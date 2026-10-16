@@ -6,7 +6,7 @@ import hashlib
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from core_storefront.models.settle_models import (
     AgreementSettleResponse,
@@ -694,8 +694,15 @@ class SellerStage:
     mechanism path. ``servicing`` builds the entry's obligation servicing over
     one runtime, or returns None when this storefront services none of its
     obligations; an entry without it never puts an obligation in the journal.
+
+    ``settles_from_agreement`` says whether a deal through the entry settles
+    from the accepted Agreement alone, with no settlement plan. An exact
+    selection of a mechanism the registry builds no obligation for is accepted
+    without a plan only when its entry says so; any other is refused, because
+    nothing its settlement is verified against would be recorded.
     """
 
+    settles_from_agreement: ClassVar[bool] = False
     registration_factory: Callable[[], Any]
     verify: Callable[..., Any]
     revalidate: Callable[..., Any]
@@ -725,6 +732,9 @@ class AlkahestStage(SellerStage):
 
 @dataclass(frozen=True, slots=True)
 class PaymentStage(SellerStage):
+    # A payment deal settles from the Agreement's mandate and receipt.
+    settles_from_agreement: ClassVar[bool] = True
+
     def accepted_data(
         self, agreement: Mapping[str, Any], payment_stage: Any
     ) -> Mapping[str, Any]:

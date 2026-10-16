@@ -159,7 +159,6 @@ def test_plan_builder_rejects_invalid_duration_before_materialization(
 @pytest.mark.parametrize(
     "artifacts",
     [
-        {"accepted_escrow_terms_error": "unknown mechanism"},
         {"proposal": PROPOSAL},
         {"settlement_plan": {"obligations": [{"mechanism": "alkahest.v1"}]}},
     ],

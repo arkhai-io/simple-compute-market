@@ -22,6 +22,11 @@ from storefront_client import StorefrontClient, StorefrontClientError
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_core.schemas import (
+    RateValue,
+    SettlementOption,
+    derive_settlement_option_id,
+)
 from market_identity import (
     AuthenticatedResponse,
     Eip191Signer,
@@ -139,7 +144,10 @@ AUTHORIZED = [_recipient_condition(SELLER_WALLET)]
 
 
 async def _insert_listing(
-    runtime: BareMetalStorefrontRuntime, *, demands: list[dict] | None = AUTHORIZED
+    runtime: BareMetalStorefrontRuntime,
+    *,
+    demands: list[dict] | None = AUTHORIZED,
+    settlement_options: list[dict] | None = None,
 ) -> None:
     await runtime.db.upsert_bare_metal_listing(
         listing_id="listing-1",
@@ -170,6 +178,7 @@ async def _insert_listing(
             },
         ],
         demands=demands,
+        settlement_options=settlement_options,
     )
 
 
@@ -997,3 +1006,69 @@ async def test_a_condition_no_escrow_can_be_settled_under_refuses_the_round(
     assert refused.value.status_code == 409
     assert "release_condition_unreadable" in str(refused.value)
     _nothing_accepted(runtime)
+
+
+# ---------------------------------------------------------------------------
+# An exact selection of a mechanism settled only under a plan
+# ---------------------------------------------------------------------------
+
+#: The seeded listing's escrow as its Alkahest option publishes it.
+_ACCEPTED_ESCROW = {
+    "chain_name": "anvil",
+    "escrow_address": ESCROW,
+    "literal_fields": {"token": TOKEN},
+    "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+}
+
+
+def _alkahest_option() -> dict:
+    params = {"accepted_escrow": dict(_ACCEPTED_ESCROW)}
+    rates = [RateValue(field="amount", per="hour", value=100)]
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism="alkahest.v1", asset=TOKEN, rates=rates, params=params
+        ),
+        mechanism="alkahest.v1",
+        asset=TOKEN,
+        rates=rates,
+        params=params,
+    ).model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    "demands", [AUTHORIZED, None], ids=["authorized condition", "no demands"]
+)
+async def test_an_exact_alkahest_selection_is_refused_with_nothing_accepted(
+    tmp_path, demands
+) -> None:
+    """An Alkahest escrow is settled only under the plan an escrow proposal
+    materializes against the listing's release condition; a selection builds
+    none, so it is refused whatever the listing authorizes, and the buyer opens
+    with an escrow proposal instead."""
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    option = _alkahest_option()
+    await _insert_listing(runtime, demands=demands, settlement_options=[option])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_new(
+                    listing_id="listing-1",
+                    initial_amount=None,
+                    provision_terms=_opening()["provision_terms"],
+                    settlement_selection={
+                        "mechanism": option["mechanism"],
+                        "option_id": option["option_id"],
+                        "expiration_unix": int(time.time()) + 3600,
+                    },
+                    selection_only=True,
+                )
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+
+    assert refused.value.status_code == 409
+    assert "settlement_selection_requires_plan" in str(refused.value)
+    assert threads.count == 0
+    _nothing_accepted(runtime)
+

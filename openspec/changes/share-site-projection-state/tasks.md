@@ -1256,6 +1256,137 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       and VM buyer's locks hand-edited for both bumped packages as before), `make
       check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
       CHANGE=share-site-projection-state`, and `openspec validate --strict` pass.
+- [x] 7.7 **(04 F1)** An exact settlement selection of a mechanism the composed registry
+      builds no accepted obligation for is accepted without a settlement plan only when
+      that mechanism settles from the accepted Agreement alone (Arkhai payments). Any other
+      — Alkahest, whose registration has no obligation builder — is refused with a named
+      4xx reason before anything is recorded, in all three storefronts; contact exchange
+      (it has a builder) and payments keep working.
+      Done. Each storefront's seller entries declare `settles_from_agreement`, a class-level
+      declaration defaulting to false, so a new builder-less entry fails closed: the
+      payment entries say true, the Alkahest and contact entries false. Bare metal:
+      `evaluate_exact_selection` refuses a builder-less mechanism whose entry does not settle
+      from the Agreement, 409 `settlement_selection_requires_plan: …`, before the listing's
+      options or admission are read. API credits: `_accepted_selection_artifacts` refuses it
+      with `OfferUnfulfillableError("settlement_selection_requires_plan")` (409); it runs in
+      every round's artifact build, so the opening is refused whatever the policy decides.
+      VM: its Alkahest entry never reaches the planless branch — it rebuilds the escrow from
+      the selected option under the listing's condition and materializes the authorized plan
+      (the reviewer's other option, which VM already had) — so VM's instance of the shape is
+      the generic branch of `_accepted_selection_artifacts`, which now takes the entry's
+      `settles_from_agreement` and refuses the same way. **Differed (reading):** the owner's
+      "refusing exact selection on all three storefronts" is carried out as refusing the
+      planless acceptance, not VM's exact Alkahest selection: every VM Alkahest opening
+      carries a selection (`resolve_proposal_stage` requires one) and VM accepts it only with
+      its authorized plan, so refusing it would end VM's Alkahest deals (`e2e_deal`).
+      Tests, each run first against the unfixed admission: bare metal (application
+      integration, real app through `StorefrontClient`, real plan builder):
+      `test_http_negotiation.py::test_an_exact_alkahest_selection_is_refused_with_nothing_accepted`,
+      for a listing authorizing its condition and one with no demands — unfixed, both were
+      accepted (`DID NOT RAISE`); now 409 named, no thread, no Agreement or plan.
+      `test_selection_dispatch.py`'s Agreement-settled entry is now a `PaymentStage`
+      (runtime called directly). API credits (application integration: the negotiate router,
+      response authentication, and the real runtime over SQLite, through `StorefrontClient`;
+      new `tests/integration/test_exact_selection_api.py`): an exact Alkahest selection is
+      refused 409 named, for a listing with its condition and one with no demands, and no
+      thread is written (unfixed, both accepted); an exact payment selection is accepted with
+      its Agreement and mandate and no plan. VM: unit `test_selection_dispatch.py` — the
+      generic branch refuses a builder-less mechanism that does not settle from the Agreement
+      and accepts one that does; application integration
+      `test_negotiate_controller.py::TestReleaseConditionAuthorization` — a selection-only
+      Alkahest opening (no escrow carrier) is accepted with the authorized plan, which the
+      thread records, and refused 409 `release_condition_not_advertised` with nothing
+      recorded for a listing with no demands.
+- [x] 7.8 **(04 F2)** Accepted escrow artifacts fail closed on any plan-materialization
+      failure, in `kit/alkahest` (owner: "Solve this at the kit layer"), under a refusal of its
+      own; `ReleaseConditionError`'s reasons stay as they are. Each storefront refuses the
+      round with 409, and the storefronts' handling of a recorded failure goes.
+      Done, `arkhai-kit-alkahest` 0.8.0. `accepted_escrow_artifacts_from_proposal` returns
+      artifacts for a proposal only with their plan: any failure to materialize it other than
+      a release condition raises the new `SettlementPlanMaterializationError` (a
+      `ValueError`, message `settlement_plan_unmaterializable: …`, chained to its cause), and
+      `accepted_escrow_terms_error` is gone; with no proposal there is no escrow and the
+      artifacts are still empty. Non-acceptance callers, checked: the settle paths (VM's
+      `prepare_vm_settlement` through its entry's plan builder, the API-credit
+      `_prepare_alkahest_settlement`) rebuild the plan and already refused a planless one
+      (core's settlement-artifacts check; "has no accepted settlement obligations"), so they
+      now refuse earlier, by name. The API-credit storefront's non-accepting rounds called the
+      accepted-artifacts builder and returned only its `accepted_escrow_proposal`, so they
+      relied on the planless form: they now call the new, separately named
+      `authorized_escrow_proposal_at_amount` (the proposal authorized against the listing at
+      the round's amount, no plan; raises `ReleaseConditionError`), which the
+      accepted-artifacts builder also uses. Storefronts: VM's `build_vm_accepted_artifacts`
+      and the API-credit `build_api_credit_accepted_artifacts` lose their pop-and-log; VM's
+      `_accepted_settlement_artifacts`, the API-credit `_build_response_artifacts`, and bare
+      metal's `build_artifacts` map the new error to the round's 409 beside
+      `ReleaseConditionError`; bare metal's `build_bare_metal_settlement_plan` loses its
+      recorded-error check and its missing-plan check (an absent plan still fails its plan
+      validation). **Found:** VM never accepted planless — the artifacts reached core's
+      settlement-artifacts check, which raised, and VM answered 500 — so its change is the
+      500 becoming the named 409; the API-credit storefront did accept planless. Floors: the
+      VM, bare-metal, and API-credit storefronts require `>=0.8.0` (they import the new
+      name); every other declaring project keeps `>=0.7.0`. `make lock` relocked every project
+      but the three PyTorch-index ones; the VM storefront's lock was edited by hand with the
+      three substitutions uv wrote into bare metal's lock (version, wheel name, root
+      specifier) and the VM buyer's with the first two (its floor is unchanged); `kit/policy`
+      locks no alkahest.
+      Tests: kit (unit) `test_plans.py` — a proposal whose rate the codecs cannot price is
+      refused with the named error, chained, and not as a release condition; accepted
+      artifacts carry their plan and no error key; `authorized_escrow_proposal_at_amount`
+      authorizes without building a plan (the unpriceable rate does not refuse it), keeps a
+      non-scalar escrow's amount, and refuses an unauthorized condition. API credits (the
+      negotiation runtime called directly over a real database, no application):
+      `test_listed_price_accept_persists_terms_without_unfunded_hold` now asserts the real
+      plan — the `db` fixture's `anvil_chain()` already names the development address book,
+      so the plan was materialized but never asserted, and the "proposal echo" comment was
+      stale — its one Alkahest obligation for 300 under the listing's arbiter and demand
+      bytes, with the deal's principals, and the plan the thread stores; its companion
+      `test_an_escrow_whose_plan_cannot_be_materialized_is_refused` opens with a rate the
+      codecs cannot price under the listed-price default and is refused
+      `settlement_plan_unmaterializable` with no thread written (against the kit's old
+      recording behaviour it was accepted). VM (application integration, typed client):
+      `TestReleaseConditionAuthorization::test_an_escrow_whose_plan_cannot_be_materialized_is_refused`
+      — the selected option names an unpriceable rate; 409 named, nothing recorded (500
+      against the old kit behaviour). Bare metal (unit) `test_settlement.py`: the
+      recorded-error case goes.
+- [x] 7.9 **(04 F3)** One application-integration test in the provisioning service suite
+      composes `market_capacity_publication.SiteProjectionState` over the production
+      `SiteCapacityClient` against the in-process provisioning app: the first `poll_once`
+      loads both families, a capacity declaration is picked up by the next poll, and an
+      authority outage keeps the last generation `stale` with its error.
+      Done: `provisioning/compute/service/tests/integration/test_site_projection_state.py`
+      (application integration). The state is built over an `AggregateCapacityClient` of one
+      `SiteCapacityClient` signing as the storefront and verifying the service's responses;
+      only the network is controlled, by a transport that forwards to the app's
+      `ASGITransport` until it is cut. After a resource is declared, the first poll loads both
+      families, each identity equal to the version document the site serves, the pool family
+      holding the declared resource, and publication woken once; a second declaration moves
+      both identities, adds the resource, adds one bucketed resource, and wakes publication
+      again; with the network cut, the next poll leaves both families `stale` with an error,
+      the same identity, rows, and confirmation time, and `status()` reports it. Dev group:
+      `arkhai-kit-capacity-publication==0.9.2` (the storefronts' exact pin) and
+      **differed:** `arkhai-core-storefront>=0.14.0` beside it, because the test imports
+      `core_storefront.aggregation.AggregateCapacityClient` (the state takes only an
+      aggregate) and every imported distribution is declared. `make check-architecture`
+      does not read the dev group and passes.
+      Evidence for 7.7–7.9 and Section 9's follow-up: `make -C kit test-alkahest` 296 passed
+      (unit; 293 before); `make test-bare-metal`: domain 134, storefront 324 (two new, one
+      removed), buyer 11, adapter 40; `make test-apicredits`: domain 41, service 72,
+      storefront 153 (four new), buyer 26, sample app 1, middleware 8; provisioning service
+      unit 675 and integration 463 (one new); `make -C kit test-capacity-publication` 94; VM
+      storefront (frozen, rebuilt wheels reinstalled) unit 1043 passed, 1 skipped (two new),
+      integration 431 (three new) in each of three full runs; VM buyer (frozen) 202;
+      `kit/policy` (frozen) 80. `make -k test` passed every suite it ran (e2e unit 650, the
+      Helm render and packaging suites among them) and stopped only at the reinit of the
+      three PyTorch-index projects, run frozen above. `make lock`, `make check-packaging`
+      (architecture rules included), `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), and `openspec validate
+      --strict` pass. No repository typing target exists. End-to-end: no scenario sends an
+      exact Alkahest selection to bare metal or the API-credit storefront (their buyers open
+      Alkahest deals with escrow proposals; `e2e_credits_payment_deal` selects payments,
+      still accepted), and VM's scenarios' selections are accepted with their plans as
+      before; no scenario's escrow fails to materialize, so none reaches the new refusals,
+      which are application-integration evidence only. The pipeline was not run.
 
 Section 7 notes:
 
@@ -1293,6 +1424,8 @@ Section 7 handoff:
 - Materialization failures other than a release condition (an unknown escrow contract,
   say) are still recorded as `accepted_escrow_terms_error`; VM and API credits log them at
   debug and accept with no plan, as before this section. Bare metal refuses them.
+  **Superseded (7.8):** the kit raises `SettlementPlanMaterializationError` for them, and
+  every storefront refuses the round with 409.
 - Review fixes: VM's `accepted_proposal` and its refund no longer fall back to the buyer's
   raw opening when no accepted escrow proposal is recorded — settlement refuses
   ("no persisted accepted escrow proposal") and the refund action fails
@@ -1956,6 +2089,19 @@ Section 9 review fixes (fresh-context review of the section commit):
   check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
   CHANGE=share-site-projection-state`, and `openspec validate --strict` pass.
 
+Section 9 follow-up (made with round 04's fixes; not a review finding):
+
+- **The intermittent settlement test is deterministic.**
+  `domains/vms/storefront/tests/integration/test_payment_settlement.py::test_settlement_is_pending_until_a_verified_receipt_then_delivers_once`
+  failed about 2 runs in 11 (`'ready' == 'provisioning'`): the payments coordinator starts
+  delivery as a task and then awaits a database read before answering, so a delivery that
+  finished during that read answered `ready`. The test now holds the delivery at the
+  harness's existing gate (`Delivery.started` / `Delivery.release`, the seam
+  `test_a_refund_after_delivery_start_records_both` uses) until it has read the
+  `provisioning` answer, then releases it and awaits the delivery task; nothing is left
+  held. No production code changed. Application integration; 20 of 20 runs of the case
+  passed alone, and the full VM integration suite passed three times (7.9's evidence).
+
 Section 9 handoff:
 
 - Startup's `lifecycle_loops` step registers every VM timer with
@@ -2008,10 +2154,10 @@ configuration.
       runtime's cache key stops carrying principals. `[provisioning.identity]` remains
       only for `build_fulfillment_client` and `services/fulfillment_service.py`. The
       provider is read synchronously on the event loop per response, so it must not block
-      on SQLite: hold each peer's principal records in memory, loaded at seeding and
-      reloaded when an identity rotation, completion, or retirement commits, and evaluate
-      `active_principals(now)` over them at each call (still "at verification time", D14b);
-      bare metal's 12.2 composes the same provider.
+      on SQLite (04 F4): hold each peer's principal records in memory, loaded at seeding
+      and reloaded when an identity rotation, completion, or retirement commits, and
+      evaluate `active_principals(now)` over them at each call (still "at verification
+      time", D14b); bare metal's 12.2 composes the same provider.
 - [ ] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
       `src/startup.py`, `src/utils/config.py`'s `settlement_servicing_interval()` (the one
       reader, used by the servicing worker and `src/lifecycle_steps.py`'s registration),

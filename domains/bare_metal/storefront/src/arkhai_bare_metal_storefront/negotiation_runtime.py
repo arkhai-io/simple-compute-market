@@ -43,7 +43,11 @@ from market_core.schemas import (
     compute_rate_total,
     Agreement,
 )
-from market_alkahest.proposals import ReleaseConditionError, authorize_escrow_proposal
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+    authorize_escrow_proposal,
+)
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -522,9 +526,12 @@ def build_bare_metal_negotiation_runtime(
 
         selection = exact_selection(proposal, None)
         assert selection is not None
-        # A composed mechanism with no obligation builder settles from the
-        # Agreement alone, so it is admitted without a plan. A mechanism with no
-        # seller entry could never settle, so it is never admitted.
+        # A mechanism with no seller entry could never settle, so it is never
+        # admitted. One with no obligation builder is admitted without a plan
+        # only when its entry settles from the Agreement alone; an Alkahest
+        # escrow is verified against the plan an escrow proposal materializes
+        # under the listing's release condition, which a selection cannot
+        # build, so its exact selection is refused.
         if (
             selection.mechanism not in seller_stages
             or selection.mechanism not in accepted_obligation_dispatch
@@ -534,6 +541,16 @@ def build_bare_metal_negotiation_runtime(
                 status_code=400,
             )
         build_obligation = accepted_obligation_dispatch[selection.mechanism]
+        if (
+            build_obligation is None
+            and not seller_stages[selection.mechanism].settles_from_agreement
+        ):
+            raise BareMetalNegotiationRefusal(
+                "settlement_selection_requires_plan: "
+                f"{selection.mechanism} settles only under a settlement plan, "
+                "which an exact selection cannot build; open with an escrow proposal",
+                status_code=409,
+            )
         record = request.listing_record
         if Identity.model_validate(record.get("seller_principal")) != seller_principal:
             raise BareMetalNegotiationRefusal("listing seller identity changed")
@@ -710,11 +727,11 @@ def build_bare_metal_negotiation_runtime(
             )
         except BareMetalSettlementPlanError as exc:
             raise BareMetalNegotiationRefusal(str(exc)) from exc
-        except ReleaseConditionError as exc:
+        except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
             # The plan is materialized under the condition the listing record
-            # authorizes; one it no longer authorizes, or an authorized one the
+            # authorizes; one it no longer authorizes, an authorized one the
             # codecs cannot encode, such as one paying an empty seller wallet,
-            # refuses like any other.
+            # and a plan that cannot be materialized refuse like any other.
             raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
         response = {
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts

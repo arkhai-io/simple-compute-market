@@ -26,7 +26,10 @@ from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
-from market_alkahest.proposals import ReleaseConditionError
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+)
 from market_arkhai_payments import PaymentSellerStage
 from market_capacity_publication import (
     RESOURCE_POOL,
@@ -259,7 +262,8 @@ def build_vm_accepted_artifacts(
     """Materialize VM settlement artifacts from domain-owned proposal codecs.
 
     The escrow settles under the release condition ``listing`` authorizes;
-    the kit refuses any other with ``ReleaseConditionError``.
+    the kit refuses any other with ``ReleaseConditionError``, and an escrow
+    whose plan cannot be materialized with ``SettlementPlanMaterializationError``.
     """
 
     artifacts = accepted_escrow_artifacts_from_proposal(
@@ -277,9 +281,6 @@ def build_vm_accepted_artifacts(
             getattr(settings, "heartbeat_interval_seconds", 60)
         ),
     )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        logger.debug("Could not materialize accepted escrow terms: %s", error)
     plan = artifacts.get("settlement_plan")
     if isinstance(plan, dict):
         buyer_wire = buyer_principal.model_dump(mode="json")
@@ -346,13 +347,17 @@ def _accepted_selection_artifacts(
     seller_principal: Identity,
     listing: Mapping[str, Any],
     provision_terms: Any,
+    settles_from_agreement: bool,
 ) -> dict[str, Any]:
     """Build the accepted plan through the selected mechanism's registration.
 
     The mechanism is resolved exactly once — from the selection — and the
     obligation is built by the composed registry dispatch. The domain keeps
     only domain semantics: the negotiated duration that scales time rates,
-    and the plan's ``vm.v1`` service terms.
+    and the plan's ``vm.v1`` service terms. A mechanism the registry builds no
+    obligation for is accepted without a plan only when its seller entry
+    ``settles_from_agreement``; any other would be accepted with nothing its
+    settlement could be verified against, so it is refused.
     """
 
     accepted = SettlementSelection.model_validate(selection)
@@ -369,6 +374,8 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
     if build_obligation is None:
+        if not settles_from_agreement:
+            raise OfferUnfulfillableError("settlement_selection_requires_plan")
         return {
             "settlement_selection": accepted.model_dump(
                 mode="json", exclude_none=True
@@ -484,11 +491,13 @@ def _accepted_settlement_artifacts(
                 agreed_amount=agreed_amount, duration_seconds=duration_seconds,
                 listing=listing, provision_terms=provision_terms,
                 buyer_principal=buyer_principal, seller_principal=seller_principal,
+                settles_from_agreement=stage.settles_from_agreement,
             ),
         )
-    except ReleaseConditionError as exc:
+    except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
         # No accepted escrow without the release condition its listing
-        # authorizes: the acceptance is refused before anything is recorded.
+        # authorizes and the plan its settlement is verified against: the
+        # acceptance is refused before anything is recorded.
         raise OfferUnfulfillableError(str(exc)) from exc
     artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
     artifacts["_agreement_settlement_option"] = dict(option)

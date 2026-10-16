@@ -1,4 +1,6 @@
-"""Exact-selection acceptance refuses a mechanism the composition lacks."""
+"""Exact-selection acceptance refuses a mechanism the composition lacks, and a
+mechanism it builds no obligation for unless that mechanism settles from the
+Agreement alone."""
 
 from __future__ import annotations
 
@@ -73,4 +75,33 @@ def test_uncomposed_mechanism_selection_is_refused() -> None:
             seller_principal=_SELLER,
             listing=_listing(option),
             provision_terms=_provision(),
+            settles_from_agreement=False,
         )
+
+
+def _select_without_a_builder(*, settles_from_agreement: bool) -> dict:
+    option = _option()
+    return _accepted_selection_artifacts(
+        {"demo.intro.v1": None},
+        selection=_selection(option),
+        option=option,
+        agreed_amount=0,
+        duration_seconds=7200,
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        listing=_listing(option),
+        provision_terms=_provision(),
+        settles_from_agreement=settles_from_agreement,
+    )
+
+
+def test_a_selection_needing_a_plan_its_mechanism_cannot_build_is_refused() -> None:
+    with pytest.raises(OfferUnfulfillableError, match="settlement_selection_requires_plan"):
+        _select_without_a_builder(settles_from_agreement=False)
+
+
+def test_a_selection_settling_from_the_agreement_is_accepted_without_a_plan() -> None:
+    artifacts = _select_without_a_builder(settles_from_agreement=True)
+
+    assert "settlement_plan" not in artifacts
+    assert artifacts["settlement_selection"]["mechanism"] == "demo.intro.v1"

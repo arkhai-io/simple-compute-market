@@ -42,8 +42,10 @@ from market_alkahest.schemas import (
 
 __all__ = [
     "ReleaseConditionError",
+    "SettlementPlanMaterializationError",
     "accepted_escrow_artifacts_from_proposal",
     "authorize_escrow_proposal",
+    "authorized_escrow_proposal_at_amount",
     "authorized_release_condition",
     "authorized_release_conditions",
     "escrow_proposal_from_accepted_entry",
@@ -52,6 +54,18 @@ __all__ = [
     "selected_release_condition",
     "validate_selected_escrow_plan",
 ]
+
+
+class SettlementPlanMaterializationError(ValueError):
+    """An accepted escrow cannot be materialized as its settlement plan.
+
+    An Alkahest deal is accepted only with the plan its settlement is verified
+    against, so any failure to build that plan from an authorized proposal
+    refuses the acceptance rather than leaving artifacts without one. A
+    release condition the listing does not authorize, or cannot be encoded, is
+    refused separately with ``ReleaseConditionError``. The message starts with
+    ``settlement_plan_unmaterializable``.
+    """
 
 
 def _escrow_proposal(proposal: EscrowProposal | Mapping[str, Any] | Any) -> EscrowProposal:
@@ -242,6 +256,41 @@ def proposal_is_splitter_gated(
     return False
 
 
+def authorized_escrow_proposal_at_amount(
+    *,
+    proposal: EscrowProposal | dict[str, Any],
+    listing: Any,
+    agreed_amount: int,
+    uses_scalar_amount: bool = True,
+) -> dict[str, Any]:
+    """The proposal as accepted at ``agreed_amount``, without materializing a plan.
+
+    The proposal is authorized against ``listing`` (``authorize_escrow_proposal``),
+    so it names the listing's form of its release condition, and carries the
+    agreed amount when the escrow bargains over one. This is what a seller
+    offers back in a round that does not accept; an acceptance takes
+    ``accepted_escrow_artifacts_from_proposal``, which also builds the plan.
+    Raises ``ReleaseConditionError``.
+    """
+    proposal_model = authorize_escrow_proposal(proposal, listing=listing)
+    fields = dict(proposal_model.fields or {})
+    if uses_scalar_amount:
+        fields["amount"] = str(agreed_amount)
+    accepted = EscrowProposal(
+        chain_name=proposal_model.chain_name,
+        escrow_address=proposal_model.escrow_address,
+        fields=fields,
+        literal_fields=proposal_model.literal_fields,
+        rates=proposal_model.rates,
+        demand=proposal_model.demand,
+        expiration_unix=proposal_model.expiration_unix,
+    )
+    payload = accepted.model_dump(mode="json")
+    if payload.get("demands") is None:
+        payload.pop("demands", None)
+    return payload
+
+
 def accepted_escrow_artifacts_from_proposal(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
@@ -258,32 +307,26 @@ def accepted_escrow_artifacts_from_proposal(
     listing the proposal was negotiated against, the agreed amount, the lease
     duration (0 for durationless deals such as token credits), and the chain
     address-config lookup. The proposal is first authorized against
-    ``listing`` (``authorize_escrow_proposal``), so the recorded accepted
-    proposal names the listing's form of its condition and the plan is
-    materialized under exactly that condition. A condition the listing does not
-    authorize, or that cannot be materialized, raises ``ReleaseConditionError``;
-    any other materialization failure is reported as
-    ``accepted_escrow_terms_error`` beside artifacts carrying no plan.
+    ``listing`` (``authorized_escrow_proposal_at_amount``), so the recorded
+    accepted proposal names the listing's form of its condition and the plan is
+    materialized under exactly that condition.
+
+    Artifacts for a proposal always carry its settlement plan: a condition the
+    listing does not authorize, or that cannot be encoded, raises
+    ``ReleaseConditionError``, and any other failure to materialize the plan
+    raises ``SettlementPlanMaterializationError``, so no caller can accept an
+    escrow without the plan its settlement is verified against. With no
+    proposal there is no escrow, and the artifacts are empty.
     """
     if proposal is None:
         return {}
-    proposal_model = authorize_escrow_proposal(proposal, listing=listing)
-    fields = dict(proposal_model.fields or {})
-    if uses_scalar_amount:
-        fields["amount"] = str(agreed_amount)
-    accepted = EscrowProposal(
-        chain_name=proposal_model.chain_name,
-        escrow_address=proposal_model.escrow_address,
-        fields=fields,
-        literal_fields=proposal_model.literal_fields,
-        rates=proposal_model.rates,
-        demand=proposal_model.demand,
-        expiration_unix=proposal_model.expiration_unix,
+    accepted_payload = authorized_escrow_proposal_at_amount(
+        proposal=proposal,
+        listing=listing,
+        agreed_amount=agreed_amount,
+        uses_scalar_amount=uses_scalar_amount,
     )
-
-    accepted_payload = accepted.model_dump(mode="json")
-    if accepted_payload.get("demands") is None:
-        accepted_payload.pop("demands", None)
+    accepted = EscrowProposal.model_validate(accepted_payload)
     out: dict[str, Any] = {
         "proposal": dict(accepted_payload),
         "accepted_escrow_proposal": dict(accepted_payload),
@@ -327,9 +370,10 @@ def accepted_escrow_artifacts_from_proposal(
             accepted_terms.append(payload)
         out["accepted_escrow_terms"] = accepted_terms
     except ReleaseConditionError:
-        # No obligation may be accepted without its authorized condition, so a
-        # refusal reaches the seller rather than leaving artifacts without a plan.
+        # A condition the listing does not authorize keeps its own reason.
         raise
     except Exception as exc:
-        out["accepted_escrow_terms_error"] = str(exc)
+        raise SettlementPlanMaterializationError(
+            f"settlement_plan_unmaterializable: {exc}"
+        ) from exc
     return out

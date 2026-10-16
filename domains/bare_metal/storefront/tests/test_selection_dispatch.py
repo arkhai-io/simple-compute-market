@@ -28,6 +28,7 @@ from core_storefront.models.negotiation_models import (
 from market_core import SettlementStageTable
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from arkhai_bare_metal_storefront.settlement_stages import (
+    PaymentStage,
     SellerStage,
     verify_contact,
     revalidate_contact,
@@ -331,7 +332,7 @@ def _payment_stages():
     """A seller entry that provisions the listed machine and settles from the Agreement."""
     return SettlementStageTable(
         {
-            PAYMENT_MECHANISM: SellerStage(
+            PAYMENT_MECHANISM: PaymentStage(
                 _intro_registration, verify_contact, revalidate_contact, True
             )
         }

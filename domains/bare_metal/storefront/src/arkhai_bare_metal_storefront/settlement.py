@@ -29,7 +29,9 @@ def build_bare_metal_settlement_plan(
     """Materialize a fail-closed mechanism-neutral plan for agreed terms.
 
     The escrow is materialized under the release condition ``listing``
-    authorizes; the kit refuses any other with ``ReleaseConditionError``.
+    authorizes; the kit refuses any other with ``ReleaseConditionError``, and
+    an escrow whose plan cannot be materialized with
+    ``SettlementPlanMaterializationError``.
     """
     if duration_seconds < 1:
         raise BareMetalSettlementPlanError(
@@ -47,19 +49,8 @@ def build_bare_metal_settlement_plan(
         chain_config_paths=dict(chain_config_paths or {}),
         heartbeat_interval_seconds=None,
     )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        raise BareMetalSettlementPlanError(
-            f"accepted escrow could not be materialized: {error}",
-        )
-
-    raw_plan = artifacts.get("settlement_plan")
-    if raw_plan is None:
-        raise BareMetalSettlementPlanError(
-            "accepted escrow produced no settlement_plan",
-        )
     try:
-        plan = SettlementPlan.model_validate(raw_plan)
+        plan = SettlementPlan.model_validate(artifacts.get("settlement_plan"))
     except Exception as exc:
         raise BareMetalSettlementPlanError(
             "accepted escrow produced an invalid settlement_plan",

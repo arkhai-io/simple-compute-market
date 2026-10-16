@@ -197,7 +197,8 @@ def build_api_credit_accepted_artifacts(
     The escrow settles under the release condition ``listing`` authorizes on
     its chain, which a condition the proposal selects must be; the kit refuses
     any other, and a listing authorizing none, with
-    ``market_alkahest.proposals.ReleaseConditionError``.
+    ``market_alkahest.proposals.ReleaseConditionError``, and an escrow whose
+    plan cannot be materialized with ``SettlementPlanMaterializationError``.
     """
 
     artifacts = accepted_escrow_artifacts_from_proposal(
@@ -209,9 +210,6 @@ def build_api_credit_accepted_artifacts(
         chain_config_paths={name: chain.alkahest_address_config_path for name, chain in CHAINS.items()},
         heartbeat_interval_seconds=None,
     )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        logger.debug("Could not materialize accepted escrow terms: %s", error)
     plan = artifacts.get("settlement_plan")
     if isinstance(plan, dict):
         buyer_wire = buyer_principal.model_dump(mode="json")
@@ -401,6 +399,9 @@ class ArkhaiPaymentsSellerStage:
     """
 
     registration = staticmethod(create_arkhai_payments_registration)
+    # A payment deal settles from the Agreement's mandate and receipt, so its
+    # exact selection is accepted without a settlement plan.
+    settles_from_agreement = True
 
     def __init__(self, *, fulfils_through_capacity: bool) -> None:
         # Whether settling through this stage issues credits against quota.
@@ -531,6 +532,10 @@ class AlkahestSellerStage:
     _delivery_locks: dict[str, asyncio.Lock] = {}
     registration = staticmethod(create_alkahest_registration)
     retry_uncertain = False
+    # An escrow is verified against the plan its escrow proposal materializes
+    # under the listing's release condition, which an exact selection cannot
+    # build, so a selection of it is refused.
+    settles_from_agreement = False
 
     def __init__(
         self, *, fulfils_through_capacity: bool, release_models: frozenset[str]

@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from typing import Any
+from typing import Any, ClassVar
 
 from arkhai_vms import normalize_vm_provision_terms
 from arkhai_vms_listings import extract_compute_from_order
@@ -86,6 +86,12 @@ class PaymentSettleResult:
 
 @dataclass(frozen=True)
 class VmAlkahestSellerStage:
+    # Whether a deal through this entry settles from the accepted Agreement
+    # alone, with no settlement plan. Declared by every VM seller stage: an
+    # exact selection of a mechanism the registry builds no obligation for is
+    # accepted without a plan only when its entry says so. An Alkahest escrow
+    # is verified against its plan, which this entry materializes itself.
+    settles_from_agreement: ClassVar[bool] = False
     # Called with the settlement build context and the listing the deal was
     # negotiated against, whose release conditions authorize the escrow's.
     build_plan: Callable[..., Any]
@@ -413,6 +419,8 @@ class VmAlkahestSellerStage:
 
 @dataclass(frozen=True)
 class VmPaymentsSellerStage:
+    # A payment deal settles from the Agreement's mandate and receipt.
+    settles_from_agreement: ClassVar[bool] = True
     mechanism: str = "arkhai.payments.v1"
     fulfils_through_capacity: bool = field(kw_only=True)
 
@@ -698,6 +706,8 @@ class VmContactSellerStage:
     settle, delivery or refund operation.
     """
 
+    # Its plan is built by the registration's obligation builder.
+    settles_from_agreement: ClassVar[bool] = False
     mechanism: str = CONTACT_MECHANISM
     fulfils_through_capacity: bool = field(kw_only=True)
 

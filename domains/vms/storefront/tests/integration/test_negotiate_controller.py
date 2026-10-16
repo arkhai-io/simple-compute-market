@@ -175,6 +175,7 @@ async def _upsert_bound_listing(
     escrow_address: str = "0x" + "11" * 20,
     literal_fields: dict | None = None,
     demands: list[dict] | None = _AUTHORIZED,
+    extra_rates: tuple[dict, ...] = (),
 ) -> None:
     _declare_source(
         listing_id,
@@ -200,9 +201,9 @@ async def _upsert_bound_listing(
     entry = {
         "chain_name": "anvil", "escrow_address": escrow_address,
         "literal_fields": {"token": _TOKEN} if literal_fields is None else dict(literal_fields),
-        "rates": [] if demand_amount is None else [
+        "rates": ([] if demand_amount is None else [
             {"field": "amount", "per": "hour", "value": str(demand_amount)}
-        ],
+        ]) + list(extra_rates),
     }
     body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
             "rates": [RateValue.model_validate(rate) for rate in entry["rates"]],
@@ -1124,6 +1125,70 @@ class TestReleaseConditionAuthorization:
 
         assert refused.value.status_code == 409
         assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def _open_selecting_only(self, c, db, listing_id: str):
+        """An exact selection with no escrow carrier, as a payments buyer opens."""
+        return await c.negotiate_new(
+            listing_id=listing_id,
+            settlement_selection=await _selection(db, listing_id),
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            selection_only=True,
+        )
+
+    async def test_an_exact_selection_is_accepted_only_with_its_authorized_plan(
+        self, client, db
+    ):
+        """VM's Alkahest entry builds the escrow from the selected option under
+        the listing's condition, so an exact selection is never accepted
+        without the plan its settlement is verified against."""
+        c, db = client
+        authorized = _recipient_condition(_RECIPIENT)
+        await _upsert_bound_listing(db, "rc-exact", demands=[authorized])
+
+        result = await self._open_selecting_only(c, db, "rc-exact")
+
+        assert result["action"] == "accept"
+        (obligation,) = result["settlement_plan"]["obligations"]
+        data = obligation["params"]["obligation_data"]
+        assert data["arbiter"].lower() == authorized["arbiter"].lower()
+        assert data["demand"] == "0x" + encode_recipient_demand(_RECIPIENT).hex()
+        thread = await db.load_negotiation_thread_row(
+            negotiation_id=result["negotiation_id"]
+        )
+        assert thread["settlement_plan"]["obligations"] == [obligation]
+
+    async def test_an_exact_selection_of_a_listing_with_no_demands_is_refused(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(db, "rc-exact-none", demands=None)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open_selecting_only(c, db, "rc-exact-none")
+
+        assert refused.value.status_code == 409
+        assert "release_condition_not_advertised" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_an_escrow_whose_plan_cannot_be_materialized_is_refused(
+        self, client, db
+    ):
+        """The selected option names a rate the codecs cannot price, so its
+        authorized escrow has no plan; the round is refused, not accepted
+        without one."""
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-unpriceable",
+            extra_rates=({"field": "bonus", "per": "fortnight", "value": "1"},),
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open_selecting_only(c, db, "rc-unpriceable")
+
+        assert refused.value.status_code == 409
+        assert "settlement_plan_unmaterializable" in str(refused.value)
         self._nothing_accepted(db)
 
     async def test_an_opening_naming_no_condition_is_settled_under_the_listings(

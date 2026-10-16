@@ -306,9 +306,14 @@ async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once
     assert pending.escrow_uid == NEGOTIATION
     assert h.delivery.starts == []
 
+    # Delivery is held once it starts until the in-flight answer has been
+    # read: the coordinator reads the delivery's state after starting it, so a
+    # delivery free to finish first would answer ``ready``.
+    h.delivery.started, h.delivery.release = asyncio.Event(), asyncio.Event()
     h.serve()
     started = await h.settle()
     assert started.status == "provisioning"
+    h.delivery.release.set()
     await h.delivered()
     repeated = await h.settle()
     assert repeated.status == "ready"

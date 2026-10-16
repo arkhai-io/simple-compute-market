@@ -19,7 +19,10 @@ from market_alkahest.plans import (
 from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
     accepted_escrow_artifacts_from_proposal,
+    authorized_escrow_proposal_at_amount,
     escrow_proposal_from_accepted_entry,
 )
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
@@ -267,6 +270,71 @@ def test_an_unmaterializable_condition_refuses_the_artifacts() -> None:
             agreed_amount=7_200_000,
             duration_seconds=3600,
             chain_config_paths={"anvil": _ANVIL_BOOK},
+        )
+
+
+# A rate the codecs cannot price: the plan fails after its release condition
+# is authorized and encoded, so the failure is the plan's, not the condition's.
+_UNPRICEABLE_RATE = {"field": "bonus", "per": "fortnight", "value": "1"}
+
+
+def test_a_plan_that_cannot_be_materialized_refuses_the_artifacts() -> None:
+    """No artifacts are returned without their plan: the acceptance is refused."""
+    with pytest.raises(SettlementPlanMaterializationError) as refused:
+        accepted_escrow_artifacts_from_proposal(
+            proposal=_anvil_proposal(rates=[_UNPRICEABLE_RATE]),
+            listing=_LISTING,
+            agreed_amount=7_200_000,
+            duration_seconds=3600,
+            chain_config_paths={"anvil": _ANVIL_BOOK},
+        )
+
+    assert str(refused.value).startswith("settlement_plan_unmaterializable: ")
+    assert "fortnight" in str(refused.value)
+    assert refused.value.__cause__ is not None
+    assert not isinstance(refused.value, ReleaseConditionError)
+
+
+def test_accepted_artifacts_always_carry_their_plan() -> None:
+    artifacts = accepted_escrow_artifacts_from_proposal(
+        proposal=_anvil_proposal(),
+        listing=_LISTING,
+        agreed_amount=7_200_000,
+        duration_seconds=3600,
+        chain_config_paths={"anvil": _ANVIL_BOOK},
+    )
+
+    (obligation,) = artifacts["settlement_plan"]["obligations"]
+    assert int(obligation["params"]["obligation_data"]["amount"]) == 7_200_000
+    assert artifacts["accepted_escrow_terms"]
+    assert "accepted_escrow_terms_error" not in artifacts
+
+
+def test_the_proposal_at_an_amount_is_authorized_without_building_a_plan() -> None:
+    """A round that does not accept offers the proposal back without its plan,
+    so a plan that could not yet be materialized does not refuse it; the
+    release condition is authorized all the same."""
+    offered = authorized_escrow_proposal_at_amount(
+        proposal=_anvil_proposal(rates=[_UNPRICEABLE_RATE]),
+        listing=_LISTING,
+        agreed_amount=5_000_000,
+    )
+
+    assert offered["fields"]["amount"] == "5000000"
+    assert offered["demand"] == _recipient_condition(_SELLER)
+    assert "demands" not in offered
+    unscaled = authorized_escrow_proposal_at_amount(
+        proposal=_anvil_proposal(),
+        listing=_LISTING,
+        agreed_amount=5_000_000,
+        uses_scalar_amount=False,
+    )
+    assert unscaled["fields"]["amount"] == 7_200_000
+    with pytest.raises(ReleaseConditionError, match="release_condition_not_authorized"):
+        authorized_escrow_proposal_at_amount(
+            proposal=_anvil_proposal(demand=_recipient_condition(_BUYER_RECIPIENT)),
+            listing=_LISTING,
+            agreed_amount=5_000_000,
         )
 
 
