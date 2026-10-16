@@ -1757,3 +1757,32 @@ def test_a_round_recorded_after_the_fact_is_given_its_last_record_before_it(
     assert step.note_round(log, [[1, 2, 3]], "owner", after=1, clock=_clock)["after"] == 1
     with pytest.raises(step.StepError, match="a record number"):
         step.note_round(log, [[1]], "owner", after=-1)
+
+
+def test_watch_follows_the_newest_progress_file(tmp_path: Path) -> None:
+    transcripts = tmp_path / "transcripts"
+    transcripts.mkdir()
+    first = transcripts / "03-validate.progress"
+    first.write_text("".join(f"line {n}\n" for n in range(12)), "utf-8")
+    shown: list[str] = []
+    polls = iter(range(10))
+
+    def tick(_: float) -> None:
+        n = next(polls)
+        if n == 0:
+            with first.open("a", encoding="utf-8") as stream:
+                stream.write("line 12\n")
+        elif n == 1:
+            second = transcripts / "04-triage.progress"
+            second.write_text("triage 0\n", "utf-8")
+            os.utime(second, ns=(first.stat().st_mtime_ns + 1,) * 2)
+
+    step.watch(tmp_path, echo=shown.append, sleep=tick, polls=3)
+    assert shown == ["== 03-validate.progress", *(f"line {n}" for n in range(2, 12)),
+                     "line 12", "== 04-triage.progress", "triage 0"]
+
+
+def test_watch_waits_for_a_first_progress_file(tmp_path: Path) -> None:
+    shown: list[str] = []
+    step.watch(tmp_path, echo=shown.append, sleep=lambda _: None, polls=2)
+    assert shown == []

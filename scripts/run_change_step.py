@@ -68,6 +68,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import tomllib
 import uuid
 from dataclasses import dataclass
@@ -624,6 +625,40 @@ def _git_head(root: Path) -> str | None:
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
                           text=True)
     return head.stdout.strip() if head.returncode == 0 else None
+
+
+def newest_progress(reviews: Path) -> Path | None:
+    """The progress file a step of the change wrote to last, if any."""
+    files = list((reviews / TRANSCRIPTS).glob("*.progress"))
+    return max(files, key=lambda f: f.stat().st_mtime_ns) if files else None
+
+
+def watch(reviews: Path, echo: Callable[[str], None] = print,
+          sleep: Callable[[float], None] = time.sleep, polls: int | None = None,
+          backlog: int = 10) -> None:
+    """Follow the change's newest progress file, moving to each newer one as a step starts.
+
+    The file being followed when watching begins shows only its last `backlog`
+    lines; a file that appears later is shown from its start, since it is a new
+    run. `polls` bounds the loop for tests; the command runs until interrupted.
+    """
+    current: Path | None = None
+    shown = 0
+    polled = 0
+    while polls is None or polled < polls:
+        polled += 1
+        newest = newest_progress(reviews)
+        if newest is not None and newest != current:
+            lines = newest.read_text("utf-8").splitlines()
+            shown = max(len(lines) - backlog, 0) if current is None else 0
+            current = newest
+            echo(f"== {newest.name}")
+        if current is not None:
+            lines = current.read_text("utf-8").splitlines()
+            for line in lines[shown:]:
+                echo(line)
+            shown = len(lines)
+        sleep(1.0)
 
 
 def denial_report(reviews: Path, entry: Entry) -> list[str]:
@@ -1248,6 +1283,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     log = commands.add_parser("log", help="print the last lines of the change's workflow log")
     log.add_argument("change")
     log.add_argument("--last", type=int, default=10)
+    watch_ = commands.add_parser(
+        "watch", help="follow the progress of the change's steps as they run")
+    watch_.add_argument("change")
     denials = commands.add_parser(
         "denials", help="print a run's denials with the tool calls it made after each")
     denials.add_argument("change")
@@ -1304,6 +1342,11 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         if args.command == "log":
             for entry in last_entries(path, args.last):
                 print(json.dumps(entry, ensure_ascii=False))
+        elif args.command == "watch":
+            try:
+                watch(path.parent, echo=lambda line: print(line, flush=True))
+            except KeyboardInterrupt:
+                pass
         elif args.command == "denials":
             entry = next((e for e in read_log(path) if e.get("seq") == args.seq), None)
             if entry is None:
