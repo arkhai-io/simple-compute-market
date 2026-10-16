@@ -19,6 +19,13 @@ You are told the **review kind** (`design`, `implementation`, `pre-closeout`, or
 `closeout`), the **change**, and for the later kinds the **base** branch the change
 is measured against.
 
+## Running unattended
+
+A review runs unattended in Codex, through `make review`, and nothing in this
+skill changes for it: your final message is the review. It carries no structured
+outcome; `scripts/run_change_step.py` logs one from the record it publishes, or a
+stopped one when your message is not a review.
+
 ## 1. Load everything first
 
 Read all of this before forming a view:

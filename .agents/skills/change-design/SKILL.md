@@ -11,8 +11,47 @@ solution, so this skill exists to put the whole problem, and every real choice
 in it, in front of them — not to arrive with an answer and defend it.
 
 Design is a discussion, not an action. Edit no file until the owner says the
-design is settled, except the index transition (section 2) and the intervention
-ledger (section 4).
+design is settled, except the index transition (section 2), the intervention
+ledger, and a prerequisite's proposal and dependency (both in section 4).
+
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make design UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied call stops the step only when it cannot go on.** Run one command per
+  Bash call: a chained command runs only when every command in it is allowed, so
+  if a chained command is denied, run its commands one call at a time. If a single
+  command or any other tool call is denied, finish every part of the work that does
+  not depend on it. If the step cannot complete without that call, end with
+  `stopped`, `reason` naming that exact call and why the step needed it, and
+  `denials` listing the calls as you saw them; the wrapper replaces them with the
+  run's own record. Otherwise go on and end as the step ends: the wrapper records
+  the denial on the outcome whatever it is, and the orchestrating session reads it
+  before the change moves on. One denied call is not a denied tool: never report
+  the tool as not allowed. Never do by another tool what a denied call would have
+  done, and never ask about a denial as a question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **Every reply is a turn.** This step is a discussion: each reply to the owner
+  ends its turn with an outcome, the reply in full as its `message` — `question`
+  while you wait for the owner's answer or disposition. The orchestrating session
+  shows the owner every message and resumes this session with each reply.
+- **The end is an outcome.** When the settled design is recorded (section 6),
+  end with `finished`, `next` naming the design review. A design that cannot
+  proceed without another change ends `blocked`, `blocked_on` the prerequisite's
+  exact change name, at steps 3 and 4 of "When the design needs another change
+  first" (section 4); telling the owner there is that outcome's `message`. Under
+  orchestration the release of step 5 is proposed to the owner by the
+  orchestrating session, which drops the dependency on their word.
 
 ## 1. Load everything before saying anything
 
@@ -36,7 +75,9 @@ places that matter, so read all of this first, in full:
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the
-dependency may make unnecessary.
+dependency may make unnecessary. If it is archived on this branch — it landed on
+dev, and dev was merged in — the dependency is released on the owner's word
+(section 4, "When the design needs another change first").
 
 When the change has been through design before, find what has moved since:
 `git log` over the code the design cites, and any dependency that has landed.
@@ -172,7 +213,37 @@ to the change's `interventions.jsonl` with the decision as the finding:
 ```
 
 Do not log decisions the owner accepted as recommended. This is the one file
-edit allowed before the design is settled, besides the index transition.
+edit allowed before the design is settled, besides the index transition and a
+prerequisite's proposal, below.
+
+### When the design needs another change first
+
+When the discussion shows the design cannot proceed until another change lands,
+that change is a prerequisite, and its workflow is the owner's to start. One change
+is worked per branch, so the prerequisite's proposal reaches this branch only
+through dev, never written here:
+
+1. With the owner, shape the prerequisite: its requirements and an initial
+   `proposal.md` only. Its design is its own workflow's, started by the owner.
+2. Write it in a worktree on a new branch from dev, never on this branch:
+   `git worktree add ../<prerequisite>-proposal -b propose-<prerequisite> dev`,
+   then, in that worktree, its directory under `openspec/changes/` and its
+   `ready for design` row in that worktree's `openspec/changes/README.md`. Run
+   `make -C ../<prerequisite>-proposal check-change-index`.
+3. Tell the owner the proposal is ready: they commit it in that worktree and open
+   its pull request. Leave this change `in design`; do not record the dependency
+   yet, since the index check refuses a `Depends on` entry naming a change this
+   branch does not list. The design halts here.
+4. Once the proposal has merged to dev and dev has been merged into this branch,
+   record the dependency: add the prerequisite to this change's `Depends on`
+   gating `design` (`` `<prerequisite>` (design) ``), name it in `Notes`, keep the
+   status `in design`, and run `make check-change-index`. `blocked in design` is
+   for reasons that are not another change; the dependency itself holds design,
+   through section 1's entry check, and the design halts again until it lands.
+5. Once the prerequisite is archived and dev is merged in again, the index check
+   refuses this change's dependency on an archived change. On the owner's word,
+   drop only that dependency, leaving the status `in design`, run
+   `make check-change-index`, and resume the discussion.
 
 ## 5. Check the whole before recording
 

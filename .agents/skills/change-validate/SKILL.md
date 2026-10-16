@@ -23,6 +23,39 @@ it, the port-forwards, and the wheelhouse in `.dist`. The scripts stop
 port-forwards and uninstall the release without asking. One change is validated at
 a time; nothing else should be building in the checkout while you run.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make validate UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied call stops the step only when it cannot go on.** Run one command per
+  Bash call: a chained command runs only when every command in it is allowed, so
+  if a chained command is denied, run its commands one call at a time. If a single
+  command or any other tool call is denied, finish every part of the work that does
+  not depend on it. If the step cannot complete without that call, end with
+  `stopped`, `reason` naming that exact call and why the step needed it, and
+  `denials` listing the calls as you saw them; the wrapper replaces them with the
+  run's own record. Otherwise go on and end as the step ends: the wrapper records
+  the denial on the outcome whatever it is, and the orchestrating session reads it
+  before the change moves on. One denied call is not a denied tool: never report
+  the tool as not allowed. Never do by another tool what a denied call would have
+  done, and never ask about a denial as a question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** An environmental failure (section 5) is a
+  `question` naming the evidence and the remedy, awaiting the owner's word; once
+  answered, take only the action the answer names, and rerun the part. When the
+  record is written, end with `finished`, `next` naming triage, or the
+  implementation review when it has not landed.
+
 ## 1. Check that this commit may be validated
 
 `make validate` refuses while the owner's round view is open (`make round-view`):
@@ -62,9 +95,24 @@ The pipeline is by far the slowest part, so it runs while everything else does:
    never fetches its earlier run — then for it to finish, and downloads its logs
    under `.snapshot/e2e-logs/<run-id>/`. Its last lines name the run and its
    conclusion; a successful fetch means the logs arrived, not that the run passed.
+   Run it as written, with no shell redirect of its output: a redirect is a
+   write no rule admits unattended, and the harness keeps a background command's
+   output in a file, which is what the wait below reads.
 
 Run long commands in the background and wait for them to finish, rather than
-inside a call that will time out.
+inside a call that will time out. Wait inside one Bash call, with a blocking
+read-only `tail -f … | grep -m1` on the command's output matching the line it
+prints when it ends — a part's result line, the fetch's run-and-conclusion line
+— never by ending the turn: under the wrapper a turn's end is an outcome, so a
+turn ended with a part in flight is logged as a stop. A single call blocks for
+at most ten minutes, and the pipeline can take longer, so when the `tail` times
+out, repeat it, still without ending the turn. Never a shell loop: `bash -c` has
+no allow rule unattended and will not get one, since no rule admits a loop
+without admitting any command. The Helm part finishes within one call, so it
+runs in the foreground. A running part prints one
+line as each step starts and one as it ends, so its output shows how far it has
+got; each step's log is in the attempt's directory under `.snapshot/validation/`,
+named when the part starts.
 
 ## 3. Run the local and Helm parts
 

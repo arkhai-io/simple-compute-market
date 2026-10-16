@@ -1,8 +1,11 @@
 """Reject a documentation citation whose target is absent or tombstoned.
 
-`AGENTS.md` requires that every `openspec/`, `docs/`, `tools/`, `scripts/`
-and `e2e-tests/` path cited by a document resolve on the branch, and treats
-an unresolvable citation as a blocking defect rather than a stale link.
+`AGENTS.md` requires that every `openspec/`, `docs/`, `tools/`, `scripts/`,
+`e2e-tests/` and `.agents/` path cited by a document resolve on the branch, and
+treats an unresolvable citation as a blocking defect rather than a stale link.
+`.agents/` holds the shared skills and the files they cite, such as the outcome
+schema; the harness skill directories mirror it through links, so it alone is
+checked.
 
 The existence test this replaces could not fail on a rename-to-tombstone,
 which is the most likely broken citation in a renaming change: a tombstoned
@@ -35,7 +38,7 @@ from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
-CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests")
+CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
 
 #: Suffixes worth checking. A citation without one is usually a directory or
 #: prose, and directories are checked separately below.
@@ -46,7 +49,7 @@ CITED_SUFFIXES = ("py", "md", "toml", "yml", "yaml", "json", "sh", "mk")
 #: first suffix match so `a/b.py` is not swallowed into `a/b.py.bak`.
 CITATION = re.compile(
     r"(?<![\w./-])((?:%s)/[\w./-]+?\.(?:%s))(?![\w/-])"
-    % ("|".join(CITED_ROOTS), "|".join(CITED_SUFFIXES))
+    % ("|".join(map(re.escape, CITED_ROOTS)), "|".join(CITED_SUFFIXES))
 )
 
 

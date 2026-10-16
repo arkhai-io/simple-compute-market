@@ -23,6 +23,40 @@ code — a part that would need a code edit stops closeout and returns the chang
 implementation. That also means closeout runs no test suites and owes no new
 validation.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make closeout UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied call stops the step only when it cannot go on.** Run one command per
+  Bash call: a chained command runs only when every command in it is allowed, so
+  if a chained command is denied, run its commands one call at a time. If a single
+  command or any other tool call is denied, finish every part of the work that does
+  not depend on it. If the step cannot complete without that call, end with
+  `stopped`, `reason` naming that exact call and why the step needed it, and
+  `denials` listing the calls as you saw them; the wrapper replaces them with the
+  run's own record. Otherwise go on and end as the step ends: the wrapper records
+  the denial on the outcome whatever it is, and the orchestrating session reads it
+  before the change moves on. One denied call is not a denied tool: never report
+  the tool as not allowed. Never do by another tool what a denied call would have
+  done, and never ask about a denial as a question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** Each point this skill puts to the owner is a
+  `question`. A part that would need a code edit ends with `returned`,
+  `return_to` `implementation`, and `evidence` naming the closeout task's notes,
+  where you recorded what needs the edit; closeout never edits code. The owner
+  confirms the return, and implementation then sets the status. When the archive is committed, end with `finished`,
+  `next` naming the closeout review.
+
 ## 1. Check that closeout may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does
@@ -40,9 +74,10 @@ validation.
   review; if not, skip to step 4's steps after the archive (3 onwards), then commit.
   Never archive twice. Read every file of the change from the directory the lookup
   prints, not from `openspec/changes/<change>/`.
-- **Tasks.** Every task outside the closeout section is checked, or carries a note
-  recording its deferral with the owner's word. An unchecked task with neither is
-  unfinished implementation: stop and say which.
+- **Tasks.** `make check-tasks CHANGE=<change>` passes, so the sections are what
+  the headings say. Every task outside the closeout section is checked, or carries
+  a note recording its deferral with the owner's word. An unchecked task with
+  neither is unfinished implementation: stop and say which.
 - **Worktree.** It is clean, and `make round-view-closed` passes.
 
 If any check fails, stop and say why. Otherwise set the row's status to

@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Change step outcome",
+  "description": "The structured outcome an unattended step of an OpenSpec change ends its turn with. Contract: openspec/specs/change-workflow/spec.md.",
+  "type": "object",
+  "properties": {
+    "outcome": {
+      "description": "finished: the step is done; question: the owner must answer before the step goes on; returned: the step proposes a return to an earlier phase; blocked: the step cannot go on until another change lands; stopped: the step could not go on, for a reason that is not a question.",
+      "enum": ["finished", "question", "returned", "blocked", "stopped"]
+    },
+    "message": {
+      "description": "What the step says to the owner, shown as it is.",
+      "type": "string",
+      "minLength": 1
+    },
+    "next": {
+      "description": "finished: what the step says comes next.",
+      "type": "string",
+      "minLength": 1
+    },
+    "awaiting": {
+      "description": "question: what the step waits for from the owner.",
+      "type": "string",
+      "minLength": 1
+    },
+    "return_to": {
+      "description": "returned: the phase the step proposes returning to.",
+      "enum": ["design", "planning", "implementation"]
+    },
+    "evidence": {
+      "description": "returned: where the evidence for the return is recorded.",
+      "type": "string",
+      "minLength": 1
+    },
+    "blocked_on": {
+      "description": "blocked: the change this one waits on.",
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "description": "stopped: why the step could not go on.",
+      "type": "string",
+      "minLength": 1
+    },
+    "denials": {
+      "description": "Any outcome: the tool calls the run was denied, as the run's own record lists them, each with the harness's reason; the wrapper sets this on every outcome, and it is required on stopped.",
+      "type": "array",
+      "items": {"type": "object"}
+    }
+  },
+  "required": ["outcome", "message"],
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"outcome": {"const": "finished"}}},
+     "then": {"required": ["next"]}},
+    {"if": {"properties": {"outcome": {"const": "question"}}},
+     "then": {"required": ["awaiting"]}},
+    {"if": {"properties": {"outcome": {"const": "returned"}}},
+     "then": {"required": ["return_to", "evidence"]}},
+    {"if": {"properties": {"outcome": {"const": "blocked"}}},
+     "then": {"required": ["blocked_on"]}},
+    {"if": {"properties": {"outcome": {"const": "stopped"}}},
+     "then": {"required": ["reason", "denials"]}}
+  ]
+}

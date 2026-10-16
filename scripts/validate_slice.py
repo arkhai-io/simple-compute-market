@@ -30,9 +30,10 @@ commit.
 
 Each part stops at its first failure and keeps each attempt's output apart, under
 `.snapshot/validation/<short commit>/<part>/<attempt>/`, so a rerun never overwrites
-the evidence of the run before it. It prints a summary and writes it as
-`summary.json` beside the logs for the validation report. A step's result is
-`passed`, `failed`, or `warning`; a warning does not fail the part.
+the evidence of the run before it. It prints one line as each step starts and one
+as it ends, so a part can be watched while it runs, then a summary, which it also
+writes as `summary.json` beside the logs for the validation report. A step's
+result is `passed`, `failed`, or `warning`; a warning does not fail the part.
 
 Contract: openspec/specs/change-workflow/spec.md, "Validation observes a committed
 slice".
@@ -195,13 +196,21 @@ def pipeline_markers(read: Reader) -> list[str]:
     return markers
 
 
+def _say(line: str) -> None:
+    # Flushed at once: a part's output is read while it runs, often through a
+    # pipe, where a buffered line would appear only when the part ends.
+    print(line, flush=True)
+
+
 class Validation:
     def __init__(self, part: str, *, root: Path = ROOT, runner: Runner = _run_logged,
-                 read: Reader = _read, clock: Callable[[], float] = time.monotonic) -> None:
+                 read: Reader = _read, clock: Callable[[], float] = time.monotonic,
+                 echo: Callable[[str], None] = _say) -> None:
         self.root = root
         self.run = runner
         self.read = read
         self.clock = clock
+        self.echo = echo
         commit = read(["git", "rev-parse", "HEAD"]).strip()
         part_dir = root / LOG_ROOT / commit[:12] / part
         earlier = [int(entry.name) for entry in part_dir.glob("*")
@@ -239,6 +248,7 @@ class Validation:
     def step(self, name: str, command: Sequence[str]) -> Step:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         log = self.log_dir / f"{name}.log"
+        self.echo(f"{name}: running ({' '.join(command)}; log {log.relative_to(self.root)})")
         started = self.clock()
         status = self.run(command, log)
         step = Step(name, "passed" if status == 0 else "failed",
@@ -255,6 +265,7 @@ class Validation:
             step.detail = "\n".join(filter(None, [step.detail, changed]))
             self.summary.passed = False
         self.summary.steps.append(step)
+        self.echo(f"{name}: {step.result} in {step.seconds}s")
         return step
 
     def commit_changed(self) -> str | None:
