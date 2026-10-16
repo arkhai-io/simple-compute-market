@@ -15,6 +15,7 @@ import asyncio
 import pytest
 
 from market_storefront import lifecycle, lifecycle_steps
+from market_storefront.utils.config import site_projection_poll_interval
 from tests.publication_app import ADMIN_SIGNER, SITE, SITE_B, pool, publication_app
 
 pytestmark = pytest.mark.asyncio
@@ -27,11 +28,9 @@ _UNBACKED_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
 async def lifecycle_registry():
     """A clean loop registry and pause flag, as a fresh process has; any timer
     a test started is cancelled and awaited before its event loop closes."""
-    lifecycle.reset_for_tests()
+    await lifecycle.reset_for_tests()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
 
 
 @pytest.fixture
@@ -49,13 +48,22 @@ async def _open_listing_sites(world) -> dict[str, str]:
 
 
 def _start_the_loops() -> None:
-    """Register every loop's timer, as startup does, and start them."""
-    lifecycle_steps.register_vm_loops()
+    """Register the poller's timer over its step, as startup does, and start it.
+
+    The poller alone: these cases are about what it polls, and a publication
+    timer running beside it would publish from a thread the test does not wait
+    for."""
+    lifecycle.register_loop(
+        lifecycle.SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=lifecycle_steps.site_projections_step,
+        interval_seconds=site_projection_poll_interval(),
+    )
     lifecycle.start_loops()
 
 
 async def _hold_the_loops(world) -> dict[str, str]:
-    """Hold the loops before their timers start, so none runs a cycle."""
+    """Hold the loops before the poller's timer starts, so it runs no cycle."""
     await world.client.admin_pause_lifecycle_loops()
     _start_the_loops()
     return (await world.client.admin_pause_lifecycle_loops())["loops"]

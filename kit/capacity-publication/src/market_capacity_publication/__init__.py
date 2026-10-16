@@ -24,6 +24,7 @@ from .capacity import (
 )
 from .cycle import (
     PublicationCycleDriver,
+    PublicationCycleStopped,
     PublicationCycleReport,
     converge_registries,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "remote_site_clients",
     "PublicationCandidate",
     "PublicationCycleDriver",
+    "PublicationCycleStopped",
     "PublicationCycleReport",
     "PublicationDomainHooks",
     "PublicationRepository",

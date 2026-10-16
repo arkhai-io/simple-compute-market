@@ -47,11 +47,9 @@ class _FailingCapacity:
 async def lifecycle_registry():
     """A clean loop registry and pause flag, as a fresh process has; any timer
     a test started is cancelled and awaited before its event loop closes."""
-    lifecycle.reset_for_tests()
+    await lifecycle.reset_for_tests()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
 
 
 @pytest.fixture
@@ -68,7 +66,7 @@ def _failing(monkeypatch, error: Exception) -> _FailingCapacity:
 
 async def _publication_status(world) -> dict:
     status = await world.client.get_system_status()
-    return status.extra["lifecycle"][lifecycle.PUBLICATION]
+    return status.lifecycle[lifecycle.PUBLICATION]
 
 
 async def test_publication_failing_every_timer_cycle_is_reported_running_and_failed(
@@ -131,7 +129,7 @@ async def test_every_loop_is_reported_with_its_state(world):
     lifecycle.start_loops()
     await world.client.admin_pause_lifecycle_loops()
 
-    loops = (await world.client.get_system_status()).extra["lifecycle"]
+    loops = (await world.client.get_system_status()).lifecycle
 
     for name in (
         lifecycle.NEGOTIATION_WATCHDOG,

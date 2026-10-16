@@ -1133,3 +1133,36 @@ class TestSnapshot:
         controller.start_loops()
         await step.next_call()
         assert step.calls == 2
+
+    async def test_stopping_loops_awaits_them_and_can_forget_their_registrations(
+        self, observed
+    ):
+        controller, lock = observed
+        step = _CountingStep()
+        controller.register_loop("alpha", step=step, interval_seconds=_FOREVER)
+        handle = controller.start_loops()["alpha"]
+        await asyncio.wait_for(step.done.wait(), timeout=1)
+        await _cycle_recorded(lock)
+
+        await controller.stop_loops(keep_registrations=False)
+
+        assert handle.done()
+        assert controller.states() == {}
+        # The step stays registered, so an operator's step still runs; the
+        # timer is gone, so starting the loops starts nothing.
+        assert controller.step_routes() == {"alpha": "alpha"}
+        assert controller.start_loops() == {}
+        await controller.run_cycle("alpha")
+        assert step.calls == 2
+
+    async def test_stopping_loops_keeps_registrations_by_default(self, observed):
+        controller, _lock = observed
+        step = _CountingStep()
+        controller.register_loop("alpha", step=step, interval_seconds=_FOREVER)
+        handle = controller.start_loops()["alpha"]
+        await asyncio.wait_for(step.done.wait(), timeout=1)
+
+        await controller.stop_loops()
+
+        assert handle.done()
+        assert set(controller.start_loops()) == {"alpha"}

@@ -12,12 +12,13 @@ availability does not bound makes no availability call.
 It answers with the policy kit's ``ListingSourceVerdict``, which the negotiation
 runtime enforces before every seller decision and every acceptance. Only a
 freshly confirmed projection confirms the listing: every family the check reads
--- the resource-pool family, and the capacity-bucket family whenever the site
-holds one, since fungible availability is computed from it -- must have been
-confirmed by a successful poll within the storefront's source-confirmation
-window. A family that is not held, whose latest poll failed, or whose last
-confirmation is older than the window cannot confirm the listing, which is
-retryable rather than a mismatch. Publication reads the same held generations
+must have been confirmed by a successful poll within the storefront's
+source-confirmation window. Every listing reads the resource-pool family; a
+fungible listing also reads the capacity-bucket family, from which its
+availability is computed, while a listing bound to one resource does not. A
+family that is not held, whose latest poll failed, or whose last confirmation
+is older than the window cannot confirm the listing, which is retryable rather
+than a mismatch. Publication reads the same held generations
 without this rule, because holding listings through an outage is its job.
 
 See openspec/specs/storefront-publication/spec.md, "The seller's inventory guard
@@ -91,30 +92,28 @@ def _unconfirmed(
     site_projections: SiteProjectionState,
     site_id: str,
     *,
+    reads_buckets: bool,
     now: datetime,
     window_seconds: float,
 ) -> str | None:
     """Why the site's projections cannot confirm a listing now, or ``None``.
 
-    The resource-pool family is always read. The capacity-bucket family is read
-    whenever the site holds a generation of it, because fungible availability
-    is computed from it then; a stale bucket generation is not dropped in
-    favour of the resource rows, which would make what is computed depend on
-    freshness.
+    The resource-pool family is always read, and the capacity-bucket family
+    when ``reads_buckets``. Every site holds both families, so a bucket family
+    with no generation is not held and confirms nothing; nor is a stale one
+    dropped in favour of the pool rows, which would make what is computed
+    depend on freshness.
     """
     try:
-        pools = site_projections.view(site_id, RESOURCE_POOL)
-        buckets = site_projections.view(site_id, CAPACITY_BUCKET)
+        read = [(RESOURCE_POOL, site_projections.view(site_id, RESOURCE_POOL))]
+        if reads_buckets:
+            read.append((CAPACITY_BUCKET, site_projections.view(site_id, CAPACITY_BUCKET)))
     except CapacityBindingError:
         return f"site {site_id!r} is not a configured capacity site"
-    if pools.value is None:
-        # This site's projection has not loaded, so nothing can confirm the
-        # declaration the listing was derived from.
-        return f"site {site_id!r} projection is not loaded"
-    read = [(RESOURCE_POOL, pools)]
-    if buckets.value is not None:
-        read.append((CAPACITY_BUCKET, buckets))
     for family, view in read:
+        if view.value is None:
+            # Nothing can confirm the declaration the listing was derived from.
+            return f"site {site_id!r} {family} projection is not loaded"
         if not freshly_confirmed(view, now=now, window_seconds=window_seconds):
             confirmed = view.fetched_at.isoformat() if view.fetched_at else "never"
             return (
@@ -212,16 +211,25 @@ async def _check_listing_source(
     key = stored_listing_key(
         recorded.source_envelope_json if recorded is not None else None, stored, site_id
     )
+    # A listing bound to one resource is an exact listing, whose availability
+    # is that resource's; a fungible listing's is computed from the site's
+    # capacity buckets.
+    fungible = recorded is None or recorded.physical_resource_id is None
     # Judged and then read with nothing awaited between, so the generations
-    # derived from are the ones just confirmed; a confirmed site holds a
-    # resource-pool generation, so its slice is never unknown here.
+    # derived from are the ones just confirmed, and a confirmed family is held.
     unconfirmed = _unconfirmed(
-        site_projections, site_id, now=now, window_seconds=window_seconds
+        site_projections,
+        site_id,
+        reads_buckets=fungible,
+        now=now,
+        window_seconds=window_seconds,
     )
     if unconfirmed is not None:
         return ListingSourceVerdict("unverifiable", unconfirmed)
     projection = _site_only(site_pool_projection(site_projections), site_id)
-    buckets = _site_only(site_capacity_buckets(site_projections), site_id)
+    buckets = (
+        _site_only(site_capacity_buckets(site_projections), site_id) if fungible else None
+    )
     # Only the admissibility default affects which listings derive; the
     # terms these settings also carry are discarded by the comparison below.
     admissibility = PoolHintResolutionSettings(

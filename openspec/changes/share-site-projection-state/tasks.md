@@ -1782,13 +1782,16 @@ Touches VM's storefront, `core/storefront`'s status model, and the VM lane's con
       resolve here (`core/storefront`, `kit/capacity-publication`, `kit/storefront`,
       `domains/vms/domain`, `domains/bare_metal`, `domains/bare_metal/storefront`,
       `domains/apicredits/storefront`, `e2e-tests`); VM storefront's lock was edited by hand
-      with the six substitutions uv wrote into bare metal's lock (both versions, both wheel
+      with the five substitutions uv wrote into bare metal's lock (both versions, both wheel
       names, the capacity-publication pin) plus its own core floor; neither `kit/policy` nor
       VM buyer locks either package (16.6 relocks VM storefront). **Not done:** the typed
       client's `HealthResponse` (`core/storefront-client`) has no `lifecycle` field, so a
       caller reads it from `extra["lifecycle"]`, which the client parses into; a typed
       field would bump the client and move the provisioning service's exact pin. Section 14
       reports bare metal's `lifecycle` too and is the natural place to add it.
+      **Amended (review):** the typed client now names it: `arkhai-core-storefront-client`
+      0.26.0's `HealthResponse.lifecycle`, read by `test_lifecycle_status.py` (see the
+      review fixes below).
 - [x] 9.5 Tests. Unit: `tests/unit/test_listing_source_check.py` — a loaded generation past
       the window, a stale bucket family beside a fresh resource-pool family, and the
       default window from `poll_interval`. Application integration, through the typed
@@ -1827,10 +1830,11 @@ Touches VM's storefront, `core/storefront`'s status model, and the VM lane's con
       with `register_vm_loops()` before starting them (the poller is no longer registered at
       import), so its refresh-during-timer case now runs every loop's timer, not the poller's
       alone. VM storefront (frozen, `UV_FROZEN=1`): unit 1035 passed, 1 skipped; integration
-      428 passed (five new; `test_alkahest` against Anvil included), twice. A first
-      integration run, started while another pytest process and `make test-core` ran in the
-      same container, made no progress for 15 minutes and was killed; run alone it passed
-      in about two minutes both times.
+      428 passed (five new; `test_alkahest` against Anvil included), twice. **Corrected
+      (review):** a first integration run that made no progress for 15 minutes was not
+      contention with a concurrent pytest process, as first recorded here: it was the
+      kit's publication driver holding a worker thread forever once a test tore down a
+      publication timer mid-cycle (see the review fixes below).
 - [x] 9.6 Validation: `make test-storefront`, `make test-core`, `make test`.
       End-to-end (VM lane): `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `multi_registry`,
       `e2e_listing_shapes`, `e2e_compute_dynamic_listings`, `e2e_vm_introduction`.
@@ -1849,6 +1853,9 @@ Touches VM's storefront, `core/storefront`'s status model, and the VM lane's con
       **End-to-end, read from the scenarios' code (the pipeline was not run):** every VM-lane
       scenario now runs the storefront's loops on the controller's timer, and its rounds and
       acceptances pass the confirmation window, which the lane overlays widen to an hour.
+      **Corrected (review):** the Compose overlays only; the umbrella chart's `bob` agent
+      (`helm/values.yaml`), which change-validate's Helm part deploys with the loops held,
+      had no `[capacity]` and so the 15 s default until the review fixes widened it too.
       The scenarios that hold the loops and step them — `e2e_deal` and `e2e_buy` (through
       `compute_deal_stages` / `compute_deal`), `e2e_deal_buyer_cli`, `e2e_non_erc20_settlement`,
       `multi_registry`, `e2e_listing_shapes`, `e2e_compute_dynamic_listings`, and
@@ -1863,14 +1870,100 @@ Touches VM's storefront, `core/storefront`'s status model, and the VM lane's con
       No bare-metal or API-credit scenario reaches this section's code (their storefronts
       take the core and capacity-publication bumps, unchanged in behaviour).
 
+
+Section 9 review fixes (fresh-context review of the section commit):
+
+- **The publication driver no longer strands its worker thread.** `PublicationCycleDriver`
+  (`kit/capacity-publication/src/market_capacity_publication/cycle.py`) tracks the
+  coroutines its callbacks hand to the loop; when the awaiting `run` is cancelled it cancels
+  them, so the waiting callback fails at once with the new `PublicationCycleStopped` and so
+  does every later call, and the runner's thread unwinds. Before, a test tearing down a
+  running publication timer left the thread blocked in `run_coroutine_threadsafe(...).result()`
+  on a closed loop, and interpreter exit hung joining it (the reviewer saw 2 of 9 runs hang;
+  this session's 15-minute stall was the same). Production shutdown mid-cycle had the same
+  fault. Unit: `kit/capacity-publication/tests/unit/test_cycle.py::test_cancelling_a_cycle_mid_callback_lets_its_worker_thread_finish`
+  (fails against the old driver); `make -C kit test-capacity-publication` 94 passed.
+  `arkhai-kit-capacity-publication` 0.9.2; the three storefronts' exact pins follow. VM's
+  `test_site_projection_state.py` and the negotiate suite's `held_loops` now register and
+  start the site-projection poller alone, so no publication timer runs where no case needs it.
+- **A fungible listing needs a freshly confirmed bucket family; an exact listing does not
+  read it.** `listing_source_check` decides from the listing's durable binding: one bound
+  to a resource (`physical_resource_id`) is exact and reads the resource-pool family
+  alone; any other is fungible and reads both, a bucket family with no generation being
+  not held and refusing (D4: every site holds both). The first version confirmed a
+  fungible listing from pools alone when the bucket family had never loaded. Test fakes:
+  `FakeProjectionSite(derive_buckets=True)` serves a bucket family derived per member from
+  its pool rows (`buckets_from_pools`, with the site's grouping attributes), which
+  `HarnessProjectionSite` (the publication harness) and the source-check unit tests use;
+  per-member buckets give a fungible pool exactly its pool rows' availability. Unit: a
+  fungible listing whose bucket family never loaded refuses, naming it; an exact listing
+  with no bucket family confirms; an exact listing still needs a fresh pool family.
+  **Found:** capacity-event reconciliation reads the held bucket family, which a delta
+  does not refresh, so where a site serves buckets a reservation closes a fungible
+  listing only after the next projection poll; `test_a_capacity_event_acts_only_on_backed_listings`
+  now steps `site-projections` after changing availability. This predates the section
+  (Section 8's reconciler reads held buckets) and was hidden by fakes serving none; for
+  the owner whether a capacity delta should refresh the site's bucket family inline.
+- **The umbrella chart's `bob` agent widens the window** (`helm/values.yaml`,
+  `capacity.source_confirmation_seconds: 3600`, commented); the storefront chart's
+  default-release render test asserts it passes through beside the derived site. `make -C
+  helm test-render` passed with the loader check run.
+- **The window test proves the step polled:** the clock is pinned past the seeding poll's
+  window, the refused round leaves `fetched_at` unchanged, and after the step the site was
+  asked its version and `fetched_at` advanced before the clock moves to a second after it.
+- **The typed client names `lifecycle`:** `arkhai-core-storefront-client` 0.26.0
+  (`HealthResponse.lifecycle`, two client unit tests); VM requires `>=0.26.0`; the
+  provisioning service's exact pin moves to `==0.26.0`.
+- **Comments and logs:** `DISCLOSED_CYCLE_ERRORS`' comment says their text names public
+  identifiers, versions, and reasons, never a secret, and that subclasses are disclosed
+  too; `register_vm_loops`' docstring states why the sweeps' first cycle is delayed instead
+  of "as they always have"; the retention step logs the payloads it deleted; startup logs
+  each loop it starts with its interval (`register_vm_loops` returns them).
+- **Stage and interval wiring:** `publication_step` enters `compose` before resolving the
+  projection state, so a missing state fails in `compose`; `claims_sweep_interval` is read
+  once, by `utils.config.settlement_servicing_interval()`, for the worker and the timer.
+- **Startup refuses an unusable window:** `_require_source_confirmation_window` (a startup
+  step before any loop) refuses a `source_confirmation_seconds` that is not a positive
+  number, naming `capacity.source_confirmation_seconds`; unit-tested for 0, negative,
+  text, and a boolean.
+- **Fulfillment resume:** `resume_incomplete_fulfillments_once` lists deliveries before
+  building any client and returns at once with none; `test_lifecycle_advance_routes.py`
+  now injects a delivery store and a payments coordinator through the container and shows
+  the step resumes and then reconciles payment deals, with no module patched.
+- **Loop teardown:** the controller gains `stop_loops(*, keep_registrations=True)` and
+  `clear_loops(*, keep_registrations=True)` (`arkhai-kit-storefront` 0.5.0, two kit unit
+  tests; the storefronts' exact pins follow); VM's `reset_for_tests()` is async, stops and
+  awaits every loop, and forgets timer registrations, so no fixture reads `_handles` and
+  `TestIntroductionRetention` is order-independent.
+- Locks: `scripts/uv_project.py lock` relocked `core/storefront-client`,
+  `kit/capacity-publication`, `kit/storefront`, `provisioning/compute/service`, the
+  bare-metal and API-credit storefronts, and `e2e-tests`; VM storefront's lock was edited
+  by hand with the nine substitutions those packages need (three versions, three wheel
+  names, three root specifiers).
+- Evidence after the fixes: VM storefront (frozen) unit 1041 passed, 1 skipped, twice;
+  integration 428 passed in nine of eleven full runs, none hanging (each about two
+  minutes). Two runs failed one test,
+  `test_payment_settlement.py::test_settlement_is_pending_until_a_verified_receipt_then_delivers_once`
+  (`'ready' == 'provisioning'`), which passed 30 of 30 runs alone. It is a race in that
+  test, not in this section's code: the coordinator starts delivery as a task and then
+  awaits a database read before answering, so a delivery that completes during that read
+  answers `ready`; no code it runs changed here. Left as it is and flagged. `make
+  test-core` (storefront client 62 passed), `make -C kit test-capacity-publication` 94,
+  `make -C kit test-storefront` 100, `make test-bare-metal` 134 + 323 + 11 + 40,
+  `make test-apicredits` (storefront 149), `make test-provisioning` (service 462 among
+  them), and `make test-kits` passed, the last stopping only at `kit/policy`'s reinit
+  (the PyTorch index); `make -C helm test-render` passed with the loader check run; `make
+  check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+  CHANGE=share-site-projection-state`, and `openspec validate --strict` pass.
+
 Section 9 handoff:
 
 - Startup's `lifecycle_loops` step registers every VM timer with
   `lifecycle_steps.register_vm_loops()` and starts them; import registers steps only. A test
-  that starts timers without startup calls `register_vm_loops()` first. A registration
-  outlives `reset_for_tests()` (the kit's `clear_loops` keeps registered loops), so once a
-  test has registered the retention sweep every later `start_loops()` in that process
-  starts it too; `test_loop_gate_wiring.py` keeps that case last.
+  that starts timers without startup registers them first (`register_vm_loops()`, or one
+  loop with `lifecycle.register_loop`). `await lifecycle.reset_for_tests()` stops and awaits
+  every timer and forgets the timer registrations (the kit's `stop_loops(keep_registrations=False)`),
+  so no test starts a loop another registered.
 - The publication wake is renewed per registration (`new_publication_wake`);
   `wake_publication_loop` sets the current one. Bare metal's publication wake (13.2) needs
   the same care if its runtime is rebuilt on another event loop.
@@ -1882,9 +1975,13 @@ Section 9 handoff:
 - The source check reads the capacity-bucket family only when the site holds a generation
   of it; Section 13's bare-metal recheck reads the resource-pool family only, per D5.
 - Status: `HealthResponse.lifecycle` (core 0.14.0) is keyed by loop name with the kit's
-  `LoopSnapshot.to_dict()` shape. The typed client's `HealthResponse` does not name it yet
-  (callers read `extra["lifecycle"]`); 14.1 can add the typed field when bare metal reports
-  it, bumping `arkhai-core-storefront-client` and the provisioning service's exact pin.
+  `LoopSnapshot.to_dict()` shape; the typed client reads it as `HealthResponse.lifecycle`
+  (`arkhai-core-storefront-client` 0.26.0), so 14.1 needs no client change.
+- For the owner: the per-site capacity-event pollers' timer cycles record no outcome; only
+  a `capacity-events` step does, through the controller. market-composition's "A loop
+  records each cycle's outcome with the controller" asks for an outcome "whether its timer
+  or an operator's step ran the cycle". Whether the kit's per-site poller should record
+  per-site outcomes (and status report them) is undecided; nothing was changed.
 - `lifecycle.DISCLOSED_CYCLE_ERRORS` is VM's disclosed set (kit and core configuration and
   binding errors; VM has none of its own). Bare metal's 13.2 picks its own, likely its
   configuration errors from Section 11 plus the same kit and core ones.
@@ -1916,7 +2013,9 @@ configuration.
       `active_principals(now)` over them at each call (still "at verification time", D14b);
       bare metal's 12.2 composes the same provider.
 - [ ] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
-      `src/startup.py`, and the lane overlays use `settlement_servicing_interval_seconds`; a
+      `src/startup.py`, `src/utils/config.py`'s `settlement_servicing_interval()` (the one
+      reader, used by the servicing worker and `src/lifecycle_steps.py`'s registration),
+      and the lane overlays use `settlement_servicing_interval_seconds`; a
       configuration stating `claims_sweep_interval` refuses startup naming its replacement;
       VM's section list marks the key retired and `make helm-values-schema` regenerates
       both schemas, so an agent's `config` stating it is refused at render. The charts'

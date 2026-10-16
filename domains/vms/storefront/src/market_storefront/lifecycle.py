@@ -73,9 +73,11 @@ def capacity_site_loop_name(site: str) -> str:
 #: The errors whose messages a recorded cycle outcome may carry. These are the
 #: configuration and binding refusals the storefront's cycles raise -- a
 #: capacity site or binding that does not resolve, a domain registration that
-#: is incomplete or does not match durable state -- and their text names keys,
-#: site and listing identifiers, and reasons, never a configured value, a URL,
-#: or a credential. Every other exception reaches status by type alone.
+#: is incomplete or does not match durable state. Their text names keys,
+#: configured site, listing, and domain identifiers and versions, and reasons,
+#: all public configuration; none carries a secret or a credential. The check
+#: is `isinstance`, so a subclass of one of these is disclosed too. Every other
+#: exception reaches status by type alone.
 DISCLOSED_CYCLE_ERRORS: tuple[type[BaseException], ...] = (
     CapacityBindingError,
     CapacityConfigurationError,
@@ -208,10 +210,11 @@ def snapshot() -> dict[str, LoopSnapshot]:
     return _CONTROLLER.snapshot()
 
 
-def reset_for_tests() -> None:
-    """Cancel every loop and drop its handles, outcomes, and pause, keeping the
-    registered steps and loops. Test-only."""
-    _CONTROLLER.clear_loops()
+async def reset_for_tests() -> None:
+    """Cancel every loop and wait for it to end, dropping its handles, outcomes,
+    pause, and timer registration and keeping the registered steps, so no test
+    starts a loop another registered. Test-only."""
+    await _CONTROLLER.stop_loops(keep_registrations=False)
 
 
 __all__ = [

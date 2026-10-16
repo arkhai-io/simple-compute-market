@@ -151,7 +151,12 @@ def test_default_release_renders_mounts_and_derives_together() -> None:
         "authorities": {REGISTRY_URL: {"authority": "registry-a", "principals": [ACTIVE_REGISTRY]}},
     }
     assert config["provisioning"]["service_url"] == PROVISIONING_URL
-    assert config["capacity"] == {"sites": {"default": PROVISIONING_URL}}
+    # The release's widened source-confirmation window passes through, and
+    # the chart adds the capacity site beside it.
+    assert config["capacity"] == {
+        "source_confirmation_seconds": 3600,
+        "sites": {"default": PROVISIONING_URL},
+    }
     assert config["Settlement"] == {"priority": []}
     assert "wait-for-registry" in deployment
     assert "wait-for-rpc" not in deployment

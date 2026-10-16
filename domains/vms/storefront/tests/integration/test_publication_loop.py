@@ -15,7 +15,6 @@ listing has no option it may publish under it. Tests of unbacked supply declare
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 from dataclasses import asdict
@@ -496,12 +495,15 @@ async def test_a_capacity_event_acts_only_on_backed_listings(world):
         row = await _listing(world, listing_id)
         return row["status"], row["closed_by"]
 
-    def set_available(units):
+    async def set_available(units):
         # Only availability moves; every declared capacity stays as it was.
         for projected in world.pools:
             projected["resources"][0]["available"]["gpu_count"] = units
+        # A fungible pool's availability is read from the site's capacity
+        # buckets, which the storefront holds as of its last poll.
+        await world.client.admin_run_lifecycle_cycle("site-projections")
 
-    set_available(0)
+    await set_available(0)
     world.site.emit("reserved")
     await world.client.admin_run_lifecycle_cycle("capacity-events")
     assert await state(backed) == ("closed", "reconciliation")
@@ -511,7 +513,7 @@ async def test_a_capacity_event_acts_only_on_backed_listings(world):
     await world.db.update_listing(
         listing_id=unbacked, status="closed", closed_by="reconciliation"
     )
-    set_available(1)
+    await set_available(1)
     world.site.emit("released")
     await world.client.admin_run_lifecycle_cycle("capacity-events")
     assert await state(backed) == ("open", None)
@@ -590,11 +592,9 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
 async def lifecycle_registry():
     """A clean loop registry and pause flag, as a fresh process has; any timer
     a test started is cancelled and awaited before its event loop closes."""
-    lifecycle.reset_for_tests()
+    await lifecycle.reset_for_tests()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
 
 
 async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(

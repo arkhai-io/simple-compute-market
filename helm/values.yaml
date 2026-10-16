@@ -266,6 +266,14 @@ storefront:
               principals:
                 - scheme: eip191
                   identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        # How long a confirmed projection poll lets the inventory guard confirm
+        # a listing, widened for this development release only. Validation
+        # scenarios hold the lifecycle loops while they trade, and with the
+        # shipped window -- three poll intervals -- a round sent more than a
+        # few seconds after the last `site-projections` step is refused as
+        # retryable. Production releases keep the shipped window.
+        capacity:
+          source_confirmation_seconds: 3600
         provisioning:
           mode: mock
           identity:

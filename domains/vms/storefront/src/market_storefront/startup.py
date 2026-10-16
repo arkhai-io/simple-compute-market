@@ -33,6 +33,7 @@ import market_storefront.container as _container
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     settings,
+    source_confirmation_seconds,
 )
 from market_storefront.utils.logging_config import setup_file_logging
 
@@ -101,6 +102,12 @@ def _require_readable_family_rates() -> None:
         raise RuntimeError(
             "configured family rates cannot be read: " + "; ".join(problems)
         )
+
+
+def _require_source_confirmation_window() -> None:
+    """Refuse to start with a source-confirmation window that is not a positive
+    number, naming the key, rather than refuse every negotiation round."""
+    source_confirmation_seconds()
 
 
 def _report_retired_pricing_keys() -> None:
@@ -223,14 +230,15 @@ def _start_lifecycle_loops() -> None:
     """
     composition = _container.resolved_contact_exchange
     retention = composition.retention() if composition is not None else None
-    register_vm_loops(
+    intervals = register_vm_loops(
         retention_interval_seconds=(
             float(retention.policy.sweep_interval_seconds)
             if retention is not None
             else None
         )
     )
-    start_loops()
+    for name in start_loops():
+        logger.info("[STARTUP] %s started (interval=%ss)", name, intervals.get(name))
 
 
 def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
@@ -278,6 +286,10 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep(
                 "configured_family_rates",
                 _require_readable_family_rates,
+            ),
+            StorefrontStartupStep(
+                "source_confirmation_window",
+                _require_source_confirmation_window,
             ),
             StorefrontStartupStep(
                 "retired_pricing_keys",

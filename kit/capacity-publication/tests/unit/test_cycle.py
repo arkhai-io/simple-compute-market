@@ -12,6 +12,7 @@ from core_storefront.publication_sources import PublicationSource
 
 from market_capacity_publication import (
     PublicationCycleDriver,
+    PublicationCycleStopped,
     PublicationCycleReport,
     RegistryDivergence,
     converge_registries,
@@ -97,6 +98,63 @@ async def test_callbacks_run_off_the_loop_and_call_back_onto_it():
     ]
     assert seen["callback"] != loop_thread
     assert seen["coroutine"] == loop_thread
+
+
+def _source(candidates) -> PublicationSource:
+    return PublicationSource(
+        name="test",
+        open_keys=lambda _db_path: set(),
+        close_stale=lambda _db_path, _base_url: [],
+        available_candidates=candidates,
+        skip_keys=lambda candidate: {candidate["key"]},
+        listing_resource=lambda candidate: dict(candidate),
+        record_published=lambda *_args: None,
+        reopen_existing=lambda *_args, **_kwargs: None,
+        reopen_error_label="reopen",
+    )
+
+
+async def test_cancelling_a_cycle_mid_callback_lets_its_worker_thread_finish():
+    """A callback waiting on a coroutine the loop never completes fails as soon
+    as the cycle is cancelled, and so does any later call, so the runner's
+    thread unwinds instead of waiting forever."""
+    driver = PublicationCycleDriver()
+    waiting = asyncio.Event()
+    unwound = threading.Event()
+    refused: list[type[BaseException]] = []
+
+    async def never_completes() -> None:
+        waiting.set()
+        await asyncio.Event().wait()
+
+    def candidates(_db_path: str) -> list[dict]:
+        try:
+            driver.call(never_completes())
+        except PublicationCycleStopped:
+            try:
+                driver.call(never_completes())
+            except PublicationCycleStopped as again:
+                refused.append(type(again))
+            unwound.set()
+            raise
+        return []
+
+    cycle = asyncio.create_task(
+        driver.run(
+            [_source(candidates)],
+            db_path="unused.db",
+            base_url="https://seller.example",
+            build_payload=lambda *_args: PublicationPayload(),
+            publish_listing=lambda *_args, **_kwargs: {"listing_id": "never"},
+        )
+    )
+    await asyncio.wait_for(waiting.wait(), timeout=5)
+    cycle.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cycle
+
+    assert await asyncio.to_thread(unwound.wait, 5), "the worker thread is still waiting"
+    assert refused == [PublicationCycleStopped]
 
 
 def _runtime(divergences, unrepaired=()):

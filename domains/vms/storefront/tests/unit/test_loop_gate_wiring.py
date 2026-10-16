@@ -58,11 +58,9 @@ _TIMED_LOOPS = {
 
 @pytest.fixture(autouse=True)
 async def _clean_registry():
-    lifecycle.reset_for_tests()
+    await lifecycle.reset_for_tests()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
 
 
 @pytest.fixture
@@ -332,9 +330,6 @@ class TestCapacityEventPollers:
 
 
 class TestIntroductionRetention:
-    """Last in this module: a registered loop stays registered for the rest of
-    the process, so a later case here would find the retention sweep among the
-    loops startup starts."""
 
     async def test_the_sweep_is_registered_while_contact_exchange_is_composed(
         self, long_intervals, collaborators, monkeypatch

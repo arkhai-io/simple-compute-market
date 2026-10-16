@@ -34,6 +34,7 @@ import market_storefront.container as _container
 import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront import lifecycle, lifecycle_steps
 from market_storefront.controllers.admin_controller import router as admin_router
+from market_storefront.utils.config import site_projection_poll_interval
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
@@ -842,17 +843,20 @@ class TestAdministrativeAcceptance:
 
 @pytest_asyncio.fixture
 async def held_loops(client):
-    """Every loop's timer registered as startup registers it and started held,
-    so no poll runs unless an operator steps one; the timers are cancelled and
-    awaited afterwards."""
-    lifecycle.reset_for_tests()
+    """The site-projection poller's timer registered as startup registers it
+    and started held, so no poll runs unless an operator steps one; it is
+    cancelled and awaited afterwards."""
+    await lifecycle.reset_for_tests()
     lifecycle.controller().request_pause(True)
-    lifecycle_steps.register_vm_loops()
+    lifecycle.register_loop(
+        lifecycle.SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=lifecycle_steps.site_projections_step,
+        interval_seconds=site_projection_poll_interval(),
+    )
     lifecycle.start_loops()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
 
 
 def _admin_client() -> StorefrontClient:
@@ -877,21 +881,20 @@ class TestSourceConfirmationWindow:
     ):
         """Spec scenario "The loops are held past the confirmation window".
 
-        The runtime measures each check at a clock the test sets relative to
-        the site's last confirmed poll: past the window while the held poller
-        has run nothing, then a second after the operator's step polled it."""
+        The runtime measures each check at a clock the test sets: first at an
+        instant past the window since the seeding poll, while the held poller
+        has polled nothing; then a second after the poll the operator's step
+        ran, which the test confirms happened."""
         c, db = client
         await _seed_listing(db, "neg-window")
         state = _container.site_projections()
-        since_last_poll = {"seconds": 61}
-
-        def clock() -> datetime:
-            confirmed = state.view("site-test", RESOURCE_POOL).fetched_at
-            return confirmed + timedelta(seconds=since_last_poll["seconds"])
+        (site,) = _PROJECTION_SITES
+        seeded = state.view("site-test", RESOURCE_POOL).fetched_at
+        now = {"at": seeded + timedelta(seconds=61)}
 
         (build_runtime,) = _RUNTIME_BUILDERS
         _container.resolved_negotiation_runtime = build_runtime(
-            source_confirmation_clock=clock
+            source_confirmation_clock=lambda: now["at"]
         )
         opening = dict(
             listing_id="neg-window",
@@ -908,9 +911,14 @@ class TestSourceConfirmationWindow:
                     await c.negotiate_new(**opening)
                 assert refused.value.status_code == 503
                 assert "listing_source_unverifiable" in str(refused.value)
+                assert state.view("site-test", RESOURCE_POOL).fetched_at == seeded
 
+                calls = len(site.calls)
                 await admin.admin_run_lifecycle_cycle("site-projections")
-                since_last_poll["seconds"] = 1
+                stepped = state.view("site-test", RESOURCE_POOL).fetched_at
+                assert "resource_pool.version" in site.calls[calls:]
+                assert stepped > seeded
+                now["at"] = stepped + timedelta(seconds=1)
                 opened = await c.negotiate_new(**opening)
 
                 still_held = await admin.admin_pause_lifecycle_loops()

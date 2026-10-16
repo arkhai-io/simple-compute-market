@@ -951,9 +951,7 @@ def build_vm_settlement_composition(
         runtime,
         repository,
         worker_id=f"vm-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=float(
-            getattr(storefront_config.settings, "claims_sweep_interval", 30)
-        ),
+        interval_seconds=storefront_config.settlement_servicing_interval(),
         on_event=on_event,
         on_terminal=on_terminal,
     )

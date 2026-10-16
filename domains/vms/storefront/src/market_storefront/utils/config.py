@@ -207,6 +207,13 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
     return str(active.get("wallet.private_key", "") or "").strip()
 
 
+def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the settlement servicing sweeps: `claims_sweep_interval`."""
+
+    active = settings if source is None else source
+    return float(active.get("claims_sweep_interval", 30))
+
+
 #: The site-projection poller's interval when `[capacity].poll_interval` is unset.
 _DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 
@@ -237,8 +244,22 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
     active = settings if source is None else source
     stated = active.get("capacity.source_confirmation_seconds")
     if stated is not None:
-        return float(stated)
+        return _positive_seconds(stated, key="capacity.source_confirmation_seconds")
     return _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+
+
+def _positive_seconds(value: Any, *, key: str) -> float:
+    """A stated duration, refused by key when it is not a positive number."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"[{key}] must be a positive number of seconds")
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"[{key}] must be a positive number of seconds") from None
+    if not seconds > 0 or seconds == float("inf"):
+        raise ValueError(f"[{key}] must be a positive number of seconds")
+    return seconds
 
 
 class AdministratorDeclaration(BaseModel):

@@ -623,6 +623,27 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     ]
 
 
+def buckets_from_pools(pools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The capacity-bucket family a site serves beside ``pools``: one bucket
+    per enabled member, holding its current availability, as the site groups
+    members whose capacity and criteria are identical. Per-member buckets give
+    a fungible pool exactly the availability its pool rows do."""
+    return [
+        {
+            "pool_id": pool.get("pool_id"),
+            "resource_type": member.get("resource_type"),
+            "resource_subtype": member.get("resource_subtype"),
+            "available": dict(member.get("available") or {}),
+            "grouping_attributes": dict(member.get("attributes") or {}),
+            "capacity_group_key": f"{pool.get('pool_id')}:{member.get('physical_resource_id')}",
+            "resource_count": 1,
+        }
+        for pool in pools
+        for member in pool.get("resources") or []
+        if member.get("enabled", True)
+    ]
+
+
 def _generation(rows: Any, *, revision: int = 1) -> dict[str, Any]:
     """A projection's identity: a digest of exactly the rows served, so a
     version poll refetches when, and only when, they changed."""
@@ -635,7 +656,10 @@ class FakeProjectionSite:
 
     A member of the fake aggregate a test builds a ``SiteProjectionState``
     over. Each family serves the rows a test sets, identified by a digest of
-    them; ``None`` serves nothing, as a site that never answered. Rows are
+    them; ``None`` serves nothing, as a site that never answered. With
+    ``derive_buckets`` and no bucket rows set, the capacity-bucket family is
+    derived from the resource-pool rows as they stand (``buckets_from_pools``),
+    as a site serves both families of one inventory. Rows are
     served as they stand when fetched, so a change reaches the state at its
     next poll or refresh and never otherwise. ``failing`` fails every call, as
     an unreachable site does. ``snapshots`` counts each family's fetches and
@@ -646,11 +670,14 @@ class FakeProjectionSite:
         self,
         resource_pools: list[dict[str, Any]] | None = None,
         capacity_buckets: list[dict[str, Any]] | None = None,
+        *,
+        derive_buckets: bool = False,
     ) -> None:
         self.rows: dict[str, list[dict[str, Any]] | None] = {
             "resource_pool": resource_pools,
             "capacity_bucket": capacity_buckets,
         }
+        self.derive_buckets = derive_buckets
         self.failing = False
         self.snapshots = {"resource_pool": 0, "capacity_bucket": 0}
         self.calls: list[str] = []
@@ -681,6 +708,8 @@ class FakeProjectionSite:
     def served(self, family: str) -> list[dict[str, Any]]:
         """The rows one family serves now; overridden to derive them live."""
         rows = self.rows[family]
+        if family == "capacity_bucket" and rows is None and self.derive_buckets:
+            return buckets_from_pools(self.served("resource_pool"))
         if self.failing or rows is None:
             raise ConnectionError(f"{family} projection unavailable")
         return rows

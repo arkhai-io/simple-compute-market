@@ -34,6 +34,7 @@ from market_storefront_kit import (
 import market_storefront.container as _container
 from market_storefront.lifecycle import (
     CAPACITY_EVENTS_POLLER,
+    enter_stage,
     FULFILLMENT_RESUME,
     INTRODUCTION_RETENTION,
     NEGOTIATION_WATCHDOG,
@@ -52,7 +53,11 @@ from market_storefront.services.publication_loop import (
     run_publication_cycle_once,
 )
 from market_storefront.services.capacity_client import site_projection_status
-from market_storefront.utils.config import settings, site_projection_poll_interval
+from market_storefront.utils.config import (
+    settings,
+    settlement_servicing_interval,
+    site_projection_poll_interval,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +168,9 @@ async def capacity_events_preview() -> Mapping[str, Any]:
 
 
 async def publication_step() -> Mapping[str, Any]:
+    # Resolving what the cycle reads is its compose stage, so a storefront with
+    # no projection state composed fails there.
+    enter_stage("compose")
     result = await run_publication_cycle_once(
         dry_run=False, site_projections=_site_projections()
     )
@@ -187,7 +195,12 @@ async def introduction_retention_step() -> Mapping[str, Any]:
     retention = _introduction_retention()
     if retention is None:
         return {"loop": INTRODUCTION_RETENTION, "enabled": False}
-    return await retention.sweep_once()
+    report = await retention.sweep_once()
+    if report.get("deleted"):
+        logger.info(
+            "[RETENTION] deleted payloads of %d introduction(s)", report["deleted"]
+        )
+    return report
 
 
 async def introduction_retention_preview() -> Mapping[str, Any]:
@@ -196,10 +209,6 @@ async def introduction_retention_preview() -> Mapping[str, Any]:
     if retention is None:
         return {"loop": INTRODUCTION_RETENTION, "enabled": False}
     return await retention.preview()
-
-
-def _settlement_servicing_interval() -> float:
-    return float(getattr(settings, "claims_sweep_interval", 30))
 
 
 def _fulfillment_resume_interval() -> float:
@@ -229,54 +238,66 @@ def register_vm_lifecycle_steps() -> None:
     )
 
 
-def register_vm_loops(*, retention_interval_seconds: float | None = None) -> None:
+def register_vm_loops(
+    *, retention_interval_seconds: float | None = None
+) -> dict[str, float]:
     """Register each loop's timer over its step, with its configured interval.
 
     Intervals are read when this runs, so startup registers what the running
-    configuration states. Publication and the site-projection poller run their
-    first cycle as soon as their timers start; the watchdog, servicing, and
-    retention first run one interval later, as their sweeps always have. The
-    retention sweep is registered only when ``retention_interval_seconds`` is
-    given, which startup does while contact exchange is composed. Publication
-    gets a fresh wake each time, bound to the event loop its timer runs on.
+    configuration states. Publication, the site-projection poller, and
+    fulfillment resume run their first cycle as soon as their timers start;
+    the watchdog, servicing, and retention sweeps run theirs one interval
+    later. Those sweeps change durable deals and introductions, and holding the
+    first one back gives an operator who holds the loops as the storefront
+    starts a whole interval to do so. The retention sweep is registered only
+    when ``retention_interval_seconds`` is given, which startup does while
+    contact exchange is composed. Publication gets a fresh wake each time,
+    bound to the event loop its timer runs on. Returns each registered loop's
+    interval, by loop name.
     """
-    watchdog = negotiation_watchdog_policy().interval_seconds
+    intervals = {
+        NEGOTIATION_WATCHDOG: negotiation_watchdog_policy().interval_seconds,
+        SETTLEMENT_SERVICING: settlement_servicing_interval(),
+        FULFILLMENT_RESUME: _fulfillment_resume_interval(),
+        SITE_PROJECTION_POLLER: site_projection_poll_interval(),
+        PUBLICATION: publication_interval_seconds(),
+    }
     register_loop(
         NEGOTIATION_WATCHDOG,
         route="negotiation-watchdog",
         step=negotiation_watchdog_step,
-        interval_seconds=watchdog,
-        initial_delay_seconds=watchdog,
+        interval_seconds=intervals[NEGOTIATION_WATCHDOG],
+        initial_delay_seconds=intervals[NEGOTIATION_WATCHDOG],
     )
-    servicing = _settlement_servicing_interval()
     register_loop(
         SETTLEMENT_SERVICING,
         route="settlement-servicing",
         step=settlement_servicing_step,
-        interval_seconds=servicing,
-        initial_delay_seconds=servicing,
+        interval_seconds=intervals[SETTLEMENT_SERVICING],
+        initial_delay_seconds=intervals[SETTLEMENT_SERVICING],
     )
     register_loop(
         FULFILLMENT_RESUME,
         route="fulfillment-resume",
         step=fulfillment_resume_step,
-        interval_seconds=_fulfillment_resume_interval(),
+        interval_seconds=intervals[FULFILLMENT_RESUME],
     )
     register_loop(
         SITE_PROJECTION_POLLER,
         route="site-projections",
         step=site_projections_step,
-        interval_seconds=site_projection_poll_interval(),
+        interval_seconds=intervals[SITE_PROJECTION_POLLER],
     )
     register_loop(
         PUBLICATION,
         route="publication",
         step=publication_step,
         preview=publication_preview,
-        interval_seconds=publication_interval_seconds(),
+        interval_seconds=intervals[PUBLICATION],
         wake=new_publication_wake(),
     )
     if retention_interval_seconds is not None:
+        intervals[INTRODUCTION_RETENTION] = retention_interval_seconds
         register_loop(
             INTRODUCTION_RETENTION,
             route=INTRODUCTION_RETENTION_ROUTE,
@@ -285,6 +306,7 @@ def register_vm_loops(*, retention_interval_seconds: float | None = None) -> Non
             interval_seconds=retention_interval_seconds,
             initial_delay_seconds=retention_interval_seconds,
         )
+    return intervals
 
 
 register_vm_lifecycle_steps()

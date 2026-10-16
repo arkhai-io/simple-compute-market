@@ -810,19 +810,25 @@ class StorefrontLoopController:
     # Process teardown
     # ------------------------------------------------------------------
 
-    def clear_loops(self) -> None:
-        """Cancel every loop and drop its state, keeping registered steps and loops.
+    def clear_loops(self, *, keep_registrations: bool = True) -> None:
+        """Cancel every loop and drop its state, keeping registered steps.
 
         Production never unregisters a loop while serving. A process that tears
         its loops down and starts them again within one interpreter -- an
         application rebuilt in place -- uses this so stale handles and outcomes
         do not report for loops that no longer exist; `start_loops` starts the
-        registered loops' timers again.
+        registered loops' timers again. With `keep_registrations=False` the
+        loops registered with `register_loop` are forgotten too, their steps
+        staying registered, so a later `start_loops` starts only what is
+        registered again: a test's reset, which must not leave one test's loops
+        for the next to start.
         """
 
         for handle in self._handles.values():
             if not handle.done():
                 handle.cancel()
+        if not keep_registrations:
+            self._loops.clear()
         self._generation += 1
         self._handles.clear()
         self._outcomes.clear()
@@ -837,6 +843,18 @@ class StorefrontLoopController:
         # A fresh signal: an event is bound to the event loop that first waited
         # on it, and loops started again may run on a different event loop.
         self._pause_signal = asyncio.Event()
+
+    async def stop_loops(self, *, keep_registrations: bool = True) -> None:
+        """`clear_loops`, then wait for every cancelled loop to end.
+
+        A loop is cancelled at whatever await it is on; waiting here means none
+        is still unwinding when the caller goes on, for instance to close the
+        event loop the loops ran on.
+        """
+
+        handles = list(self._handles.values())
+        self.clear_loops(keep_registrations=keep_registrations)
+        await asyncio.gather(*handles, return_exceptions=True)
 
 
 __all__ = [

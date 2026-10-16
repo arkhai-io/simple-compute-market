@@ -385,26 +385,34 @@ class HarnessProjectionSite(FakeProjectionSite):
     poll or refresh, as it holds any site's projection. With a ``site``, each
     resource-pool fetch also writes that fake site's live availability into
     every member it holds, so a reservation there reaches the storefront exactly
-    when the storefront refreshes the site, and never otherwise. ``failing``
+    when the storefront refreshes the site, and never otherwise. Its
+    capacity-bucket family is derived from the same list. ``failing``
     fails every call, as a site mid-outage does.
     """
 
     def __init__(self, pools: list[dict[str, Any]], site: "FakeSite | None" = None) -> None:
-        super().__init__(resource_pools=pools)
+        super().__init__(resource_pools=pools, derive_buckets=True)
         self.site = site
 
     @property
     def pools(self) -> list[dict[str, Any]]:
         return self.resource_pools
 
-    async def resource_pool_projection(self) -> dict[str, Any]:
+    def _write_availability(self) -> None:
         if self.site is not None and not self.failing:
             for projected in self.pools:
                 for member in projected.get("resources") or []:
                     resource_id = member.get("physical_resource_id")
                     if resource_id in self.site.resources:
                         member["available"] = self.site.available_dimensions(resource_id)
+
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        self._write_availability()
         return await super().resource_pool_projection()
+
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        self._write_availability()
+        return await super().capacity_bucket_projection()
 
 
 @contextlib.contextmanager

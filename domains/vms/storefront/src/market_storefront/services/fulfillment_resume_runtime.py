@@ -570,11 +570,15 @@ async def resume_incomplete_fulfillments_once(
     composition = composition or _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
+    deliveries = await db.list_incomplete_vm_deliveries(limit=limit)
+    if not deliveries:
+        # Nothing to resume needs no site or provisioning client.
+        return 0
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
     progressed = 0
-    for delivery in await db.list_incomplete_vm_deliveries(limit=limit):
+    for delivery in deliveries:
         negotiation_id = delivery["negotiation_id"]
         claimed = await db.claim_vm_delivery(
             negotiation_id=negotiation_id,

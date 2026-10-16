@@ -77,22 +77,29 @@ class TestStepsReportRegisteredNames:
         assert raised.value.status_code == 503
 
     async def test_fulfillment_resume(self, monkeypatch):
-        calls = {"n": 0}
+        """The step is the timer's whole cycle: it resumes unfinished
+        deliveries, then advances accepted payment deals."""
+        calls: list[str] = []
 
-        async def _sweep(*, sqlite_client):
-            calls["n"] += 1
+        class _Deliveries:
+            async def list_incomplete_vm_deliveries(self, *, limit):
+                calls.append("resume")
+                return []
 
-        import market_storefront.container as container
+        class _Payments:
+            async def reconcile_once(self):
+                calls.append("payments")
 
-        monkeypatch.setattr(container, "resolved_sqlite_client", object(), raising=False)
+        monkeypatch.setattr(container, "resolved_sqlite_client", _Deliveries())
         monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.fulfillment_resume_cycle_once",
-            _sweep,
+            container,
+            "resolved_settlement_composition",
+            SimpleNamespace(payments_coordinator=_Payments()),
         )
         result = await _advance("fulfillment-resume")
 
         assert result["loop"] == lifecycle.FULFILLMENT_RESUME
-        assert calls["n"] == 1
+        assert calls == ["resume", "payments"]
 
     async def test_site_projections(self, monkeypatch):
         """The step runs the poller's cycle on the injected state: every family
