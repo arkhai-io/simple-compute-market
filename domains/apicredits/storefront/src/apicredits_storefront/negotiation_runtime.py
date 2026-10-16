@@ -418,7 +418,7 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
     if build_obligation is None:
-        if stage is None or not stage.settles_from_agreement:
+        if stage is None or not getattr(stage, "settles_from_agreement", False):
             raise OfferUnfulfillableError("settlement_selection_requires_plan")
         return {
             "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),

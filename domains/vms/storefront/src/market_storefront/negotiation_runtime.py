@@ -491,7 +491,7 @@ def _accepted_settlement_artifacts(
                 agreed_amount=agreed_amount, duration_seconds=duration_seconds,
                 listing=listing, provision_terms=provision_terms,
                 buyer_principal=buyer_principal, seller_principal=seller_principal,
-                settles_from_agreement=stage.settles_from_agreement,
+                settles_from_agreement=getattr(stage, "settles_from_agreement", False),
             ),
         )
     except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:

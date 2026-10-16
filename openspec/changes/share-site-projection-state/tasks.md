@@ -1262,8 +1262,10 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       — Alkahest, whose registration has no obligation builder — is refused with a named
       4xx reason before anything is recorded, in all three storefronts; contact exchange
       (it has a builder) and payments keep working.
-      Done. Each storefront's seller entries declare `settles_from_agreement`, a class-level
-      declaration defaulting to false, so a new builder-less entry fails closed: the
+      Done. Each storefront's seller entries declare `settles_from_agreement` (bare metal on
+      its `SellerStage` base, defaulting to false; VM's and the API-credit storefront's stages
+      share no base, so their runtimes read it with `getattr(..., False)`, a review-round
+      correction), so a new builder-less entry fails closed with the named refusal: the
       payment entries say true, the Alkahest and contact entries false. Bare metal:
       `evaluate_exact_selection` refuses a builder-less mechanism whose entry does not settle
       from the Agreement, 409 `settlement_selection_requires_plan: …`, before the listing's

@@ -9,7 +9,10 @@ equal a condition the listing authorizes for that chain, including when the list
 none. Independently of any seller policy, the plan a seller materializes MUST use exactly the
 authorized condition the proposal selected, or the listing's authorized condition where the
 proposal selected none, and a listing whose authorized condition is missing or cannot be read
-MUST fail closed before any obligation is accepted.
+MUST fail closed before any obligation is accepted. A seller MUST NOT accept an Alkahest deal
+without its materialized plan: a plan that cannot be materialized refuses the acceptance, and an
+exact settlement selection of a mechanism whose deals need a plan is accepted only with that
+plan; only a mechanism that settles from the Agreement alone is accepted without one.
 
 #### Scenario: A proposal substitutes the recipient
 
@@ -35,3 +38,15 @@ MUST fail closed before any obligation is accepted.
 - **WHEN** a seller's negotiation policies omit the escrow-shape guard and a buyer selects an
   unauthorized release condition
 - **THEN** plan materialization refuses it and no obligation is accepted
+
+#### Scenario: The plan cannot be materialized
+
+- **WHEN** a seller accepts an Alkahest proposal whose release condition is authorized but whose
+  plan cannot be materialized, for a reason other than the release condition
+- **THEN** the seller refuses the acceptance and records neither an Agreement nor a plan
+
+#### Scenario: An exact selection names a mechanism that needs a plan
+
+- **WHEN** a buyer's opening selects an advertised option exactly, and the seller has no way to
+  build that mechanism's plan from the selection
+- **THEN** the seller refuses the opening rather than accepting a deal it cannot settle
