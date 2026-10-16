@@ -3,13 +3,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from core_storefront.aggregation import AggregateCapacityClient
 
 import market_storefront.container as container
 import market_storefront.server as server
 import market_storefront.services.capacity_client as capacity_client_module
 import market_storefront.startup as startup
-from tests.fake_site import FakeProjectionSite
+from market_storefront.services.publication_loop import wake_publication_loop
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -116,10 +115,16 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch,
 ) -> None:
     signer = SimpleNamespace(identity=object())
-    # The projection state is built over the runtime's own aggregate.
-    aggregate = AggregateCapacityClient({"default": FakeProjectionSite(resource_pools=[])})
+    aggregate = SimpleNamespace(site_names=["default"])
     capacity_runtime = SimpleNamespace(client=lambda: aggregate, site_ids=("default",))
     built = {}
+
+    def fake_site_projection_state(client, *, on_resource_pool_change):
+        # A distinct compatible object, so every consumer is shown to receive
+        # exactly the one the root built.
+        state = SimpleNamespace(refresh_site=lambda _site_id: None)
+        built["site_projection_state"] = (client, on_resource_pool_change, state)
+        return state
 
     def fake_sqlite_client(*, registry):
         sqlite_client = SimpleNamespace(
@@ -132,9 +137,10 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         built["sqlite_client"] = sqlite_client
         return sqlite_client
 
-    def fake_capacity_runtime(repository, *, signer: object):
+    def fake_capacity_runtime(repository, *, signer: object, site_projections):
         assert repository() is built["sqlite_client"]
         assert signer is built["signer"]
+        built["reconciled_projections"] = site_projections
         return capacity_runtime
 
     def fake_negotiation_runtime(
@@ -163,8 +169,10 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         domain,
         capacity_runtime: object,
         settlement_composition,
+        site_projections: object,
         **_kwargs,
     ):
+        built["listing_projections"] = site_projections
         assert registry is built["registry"]
         assert registry.resolve(binding) is domain
         assert capacity_runtime is built["capacity_runtime"]
@@ -210,11 +218,24 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch.setattr(
         capacity_client_module,
         "build_capacity_runtime_for",
-        lambda repository, *, signer: built.setdefault(
+        lambda repository, *, signer, site_projections: built.setdefault(
             "capacity_runtime",
-            fake_capacity_runtime(repository, signer=signer),
+            fake_capacity_runtime(
+                repository, signer=signer, site_projections=site_projections
+            ),
         ),
     )
+    monkeypatch.setattr(server, "SiteProjectionState", fake_site_projection_state)
+
+    def fake_system_service(*, site_projections, **_kwargs):
+        built["system_projections"] = site_projections
+        return SimpleNamespace()
+
+    def fake_pool_override_service(*, site_projections, **_kwargs):
+        built["override_projections"] = site_projections
+        return SimpleNamespace()
+
+    monkeypatch.setattr(server, "build_pool_override_service", fake_pool_override_service)
     monkeypatch.setattr(
         server,
         "build_vm_negotiation_runtime",
@@ -224,7 +245,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch.setattr(
         server,
         "_build_system_service",
-        lambda **_kwargs: SimpleNamespace(),
+        fake_system_service,
     )
     monkeypatch.setattr(
         server,
@@ -270,9 +291,19 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         assert container.resolved_negotiation_runtime is first_services.negotiation_runtime
         assert container.resolved_negotiation_service is first_services.negotiation_service
         assert container.resolved_system_service is first_services.system_service
-        # One projection state, the one every consumer was given.
-        assert container.resolved_site_projections is first_services.site_projections
-        assert first_services.site_projections is built["site_projections"]
+        # One projection state, built over the runtime's own aggregate with the
+        # publication wake, and the one every consumer was given.
+        client, wake, state = built["site_projection_state"]
+        assert client is aggregate
+        assert wake is wake_publication_loop
+        assert first_services.site_projections is state
+        assert container.resolved_site_projections is state
+        assert built["site_projections"] is state  # the negotiation runtime
+        assert built["listing_projections"] is state
+        assert built["system_projections"] is state
+        assert built["override_projections"] is state
+        # Capacity reconciliation reads it through the root's late-bound provider.
+        assert built["reconciled_projections"]() is state
 
         with pytest.raises(
             RuntimeError,

@@ -15,7 +15,7 @@ import asyncio
 import pytest
 
 from market_storefront import lifecycle
-from tests.publication_app import SITE, SITE_B, pool, publication_app
+from tests.publication_app import ADMIN_SIGNER, SITE, SITE_B, pool, publication_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -121,3 +121,49 @@ async def test_the_projection_step_is_run_while_held(world):
     # A cycle with no change confirms and wakes nothing.
     await world.client.admin_run_lifecycle_cycle("site-projections")
     assert len(world.wakes) == woken + 1
+
+
+async def _authenticated(world, request_id: str) -> None:
+    """Wait until the storefront has authenticated the administrator request
+    ``request_id`` -- its replay reservation is recorded -- then yield so it can
+    reach the cycle it waits for.
+
+    Nothing observable marks a request waiting on a loop's cycle -- it calls
+    nothing -- so after authentication the test yields generously. Too few
+    yields could only let the request arrive after the running cycle, which a
+    correct route answers the same way; it never fails the test spuriously.
+    """
+    while await world.db.get_replay_reservation(ADMIN_SIGNER.identity, request_id) is None:
+        await asyncio.sleep(0)
+    for _ in range(500):
+        await asyncio.sleep(0)
+
+
+async def test_the_admin_refresh_waits_for_a_running_timer_cycle_and_polls_after_it(world):
+    """The refresh runs through the controller: a timer cycle already polling
+    finishes first, and the refresh then polls for itself, so its answer holds
+    the change the caller made before asking, not the generation the timer's
+    check saw."""
+    world.projection.hold = asyncio.Event()
+    lifecycle.start_loops()
+    # The timer's first cycle checks site-a's version and parks there.
+    await asyncio.wait_for(world.projection.holding.wait(), timeout=1)
+
+    world.pools.append(pool("pool-new", backing="unbacked"))
+    refresh = asyncio.create_task(
+        world.client.admin_refresh_site_projections(request_id="refresh-during-timer")
+    )
+    await asyncio.wait_for(_authenticated(world, "refresh-during-timer"), timeout=5)
+    assert not refresh.done(), "the refresh ran beside the timer's cycle"
+    checked = len(world.projection.calls)
+    world.projection.hold.set()
+    refreshed = await asyncio.wait_for(refresh, timeout=5)
+
+    held = world.site_projections.view(SITE, "resource_pool")
+    assert refreshed["sites"][SITE]["resource_pool"]["digest"] == held.identity.digest
+    assert "pool-new" in {row["pool_id"] for row in held.value}
+    # The refresh checked site-a again after the timer's cycle released it.
+    assert "resource_pool.version" in world.projection.calls[checked:]
+    # One cycle each: the timer's, then the refresh's, recorded as a step.
+    outcome = lifecycle.controller().last_outcome(lifecycle.SITE_PROJECTION_POLLER)
+    assert outcome.trigger == "step" and outcome.completed

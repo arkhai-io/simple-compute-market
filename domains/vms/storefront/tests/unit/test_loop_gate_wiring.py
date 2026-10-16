@@ -34,7 +34,7 @@ import pytest
 from core_storefront.app_startup import StorefrontBackgroundTask
 import market_storefront.container as container
 from market_storefront import lifecycle
-from market_storefront import lifecycle_steps  # noqa: F401 - registers the loops
+from market_storefront import lifecycle_steps
 from tests.fake_site import FakeProjectionSite, site_projection_state
 
 #: Far longer than any test waits. A loop that sleeps this instead of waiting
@@ -73,6 +73,24 @@ async def _registered(coro_factory, name: str):
         await asyncio.gather(task, return_exceptions=True)
 
 
+@pytest.fixture
+async def long_poller_interval():
+    """The poller registered with an interval far longer than any test waits,
+    so a held poller that slept its interval could not report paused in time;
+    the configured registration is restored afterwards."""
+    lifecycle.register_loop(
+        lifecycle.SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=lifecycle_steps.site_projections_step,
+        interval_seconds=_LONG_INTERVAL,
+    )
+    yield
+    handles = list(lifecycle.controller()._handles.values())
+    lifecycle.reset_for_tests()
+    await asyncio.gather(*handles, return_exceptions=True)
+    lifecycle_steps.register_vm_lifecycle_steps()
+
+
 async def _paused_promptly() -> dict[str, str]:
     return await asyncio.wait_for(lifecycle.controller().pause(), timeout=_PROMPTLY)
 
@@ -100,12 +118,17 @@ class TestRegisteredNamesAreTheGatedNames:
                 "name here can drift from the one the loop body gates under"
             )
 
-    async def test_the_site_projection_poller_is_a_controller_timer_loop(self):
+    async def test_startup_starts_the_site_projection_poller(self, long_poller_interval):
         """The poller has no body of its own: it registers its step with an
-        interval, so the controller's timer gates, runs that step, and waits.
-        Held from the start, so its timer runs no cycle here."""
+        interval, so the controller's timer gates, runs that step, and waits,
+        and startup's step is what starts that timer. Held from the start, so
+        it runs no cycle here."""
+        from market_storefront import startup
+
         lifecycle.controller().request_pause(True)
-        assert set(lifecycle.start_loops()) == {lifecycle.SITE_PROJECTION_POLLER}
+        startup._start_site_projection_poller()
+
+        assert lifecycle.registered_loop_names() == [lifecycle.SITE_PROJECTION_POLLER]
 
 
 class TestEachProductionLoopIsHeldWithinItsInterval:
@@ -230,7 +253,7 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
 
         assert len(failures) == 2, "the loop stopped after a failing sweep"
 
-    async def test_site_projection_poller(self, monkeypatch):
+    async def test_site_projection_poller(self, monkeypatch, long_poller_interval):
         """The controller's timer over the registered step: it polls once on
         starting, then a pause holds it within the bound, polling no more."""
         first = asyncio.Event()

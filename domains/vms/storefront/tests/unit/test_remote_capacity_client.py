@@ -392,30 +392,24 @@ async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
 @pytest.mark.asyncio
 async def test_domain_hook_reconciles_nothing_without_a_projection_state():
     """With no projection state composed, every listing's source is unknown,
-    so a delta closes and reopens nothing."""
-    calls: list[str] = []
+    so a delta closes and reopens nothing: the reconciler never reaches for
+    the repository it would reconcile."""
+    repositories: list[object] = []
 
-    async def fake_close(*_args, **_kwargs):
-        calls.append("close")
-        return []
+    def repository():
+        repositories.append(object())
+        return SimpleNamespace(db_path="/tmp/x.db")
 
-    reconcile = cc._capacity_reconciler(
-        lambda: SimpleNamespace(db_path="/tmp/x.db"), site_projections=lambda: None
-    )
-    with patch(
-        "market_storefront.services.publication_service."
-        "close_stale_compute_listings_after_capacity_change",
-        fake_close,
-    ):
-        await reconcile(
-            CapacityReconcileContext(
-                projections=(CapacityProjection("default", ()),),
-                availability={},
-                delta=CapacityDelta(kind="reserved", version=1),
-            )
+    reconcile = cc._capacity_reconciler(repository, site_projections=lambda: None)
+    await reconcile(
+        CapacityReconcileContext(
+            projections=(CapacityProjection("default", ()),),
+            availability={},
+            delta=CapacityDelta(kind="reserved", version=1),
         )
+    )
 
-    assert calls == []
+    assert repositories == []
 
 
 @pytest.mark.asyncio

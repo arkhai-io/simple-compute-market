@@ -505,14 +505,20 @@ class VmPublicationCycle:
         )
 
 
-async def run_publication_cycle_once(*, dry_run: bool) -> dict[str, Any]:
-    """Run, or preview, exactly one publication cycle — the timer's cycle."""
+async def run_publication_cycle_once(
+    *, dry_run: bool, site_projections: SiteProjectionState | None = None
+) -> dict[str, Any]:
+    """Run, or preview, exactly one publication cycle — the timer's cycle.
+
+    ``site_projections`` is the storefront's state; without one, the cycle reads
+    the state the composition root put in the container.
+    """
 
     cycle = VmPublicationCycle(
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,
         capacity_runtime=container.resolved_capacity_runtime,
-        site_projections=container.site_projections(),
+        site_projections=site_projections or container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
         wallet_address=get_evm_wallet_address() or "",

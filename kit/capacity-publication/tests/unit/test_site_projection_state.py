@@ -124,6 +124,26 @@ async def test_values_omit_a_site_holding_nothing_and_keep_a_loaded_empty_site()
     assert state.view("unreachable", RESOURCE_POOL).value is None
 
 
+async def test_a_site_that_never_loaded_loads_on_a_later_poll():
+    """A site unreachable from the first poll is polled again each cycle, and
+    loads, waking publication, once it answers; the other site is unaffected."""
+    late, steady = _FakeSite(pools=[{"pool_id": "late"}]), _FakeSite()
+    late.failing = {RESOURCE_POOL, CAPACITY_BUCKET}
+    state, wakes = _state(late=late, steady=steady)
+    await state.poll_once()
+    assert state.view("late", RESOURCE_POOL).value is None
+    assert set(state.values(RESOURCE_POOL)) == {"steady"}
+    woken = wakes.count
+
+    late.failing = set()
+    await state.poll_once()
+
+    for family in (RESOURCE_POOL, CAPACITY_BUCKET):
+        assert state.view("late", family).state is ProjectionState.loaded
+    assert state.values(RESOURCE_POOL)["late"] == [{"pool_id": "late"}]
+    assert wakes.count == woken + 1
+
+
 async def test_a_failed_poll_keeps_the_last_generation_stale_and_in_values():
     site = _FakeSite()
     state, _ = _state(west=site)

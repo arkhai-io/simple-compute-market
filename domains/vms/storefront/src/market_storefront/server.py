@@ -270,9 +270,13 @@ def _build_vm_services(
     alkahest_clients = _build_alkahest_clients()
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
+    site_projections: SiteProjectionState | None = None
+    # Capacity reconciliation reads the state built just below, over this
+    # runtime's own aggregate; the provider is read when a delta arrives.
     capacity_runtime = build_capacity_runtime_for(
         lambda: sqlite_client,
         signer=marketplace_signer,
+        site_projections=lambda: site_projections,
     )
     # One state per process, over the runtime's own aggregate: every consumer
     # reads it, and a resource-pool change a poll observes wakes publication.
@@ -450,6 +454,10 @@ from market_storefront.controllers.settle_controller import (  # noqa: E402
 from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
+
+# Registers every loop's step, and the site-projection poller with its interval,
+# which startup then starts; without it startup would start no poller.
+import market_storefront.lifecycle_steps  # noqa: E402,F401
 
 
 def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):

@@ -144,14 +144,18 @@ async def capacity_events_preview() -> Mapping[str, Any]:
 
 
 async def publication_step() -> Mapping[str, Any]:
-    result = await run_publication_cycle_once(dry_run=False)
+    result = await run_publication_cycle_once(
+        dry_run=False, site_projections=_site_projections()
+    )
     logger.info("[ADMIN] Publication cycle advanced: %s", result["counts"])
     return result
 
 
 async def publication_preview() -> Mapping[str, Any]:
     """Derive the next cycle's actions and apply none of them."""
-    return await run_publication_cycle_once(dry_run=True)
+    return await run_publication_cycle_once(
+        dry_run=True, site_projections=_site_projections()
+    )
 
 
 def _introduction_retention() -> Any:

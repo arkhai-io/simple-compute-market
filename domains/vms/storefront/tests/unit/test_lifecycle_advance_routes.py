@@ -159,8 +159,11 @@ class TestPublicationRoutes:
     @pytest.mark.parametrize("dry_run", [True, False])
     async def test_each_route_runs_exactly_the_timers_cycle(self, monkeypatch, dry_run):
         calls: list[bool] = []
+        state = site_projection_state({"default": FakeProjectionSite(resource_pools=[])})
+        monkeypatch.setattr(container, "resolved_site_projections", state)
 
-        async def _cycle(*, dry_run):
+        async def _cycle(*, dry_run, site_projections):
+            assert site_projections is state, "the cycle reads the composed state"
             calls.append(dry_run)
             return {"loop": "publication", "dry_run": dry_run, "actions": [], "counts": {}}
 
@@ -173,3 +176,11 @@ class TestPublicationRoutes:
 
         assert calls == [dry_run]
         assert result["loop"] == lifecycle.PUBLICATION
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    async def test_before_composition_each_route_is_unavailable(self, monkeypatch, dry_run):
+        monkeypatch.setattr(container, "resolved_site_projections", None)
+        loops = lifecycle.controller()
+        with pytest.raises(LifecycleRouteError) as raised:
+            await (loops.dry_run("publication") if dry_run else loops.run_cycle("publication"))
+        assert raised.value.status_code == 503

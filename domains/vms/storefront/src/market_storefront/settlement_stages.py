@@ -40,6 +40,7 @@ from market_core.schemas import (
 )
 from market_identity import Identity
 
+import market_storefront.container as _container
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -274,6 +275,7 @@ class VmAlkahestSellerStage:
             db,
             FulfillmentFailureContext(**fields, escrow_uid=evidence.settlement_ref),
             capacity=build_capacity_runtime(lambda: db),
+            site_projections=_container.resolved_site_projections,
         )
 
     async def refund_failed_delivery(
@@ -501,6 +503,7 @@ class VmPaymentsSellerStage:
             db,
             FulfillmentFailureContext(**fields),
             capacity=build_capacity_runtime(lambda: db),
+            site_projections=_container.resolved_site_projections,
         )
 
     def revalidate(

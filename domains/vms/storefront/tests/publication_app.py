@@ -596,6 +596,8 @@ async def publication_app(
         capacity = capacity_runtime_over_sites(
             {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
+            # Bound to the projection state built below, as the root binds it.
+            site_projections=lambda: site_projections,
         )
         # The storefront's one projection state, over the harness's sites,
         # loaded as startup loads it. Each wake is recorded, then raised as

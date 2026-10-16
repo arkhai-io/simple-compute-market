@@ -21,8 +21,10 @@ from market_storefront.lifecycle import (
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
     PUBLICATION,
+    SITE_PROJECTION_POLLER,
     idle,
     loop_gate,
+    registered_loop_names,
     start_loops,
     start_registered_loop,
 )
@@ -335,8 +337,17 @@ async def _load_site_projections() -> None:
 
 
 def _start_site_projection_poller() -> None:
-    """Start the poller's timer, the one loop registered with its interval."""
+    """Start the poller's timer, the one loop registered with its interval.
+
+    Refuses, naming the poller, when nothing registered it: a storefront whose
+    poller never runs holds no projection beyond its first load.
+    """
     start_loops()
+    if SITE_PROJECTION_POLLER not in registered_loop_names():
+        raise RuntimeError(
+            f"the {SITE_PROJECTION_POLLER} loop is not registered, so nothing "
+            "polls the site projections"
+        )
 
 
 def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:

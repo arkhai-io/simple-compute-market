@@ -14,6 +14,7 @@ from market_alkahest.schemas import EscrowTerms
 from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
 )
+from market_capacity_publication import CapacityBindingError, SiteProjectionState
 from market_identity import Identity
 from market_settlement_runtime import FailurePolicy
 
@@ -296,8 +297,14 @@ async def _release_capacity(
     db: Any,
     ctx: FulfillmentFailureContext,
     capacity: Any | None = None,
+    site_projections: SiteProjectionState | None = None,
 ) -> FulfillmentFailurePolicyResult:
-    """Release failed capacity at the listing's exact recorded site."""
+    """Release failed capacity at the listing's exact recorded site.
+
+    Once the site has released the reservation, nothing after it may fail the
+    release: the reopen it reports is best-effort, refreshed from
+    ``site_projections`` when one is given and skipped when not.
+    """
     from market_capacity_publication import capacity_availability, remote_site_clients
 
     from market_storefront.services.capacity_client import (
@@ -331,13 +338,25 @@ async def _release_capacity(
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
         reopened: list[str] = []
-        if remote_site_clients(runtime.client()):
+        if site_projections is None:
+            logger.warning(
+                "[FAILURE] no site projection state; released %s reopens nothing",
+                result.capacity_reservation_id,
+            )
+        elif remote_site_clients(runtime.client()):
             # The same source publication derives from, refreshed for the site
             # this release just changed, so a reopen here agrees with what
             # publication would keep open and reports this release's own effect.
-            # The refresh reconciles inline, so it wakes nothing.
-            site_projections = _container.site_projections()
-            await site_projections.refresh_site(binding.site_id)
+            # The refresh reconciles inline, so it wakes nothing; a failed fetch
+            # keeps the site's last generation and never raises.
+            try:
+                await site_projections.refresh_site(binding.site_id)
+            except CapacityBindingError:
+                logger.warning(
+                    "[FAILURE] site %s holds no projection here; reopening from "
+                    "what is held",
+                    binding.site_id,
+                )
             reopened = closed_available_listing_ids(
                 db.db_path,
                 member_availability=await capacity_availability(runtime.client()),
@@ -494,6 +513,7 @@ async def _release_capacity_handler(
         db,
         _context_model(state),
         state.get("_capacity_client"),
+        state.get("_site_projections"),
     )
     state.update(
         {
@@ -559,11 +579,14 @@ async def apply_fulfillment_failure_policy(
     ctx: FulfillmentFailureContext,
     *,
     capacity: Any | None = None,
+    site_projections: SiteProjectionState | None = None,
 ) -> FulfillmentFailurePolicyResult:
     context = dict(ctx.__dict__)
     context["listing_id"] = await _resolve_listing_id(db, ctx)
     if capacity is not None:
         context["_capacity_client"] = capacity
+    if site_projections is not None:
+        context["_site_projections"] = site_projections
     token = _ACTIVE_FAILURE_STATE.set(context)
     try:
         dispatched = await _VM_FAILURE_POLICY.apply(db, context)

@@ -901,7 +901,7 @@ class TestFulfillmentEvents:
         failure policy with that escrow."""
         received = []
 
-        async def failure_policy(_db, context, *, capacity):
+        async def failure_policy(_db, context, *, capacity, site_projections):
             received.append(context)
             return SimpleNamespace(
                 capacity_reservation_id=context.capacity_reservation_id,

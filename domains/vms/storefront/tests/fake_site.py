@@ -12,6 +12,7 @@ projection families, for a test that builds its own projection state with
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import itertools
@@ -479,11 +480,14 @@ def aggregate_over(
     *,
     site_name: str = "default",
     sqlite_client_factory: Any | None = None,
+    site_projections: Any = None,
 ):
     """A real AggregateCapacityClient over the fake site's transport.
 
     With ``sqlite_client_factory``, the production listing-reconcile
-    subscriber is attached — drive it with ``pump_events``.
+    subscriber is attached — drive it with ``pump_events``. It reads the
+    projection state ``site_projections`` provides, by default the one a test
+    injected into the container.
     """
     from core_storefront.aggregation import AggregateCapacityClient
     from market_capacity_publication import (
@@ -503,7 +507,10 @@ def aggregate_over(
     )
     aggregate = AggregateCapacityClient({site_name: remote})
     if sqlite_client_factory is not None:
-        reconcile = _capacity_reconciler(sqlite_client_factory)
+        reconcile = _capacity_reconciler(
+            sqlite_client_factory,
+            site_projections=site_projections or _injected_site_projections,
+        )
 
         async def _on_delta(delta):
             rows = tuple(await aggregate.snapshot())
@@ -524,21 +531,32 @@ def capacity_runtime_over(
     *,
     site_name: str = "default",
     sqlite_client_factory: Any | None = None,
+    site_projections: Any = None,
 ):
     """A kit-owned ``CapacityRuntime`` over the fake site's transport."""
     return capacity_runtime_over_sites(
-        {site_name: fake}, sqlite_client_factory=sqlite_client_factory
+        {site_name: fake},
+        sqlite_client_factory=sqlite_client_factory,
+        site_projections=site_projections,
     )
+
+
+def _injected_site_projections():
+    return container.resolved_site_projections
 
 
 def capacity_runtime_over_sites(
     fakes: dict[str, FakeSite],
     *,
     sqlite_client_factory: Any | None = None,
+    site_projections: Any = None,
 ):
     """A kit-owned ``CapacityRuntime`` over several fake sites, one per name.
 
     Sites are configured in the mapping's order, so its first is the home site.
+    With ``sqlite_client_factory`` its reconciler runs, reading the projection
+    state ``site_projections`` provides, by default the one a test injected
+    into the container.
     """
     from core_storefront.aggregation import fill_first
     from market_capacity_publication import CapacityRuntime, CapacitySite
@@ -550,7 +568,10 @@ def capacity_runtime_over_sites(
         async def reconcile(_context):
             return None
     else:
-        reconcile = _capacity_reconciler(sqlite_client_factory)
+        reconcile = _capacity_reconciler(
+            sqlite_client_factory,
+            site_projections=site_projections or _injected_site_projections,
+        )
 
     return CapacityRuntime(
         sites=tuple(
@@ -635,6 +656,11 @@ class FakeProjectionSite:
         self.calls: list[str] = []
         #: What the state installed for this site's topology-sensitive refusals.
         self.topology_error_handler: Any = None
+        #: When set, the next version check answers as the rows stand and then
+        #: parks until ``hold`` is set, having set ``holding``: an operation
+        #: caught mid-poll.
+        self.hold: asyncio.Event | None = None
+        self.holding = asyncio.Event()
 
     @property
     def resource_pools(self) -> list[dict[str, Any]] | None:
@@ -661,7 +687,11 @@ class FakeProjectionSite:
 
     async def _version(self, family: str) -> dict[str, Any]:
         self.calls.append(f"{family}.version")
-        return _generation(self.served(family))
+        answer = _generation(self.served(family))
+        if self.hold is not None and not self.hold.is_set():
+            self.holding.set()
+            await self.hold.wait()
+        return answer
 
     async def _snapshot(self, family: str, key: str) -> dict[str, Any]:
         self.calls.append(f"{family}.snapshot")
@@ -729,10 +759,13 @@ async def site_capacity(
     startup loads it; otherwise it holds nothing. ``on_resource_pool_change``
     is the publication wake the state raises.
     """
+    # The runtime's reconciler reads the state built over its own aggregate,
+    # bound once it exists.
     runtime = capacity_runtime_over(
         fake,
         site_name=site_name,
         sqlite_client_factory=sqlite_client_factory,
+        site_projections=lambda: state,
     )
     aggregate = runtime.client()
     state = site_projection_state(aggregate, on_resource_pool_change=on_resource_pool_change)

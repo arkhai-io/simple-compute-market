@@ -8,21 +8,26 @@ from market_capacity_publication import PublicationBinding
 from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 
-import market_storefront.container as container
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import site_projection_state
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
 BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 
 
 @pytest.mark.asyncio
-async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
+@pytest.mark.parametrize("projections", ["held", "absent", "another_site"])
+async def test_failure_policy_releases_capacity_and_runs_webhook(
+    tmp_path, monkeypatch, projections
+):
+    """The site's release is recorded whatever the projection state can do
+    after it: the held site is refreshed before the reopen, and a state that is
+    absent or does not hold the site fails nothing."""
     from tests.fake_site import FakeSite, capacity_runtime_over
 
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
@@ -34,10 +39,14 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     )
     binding = PublicationBinding("site-test", "vm", "pool-test", BACKED)
     capacity = capacity_runtime_over(fake, site_name=binding.site_id)
-    # The release refreshes the site's held projections before it reconciles.
-    monkeypatch.setattr(
-        container, "resolved_site_projections", site_projection_state(capacity.client())
-    )
+    site_projections = {
+        # The state over the runtime's own aggregate, as the root composes it.
+        "held": site_projection_state(capacity.client()),
+        "absent": None,
+        "another_site": site_projection_state(
+            {"elsewhere": FakeProjectionSite(resource_pools=[])}
+        ),
+    }[projections]
 
     async def resolve_capacity_binding(repository, listing_id):
         assert repository is db
@@ -84,10 +93,16 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
             source="test",
         ),
         capacity=capacity,
+        site_projections=site_projections,
     )
 
     assert result.state == "released"
+    assert result.capacity_reservation_id == reserved["capacity_reservation_id"]
     assert result.resource_id == "gpu-host-1"
+    assert result.reopened_listing_ids == []
+    # Only a state holding the site refreshes it before the reopen.
+    refreshed = ("GET", "/api/v1/capacity/site-resource-pools") in fake.requests
+    assert refreshed is (projections == "held")
     assert result.actions == [
         {"action": "release_capacity", "status": "ok"},
         {"action": "webhook", "status": "sent", "status_code": 204},

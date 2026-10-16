@@ -44,7 +44,6 @@ import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
     site_capacity_buckets,
     site_pool_projection,
-    site_projection_status,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
@@ -87,6 +86,7 @@ from market_capacity_publication import (
     CapacityAdminRouteService,
     CapacityBindingError,
     PublicationBinding,
+    SiteProjectionState,
     remote_site_clients,
 )
 from market_resource_pools_contracts.backing import (
@@ -162,10 +162,14 @@ class AdminController:
         capacity_runtime=Depends(  # noqa: B008
             lambda: _container.resolved_capacity_runtime
         ),
+        site_projections=Depends(  # noqa: B008
+            lambda: _container.resolved_site_projections
+        ),
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
         self._capacity_runtime = capacity_runtime
+        self._site_projections = site_projections
 
     @staticmethod
     def _operator(request: Request) -> AuthenticatedPrincipal:
@@ -455,10 +459,13 @@ class AdminController:
         has just declared capacity at the site authority would otherwise wait
         that interval out, and a caller holding the lifecycle loops paused
         would wait forever: the poller that would pull it is one of the loops
-        being held. Neither is a wait a test may take. So this runs exactly the
-        poller's cycle, held or not: every site's families are polled in place,
-        a site that cannot be reached keeps its last generation as `stale`, and
-        a resource-pool change wakes publication.
+        being held. Neither is a wait a test may take. So this runs the
+        poller's cycle through the loop controller, held or not, as the
+        `site-projections` step does: a timer cycle already polling finishes
+        first and this one polls after it, so the answer reflects a change the
+        caller made before asking. Every site's families are polled in place, a
+        site that cannot be reached keeps its last generation as `stale`, and a
+        resource-pool change wakes publication.
 
         Returns the per-site load state so a caller asserts the pull happened
         rather than assuming it. A site reporting `not_loaded`, `unavailable`,
@@ -467,9 +474,11 @@ class AdminController:
         are indistinguishable downstream, which is how an inventory failure
         becomes a negotiation failure several stages away.
         """
-        state = _container.site_projections()
-        await state.poll_once()
-        summary = site_projection_status(state)
+        try:
+            cycle = await _lifecycle_routes().run_cycle("site-projections")
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        summary = cycle["sites"]
         logger.info(
             "[ADMIN] Site projections polled on demand: %s",
             {
@@ -646,6 +655,11 @@ class AdminController:
             raise RuntimeError("capacity runtime is unavailable")
         return self._capacity_runtime
 
+    def _projections(self) -> SiteProjectionState:
+        if self._site_projections is None:
+            raise RuntimeError("site projection state is unavailable")
+        return self._site_projections
+
     async def _reservation_binding(
         self,
         *,
@@ -788,7 +802,7 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
-        site_projections = _container.site_projections()
+        site_projections = self._projections()
         await site_projections.refresh_site(changed_site)
         projection = site_pool_projection(site_projections)
         closed_listing_ids = stale_open_listing_ids(
@@ -819,7 +833,7 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
-        site_projections = _container.site_projections()
+        site_projections = self._projections()
         await site_projections.refresh_site(changed_site)
         projection = site_pool_projection(site_projections)
         reopened_listing_ids = closed_available_listing_ids(
@@ -979,6 +993,7 @@ class AdminController:
                 source="admin_event",
             ),
             capacity=self._runtime(),
+            site_projections=self._site_projections,
         )
         if "release_capacity" in configured_failure_actions() and result.state is None:
             raise HTTPException(

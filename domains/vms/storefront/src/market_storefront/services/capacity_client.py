@@ -104,20 +104,33 @@ _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 
-def _composed_site_projections() -> SiteProjectionState | None:
-    return container.resolved_site_projections
+SiteProjectionsProvider = Callable[[], SiteProjectionState | None]
+
+
+class _LateSiteProjections:
+    """The projection state a runtime's reconciler reads, bound after the runtime.
+
+    The state is composed over the runtime's own aggregate, so it cannot exist
+    when the runtime's reconciler does; the composition root binds it here once
+    it has built it. A runtime nothing has bound reconciles no delta.
+    """
+
+    def __init__(self) -> None:
+        self.provider: SiteProjectionsProvider = lambda: None
+
+    def __call__(self) -> SiteProjectionState | None:
+        return self.provider()
 
 
 def _capacity_reconciler(
     sqlite_client_factory: SQLiteClientFactory,
     *,
-    site_projections: Callable[[], SiteProjectionState | None] = _composed_site_projections,
+    site_projections: SiteProjectionsProvider,
 ) -> Callable[[CapacityReconcileContext], Any]:
     """Supply VM candidate semantics to the kit-owned reconciliation loop.
 
-    The projection state is read when a delta arrives, not when the reconciler
-    is built: the state is composed over this runtime's own aggregate, so it
-    cannot exist when the runtime's reconciler does.
+    ``site_projections`` is read when a delta arrives, not when the reconciler
+    is built, so a state composed after the runtime reaches it.
     """
 
     async def _reconcile(context: CapacityReconcileContext) -> None:
@@ -188,15 +201,25 @@ def _capacity_reconciler(
     return _reconcile
 
 
-_capacity_runtime_state: dict[str, Any] = {"key": None, "runtime": None}
+_capacity_runtime_state: dict[str, Any] = {
+    "key": None,
+    "runtime": None,
+    "site_projections": None,
+}
 
 
 def build_capacity_runtime_for(
     sqlite_client_factory: SQLiteClientFactory,
     *,
     signer: Any,
+    site_projections: SiteProjectionsProvider | None = None,
 ) -> CapacityRuntime:
-    """Compose the kit runtime from explicit repository and signer collaborators."""
+    """Compose the kit runtime from explicit repository and signer collaborators.
+
+    ``site_projections`` is the composition root's provider of the projection
+    state its capacity reconciliation reads; a caller that is not the root
+    passes none and leaves the root's binding in place.
+    """
 
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
@@ -230,7 +253,9 @@ def build_capacity_runtime_for(
         db_path,
     )
     if _capacity_runtime_state["key"] != key:
+        late = _LateSiteProjections()
         _capacity_runtime_state["key"] = key
+        _capacity_runtime_state["site_projections"] = late
         _capacity_runtime_state["runtime"] = CapacityRuntime(
             sites=tuple(
                 CapacitySite(site_id, url, expected_authorities)
@@ -238,8 +263,10 @@ def build_capacity_runtime_for(
             ),
             signer=signer,
             placement=placement,
-            reconcile=_capacity_reconciler(sqlite_client_factory),
+            reconcile=_capacity_reconciler(sqlite_client_factory, site_projections=late),
         )
+    if site_projections is not None:
+        _capacity_runtime_state["site_projections"].provider = site_projections
     return _capacity_runtime_state["runtime"]
 
 

@@ -148,8 +148,11 @@ the state.
 The state is built once and never replaced, and every refresh updates caches in place; a
 site whose fetch fails keeps its last generation as `stale`. VM's admin route
 `POST /api/v1/admin/capacity/projections/refresh` is a manual invocation of the poller's
-cycle, `poll_once()`: it does not wait for a timer and runs whether or not the loops are
-held, keeps its wire contract, and reports honestly (02 F4). A version poll observes every
+cycle, `poll_once()`, run through the loop controller as the `site-projections` step runs
+it: it does not wait for a timer's interval and runs whether or not the loops are held, but
+a timer cycle already running finishes first and the route's cycle then polls for itself, so
+its answer reflects a change its caller made before asking, and the controller records the
+cycle's outcome. It keeps its wire contract and reports honestly (02 F4). A version poll observes every
 change a forced snapshot would, because the resource-pool digest covers availability and
 views, so the state carries no separate force-refresh operation. Bare metal gains no such
 route. This closes the index's unowned item "the admin projection refresh … discards
