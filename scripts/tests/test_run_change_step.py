@@ -242,9 +242,12 @@ def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
 
 @pytest.mark.parametrize("fields,problem", [
     ({"resolves": 9}, "no run has seq 9"),
+    ({"reads": 9}, "no run has seq 9"),
     ({"next_step": "deploy"}, "unknown step 'deploy'"),
     ({"kind": "design"}, "a kind goes with next = review"),
     ({"next_step": "review", "kind": "triage"}, "unknown review kind 'triage'"),
+    ({"next_step": "review"}, "a decision directing a review names its kind"),
+    ({"next_step": "design"}, "directing design is a confirmed return and names the run"),
     ({"by": ""}, "names who decided"),
 ])
 def test_a_decision_naming_what_the_log_lacks_is_refused(tmp_path: Path, fields: dict,
@@ -266,6 +269,36 @@ def test_a_decision_resolves_only_a_steps_run(tmp_path: Path) -> None:
         step.note_orchestrator(log, "d", "r", resolves=note["seq"])
 
 
+# A run denied a call can still end with a question or a return, so the reading
+# of its denials is recorded apart from the decision that settles its outcome.
+
+DENIALS = [{"tool_name": "Bash", "tool_input": {"command": "gh run view 1"}, "reason": "mode"}]
+
+
+def test_a_decision_reads_a_run_with_denials_without_resolving_it(tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    run = step.record_outcome(log, "validate", {**VALID["question"], "denials": DENIALS},
+                              session="s", commit=COMMIT)
+
+    line = step.note_orchestrator(log, "gap: gh run view", "the skill names it", reads=run["seq"],
+                                  clock=_clock)
+    both = step.note_orchestrator(log, "gap: gh run view; rerun", "r", reads=run["seq"],
+                                  resolves=run["seq"], clock=_clock)
+
+    assert (line["reads"], "resolves" in line) == (1, False)
+    assert (both["reads"], both["resolves"]) == (1, 1)
+
+
+def test_a_decision_may_not_read_a_run_that_recorded_no_denial(tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    run = step.record_outcome(log, "validate", VALID["question"], session="s", commit=COMMIT)
+
+    with pytest.raises(step.StepError, match="recorded no denial"):
+        step.note_orchestrator(log, "d", "r", reads=run["seq"])
+
+    assert len(step.read_log(log)) == 1
+
+
 def test_an_outcome_may_not_set_what_the_wrapper_records(tmp_path: Path) -> None:
     with pytest.raises(step.StepError, match="does not conform"):
         step.record_outcome(_log(tmp_path), "plan", {**VALID["finished"], "commit": "x"},
@@ -279,22 +312,27 @@ def test_sections_parse_by_session(tmp_path: Path) -> None:
 def test_the_command_line_notes_a_round_and_prints_the_log(
         tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     log = _log(tmp_path)
+    step.record_outcome(log, "validate", {**VALID["question"], "denials": DENIALS},
+                        session="s", commit=COMMIT)
 
     assert step.main(["note", CHANGE, "round", "--sections", "1;2,3", "--after", "4"],
                      root=tmp_path) == 0
     assert step.main(["note", CHANGE, "orchestrator", "--decision", "d", "--reason", "r",
                       "--by", "owner", "--next", "review", "--kind", "closeout"],
                      root=tmp_path) == 0
+    assert step.main(["note", CHANGE, "orchestrator", "--decision", "gap", "--reason", "r",
+                      "--reads", "1"], root=tmp_path) == 0
     capsys.readouterr()
     assert step.main(["log", CHANGE, "--last", "1"], root=tmp_path) == 0
 
     printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    entries = step.read_log(log)
-    assert [entry["outcome"] for entry in entries] == ["round", "orchestrator"]
+    entries = step.read_log(log)[1:]
+    assert [entry["outcome"] for entry in entries] == ["round", "orchestrator", "orchestrator"]
     assert (entries[0]["sections"], entries[0]["after"]) == ([[1], [2, 3]], 4)
     assert (entries[1]["by"], entries[1]["next"], entries[1]["kind"]) == (
         "owner", "review", "closeout")
-    assert [entry["seq"] for entry in printed] == [2]
+    assert entries[2]["reads"] == 1
+    assert [entry["seq"] for entry in printed] == [4]
 
 
 def test_the_command_line_names_a_change_it_cannot_find(
@@ -427,14 +465,17 @@ def _allows_chain(rules, command: str) -> bool:
 def _allows_edit(rules, tool: str, path: str) -> bool:
     """Whether editing `path` with `tool` matches an allow rule and no deny rule.
 
-    An `Edit` rule, bare or with a pattern, applies to every tool that edits a
-    file, `Write` among them, as the harness's rules do; a `Write` rule to Write
-    alone.
+    As the harness's rules do: an `Edit` rule, bare or with a pattern, applies to
+    every tool that edits a file, `Write` among them; a bare tool name applies to
+    that tool; a `Write(pattern)` rule is not honoured, so it matches nothing here
+    and no row may rely on one.
     """
     def matches(rule_list) -> bool:
         for rule in rule_list:
             name, _, rest = rule.partition("(")
-            if name in ("Edit", tool) and fnmatch.fnmatchcase(path, rest[:-1] if rest else "*"):
+            if name == "Edit" and fnmatch.fnmatchcase(path, rest[:-1] if rest else "*"):
+                return True
+            if name == tool and not rest:
                 return True
         return False
     return matches(rules.allow) and not matches(rules.deny)
@@ -501,17 +542,37 @@ def test_validation_may_not_relock_or_commit() -> None:
 
 
 def test_validation_may_write_only_its_own_record() -> None:
-    """A bare `Edit` deny would also deny the record's `Write`, since edit rules
-    apply to every editing tool; the row relies on no allow rule naming anything
+    """The record is admitted by an `Edit(path)` rule, which covers every editing
+    tool, since a `Write(path)` rule is not honoured. A bare `Edit` deny would
+    cover the record too, so the row relies on no allow rule naming anything
     else instead."""
     rules = step.load_steps()["validate"]
     record = "openspec/changes/shape-bounds/reviews/07-validation.md"
 
     assert _allows_edit(rules, "Write", record)
-    assert not _allows_edit(rules, "Edit", record)
+    assert _allows_edit(rules, "Edit", record)
+    assert not _allows_edit(rules, "Write", "openspec/changes/shape-bounds/reviews/08-closeout.md")
     assert not _allows_edit(rules, "Write", "scripts/run_change_step.py")
     assert not _allows_edit(rules, "Edit", "scripts/run_change_step.py")
     assert "Edit" not in rules.deny
+    assert not any(rule.startswith("Write(") for rule in rules.allow)
+
+
+def test_archive_cleanup_may_write_only_the_index_and_its_pull_request_draft() -> None:
+    rules = step.load_steps()["archive-cleanup"]
+    archived = f"openspec/changes/archive/2026-10-20-{CHANGE}"
+
+    assert _allows_edit(rules, "Write", f"{archived}/reviews/pull-request.md")
+    assert _allows_edit(rules, "Edit", f"{archived}/reviews/pull-request.md")
+    assert _allows_edit(rules, "Edit", "openspec/changes/README.md")
+    assert not _allows_edit(rules, "Write", f"{archived}/specs/pools/spec.md")
+    assert not any(rule.startswith("Write(") for rule in rules.allow)
+
+
+def test_every_step_may_compute_the_next_step_and_read_the_log() -> None:
+    for name, rules in step.load_steps().items():
+        assert _allows(rules, f"python3 scripts/change_next_step.py {CHANGE}"), name
+        assert _allows(rules, f"python3 scripts/run_change_step.py log {CHANGE} --last 3"), name
 
 
 def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
@@ -1281,6 +1342,9 @@ RECORDS = f"openspec/changes/{CHANGE}"
     (["openspec/changes/other/notes.jsonl"], "also changes openspec/changes/other/notes.jsonl"),
     (["openspec/changes/interventions.jsonl"], "also changes openspec/changes/interventions.jsonl"),
     (["openspec/changes/archive/interventions.jsonl"], "also changes openspec/changes/archive/"),
+    (["openspec/changes/archive/reviews/01-closeout.md"], "also changes openspec/changes/archive/"),
+    ([f"openspec/changes/archive/2026-10-20-{CHANGE}/interventions.jsonl",
+      f"openspec/changes/archive/2026-10-20-{CHANGE}/reviews/09-closeout.triage.md"], None),
     (None, "not HEAD"),
 ])
 def test_a_validation_of_an_ancestor_clears_head_when_only_records_changed(

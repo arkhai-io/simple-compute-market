@@ -27,13 +27,16 @@ the session, and every turn ends with an outcome matching
   ask, tell, or wait for the owner, end the turn with `question`: `message` says
   what you found, the options, and your recommendation; `awaiting` names what you
   need. The owner's answer resumes this session; carry on from it.
-- **A denied tool stops the step.** Run one command per Bash call: a chained
-  command runs only when every command in it is allowed, so if a chained command
-  is denied, run its commands one call at a time. If a single command or any other
-  tool call is denied, finish every part of the work that does not depend on it,
-  then end with `stopped`, `reason` naming that exact call and why the step needed
-  it, and `denials` listing the calls as you saw them; the wrapper replaces them
-  with the run's own record. One denied call is not a denied tool: never report
+- **A denied call stops the step only when it cannot go on.** Run one command per
+  Bash call: a chained command runs only when every command in it is allowed, so
+  if a chained command is denied, run its commands one call at a time. If a single
+  command or any other tool call is denied, finish every part of the work that does
+  not depend on it. If the step cannot complete without that call, end with
+  `stopped`, `reason` naming that exact call and why the step needed it, and
+  `denials` listing the calls as you saw them; the wrapper replaces them with the
+  run's own record. Otherwise go on and end as the step ends: the wrapper records
+  the denial on the outcome whatever it is, and the orchestrating session reads it
+  before the change moves on. One denied call is not a denied tool: never report
   the tool as not allowed. Never do by another tool what a denied call would have
   done, and never ask about a denial as a question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or

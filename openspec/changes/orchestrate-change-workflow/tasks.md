@@ -714,6 +714,16 @@ a fix commit after a failed gate. 07 A2: `change-validate` section 2 says a
 running part prints a line per step and where its step logs are.
 `make check-agent-skills`: passed.
 
+Round 2 fixes, section 5. 28 F1: every skill's denial bullet, now "A denied call
+stops the step only when it cannot go on", says a step finishes what does not
+depend on the denied call, ends `stopped` naming that call only when it cannot
+complete without it, and otherwise goes on and ends as it ends, the denial
+recorded on the outcome for the orchestrator's reading; the wrapper's appended
+prompt says the same. 29 A2: `change-validate` section 2 says to wait on a
+background command through the harness's notification or a read-only `tail`,
+never a shell loop, since `bash -c` has no rule and will not get one.
+`make check-agent-skills`: passed.
+
 Fixes concerning no section. 02 O1: `scripts/check_comment_hygiene.py` is a
 direct port of the Makefile's shell target — the same two scans, file types,
 exclusions (`.claude/` among them, unchanged, so the step table now under it is
@@ -765,7 +775,63 @@ the next validation, which refuses an unreadable `HEAD`; and the credential-
 helper test's `PATH` patching in `test_validate_slice.py`, which predates this
 change.
 
-## 6. The orchestrating session
+Round 2 fixes, sections 1, 2, and 4 (review 28 and validation 29 of `b133afbb`,
+triaged in `reviews/28-implementation.triage.md` and `29-validation.triage.md`).
+Section 1, the log's writer. 28 F1 (option 1): `note_orchestrator` takes
+`reads`, the run whose denials the decision has read, beside `resolves`, refused
+for a run that recorded no denial; `note … orchestrator --reads`. 28 F3: it
+refuses `next` of a non-review step without `resolves` (the only such directive
+is a confirmed return, which the returned run would otherwise wait ahead of) and
+`next = review` without `kind`; the repeat review after a failed gate stays the
+line that names no run. Section 4, the computation. 28 F1: `pending()` holds a
+run with unread denials for their reading first, whatever its outcome, then a
+question for its resume and a return or block for the decision resolving it; a
+line that resolves a run counts as having read it, and a stopped run is read and
+resolved by one line; a blocked design's denials are read before the
+prerequisite rules take it. 28 F2: the records pattern admits a change's ledger
+and reviews under `archive/<dated directory>/`, and still not a file directly
+under `archive/`, so a closeout triage's ledger commit is not a fix. Section 2,
+the step table. 29 A1: the orchestrator's edits, carried here — the validate and
+archive-cleanup record rules in the `Edit(path)` form, since the harness does
+not honour a `Write(path)` allow rule (which corrects X4's cause: removing the
+bare `Edit` deny was harmless), and `Bash(python3 scripts/change_next_step.py*)`
+on common; the test matcher honours an `Edit(pattern)` rule for every editing
+tool and a bare tool name, and ignores a `Write(pattern)` rule; the record tests
+say the validate row admits its record to `Write` and `Edit` and nothing else,
+likewise archive cleanup's draft and the index, and every step may run the
+computation. The `Write(…)` twins beside `Edit(…)` rules in the design, plan,
+and closeout rows are dead but harmless and are the owner's to drop (7.3).
+Delta: the decision-line sentence in the owner's wording (resolves, reads,
+kind), the scenarios "The owner confirms a return" and "The owner directs a
+repeat review" as log lines with their refused negatives, and "A question
+carries denials". Design: D3, D6, D6a, D12, D14, and the second round's
+decisions list.
+
+Round 2 checks. Focused suites (unit, `uv run --no-project --with pytest`):
+`test_run_change_step.py` and `test_change_next_step.py`, 286 passed; the whole
+of `scripts/tests`, 917 passed. `make test`: passed, every suite, before the
+fresh-context check's fixes, which touched only `change_next_step.py`, the two
+suites, and `change-validate`'s wrapping; the focused suites and `scripts/tests`
+passed after them. `make check-comment-hygiene`: passed after two test strings
+were reworded (an archived path with a date-and-name literal and a change
+document's name both read as history). `make check-agent-skills`, `make
+check-change-index`, `make check-packaging`, `openspec validate
+orchestrate-change-workflow --strict`: passed. `make check-doc-citations
+CHANGE=orchestrate-change-workflow`: the same five citations as round 1, all of
+what the change removes or has not yet written; nothing else. Fresh-context
+check of the diff against `b133afbb` (a subagent, read-only): hygiene, test
+seams, public-repository discipline, and the consistency of the skills, the
+prompt, D12, and the delta on the denial rule satisfied; it found, and this
+round fixed, four things — the unread-denials message named the raw outcome word
+("its returned waits"), a blocked design's denials were never surfaced for
+reading, `directed()`'s docstring said a repeat review names no run in every
+case, and the question-with-denials test ended at "validate again" rather than
+the review its name promised; and two nits — the re-wrapping of the validate
+sentence (done) and the dead `Write(…)` twins in three rows (declined: a table
+edit, the owner's). Two calls were denied to this session and done by the
+allowed tool instead: a shell append to the ledger (`printf >>`) and a `sed` on
+a test file, both edits the step's `Edit` rule admits; a third, a `make test`
+chained with a redirect and `echo`, was rerun as plain `make test`.
 
 Delivers `change-orchestrate` (D2, D7's notifications, D8, D9, D10, D13's round
 line, D14's backstop, never passing a gate; requirements "An orchestrating

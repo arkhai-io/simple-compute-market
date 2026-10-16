@@ -110,13 +110,22 @@ transcript.
 
 An `orchestrator` line is a decision — the orchestrator's own routing or recovery,
 or the owner's, relayed — and names what it decides: `by` (`owner` or
-`orchestrator`), `resolves` (the `seq` of the run it settles, which alone stops
-waiting on the owner: a decision clears nothing it does not name), and, when it
-directs a step, `next` (with `kind` for a review), which the next-step computation
-names until that step has run. Settled at the first implementation round's triage
-(04 F3): the first form, a decision as free text that cleared every run before it,
-let one decision about a stopped review silence a validation question waiting
-beside it.
+`orchestrator`), `reads` (the `seq` of the run whose denials it has read, D6a),
+`resolves` (the `seq` of the run it settles, which alone stops waiting on the
+owner: a decision clears nothing it does not name), and, when it directs a step,
+`next` (with `kind` for a review), which the next-step computation names until
+that step has run. Settled at the first implementation round's triage (04 F3): the
+first form, a decision as free text that cleared every run before it, let one
+decision about a stopped review silence a validation question waiting beside it.
+`reads` is distinct from `resolves` because a run can be denied a call and still
+end with a question or a proposed return: its denials are read first, and its
+question is answered or its return decided after, so a reading settles nothing of
+the outcome; a stopped run is read and resolved by one line, and a line that
+resolves a run counts as having read it (28 F1). A directed review names its
+`kind`, without which the computation could name no review; a directed step of
+any other kind is a confirmed return and resolves the returned run, which would
+otherwise wait ahead of the directive; a repeat review after a failed gate names
+no run, a failed gate being a state of the triage file, not of a run (28 F3).
 
 ```jsonl
 {"seq":12,"at":"2026-10-21T09:15:40Z","step":"orchestrator","outcome":"round","sections":[[0]],"by":"owner","after":3}
@@ -178,11 +187,14 @@ the results that wait for the owner:
 - a prerequisite gating `design` is not archived: `owner`, design waits on it (D5);
 - a prerequisite gating `design` is archived on this branch: `owner`, proposing the
   release (D5a);
-- a step's latest run asked, returned, was blocked, stopped, or went on past a
-  denied tool: `owner`, until a decision line resolves that run (D3); a decision
-  that names `next` routes to that step until it has run, which is how a confirmed
-  return reaches the phase's step (04 F1) and a repeat review the owner asked for
-  reaches the reviewer;
+- a step's latest run went on past a denied tool: `owner`, carrying the denials,
+  until a decision line reads that run (D6a); its question or return then waits
+  as below;
+- a step's latest run asked, returned, was blocked, or stopped: `owner`, until
+  its session is resumed with the answer or a decision line resolves that run
+  (D3); a decision that names `next` routes to that step until it has run, which
+  is how a confirmed return reaches the phase's step (04 F1) and a repeat review
+  the owner asked for reaches the reviewer;
 - a pre-closeout or closeout review whose gate did not pass: `owner`, until `HEAD`
   differs from the review's reviewed commit in more than changes' records — a fix
   accepted at triage and committed — when the review of the same kind runs again,
@@ -268,15 +280,19 @@ run is unaffected: the owner's own permission settings apply, with prompts.
 | design, plan | read; edit `openspec/`, `docs/`; the pinned OpenSpec validator; `make check-*`; for a prerequisite (D5), `git worktree add` on a new branch from dev and edits under that worktree's `openspec/` | commits of code, any push |
 | triage | design's, and implement's, since it fixes what the owner accepts and commits | any push |
 | implement | edit the repository; `make` test, lock, and check targets; `uv run`; `git add`, `git commit`; the Agent tool | any push, `make push-branch`, `make run-e2e` |
-| validate | read; write `reviews/NN-validation.md` only; `make validate-*`, `push-branch`, `run-e2e`, `round-e2e-baseline`, `fetch-e2e-logs`; `gh run list`, `gh run view`, `gh auth status`; `docker`, `kubectl`, `helm` | `make lock`, commits, any other push; any other edit for want of an allow rule — a bare `Edit` deny would deny the record's `Write` too, since an edit rule covers every editing tool (X4) |
+| validate | read; write `reviews/NN-validation.md` only, by an `Edit(path)` rule, since an `Edit` rule covers every editing tool and a `Write(path)` rule is not honoured (X4, 29 A1); `make validate-*`, `push-branch`, `run-e2e`, `round-e2e-baseline`, `fetch-e2e-logs`; `gh run list`, `gh run view`, `gh auth status`; `docker`, `kubectl`, `helm` | `make lock`, commits, any other push; any other edit for want of an allow rule — a bare `Edit` deny would deny the record too |
 | closeout | edit `openspec/`, `docs/`; `openspec archive`; `make check-*`; commits | code edits, any push |
-| archive cleanup | edit the index; write `reviews/pull-request.md`; commits | any push, creating the pull request |
+| archive cleanup | edit the index; write `reviews/pull-request.md`, by an `Edit(path)` rule likewise; commits | any push, creating the pull request |
 
 Every step's row also allows the read-only shell utilities the skills reach for
 (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `echo`, `diff`, `find` without its
 writing actions), since a chained command runs only when every command in it is
 allowed and the first round's validation and triage stopped on chains of exactly
-those (07 A1); `make round-view-closed` is matched with a trailing variable (X4).
+those (07 A1); `make round-view-closed` is matched with a trailing variable (X4);
+and every step may run the next-step computation, so a step can see where the
+change stands. No row admits a shell loop: `bash -c` cannot be allowed without
+allowing any command, so a step waits on a background command through the
+harness's notification or a read-only `tail` (29 A2).
 
 The allow-lists turn each skill's "never" lines into rules the harness enforces:
 validation's "never changes the commit" stops being an instruction only. A run that
@@ -307,14 +323,18 @@ missing `echo`; X5). The reading, in `change-orchestrate`:
    `--allow` on the resume, for a stopped run that needs the call to go on, or a
    tracked table edit the owner commits, for a call the step's skill makes routine.
    A deny-rule denial is never granted for one run: the grant cannot override it.
-4. The reading is recorded as the decision line that resolves the run, `by:
+4. The reading is recorded as a decision line that `reads` the run, `by:
    orchestrator`, its `decision` beginning `gap:`, `forbidden:`, or `workaround:`
-   with the call and the rule; a forbidden or workaround reading goes to the owner,
-   whose disposition is a second line, `by: owner`.
+   with the call and the rule. A stopped run's reading is the line that also
+   resolves it; a run that ended with a question or a proposed return is answered
+   or decided after its reading, which settles nothing of its outcome (28 F1). A
+   forbidden or workaround reading goes to the owner, whose disposition is a
+   second line, `by: owner`.
 
-A run that went on past a denial waits in the computation like a stop, until the
-reading resolves it, so the reading happens whether or not the orchestrator was
-awake when the line was written.
+A run that went on past a denial waits in the computation like a stop, until a
+line reads it, so the reading happens whether or not the orchestrator was awake
+when the line was written; its question or return then waits as it would without
+the denial.
 
 Rejected: auto mode — what a step may do would rest on a classifier's call per
 action, unreviewable in advance. A permission-prompt tool routing each prompt to
@@ -391,13 +411,15 @@ Codex needs no output schema for this.
 ### D12 — The skills change how they ask and report, not what they check
 
 When a skill runs through the wrapper, every "stop and ask the owner" ends its turn
-with a `question` outcome; a denied tool ends it `stopped` with its reason, never
-a question or a workaround — except that a chained command denied because one
-part lacks a rule is rerun one command at a time, since the denial is of the
-chain and not of its parts, and a step finishes every part of its work that does
-not depend on a denied call before it stops, and names that exact call (X3, X5);
-and its last turn ends with an outcome matching
-`.agents/change-outcome.schema.json`. Interactive use is unchanged. Beyond that:
+with a `question` outcome; a denied call ends it `stopped`, naming that exact
+call, only when the step cannot complete without it, never a question or a
+workaround; a chained command denied because one part lacks a rule is rerun one
+command at a time, since the denial is of the chain and not of its parts; a step
+finishes every part of its work that does not depend on a denied call, and one
+that can complete goes on and ends as it ends, the denial recorded on its outcome
+for the orchestrator's reading (X3, X5, 28 F1); and its last turn ends with an
+outcome matching `.agents/change-outcome.schema.json`. Interactive use is
+unchanged. Beyond that:
 
 - `change-plan` sizes a section as a coherent, verifiable slice rather than to one
   session, and drops "one section per session" from its handoff (D13).
@@ -451,6 +473,28 @@ Beside the amendments above, each under its finding's label:
   that exclusion already stood.
 - **07 A2** — `validate_slice.py` prints one flushed line as each step starts and
   ends, so a part can be watched while it runs; its summary was its only output.
+
+### Decisions at the second implementation round's triage
+
+- **28 F1 (option 1)** — a decision line `reads` the run whose denials it read,
+  beside `resolves`; a run with unread denials waits for the reading first, then
+  for its question's answer or its return's decision as before; the skills and
+  the wrapper prompt say a step stops only when it cannot go on without the denied
+  call; see D3, D6a, D12, D14. Rejected: a resolved question that waits until the
+  step's next line (a special rule for one outcome, and a return's reading would
+  resolve it unconfirmed); routing on the `gap:`/`forbidden:`/`workaround:` prefix
+  (a routing rule on free text).
+- **28 F3** — a directed review names its kind, a directed step of any other kind
+  resolves the returned run, and a repeat review names no run; the delta shows
+  both as log lines; see D3.
+- **28 F2** — an archived change's ledger and reviews are records, so a closeout
+  triage's ledger commit is not a fix; see D14.
+- **29 A1** — the record rules take the `Edit(path)` form, since `Write(path)`
+  allow rules are not honoured; this corrects X4's cause, whose `Edit` deny
+  removal was harmless; see D6.
+- **29 A2** — validation waits on a background part through the harness's
+  notification or a read-only `tail`, never a shell loop; no rule for `bash -c`;
+  see D6.
 
 ## Risks / Trade-offs
 

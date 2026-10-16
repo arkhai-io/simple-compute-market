@@ -221,9 +221,25 @@ def _owner(reason: str, **extra: Any) -> Result:
     return {"step": "owner", "reason": reason, **extra}
 
 
-def _waiting(entry: dict[str, Any]) -> Result | None:
-    """The owner result for a step whose last run waits on the owner, if it does."""
+def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
+    """The owner result for a step whose last run waits on the owner, if it does.
+
+    A stopped run waits for the decision that resolves it, its denials on the
+    result. Any other run whose denials are not yet `read` waits for their
+    reading first, whatever its outcome: a run can be denied a call and still
+    ask a question or propose a return, and the reading answers neither, so the
+    question or return waits after it as it would without the denial.
+    """
     step, outcome = entry.get("step"), entry.get("outcome")
+    if outcome == "stopped":
+        return _owner(f"the {step} step stopped: {entry.get('reason', '')}",
+                      denials=entry.get("denials", []))
+    if (denials := entry.get("denials")) and not read:
+        waits = {"question": "question", "returned": "return", "blocked": "block"}.get(outcome)
+        return _owner(f"the {step} step ended {outcome} but was denied {len(denials)} tool "
+                      "call(s): read them against its rules and record the reading"
+                      + (f"; its {waits} waits after that" if waits else ""),
+                      denials=denials, outcome=outcome)
     if outcome == "question":
         return _owner(f"the {step} step asks: {entry.get('message', '')}",
                       awaiting=entry.get("awaiting"), resume=step)
@@ -233,15 +249,6 @@ def _waiting(entry: dict[str, Any]) -> Result | None:
     if outcome == "blocked":
         return _owner(f"the {step} step is blocked on {entry.get('blocked_on')}: "
                       f"{entry.get('message', '')}", blocked_on=entry.get("blocked_on"))
-    if outcome == "stopped":
-        return _owner(f"the {step} step stopped: {entry.get('reason', '')}",
-                      denials=entry.get("denials", []))
-    if denials := entry.get("denials"):
-        # The run went on past a denial: the orchestrating session reads each
-        # denial against the step's rules before the change moves on.
-        return _owner(f"the {step} step ended {outcome} but was denied {len(denials)} tool "
-                      "call(s): read them against its rules and record the reading",
-                      denials=denials)
     return None
 
 
@@ -466,15 +473,20 @@ class Computation:
         """A step of `phase` whose latest run waits on the owner, if one does.
 
         A question is answered by resuming its session; a returned, blocked, or
-        stopped run, or one that went on past a denial, is decided by the owner or
-        the orchestrating session; none is routed past by running the step afresh.
-        An `orchestrator` line records such a decision and names the run it
-        resolves, and only that run stops waiting: a decision about one step's run
-        says nothing about another's. A design that ended blocked on a prerequisite
-        is the prerequisite rules', not this one's.
+        stopped run is decided by the owner or the orchestrating session; none is
+        routed past by running the step afresh. A run that went on past a denial
+        waits first for the orchestrating session's reading of it, an
+        `orchestrator` line that `reads` the run, and then for its outcome's
+        answer or decision as any other. A decision line names the run it
+        resolves, and only that run stops waiting: a decision about one step's
+        run says nothing about another's, and a line that resolves a run counts
+        as having read it. A design that ended blocked on a prerequisite is the
+        prerequisite rules', not this one's, once its denials, if any, are read.
         """
         log = self.state.log
-        resolved = {e.get("resolves") for e in log if e.get("outcome") == ORCHESTRATOR}
+        decisions = [e for e in log if e.get("outcome") == ORCHESTRATOR]
+        resolved = {e.get("resolves") for e in decisions}
+        read = {e.get("reads") for e in decisions} | resolved
         latest: dict[str, dict[str, Any]] = {}
         for index, entry in enumerate(log):
             name = entry.get("step")
@@ -485,18 +497,20 @@ class Computation:
             if name == "triage" and _triage_phase(log[:index]) not in (phase, None):
                 continue
             latest[name] = entry
-        waiting = [entry for entry in latest.values()
+        waiting = [(entry["seq"], result) for entry in latest.values()
                    if entry["seq"] not in resolved
-                   and not (entry.get("step") == "design" and entry.get("outcome") == "blocked")
-                   and _waiting(entry)]
-        return _waiting(max(waiting, key=lambda e: e["seq"])) if waiting else None
+                   and (result := _waiting(entry, read=entry["seq"] in read))
+                   and not (entry.get("step") == "design" and "blocked_on" in result)]
+        return max(waiting)[1] if waiting else None
 
     def directed(self) -> Result | None:
         """The step the latest decision directs, until that step has run.
 
         An `orchestrator` line with `next` is the owner's word on a step: a
         confirmed return names the phase's step, which sets the status when it
-        runs; a review asked for again names `review` and its kind.
+        runs, and resolves the returned run, which would otherwise wait ahead of
+        it; a review asked for again names `review` and its kind, and, after a
+        failed gate, no run.
         """
         log = self.state.log
         decision = next((e for e in reversed(log)

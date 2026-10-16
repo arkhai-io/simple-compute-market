@@ -105,6 +105,7 @@ def _round(root: Path, sections, after: int | None = None) -> None:
 # What HEAD changed since a reviewed commit: a fix in code, unless a test says otherwise.
 FIX = ["scripts/change_next_step.py"]
 RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
+ARCHIVED_RECORDS_ONLY = [f"openspec/changes/archive/2026-10-20-{CHANGE}/interventions.jsonl"]
 
 
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX) -> dict:
@@ -340,7 +341,8 @@ def test_a_fix_after_a_failed_closeout_gate_is_reviewed_again(tmp_path: Path) ->
     _record(root, "05-closeout.md", triage="Not passed.", reviewed="e" * 40)
 
     fixed = _next(root)
-    unchanged = _next(root, changed=RECORDS_ONLY)
+    # A closeout triage commits the archived change's ledger; that is not a fix.
+    unchanged = _next(root, changed=ARCHIVED_RECORDS_ONLY)
 
     assert (fixed["step"], fixed["kind"]) == ("review", "closeout")
     assert unchanged["step"] == "owner"
@@ -640,12 +642,111 @@ def test_a_run_that_went_on_past_a_denial_waits_for_its_reading(tmp_path: Path) 
                sections=[2])
 
     unread = _next(root)
-    _decide(root, "gap: proposed Bash(cat *)", resolves=run["seq"])
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
     read = _next(root)
 
     assert unread["step"] == "owner" and "denied 1 tool call" in unread["reason"]
     assert unread["denials"] == [{"tool_name": "Bash"}]
     assert read["step"] == "implement"
+
+
+def test_a_line_that_resolves_a_finished_run_counts_as_its_reading(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    run = _log(root, "implement", {**FINISHED, "denials": [{"tool_name": "Bash"}]},
+               sections=[2])
+    _decide(root, "gap: proposed Bash(cat *)", resolves=run["seq"])
+
+    assert _next(root)["step"] == "implement"
+
+
+# A run can be denied a call and still ask or propose a return: its denials are
+# read first, and its question or return waits after the reading as it would
+# without the denial.
+
+def test_a_question_with_denials_waits_for_its_reading_then_its_answer(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _implemented_round(root)
+    _record(root, "02-implementation-owner.md")
+    run = _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy",
+                                  "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(gh run view *)", reads=run["seq"])
+    read = _next(root)
+    _log(root, "validate", FINISHED)
+    _record(root, "03-validation.md", text=_validation())
+    answered = _next(root)
+
+    assert unread["step"] == "owner" and "its question waits after that" in unread["reason"]
+    assert (unread["denials"], unread["outcome"]) == ([{"tool_name": "Bash"}], "question")
+    assert "resume" not in unread
+    assert (read["step"], read["resume"], read["awaiting"]) == (
+        "owner", "validate", "environmental remedy")
+    assert (answered["step"], answered["kind"]) == ("review", "implementation")
+
+
+def test_a_return_with_denials_waits_for_its_reading_then_its_confirmation(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    run = _log(root, "implement", {"outcome": "returned", "message": "Needs a decision.",
+                                   "return_to": "design", "evidence": "the notes",
+                                   "denials": [{"tool_name": "Bash"}]}, sections=[2])
+
+    unread = _next(root)
+    _decide(root, "workaround: none", reads=run["seq"])
+    read = _next(root)
+    _decide(root, "return to design confirmed", by="owner", resolves=run["seq"],
+            next_step="design")
+    confirmed = _next(root)
+
+    assert unread["step"] == "owner" and unread["denials"] == [{"tool_name": "Bash"}]
+    assert "return_to" not in unread
+    assert (read["step"], read["return_to"]) == ("owner", "design")
+    assert confirmed["step"] == "design"
+
+
+def test_a_blocked_design_with_denials_waits_for_their_reading_first(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    run = _log(root, "design", {"outcome": "blocked", "message": "Needs split-pools.",
+                                "blocked_on": "split-pools",
+                                "denials": [{"tool_name": "Bash"}]})
+
+    unread = _next(root)
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+
+    assert unread["step"] == "owner" and "its block waits after that" in unread["reason"]
+    assert unread["denials"] == [{"tool_name": "Bash"}]
+    assert (read["step"], read["prerequisite"]) == ("owner", "split-pools")
+
+
+def test_a_stopped_run_is_not_cleared_by_its_reading_alone(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _implemented_round(root)
+    _record(root, "02-implementation-owner.md")
+    _record(root, "03-validation.md", text=_validation())
+    run = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
+                              commit=HEAD, extra={"kind": "implementation"})
+
+    _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
+    read = _next(root)
+    _decide(root, "rerun the review", reads=run["seq"], resolves=run["seq"])
+    resolved = _next(root)
+
+    assert read["step"] == "owner" and "stopped" in read["reason"]
+    assert (resolved["step"], resolved["kind"]) == ("review", "implementation")
+
+
+def test_a_decision_that_resolves_a_question_ends_its_wait(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _implemented_round(root)
+    _record(root, "02-implementation-owner.md")
+    run = _log(root, "validate", {**QUESTION, "denials": [{"tool_name": "Bash"}]})
+    _decide(root, "validate afresh", by="owner", resolves=run["seq"])
+
+    assert _next(root)["step"] == "validate-and-review"
 
 
 def test_a_confirmed_return_routes_to_the_step_returned_to(tmp_path: Path) -> None:

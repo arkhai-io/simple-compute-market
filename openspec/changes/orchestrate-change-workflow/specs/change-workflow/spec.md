@@ -47,8 +47,9 @@ A question MUST be answered by resuming the same session with the owner's answer
 A proposed return MUST NOT change the change's status until the owner confirms it;
 the confirmation MUST be recorded in the workflow log as a decision naming the run
 it resolves and the step it directs, and the step so directed sets the status.
-A decision recorded in the workflow log MUST name the run it resolves, and MUST NOT
-resolve any other.
+A decision that resolves a run MUST name it, and MUST NOT resolve any other; a
+decision that reads a run's denials MUST name that run; a decision that directs a
+review MUST name its kind.
 An interactive run of a step MUST behave as it does without the wrapper.
 
 #### Scenario: Validation needs an environmental remedy
@@ -71,10 +72,31 @@ An interactive run of a step MUST behave as it does without the wrapper.
 
 #### Scenario: The owner confirms a return
 
-- **WHEN** the owner confirms a proposed return to design
-- **THEN** the confirmation is recorded as a decision resolving that run and
-  directing the design step, the next-step computation names design until it has
-  run, and the design step sets the status
+- **WHEN** an implementation run at seq 50 ended with a proposed return to design
+  and the owner confirms it, recorded as
+  `{"seq": 51, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "resolves": 50, "next": "design", "decision": "return to design confirmed", "reason": "task 0.4 needs a provider decision the design does not make"}`
+- **THEN** the next-step computation names design until it has run, and the
+  design step sets the status
+
+#### Scenario: A confirmation names no run
+
+- **WHEN** a confirmation line with `next: design` and no `resolves` is attempted
+- **THEN** the log's writer refuses it, since the returned run at seq 50 would
+  otherwise keep waiting and the computation would name the owner, never design
+
+#### Scenario: The owner directs a repeat review
+
+- **WHEN** a pre-closeout review's gate did not pass, no fix has landed, and the
+  owner asks for the review again, recorded as
+  `{"seq": 61, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "next": "review", "kind": "pre-closeout", "decision": "review again", "reason": "the findings were declined; the reviewer should see the triage"}`,
+  naming no run, since a failed gate is a state of the triage file and not of a run
+- **THEN** the next-step computation names the pre-closeout review until it has run
+
+#### Scenario: A directed review names no kind
+
+- **WHEN** a decision line with `next: review` and no `kind` is attempted
+- **THEN** the log's writer refuses it, since the computation could name no review
+  from it
 
 #### Scenario: A decision about one run leaves another waiting
 
@@ -143,9 +165,11 @@ orchestrating session MUST read each recorded denial from the run's record, neve
 from the step's message; classify it by the harness's reason as a gap in the table
 or a forbidden action; check the run's later calls for a workaround; propose, for
 a gap, the narrowest rule that matches the call and say whether it is a one-run
-grant or a tracked change; and record its reading in the workflow log as the
-decision resolving that run, before the next step runs. A denial by a deny rule
-MUST NOT be granted for one run. A
+grant or a tracked change; and record its reading in the workflow log as a
+decision reading that run, before the next step runs. A run whose outcome still
+waits — a question, a proposed return — MUST be answered or decided after its
+denials are read, and the reading MUST NOT settle that outcome. A denial by a
+deny rule MUST NOT be granted for one run. A
 change to a step's permissions MUST be made by the owner, as a tracked change, or
 granted by the owner for one resumed run. Interactive runs MUST NOT be restricted by
 the table.
@@ -161,6 +185,14 @@ the table.
 - **WHEN** an unattended run is denied a command because no allow rule names it
 - **THEN** the orchestrating session proposes the narrowest allow rule matching the
   call, and the owner grants it for the resumed run or commits it to the table
+
+#### Scenario: A question carries denials
+
+- **WHEN** an unattended validation was denied a command it could do without, went
+  on, and ended with a question
+- **THEN** the next-step computation names the owner for the reading of the denial
+  first, carrying it; once a decision reads that run, the question waits for its
+  answer, and the same session resumes with it
 
 #### Scenario: A step is denied by a deny rule
 

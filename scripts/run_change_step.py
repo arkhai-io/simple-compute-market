@@ -43,8 +43,11 @@ run's session and commit. `note` appends the orchestrating session's own lines: 
 `round` line recording the implementation round the owner agreed, and an
 `orchestrator` line recording a decision — the orchestrating session's own
 routing or recovery, or the owner's, such as a confirmed return or a repeat
-review — naming the run it resolves and the step it directs next, so the next-step
-computation routes on it. This module is the log's only writer.
+review — naming the run whose denials it reads, the run it resolves, and the
+step it directs next, so the next-step computation routes on it. Reading and
+resolving are distinct because a run can be denied a call and still end with a
+question or a proposed return: its denials are read first, and its outcome is
+answered or decided after. This module is the log's only writer.
 
 The log holds only what the change's files cannot: session ids, the owner's round
 agreements, and the last outcome. Where the log and the files disagree, the files
@@ -100,10 +103,11 @@ UNATTENDED = (
     "outcome; the owner's answer resumes this session. Run one command per Bash call: a "
     "chained command runs only when every command in it is allowed. If a chained command is "
     "denied, run its commands one call at a time. If a single command or any other tool call "
-    "is denied, finish every part of the work that does not depend on it, then end with a "
-    "`stopped` outcome whose `reason` names that exact call; one denied call is not a denied "
-    "tool. Never do by another tool what a denied call would have done, and never ask about "
-    "a denial as a question.")
+    "is denied, finish every part of the work that does not depend on it; if the step cannot "
+    "complete without that call, end with a `stopped` outcome whose `reason` names that exact "
+    "call, and otherwise go on and end as the step ends, since the denial is recorded on the "
+    "outcome whatever it is. One denied call is not a denied tool. Never do by another tool "
+    "what a denied call would have done, and never ask about a denial as a question.")
 
 
 class StepError(RuntimeError):
@@ -320,16 +324,26 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
 
 
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
-                      resolves: int | None = None, next_step: str | None = None,
-                      kind: str | None = None, clock: Clock = _utc_now) -> Entry:
+                      resolves: int | None = None, reads: int | None = None,
+                      next_step: str | None = None, kind: str | None = None,
+                      clock: Clock = _utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
 
-    `resolves` names the run (its `seq`) the decision settles, so that run alone
-    stops waiting on the owner: a decision clears nothing it does not name.
+    `reads` names the run (its `seq`) whose recorded denials the decision has
+    read against the step's rules; `resolves` names the run the decision
+    settles, so that run alone stops waiting on the owner: a decision clears
+    nothing it does not name. They differ because a run denied a call can still
+    end with a question or a proposed return, whose denials are read before the
+    question is answered or the return decided; a reading alone leaves such an
+    outcome waiting, and a stopped run is read and resolved by one line.
     `next_step` names the step the decision directs — the step a confirmed
     return goes to, the review the owner asked for again — which the next-step
-    computation names until that step has run; a review takes its `kind`.
+    computation names until that step has run. A directed review takes its
+    `kind`, without which the computation could not name one; a directed step
+    of any other kind is a confirmed return, so it resolves the returned run,
+    which would otherwise wait ahead of the directive. A repeat review after a
+    failed gate names no run: a failed gate is a state of the triage file.
     """
     if not decision or not reason:
         raise StepError("an orchestrator line names its decision and its reason")
@@ -337,16 +351,28 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
         raise StepError("an orchestrator line names who decided")
     line: Entry = {"step": ORCHESTRATOR, "outcome": ORCHESTRATOR, "by": by,
                    "decision": decision, "reason": reason}
+    runs = {entry["seq"]: entry for entry in read_log(path) if entry.get("step") in STEPS}
     if resolves is not None:
-        runs = {entry["seq"] for entry in read_log(path)
-                if entry.get("step") in STEPS}
         if resolves not in runs:
             raise StepError(f"no run has seq {resolves!r} in the workflow log; a decision "
                             "resolves a step's run")
         line["resolves"] = resolves
+    if reads is not None:
+        if reads not in runs:
+            raise StepError(f"no run has seq {reads!r} in the workflow log; a decision "
+                            "reads a step's run")
+        if not runs[reads].get("denials"):
+            raise StepError(f"the run at seq {reads} recorded no denial; a decision reads "
+                            "a run's denials")
+        line["reads"] = reads
     if next_step is not None:
         if next_step not in STEPS:
             raise StepError(f"unknown step {next_step!r}; expected one of {', '.join(STEPS)}")
+        if next_step == "review" and kind is None:
+            raise StepError("a decision directing a review names its kind")
+        if next_step != "review" and resolves is None:
+            raise StepError(f"a decision directing {next_step} is a confirmed return and "
+                            "names the run it resolves")
         line["next"] = next_step
     if kind is not None:
         if next_step != "review":
@@ -828,8 +854,11 @@ def _changed_since(root: Path, commit: str, head: str) -> list[str] | None:
     return [path for path in diff.stdout.split("\0") if path] if diff.returncode == 0 else None
 
 
+# A change's records: its ledger and its reviews, whether the change is active or
+# under its dated archive directory. A closeout triage edits an archived change's
+# ledger, so the archive must count, or that edit would read as a fix.
 _RECORD = re.compile(
-    rf"^{re.escape(str(CHANGES))}/(?!archive/)[^/]+/(interventions\.jsonl$|reviews/)")
+    rf"^{re.escape(str(CHANGES))}/(?:archive/)?(?!archive/)[^/]+/(interventions\.jsonl$|reviews/)")
 
 
 def validation_problem(reviews: Path, head: str, root: Path | None = None,
@@ -1217,6 +1246,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     decision.add_argument("--by", default=ORCHESTRATOR, help="who decided: owner or orchestrator")
     decision.add_argument("--resolves", type=int, default=None,
                           help="the seq of the run the decision settles")
+    decision.add_argument("--reads", type=int, default=None,
+                          help="the seq of the run whose denials the decision has read")
     decision.add_argument("--next", dest="next_step", default=None,
                           help="the step the decision directs next")
     decision.add_argument("--kind", default=None, help="the review kind when --next is review")
@@ -1261,8 +1292,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             print(json.dumps(line, ensure_ascii=False))
         else:
             line = note_orchestrator(path, args.decision, args.reason, by=args.by,
-                                     resolves=args.resolves, next_step=args.next_step,
-                                     kind=args.kind)
+                                     resolves=args.resolves, reads=args.reads,
+                                     next_step=args.next_step, kind=args.kind)
             print(json.dumps(line, ensure_ascii=False))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

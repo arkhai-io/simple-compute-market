@@ -27,7 +27,7 @@ allow = [
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)",
-  "Bash(python3 scripts/find_change.py*)",
+  "Bash(python3 scripts/find_change.py*)", "Bash(python3 scripts/change_next_step.py*)",
   "Bash(python3 scripts/run_change_step.py log*)",
   "Bash(make round-view-closed*)", "Bash(make check-change-index)",
   "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
@@ -100,7 +100,7 @@ deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
 [steps.validate]
 skill = "change-validate"
 allow = [
-  "Write(openspec/changes/**/reviews/*-validation.md)",
+  "Edit(openspec/changes/**/reviews/*-validation.md)",
   "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(make push-branch)",
   "Bash(make run-e2e)", "Bash(make round-e2e-baseline)", "Bash(make fetch-e2e-logs*)",
   "Bash(make dist-clean)",
@@ -128,7 +128,7 @@ deny = ["Bash(make push-branch*)"]
 skill = "change-archive-cleanup"
 allow = [
   "Edit(openspec/changes/README.md)",
-  "Write(openspec/changes/**/reviews/pull-request.md)",
+  "Edit(openspec/changes/**/reviews/pull-request.md)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]
