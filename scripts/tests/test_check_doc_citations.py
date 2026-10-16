@@ -76,6 +76,19 @@ def test_an_archived_change_citing_its_own_unarchived_path_resolves(tmp_path: Pa
         "docs/missing.md", "openspec/changes/shape-bounds/gone.md"]
 
 
+def test_a_cited_agents_path_must_resolve(tmp_path: Path) -> None:
+    change = tmp_path / "openspec/changes/shape-bounds"
+    change.mkdir(parents=True)
+    (tmp_path / ".agents").mkdir()
+    (tmp_path / ".agents/change-outcome.schema.json").write_text("{}", "utf-8")
+    (change / "why.md").write_text(
+        "matches `.agents/change-outcome.schema.json`, not `.agents/gone.json`; "
+        "a `.claude/skills/x.md` mirror is not checked\n", "utf-8")
+
+    assert [cited for _, cited, _ in checker.unresolvable(tmp_path, "shape-bounds")] == [
+        ".agents/gone.json"]
+
+
 def test_an_active_change_citing_its_own_path_must_resolve_as_written(tmp_path: Path) -> None:
     change = tmp_path / "openspec/changes/shape-bounds"
     change.mkdir(parents=True)

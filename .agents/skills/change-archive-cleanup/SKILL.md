@@ -15,6 +15,38 @@ Archive cleanup changes the campaign index only. The archived change, its specs,
 the permanent documents are as the closeout review read them; a defect found now
 in any of them is not this skill's to fix — stop and tell the owner.
 
+## Running unattended
+
+Run interactively, as most runs are, this section does not apply, and nothing else
+in the skill changes. When this skill runs through `scripts/run_change_step.py` —
+`make archive-cleanup UNATTENDED=1`, or the orchestrating session — nobody can answer in
+the session, and every turn ends with an outcome matching
+`.agents/change-outcome.schema.json`, whose `message` the owner reads as written:
+
+- **A stop for the owner is a question.** Wherever this skill says to stop and
+  ask, tell, or wait for the owner, end the turn with `question`: `message` says
+  what you found, the options, and your recommendation; `awaiting` names what you
+  need. The owner's answer resumes this session; carry on from it.
+- **A denied call stops the step only when it cannot go on.** Run one command per
+  Bash call: a chained command runs only when every command in it is allowed, so
+  if a chained command is denied, run its commands one call at a time. If a single
+  command or any other tool call is denied, finish every part of the work that does
+  not depend on it. If the step cannot complete without that call, end with
+  `stopped`, `reason` naming that exact call and why the step needed it, and
+  `denials` listing the calls as you saw them; the wrapper replaces them with the
+  run's own record. Otherwise go on and end as the step ends: the wrapper records
+  the denial on the outcome whatever it is, and the orchestrating session reads it
+  before the change moves on. One denied call is not a denied tool: never report
+  the tool as not allowed. Never do by another tool what a denied call would have
+  done, and never ask about a denial as a question.
+- **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
+  to stop and report — a repository guard refusing, `HEAD` moving under you — end
+  with `stopped`, `reason` saying why, and `denials` empty.
+- **The end is an outcome.** When the cleanup is committed and the pull request
+  drafted, end with `finished`, `next` naming the owner creating the pull request;
+  you never create it. A row already `archived` (step 1) ends `finished` too,
+  saying cleanup had run.
+
 ## 1. Check that cleanup may start
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does

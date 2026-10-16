@@ -175,8 +175,8 @@ is a leak, and it also rots the moment the external caller is renamed.
 
 ### Cross-references must resolve
 
-Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by
-a permanent document must exist on the branch that cites it.
+Every `openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, and `.agents/`
+path cited by a permanent document must exist on the branch that cites it.
 
 A permanent document describing behaviour this branch does not implement is not
 a harmless forward reference — it is how work from another branch or another
