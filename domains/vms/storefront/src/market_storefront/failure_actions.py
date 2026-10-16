@@ -305,13 +305,6 @@ async def _release_capacity(
         capacity_binding_for_listing,
     )
 
-    # Refreshing projections wakes the publication loop, which composes the
-    # settlement table whose seller entries apply this policy; importing it at
-    # module scope would make that composition import itself.
-    from market_storefront.services.site_projection_cache import (
-        refresh_site_projections,
-    )
-
     result = FulfillmentFailurePolicyResult(
         capacity_reservation_id=ctx.capacity_reservation_id
     )
@@ -342,12 +335,14 @@ async def _release_capacity(
             # The same source publication derives from, refreshed for the site
             # this release just changed, so a reopen here agrees with what
             # publication would keep open and reports this release's own effect.
-            await refresh_site_projections(binding.site_id)
+            # The refresh reconciles inline, so it wakes nothing.
+            site_projections = _container.site_projections()
+            await site_projections.refresh_site(binding.site_id)
             reopened = closed_available_listing_ids(
                 db.db_path,
                 member_availability=await capacity_availability(runtime.client()),
-                site_pool_projection=site_pool_projection(),
-                site_capacity_buckets=site_capacity_buckets(),
+                site_pool_projection=site_pool_projection(site_projections),
+                site_capacity_buckets=site_capacity_buckets(site_projections),
                 shape_feasible=vm_shape_feasibility(),
                 configured_sites=runtime.site_ids,
                 admissibility_default=_container.resolved_admissibility_default,

@@ -4,7 +4,7 @@ aggregate composition, and delta delivery.
 The client's own wire-contract tests live in
 kit/site-client/tests/unit/test_client.py -- these tests cover this
 package's own orchestration on top of the client: aggregate/placement
-composition, the listing-reconcile subscriber, the projection cache
+composition, the listing-reconcile subscriber, the projection state
 wiring, and the event-feed poller. The FakeSite transport mirrors the
 provisioning service's /api/v1/capacity surface (whose shapes are pinned
 by that service's own integration tests).
@@ -13,7 +13,7 @@ by that service's own integration tests).
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from core_storefront.capacity import CapacityDelta
@@ -30,7 +30,9 @@ from market_storefront.services import capacity_client as cc
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     TEST_SITE_AUTHORITIES,
+    FakeProjectionSite,
     FakeSite,
+    loaded_site_projection_state,
 )
 
 
@@ -315,7 +317,8 @@ async def test_domain_hook_closes_and_reopens_with_exact_site_availability():
         calls.append(("reopen", member_availability))
         return []
 
-    reconcile = cc._capacity_reconciler(lambda: repository)
+    state = await loaded_site_projection_state({"default": FakeProjectionSite(resource_pools=[])})
+    reconcile = cc._capacity_reconciler(lambda: repository, site_projections=lambda: state)
     projection = (CapacityProjection("default", ()),)
     with (
         patch(
@@ -361,7 +364,8 @@ async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
         calls.append("reopen")
         return []
 
-    reconcile = cc._capacity_reconciler(lambda: repository)
+    state = await loaded_site_projection_state({"default": FakeProjectionSite(resource_pools=[])})
+    reconcile = cc._capacity_reconciler(lambda: repository, site_projections=lambda: state)
     with (
         patch(
             "market_storefront.services.publication_service."
@@ -383,6 +387,35 @@ async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
         )
 
     assert calls == ["close", "reopen"]
+
+
+@pytest.mark.asyncio
+async def test_domain_hook_reconciles_nothing_without_a_projection_state():
+    """With no projection state composed, every listing's source is unknown,
+    so a delta closes and reopens nothing."""
+    calls: list[str] = []
+
+    async def fake_close(*_args, **_kwargs):
+        calls.append("close")
+        return []
+
+    reconcile = cc._capacity_reconciler(
+        lambda: SimpleNamespace(db_path="/tmp/x.db"), site_projections=lambda: None
+    )
+    with patch(
+        "market_storefront.services.publication_service."
+        "close_stale_compute_listings_after_capacity_change",
+        fake_close,
+    ):
+        await reconcile(
+            CapacityReconcileContext(
+                projections=(CapacityProjection("default", ()),),
+                availability={},
+                delta=CapacityDelta(kind="reserved", version=1),
+            )
+        )
+
+    assert calls == []
 
 
 @pytest.mark.asyncio
@@ -421,47 +454,31 @@ async def test_poller_loop_delegates_to_composed_kit_runtime():
 
 
 # ---------------------------------------------------------------------------
-# site_pool_projection -- projection_caches() -> {site: rows} conversion
+# site_pool_projection / site_capacity_buckets -- the state's held rows per site
 # ---------------------------------------------------------------------------
 
 
-class TestSitePoolProjection:
-    def test_empty_when_nothing_cached(self):
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={},
-        ):
-            assert cc.site_pool_projection() == {}
+async def _state(**sites: FakeProjectionSite):
+    return await loaded_site_projection_state(sites)
 
-    def test_includes_a_site_with_a_loaded_value(self):
-        fake_cache = MagicMock()
-        fake_cache.resource_pools.view.return_value.value = [
-            {"pool_id": "gpu-pool", "resources": []},
-        ]
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_pool_projection()
-        assert result == {
+
+class TestSitePoolProjection:
+    async def test_includes_a_site_with_a_loaded_value(self):
+        state = await _state(
+            **{"site-a": FakeProjectionSite(resource_pools=[{"pool_id": "gpu-pool", "resources": []}])}
+        )
+        assert cc.site_pool_projection(state) == {
             "site-a": [{"pool_id": "gpu-pool", "resources": []}],
         }
 
-    def test_excludes_a_site_with_no_cached_value(self):
-        """A site whose projection has never loaded (or is currently
-        unavailable/invalid) has value=None -- it must not appear at all,
+    async def test_excludes_a_site_holding_no_generation(self):
+        """A site whose projection has never loaded must not appear at all,
         not as an empty list -- a present-but-empty-list site would
         incorrectly look like "this site genuinely has zero pools"."""
-        fake_cache = MagicMock()
-        fake_cache.resource_pools.view.return_value.value = None
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_pool_projection()
-        assert result == {}
+        state = await _state(**{"site-a": FakeProjectionSite(resource_pools=None)})
+        assert cc.site_pool_projection(state) == {}
 
-    def test_includes_a_site_with_a_loaded_empty_projection(self):
+    async def test_includes_a_site_with_a_loaded_empty_projection(self):
         """The other half of the None-vs-[] distinction: a site whose
         projection HAS successfully loaded, and genuinely has zero
         pools right now, must be included as an empty list -- not
@@ -470,121 +487,92 @@ class TestSitePoolProjection:
         identically to a never-loaded site, so an authoritative "zero
         pools" answer was read as unknown instead of correctly
         registering zero capacity."""
-        fake_cache = MagicMock()
-        fake_cache.resource_pools.view.return_value.value = []
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_pool_projection()
+        state = await _state(**{"site-a": FakeProjectionSite(resource_pools=[])})
+        result = cc.site_pool_projection(state)
         assert result == {"site-a": []}
         assert "site-a" in result  # not just == {} by coincidence
 
-    def test_multiple_sites_only_loaded_ones_included(self):
-        loaded = MagicMock()
-        loaded.resource_pools.view.return_value.value = [{"pool_id": "p"}]
-        unloaded = MagicMock()
-        unloaded.resource_pools.view.return_value.value = None
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": loaded, "site-b": unloaded},
-        ):
-            result = cc.site_pool_projection()
-        assert set(result) == {"site-a"}
+    async def test_multiple_sites_only_held_ones_included(self):
+        state = await _state(**{
+            "site-a": FakeProjectionSite(resource_pools=[{"pool_id": "p"}]),
+            "site-b": FakeProjectionSite(resource_pools=None),
+        })
+        assert set(cc.site_pool_projection(state)) == {"site-a"}
+
+    async def test_a_stale_site_keeps_its_last_generation(self):
+        site = FakeProjectionSite(resource_pools=[{"pool_id": "p"}])
+        state = await _state(**{"site-a": site})
+        site.failing = True
+        await state.poll_once()
+
+        assert cc.site_pool_projection(state) == {"site-a": [{"pool_id": "p"}]}
 
 
 class TestSiteCapacityBuckets:
     """Same None-vs-[] inclusion contract as TestSitePoolProjection,
     verified independently for the sibling function -- both feed the
     same reconciler consumer, and the two are easy to accidentally drift
-    apart since they're separate functions over separate cache fields."""
+    apart since they read separate families."""
 
-    def test_empty_when_nothing_cached(self):
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={},
-        ):
-            assert cc.site_capacity_buckets() == {}
+    async def test_excludes_a_site_holding_no_generation(self):
+        state = await _state(**{"site-a": FakeProjectionSite(resource_pools=[])})
+        assert cc.site_capacity_buckets(state) == {}
 
-    def test_excludes_a_site_with_no_cached_value(self):
-        fake_cache = MagicMock()
-        fake_cache.capacity_buckets.view.return_value.value = None
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_capacity_buckets()
-        assert result == {}
-
-    def test_includes_a_site_with_a_loaded_empty_projection(self):
+    async def test_includes_a_site_with_a_loaded_empty_projection(self):
         """A site whose capacity-bucket family loaded successfully with
         zero rows must be included as an empty list, not excluded the
         way an unloaded site is -- reconciler's fungible-mode row builder
         relies on this to trust an authoritative zero instead of falling
         back."""
-        fake_cache = MagicMock()
-        fake_cache.capacity_buckets.view.return_value.value = []
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_capacity_buckets()
+        state = await _state(**{"site-a": FakeProjectionSite(capacity_buckets=[])})
+        result = cc.site_capacity_buckets(state)
         assert result == {"site-a": []}
         assert "site-a" in result
 
-    def test_includes_a_site_with_loaded_bucket_rows(self):
-        fake_cache = MagicMock()
-        fake_cache.capacity_buckets.view.return_value.value = [
-            {
-                "pool_id": "gpu-pool",
-                "available": {"gpu_count": 4},
-                "resource_count": 1,
-            },
-        ]
-        with patch(
-            "market_storefront.services.site_projection_cache.projection_caches",
-            return_value={"site-a": fake_cache},
-        ):
-            result = cc.site_capacity_buckets()
-        assert result == {
-            "site-a": [
-                {
-                    "pool_id": "gpu-pool",
-                    "available": {"gpu_count": 4},
-                    "resource_count": 1,
-                },
-            ],
-        }
+    async def test_includes_a_site_with_loaded_bucket_rows(self):
+        rows = [{"pool_id": "gpu-pool", "available": {"gpu_count": 4}, "resource_count": 1}]
+        state = await _state(**{"site-a": FakeProjectionSite(capacity_buckets=rows)})
+        assert cc.site_capacity_buckets(state) == {"site-a": rows}
+
+
+class TestSiteProjectionStatus:
+    async def test_reports_each_familys_state_and_identity_without_its_rows(self):
+        state = await _state(**{
+            "site-healthy": FakeProjectionSite(resource_pools=[{"pool_id": "pool-1"}]),
+            "site-failing": FakeProjectionSite(resource_pools=None),
+        })
+
+        summary = cc.site_projection_status(state)
+
+        healthy = summary["site-healthy"]["resource_pool"]
+        assert healthy["state"] == "loaded"
+        assert healthy["revision"] == 1
+        assert healthy["digest"]
+        assert healthy["last_error"] is None
+        assert healthy["fetched_at"] is not None
+        # The rows themselves never reach the status, only identity and state.
+        assert "pool-1" not in str(summary)
+        failing = summary["site-failing"]["resource_pool"]
+        assert failing["state"] == "unavailable"
+        assert failing["revision"] is None
+        assert failing["last_error"] is not None
 
 
 # ---------------------------------------------------------------------------
-# Orchestration: a real cached projection actually reaches reconciliation,
-# not just the two pieces (cache -> dict, dict -> dispatch) in isolation.
+# Orchestration: a held projection actually reaches reconciliation, not just
+# the two pieces (state -> dict, dict -> dispatch) in isolation.
 # ---------------------------------------------------------------------------
 
 
-class TestReconcileListingsUsesCachedProjection:
-    async def test_a_real_loaded_cache_entry_reaches_the_close_call(
-        self,
-        client: cc.SiteCapacityClient,
-    ):
-        """End to end: populate site_projection_cache's real module-level
-        cache with a real (not mocked) ProjectionCache in the `loaded`
-        state, trigger the real subscriber with
-        a real CapacityDelta, and confirm the exact cached rows arrive as
-        the site_pool_projection argument to the close call -- proving
-        the wiring from cache to reconciliation is actually connected,
-        not just each half correct in isolation. Also proves the sibling
-        site_capacity_buckets cache reaches the same call the same way.
+class TestReconcileListingsUsesHeldProjection:
+    async def test_a_held_generation_reaches_the_close_call(self):
+        """End to end: a real projection state holding a loaded generation of
+        both families, the real subscriber triggered with a real
+        CapacityDelta, and the exact held rows arriving as the
+        site_pool_projection and site_capacity_buckets arguments to the close
+        call -- proving the wiring from state to reconciliation is actually
+        connected, not just each half correct in isolation.
         """
-        from core_storefront.site_projections import (
-            ProjectionCache,
-            ProjectionIdentity,
-            ProjectionState,
-        )
-
-        from market_storefront.services import site_projection_cache as spc
-
         pool_rows = [{"pool_id": "gpu-pool", "resources": []}]
         bucket_rows = [
             {
@@ -593,20 +581,8 @@ class TestReconcileListingsUsesCachedProjection:
                 "resource_count": 1,
             }
         ]
-
-        resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
-        resource_pools_cache._value = pool_rows
-        resource_pools_cache._state = ProjectionState.loaded
-        resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
-
-        capacity_buckets_cache: ProjectionCache = ProjectionCache(client=None)
-        capacity_buckets_cache._value = bucket_rows
-        capacity_buckets_cache._state = ProjectionState.loaded
-        capacity_buckets_cache._identity = ProjectionIdentity(revision=1, digest="def")
-
-        caches = spc.SiteProjectionCaches(
-            resource_pools=resource_pools_cache,
-            capacity_buckets=capacity_buckets_cache,
+        state = await _state(
+            default=FakeProjectionSite(resource_pools=pool_rows, capacity_buckets=bucket_rows)
         )
 
         received: dict = {}
@@ -637,9 +613,8 @@ class TestReconcileListingsUsesCachedProjection:
             assert sqlite_client is repository
             return []
 
-        reconcile = cc._capacity_reconciler(lambda: repository)
+        reconcile = cc._capacity_reconciler(lambda: repository, site_projections=lambda: state)
         with (
-            patch.dict(spc._caches, {"default": caches}, clear=True),
             patch(
                 "market_storefront.services.publication_service."
                 "close_stale_compute_listings_after_capacity_change",
@@ -661,4 +636,3 @@ class TestReconcileListingsUsesCachedProjection:
 
         assert received["site_pool_projection"] == {"default": pool_rows}
         assert received["site_capacity_buckets"] == {"default": bucket_rows}
-

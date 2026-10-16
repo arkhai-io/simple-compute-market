@@ -190,7 +190,7 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     )
     alkahest.oracle.request_arbitration = AsyncMock()
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,
@@ -278,24 +278,22 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         controlled_provision,
     )
 
-    with (
-        settings_overrides(
-            enable_registry_discovery=False,
-            registry__urls=[],
-        ),
-        site_capacity(
+    with settings_overrides(
+        enable_registry_discovery=False,
+        registry__urls=[],
+    ):
+        async with site_capacity(
             fake,
             sqlite_client_factory=lambda: client,
             project_pool_modes=True,
-        ) as aggregate,
-    ):
-        result = await fulfillment_service.fulfill_compute_obligation(
-            sqlite_client=client,
-            evidence=lifecycle.evidence,
-            site_id="default",
-        )
-        # The poller delivers deltas in production; pump them here.
-        await pump_events(aggregate, fake)
+        ) as aggregate:
+            result = await fulfillment_service.fulfill_compute_obligation(
+                sqlite_client=client,
+                evidence=lifecycle.evidence,
+                site_id="default",
+            )
+            # The poller delivers deltas in production; pump them here.
+            await pump_events(aggregate, fake)
 
     assert result["status"] == "fulfilled"
     statuses = {
@@ -460,7 +458,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         raising=False,
     )
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,
@@ -591,7 +589,7 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         raising=False,
     )
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,

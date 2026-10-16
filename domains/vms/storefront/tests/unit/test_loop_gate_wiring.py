@@ -32,7 +32,10 @@ from types import SimpleNamespace
 import pytest
 
 from core_storefront.app_startup import StorefrontBackgroundTask
+import market_storefront.container as container
 from market_storefront import lifecycle
+from market_storefront import lifecycle_steps  # noqa: F401 - registers the loops
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 #: Far longer than any test waits. A loop that sleeps this instead of waiting
 #: through the controller cannot be reported paused within `_PROMPTLY`.
@@ -90,13 +93,19 @@ class TestRegisteredNamesAreTheGatedNames:
             "SETTLEMENT_SERVICING",
             "FULFILLMENT_RESUME",
             "CAPACITY_EVENTS_POLLER",
-            "SITE_PROJECTION_POLLER",
             "PUBLICATION",
         ):
             assert f"name={constant}" in source, (
                 f"{constant} is no longer used to register its loop; a literal "
                 "name here can drift from the one the loop body gates under"
             )
+
+    async def test_the_site_projection_poller_is_a_controller_timer_loop(self):
+        """The poller has no body of its own: it registers its step with an
+        interval, so the controller's timer gates, runs that step, and waits.
+        Held from the start, so its timer runs no cycle here."""
+        lifecycle.controller().request_pause(True)
+        assert set(lifecycle.start_loops()) == {lifecycle.SITE_PROJECTION_POLLER}
 
 
 class TestEachProductionLoopIsHeldWithinItsInterval:
@@ -222,27 +231,28 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
         assert len(failures) == 2, "the loop stopped after a failing sweep"
 
     async def test_site_projection_poller(self, monkeypatch):
-        from market_storefront.services import site_projection_cache as spc
-
-        loads: list[int] = []
+        """The controller's timer over the registered step: it polls once on
+        starting, then a pause holds it within the bound, polling no more."""
         first = asyncio.Event()
 
-        async def _load(_client):
-            loads.append(1)
-            first.set()
+        class _Site(FakeProjectionSite):
+            async def _snapshot(self, family, key):
+                first.set()
+                return await super()._snapshot(family, key)
 
-        monkeypatch.setattr(spc, "load_site_projections", _load)
+        site = _Site(resource_pools=[], capacity_buckets=[])
         monkeypatch.setattr(
-            "market_storefront.utils.config.settings",
-            SimpleNamespace(capacity=SimpleNamespace(poll_interval=_LONG_INTERVAL)),
+            container, "resolved_site_projections", site_projection_state({"default": site})
         )
         name = lifecycle.SITE_PROJECTION_POLLER
-        async with _registered(partial(spc.site_projection_poller_loop, object()), name):
-            await asyncio.wait_for(first.wait(), timeout=_PROMPTLY)
-            states = await _paused_promptly()
+        lifecycle.start_loops()
+        await asyncio.wait_for(first.wait(), timeout=_PROMPTLY)
+        states = await _paused_promptly()
 
         assert states == {name: "paused"}
-        assert loads == [1], "a held poller pulled projections again"
+        assert site.snapshots == {"resource_pool": 1, "capacity_bucket": 1}, (
+            "a held poller polled again"
+        )
 
     async def test_publication_loop_gates_before_any_cycle(self):
         """Held from the start, the publication loop reaches its gate and runs no cycle."""

@@ -21,11 +21,6 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 import pytest_asyncio
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client.client import StorefrontClient, StorefrontClientError
@@ -40,9 +35,9 @@ from market_storefront.middleware import admin_identity as _admin_identity
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 import market_storefront.negotiation_runtime as _negotiation_runtime
 from market_storefront.publication_binding import prepare_vm_listing_binding
-from market_storefront.services import site_projection_cache
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import FakeProjectionSite, loaded_site_projection_state
 from tests.listing_service_fixtures import vm_listing_collaborators
 
 _VM_PROVISION_TERMS = {
@@ -149,24 +144,15 @@ async def _seed_listing(
         await db.upsert_listing(listing_id=listing_id, **listing_kwargs)
 
 
-def _vm_pool_projection_caches():
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = [{
+async def _vm_pool_projections():
+    """The home site's held projection: one VM pool and no members."""
+    return await loaded_site_projection_state({_HOME_SITE: FakeProjectionSite(resource_pools=[{
         "pool_id": "pool-vm",
         "pool_metadata": {
             "policy_tags": {"deliverable_modes": ["vm"]},
         },
         "resources": [],
-    }]
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(
-        revision=1,
-        digest="vm-pool",
-    )
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
+    }])})
 
 
 @pytest_asyncio.fixture
@@ -177,6 +163,7 @@ async def client(
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = None  # not used by read/pause/resume
     _container.resolved_marketplace_signer = _TEST_MARKETPLACE_SIGNER
+    monkeypatch.setattr(_container, "resolved_site_projections", await _vm_pool_projections())
 
     app = FastAPI()
     app.include_router(listings_router)
@@ -184,11 +171,6 @@ async def client(
 
     transport = httpx.ASGITransport(app=app)
     with (
-        patch.dict(
-            site_projection_cache._caches,
-            {_HOME_SITE: _vm_pool_projection_caches()},
-            clear=True,
-        ),
         settings_overrides(
             enable_registry_discovery=False,
             registry__urls=[],
@@ -451,11 +433,13 @@ async def admin_client(
         authorities=_TEST_PROVISIONING_AUTHORITIES,
     )
 
+    site_projections = await _vm_pool_projections()
     listing_svc = ListingService(
         registry=collaborators.registry,
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=site_projections,
         sqlite_client=db,
         alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
@@ -465,6 +449,7 @@ async def admin_client(
         "market_storefront.services.capacity_client.get_provisioning_authorities",
         lambda: _TEST_PROVISIONING_AUTHORITIES,
     )
+    monkeypatch.setattr(_container, "resolved_site_projections", site_projections)
 
     _container.resolved_sqlite_client = db
     _container.resolved_listing_service = listing_svc
@@ -485,6 +470,7 @@ async def admin_client(
             registry=db.domain_registry,
             binding=registration.binding,
             capacity_runtime=collaborators.capacity_runtime,
+            site_projections=site_projections,
             listing_source_check=source_matches,
         )
     )
@@ -494,19 +480,14 @@ async def admin_client(
     app.include_router(admin_router)
     _configure_administrator_auth(app, db, monkeypatch)
     transport = httpx.ASGITransport(app=app)
-    with patch.dict(
-        site_projection_cache._caches,
-        {_HOME_SITE: _vm_pool_projection_caches()},
-        clear=True,
-    ):
-        async with StorefrontClient(
-            "http://test",
-            signer=_TEST_ADMIN_SIGNER,
-            caller_role="admin",
-            expected_publishers=_TEST_PUBLISHERS,
-            transport=transport,
-        ) as c:
-            yield c, db
+    async with StorefrontClient(
+        "http://test",
+        signer=_TEST_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_TEST_PUBLISHERS,
+        transport=transport,
+    ) as c:
+        yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None
@@ -533,6 +514,7 @@ async def unsigned_admin_client(
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=db,
         alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
@@ -782,12 +764,11 @@ async def seller_auth_client(db):
     _container.resolved_marketplace_signer = None
 
 
-def _declared_pool_projection_caches(
+async def _declared_pool_projections(
     *, resource_id: str = "res-test-1", capacity_backing: str = "backed"
 ):
-    """A site projection whose pool declares both declarations explicitly."""
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = [{
+    """The home site's held projection, whose pool states both declarations."""
+    return await loaded_site_projection_state({_HOME_SITE: FakeProjectionSite(resource_pools=[{
         "pool_id": "pool-vm",
         "pool_metadata": {
             "enabled": True,
@@ -803,13 +784,7 @@ def _declared_pool_projection_caches(
             "capacity": {"gpu_count": 1},
             "attributes": {"gpu_model": "H200", "region": "California, US"},
         }],
-    }]
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="declared-pool")
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
+    }])})
 
 
 @pytest_asyncio.fixture
@@ -832,6 +807,7 @@ async def seller_auth_full_client(db):
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=await _declared_pool_projections(),
         sqlite_client=db,
         alkahest_clients={},
         marketplace_signer=_TEST_MARKETPLACE_SIGNER,
@@ -847,19 +823,14 @@ async def seller_auth_full_client(db):
     app.middleware("http")(listing_lifecycle_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    with patch.dict(
-        site_projection_cache._caches,
-        {_HOME_SITE: _declared_pool_projection_caches()},
-        clear=True,
-    ):
-        async with StorefrontClient(
-            "http://test",
-            signer=_TEST_MARKETPLACE_SIGNER,
-            caller_role="seller",
-            expected_publishers=_TEST_PUBLISHERS,
-            transport=transport,
-        ) as c:
-            yield c, db
+    async with StorefrontClient(
+        "http://test",
+        signer=_TEST_MARKETPLACE_SIGNER,
+        caller_role="seller",
+        expected_publishers=_TEST_PUBLISHERS,
+        transport=transport,
+    ) as c:
+        yield c, db
 
     _container.resolved_sqlite_client = None
     _container.resolved_listing_service = None

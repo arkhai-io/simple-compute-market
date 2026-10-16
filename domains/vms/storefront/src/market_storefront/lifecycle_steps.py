@@ -9,6 +9,8 @@ Steps resolve their collaborators from the container when they run, not when
 they are registered, so they answer the same way whether or not startup has
 started the loops.
 Registration happens when this module is imported, which the admin routes do.
+The site-projection poller registers its interval with its step, so the
+controller's timer runs that step; startup starts the timer.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_capacity_publication import SiteProjectionState
 from market_contact_exchange import INTRODUCTION_RETENTION_ROUTE
 from market_storefront_kit import LifecycleRouteError, sweep_stale_negotiations
 
@@ -30,17 +33,16 @@ from market_storefront.lifecycle import (
     PUBLICATION,
     SETTLEMENT_SERVICING,
     SITE_PROJECTION_POLLER,
+    register_loop,
     register_step,
 )
 from market_storefront.services.fulfillment_resume_runtime import (
     resume_incomplete_fulfillments_once,
 )
 from market_storefront.services.publication_loop import run_publication_cycle_once
-from market_storefront.services.site_projection_cache import (
-    load_site_projections,
-    projection_status_summary,
-)
+from market_storefront.services.capacity_client import site_projection_status
 from market_storefront.startup import _negotiation_watchdog_policy
+from market_storefront.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,12 @@ def _sqlite_client() -> Any:
     if _container.resolved_sqlite_client is None:
         raise LifecycleRouteError(503, "storefront persistence is not initialized")
     return _container.resolved_sqlite_client
+
+
+def _site_projections() -> SiteProjectionState:
+    if _container.resolved_site_projections is None:
+        raise LifecycleRouteError(503, "site projection state is unavailable")
+    return _container.resolved_site_projections
 
 
 def _capacity_runtime() -> Any:
@@ -82,9 +90,20 @@ async def fulfillment_resume_step() -> Mapping[str, Any]:
 
 
 async def site_projections_step() -> Mapping[str, Any]:
-    """The projection poller's own cycle: pull every site's projection now."""
-    await load_site_projections(_sqlite_client())
-    return {"loop": SITE_PROJECTION_POLLER, "sites": projection_status_summary()}
+    """The projection poller's cycle: poll every site's families in place.
+
+    The timer runs this same step, so an operator stepping the held poller runs
+    exactly its cycle: a site that cannot be reached keeps its last generation
+    as `stale`, and a resource-pool change wakes publication.
+    """
+    state = _site_projections()
+    await state.poll_once()
+    return {"loop": SITE_PROJECTION_POLLER, "sites": site_projection_status(state)}
+
+
+def _site_projection_poll_interval() -> float:
+    capacity = getattr(settings, "capacity", None)
+    return float(getattr(capacity, "poll_interval", 5) or 5)
 
 
 async def capacity_events_step() -> Mapping[str, Any]:
@@ -160,7 +179,12 @@ def register_vm_lifecycle_steps() -> None:
     register_step(NEGOTIATION_WATCHDOG, route="negotiation-watchdog", step=negotiation_watchdog_step)
     register_step(SETTLEMENT_SERVICING, route="settlement-servicing", step=settlement_servicing_step)
     register_step(FULFILLMENT_RESUME, route="fulfillment-resume", step=fulfillment_resume_step)
-    register_step(SITE_PROJECTION_POLLER, route="site-projections", step=site_projections_step)
+    register_loop(
+        SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=site_projections_step,
+        interval_seconds=_site_projection_poll_interval(),
+    )
     register_step(
         CAPACITY_EVENTS_POLLER,
         route="capacity-events",

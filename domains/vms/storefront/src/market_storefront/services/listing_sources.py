@@ -11,20 +11,19 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
 from market_resource_pools import SiteDeclarations, read_site_declarations
 from market_resource_pools_contracts.backing import CapacityBacking
-from market_storefront.services.site_projection_cache import projection_caches
 
 
 class ListingSourceUnavailable(ValueError):
     """The source's site does not currently declare it as publishable."""
 
 
-def _site_pools(site_id: str) -> Sequence[Mapping[str, Any]] | None:
-    caches = projection_caches().get(site_id)
-    if caches is None:
-        return None
-    return caches.resource_pools.view().value
+def _site_pools(
+    site_projections: SiteProjectionState, site_id: str
+) -> Sequence[Mapping[str, Any]] | None:
+    return site_projections.values(RESOURCE_POOL).get(site_id)
 
 
 def _pool_for_source(
@@ -46,6 +45,7 @@ def _pool_for_source(
 
 
 def resolve_source_backing(
+    site_projections: SiteProjectionState,
     *,
     site_id: str,
     pool_id: str | None,
@@ -58,7 +58,7 @@ def resolve_source_backing(
     advertisable for ``offering_mode``, under that site generation's declaration
     rule; anything else is refused rather than classified.
     """
-    pools = _site_pools(site_id)
+    pools = _site_pools(site_projections, site_id)
     if pools is None:
         raise ListingSourceUnavailable(
             f"site {site_id!r} has no loaded resource-pool projection"

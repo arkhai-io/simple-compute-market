@@ -28,7 +28,6 @@ candidate derivation".
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
@@ -44,18 +43,12 @@ from core_storefront.site_projections import (
 
 from .capacity import CapacityBindingError, CapacityConfigurationError
 
-logger = logging.getLogger(__name__)
-
 RESOURCE_POOL = "resource_pool"
 CAPACITY_BUCKET = "capacity_bucket"
 FAMILIES: tuple[str, ...] = (RESOURCE_POOL, CAPACITY_BUCKET)
 
 # The key each family's snapshot carries its rows under.
 _ROWS_KEY = {RESOURCE_POOL: "resource_pools", CAPACITY_BUCKET: "capacity_buckets"}
-
-#: How often a held poller re-reads its gate. A held loop cannot wait through
-#: the controller, whose wait returns at once while a pause is requested.
-_HELD_POLL_SECONDS = 0.05
 
 Rows = list[dict[str, Any]]
 
@@ -182,29 +175,6 @@ class SiteProjectionState:
             dict.fromkeys(_require_family(family) for family in families)
         )
         await asyncio.gather(*(caches[family].refresh(force=True) for family in selected))
-
-    async def run(
-        self,
-        *,
-        interval: float,
-        gate: Callable[[], bool],
-        wait: Callable[[float], Awaitable[None]],
-    ) -> None:
-        """Run the poller until cancelled: gate, ``poll_once``, then ``wait``.
-
-        ``wait`` is the loop controller's interruptible wait, so a pause
-        requested during an interval reaches the gate at once.
-        """
-
-        while True:
-            if gate():
-                await asyncio.sleep(_HELD_POLL_SECONDS)
-                continue
-            try:
-                await self.poll_once()
-            except Exception:
-                logger.exception("[PROJECTIONS] site projection poll failed")
-            await wait(interval)
 
     def _site(self, site_id: str) -> dict[str, ProjectionCache[Rows]]:
         caches = self._caches.get(site_id)

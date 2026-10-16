@@ -134,7 +134,7 @@ async def admin_client(
     app.middleware("http")(administrator_identity_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    with site_capacity(
+    async with site_capacity(
         capacity_site,
         site_name="site-test",
         sqlite_client_factory=lambda: db,

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     )
     from core_storefront.services.negotiation_service import NegotiationService
     from market_capability_admissibility import Declaration
-    from market_capacity_publication import CapacityRuntime
+    from market_capacity_publication import CapacityRuntime, SiteProjectionState
     from market_contact_exchange import ContactExchangeComposition
     from market_delivery import SellerIntroductionDelivery
     from market_identity import Signer
@@ -41,6 +41,9 @@ resolved_sqlite_client: SQLiteClient | None = None
 resolved_marketplace_signer: Signer | None = None
 resolved_negotiation_runtime: NegotiationRuntime | None = None
 resolved_capacity_runtime: CapacityRuntime | None = None
+# Both projection families of every configured site, built once over the
+# capacity runtime's aggregate and read by every consumer in the process.
+resolved_site_projections: SiteProjectionState | None = None
 
 # AlkahestClient instances keyed by chain name. Populated from
 # AlkahestService.build_clients(). May be empty if no chains are
@@ -77,6 +80,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     global resolved_marketplace_signer
     global resolved_negotiation_runtime
     global resolved_capacity_runtime
+    global resolved_site_projections
     global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
@@ -102,6 +106,7 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_alkahest_clients = {}
     resolved_negotiation_runtime = None
     resolved_capacity_runtime = None
+    resolved_site_projections = None
     resolved_listing_service = None
     resolved_negotiation_service = None
     resolved_system_service = None
@@ -112,6 +117,13 @@ def clear_lifespan_state(*, registry: StorefrontDomainRegistry) -> None:
     resolved_admissibility_default = None
     resolved_storefront_service = None
 
+
+
+def site_projections() -> SiteProjectionState:
+    """The process's site projection state; composition sets it before serving."""
+    if resolved_site_projections is None:
+        raise RuntimeError("site projection state is not composed")
+    return resolved_site_projections
 
 
 def get_alkahest_client(chain_name: str) -> Any | None:

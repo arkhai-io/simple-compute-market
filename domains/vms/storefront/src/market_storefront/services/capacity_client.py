@@ -41,11 +41,14 @@ from core_storefront.aggregation import (
     most_available,
 )
 from market_capacity_publication import (
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
     run_capacity_event_pollers,
     CapacityReconcileContext,
     CapacityRuntime,
     CapacitySite,
     PublicationBinding,
+    SiteProjectionState,
     publication_binding,
 )
 from market_core import VersionedEnvelope
@@ -101,10 +104,21 @@ _CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
 _MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
 
 
+def _composed_site_projections() -> SiteProjectionState | None:
+    return container.resolved_site_projections
+
+
 def _capacity_reconciler(
     sqlite_client_factory: SQLiteClientFactory,
+    *,
+    site_projections: Callable[[], SiteProjectionState | None] = _composed_site_projections,
 ) -> Callable[[CapacityReconcileContext], Any]:
-    """Supply VM candidate semantics to the kit-owned reconciliation loop."""
+    """Supply VM candidate semantics to the kit-owned reconciliation loop.
+
+    The projection state is read when a delta arrives, not when the reconciler
+    is built: the state is composed over this runtime's own aggregate, so it
+    cannot exist when the runtime's reconciler does.
+    """
 
     async def _reconcile(context: CapacityReconcileContext) -> None:
         from core_storefront.stage_log import stage_event
@@ -114,9 +128,15 @@ def _capacity_reconciler(
             reopen_available_compute_listings_after_capacity_change,
         )
 
+        state = site_projections()
+        if state is None:
+            # No site's projection is held, so every listing's source is
+            # unknown and nothing may be closed or reopened on it.
+            logger.warning("[CAPACITY] no site projection state; delta not reconciled")
+            return
         db = sqlite_client_factory()
-        projection = site_pool_projection()
-        buckets = site_capacity_buckets()
+        projection = site_pool_projection(state)
+        buckets = site_capacity_buckets(state)
         delta = context.delta
         close = (
             delta is None
@@ -498,49 +518,50 @@ def build_fulfillment_client(
     return aggregate
 
 
-def site_pool_projection() -> dict[str, list[dict[str, Any]]]:
-    """Resource-pool projection rows per site, from the storefront's own
-    background poller cache (``site_projection_cache``).
+def site_pool_projection(state: SiteProjectionState) -> dict[str, list[dict[str, Any]]]:
+    """Resource-pool projection rows per site, from the storefront's one
+    per-site projection state.
 
-    Only sites whose cache holds a value contribute, loaded or stale; a site
-    that has never loaded, or whose load failed with no earlier value, is
-    absent. A loaded site is included *even when its rows list is empty*:
-    that is an authoritative "this site has zero pools" answer, distinct from
-    "this site's answer is not known". Derivation holds the listings of every
-    configured site absent here rather than reading it as empty, and an empty
-    mapping derives nothing.
+    Only sites holding a generation contribute, loaded or stale; a site that
+    has never loaded, or whose load failed with no earlier value, is absent. A
+    loaded site is included *even when its rows list is empty*: that is an
+    authoritative "this site has zero pools" answer, distinct from "this site's
+    answer is not known". Derivation holds the listings of every configured
+    site absent here rather than reading it as empty, and an empty mapping
+    derives nothing.
 
     Publication, capacity reconciliation, the inventory guard, and override
     status all read listing sources through this, so they never disagree about
     which sites are known.
     """
-    from market_storefront.services.site_projection_cache import projection_caches
-
-    result: dict[str, list[dict[str, Any]]] = {}
-    for site, caches in projection_caches().items():
-        value = caches.resource_pools.view().value
-        if value is not None:
-            result[site] = value
-    return result
+    return dict(state.values(RESOURCE_POOL))
 
 
-def site_capacity_buckets() -> dict[str, list[dict[str, Any]]]:
-    """Grouped capacity-bucket rows per site, same cache/inclusion rule as
-    ``site_pool_projection`` (above) -- only a site whose capacity-bucket
-    family has ever loaded contributes, including an authoritative empty
-    list, for the same reason: `reconciler`'s fungible-mode row builder
+def site_capacity_buckets(state: SiteProjectionState) -> dict[str, list[dict[str, Any]]]:
+    """Grouped capacity-bucket rows per site, under ``site_pool_projection``'s
+    inclusion rule -- only a site whose capacity-bucket family holds a
+    generation contributes, including an authoritative empty list, for the
+    same reason: `reconciler`'s fungible-mode row builder
     (`_projected_pool_rows`) must be able to tell "no bucket data yet" from
     "genuinely zero buckets" and falls back to its own resource-list
     computation only in the former case.
     """
-    from market_storefront.services.site_projection_cache import projection_caches
+    return dict(state.values(CAPACITY_BUCKET))
 
-    result: dict[str, list[dict[str, Any]]] = {}
-    for site, caches in projection_caches().items():
-        value = caches.capacity_buckets.view().value
-        if value is not None:
-            result[site] = value
-    return result
+
+def site_projection_status(
+    state: SiteProjectionState,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Per-site, per-family load state as operator surfaces report it.
+
+    State and identity only, never the held rows. A missing site or a
+    `not_loaded`/`unavailable`/`invalid` state means the family has not been
+    confirmed; it must never be read as authoritative empty capacity.
+    """
+    return {
+        site_id: {family: status.model_dump() for family, status in families.items()}
+        for site_id, families in state.status().items()
+    }
 
 
 async def capacity_events_poller_loop(sqlite_client: Any) -> None:

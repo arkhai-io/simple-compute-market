@@ -33,6 +33,7 @@ from market_negotiation_runtime import (
     StorefrontPausedError,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 _BUYER_SIGNER = create_signer("ed25519", b"\x41" * 32)
@@ -84,6 +85,10 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
+        # The site has served nothing, so no listing's source is confirmed.
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
     return await runtime.start(
         repository=sqlite_client,

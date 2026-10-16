@@ -1378,13 +1378,28 @@ Delivers VM on one injected `SiteProjectionState` (D2, D3, D4, C2, C7; correctio
 storefront only. The largest section by file count: about ten production modules and
 fifteen test files, mechanically.
 
-- [ ] 8.1 Composition: `src/server.py` builds the state once over the capacity runtime's
+- [x] 8.1 Composition: `src/server.py` builds the state once over the capacity runtime's
       aggregate client, with `wake_publication_loop` as `on_resource_pool_change`;
       `src/container.py` holds it; `src/startup.py`'s `_load_site_projections` calls
       `poll_once()`. The poller registers as the `site_projection_poller` loop on the
       controller with `register_loop`, interval `[capacity].poll_interval`, replacing
       `site_projection_poller_loop`.
-- [ ] 8.2 Consumers take the injected state, never a module: `services/capacity_client.py`
+      Done. `_build_vm_services` builds `SiteProjectionState(capacity_runtime.client(),
+      on_resource_pool_change=wake_publication_loop)` after the capacity runtime and
+      before every consumer; `VmStorefrontServices.site_projections` carries it and
+      `_start_vm_services` sets `container.resolved_site_projections`, which
+      `clear_lifespan_state` clears (`container.site_projections()` is the accessor, raising
+      when nothing is composed). `startup._load_site_projections` runs `poll_once()`.
+      **Differed:** the poller registers in `lifecycle_steps.register_vm_lifecycle_steps`,
+      at import, as `register_loop(SITE_PROJECTION_POLLER, route="site-projections",
+      step=site_projections_step, interval_seconds=[capacity].poll_interval)`, not in
+      `startup.py`: VM registers its steps at import, and `lifecycle_steps` imports
+      `startup`, so `startup` cannot import it back. Startup's `site_projection_poller`
+      step calls the new `lifecycle.start_loops()`, which starts every loop registered
+      with an interval -- only the poller until Section 9 registers the rest.
+      `site_projection_poller_loop` is gone. The interval is read from settings when the
+      module is imported.
+- [x] 8.2 Consumers take the injected state, never a module: `services/capacity_client.py`
       (`site_pool_projection`, `site_capacity_buckets`, `_reconcile`),
       `services/listing_sources.py`, `services/listing_source_check.py`,
       `services/publication_loop.py`, `negotiation_runtime.py`
@@ -1392,15 +1407,45 @@ fifteen test files, mechanically.
       (projection status from `status()`), `server.py` (`PoolOverrideService`'s
       `projection_source` reads `values(RESOURCE_POOL)` and `refresh_site` calls
       `refresh_site(site_id)`), and `controllers/admin_controller.py`.
-- [ ] 8.3 Refresh categories (D4, C7): inline reconciliation in `admin_controller.py`
+      Done. Injected where a constructor or builder already takes its collaborators:
+      `ListingService(site_projections=)` (its default source-backing resolver is
+      `partial(resolve_source_backing, site_projections)`; `resolve_source_backing` takes
+      the state first), `build_vm_negotiation_runtime(site_projections=)`, which passes it
+      to `check_listing_source(site_projections=)` and `_place_capacity_hold` /
+      `lookup_pool_policy_tags(repository, listing_id, site_projections)`,
+      `SystemService(site_projections=)` (its default status and cardinality providers
+      bind it), `build_pool_override_service(site_projections=)` (`projection_source` is
+      `partial(site_pool_projection, state)`, `refresh_site` the state's), and
+      `VmPublicationCycle(site_projections=)`. Read from the container when they run, as
+      those modules read their other collaborators: `run_publication_cycle_once`,
+      `failure_actions._release_capacity`, the admin controller, the lifecycle steps, and
+      the capacity reconciler, whose `_capacity_reconciler(factory, *, site_projections=)`
+      provider defaults to the container because the state is built over the runtime's
+      own aggregate, after the runtime and its reconciler exist; with no state composed a
+      delta reconciles nothing (logged). `capacity_client`'s `site_pool_projection(state)`,
+      `site_capacity_buckets(state)`, and new `site_projection_status(state)` (the status
+      models as dicts) are the three readers. **Behaviour change:** an override write now
+      refreshes both of the site's families (`refresh_site`), not the resource-pool family
+      alone.
+- [x] 8.3 Refresh categories (D4, C7): inline reconciliation in `admin_controller.py`
       (`_close_oversized_compute_listings`, `_reopen_available_compute_listings`) and
       `failure_actions.py` (`_release_capacity`) calls `refresh_site` and never wakes; the
       admin route `POST /api/v1/admin/capacity/projections/refresh` runs `poll_once()` and
       returns `status()`, whether or not the loops are held, keeping its wire contract (D3);
       the override service's wake stays as it is.
-- [ ] 8.4 `lifecycle_steps.py`: the `site-projections` step runs `poll_once()` and returns
+      Done. `_close_oversized_compute_listings`, `_reopen_available_compute_listings`, and
+      `_release_capacity` call `refresh_site(site)` and wake nothing (the old release-path
+      comment that claimed a refresh wakes publication went with its local import). The
+      admin refresh route runs `poll_once()` and returns `{"sites":
+      site_projection_status(state)}`, the same wire shape as before (each family's
+      `state`, `revision`, `digest`, `last_error`, `fetched_at`), held or not, and no
+      longer replaces the caches. The override service's wake is unchanged.
+- [x] 8.4 `lifecycle_steps.py`: the `site-projections` step runs `poll_once()` and returns
       `status()` (C2).
-- [ ] 8.5 `services/site_projection_cache.py` reduced to
+      Done: `site_projections_step` runs `poll_once()` on the container's state (503
+      `LifecycleRouteError` before composition) and returns `{"loop", "sites":
+      site_projection_status(state)}`; it is also the registered timer's step.
+- [x] 8.5 `services/site_projection_cache.py` reduced to
       `listing_cardinality_mode_explanations`, reading the state it is given; `_caches`,
       the loaders, the poller, the refresh functions, and the unused
       `refresh_after_topology_error` go, and so does VM's `_RemoteProjectionClient`, which
@@ -1410,7 +1455,27 @@ fifteen test files, mechanically.
       `SiteProjectionState.run` and its tests unless something else calls it: it reads its
       gate once and can then wait on a family's lock, the gap Section 3 closed for the
       controller's timer and the capacity-event poller.
-- [ ] 8.6 Tests build their own state over `tests/fake_site.py`'s fake aggregate and inject
+      Done. `services/site_projection_cache.py` is deleted: `_caches`, the loaders,
+      `site_projection_poller_loop`, the refresh functions, `refresh_after_topology_error`,
+      `projection_status_summary`, and VM's `_RemoteProjectionClient` go. The explanations
+      move to `services/listing_cardinality_explanations.py` as
+      `listing_cardinality_mode_explanations(site_projections)`, its
+      `arkhai_vms_listings` import now at module level. The VM listings reconciler's
+      docstring names the state instead (docstring only; `arkhai-vms-listings` keeps
+      0.5.0). Nothing called `SiteProjectionState.run`, so it goes with its test,
+      `_HELD_POLL_SECONDS`, and the module logger: `arkhai-kit-capacity-publication` 0.9.0
+      (an incompatible removal), the three storefronts' exact pins `==0.9.0`. `make lock`
+      cannot run here (the PyTorch index is refused, as in 2.6), so `scripts/uv_project.py
+      lock` relocked the four projects that lock the kit and resolve here
+      (`domains/apicredits/storefront`, `domains/bare_metal/storefront`, `e2e-tests`,
+      `kit/capacity-publication`); VM storefront's lock was edited by hand with the three
+      substitutions uv wrote into bare metal's (version, wheel name, specifier) and
+      `make check-packaging` passes with it (16.6 relocks it). **Also changed:**
+      `openspec/specs/site-capacity/spec.md` cited the deleted
+      `tests/unit/services/test_site_projection_cache.py` as evidence for per-site
+      load-state reporting; it now cites `kit/capacity-publication/tests/unit/test_site_projection_state.py`,
+      where that evidence lives, so the citation resolves.
+- [x] 8.6 Tests build their own state over `tests/fake_site.py`'s fake aggregate and inject
       it through the container, never patching a module (`TESTING.md` "Mocking
       convention"): `tests/unit/services/test_site_projection_cache.py`,
       `tests/unit/test_listing_source_check.py`, `tests/unit/test_publications_wiring.py`,
@@ -1427,10 +1492,122 @@ fifteen test files, mechanically.
       a topology-sensitive refusal checks both families once and does not retry ("A
       refused reservation reveals drift"); stepping `site-projections` while held runs the
       poller's cycle ("The projection step is run while held").
-- [ ] 8.7 Validation: `make test-storefront`, `make test-vms-domain`, `make test`.
+      Done. `tests/fake_site.py`: `FakeProjectionSite` (one site's two families, served
+      as a test sets them under a digest of the rows, `None` serving nothing, `failing`,
+      per-family `snapshots`, `calls`, and the installed topology handler),
+      `site_projection_state(sites)` over a fake aggregate or a runtime's own, and
+      `loaded_site_projection_state`; `FakeSite` serves the capacity-bucket family when
+      `capacity_buckets` is set (default `None`, keeping the bucket-less derivation the
+      suites assumed); `site_capacity` is now an async context manager injecting a state
+      over the runtime's own aggregate through the container, loaded with
+      `project_pool_modes`; `pump_events` polls that state instead of writing a cache's
+      value. Every listed file now builds a state and injects it (constructor or
+      `container.resolved_site_projections`); no test patches a projection module. Also
+      adapted, as their constructors changed: `test_domain_runtime_wiring.py`,
+      `test_settlement_reconciliation.py`, `test_listing_settlement_config.py`,
+      `test_order_pause_state.py`, `test_sync_negotiation_seller_round_hook.py`,
+      `test_two_phase_reserve.py` (its pre-existing `lookup_pool_policy_tags` patch takes
+      the new argument), `test_fulfillment_service.py`, `test_failure_policy.py`,
+      `test_server_app_composition.py` (asserts the one state is the one the negotiation
+      runtime was given, and is cleared), `test_negotiations_api.py`,
+      `test_inventory_freeze.py`, `test_settle_controller.py`, `introduction_deals.py`,
+      and `listing_service_fixtures.py` (collaborators carry an unpolled state).
+      `test_site_projection_cache.py` became `test_listing_cardinality_explanations.py`
+      (its load and status cases are the kit's now; one case added: a stale generation is
+      still explained); `site_projection_status` is tested in
+      `test_remote_capacity_client.py`, with a stale site keeping its generation and a
+      reconciler with no state reconciling nothing. Projection patches that nothing read
+      went without replacement (`test_abandon_truncation.py`, and the
+      `test_publications_wiring.py` fixture): the tests pass without them.
+      **Harness semantics:** the old harness gave its cache the pool list itself, so any
+      edit was visible with no poll; the state holds what a site served at its last poll
+      or refresh, as production does. The publication suites' `_cycle` helpers (and
+      `introduction_deals.publish`) therefore step `site-projections` before stepping
+      publication; two cases poll explicitly before stepping another loop or the guard;
+      snapshot-count assertions measure the change around the write. A held state never
+      forgets a site, so "a site with no projection" is now a restart:
+      `publication_app(unreachable_sites=...)` fails a site from the first load, and a
+      second app over the same `tmp_path` reopens the first's database
+      (`test_pool_overrides_api.py`'s two cases); `test_negotiate_controller.py`'s
+      "source cannot be read" cases rebuild the negotiation runtime over a state whose site
+      never answered. Until Section 9's freshness window, a stale but held site still
+      confirms a source check, so those cases cannot use a failed poll instead.
+      New application integration, through `StorefrontClient`:
+      `tests/integration/test_site_projection_state.py` -- the admin refresh with site-a
+      unreachable, running and held: site-a reported `stale` with its error, site-b
+      `loaded`, one wake for site-b's change, site-a's listing still derived (no hold) and
+      site-b's new pool published, the loops still held (fails, both cases, with the route
+      replaced by a per-site `refresh_site`, which wakes nothing); stepping
+      `site-projections` while held runs the poller's cycle: one fetch of the changed site
+      only, one wake, nothing published, still held, and a step with no change waking
+      nothing. `tests/integration/test_admin_api.py::test_a_refused_reservation_checks_both_families_once_and_is_not_retried`
+      -- a site answering the reservation 409 after its pool changed: one POST, then one
+      version check of each family through the handler the state installed on the
+      runtime's own site client, only the changed family fetched, one wake.
+      VM storefront (frozen environment, `UV_FROZEN=1 make test-unit test-integration`):
+      unit 1029 passed, 1 skipped; integration 422 passed (four new).
+- [x] 8.7 Validation: `make test-storefront`, `make test-vms-domain`, `make test`.
       End-to-end (VM lane): `e2e_deal`, `e2e_deal_buyer_cli`, `multi_registry` (which
       calls the admin refresh), `e2e_listing_shapes`, `e2e_compute_dynamic_listings`,
       `e2e_pool_declared_modes`, `e2e_vm_introduction`.
+      Done. `make test-storefront` cannot reinit here (the PyTorch index is refused, as in
+      2.6), so VM storefront ran in its frozen environment with the rebuilt wheels
+      reinstalled (`UV_FROZEN=1 make test-unit test-integration`): unit 1029 passed,
+      1 skipped; integration 422 passed (application integration, typed client;
+      `test_alkahest` against Anvil included). `make -k test`: 54 pytest runs and every
+      non-Python suite passed, `make test-vms-domain` (53 passed) among them, kit
+      capacity-publication 92 (unit), bare metal 134 + 323 + 11 + 40 and API-credit
+      storefront 149 on the 0.9.0 kit; it stopped only at the reinit of `kit/policy`,
+      `domains/vms/storefront`, and `domains/vms/buyer`, run frozen: `kit/policy` 80
+      passed, VM buyer 202 passed (with the rebuilt `arkhai-vms-listings` reinstalled).
+      `make check-packaging` (architecture rules included), `make check-comment-hygiene`,
+      `make check-doc-citations CHANGE=share-site-projection-state` (nothing reported),
+      and `openspec validate --strict` pass. No repository typing target exists; none was
+      run. The pipeline was not run for this section.
+      **End-to-end, confirmed against the scenarios:** every VM-lane scenario composes the
+      state at startup and publishes, negotiates, and checks sources through it. Those that
+      reach the changed surfaces directly: `multi_registry`, `e2e_listing_shapes`,
+      `e2e_compute_dynamic_listings`, and `e2e_vm_introduction` call the admin refresh
+      (`host_registry.refresh_storefront_projections`, now `poll_once()`, asserting every
+      family `loaded`); `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, and
+      `e2e_non_erc20_settlement` step `site-projections` (now `poll_once()`), and
+      `e2e_compute_dynamic_listings` reads `listing_cardinality_mode_explanations` from
+      status. `e2e_pool_declared_modes` reaches it only through startup and the source
+      check. The smoke test `test_site_projections_loaded` reads status's
+      `site_projections`, whose shape is unchanged. No bare-metal or API-credit scenario
+      reaches it (bare metal still fetches live until Section 13).
+
+Section 8 handoff:
+
+- Section 9 registers the other VM loops with `register_loop` in
+  `lifecycle_steps.register_vm_lifecycle_steps`, as the poller now is, and startup's one
+  `lifecycle.start_loops()` (today in the `site_projection_poller` step, after
+  `load_site_projections`) then starts them all; move that call to wherever every loop may
+  start, keeping the poller's first timer cycle after the first load.
+- The poller's interval is read from `[capacity].poll_interval` when `lifecycle_steps` is
+  imported; a test wanting another interval registers the loop again before
+  `start_loops()`.
+- 9.2's freshness check has what it needs: `check_listing_source` receives the state
+  (`site_projections=`); read each family with `view(site, family)` and
+  `freshly_confirmed`. Until then a stale but held site still confirms a source check.
+- 9.4's status can build on `capacity_client.site_projection_status(state)`.
+- Tests: `tests.fake_site.FakeProjectionSite` and `site_projection_state` /
+  `loaded_site_projection_state` build a state over fake sites; `site_capacity` (now
+  `async with`) injects one over the runtime's own aggregate, so the topology handler is
+  the real site client's. `FakeSite.capacity_buckets` is `None` by default (no bucket
+  family served), which the existing derivation tests depend on; a test needing the
+  bucket family sets a list. The publication harness's `wakes` records each wake;
+  `unreachable_sites` plus a second app over the same `tmp_path` is how a test restarts
+  with a site that holds nothing, because a held state never forgets a site.
+- The publication suites step `site-projections` before every publication cycle
+  (`_cycle`), so a held-loops test that negotiates after Section 9's window passes must
+  step it again, as the e2e scenarios do.
+- `build_capacity_runtime_for` caches the runtime by configuration key, so a rebuilt app
+  in one process builds a new state over the same aggregate; the new state's constructor
+  installs its topology handler over the old one's. 10.2's cache-key change keeps that.
+- `container.site_projections()` raises when nothing is composed; the lifecycle step turns
+  that into a 503 itself, the admin route and inline reconciliation do not need to (the
+  lifespan sets the state before any route serves).
 
 ## 9. VM loops on the cycle boundary, freshness, and lifecycle status
 

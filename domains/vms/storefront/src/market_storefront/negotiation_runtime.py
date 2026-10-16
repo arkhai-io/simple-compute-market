@@ -27,7 +27,11 @@ from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.proposals import ReleaseConditionError
 from market_arkhai_payments import PaymentSellerStage
-from market_capacity_publication import CapacityRuntime
+from market_capacity_publication import (
+    RESOURCE_POOL,
+    CapacityRuntime,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
@@ -642,8 +646,9 @@ async def _persist_artifacts(
 def lookup_pool_policy_tags(
     repository: Any,
     listing_id: str | None,
+    site_projections: SiteProjectionState,
 ) -> dict[str, Any]:
-    """Return the live policy tags for the pool mapped to a VM listing."""
+    """Return the held policy tags for the pool mapped to a VM listing."""
 
     if not listing_id:
         return {}
@@ -653,18 +658,11 @@ def lookup_pool_policy_tags(
             site_id_for_listing,
         )
 
-        from market_storefront.services.site_projection_cache import (
-            projection_caches,
-        )
-
         site_id = site_id_for_listing(repository.db_path, listing_id)
         pool_id = pool_id_for_listing(repository.db_path, listing_id)
         if not site_id or not pool_id:
             return {}
-        caches = projection_caches().get(site_id)
-        if caches is None:
-            return {}
-        pools = caches.resource_pools.view().value or []
+        pools = site_projections.values(RESOURCE_POOL).get(site_id) or []
         for pool in pools:
             if str(pool.get("pool_id") or "") == pool_id:
                 metadata = pool.get("pool_metadata") or {}
@@ -690,6 +688,7 @@ async def _place_capacity_hold(
     acceptance: Acceptance,
     *,
     capacity_runtime: CapacityRuntime,
+    site_projections: SiteProjectionState,
 ) -> None:
     """Place the VM domain's best-effort capacity hold after acceptance.
 
@@ -715,7 +714,9 @@ async def _place_capacity_hold(
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
         capped_ttl = capped_hold_seconds(
             ttl,
-            lookup_pool_policy_tags(repository, acceptance.listing_id),
+            lookup_pool_policy_tags(
+                repository, acceptance.listing_id, site_projections
+            ),
         )
         return _HoldAttempt(
             await capacity_runtime.reserve(
@@ -787,6 +788,7 @@ def build_vm_negotiation_runtime(
     registry: StorefrontDomainRegistry,
     binding: StorefrontDomainBinding,
     capacity_runtime: CapacityRuntime,
+    site_projections: SiteProjectionState,
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
@@ -795,7 +797,8 @@ def build_vm_negotiation_runtime(
     """Compose the shared lifecycle with the exact registered VM contract.
 
     ``listing_source_check`` replaces the check of each listing against its own
-    source; by default it reads the site projections this storefront holds.
+    source; by default it reads ``site_projections``, the projections this
+    storefront holds, which the capacity hold's pool tags also come from.
     """
 
     dispatch = (
@@ -1000,6 +1003,7 @@ def build_vm_negotiation_runtime(
             listing_record=resolved.listing_record,
             binding=resolved.binding,
             capacity_runtime=capacity_runtime,
+            site_projections=site_projections,
         )
 
     async def place_hold(
@@ -1010,6 +1014,7 @@ def build_vm_negotiation_runtime(
             repository,
             acceptance,
             capacity_runtime=capacity_runtime,
+            site_projections=site_projections,
         )
 
     from core_storefront.stage_log import stage_event

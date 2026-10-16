@@ -15,11 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 from market_identity import Ed25519Signer
 from core_storefront.models.listing_models import CreateListingRequest
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from market_capacity_publication import BoundListing
 
 from market_storefront.services import publication_service
@@ -29,7 +24,6 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.listing_service import ListingService
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
 from tests.listing_service_fixtures import vm_listing_collaborators
 from tests.fake_site import TEST_SITE_AUTHORITIES
@@ -66,31 +60,7 @@ def _mock_multi_registry(urls: list[str], results: list[PublishResult]):
 
 
 @pytest.fixture
-def vm_pool_projection():
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = [{
-        "pool_id": "pool-vm",
-        "pool_metadata": {
-            "policy_tags": {"deliverable_modes": ["vm"]},
-        },
-        "resources": [],
-    }]
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="vm-pool")
-    caches = site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
-    with patch.dict(
-        site_projection_cache._caches,
-        {"site-a": caches},
-        clear=True,
-    ):
-        yield
-
-
-@pytest.fixture
-def db(tmp_path, vm_pool_projection):
+def db(tmp_path):
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
     return SQLiteClient(
@@ -184,6 +154,7 @@ def test_listing_validation_uses_the_exact_injected_codec(tmp_path) -> None:
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=db,
         marketplace_signer=_SELLER,
         alkahest_clients={},
@@ -243,6 +214,7 @@ def test_listing_composition_mismatch_fails_before_side_effects() -> None:
             binding=other_collaborators.binding,
             domain=other_collaborators.domain,
             capacity_runtime=other_collaborators.capacity_runtime,
+            site_projections=other_collaborators.site_projections,
             sqlite_client=repository,
             marketplace_signer=_SELLER,
             alkahest_clients={},

@@ -7,7 +7,6 @@ those fakes, injected through the state's constructor.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -282,62 +281,6 @@ async def test_status_reports_each_family_without_its_rows():
     assert pool_status.fetched_at is not None
     assert status["unreachable"][RESOURCE_POOL].state == "unavailable"
     assert status["unreachable"][CAPACITY_BUCKET].last_error == "capacity_bucket unreachable"
-
-
-class _Control:
-    """A gate and a wait the test drives in place of a loop controller.
-
-    Each gate read is recorded with the poll count at that moment, and the
-    wait parks until the test releases it, so the test observes every cycle
-    boundary without waiting on time.
-    """
-
-    def __init__(self, site: _FakeSite) -> None:
-        self._site = site
-        self.held = False
-        self.gate_reads: list[int] = []
-        self.gate_read = asyncio.Event()
-        self.waiting = asyncio.Event()
-        self.resume = asyncio.Event()
-
-    def gate(self) -> bool:
-        self.gate_reads.append(len(self._site.calls))
-        self.gate_read.set()
-        return self.held
-
-    async def wait(self, seconds: float) -> None:
-        self.waiting.set()
-        await self.resume.wait()
-        self.resume.clear()
-
-    async def next_gate_read(self) -> None:
-        self.gate_read.clear()
-        await asyncio.wait_for(self.gate_read.wait(), timeout=1)
-
-
-async def test_run_polls_each_cycle_and_none_while_held():
-    site = _FakeSite()
-    state, _ = _state(west=site)
-    control = _Control(site)
-    task = asyncio.create_task(
-        state.run(interval=30, gate=control.gate, wait=control.wait)
-    )
-    try:
-        await asyncio.wait_for(control.waiting.wait(), timeout=1)
-        assert control.gate_reads == [0]
-        assert state.view("west", RESOURCE_POOL).state is ProjectionState.loaded
-        polled = len(site.calls)
-
-        control.held = True
-        control.resume.set()
-        await control.next_gate_read()
-
-        # The held cycle read its gate and polled nothing.
-        assert control.gate_reads == [0, polled]
-        assert len(site.calls) == polled
-    finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
 
 
 _NOW = datetime(2026, 10, 15, 12, 0, tzinfo=timezone.utc)

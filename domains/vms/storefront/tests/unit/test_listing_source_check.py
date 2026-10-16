@@ -2,15 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from market_capacity_publication import PublicationBinding
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_policy.listing_source import ListingSourceVerdict
@@ -19,10 +12,13 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
-from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_source_check import check_listing_source
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests.fake_site import TEST_MARKETPLACE_SIGNER
+from tests.fake_site import (
+    TEST_MARKETPLACE_SIGNER,
+    FakeProjectionSite,
+    loaded_site_projection_state,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -48,16 +44,6 @@ def _pool(pool_id, *, gpu_model="H100", members=(("r1", 4, 4),), tags=_TAGS):
             for rid, count, available in members
         ],
     }
-
-
-def _caches(pools):
-    cache = ProjectionCache(client=None)
-    cache._value = pools
-    cache._state = ProjectionState.loaded
-    cache._identity = ProjectionIdentity(revision=1, digest="check")
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=cache, capacity_buckets=ProjectionCache(client=None)
-    )
 
 
 class _Capacity:
@@ -129,17 +115,18 @@ async def _bind(repository, binding, listing):
 async def _check(repository, projections, binding, listing, capacity):
     if await repository.load_listing_binding(listing_id=listing["listing_id"]) is None:
         await _bind(repository, binding, listing)
-    with patch.dict(
-        site_projection_cache._caches,
-        {site: _caches(pools) for site, pools in projections.items()},
-        clear=True,
-    ):
-        return await check_listing_source(
-            repository=repository,
-            listing_record=listing,
-            binding=binding,
-            capacity_runtime=capacity,
-        )
+    # Each site serves its pools and no capacity buckets, so the check derives
+    # fungible availability from the pool rows.
+    state = await loaded_site_projection_state(
+        {site: FakeProjectionSite(resource_pools=pools) for site, pools in projections.items()}
+    )
+    return await check_listing_source(
+        repository=repository,
+        listing_record=listing,
+        binding=binding,
+        capacity_runtime=capacity,
+        site_projections=state,
+    )
 
 
 async def test_availability_is_read_from_the_pinned_site_only(repository):

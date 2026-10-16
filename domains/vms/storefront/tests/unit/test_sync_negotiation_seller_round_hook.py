@@ -41,6 +41,7 @@ from market_storefront.negotiation_runtime import (
     _default_seller_round_hook,
     build_vm_negotiation_runtime,
 )
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x42" * 32)
@@ -57,6 +58,11 @@ _DOMAIN = build_vm_storefront_domain()
 
 async def _noop_reconcile(_context) -> None:
     return None
+
+
+def _no_projections():
+    """A projection state over the runtime's site that has served nothing yet."""
+    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=[])})
 
 
 def _capacity_runtime() -> CapacityRuntime:
@@ -261,6 +267,7 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -302,6 +309,7 @@ async def _continue(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )

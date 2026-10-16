@@ -3,11 +3,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from core_storefront.aggregation import AggregateCapacityClient
 
 import market_storefront.container as container
 import market_storefront.server as server
 import market_storefront.services.capacity_client as capacity_client_module
 import market_storefront.startup as startup
+from tests.fake_site import FakeProjectionSite
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
@@ -114,7 +116,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch,
 ) -> None:
     signer = SimpleNamespace(identity=object())
-    capacity_runtime = SimpleNamespace(client=lambda: None, site_ids=("default",))
+    # The projection state is built over the runtime's own aggregate.
+    aggregate = AggregateCapacityClient({"default": FakeProjectionSite(resource_pools=[])})
+    capacity_runtime = SimpleNamespace(client=lambda: aggregate, site_ids=("default",))
     built = {}
 
     def fake_sqlite_client(*, registry):
@@ -139,6 +143,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         registry,
         binding,
         capacity_runtime: object,
+        site_projections: object,
         accepted_obligation_dispatch: object = None,
         arkhai_payments_stage: object = None,
     ):
@@ -146,6 +151,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         assert registry is built["registry"]
         assert registration.contract is domain
         assert capacity_runtime is built["capacity_runtime"]
+        built["site_projections"] = site_projections
         runtime = SimpleNamespace(continue_negotiation=lambda: None)
         built["negotiation_runtime"] = runtime
         return runtime
@@ -264,6 +270,9 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         assert container.resolved_negotiation_runtime is first_services.negotiation_runtime
         assert container.resolved_negotiation_service is first_services.negotiation_service
         assert container.resolved_system_service is first_services.system_service
+        # One projection state, the one every consumer was given.
+        assert container.resolved_site_projections is first_services.site_projections
+        assert first_services.site_projections is built["site_projections"]
 
         with pytest.raises(
             RuntimeError,
@@ -285,6 +294,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         assert container.resolved_system_service is first_services.system_service
 
     assert first_app.state.storefront_container is None
+    assert container.resolved_site_projections is None
     assert container.resolved_domain_registry is None
     assert container.resolved_sqlite_client is None
     assert container.resolved_listing_service is None

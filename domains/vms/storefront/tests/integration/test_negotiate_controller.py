@@ -41,8 +41,8 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
-from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
@@ -136,22 +136,19 @@ def _declare_source(
     })
 
 
-def _site_projection_caches():
-    from core_storefront.site_projections import (
-        ProjectionCache,
-        ProjectionIdentity,
-        ProjectionState,
-    )
-
+def _site_projections():
+    """The storefront's projection state over the site-test site serving
+    ``_SITE_POOLS``, holding nothing until polled."""
     _SITE_POOLS.clear()
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = _SITE_POOLS
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="site-test")
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
+    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=_SITE_POOLS)})
+
+
+def _unheld_site_projections():
+    """A state over a site-test site that has never answered, as a storefront
+    restarted while its site cannot be reached holds it."""
+    site = FakeProjectionSite(resource_pools=[])
+    site.failing = True
+    return site_projection_state({"site-test": site})
 
 
 async def _upsert_bound_listing(
@@ -174,6 +171,8 @@ async def _upsert_bound_listing(
         available_gpu_count=available_gpu_count,
         capacity_backing=capacity_backing,
     )
+    # The poller's cycle: the storefront now holds the source just declared.
+    await _container.site_projections().poll_once()
     pool_id = f"pool-{listing_id}"
     # Bound as publication binds it: the listing's shape and the resource it
     # publishes, so every reader finds the listing's key in its binding.
@@ -344,21 +343,22 @@ async def client(db, monkeypatch):
         capacity_binding_for_listing,
     )
     registration = db.domain_registry.resolve_mode("vm")
+    site_projections = _site_projections()
+    monkeypatch.setattr(_container, "resolved_site_projections", site_projections)
 
-    def build_runtime(**hooks):
+    def build_runtime(*, projections=site_projections, **hooks):
         return _negotiation_runtime.build_vm_negotiation_runtime(
             registration.contract,
             registry=db.domain_registry,
             binding=registration.binding,
             capacity_runtime=capacity_runtime,
+            site_projections=projections,
             **hooks,
         )
 
     _RUNTIME_BUILDERS[:] = [build_runtime]
     _container.resolved_negotiation_runtime = build_runtime()
     transport = httpx.ASGITransport(app=app)
-    from unittest.mock import patch as _patch
-
     with settings_overrides(
         **{
             "provisioning.identity.principals": [
@@ -367,10 +367,6 @@ async def client(db, monkeypatch):
             ],
             "wallet.address": _RECIPIENT,
         }
-    ), _patch.dict(
-        site_projection_cache._caches,
-        {"site-test": _site_projection_caches()},
-        clear=True,
     ):
         async with StorefrontClient(
             "http://test",
@@ -868,8 +864,11 @@ class TestAcceptanceRechecksTheSource:
     async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
-
-        site_projection_cache._caches.pop("site-test")
+        # Restarted while the site cannot be reached: nothing is held for it.
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            projections=_unheld_site_projections()
+        )
 
         with pytest.raises(StorefrontClientError) as refused:
             await c.negotiate_continue(negotiation_id, action="accept")
@@ -880,8 +879,10 @@ class TestAcceptanceRechecksTheSource:
     async def test_a_buyer_exits_whatever_the_source(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
-
-        site_projection_cache._caches.pop("site-test")
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            projections=_unheld_site_projections()
+        )
 
         result = await c.negotiate_continue(negotiation_id, action="exit")
 

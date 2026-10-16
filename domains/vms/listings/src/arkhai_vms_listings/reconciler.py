@@ -1344,10 +1344,10 @@ def available_compute_slices(
     """Return publishable compute listing slices from the site projections.
 
     ``site_pool_projection`` is the ``site_id -> resource-pool projection rows``
-    mapping the storefront holds (the shape
-    ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
-    produces). It is the only source of listing structure: which pools and
-    members exist comes from it for every site in it, and a configured site
+    mapping the storefront's per-site projection state holds, a site's last
+    generation included while it is stale. It is the only source of listing
+    structure: which pools and members exist comes from it for every site in
+    it, and a configured site
     absent from it is held (below). Shapes and terms resolve through the
     storefront's site-scoped overrides, read through the pool-override kit, then
     each pool's projected hints, then the storefront's configured defaults --

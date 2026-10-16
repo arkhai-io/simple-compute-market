@@ -16,13 +16,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from market_storefront_kit import LifecycleRouteError
 
 # `server` first: it and the admin controller import each other, and importing
 # the controller from a cold interpreter hits that cycle part-way. The app module
 # resolves it, which is the order every other test here gets by importing
 # through the app.
 from market_storefront import lifecycle, server  # noqa: F401
+import market_storefront.container as container
 from market_storefront.controllers import admin_controller  # noqa: F401 - registers the steps
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 def _loop_names() -> set[str]:
@@ -92,24 +95,24 @@ class TestStepsReportRegisteredNames:
         assert calls["n"] == 1
 
     async def test_site_projections(self, monkeypatch):
-        async def _load(_client):
-            return None
-
-        import market_storefront.container as container
-
-        monkeypatch.setattr(container, "resolved_sqlite_client", object(), raising=False)
+        """The step runs the poller's cycle on the injected state: every family
+        of every site is polled once, and the per-site state proves it landed."""
+        site = FakeProjectionSite(resource_pools=[], capacity_buckets=[])
         monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.load_site_projections",
-            _load,
-        )
-        monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.projection_status_summary",
-            lambda: {"default": {"capacity_buckets": {"state": "loaded"}}},
+            container, "resolved_site_projections", site_projection_state({"default": site})
         )
         result = await _advance("site-projections")
 
         assert result["loop"] == lifecycle.SITE_PROJECTION_POLLER
-        assert result["sites"], "the pull's per-site state is what proves it landed"
+        assert result["sites"]["default"]["resource_pool"]["state"] == "loaded"
+        assert result["sites"]["default"]["capacity_bucket"]["state"] == "loaded"
+        assert site.snapshots == {"resource_pool": 1, "capacity_bucket": 1}
+
+    async def test_site_projections_before_composition_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr(container, "resolved_site_projections", None)
+        with pytest.raises(LifecycleRouteError) as raised:
+            await _advance("site-projections")
+        assert raised.value.status_code == 503
 
     async def test_negotiation_watchdog(self, monkeypatch):
         calls = {"n": 0}

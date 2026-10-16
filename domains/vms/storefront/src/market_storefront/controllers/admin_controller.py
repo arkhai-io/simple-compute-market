@@ -44,8 +44,8 @@ import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
     site_capacity_buckets,
     site_pool_projection,
+    site_projection_status,
 )
-from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
@@ -449,13 +449,16 @@ class AdminController:
         summary="Pull site-authority projections now (admin)",
     )
     async def refresh_site_projections(self) -> dict[str, Any]:
-        """Reload every site projection and report what each site now holds.
+        """Run the projection poller's cycle now and report what each site holds.
 
         Projections are pull-synchronized on a poller interval. A caller that
         has just declared capacity at the site authority would otherwise wait
         that interval out, and a caller holding the lifecycle loops paused
         would wait forever: the poller that would pull it is one of the loops
-        being held. Neither is a wait a test may take.
+        being held. Neither is a wait a test may take. So this runs exactly the
+        poller's cycle, held or not: every site's families are polled in place,
+        a site that cannot be reached keeps its last generation as `stale`, and
+        a resource-pool change wakes publication.
 
         Returns the per-site load state so a caller asserts the pull happened
         rather than assuming it. A site reporting `not_loaded`, `unavailable`,
@@ -464,15 +467,11 @@ class AdminController:
         are indistinguishable downstream, which is how an inventory failure
         becomes a negotiation failure several stages away.
         """
-        from market_storefront.services.site_projection_cache import (
-            load_site_projections,
-            projection_status_summary,
-        )
-
-        await load_site_projections(self._db)
-        summary = projection_status_summary()
+        state = _container.site_projections()
+        await state.poll_once()
+        summary = site_projection_status(state)
         logger.info(
-            "[ADMIN] Site projections refreshed on demand: %s",
+            "[ADMIN] Site projections polled on demand: %s",
             {
                 site: {family: view.get("state") for family, view in families.items()}
                 for site, families in summary.items()
@@ -789,8 +788,9 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
-        await refresh_site_projections(changed_site)
-        projection = site_pool_projection()
+        site_projections = _container.site_projections()
+        await site_projections.refresh_site(changed_site)
+        projection = site_pool_projection(site_projections)
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
             configured_sites=self._runtime().site_ids,
@@ -798,7 +798,7 @@ class AdminController:
             # The same source publication derives from, so reconciliation here
             # cannot close a listing publication would keep.
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets(),
+            site_capacity_buckets=site_capacity_buckets(site_projections),
             scope=ReconciliationScope.AVAILABILITY,
             shape_feasible=vm_shape_feasibility(),
             admissibility_default=_container.resolved_admissibility_default,
@@ -819,13 +819,14 @@ class AdminController:
         availability = await self._member_availability()
         if availability is None:
             return []
-        await refresh_site_projections(changed_site)
-        projection = site_pool_projection()
+        site_projections = _container.site_projections()
+        await site_projections.refresh_site(changed_site)
+        projection = site_pool_projection(site_projections)
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
             member_availability=availability,
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets(),
+            site_capacity_buckets=site_capacity_buckets(site_projections),
             shape_feasible=vm_shape_feasibility(),
             configured_sites=self._runtime().site_ids,
             admissibility_default=_container.resolved_admissibility_default,

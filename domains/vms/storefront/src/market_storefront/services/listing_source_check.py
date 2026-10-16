@@ -33,6 +33,7 @@ from arkhai_vms_listings.reconciler import (
     slice_identity,
     stored_listing_key,
 )
+from market_capacity_publication import SiteProjectionState
 from market_policy.listing_source import ListingSourceVerdict
 from market_resource_pools_contracts.backing import capacity_backing
 
@@ -96,6 +97,7 @@ async def check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     shape_feasible: ShapeFeasibility | None = None,
 ) -> ListingSourceVerdict:
     """Check one listing against its own source.
@@ -112,6 +114,7 @@ async def check_listing_source(
         listing_record=listing_record,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         shape_feasible=shape_feasible or vm_shape_feasibility(),
     )
     if verdict.outcome == "declared_mismatch":
@@ -131,6 +134,7 @@ async def _check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     shape_feasible: ShapeFeasibility,
 ) -> ListingSourceVerdict:
     site_id = binding.site_id
@@ -142,14 +146,14 @@ async def _check_listing_source(
     key = stored_listing_key(
         recorded.source_envelope_json if recorded is not None else None, stored, site_id
     )
-    projection = _site_only(site_pool_projection(), site_id)
+    projection = _site_only(site_pool_projection(site_projections), site_id)
     if projection is None:
         # This site's projection has not loaded, so nothing can confirm the
         # declaration the listing was derived from.
         return ListingSourceVerdict(
             "unverifiable", f"site {site_id!r} projection is not loaded"
         )
-    buckets = _site_only(site_capacity_buckets(), site_id)
+    buckets = _site_only(site_capacity_buckets(site_projections), site_id)
     # Only the admissibility default affects which listings derive; the
     # terms these settings also carry are discarded by the comparison below.
     admissibility = PoolHintResolutionSettings(

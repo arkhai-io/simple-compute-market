@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from core_storefront.app_composition import default_storefront_app_config
@@ -25,7 +26,7 @@ from core_storefront.domain_registry import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_capacity_publication import CapacityRuntime
+from market_capacity_publication import CapacityRuntime, SiteProjectionState
 from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
@@ -77,7 +78,6 @@ from market_storefront.services.publication_terms import (
     parse_configured_admissibility_default,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.services.site_projection_cache import refresh_site_resource_pools
 from market_storefront.settlement_composition import require_vm_release_model
 
 logger = logging.getLogger(__name__)
@@ -177,6 +177,7 @@ def build_pool_override_service(
     *,
     sqlite_client: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     admissibility_default: Declaration | None,
 ) -> Any:
     """Compose the pool-override kit's service over this storefront's effects.
@@ -185,9 +186,10 @@ def build_pool_override_service(
     shapes against ``admissibility_default``, the configured default
     publication also resolves with. A write is checked
     against the named site through the capacity runtime's signed client,
-    refreshes only that site's resource-pool cache, and wakes the publication
-    loop; status is judged against the source publication derives from. The
-    lifespan and the publication test harness compose it identically.
+    refreshes only that site's held projections, and wakes the publication
+    loop; status is judged against the held resource-pool projection
+    publication derives from. The lifespan and the publication test harness
+    compose it identically.
     """
     contribution = VmPoolOverrideContribution(
         db_path=sqlite_client.db_path,
@@ -200,8 +202,8 @@ def build_pool_override_service(
         site_client=lambda site_id: capacity_runtime.site_client(site_id),
         contributions={contribution.offering_mode: contribution},
         compile_clauses=compile_publication_clauses,
-        projection_source=site_pool_projection,
-        refresh_site=refresh_site_resource_pools,
+        projection_source=partial(site_pool_projection, site_projections),
+        refresh_site=site_projections.refresh_site,
         wake_publication=wake_publication_loop,
     )
 
@@ -234,6 +236,7 @@ class VmStorefrontServices:
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
     capacity_runtime: CapacityRuntime
+    site_projections: SiteProjectionState
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
@@ -271,6 +274,12 @@ def _build_vm_services(
         lambda: sqlite_client,
         signer=marketplace_signer,
     )
+    # One state per process, over the runtime's own aggregate: every consumer
+    # reads it, and a resource-pool change a poll observes wakes publication.
+    site_projections = SiteProjectionState(
+        capacity_runtime.client(),
+        on_resource_pool_change=wake_publication_loop,
+    )
     settlement_composition = _build_settlement_composition(
         domain=domain,
         sqlite_client=sqlite_client,
@@ -282,6 +291,7 @@ def _build_vm_services(
         registry=registry,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         accepted_obligation_dispatch=(
             settlement_composition.accepted_obligation_dispatch()
         ),
@@ -292,6 +302,7 @@ def _build_vm_services(
         binding=binding,
         domain=domain,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
@@ -304,10 +315,12 @@ def _build_vm_services(
     system_service = _build_system_service(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
+        site_projections=site_projections,
     )
     pool_override_service = build_pool_override_service(
         sqlite_client=sqlite_client,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         admissibility_default=admissibility_default,
     )
     known_origins = capacity_runtime.site_ids
@@ -329,6 +342,7 @@ def _build_vm_services(
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
@@ -359,6 +373,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         initialize_service_peer_identities(services.sqlite_client.db_path)
         _container.resolved_alkahest_clients = services.alkahest_clients
         _container.resolved_capacity_runtime = services.capacity_runtime
+        _container.resolved_site_projections = services.site_projections
         _container.resolved_listing_service = services.listing_service
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service

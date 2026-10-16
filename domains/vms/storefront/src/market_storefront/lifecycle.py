@@ -9,7 +9,9 @@ the loop bodies, startup, and admin routes share it through stable names.
 A loop body consults `gate` once per cycle, before any work, and waits between
 cycles through `idle`, so a pause holds it at a cycle boundary without
 cancelling it. Two loop bodies live in kit runners and take a `paused`
-predicate and a `wait`; composition supplies `loop_gate(name)` and `idle`.
+predicate and a `wait`; composition supplies `loop_gate(name)` and `idle`. A
+loop registered with `register_loop` has no body of its own: the controller's
+timer gates, runs its step, and waits.
 """
 
 from __future__ import annotations
@@ -96,6 +98,33 @@ def register_step(
     _CONTROLLER.register_step(name, route=route, step=step, preview=preview)
 
 
+def register_loop(
+    name: str,
+    *,
+    route: str,
+    step: LoopStep,
+    interval_seconds: float,
+    preview: LoopStep | None = None,
+) -> None:
+    """Register a loop whose timer the controller runs over its step.
+
+    The timer and an operator's step run the same operation, one at a time;
+    `start_loops` starts the timer.
+    """
+    _CONTROLLER.register_loop(
+        name,
+        route=route,
+        step=step,
+        preview=preview,
+        interval_seconds=interval_seconds,
+    )
+
+
+def start_loops() -> dict[str, asyncio.Task[Any]]:
+    """Start the timer of every registered loop not yet started."""
+    return _CONTROLLER.start_loops(task_logger=logger)
+
+
 def declare_and_gate(name: str) -> Callable[[], bool]:
     """Declare a gated name with no task handle here, and bind its gate."""
     return _CONTROLLER.declare(name)
@@ -163,9 +192,11 @@ __all__ = [
     "loop_gate",
     "loop_states",
     "loops_check",
+    "register_loop",
     "register_step",
     "registered_loop_names",
     "reset_for_tests",
+    "start_loops",
     "start_registered_loop",
     "starting_loop_names",
 ]

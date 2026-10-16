@@ -21,9 +21,9 @@ from market_storefront.lifecycle import (
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
     PUBLICATION,
-    SITE_PROJECTION_POLLER,
     idle,
     loop_gate,
+    start_loops,
     start_registered_loop,
 )
 from typing import Any
@@ -42,6 +42,7 @@ from market_storefront_kit import (
     run_negotiation_watchdog,
 )
 
+import market_storefront.container as _container
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     settings,
@@ -328,24 +329,14 @@ def _start_publication_loop(sqlite_client: Any) -> None:
     )
 
 
-async def _load_site_projections(sqlite_client: Any) -> None:
-    from market_storefront.services.site_projection_cache import load_site_projections
+async def _load_site_projections() -> None:
+    """The first load: one cycle of the poller, before its timer starts."""
+    await _container.site_projections().poll_once()
 
-    await load_site_projections(sqlite_client)
 
-
-def _start_site_projection_poller(sqlite_client: Any) -> None:
-    from market_storefront.services.site_projection_cache import (
-        site_projection_poller_loop,
-    )
-
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=SITE_PROJECTION_POLLER,
-            task_factory=partial(site_projection_poller_loop, sqlite_client),
-        ),
-        task_logger=logger,
-    )
+def _start_site_projection_poller() -> None:
+    """Start the poller's timer, the one loop registered with its interval."""
+    start_loops()
 
 
 def _assert_startup_registry(registry: Any, domain: MarketDomainContract) -> Any:
@@ -434,12 +425,12 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
             StorefrontStartupStep("preflight_provisioning", _preflight_provisioning),
             StorefrontStartupStep(
                 "load_site_projections",
-                partial(_load_site_projections, sqlite_client),
+                _load_site_projections,
                 error_message="[STARTUP] Site projection load failed: %s",
             ),
             StorefrontStartupStep(
                 "site_projection_poller",
-                partial(_start_site_projection_poller, sqlite_client),
+                _start_site_projection_poller,
             ),
             StorefrontStartupStep(
                 "capacity_events_poller",

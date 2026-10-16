@@ -21,7 +21,7 @@ dependencies = [
     "arkhai-kit-policy>=0.4.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-site-client>=0.9.0",
-    "arkhai-kit-capacity-publication==0.8.2",
+    "arkhai-kit-capacity-publication==0.9.0",
     "arkhai-kit-pool-overrides==0.2.1",
     "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-arkhai-payments==0.2.0",

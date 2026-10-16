@@ -48,6 +48,7 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    SiteProjectionState,
     converge_registries,
 )
 from market_resource_pools_contracts.backing import capacity_backing
@@ -128,6 +129,7 @@ class VmPublicationCycle:
         sqlite_client: Any,
         listing_service: Any,
         capacity_runtime: Any,
+        site_projections: SiteProjectionState,
         registry: Any,
         storefront_url: str,
         wallet_address: str,
@@ -140,6 +142,7 @@ class VmPublicationCycle:
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
+        self._site_projections = site_projections
         self._registry = registry
         self._storefront_url = storefront_url
         self._wallet_address = wallet_address
@@ -165,8 +168,8 @@ class VmPublicationCycle:
         if not self._sites:
             await self._converge_registries()
             return self._report()
-        self._projection = site_pool_projection()
-        self._buckets = site_capacity_buckets()
+        self._projection = site_pool_projection(self._site_projections)
+        self._buckets = site_capacity_buckets(self._site_projections)
         try:
             self._availability = dict(await self._capacity.availability())
         except Exception as exc:
@@ -509,6 +512,7 @@ async def run_publication_cycle_once(*, dry_run: bool) -> dict[str, Any]:
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,
         capacity_runtime=container.resolved_capacity_runtime,
+        site_projections=container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
         wallet_address=get_evm_wallet_address() or "",

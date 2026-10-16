@@ -3,8 +3,11 @@
 ``FakeSite`` mirrors the provisioning service's ``/api/v1/capacity``
 surface behind an ``httpx.MockTransport``. The real wire shapes are pinned
 by that service's own integration tests. ``site_capacity`` injects the exact
-``CapacityRuntime`` and pool projection used by settle/fulfillment tests;
-``capacity_runtime_over`` is available when a test owns composition directly.
+``CapacityRuntime`` and the projection state over its aggregate used by
+settle/fulfillment tests; ``capacity_runtime_over`` is available when a test
+owns composition directly. ``FakeProjectionSite`` serves only the two
+projection families, for a test that builds its own projection state with
+``site_projection_state``.
 """
 
 from __future__ import annotations
@@ -14,11 +17,13 @@ import hashlib
 import itertools
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import patch
 
 import httpx
+from core_storefront.aggregation import AggregateCapacityClient
+from market_capacity_publication import SiteProjectionState
 from market_identity import (
     EMPTY_BODY,
     ResponseEnvelope,
@@ -37,6 +42,8 @@ from market_site_client.client import (
     TIMESTAMP_HEADER,
     resolve_capacity_route,
 )
+
+import market_storefront.container as container
 
 
 TEST_MARKETPLACE_SIGNER = create_signer("ed25519", b"\x41" * 32)
@@ -64,6 +71,10 @@ class FakeSite:
         #: exactly that generation.
         self.pool_projection: list[dict] | None = None
         self.pool_projection_revision = 1
+        #: The capacity-bucket projection the site serves. ``None`` serves none,
+        #: so the storefront holds no bucket generation and derives fungible
+        #: availability from the pool rows instead.
+        self.capacity_buckets: list[dict] | None = None
         #: Off: every request fails to connect, as an unreachable site does.
         self.reachable = True
         #: Off: every answer is signed by an authority the storefront does not
@@ -137,11 +148,9 @@ class FakeSite:
         return _pool_projection_rows(self)
 
     def _pool_projection_generation(self) -> dict[str, Any]:
-        pools = self.served_pool_projection()
-        digest = hashlib.sha256(
-            json.dumps(pools, sort_keys=True, default=str).encode()
-        ).hexdigest()
-        return {"revision": self.pool_projection_revision, "digest": digest}
+        return _generation(
+            self.served_pool_projection(), revision=self.pool_projection_revision
+        )
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         if not self.reachable:
@@ -221,6 +230,18 @@ class FakeSite:
             and path == "/api/v1/capacity/site-resource-pools/version"
         ):
             return httpx.Response(200, json=self._pool_projection_generation())
+
+        if self.capacity_buckets is not None and request.method == "GET":
+            if path == "/api/v1/capacity/site-capacity-buckets":
+                return httpx.Response(
+                    200,
+                    json={
+                        **_generation(self.capacity_buckets),
+                        "capacity_buckets": self.capacity_buckets,
+                    },
+                )
+            if path == "/api/v1/capacity/site-capacity-buckets/version":
+                return httpx.Response(200, json=_generation(self.capacity_buckets))
 
         if path == "/api/v1/capacity/snapshot":
             return httpx.Response(
@@ -581,66 +602,142 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     ]
 
 
-class _FakePoolProjectionClient:
-    """The fake authority's pool projection, as its site would serve it.
+def _generation(rows: Any, *, revision: int = 1) -> dict[str, Any]:
+    """A projection's identity: a digest of exactly the rows served, so a
+    version poll refetches when, and only when, they changed."""
+    digest = hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()
+    return {"revision": revision, "digest": digest}
 
-    Each refresh re-reads the fake's live availability, so an operation that
-    refreshes the site after changing its capacity sees its own change.
+
+class FakeProjectionSite:
+    """One site's two projection families, as its site client serves them.
+
+    A member of the fake aggregate a test builds a ``SiteProjectionState``
+    over. Each family serves the rows a test sets, identified by a digest of
+    them; ``None`` serves nothing, as a site that never answered. Rows are
+    served as they stand when fetched, so a change reaches the state at its
+    next poll or refresh and never otherwise. ``failing`` fails every call, as
+    an unreachable site does. ``snapshots`` counts each family's fetches and
+    ``calls`` names every call in order.
     """
 
-    def __init__(self, fake: FakeSite, *, site_name: str) -> None:
-        self._fake = fake
-        self._site_name = site_name
+    def __init__(
+        self,
+        resource_pools: list[dict[str, Any]] | None = None,
+        capacity_buckets: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.rows: dict[str, list[dict[str, Any]] | None] = {
+            "resource_pool": resource_pools,
+            "capacity_bucket": capacity_buckets,
+        }
+        self.failing = False
+        self.snapshots = {"resource_pool": 0, "capacity_bucket": 0}
+        self.calls: list[str] = []
+        #: What the state installed for this site's topology-sensitive refusals.
+        self.topology_error_handler: Any = None
 
-    def identity(self):
-        from core_storefront.site_projections import ProjectionIdentity
+    @property
+    def resource_pools(self) -> list[dict[str, Any]] | None:
+        return self.rows["resource_pool"]
 
-        return ProjectionIdentity(
-            revision=1,
-            digest=f"fake:{self._site_name}:{','.join(sorted(self._fake.resources))}",
-        )
+    @resource_pools.setter
+    def resource_pools(self, rows: list[dict[str, Any]] | None) -> None:
+        self.rows["resource_pool"] = rows
 
-    async def version(self):
-        return self.identity()
+    @property
+    def capacity_buckets(self) -> list[dict[str, Any]] | None:
+        return self.rows["capacity_bucket"]
 
-    async def snapshot(self):
-        return self.identity(), _pool_projection_rows(self._fake)
+    @capacity_buckets.setter
+    def capacity_buckets(self, rows: list[dict[str, Any]] | None) -> None:
+        self.rows["capacity_bucket"] = rows
+
+    def served(self, family: str) -> list[dict[str, Any]]:
+        """The rows one family serves now; overridden to derive them live."""
+        rows = self.rows[family]
+        if self.failing or rows is None:
+            raise ConnectionError(f"{family} projection unavailable")
+        return rows
+
+    async def _version(self, family: str) -> dict[str, Any]:
+        self.calls.append(f"{family}.version")
+        return _generation(self.served(family))
+
+    async def _snapshot(self, family: str, key: str) -> dict[str, Any]:
+        self.calls.append(f"{family}.snapshot")
+        self.snapshots[family] += 1
+        rows = self.served(family)
+        return {**_generation(rows), key: rows}
+
+    async def resource_pool_projection_version(self) -> dict[str, Any]:
+        return await self._version("resource_pool")
+
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        return await self._snapshot("resource_pool", "resource_pools")
+
+    async def capacity_bucket_projection_version(self) -> dict[str, Any]:
+        return await self._version("capacity_bucket")
+
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        return await self._snapshot("capacity_bucket", "capacity_buckets")
+
+    def set_topology_error_handler(self, handler: Any) -> None:
+        self.topology_error_handler = handler
 
 
-def _pool_projection_caches(fake: FakeSite, *, site_name: str):
-    """Loaded pool metadata for the fake authority's exact VM capabilities."""
-    from core_storefront.site_projections import ProjectionCache, ProjectionState
-    from market_storefront.services.site_projection_cache import SiteProjectionCaches
+def site_projection_state(
+    sites: Any,
+    *,
+    on_resource_pool_change: Any = None,
+):
+    """A ``SiteProjectionState`` over ``sites``, holding nothing until polled.
 
-    client = _FakePoolProjectionClient(fake, site_name=site_name)
-    resource_pools = ProjectionCache(client=client)
-    resource_pools._value = _pool_projection_rows(fake)
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = client.identity()
-    return SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
+    ``sites`` is an aggregate capacity client -- a runtime's own, so a state
+    over a ``FakeSite`` reads the projections that site serves -- or a mapping
+    of site name to ``FakeProjectionSite``, which becomes the fake aggregate.
+    """
+    aggregate = (
+        sites if isinstance(sites, AggregateCapacityClient) else AggregateCapacityClient(dict(sites))
+    )
+    return SiteProjectionState(
+        aggregate,
+        on_resource_pool_change=on_resource_pool_change or (lambda: None),
     )
 
 
-@contextlib.contextmanager
-def site_capacity(
+async def loaded_site_projection_state(sites: Any, **kwargs: Any):
+    """``site_projection_state`` after its first poll, as startup loads it."""
+    state = site_projection_state(sites, **kwargs)
+    await state.poll_once()
+    return state
+
+
+@contextlib.asynccontextmanager
+async def site_capacity(
     fake: FakeSite,
     *,
     site_name: str = "default",
     sqlite_client_factory: Any | None = None,
     project_pool_modes: bool = False,
-) -> Iterator[Any]:
-    """Inject one explicit fake-backed capacity runtime and optional pools."""
-    from market_storefront.services import site_projection_cache
-    import market_storefront.container as container
+    on_resource_pool_change: Any = None,
+) -> AsyncIterator[Any]:
+    """Inject one explicit fake-backed capacity runtime and its projection state.
 
+    The state is built over the runtime's own aggregate, as the composition
+    root builds it, and injected through the container. With
+    ``project_pool_modes`` it is loaded from what the fake site serves, as
+    startup loads it; otherwise it holds nothing. ``on_resource_pool_change``
+    is the publication wake the state raises.
+    """
     runtime = capacity_runtime_over(
         fake,
         site_name=site_name,
         sqlite_client_factory=sqlite_client_factory,
     )
     aggregate = runtime.client()
+    state = site_projection_state(aggregate, on_resource_pool_change=on_resource_pool_change)
+    if project_pool_modes:
+        await state.poll_once()
     patches = [
         patch(
             "market_storefront.services.capacity_client.build_capacity_runtime",
@@ -660,15 +757,8 @@ def site_capacity(
             return_value=aggregate,
         ),
         patch.object(container, "resolved_capacity_runtime", runtime),
+        patch.object(container, "resolved_site_projections", state),
     ]
-    if project_pool_modes:
-        patches.append(
-            patch.dict(
-                site_projection_cache._caches,
-                {site_name: _pool_projection_caches(fake, site_name=site_name)},
-                clear=True,
-            )
-        )
     with contextlib.ExitStack() as stack:
         for capacity_patch in patches:
             stack.enter_context(capacity_patch)
@@ -685,20 +775,13 @@ async def pump_events(
     """Deliver the fake site's events to aggregate subscribers (the
     production poller's job). Returns the last delivered version."""
     from core_storefront.capacity import CapacityDelta
-    from market_storefront.services.site_projection_cache import projection_caches
 
-    caches = projection_caches().get(site_name)
-    if caches is not None and str(
-        getattr(
-            getattr(caches.resource_pools, "_identity", None),
-            "digest",
-            "",
-        )
-    ).startswith(f"fake:{site_name}:"):
-        # The real projection poller refreshes this view before capacity
-        # deltas are reconciled. Mirror that ordering with the fake's
-        # post-reservation availability so only genuinely oversized slices close.
-        caches.resource_pools._value = _pool_projection_rows(fake)
+    state = container.resolved_site_projections
+    if state is not None:
+        # The production poller refreshes the held projections before
+        # capacity deltas are reconciled. Mirror that ordering, so only
+        # genuinely oversized slices close.
+        await state.poll_once()
 
     last = after
     for event in fake.events:

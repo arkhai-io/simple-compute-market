@@ -65,7 +65,16 @@ async def capacity_world(tmp_path):
         yield app
 
 
+async def _poll(world) -> None:
+    """One cycle of the projection poller: the storefront now holds what the
+    harness's sites serve."""
+    await world.client.admin_run_lifecycle_cycle("site-projections")
+
+
 async def _cycle(world, *, dry_run: bool = False) -> dict:
+    """One publication cycle, after the projection poller's, so the cycle reads
+    what the harness's sites now serve."""
+    await _poll(world)
     if dry_run:
         report = await world.client.admin_dry_run_lifecycle_cycle("publication")
     else:
@@ -307,6 +316,7 @@ async def test_a_regionless_pools_sold_out_listing_still_closes(world):
 
     world.pools[0] = _without_region(pool("pool-b", backing="backed"))
     world.pools[0]["resources"][0]["available"]["gpu_count"] = 0
+    await _poll(world)
     world.site.emit("reserved")
     await world.client.admin_run_lifecycle_cycle("capacity-events")
 
@@ -655,9 +665,11 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
     supported = await evaluate()
     assert supported.decision == "accept"
 
-    # The declaration shrinks below the listing's count; no cycle has run, so
-    # the listing is still open and only the guard can notice.
+    # The declaration shrinks below the listing's count and the poller holds
+    # it; no publication cycle has run, so the listing is still open and only
+    # the guard can notice.
     world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=1)
+    await _poll(world)
     refused = await evaluate()
 
     # A policy rejection refuses the opening, as negotiate/new would.

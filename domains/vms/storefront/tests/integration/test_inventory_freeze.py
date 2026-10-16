@@ -23,6 +23,7 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.services.system_service import SystemService
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 # Migrations that only ever created or altered the retired tables. A database
 # may have recorded any of them, depending on when it was last initialized.
@@ -323,6 +324,7 @@ async def test_status_reads_nothing_from_retained_inventory(tmp_path):
         sqlite_client=client,
         # Development fixture key; never used on a public network.
         marketplace_signer=Ed25519Signer(b"\x41" * 32),
+        site_projections=site_projection_state({"default": FakeProjectionSite(resource_pools=[])}),
     )
 
     status = await service.get_health(include_registry=True)

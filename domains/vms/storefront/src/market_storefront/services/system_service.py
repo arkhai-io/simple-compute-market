@@ -9,14 +9,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import httpx
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from market_capacity_publication import SiteProjectionState
 from market_identity import Signer
 from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as _container
+from market_storefront.services.capacity_client import site_projection_status
+from market_storefront.services.listing_cardinality_explanations import (
+    listing_cardinality_mode_explanations,
+)
 from market_storefront.services.listing_identity_carryover import carryover_report
 from market_storefront.negotiation_runtime import load_storefront_chain
 from market_storefront.utils.config import (
@@ -27,21 +33,6 @@ from market_storefront.utils.config import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _default_projection_status_provider() -> dict[str, Any]:
-    """Real production source for per-site projection load state.
-
-    A plain module-level function, not a bound import at class-body scope,
-    so it is only ever resolved when actually called — a caller that never
-    exercises `include_registry=True` pays no import cost, and a test can
-    substitute a fake via the constructor without patching this module.
-    """
-    from market_storefront.services.site_projection_cache import (
-        projection_status_summary,
-    )
-
-    return projection_status_summary()
 
 
 def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
@@ -74,21 +65,6 @@ def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     return carryover_report()
 
 
-def _default_listing_cardinality_mode_explanation_provider() -> (
-    dict[str, dict[str, str]]
-):
-    """Real production source for per-site, per-pool
-    listing_cardinality_mode operator notices. Same lazy-resolution and
-    constructor-injection rationale as `_default_projection_status_provider`,
-    immediately above.
-    """
-    from market_storefront.services.site_projection_cache import (
-        listing_cardinality_mode_explanations,
-    )
-
-    return listing_cardinality_mode_explanations()
-
-
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -102,6 +78,7 @@ class SystemService:
         *,
         sqlite_client,
         marketplace_signer: Signer,
+        site_projections: SiteProjectionState,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
         listing_cardinality_mode_explanation_provider: (
@@ -118,12 +95,14 @@ class SystemService:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
-        self._projection_status_provider = (
-            projection_status_provider or _default_projection_status_provider
+        # Both read the storefront's one projection state unless a caller
+        # supplies its own report.
+        self._projection_status_provider = projection_status_provider or partial(
+            site_projection_status, site_projections
         )
         self._listing_cardinality_mode_explanation_provider = (
             listing_cardinality_mode_explanation_provider
-            or _default_listing_cardinality_mode_explanation_provider
+            or partial(listing_cardinality_mode_explanations, site_projections)
         )
         self._publication_derivation_provider = (
             publication_derivation_provider or _default_publication_derivation_provider
