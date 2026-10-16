@@ -258,10 +258,12 @@ def test_a_listing_authorizing_no_condition_builds_no_proposal() -> None:
 
 def test_an_unmaterializable_condition_refuses_the_artifacts() -> None:
     """A refusal is raised to the seller, never recorded beside empty artifacts."""
-    with pytest.raises(ValueError, match="release condition"):
+    # The listing authorizes the condition, so the refusal comes from
+    # materializing it, not from authorization.
+    with pytest.raises(ValueError, match="release_condition_unreadable"):
         accepted_escrow_artifacts_from_proposal(
             proposal=_anvil_proposal(),
-            listing={"demands": []},
+            listing={"demands": [_recipient_condition("")]},
             agreed_amount=7_200_000,
             duration_seconds=3600,
             chain_config_paths={"anvil": _ANVIL_BOOK},

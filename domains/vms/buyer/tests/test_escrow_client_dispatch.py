@@ -57,28 +57,6 @@ def patched_alkahest(monkeypatch):
             return _StubNativeCodec()
         raise ValueError(f"no stub codec for {escrow_address!r}")
 
-    def _stub_build_obligation(
-        *, demands=None, recipient=None, seller_wallet=None, agreed_amount, duration_seconds,
-        token_contract_address, chain_name,
-        addr_config_path=None, arbiter_kind="recipient_arbiter",
-    ):
-        effective_recipient = recipient or seller_wallet
-        captured["build_call"] = dict(
-            demands=demands,
-            recipient=effective_recipient,
-            agreed_amount=agreed_amount,
-            duration_seconds=duration_seconds,
-            token=token_contract_address,
-            chain_name=chain_name,
-            arbiter_kind=arbiter_kind,
-        )
-        return {
-            "arbiter": _ARBITER,
-            "demand": "0xdead",
-            "token": token_contract_address,
-            "amount": int(agreed_amount),
-        }
-
     def _stub_address_to_slot(chain_name, address, *, config_path=None):
         # Returns a known slot for the canonical arbiter address; None
         # for anything else (the builder falls back to recipient_arbiter).
@@ -88,9 +66,6 @@ def patched_alkahest(monkeypatch):
 
     monkeypatch.setattr(
         alkahest_mod, "get_escrow_codec_for", _stub_codec_for,
-    )
-    monkeypatch.setattr(
-        alkahest_mod, "build_payment_obligation_data", _stub_build_obligation,
     )
     monkeypatch.setattr(
         alkahest_mod, "address_to_slot", _stub_address_to_slot,

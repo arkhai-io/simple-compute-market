@@ -1137,7 +1137,8 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       and authorizes the condition itself: a selection must equal a condition the listing
       authorizes for the chain (arbiter and demand data), no selection takes the listing's,
       and a missing or unreadable authorized condition refuses before anything is accepted.
-      No public kit entry point encodes a condition without authorizing it. The plan
+      No public kit entry point encodes a condition from a proposal without authorizing it.
+      The plan
       builders' signatures change; every caller in VM, bare metal, the API-credit storefront,
       the VM and API-credit buyers, and the core buyer's orchestration moves to the new shape,
       and the call-site authorization the kit now does goes. Every Section 7 refusal reason,
@@ -1158,10 +1159,15 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       any obligation data; `accepted_escrow_artifacts_from_proposal` authorizes first, so the
       recorded accepted proposal carries the listing's form; `verify_escrow_for_settlement`
       materializes its expected obligation against the listing it was already given, so its
-      signature is unchanged. `build_payment_obligation_data` loses its unused `demands=`
-      branch, which encoded a caller-named condition unauthorized; it now encodes only the
-      recipient condition for the wallet its caller names, as legacy no-proposal
-      verification does. `plans.py`'s function-local import of `alkahest` moved to module
+      signature is unchanged. **Corrected (review):** `build_payment_obligation_data`, which
+      encoded a recipient condition for any wallet (and, through an unused `demands=` branch,
+      any caller-named condition), is gone from the public kit: its one caller was
+      verification, so it became `escrow_verification._legacy_recipient_obligation_data`
+      (recipient branch only). `verify_escrow_for_settlement` with `escrow_proposal=None` —
+      the admin dry-run path (`admin_settle_service.py`) and bare metal's admin verify —
+      expects a recipient condition paying the seller wallet without consulting the listing;
+      its injected `build_obligation_data_fn` and `get_obligation_fn` hooks are test seams
+      no production caller passes. `plans.py`'s function-local import of `alkahest` moved to module
       level (no cycle: `alkahest.py` imports neither). **Differed:** with no selection,
       materialization now uses the listing's condition rather than refusing
       `release_condition_unselected`, as the decision requires, so no kit refusal carries that
@@ -1169,7 +1175,9 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       result changes). Callers: VM's seller stage binds the listing to its plan builder
       (`functools.partial` over the core build context, which carries no listing, so
       `core/storefront` is unchanged), as its settle path does with the stored listing; VM's
-      refund loads the listing to materialize its obligation; bare metal's plan builder and
+      refund (**corrected (review)**, which first re-materialized against the current listing)
+      reads the token and amount of the accepted plan's one obligation on the escrow
+      (`thread["settlement_plan"]`) and materializes nothing; bare metal's plan builder and
       `_build_settlement_from_context` take the listing record, `build_artifacts` no longer
       re-authorizes (its opening authorization stays: it pins the condition on the thread and
       refuses an unauthorized selection at the opening, before any acceptance), and
@@ -1177,9 +1185,10 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       the API-credit storefront's `build_api_credit_accepted_artifacts` takes a required
       `listing` and neither it nor its settle path authorizes at the call site. Buyers: the
       core orchestration's `BuildEscrowTermsFn` takes the selected listing as its second
-      argument in place of the seller wallet (`arkhai-core-buyer` keeps 0.4.0, as `kit/policy`
-      did in 7.3: `arkhai-bare-metal-buyer` pins it exactly and no consumer needs a new name),
-      and each domain's `make_buyer_payment_escrow_terms_fn` closure passes it to the kit.
+      argument in place of the seller wallet (**corrected (review):** `arkhai-core-buyer`
+      0.5.0, every consumer moved, bare metal's exact pin to `==0.5.0`; `arkhai-vms-settlement`
+      0.3.0, since it re-exports `accepted_escrow_artifacts_from_proposal`, the VM storefront
+      and VM buyer requiring `>=0.3.0`), and each domain's `make_buyer_payment_escrow_terms_fn` closure passes it to the kit.
       **Differed (judgement):** the three resume paths (VM `escrow create`, VM settle resume,
       API-credit settle) materialized a run-log's accepted proposal when no accepted escrow
       terms were recorded; a run-log records no listing, so they now refuse by name (exit 3,
@@ -1207,10 +1216,20 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       `test_escrow_verification.py` (its fixture listing advertises the seller's condition),
       `test_settlement_composition.py`, `test_failure_policy.py`; VM buyer
       `test_escrow_client_dispatch.py`, `test_buy_orchestrator.py` (the builder receives the
-      matched listing), and two stubs' parameter names; bare metal `test_settlement.py`,
+      matched listing; its `test_escrow_client_dispatch.py` no longer stubs the removed
+      builder), and two stubs' parameter names; bare metal `test_settlement.py`,
       `test_domain_runtime.py`, `test_negotiation_runtime.py` (the builder plans against the
       listing record); API credits `test_sync_negotiation.py` (unit: the listing is handed to
-      the kit).
+      the kit). **Review fixes, tests:** kit `test_plans.py`'s unmaterializable-artifacts case
+      now gives an authorized condition that cannot be encoded, so it is refused inside
+      materialization, not in authorization; `test_arbiter_codec.py` tests the moved legacy
+      builder; VM storefront `test_failure_policy.py` refunds from a thread row carrying the
+      accepted plan as the database returns it, with no materialization patched, and refuses
+      (`escrow_refund_context_invalid`) a plan naming another escrow; VM buyer
+      `test_release_condition_refusals.py` shows `escrow create` and the settle resume refuse a
+      run-log whose accepted proposal names no condition and one that selects a condition;
+      API-credit buyer `test_settle_credentials.py` shows `settle` refuses both, with no escrow
+      created.
       Evidence: `make -C kit test-alkahest` 293 passed (unit; 252 before); `kit/policy`
       (frozen) 80 passed (unit); VM storefront (frozen) unit 1028 passed, 1 skipped, and
       integration 418 passed (application integration, typed client; the Section 7
@@ -1230,6 +1249,13 @@ Alkahest obligation uses exactly the release condition its listing authorizes").
       the listing's condition, now materialized and verified against the listing; their
       buyers create escrows from the seller's accepted terms, so none reaches the resume
       refusal. The pipeline was not run.
+      **Review fixes, re-run:** `make -C kit test-alkahest` 293 passed (unit); core buyer 134
+      (unit); VM storefront (frozen) unit 1029 passed, 1 skipped (one new), integration 418;
+      VM buyer (frozen) 202 (three new); `make test-bare-metal` 134 + 323 + 11 + 40;
+      `make test-apicredits` all passed (buyer 26, two new); `make lock` (the VM storefront's
+      and VM buyer's locks hand-edited for both bumped packages as before), `make
+      check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state`, and `openspec validate --strict` pass.
 
 Section 7 notes:
 
@@ -1309,6 +1335,9 @@ Section 7 handoff:
     `arkhai-kit-alkahest` moved, to 0.6.0), while the release guidance requires SemVer
     bumps for published packages; `kit/negotiation-runtime`'s exact `==0.4.0` pin is why
     `kit/policy` stayed.
+    **Amended (7.6):** 7.6 bumped `arkhai-core-buyer` (0.5.0) and `arkhai-vms-settlement`
+    (0.3.0) for their incompatible changes, moving every consumer; `kit/policy` and the
+    storefronts still have the question.
   - (d) An empty seller wallet still derives and publishes a recipient condition with no
     recipient, which every deal refuses as `release_condition_unreadable`, rather than
     refusing at startup (beside Section 6's oracle-gated question).
@@ -1325,13 +1354,22 @@ Section 7 handoff:
   name `market_alkahest.proposals` as the place the invariant is held.
   **Amended (7.6):** name the kit's materialization (`market_alkahest.release_authorization`,
   read by every materializing entry point) as the place the invariant is held.
-- (7.6) Open for the owner: (f) Seller verification, VM's refund, and bare metal's
-  acceptance re-materialize against the listing as stored when they run, so a listing whose
-  conditions changed after acceptance fails them closed — (e) widened to every domain; a
-  refund the listing no longer authorizes leaves the buyer to reclaim at expiry. (g) A resumed
-  buyer run holding only an accepted proposal now refuses; recording the listing's
-  conditions in the run-log would restore it. (h) `arkhai-core-buyer` changed a hook's
-  argument without a version bump, beside (c).
+- (7.6) Open for the owner:
+  - (f) Seller verification and bare metal's acceptance re-materialize against the listing as
+    stored when they run, so a listing whose conditions changed after acceptance fails them
+    closed — (e) widened to every domain. VM's refund does not: it reads the token and amount
+    from the accepted plan, so a changed or deleted listing no longer blocks it.
+  - (g) A resumed buyer run holding only an accepted proposal now refuses, while one holding
+    the seller's accepted escrow terms creates the escrow from them unchecked. Recording the
+    listing's demands in the run-log would let both be checked against the listing, and is
+    the better fix.
+  - (h) Settled in 7.6's review fixes: `arkhai-core-buyer` 0.5.0 and `arkhai-vms-settlement`
+    0.3.0, beside (c).
+  - (i) The buyer checks the seller's echoed terms against the listing only on the VM
+    selection path (`validate_selected_escrow_plan`); core orchestration creates the escrow
+    from `accepted_escrow_terms` unchecked for the API-credit buyer and VM's proposal path.
+    Should the buyer verify them against the listing on every path? That needs a domain hook,
+    since `core/buyer` cannot import `kit/alkahest`. Not implemented.
 
 ## 8. VM composes the shared projection state
 

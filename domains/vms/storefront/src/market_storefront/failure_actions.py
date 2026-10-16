@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_alkahest.plans import escrow_terms_from_settlement_plan
+from market_alkahest.schemas import EscrowTerms
 from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
 )
@@ -132,18 +134,24 @@ async def _load_failed_thread(
     return await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
 
 
-def _thread_duration_seconds(thread: dict[str, Any]) -> int:
-    for key in ("agreed_duration_seconds", "requested_duration_seconds"):
-        raw = thread.get(key)
-        if raw is None:
-            continue
-        try:
-            duration = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if duration > 0:
-            return duration
-    return 3600
+def _accepted_escrow_obligation(
+    plan: Any, *, chain_name: str, escrow_address: str
+) -> EscrowTerms:
+    """The accepted plan's one Alkahest obligation on this escrow's contract."""
+    if not isinstance(plan, dict):
+        raise ValueError("the negotiation records no accepted settlement plan")
+    matches = [
+        terms
+        for terms in escrow_terms_from_settlement_plan(plan)
+        if terms.chain_name == chain_name
+        and terms.escrow_contract.lower() == escrow_address.lower()
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "the accepted settlement plan holds no single obligation on escrow "
+            f"{escrow_address!r} of chain {chain_name!r}"
+        )
+    return matches[0]
 
 
 async def _refund_from_escrow_proposal(
@@ -187,11 +195,7 @@ async def _refund_from_escrow_proposal(
             "reason": "escrow_chain_unknown",
         }
 
-    from market_alkahest.alkahest import (
-        get_escrow_codec_for,
-        materialize_escrow_terms_from_proposal,
-    )
-    from market_core.schemas import EscrowProposal
+    from market_alkahest.alkahest import get_escrow_codec_for
 
     from market_storefront.utils.config import CHAINS
 
@@ -212,27 +216,15 @@ async def _refund_from_escrow_proposal(
             "reason": "wallet_private_key_empty",
         }
 
-    # The escrow's obligation is materialized under the release condition the
-    # listing authorizes, as it was accepted; a listing that is gone, or no
-    # longer authorizes it, leaves the refund context invalid.
-    listing = (
-        await db.load_listing(listing_id=listing_id)
-        if hasattr(db, "load_listing")
-        else None
-    )
+    # A refund returns the escrow's token and amount, which the accepted plan
+    # recorded when the deal was accepted; it is read from there rather than
+    # materialized again, so a listing changed since acceptance cannot block it.
     try:
-        proposal = EscrowProposal.model_validate(proposal_raw)
-        terms = materialize_escrow_terms_from_proposal(
-            proposal=proposal,
-            listing=listing or {},
-            agreed_amount=(
-                int(thread["agreed_price"])
-                if thread.get("agreed_price") is not None
-                else None
-            ),
-            duration_seconds=_thread_duration_seconds(thread),
-            addr_config_path=chain_cfg.alkahest_address_config_path,
-        )[0]
+        terms = _accepted_escrow_obligation(
+            thread.get("settlement_plan"),
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+        )
         codec = get_escrow_codec_for(
             chain_name,
             escrow_address,

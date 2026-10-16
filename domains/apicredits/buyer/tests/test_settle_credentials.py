@@ -269,3 +269,88 @@ def test_settle_without_agreed_proposal_refuses(
             poll_interval=0.01,
             settlement_timeout=5.0,
         )
+
+
+_CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": "0x" + "55" * 20,
+    "demand_data": {"recipient": "0x" + "44" * 20},
+}
+
+
+@pytest.mark.parametrize(
+    ("proposal", "reason"),
+    [
+        (_PROPOSAL, "release_condition_unselected"),
+        ({**_PROPOSAL, "demands": None, "demand": _CONDITION}, "not the listing that authorizes"),
+    ],
+    ids=["naming no condition", "selecting a condition"],
+)
+def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
+    tmp_path, monkeypatch, fake_chain_config, proposal, reason
+):
+    """A run-log records the accepted proposal but not the listing that
+    authorizes its release condition, so with no accepted escrow terms the
+    resumed settlement refuses by name and nothing reaches the chain."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    runs = tmp_path / "arkhai" / "buy-runs"
+    runs.mkdir(parents=True)
+    events = [
+        _run_event(
+            "run-tok-3",
+            "run_started",
+            seller_url="http://seller:8002",
+            listing_id="lst-1",
+            chain_name="anvil",
+            publisher_id="publisher-1",
+            source_registry_url="http://registry:8080",
+            source_registry_authority="registry-1",
+        ),
+        _run_event(
+            "run-tok-3",
+            "run_ended",
+            status="agreed",
+            negotiation_id="neg-3",
+            agreed_amount=300,
+            publisher_principals=TrustedIdentitySet(
+                identities=(_SELLER_SIGNER.identity,),
+            ).model_dump(mode="json"),
+            accepted_escrow_proposal=proposal,
+            settlement_selection={
+                "mechanism": "alkahest.v1",
+                "option_id": "legacy-alkahest",
+                "expiration_unix": 1_800_000_000,
+            },
+        ),
+    ]
+    (runs / "run-tok-3.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n"
+    )
+
+    def _no_escrow(**_kwargs):
+        def refuse(_terms):
+            raise AssertionError("an escrow was created without its release condition")
+
+        return refuse
+
+    monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _no_escrow)
+
+    import typer
+
+    with pytest.raises(typer.Exit) as refused:
+        settle_cli.run_settle_from_log(
+            run_id="run-tok-3",
+            escrow_uid=None,
+            identity=_IDENTITY,
+            evm_address=None,
+            evm_private_key=None,
+            chain_name=None,
+            poll_interval=0.01,
+            settlement_timeout=5.0,
+        )
+
+    assert refused.value.exit_code == 3
+    (missing,) = [
+        e for e in read_run("run-tok-3") if e.get("event") == "escrow_release_condition_missing"
+    ]
+    assert reason in missing["error"]

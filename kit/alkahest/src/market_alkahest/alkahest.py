@@ -610,17 +610,14 @@ def encode_recipient_demand(recipient_address: str) -> bytes:
 #   - which on-chain contract address holds the arbiter
 #   - how the buyer should encode the demand bytes for it
 #
-# ``build_payment_obligation_data`` delegates both to the codec, so adding
-# a new arbiter (e.g. TrustedOracleArbiter) only requires writing a codec
-# + registering it — neither the buyer's escrow construction nor the
-# seller's verification needs to know about the new kind.
+# Materialization resolves a release condition's codec from its arbiter's
+# address, so adding a new arbiter (e.g. TrustedOracleArbiter) only requires
+# writing a codec + registering it — neither the buyer's escrow construction
+# nor the seller's verification needs to know about the new kind.
 #
-# The seller's verifier doesn't consult codecs at all: it dict-compares
-# the chain-read obligation_data against the buyer-built one. Both sides
-# call the same builder with the same inputs, so the demand bytes match
-# bytewise. Codec-aware verification (e.g. "decode demand and report the
-# *recipient address* that didn't match") is a UX nicety we can add later;
-# the structural check is already covered.
+# The seller's verifier dict-compares the chain-read obligation_data against
+# the obligation both sides materialize from the same inputs, so the demand
+# bytes match bytewise.
 
 
 @dataclass(frozen=True, init=False)
@@ -675,9 +672,9 @@ class ArbiterCodec(Protocol):
     ``_ARBITER_CODECS``; the buyer's builder looks one up by ``kind``
     (today: ``"recipient"``) and delegates the arbiter parts of
     obligation_data construction to it. Both sides — buyer at escrow
-    creation, seller via the shared ``build_payment_obligation_data``
-    helper — go through the same codec, so demand bytes match
-    bytewise across the wire and dict-compare verification passes.
+    creation, seller at verification — go through the same codec, so
+    demand bytes match bytewise across the wire and dict-compare
+    verification passes.
     """
 
     kind: str
@@ -756,64 +753,6 @@ def get_arbiter_codec(kind: str) -> ArbiterCodec:
 def known_arbiter_kinds() -> list[str]:
     """Snapshot of currently-registered arbiter kinds (for diagnostics)."""
     return sorted(_ARBITER_CODECS)
-
-
-def build_payment_obligation_data(
-    *,
-    recipient: str | None = None,
-    seller_wallet: str | None = None,
-    agreed_amount: int,
-    duration_seconds: int,
-    token_contract_address: str,
-    chain_name: str,
-    addr_config_path: str | None = None,
-    arbiter_kind: str = "recipient_arbiter",
-) -> dict[str, Any]:
-    """Canonical obligation_data for an ERC20 + arbiter-kind payment escrow.
-
-    Both the buyer (at escrow creation) and the seller (at verification)
-    call this helper with the negotiated inputs and the chain config, so
-    they produce identical expected obligation_data. Any divergence
-    between sides means a misconfiguration somewhere — wrong token,
-    wrong chain config, wrong amount, wrong arbiter kind — and the
-    seller's verifier flags it before any provisioning side-effect.
-
-    Returns the literal ``ERC20EscrowObligation.ObligationData`` struct:
-
-        {arbiter: <kind-specific address for chain_name>,
-         demand:  "0x" + <kind-specific demand bytes>,
-         token:   token_contract_address,
-         amount:  agreed_amount}
-
-    ``agreed_amount`` is the absolute payment total in base units of
-    ``token_contract_address`` — already multiplied out from any per-hour
-    rate during negotiation. The middleware chain owns price math; this
-    helper just wires obligation bytes.
-
-    The arbiter address and demand bytes are produced by the registered
-    ``ArbiterCodec`` matching ``arbiter_kind``, for the ``recipient`` the
-    caller names: the seller's own wallet, on a thread that carries no
-    proposal. A condition a proposal names is never encoded here; it is
-    materialized only under the release condition its listing authorizes
-    (``materialize_escrow_terms_from_proposal``).
-    """
-    effective_recipient = recipient or seller_wallet
-    if not effective_recipient:
-        raise ValueError("recipient must be supplied to build payment obligation data")
-    codec = get_arbiter_codec(arbiter_kind)
-    agreement = AgreementContext(
-        recipient=effective_recipient,
-        agreed_amount=int(agreed_amount),
-        duration_seconds=duration_seconds,
-    )
-    arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
-    demand_bytes = codec.encode_demand(agreement)
-    return {
-        "arbiter": arbiter_address,
-        "demand": "0x" + demand_bytes.hex(),
-        "token": token_contract_address,
-        "amount": int(agreed_amount),
-    }
 
 
 def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:

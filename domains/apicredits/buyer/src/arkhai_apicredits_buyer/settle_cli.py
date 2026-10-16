@@ -108,9 +108,8 @@ def _refuse_without_release_condition(log, reason: str) -> None:
     created.
     """
     error = (
-        f"Cannot create the escrow: {reason}. An escrow is created only under "
-        "the release condition the listing authorizes, from the seller's "
-        "accepted escrow terms or, against the listing, its accepted proposal; "
+        f"Cannot create the escrow: {reason}. A resumed run creates an escrow "
+        "only from the seller's accepted escrow terms recorded in its run-log; "
         "re-run negotiation so they are captured."
     )
     log.event("escrow_release_condition_missing", error=error)

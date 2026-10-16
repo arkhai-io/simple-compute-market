@@ -362,9 +362,9 @@ Secrets is owed. Accepted scope beyond the original proposal.
   one), and `verify_escrow_for_settlement`, which materializes the expected obligation against
   the listing it is given. Encoding one condition is private to `alkahest.py`, reached only
   through `encode_authorized_release_condition(listing, …)`, so there is no public way to encode
-  a condition a listing does not authorize from a proposal; `build_payment_obligation_data`
-  encodes only the recipient condition for the wallet its caller names, which legacy
-  verification of a thread with no proposal uses. The recipient-arbiter fallback is gone, an `arbiter`
+  a condition a listing does not authorize from a proposal. The recipient condition legacy
+  verification expects for a thread with no proposal is built by a function private to
+  verification. The recipient-arbiter fallback is gone, an `arbiter`
   or `demand` among the escrow's fields is overwritten, an authorized condition the chain's address
   book or codec cannot encode is `_unreadable`, and `accepted_escrow_artifacts_from_proposal`
   raises rather than recording a refusal beside artifacts with no plan. `seller_wallet_address`
@@ -378,13 +378,20 @@ Secrets is owed. Accepted scope beyond the original proposal.
   passes its listing. The call-site authorization each domain carried goes, except bare metal's
   at the opening, which pins the authorized proposal on the thread and refuses an unauthorized
   selection at the opening whatever the policy decides. Every refusal is the round's 409 with the
-  `release_condition_*` reason, and nothing is recorded. Seller verification and refund
-  re-materialize against the listing as stored when they run, so a listing whose conditions
-  changed after acceptance fails them closed. The core buyer's orchestration passes the selected
-  listing to the domain's escrow-terms builder, so a buyer creates no escrow under a condition the
-  listing does not authorize, whatever the seller echoed; a resumed run whose run-log records the
-  seller's accepted proposal but no accepted escrow terms has no listing to authorize against and
-  refuses by name (`escrow_release_condition_missing`). Rejected: authorization at each
+  `release_condition_*` reason, and nothing is recorded. Seller verification re-materializes
+  against the listing as stored when it runs, so a listing whose conditions changed after
+  acceptance fails it closed; a legacy thread with no proposal is verified against a recipient
+  condition paying the seller's wallet, without the listing. VM's refund reads the token and
+  amount from the accepted plan's obligation and materializes nothing, so a changed listing does
+  not block it. On the buyer side the check is narrower than the seller's. The core buyer's
+  orchestration creates the escrow from the seller's accepted escrow terms when the response
+  carries them, checking them against nothing here; only the VM buyer's selection path checks the
+  seller's plan against the listing first (`validate_selected_escrow_plan`), and the API-credit
+  buyer and VM's proposal path do not. Where the response carries no terms, the orchestration
+  passes the selected listing to the domain's escrow-terms builder, which materializes the
+  accepted proposal under the condition the listing authorizes. A resumed run whose run-log
+  records the seller's accepted proposal but no accepted escrow terms has no listing to authorize
+  against and refuses by name (`escrow_release_condition_missing`). Rejected: authorization at each
   storefront's acceptance boundary through `authorize_escrow_proposal`, with materialization
   refusing only a proposal selecting no condition, which Section 7 first delivered, because a rule
   each caller must remember is how correction 9 opened: a later acceptance path that skips the

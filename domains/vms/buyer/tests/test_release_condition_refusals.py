@@ -119,15 +119,81 @@ def test_escrow_create_refuses_a_run_log_with_no_accepted_proposal(monkeypatch):
     assert [name for name, _ in log.events][-1] == "escrow_release_condition_missing"
 
 
-def test_settle_refuses_an_accepted_proposal_naming_no_condition(monkeypatch):
-    log = _Log()
-    proposal = {
+_PROPOSAL = {
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "11" * 20,
+    "fields": {"token": _TOKEN},
+    "literal_fields": {"token": _TOKEN},
+    "expiration_unix": 2_000_000_000,
+}
+# A run-log holding an accepted proposal that selects the seller's recipient
+# condition, but not the listing that authorizes it, nor the seller's terms.
+_SELECTING_PROPOSAL = {
+    **_PROPOSAL,
+    "demand": {
         "chain_name": "anvil",
-        "escrow_address": "0x" + "11" * 20,
-        "fields": {"token": _TOKEN},
-        "literal_fields": {"token": _TOKEN},
-        "expiration_unix": 2_000_000_000,
-    }
+        "arbiter": "0x" + "55" * 20,
+        "demand_data": {"recipient": _SELLER_WALLET},
+    },
+}
+_RESUMED_PROPOSALS = pytest.mark.parametrize(
+    ("proposal", "reason"),
+    [
+        (_PROPOSAL, "release_condition_unselected"),
+        (_SELECTING_PROPOSAL, "not the listing that authorizes"),
+    ],
+    ids=["naming no condition", "selecting a condition"],
+)
+
+
+@_RESUMED_PROPOSALS
+def test_escrow_create_refuses_a_run_log_holding_only_an_accepted_proposal(
+    monkeypatch, proposal, reason
+):
+    log = _Log()
+    monkeypatch.setattr(common, "resolve_recovery_buyer_identity", lambda _run: _identity())
+    monkeypatch.setattr(
+        deal_helpers,
+        "load_deal_context",
+        lambda *_a, **_k: _deal(accepted_escrow_proposal=proposal),
+    )
+    monkeypatch.setattr(deal_helpers, "open_run_log", lambda *_a, **_k: log)
+    monkeypatch.setattr(
+        common,
+        "chain_by_name",
+        lambda _name: SimpleNamespace(
+            name="anvil", rpc_url="http://rpc", alkahest_address_config_path=None
+        ),
+    )
+    monkeypatch.setattr(
+        common, "resolve_buyer_wallet", lambda **_kw: ("0x" + "66" * 20, "0x" + "77" * 32)
+    )
+    _no_escrow_is_created(monkeypatch)
+
+    with pytest.raises(typer.Exit) as refused:
+        escrow_cli.create_cmd(
+            run_id="run-1",
+            duration_hours=None,
+            expiration_seconds=3600,
+            token_contract=None,
+            token_decimals=None,
+            chain_name_flag=None,
+            private_key=None,
+            buyer_address=None,
+        )
+
+    assert refused.value.exit_code == 3
+    (missing,) = [
+        fields for name, fields in log.events if name == "escrow_release_condition_missing"
+    ]
+    assert reason in missing["error"]
+
+
+@_RESUMED_PROPOSALS
+def test_settle_refuses_a_run_log_holding_only_an_accepted_proposal(
+    monkeypatch, proposal, reason
+):
+    log = _Log()
     monkeypatch.setattr(common, "resolve_recovery_buyer_identity", lambda _run: _identity())
     monkeypatch.setattr(
         common, "resolve_buyer_wallet", lambda: ("0x" + "66" * 20, "0x" + "77" * 32)
@@ -177,4 +243,4 @@ def test_settle_refuses_an_accepted_proposal_naming_no_condition(monkeypatch):
     (missing,) = [
         fields for name, fields in log.events if name == "escrow_release_condition_missing"
     ]
-    assert "release_condition_unselected" in missing["error"]
+    assert reason in missing["error"]

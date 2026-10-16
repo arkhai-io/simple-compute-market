@@ -101,6 +101,34 @@ _ACCEPTED_ESCROW_PROPOSAL = {
     "fields": {"token": "0x" + "cc" * 20},
     "expiration_unix": 1_800_000_000,
 }
+_ACCEPTED_OBLIGATION_DATA = {
+    "arbiter": "0x" + "bb" * 20,
+    "demand": "0x" + "dd" * 32,
+    "token": "0x" + "cc" * 20,
+    "amount": "42",
+}
+
+
+def _accepted_plan(escrow_contract: str = "0x" + "aa" * 20) -> dict:
+    """The accepted plan as the thread row returns it, decoded from its JSON."""
+    return {
+        "obligations": [
+            {
+                "payer": "buyer",
+                "claimant": "seller",
+                "amount": "42",
+                "asset": "0x" + "cc" * 20,
+                "expiration_unix": 1_800_000_000,
+                "mechanism": "alkahest.v1",
+                "params": {
+                    "chain_name": "anvil",
+                    "escrow_contract": escrow_contract,
+                    "obligation_data": dict(_ACCEPTED_OBLIGATION_DATA),
+                },
+            }
+        ],
+        "service_terms": {},
+    }
 
 
 @pytest.mark.asyncio
@@ -111,8 +139,17 @@ _ACCEPTED_ESCROW_PROPOSAL = {
             {
                 "settlement_data": {"accepted_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
                 "buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL,
+                "settlement_plan": _accepted_plan(),
             },
             id="accepted proposal recorded",
+        ),
+        pytest.param(
+            {
+                "settlement_data": {"accepted_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+                "buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL,
+                "settlement_plan": _accepted_plan("0x" + "ee" * 20),
+            },
+            id="accepted plan names another escrow",
         ),
         pytest.param(
             {"buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
@@ -121,8 +158,10 @@ _ACCEPTED_ESCROW_PROPOSAL = {
     ],
 )
 async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch, recorded):
-    """A refund materializes the accepted escrow proposal, never the buyer's
-    opening: only the accepted one carries the authorized release condition."""
+    """A refund returns the token and amount of the accepted plan's obligation
+    on the escrow, read as accepted rather than materialized again, and only
+    for a deal that recorded its accepted escrow proposal, never the buyer's
+    opening alone."""
 
     class FakeDb:
         def __init__(self):
@@ -160,9 +199,6 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
         kind="erc20_escrow_obligation_default",
         refund_claimed=AsyncMock(return_value={"tx_hash": "0xrefund"}),
     )
-    fake_terms = SimpleNamespace(
-        obligation_data={"token": "0x" + "cc" * 20, "amount": 42}
-    )
 
     monkeypatch.setattr(
         "market_storefront.failure_actions._configured_failure_actions_source",
@@ -183,10 +219,6 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
                 rpc_url="http://rpc", alkahest_address_config_path="/addr.json"
             )
         },
-    )
-    monkeypatch.setattr(
-        "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",
-        lambda **kwargs: [fake_terms],
     )
     monkeypatch.setattr(
         "market_alkahest.alkahest.get_escrow_codec_for",
@@ -214,6 +246,15 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
         fake_codec.refund_claimed.assert_not_awaited()
         assert db.escrow_updates == []
         return
+    if recorded["settlement_plan"] != _accepted_plan():
+        (action,) = result.actions
+        assert (action["status"], action["reason"]) == (
+            "failed",
+            "escrow_refund_context_invalid",
+        )
+        fake_codec.refund_claimed.assert_not_awaited()
+        assert db.escrow_updates == []
+        return
     assert result.actions == [
         {
             "action": "refund",
@@ -225,7 +266,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
     fake_codec.refund_claimed.assert_awaited_once_with(
         private_key="seller-pk",
         rpc_url="http://rpc",
-        obligation_data={"token": "0x" + "cc" * 20, "amount": 42},
+        obligation_data={**_ACCEPTED_OBLIGATION_DATA, "amount": 42},
         to_address=BUYER_EVM_ADDRESS,
     )
     assert db.listing_updates == [{"listing_id": "listing-1", "status": "refunded"}]

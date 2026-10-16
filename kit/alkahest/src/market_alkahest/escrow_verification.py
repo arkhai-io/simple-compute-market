@@ -3,9 +3,11 @@
 The seller's storefront calls ``verify_escrow_for_settlement`` before any
 provisioning side-effect. It reads the EAS attestation by uid via
 alkahest-py's ``client.erc20.escrow.default.get_obligation(uid)`` and asserts
-the on-chain obligation_data dict-matches what the seller expects, computed
-via ``build_payment_obligation_data`` from the same negotiation inputs the
-buyer used.
+the on-chain obligation_data dict-matches what the seller expects: the
+obligation materialized from the thread's proposal under the release
+condition the listing authorizes, the same inputs the buyer used. A legacy
+thread with no proposal expects a recipient condition paying the seller's
+wallet, without consulting the listing.
 
 Verification is two-phase:
 
@@ -16,9 +18,8 @@ Verification is two-phase:
    + amount for ERC20EscrowObligation) dict-equals the expected
    obligation_data byte-for-byte (modulo address-case normalization and
    bytes/hex normalization). Single dict-compare replaces the per-field
-   hard-coded checks; adding new arbiter / escrow kinds later only
-   requires updating ``build_payment_obligation_data`` (or its successor
-   codec lookup in step 5), not this verifier.
+   hard-coded checks; adding new arbiter / escrow kinds only requires
+   registering their codecs, not changing this verifier.
 
 The expected ``expiration_unix`` doesn't participate in dict-compare —
 it's buyer-clock-stamped at escrow creation and the seller can't
@@ -29,7 +30,7 @@ check can become exact-equal.
 On any mismatch raises ``EscrowVerificationError``. The caller maps that
 to HTTP 400 — settlement aborts before any DB side effect or chain
 write. ``get_obligation_fn`` and ``build_obligation_data_fn`` are
-injectable test seams.
+injectable test seams; no production caller passes them.
 """
 
 from __future__ import annotations
@@ -249,6 +250,48 @@ def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
     return _normalize_obligation_data(raw)
 
 
+def _legacy_recipient_obligation_data(
+    *,
+    recipient: str | None = None,
+    seller_wallet: str | None = None,
+    agreed_amount: int,
+    duration_seconds: int,
+    token_contract_address: str,
+    chain_name: str,
+    addr_config_path: str | None = None,
+    arbiter_kind: str = "recipient_arbiter",
+) -> dict[str, Any]:
+    """Expected obligation_data for a legacy thread that carries no proposal.
+
+    The ERC20 escrow paying ``recipient`` (the seller's own wallet) under the
+    registered ``arbiter_kind`` codec, with ``agreed_amount`` the absolute
+    payment total in base units of ``token_contract_address``:
+
+        {arbiter, demand: "0x" + <codec demand bytes>, token, amount}
+
+    Private to verification: a condition a proposal names is never encoded
+    here, only materialized under the release condition its listing
+    authorizes. The listing is not consulted on this path.
+    """
+    effective_recipient = recipient or seller_wallet
+    if not effective_recipient:
+        raise ValueError("recipient must be supplied to build payment obligation data")
+    codec = _codecs.get_arbiter_codec(arbiter_kind)
+    agreement = _codecs.AgreementContext(
+        recipient=effective_recipient,
+        agreed_amount=int(agreed_amount),
+        duration_seconds=duration_seconds,
+    )
+    arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
+    demand_bytes = codec.encode_demand(agreement)
+    return {
+        "arbiter": arbiter_address,
+        "demand": "0x" + demand_bytes.hex(),
+        "token": token_contract_address,
+        "amount": int(agreed_amount),
+    }
+
+
 async def verify_escrow_for_settlement(
     *,
     escrow_uid: str,
@@ -422,7 +465,7 @@ async def verify_escrow_for_settlement(
         # Legacy thread with no concrete proposal; keep the old ERC20 path.
         obligation_data_builder = build_obligation_data_fn
         if obligation_data_builder is None:
-            obligation_data_builder = _codecs.build_payment_obligation_data
+            obligation_data_builder = _legacy_recipient_obligation_data
         try:
             expected_obligation_raw = obligation_data_builder(
                 recipient=effective_recipient,
