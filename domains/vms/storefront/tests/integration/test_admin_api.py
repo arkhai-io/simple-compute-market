@@ -23,6 +23,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, Identity, TrustedIdentitySet
 from core_storefront.models.system_models import STAGE_EVENT_PAGE_CAP
+from core_storefront.service_peers import ServicePeerTrust
 
 import market_storefront.container as _container
 from market_storefront.controllers import admin_controller
@@ -31,7 +32,6 @@ from market_storefront.middleware.admin_identity import (
     initialize_administrator_identities,
 )
 from market_storefront.middleware.service_peer_auth import (
-    initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
 import market_storefront.lifecycle as _lifecycle
@@ -110,15 +110,14 @@ async def admin_app(db) -> AsyncIterator[FastAPI]:
             "market_storefront.middleware.admin_identity.get_administrator_configs",
             return_value={"operator": _ADMIN_PRINCIPALS},
         ),
-        patch(
-            "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
-            return_value={
-                "system-status": ("service", "default", _SERVICE_PRINCIPALS)
-            },
-        ),
     ):
         initialize_administrator_identities(db.db_path)
-        initialize_service_peer_identities(db.db_path)
+        service_peer_trust = ServicePeerTrust(
+            db.db_path,
+            {"system-status": ("service", "default", _SERVICE_PRINCIPALS)},
+        )
+        service_peer_trust.seed()
+        _container.resolved_service_peer_trust = service_peer_trust
         app = FastAPI()
         app.include_router(system_router)
         app.include_router(admin_router)
@@ -131,6 +130,7 @@ async def admin_app(db) -> AsyncIterator[FastAPI]:
     _container.resolved_sqlite_client = None
     _container.resolved_marketplace_signer = None
     _container.resolved_system_service = None
+    _container.resolved_service_peer_trust = None
 
 
 @pytest_asyncio.fixture

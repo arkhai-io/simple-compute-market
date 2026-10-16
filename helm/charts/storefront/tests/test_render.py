@@ -362,6 +362,15 @@ def test_retired_inventory_settings_are_refused_in_any_spelling() -> None:
     _ok(_render(agent=_with_config(capacity={"sites": {}})))
 
 
+def test_the_renamed_servicing_interval_is_refused_in_any_spelling() -> None:
+    """The storefront refuses to start on its old servicing-interval key; the
+    schema refuses it first, and its replacement passes through."""
+    for key in ("claims_sweep_interval", "Claims_Sweep_Interval"):
+        _refused(_render(agent=_with_config(**{key: 30})), key)
+    config = _config(_ok(_render(agent=_with_config(settlement_servicing_interval_seconds=30))))
+    assert config["settlement_servicing_interval_seconds"] == 30
+
+
 def test_a_stated_port_must_be_a_number_equal_to_the_agents() -> None:
     _refused(_render(agent=_with_config(port="8001")), "must be a number")
     _refused(_render(agent=_with_config(port=8001.5)), "differs from the agent's port")

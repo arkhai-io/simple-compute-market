@@ -81,6 +81,10 @@ class FakeSite:
         #: Off: every answer is signed by an authority the storefront does not
         #: trust, so it arrives but does not verify.
         self.verifiable = True
+        #: The authority that signs the site's answers; ``None`` signs as the
+        #: trusted test authority, or the untrusted one while ``verifiable`` is
+        #: off. A test rotating the site's key sets it.
+        self.signer: Any = None
         #: ``(method, path)`` of every request that reached the site.
         self.requests: list[tuple[str, str]] = []
         #: Reservations fulfillment delivered against: the site's release
@@ -165,7 +169,9 @@ class FakeSite:
             request.url.path,
             request_body,
         )
-        signer = TEST_SITE_AUTHORITY_SIGNER if self.verifiable else TEST_UNTRUSTED_SIGNER
+        signer = self.signer or (
+            TEST_SITE_AUTHORITY_SIGNER if self.verifiable else TEST_UNTRUSTED_SIGNER
+        )
         signed = sign_response(
             signer=signer,
             envelope=ResponseEnvelope(

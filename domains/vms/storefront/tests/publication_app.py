@@ -38,6 +38,7 @@ import market_policy.negotiation_thread as thread_store
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import ContactExchangeClient
 from market_core.schemas import RateValue, derive_settlement_option_id
+from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
@@ -68,7 +69,6 @@ from market_storefront.controllers.negotiate_controller import router as negotia
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.middleware.service_peer_auth import (
-    initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
 from market_storefront.services.listing_service import ListingService
@@ -571,20 +571,6 @@ async def publication_app(
                 lambda: {"operator": _ADMINISTRATORS},
             )
         )
-        # The provisioning service's callbacks authenticate as a service peer
-        # trusted for the home site.
-        stack.enter_context(
-            patch(
-                "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
-                return_value={
-                    "provisioning": (
-                        "service",
-                        SITE,
-                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
-                    )
-                },
-            )
-        )
         registry = storefront_config.storefront_domain_registry()
         db = SQLiteClient(db_path=str(tmp_path / "storefront.db"), registry=registry)
         composition = SettlementCompositionDouble(
@@ -646,6 +632,7 @@ async def publication_app(
                 "resolved_pool_override_service",
                 "resolved_admissibility_default",
                 "resolved_contact_exchange",
+                "resolved_service_peer_trust",
             )
         }
         container.resolved_sqlite_client = db
@@ -719,7 +706,20 @@ async def publication_app(
             routers = (*routers, introductions_router)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
-            initialize_service_peer_identities(db.db_path)
+            # The provisioning service's callbacks authenticate as a service
+            # peer trusted for the home site, seeded as the lifespan seeds it.
+            service_peer_trust = ServicePeerTrust(
+                db.db_path,
+                {
+                    "provisioning": (
+                        "service",
+                        SITE,
+                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
+                    )
+                },
+            )
+            service_peer_trust.seed()
+            container.resolved_service_peer_trust = service_peer_trust
             app = FastAPI()
             for router in (
                 system_router,

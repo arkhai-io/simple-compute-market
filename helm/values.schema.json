@@ -1267,7 +1267,17 @@
             },
             "^[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]$": false
           }
-        }
+        },
+        "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[pP][aA][tT][hH]$": false,
+        "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[iI][nN][lL][iI][nN][eE]$": false,
+        "^[eE][sS][cC][rR][oO][wW]_[tT][eE][mM][pP][lL][aA][tT][eE][sS]$": false,
+        "^[cC][aA][pP][aA][cC][iI][tT][yY]$": {
+          "type": "object",
+          "patternProperties": {
+            "^[uU][sS][eE]_[sS][iI][tT][eE]_[pP][rR][oO][jJ][eE][cC][tT][iI][oO][nN]_[fF][oO][rR]_[lL][iI][sS][tT][iI][nN][gG][sS]$": false
+          }
+        },
+        "^[cC][lL][aA][iI][mM][sS]_[sS][wW][eE][eE][pP]_[iI][nN][tT][eE][rR][vV][aA][lL]$": false
       }
     },
     "trustedIdentitySet": {

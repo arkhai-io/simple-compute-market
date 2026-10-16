@@ -223,6 +223,32 @@ def test_service_peer_binding_rejects_missing_site():
         agent_config.get_service_peer_configs(source)
 
 
+def test_the_servicing_interval_is_read_from_its_key():
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert packaged["settlement_servicing_interval_seconds"] == 30
+    assert "claims_sweep_interval" not in packaged
+    assert agent_config.settlement_servicing_interval(Dynaconf(environments=False)) == 30.0
+
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", 2)
+    assert agent_config.settlement_servicing_interval(source) == 2.0
+
+
+@pytest.mark.parametrize("spelling", ["claims_sweep_interval", "CLAIMS_SWEEP_INTERVAL"])
+def test_the_retired_servicing_interval_is_named_with_its_replacement(spelling):
+    """A configuration stating the old key is refused rather than silently run
+    at the default; the refusal names the key that replaced it."""
+    source = Dynaconf(environments=False)
+    source.set(spelling, 5)
+    assert agent_config.renamed_setting_problems(source) == [
+        "claims_sweep_interval was renamed settlement_servicing_interval_seconds; "
+        "state settlement_servicing_interval_seconds instead"
+    ]
+    # The old key is not read as the interval.
+    assert agent_config.settlement_servicing_interval(source) == 30.0
+    assert agent_config.renamed_setting_problems(Dynaconf(environments=False)) == []
+
+
 # ---------------------------------------------------------------------------
 # Composites — AGENT_ID, AGENT_NAME, BASE_URL_OVERRIDE are computed once at
 # module load. get_agent_id() supports per-call override.

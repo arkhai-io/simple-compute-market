@@ -2145,12 +2145,28 @@ that cannot publish refuses to start", "Site authority principals rotate with bo
 overlap"). Touches VM's storefront, its chart's generated schema, and the VM lane's
 configuration.
 
-- [ ] 10.1 Startup refusal (`src/startup.py` or a composition-time check beside it): no
+- [x] 10.1 Startup refusal (`src/startup.py` or a composition-time check beside it): no
       registry, or a registry without its authority pin while `enable_registry_discovery`
       is true; no enabled settlement mechanism; a configured site with no service peer or
       more than one (through 4.3). Each problem is named, and no loop starts. An empty
       `[pricing].settlements` is not a refusal.
-- [ ] 10.2 Per-site trust: `services/capacity_client.py`'s `build_capacity_runtime_for`
+      Done in a new module beside startup, `src/startup_refusal.py`:
+      `publication_startup_problems(source)` collects every problem in order and
+      `require_publishable_storefront(source)` raises `StorefrontStartupError` ("the
+      storefront cannot publish: …", each problem named, `;`-joined). `_build_vm_services`
+      calls it after the admissibility parse and the release-model check and before the
+      database, signer, or any collaborator, so no database file and no loop exist when it
+      refuses. Problems: a renamed setting still stated (10.3); `[registry].urls` empty, or
+      `get_registry_authorities` refusing the pins (both only while
+      `enable_registry_discovery` is on, the switch with which VM publishes to no registry
+      on purpose -- D6's parenthetical read as covering both registry checks); no
+      `[Settlement]` section enabled, or a root that does not resolve; no `[capacity.sites]`
+      (also in the spec delta's "no configured site", which 10.1's text omitted for VM); and
+      `require_one_service_peer_per_site` (4.3). `_start_vm_services` no longer calls
+      `get_registry_authorities()` itself, since the refusal checks it first. Site reading
+      moved into `utils.config.configured_capacity_sites(source)`, which
+      `capacity_client._capacity_settings` now calls (same messages).
+- [x] 10.2 Per-site trust: `services/capacity_client.py`'s `build_capacity_runtime_for`
       gives each site's `CapacitySite` the provider of that site's peer's active
       principals (4.1, 4.3) instead of the shared `[provisioning.identity]` set, and the
       runtime's cache key stops carrying principals. `[provisioning.identity]` remains
@@ -2160,7 +2176,39 @@ configuration.
       and reloaded when an identity rotation, completion, or retirement commits, and
       evaluate `active_principals(now)` over them at each call (still "at verification
       time", D14b); bare metal's 12.2 composes the same provider.
-- [ ] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
+      Done (04 F4). Core: `core_storefront.service_peers.ServicePeerTrust(db_path, peers, *,
+      clock)` holds each configured site's durable peer status in memory (replaced whole
+      per load, under a lock, so a reader sees one complete load): `seed()` seeds and
+      loads, `reload()` reads durable state (blocking; worker thread once serving),
+      `site_active_principals(site, now=)` for callbacks, `site_trusted_set(site)` and
+      `site_authorities(site)` (a provider: `partial` over memory, primary first) for site
+      clients, and `identity_authority()`, a `StorefrontIdentityAuthority` whose
+      `register_service_peer`, `apply_rotation`, `complete_rotation`, `retire`, and
+      `disable` reload the trust in a `finally`, so a change committed through it reaches
+      verification as it commits. A site bound to no peer, two, a disabled peer, or one
+      disagreeing with configuration raises `AuthError` with the reason; before the first
+      load, `AuthError` 503. The SQLite-reading `site_trusted_authorities` and
+      `site_active_principals` functions are gone (nothing composed the first; the second
+      was VM's callback read, now the trust's), so `arkhai-core-storefront` 0.15.0 (an
+      incompatible removal); `arkhai-kit-capacity-publication` 0.9.3 pins it exactly, and
+      the VM, bare-metal, API-credit storefronts' and the provisioning service dev group's
+      exact pins follow; VM requires `arkhai-core-storefront>=0.15.0`. VM:
+      `_build_vm_services` builds one trust over the storefront database and
+      `get_service_peer_configs()`, passes it to `build_capacity_runtime_for`, and
+      `VmStorefrontServices.service_peer_trust` carries it; `_start_vm_services` seeds it
+      (in place of `initialize_service_peer_identities`, which is gone) and sets
+      `container.resolved_service_peer_trust`. The runtime's sites carry
+      `_LateServicePeerTrust.site_authorities(site)` providers, which read whichever trust
+      the root last bound (the runtime is cached across compositions in one process, as
+      Section 8's late-bound projection provider is); nothing bound fails each response
+      closed. The cache key drops the principals and gains an optional
+      `site_client_factory`, passed to `CapacityRuntime` as its constructor allows, so a
+      test can give the production runtime a fake transport. The callback middleware reads
+      the trust from the container (no thread, no SQLite) and the status read's single peer
+      from `trust.peers`; it no longer imports `get_service_peer_configs`, retiring the
+      module patch three VM test files used. The admin rotation and retirement routes
+      commit through `trust.identity_authority()` (503 when no trust is composed).
+- [x] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
       `src/startup.py`, `src/utils/config.py`'s `settlement_servicing_interval()` (the one
       reader, used by the servicing worker and `src/lifecycle_steps.py`'s registration),
       and the lane overlays use `settlement_servicing_interval_seconds`; a
@@ -2169,9 +2217,48 @@ configuration.
       both schemas, so an agent's `config` stating it is refused at render. The charts'
       hand-written `config.allOf` block of retired keys is a second home for retirements:
       decide between them first (Section 5 handoff).
-- [ ] 10.4 The VM lane's overlays declare every site's service peer if any does not yet,
+      Done. `settlement_servicing_interval()` reads `settlement_servicing_interval_seconds`
+      (default 30), still the one reader (the worker in `settlement_composition.py` and the
+      timer in `lifecycle_steps.py`); `settings.toml` ships the key; Bob's and Alice's
+      overlays use it. `startup.py` needed no change: it reads no interval of its own.
+      `utils.config.RENAMED_SETTINGS` maps the old key to its replacement and
+      `renamed_setting_problems(source)` names each one stated, in any spelling, which the
+      startup refusal reports; the old key is not read as the interval.
+      **Decided (two homes):** `RETIRED_KEYS` in VM's `values_schema.py` holds keys of the
+      storefront's own configuration that it no longer reads, generated with its section
+      list; the chart's hand-written `config.allOf` block holds the chart's own retired
+      values shape, the pre-0.2.0 keys the pass-through chart refused when it was introduced
+      (`seller`, `registryAuthority`, `registryUrl`, `storefrontDomains`, `configMapName`,
+      `hostedSettlement`, `chain`). By that rule the local-inventory keys the storefront
+      retired later (`resources_csv_path`, `resources_csv_inline`, `escrow_templates`,
+      `capacity.use_site_projection_for_listings`) moved from both hand blocks
+      (`helm/charts/storefront/values.schema.json`, `helm/values.schema.json`) into
+      `RETIRED_KEYS`, beside `*RENAMED_SETTINGS`; `make helm-values-schema` regenerated both
+      definitions, which now refuse all five in any spelling. The existing render tests of
+      the inventory keys pass unchanged against the generated refusal. `market-storefront
+      config set`'s own list of inventory keys (`groups/config.py`) is unchanged. For 17.9:
+      `DEPLOYMENT_AND_CONFIG.md` should state which home is for which kind of key.
+- [x] 10.4 The VM lane's overlays declare every site's service peer if any does not yet,
       so the lane starts under 10.1.
-- [ ] 10.5 Tests. Unit: `tests/unit/test_config_loader.py` — the retired key's refusal.
+      Already so: `storefront.bob.toml` and `storefront.alice.toml` each bind their one
+      site, `default`, to `provisioning_default`, pin every registry, and enable Alkahest
+      (Bob also contact exchange), so both pass the refusal; no change. The umbrella's
+      `bob` agent and the chart fixtures declare the peer too. **Found (for the owner):** the
+      umbrella's default `bob` agent (`helm/values.yaml`, and the storefront chart's own
+      `values.yaml`) states `Settlement: {priority: []}`, so a release from the default
+      values alone -- `make -C helm deploy-local` with no settlement overlay, as
+      change-validate's Helm part deploys -- now refuses to start, naming "no settlement
+      mechanism is enabled under [Settlement]". The render tests are unaffected (they do
+      not start a storefront), and the fixtures `eip191-evm-values.yaml`,
+      `payments-ed25519-values.yaml`, and `contact-exchange-values.yaml` each enable one.
+      Not changed here, since which mechanism the default development release sells under
+      is not decided in `design.md`. Options: (a) enable Alkahest in the default agent as
+      the EVM fixture does (needs the wallet Secret and a chain the release has);
+      (b) enable contact exchange, which needs no wallet, chain, or credential, with a
+      development contact on a reserved domain; (c) keep the default unstartable and have
+      the runbook deploy with a fixture that enables a mechanism. Recommended: (a), which
+      matches the Compose lane and is what the Helm deal validation exercises.
+- [x] 10.5 Tests. Unit: `tests/unit/test_config_loader.py` — the retired key's refusal.
       Application integration, through the typed client: startup refusals named per
       problem with no loop started; the empty-settlements storefront starts and publishes
       a pool whose override states clauses ("A storefront's terms live in its pools"); a
@@ -2180,19 +2267,109 @@ configuration.
       without a restart ("A site's responses follow its rotation"); a principal of one
       site does not verify another's responses. `helm/charts/storefront/tests/test_render.py`
       — `claims_sweep_interval` in an agent's `config` is refused naming the key.
-- [ ] 10.6 Validation: `make test-storefront`, `make -C helm test-render` (with
+      Done. Unit: `test_config_loader.py` (two new) -- the packaged and read interval key,
+      and the old key in two spellings named with its replacement and not read;
+      `tests/unit/test_startup_refusal.py` (new, nine, over Dynaconf sources) -- a
+      storefront with no configured clauses is not refused; no registry; a registry without
+      its pin; registries unchecked while discovery is off; no enabled mechanism (none, and
+      one disabled); no site; a site with no peer and one with two, named together; the
+      renamed key; every problem in one refusal. Application startup, the real app and
+      lifespan: `tests/integration/test_publishable_startup.py` (new, six cases) -- from a
+      configuration that publishes, each break (no registry, a registry without its pin, no
+      enabled mechanism, a site with no peer, one with two, the old interval key) refuses
+      with `StorefrontStartupError` naming it, no storefront installed, no database client
+      created, no database file written, no loop. Application integration through
+      `StorefrontClient`: `test_pool_overrides_api.py::test_a_storefront_with_no_configured_clauses_publishes_a_pool_whose_override_states_them`
+      -- `[pricing].settlements` empty, the pool publishes nothing until an override states
+      a clause, then publishes under it. **Differed (level):** that such a storefront
+      *starts* is shown by the refusal unit test, not by a lifespan that runs its startup
+      steps, which need a reachable provisioning service. `tests/integration/test_site_trust.py`
+      (new, two): the production `build_capacity_runtime_for` composed with the seeded trust
+      and fake site transports; a rotation applied through
+      `admin_initiate_identity_rotation` admits either principal during its overlap, and once
+      `admin_complete_identity_rotation` retires the old one only the replacement verifies,
+      same runtime and clients; the other site's peer is untouched; neither site's principal
+      verifies the other's responses. With the admin routes committing through a plain
+      `StorefrontIdentityAuthority` (swapped, then restored) the rotation case fails.
+      Core (library integration, `core/storefront/tests/integration/test_service_peers.py`,
+      rewritten over the trust): seeding, the startup refusal, a site with no peer or two,
+      nothing before the first load (503), active principals through an overlap and per
+      site, the provider following a rotation from memory with the database file moved away
+      (the overlap still ends by the clock) and a completion through the trust's authority,
+      a change made outside it waiting for a reload, and a disabled peer. Adapted:
+      `test_service_peer_identity.py`, `tests/publication_app.py`, and
+      `test_admin_api.py` build and inject a seeded trust instead of patching
+      `get_service_peer_configs`; `test_server_app_composition.py` asserts the one trust the
+      root builds reaches the runtime and the container, is seeded, and is cleared (it
+      stubs the refusal, since its configuration publishes nowhere);
+      `test_admissibility_default_composition.py` and `test_loop_gate_wiring.py` follow.
+      `tests/fake_site.py`'s `FakeSite.signer` lets a test choose the key a site signs
+      with. Chart render: `test_the_renamed_servicing_interval_is_refused_in_any_spelling`
+      (two spellings refused naming the key; the new key passes through).
+- [x] 10.6 Validation: `make test-storefront`, `make -C helm test-render` (with
       `STOREFRONT_PYTHON` for the loader check), `make test`. End-to-end (VM lane): every
       VM scenario, since each starts the storefront; and the storefront smoke tests.
+      Done. `make test-storefront` cannot reinit here (the PyTorch index is refused, as in
+      2.6), so VM storefront ran frozen with the rebuilt core and capacity-publication
+      wheels reinstalled (`UV_FROZEN=1 make test-unit test-integration`): unit 1055 passed,
+      1 skipped (twelve new); integration 440 passed (nine new; application integration and
+      application startup; `test_alkahest` against Anvil included), twice. `make
+      helm-values-schema` regenerated both schemas (the five retired keys); `make -C helm
+      test-render` with `STOREFRONT_PYTHON` set to VM's environment passed, the loader
+      check (`test_rendered_document_loads_with_the_storefront_loader`) run, not skipped,
+      and the new render case passing. `make -k test`: every suite it ran passed -- core
+      storefront 213 passed, 2 skipped (library integration, two new), kit
+      capacity-publication 94 + 81, kit storefront 100, provisioning service 675 + 463, bare
+      metal 134 + 324 + 11 + 40, API-credit storefront 153, e2e unit 650, the Helm and
+      deployment-packaging suites among them -- and it stopped only at the reinit of
+      `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer`, run frozen:
+      `kit/policy` 80 passed, VM buyer 202 passed, VM storefront as above. Locks:
+      `scripts/uv_project.py lock` relocked the nine projects locking either bumped package
+      that resolve here; VM storefront's lock was edited by hand with the six substitutions
+      uv wrote into bare metal's lock for the same two packages (two versions, two wheel
+      names, the capacity-publication pin) plus its own core floor (16.6 relocks it); neither
+      `kit/policy` nor VM buyer locks either package. `make check-packaging` (architecture
+      rules included), `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), and `openspec validate
+      --strict` pass. No repository typing target exists. The pipeline was not run.
+      **End-to-end, read from the lane's configuration (the pipeline was not run):** every
+      VM-lane scenario starts Bob's and Alice's storefronts, whose overlays pass the startup
+      refusal (registries pinned, Alkahest enabled, `default` bound to one peer) and now
+      state `settlement_servicing_interval_seconds`; every site response those storefronts
+      verify -- projection polls, capacity events, reservations -- is verified against the
+      `default` site's seeded peer through the trust, and every provisioning callback
+      (`e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `e2e_non_erc20_settlement`,
+      `e2e_compute_dynamic_listings`) authenticates against it. No scenario rotates a peer or
+      starts a storefront that cannot publish: those are application-integration evidence
+      only. The Helm smoke tests run against a release from the default values, which now
+      refuses to start without a settlement overlay (10.4's finding). No bare-metal or
+      API-credit scenario reaches this section's code (their storefronts take the core and
+      capacity-publication bumps, unchanged in behaviour).
 
-**Stopped here (session ended by the owner, 2026-10-16).** Section 10 is committed as unverified
-work in progress: the implementer was relocking (its last step was hand-editing the VM storefront
-lock after `scripts/uv_project.py lock` of the other projects). Which of 10.1–10.5 are complete,
-and which checks ran, is not recorded; the next session reads the WIP diff
-(`git diff ecbbe47 <wip commit>`), finishes 10.1–10.6, runs every check in change-implement's step
-5 (VM storefront frozen, `make -C helm test-render` with `STOREFRONT_PYTHON`, `make -k test`,
-packaging, hygiene, citations), checks the tasks with evidence, and then the owner gets the
-code snapshot they asked for after Section 10's initial implementation, before its review.
-Round 04's triage (gate passed 2026-10-16) is in `reviews/04-implementation-external.triage.md`.
+Section 10 handoff:
+
+- Bare metal's 12.1–12.3 compose the same `ServicePeerTrust`: build it over the
+  storefront database and the configured peers, `seed()` it at startup, give each site
+  client `trust.site_authorities(site)`, verify callbacks with
+  `trust.site_active_principals(site, now=)`, and commit 12.5's rotation routes through
+  `trust.identity_authority()`; a change committed any other way is invisible until
+  `reload()`.
+- `build_capacity_runtime_for(..., service_peer_trust=, site_client_factory=)`: the root
+  binds the trust late, as it binds the projection provider; legacy non-root callers pass
+  neither. The many tests patching `capacity_client.get_provisioning_authorities` still
+  run (`build_fulfillment_client` reads it); for the capacity runtime it no longer
+  matters.
+- The startup refusal reads its configuration from `utils.config.settings` by default; a
+  test composing the real app must give it a publishable configuration, as
+  `test_publishable_startup.py`'s `_PUBLISHABLE` does. Dynaconf keeps an empty table set
+  on a dotted key, so replace a section at its root to empty it.
+- Bare metal's 11.5 and 12.1 refusal is its own; `startup_refusal.py` is VM's and reads
+  VM's Dynaconf settings, so it is not shared. Its problem texts are a reasonable model.
+- The umbrella's default release no longer starts without a settlement mechanism (10.4,
+  for the owner).
+- For 17.9: `DEPLOYMENT_AND_CONFIG.md` -- the startup refusal, per-site trust from each
+  site's peer (and `[provisioning.identity]` only for the provisioning client), the
+  renamed key, and the two homes of retired keys (10.3).
 
 ## 11. Bare-metal configuration through files
 

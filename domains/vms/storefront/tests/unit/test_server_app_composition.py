@@ -137,11 +137,26 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         built["sqlite_client"] = sqlite_client
         return sqlite_client
 
-    def fake_capacity_runtime(repository, *, signer: object, site_projections):
+    def fake_capacity_runtime(
+        repository, *, signer: object, site_projections, service_peer_trust
+    ):
         assert repository() is built["sqlite_client"]
         assert signer is built["signer"]
         built["reconciled_projections"] = site_projections
+        built["runtime_trust"] = service_peer_trust
         return capacity_runtime
+
+    def fake_service_peer_trust(db_path, peers):
+        # A distinct compatible object, so the runtime and the container are
+        # shown to receive exactly the one the root built and seeded.
+        trust = SimpleNamespace(db_path=db_path, peers=peers, seeded=False)
+
+        def seed():
+            trust.seeded = True
+
+        trust.seed = seed
+        built["service_peer_trust"] = trust
+        return trust
 
     def fake_negotiation_runtime(
         domain,
@@ -212,16 +227,23 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         "resolve_marketplace_signer",
         lambda: built.setdefault("signer", signer),
     )
-    monkeypatch.setattr(server, "get_registry_authorities", lambda: ())
+    # The configuration under test publishes nowhere; the refusal it would
+    # meet is tested in tests/integration/test_publishable_startup.py.
+    monkeypatch.setattr(server, "require_publishable_storefront", lambda: None)
+    monkeypatch.setattr(server, "get_service_peer_configs", lambda: {})
+    monkeypatch.setattr(server, "ServicePeerTrust", fake_service_peer_trust)
     monkeypatch.setattr(server, "set_stage_event_db_path", lambda _path: None)
     monkeypatch.setattr(server, "_build_alkahest_clients", lambda: {})
     monkeypatch.setattr(
         capacity_client_module,
         "build_capacity_runtime_for",
-        lambda repository, *, signer, site_projections: built.setdefault(
+        lambda repository, *, signer, site_projections, service_peer_trust: built.setdefault(
             "capacity_runtime",
             fake_capacity_runtime(
-                repository, signer=signer, site_projections=site_projections
+                repository,
+                signer=signer,
+                site_projections=site_projections,
+                service_peer_trust=service_peer_trust,
             ),
         ),
     )
@@ -256,11 +278,6 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     monkeypatch.setattr(
         server,
         "initialize_administrator_identities",
-        lambda _path: None,
-    )
-    monkeypatch.setattr(
-        server,
-        "initialize_service_peer_identities",
         lambda _path: None,
     )
 
@@ -304,6 +321,14 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         assert built["override_projections"] is state
         # Capacity reconciliation reads it through the root's late-bound provider.
         assert built["reconciled_projections"]() is state
+        # One service-peer trust over the storefront's database, seeded by the
+        # lifespan, verifying the runtime's site responses and the callbacks.
+        trust = built["service_peer_trust"]
+        assert trust.db_path == first_services.sqlite_client.db_path
+        assert trust.seeded
+        assert built["runtime_trust"] is trust
+        assert first_services.service_peer_trust is trust
+        assert container.resolved_service_peer_trust is trust
 
         with pytest.raises(
             RuntimeError,
@@ -326,6 +351,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
 
     assert first_app.state.storefront_container is None
     assert container.resolved_site_projections is None
+    assert container.resolved_service_peer_trust is None
     assert container.resolved_domain_registry is None
     assert container.resolved_sqlite_client is None
     assert container.resolved_listing_service is None

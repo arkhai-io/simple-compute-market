@@ -9,8 +9,9 @@ service peer; or a setting stated under a name the storefront has renamed.
 
 Terms that a pool's override or hint may supply instead of the storefront's
 defaults -- its settlement clauses among them -- are not checked here: a pool
-that resolves none is held and reported by publication. See
-openspec/specs/storefront-publication/spec.md#requirement-a-storefront-that-cannot-publish-refuses-to-start.
+that resolves none is held and reported by publication. See the requirement "A
+storefront that cannot publish refuses to start" in
+openspec/specs/storefront-publication/spec.md.
 """
 
 from __future__ import annotations

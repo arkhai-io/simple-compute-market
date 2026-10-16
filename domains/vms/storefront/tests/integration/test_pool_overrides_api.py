@@ -20,7 +20,14 @@ import pytest
 from market_pool_overrides import PoolOverrideClient, pool_override_statuses
 from storefront_client import StorefrontClientError
 
-from tests.publication_app import SITE, SITE_B, pool, publication_app, settlement_clause
+from tests.publication_app import (
+    SITE,
+    SITE_B,
+    _replaced_setting,
+    pool,
+    publication_app,
+    settlement_clause,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -184,6 +191,27 @@ async def test_commercial_terms_reach_the_published_listing(world):
     ((_, row),) = (await _open_rows(world)).items()
     assert row["listing_resource"]["sla"] == 97.5
     assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
+
+
+async def test_a_storefront_with_no_configured_clauses_publishes_a_pool_whose_override_states_them(
+    world,
+):
+    """A storefront's terms may live in its pools: with no storefront-wide
+    settlement clause, a pool resolving none publishes nothing, and one whose
+    override states clauses publishes under them. That such a storefront starts
+    is tests/unit/test_startup_refusal.py's."""
+    with _replaced_setting("pricing.settlements", []):
+        world.pools.append(_shaped())
+        await _cycle(world)
+        assert await _open_rows(world) == {}
+
+        await _overrides(world).put_pool_override(
+            _record(settlements=[settlement_clause(rate="7")])
+        )
+        await _cycle(world)
+
+        ((_, row),) = (await _open_rows(world)).items()
+        assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
 
 
 async def test_an_override_rate_reaches_the_published_listing(world):
