@@ -208,6 +208,10 @@ def _good_listing() -> dict:
             }
         ],
         "listing_resource": {"gpu_model": "H200", "gpu_count": 1},
+        # The seller's recipient condition, which an escrow settles under.
+        "demands": [
+            {"chain_name": "anvil", "arbiter": ARBITER, "demand_data": {"recipient": SELLER}}
+        ],
     }
 
 

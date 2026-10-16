@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import Any
 
 from arkhai_vms import normalize_vm_provision_terms
@@ -84,6 +85,8 @@ class PaymentSettleResult:
 
 @dataclass(frozen=True)
 class VmAlkahestSellerStage:
+    # Called with the settlement build context and the listing the deal was
+    # negotiated against, whose release conditions authorize the escrow's.
     build_plan: Callable[..., Any]
     mechanism: str = "alkahest.v1"
     # Whether settling through this stage delivers through VM capacity-backed
@@ -126,7 +129,8 @@ class VmAlkahestSellerStage:
             demand=selected_release_condition(context.proposal),
         )
         artifacts = build_domain_settlement_artifacts(
-            domain, replace(context, proposal=proposal), build_plan=self.build_plan,
+            domain, replace(context, proposal=proposal),
+            build_plan=partial(self.build_plan, listing=dict(listing)),
         )
         return {
             **dict(artifacts.supplemental),

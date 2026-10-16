@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import partial
+
 import arkhai_bare_metal_storefront.domain_runtime as domain_runtime
 from arkhai_bare_metal.schema import (
     BARE_METAL_DOMAIN_IDENTITY,
@@ -110,19 +112,22 @@ def test_settlement_hook_consumes_common_context(monkeypatch) -> None:
         chain_config_paths={"base": "/config/base.json"},
     )
 
+    listing = {"listing_id": "listing-a", "demands": []}
     artifacts = build_domain_settlement_artifacts(
-        contract, context, build_plan=domain_runtime._build_settlement_from_context
+        contract,
+        context,
+        build_plan=partial(domain_runtime._build_settlement_from_context, listing=listing),
     )
 
     assert artifacts.supplemental == {"accepted_escrow_terms": []}
     assert calls == [
         {
             "proposal": {"kind": "proposal"},
+            "listing": listing,
             "agreed_amount": 100,
             "duration_seconds": 3600,
             "buyer_principal": buyer,
             "seller_principal": seller,
-            "seller_wallet_address": "0xseller",
             "chain_config_paths": context.chain_config_paths,
         }
     ]

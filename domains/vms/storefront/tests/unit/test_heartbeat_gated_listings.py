@@ -61,11 +61,12 @@ def _artifacts(demands, heartbeat_interval=60, chain_config_paths=None):
         "demands": demands,
         "expiration_unix": 1_800_000_000,
     }
+    # The listing advertises the condition the proposal selects.
     return accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing={"demands": demands},
         agreed_amount=5_000_000,
         duration_seconds=3600,
-        seller_wallet_address=WALLET,
         chain_config_paths=chain_config_paths,
         heartbeat_interval_seconds=heartbeat_interval,
     )

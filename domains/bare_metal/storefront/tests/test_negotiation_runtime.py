@@ -98,7 +98,6 @@ async def test_an_accepted_escrow_is_planned_from_verifications_inputs(tmp_path)
         trading_pause=TradingPause(),
         plan_builder=builder,
         accepted_obligation_dispatch={},
-        seller_wallet_address=WALLET,
         chain_config_paths={"anvil": "/addresses.json"},
     )
     opened = await runtime.start(
@@ -124,7 +123,9 @@ async def test_an_accepted_escrow_is_planned_from_verifications_inputs(tmp_path)
     (call,) = calls
     # The builder plans the escrow under the listing's form of the condition.
     assert call["proposal"].demand.model_dump(exclude_none=True) == CONDITION
-    assert call["seller_wallet_address"] == WALLET
+    # It plans against the listing record, whose conditions authorize it.
+    assert call["listing"]["listing_id"] == "listing-1"
+    assert call["listing"]["demands"] == [CONDITION]
     assert call["chain_config_paths"] == {"anvil": "/addresses.json"}
     assert call["duration_seconds"] == 3600
     # The response returns, and the thread records, the terms as the buyer sent them.

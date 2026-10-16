@@ -8,7 +8,7 @@ requires-python = ">=3.12,<3.14"
 # consumer opts in through its own `rl` extra, which pins the CPU index.
 dependencies = [
     "arkhai-vms-listings>=0.4.1",
-    "arkhai-kit-alkahest",
+    "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-policy>=0.4.0",
 ]
 

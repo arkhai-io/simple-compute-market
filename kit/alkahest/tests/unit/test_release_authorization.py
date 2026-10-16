@@ -2,14 +2,30 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 
 import pytest
 
-from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.alkahest import (
+    encode_recipient_demand,
+    get_erc20_escrow_obligation_default,
+    get_recipient_arbiter,
+    materialize_escrow_terms_from_proposal,
+    materialize_escrow_terms_payload_from_proposal,
+)
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.escrow_verification import (
+    EscrowVerificationError,
+    verify_escrow_for_settlement,
+)
+from market_alkahest.plans import (
+    materialize_settlement_plan_from_proposal,
+    settlement_plan_payload_from_proposal,
+)
 from market_alkahest.proposals import (
     ReleaseConditionError,
+    accepted_escrow_artifacts_from_proposal,
     authorize_escrow_proposal,
     authorized_release_conditions,
     escrow_proposal_from_accepted_entry,
@@ -182,3 +198,162 @@ def test_a_listing_entry_builds_its_proposal_under_the_authorized_condition() ->
             expiration_unix=1_800_000_000,
             demand=_condition(_BUYER),
         )
+
+
+# Materialization authorizes the condition itself. A caller that skips
+# ``authorize_escrow_proposal`` and materializes a buyer's proposal directly is
+# refused all the same, so no acceptance path can forget the check.
+
+
+def _materialize_terms(proposal, listing):
+    return materialize_escrow_terms_from_proposal(
+        proposal=proposal, listing=listing, agreed_amount=100,
+        duration_seconds=3600, addr_config_path=_BOOK,
+    )
+
+
+def _materialize_terms_payload(proposal, listing):
+    return materialize_escrow_terms_payload_from_proposal(
+        proposal=proposal, listing=listing, agreed_amount=100,
+        duration_seconds=3600, addr_config_path=_BOOK,
+    )
+
+
+def _materialize_plan(proposal, listing):
+    return materialize_settlement_plan_from_proposal(
+        proposal=proposal, listing=listing, agreed_amount=100,
+        duration_seconds=3600, addr_config_path=_BOOK,
+    )
+
+
+def _materialize_plan_payload(proposal, listing):
+    return settlement_plan_payload_from_proposal(
+        proposal=proposal, listing=listing, agreed_amount=100,
+        duration_seconds=3600, addr_config_path=_BOOK,
+    )
+
+
+def _accepted_artifacts(proposal, listing):
+    return accepted_escrow_artifacts_from_proposal(
+        proposal=proposal, listing=listing, agreed_amount=100,
+        duration_seconds=3600, chain_config_paths={"anvil": _BOOK},
+    )
+
+
+_MATERIALIZERS = pytest.mark.parametrize(
+    "materialize",
+    [
+        _materialize_terms,
+        _materialize_terms_payload,
+        _materialize_plan,
+        _materialize_plan_payload,
+        _accepted_artifacts,
+    ],
+    ids=[
+        "escrow terms",
+        "escrow terms payload",
+        "settlement plan",
+        "settlement plan payload",
+        "accepted artifacts",
+    ],
+)
+
+
+@_MATERIALIZERS
+@pytest.mark.parametrize(
+    ("selected", "listing", "reason"),
+    [
+        (_condition(_BUYER), _LISTING, "release_condition_not_authorized"),
+        (
+            _condition(arbiter="0x" + "55" * 20),
+            _LISTING,
+            "release_condition_not_authorized",
+        ),
+        (_condition(), {"demands": []}, "release_condition_not_advertised"),
+        (None, {}, "release_condition_not_advertised"),
+        (
+            _condition(),
+            {"demands": [_condition(chain_name="base_sepolia")]},
+            "release_condition_not_advertised",
+        ),
+        (None, {"demands": "not json"}, "release_condition_unreadable"),
+    ],
+    ids=[
+        "substituted recipient",
+        "another arbiter",
+        "listing authorizes none",
+        "listing states no demands",
+        "another chain only",
+        "unreadable demands",
+    ],
+)
+def test_materialization_called_directly_refuses_an_unauthorized_condition(
+    materialize, selected, listing, reason
+) -> None:
+    proposal = _proposal(demand=selected) if selected is not None else _proposal()
+    with pytest.raises(ReleaseConditionError, match=reason):
+        materialize(proposal, listing)
+
+
+@_MATERIALIZERS
+def test_materialization_called_directly_encodes_the_listings_condition(
+    materialize,
+) -> None:
+    expected = {
+        "arbiter": _ARBITER,
+        "demand": "0x" + encode_recipient_demand(_SELLER).hex(),
+    }
+    shouted = _condition(_SELLER.upper().replace("0X", "0x"))
+    for proposal in (_proposal(), _proposal(demand=shouted)):
+        out = materialize(proposal, _LISTING)
+        if isinstance(out, dict) and "settlement_plan" in out:
+            assert out["accepted_escrow_proposal"]["demand"] == _condition()
+            out = out["settlement_plan"]
+        if isinstance(out, list):
+            (term,) = out
+            data = term["obligation_data"] if isinstance(term, dict) else term.obligation_data
+        else:
+            plan = out if isinstance(out, dict) else out.model_dump(mode="json")
+            (obligation,) = plan["obligations"]
+            data = obligation["params"]["obligation_data"]
+        assert {key: data[key] for key in expected} == expected
+
+
+@pytest.mark.parametrize(
+    "materialize",
+    [
+        materialize_escrow_terms_from_proposal,
+        materialize_escrow_terms_payload_from_proposal,
+        materialize_settlement_plan_from_proposal,
+        settlement_plan_payload_from_proposal,
+        accepted_escrow_artifacts_from_proposal,
+    ],
+)
+def test_no_materializer_can_be_called_without_its_listing(materialize) -> None:
+    listing = inspect.signature(materialize).parameters["listing"]
+    assert listing.default is inspect.Parameter.empty
+
+
+async def test_settlement_verification_refuses_a_condition_its_listing_does_not_authorize(
+) -> None:
+    async def _never_read(_client, _uid):
+        raise AssertionError("the chain is read only for an authorized condition")
+
+    escrow = get_erc20_escrow_obligation_default("anvil", config_path=_BOOK)
+    for proposal, listing in (
+        (_proposal(escrow_address=escrow, demand=_condition(_BUYER)), _LISTING),
+        (_proposal(escrow_address=escrow), {"demands": []}),
+    ):
+        with pytest.raises(EscrowVerificationError, match="release_condition_"):
+            await verify_escrow_for_settlement(
+                escrow_uid="0x" + "ab" * 32,
+                seller_wallet=_SELLER,
+                agreed_price=100,
+                agreed_duration_seconds=3600,
+                listing=listing,
+                alkahest_client=object(),
+                chain_name="anvil",
+                alkahest_address_config_path=_BOOK,
+                escrow_proposal=proposal,
+                get_obligation_fn=_never_read,
+            )

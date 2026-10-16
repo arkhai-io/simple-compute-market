@@ -242,23 +242,27 @@ def _agreement(
 def build_vm_accepted_artifacts(
     *,
     proposal: Any,
+    listing: Mapping[str, Any],
     agreed_amount: int,
     duration_seconds: int,
     buyer_principal: Identity,
     seller_principal: Identity,
     uses_scalar_amount: bool = True,
-    seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     **_unused: Any,
 ) -> dict[str, Any]:
-    """Materialize VM settlement artifacts from domain-owned proposal codecs."""
+    """Materialize VM settlement artifacts from domain-owned proposal codecs.
+
+    The escrow settles under the release condition ``listing`` authorizes;
+    the kit refuses any other with ``ReleaseConditionError``.
+    """
 
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=seller_wallet_address,
         chain_config_paths=(
             dict(chain_config_paths)
             if chain_config_paths is not None

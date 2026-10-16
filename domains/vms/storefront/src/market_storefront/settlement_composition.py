@@ -242,9 +242,10 @@ def _settlement_plan_obligations(
     domain: MarketDomainContract,
     context: StorefrontSettlementBuildContext,
     stage: Any,
+    listing: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     artifacts = build_domain_settlement_artifacts(
-        domain, context, build_plan=stage.build_plan
+        domain, context, build_plan=partial(stage.build_plan, listing=listing)
     )
     obligations = artifacts.settlement_plan["obligations"]
     return tuple(dict(item) for item in obligations)
@@ -333,7 +334,7 @@ async def prepare_vm_settlement(
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     obligations = _settlement_plan_obligations(
-        domain=domain, stage=stage,
+        domain=domain, stage=stage, listing=dict(order),
         context=StorefrontSettlementBuildContext(
             binding=thread_binding.binding,
             negotiation_id=negotiation_id,

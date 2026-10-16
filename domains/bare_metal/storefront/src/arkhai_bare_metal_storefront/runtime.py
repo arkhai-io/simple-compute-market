@@ -272,7 +272,6 @@ class BareMetalStorefrontRuntime:
                     if self.settlement_composition is not None
                     else {}
                 ),
-                seller_wallet_address=self.seller_evm_address,
                 chain_config_paths=self.chain_config_paths,
                 settlement_data_dispatch=(
                     self.settlement_composition.settlement_data_dispatch()

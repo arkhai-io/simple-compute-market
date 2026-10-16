@@ -18,15 +18,19 @@ class BareMetalSettlementPlanError(ValueError):
 def build_bare_metal_settlement_plan(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
+    listing: Mapping[str, Any],
     agreed_amount: int,
     duration_seconds: int,
     buyer_principal: Identity,
     seller_principal: Identity,
     uses_scalar_amount: bool = True,
-    seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
 ) -> dict[str, Any]:
-    """Materialize a fail-closed mechanism-neutral plan for agreed terms."""
+    """Materialize a fail-closed mechanism-neutral plan for agreed terms.
+
+    The escrow is materialized under the release condition ``listing``
+    authorizes; the kit refuses any other with ``ReleaseConditionError``.
+    """
     if duration_seconds < 1:
         raise BareMetalSettlementPlanError(
             "duration_seconds must be positive",
@@ -36,10 +40,10 @@ def build_bare_metal_settlement_plan(
 
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=seller_wallet_address,
         chain_config_paths=dict(chain_config_paths or {}),
         heartbeat_interval_seconds=None,
     )

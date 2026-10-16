@@ -345,38 +345,59 @@ Secrets is owed. Accepted scope beyond the original proposal.
   refuses startup in every storefront composing Alkahest, VM included, enabled or not, since
   one escrow has one arbiter.
 
-  As delivered (Section 7), the invariant is held by two kit steps rather than by a listing
-  argument to the plan builders, whose signatures stay as they were.
-  `market_alkahest.proposals.authorize_escrow_proposal(proposal, listing=…)` returns the
-  proposal under exactly the condition the listing authorizes on its chain: a selected
-  condition is kept only when its arbiter and demand data equal one the listing advertises
-  (addresses compared case-insensitively, and replaced by the listing's form), a proposal
-  selecting none takes the listing's first condition on the chain, and a listing advertising
-  none there, or demands that cannot be read, raise `ReleaseConditionError`
-  (`release_condition_not_authorized`, `_not_advertised`, `_unreadable`). The proposal's
-  escrow address plays no part, so an unpinned (zero-address) proposal the shape guard skips
-  is held all the same. Materialization then encodes the proposal's selected condition and
-  no other: the recipient-arbiter fallback is gone, an `arbiter` or `demand` among the
-  escrow's fields is overwritten, a proposal selecting no condition (`_unselected`) or
-  several (`_ambiguous`), or one whose arbiter the chain's address book does not name
-  (`_unreadable`), raises `ReleaseConditionError`, and
-  `accepted_escrow_artifacts_from_proposal` raises it rather than recording it beside
-  artifacts with no plan. Each domain authorizes where its seller accepts, independently of
-  its policy chain: VM's Alkahest seller stage passes the buyer's selected condition to
-  `escrow_proposal_from_accepted_entry`, which now authorizes it; bare metal authorizes the
-  escrow carrier at the opening, so the thread pins the authorized proposal that settlement
-  verification re-materializes, and again before its plan builder; the API-credit storefront
-  authorizes in `build_api_credit_accepted_artifacts` and on its settle path before
-  verification. Every refusal is the round's 409 with the `release_condition_*` reason, and
-  nothing is recorded. `validate_selected_escrow_plan` (the VM buyer's check of a seller's
-  plan) compares the demand bytes as well as the arbiter, through the chain's address book
-  the buyer configures, and refuses a listing advertising no condition. `escrow_shape_guard`
-  rejects a listing advertising no condition on the proposal's chain
-  (`release_condition_not_advertised`) and `accept_exact_listing` likewise
-  (`exact_listing:release_condition_not_advertised`). The guard still passes a proposal
-  carrying no escrow address or the zero placeholder, and a listing accepting no escrow;
-  `accept_exact_listing` rejects those as `exact_listing:escrow_not_in_accepted_set`, as it
-  did before.
+  As delivered (Section 7), and as the owner decided on 2026-10-16 (task 7.6), the invariant is
+  enforced inside `kit/alkahest`, so no caller can skip it. `market_alkahest.release_authorization`
+  reads what a listing authorizes: a selected condition is kept only when its arbiter and demand
+  data equal one the listing advertises on the proposal's chain (addresses compared
+  case-insensitively, and replaced by the listing's form), a proposal selecting none takes the
+  listing's first condition on the chain, and a listing advertising none there, or demands that
+  cannot be read, raise `ReleaseConditionError` (`release_condition_not_authorized`,
+  `_not_advertised`, `_unreadable`; `_ambiguous` for a proposal selecting several). The
+  proposal's escrow address plays no part, so an unpinned (zero-address) proposal the shape guard
+  skips is held all the same. Every kit entry point that encodes an obligation's release
+  condition from a proposal takes the listing and authorizes it itself:
+  `materialize_escrow_terms_from_proposal` and its payload form,
+  `materialize_settlement_plan_from_proposal` and `settlement_plan_payload_from_proposal`,
+  `accepted_escrow_artifacts_from_proposal` (which records the authorized proposal as the accepted
+  one), and `verify_escrow_for_settlement`, which materializes the expected obligation against
+  the listing it is given. Encoding one condition is private to `alkahest.py`, reached only
+  through `encode_authorized_release_condition(listing, …)`, so there is no public way to encode
+  a condition a listing does not authorize from a proposal; `build_payment_obligation_data`
+  encodes only the recipient condition for the wallet its caller names, which legacy
+  verification of a thread with no proposal uses. The recipient-arbiter fallback is gone, an `arbiter`
+  or `demand` among the escrow's fields is overwritten, an authorized condition the chain's address
+  book or codec cannot encode is `_unreadable`, and `accepted_escrow_artifacts_from_proposal`
+  raises rather than recording a refusal beside artifacts with no plan. `seller_wallet_address`
+  left these signatures, since nothing read it.
+
+  The plan builders' signatures take the listing: VM's Alkahest seller stage builds its proposal
+  from the listing entry (`escrow_proposal_from_accepted_entry`, carrying a condition the
+  buyer's proposal selects so a substituted one is refused) and binds the listing to its plan
+  builder, as its settle path binds the stored listing when it rebuilds the plan; bare metal's
+  plan builder receives the listing record; the API-credit storefront's accepted-artifacts builder
+  passes its listing. The call-site authorization each domain carried goes, except bare metal's
+  at the opening, which pins the authorized proposal on the thread and refuses an unauthorized
+  selection at the opening whatever the policy decides. Every refusal is the round's 409 with the
+  `release_condition_*` reason, and nothing is recorded. Seller verification and refund
+  re-materialize against the listing as stored when they run, so a listing whose conditions
+  changed after acceptance fails them closed. The core buyer's orchestration passes the selected
+  listing to the domain's escrow-terms builder, so a buyer creates no escrow under a condition the
+  listing does not authorize, whatever the seller echoed; a resumed run whose run-log records the
+  seller's accepted proposal but no accepted escrow terms has no listing to authorize against and
+  refuses by name (`escrow_release_condition_missing`). Rejected: authorization at each
+  storefront's acceptance boundary through `authorize_escrow_proposal`, with materialization
+  refusing only a proposal selecting no condition, which Section 7 first delivered, because a rule
+  each caller must remember is how correction 9 opened: a later acceptance path that skips the
+  call is unguarded.
+
+  `validate_selected_escrow_plan` (the VM buyer's check of a seller's plan) compares the demand
+  bytes as well as the arbiter, through the chain's address book the buyer configures, and refuses
+  a listing advertising no condition. `escrow_shape_guard` rejects a listing advertising no
+  condition on the proposal's chain (`release_condition_not_advertised`) and
+  `accept_exact_listing` likewise (`exact_listing:release_condition_not_advertised`). The guard
+  still passes a proposal carrying no escrow address or the zero placeholder, and a listing
+  accepting no escrow; `accept_exact_listing` rejects those as
+  `exact_listing:escrow_not_in_accepted_set`, as it did before.
 
   An empty seller wallet (Section 6's handoff) needs no rule of its own: a recipient condition
   with an empty recipient cannot be encoded, so materialization refuses it as

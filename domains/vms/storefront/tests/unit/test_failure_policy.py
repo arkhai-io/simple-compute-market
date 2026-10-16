@@ -173,10 +173,6 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
         lambda: "seller-pk",
     )
     monkeypatch.setattr(
-        "market_storefront.failure_actions.get_evm_wallet_address",
-        lambda: "0x" + "dd" * 20,
-    )
-    monkeypatch.setattr(
         "market_storefront.failure_actions.stage_event",
         lambda *args, **kwargs: None,
     )

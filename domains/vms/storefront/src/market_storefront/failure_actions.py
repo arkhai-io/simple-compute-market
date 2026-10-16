@@ -23,7 +23,6 @@ from market_storefront.services.capacity_client import (
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
-    get_evm_wallet_address,
     get_evm_wallet_private_key,
     settings,
 )
@@ -213,11 +212,19 @@ async def _refund_from_escrow_proposal(
             "reason": "wallet_private_key_empty",
         }
 
+    # The escrow's obligation is materialized under the release condition the
+    # listing authorizes, as it was accepted; a listing that is gone, or no
+    # longer authorizes it, leaves the refund context invalid.
+    listing = (
+        await db.load_listing(listing_id=listing_id)
+        if hasattr(db, "load_listing")
+        else None
+    )
     try:
         proposal = EscrowProposal.model_validate(proposal_raw)
         terms = materialize_escrow_terms_from_proposal(
             proposal=proposal,
-            seller_wallet_address=get_evm_wallet_address() or None,
+            listing=listing or {},
             agreed_amount=(
                 int(thread["agreed_price"])
                 if thread.get("agreed_price") is not None

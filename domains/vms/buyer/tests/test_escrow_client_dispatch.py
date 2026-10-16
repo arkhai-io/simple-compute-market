@@ -13,9 +13,15 @@ _ERC20_ADDR = "0x" + "11" * 20
 _NATIVE_ADDR = "0x" + "22" * 20
 _TOKEN = "0x" + "33" * 20
 _TOKEN_LEGACY = "0x" + "44" * 20
-_SELLER = "0x" + "55" * 20
 _ARBITER = "0x" + "66" * 20
 _RECIPIENT = "0x" + "77" * 20
+# The listing the proposals are negotiated against: it authorizes the
+# release condition they select.
+_LISTING = {
+    "demands": [
+        {"chain_name": _CHAIN, "arbiter": _ARBITER, "demand_data": {"recipient": _RECIPIENT}},
+    ],
+}
 
 
 @pytest.fixture
@@ -111,7 +117,7 @@ def test_reads_token_from_literal_fields(patched_alkahest):
         chain_name=_CHAIN, addr_config_path=None,
     )
     proposal = _make_proposal(literal_fields={"token": _TOKEN})
-    terms = build(proposal, _SELLER, 1_000, 3600)
+    terms = build(proposal, _LISTING, 1_000, 3600)
 
     assert len(terms) == 1
     assert terms[0].maker == "buyer"
@@ -128,7 +134,7 @@ def test_reads_recipient_from_literal_fields(patched_alkahest):
     proposal = _make_proposal(
         literal_fields={"token": _TOKEN, "recipient": _RECIPIENT},
     )
-    terms = build(proposal, _SELLER, 1_000, 3600)
+    terms = build(proposal, _LISTING, 1_000, 3600)
 
     assert terms[0].obligation_data["arbiter"] == _ARBITER
     assert isinstance(terms[0].obligation_data["demand"], str)
@@ -144,7 +150,7 @@ def test_ignores_legacy_fields_token(patched_alkahest):
         fields={"token": _TOKEN_LEGACY},
         literal_fields={"token": _TOKEN},
     )
-    terms = build(proposal, _SELLER, 500, 1800)
+    terms = build(proposal, _LISTING, 500, 1800)
 
     assert terms[0].obligation_data["token"] == _TOKEN
 
@@ -154,7 +160,7 @@ def test_allows_literal_token_missing_for_non_token_shapes(patched_alkahest):
         chain_name=_CHAIN, addr_config_path=None,
     )
     proposal = _make_proposal(fields={"tokenId": 7}, literal_fields={})
-    terms = build(proposal, _SELLER, 100, 3600)
+    terms = build(proposal, _LISTING, 100, 3600)
     assert terms[0].obligation_data["tokenId"] == 7
 
 
@@ -166,7 +172,7 @@ def test_materializes_non_erc20_escrow(patched_alkahest):
         literal_fields={"token": _TOKEN},
         escrow_address=_NATIVE_ADDR,
     )
-    terms = build(proposal, _SELLER, 100, 3600)
+    terms = build(proposal, _LISTING, 100, 3600)
     assert terms[0].escrow_contract == _NATIVE_ADDR
     assert terms[0].obligation_data["amount"] == 100
 
@@ -176,7 +182,7 @@ def test_non_erc20_without_token_still_materializes(patched_alkahest):
         chain_name=_CHAIN, addr_config_path=None,
     )
     proposal = _make_proposal(escrow_address=_NATIVE_ADDR)
-    terms = build(proposal, _SELLER, 100, 3600)
+    terms = build(proposal, _LISTING, 100, 3600)
     assert terms[0].escrow_contract == _NATIVE_ADDR
 
 
@@ -189,7 +195,7 @@ def test_arbiter_override_via_literal_fields(patched_alkahest):
     proposal = _make_proposal(
         literal_fields={"token": _TOKEN, "arbiter": _ARBITER},
     )
-    build(proposal, _SELLER, 1_000, 3600)
+    build(proposal, _LISTING, 1_000, 3600)
 
     assert True
 
@@ -200,6 +206,6 @@ def test_obligation_data_carries_agreed_amount(patched_alkahest):
         chain_name=_CHAIN, addr_config_path=None,
     )
     proposal = _make_proposal(literal_fields={"token": _TOKEN})
-    terms = build(proposal, _SELLER, 42_000_000, 3600)
+    terms = build(proposal, _LISTING, 42_000_000, 3600)
 
     assert terms[0].obligation_data["amount"] == 42_000_000

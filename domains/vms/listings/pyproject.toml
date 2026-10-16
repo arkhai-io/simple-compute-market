@@ -12,7 +12,7 @@ dependencies = [
     # each listing's admissibility resolved, only through the admissibility kit.
     "arkhai-kit-capability-admissibility>=0.1.0",
     "pydantic>=2",
-    "arkhai-kit-alkahest",
+    "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-identity==0.4.0",
     # The capacity backing vocabulary and its delegate: a listing publishes its
     # backing's label, and reconciliation asks the delegate what backing means.

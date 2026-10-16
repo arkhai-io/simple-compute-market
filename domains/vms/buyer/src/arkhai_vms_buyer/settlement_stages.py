@@ -18,9 +18,8 @@ from core_buyer.orchestration import (
     wait_for_settlement,
 )
 from market_alkahest.plans import escrow_terms_from_settlement_plan
-from market_alkahest.proposals import ReleaseConditionError, validate_selected_escrow_plan
+from market_alkahest.proposals import validate_selected_escrow_plan
 from market_alkahest.schemas import (
-    EscrowProposal,
     EscrowTerms,
     accepted_recipient_address,
     accepted_token_address,
@@ -46,6 +45,7 @@ from .escrow_client import (
     make_alkahest_settlement_payload_fn,
     make_buyer_payment_escrow_terms_fn,
     make_create_escrow_fn,
+    resumed_proposal_refusal,
 )
 from .run_log import read_run
 
@@ -372,9 +372,10 @@ def _refuse_without_release_condition(log: Any, reason: str) -> None:
     created.
     """
     error = (
-        f"Cannot create the escrow: {reason}. The seller's accepted escrow "
-        "proposal names the release condition it settles under; re-run "
-        "negotiation so it is captured."
+        f"Cannot create the escrow: {reason}. An escrow is created only under "
+        "the release condition the listing authorizes, from the seller's "
+        "accepted escrow terms or, against the listing, its accepted proposal; "
+        "re-run negotiation so they are captured."
     )
     log.event("escrow_release_condition_missing", error=error)
     log.end("error", error=error)
@@ -489,19 +490,9 @@ def _resume_alkahest(context: BuyerResumeContext) -> dict:
                 log, "the run-log records no accepted escrow terms or proposal"
             )
         else:
-            proposal = EscrowProposal(**deal.accepted_escrow_proposal)
-            build_terms = make_buyer_payment_escrow_terms_fn(
-                chain_name=chain.chain_name, addr_config_path=chain.alkahest_addr_config
+            _refuse_without_release_condition(
+                log, resumed_proposal_refusal(deal.accepted_escrow_proposal)
             )
-            try:
-                escrow_terms_list = build_terms(
-                    proposal,
-                    seller_wallet,
-                    int(deal.agreed_amount),
-                    int(effective_duration),
-                )
-            except ReleaseConditionError as exc:
-                _refuse_without_release_condition(log, str(exc))
         create_escrow = make_create_escrow_fn(
             private_key=chain.buyer_private_key,
             rpc_url=chain.rpc_url,

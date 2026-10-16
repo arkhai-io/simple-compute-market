@@ -34,6 +34,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Protocol, runtime_checkable
 
+from market_alkahest.release_authorization import (
+    ReleaseConditionError,
+    authorized_release_condition,
+    selected_release_condition,
+)
+from market_alkahest.schemas import EscrowTerms, RateValue, compute_rate_total
+
 NETWORK_ANVIL = "anvil"
 NETWORK_BASE_SEPOLIA = "base_sepolia"
 NETWORK_ETHEREUM_SEPOLIA = "ethereum_sepolia"
@@ -753,7 +760,6 @@ def known_arbiter_kinds() -> list[str]:
 
 def build_payment_obligation_data(
     *,
-    demands: list[dict[str, Any]] | None = None,
     recipient: str | None = None,
     seller_wallet: str | None = None,
     agreed_amount: int,
@@ -785,49 +791,23 @@ def build_payment_obligation_data(
     helper just wires obligation bytes.
 
     The arbiter address and demand bytes are produced by the registered
-    ``ArbiterCodec`` matching ``arbiter_kind``.
+    ``ArbiterCodec`` matching ``arbiter_kind``, for the ``recipient`` the
+    caller names: the seller's own wallet, on a thread that carries no
+    proposal. A condition a proposal names is never encoded here; it is
+    materialized only under the release condition its listing authorizes
+    (``materialize_escrow_terms_from_proposal``).
     """
-    if demands:
-        if len(demands) > 1:
-            raise ValueError(
-                "payment obligation demands[] is a deprecated proposal alias "
-                "and may contain at most one selected demand"
-            )
-        first = demands[0]
-        if not isinstance(first, dict):
-            raise ValueError("demands entries must be objects")
-        arbiter_address = first.get("arbiter")
-        if not isinstance(arbiter_address, str) or not arbiter_address:
-            raise ValueError("demands[0].arbiter is required")
-        demand_data = first.get("demand_data")
-        if not isinstance(demand_data, dict):
-            raise ValueError("demands[0].demand_data must be an object")
-        resolved_kind = address_to_slot(
-            chain_name,
-            arbiter_address,
-            config_path=addr_config_path,
-        )
-        if not resolved_kind:
-            raise ValueError(
-                f"Cannot resolve arbiter codec for demand arbiter "
-                f"{arbiter_address!r} on chain {chain_name!r}"
-            )
-        codec = get_arbiter_codec(resolved_kind)
-        demand_bytes = codec.encode_demand_data(demand_data)
-    else:
-        effective_recipient = recipient or seller_wallet
-        if not effective_recipient:
-            raise ValueError(
-                "recipient or demands must be supplied to build payment obligation data"
-            )
-        codec = get_arbiter_codec(arbiter_kind)
-        agreement = AgreementContext(
-            recipient=effective_recipient,
-            agreed_amount=int(agreed_amount),
-            duration_seconds=duration_seconds,
-        )
-        arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
-        demand_bytes = codec.encode_demand(agreement)
+    effective_recipient = recipient or seller_wallet
+    if not effective_recipient:
+        raise ValueError("recipient must be supplied to build payment obligation data")
+    codec = get_arbiter_codec(arbiter_kind)
+    agreement = AgreementContext(
+        recipient=effective_recipient,
+        agreed_amount=int(agreed_amount),
+        duration_seconds=duration_seconds,
+    )
+    arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
+    demand_bytes = codec.encode_demand(agreement)
     return {
         "arbiter": arbiter_address,
         "demand": "0x" + demand_bytes.hex(),
@@ -901,18 +881,7 @@ def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
         )
 
 
-class ReleaseConditionError(ValueError):
-    """An escrow cannot be settled under the release condition it was offered.
-
-    The condition is an arbiter and its demand data. A seller materializes an
-    obligation only under one its listing authorizes for the chain, so a
-    selection the listing does not authorize, a listing authorizing none, and a
-    condition that cannot be read or encoded all refuse before anything is
-    accepted. The message starts with a ``release_condition_*`` reason.
-    """
-
-
-def encode_release_condition(
+def _encode_release_condition(
     chain_name: str,
     condition: Any,
     *,
@@ -923,7 +892,8 @@ def encode_release_condition(
     ``condition`` is a demand mapping or model (``arbiter``, ``demand_data``).
     The arbiter's codec is resolved from its deployed address on ``chain_name``,
     so an arbiter the chain's address book does not name cannot be encoded.
-    Raises ``ReleaseConditionError``.
+    Raises ``ReleaseConditionError``. Private: a caller reaches an encoded
+    condition only through ``encode_authorized_release_condition``.
     """
     if hasattr(condition, "model_dump"):
         condition = condition.model_dump(exclude_none=True)
@@ -963,6 +933,28 @@ def encode_release_condition(
     return arbiter, "0x" + demand.hex()
 
 
+def encode_authorized_release_condition(
+    listing: Any,
+    *,
+    chain_name: str,
+    selected: Any = None,
+    config_path: str | None,
+) -> tuple[str, str]:
+    """The ``arbiter`` and hex ``demand`` of the condition ``listing`` authorizes.
+
+    ``selected`` is the condition a proposal names, if any; it must be one the
+    listing authorizes on ``chain_name``, and with none the listing's
+    authorized condition is used (``authorized_release_condition``). The
+    condition encoded is always the listing's own form of it. Raises
+    ``ReleaseConditionError`` before anything is encoded when the listing
+    authorizes no condition there, or not the one selected.
+    """
+    condition = authorized_release_condition(
+        listing, chain_name=chain_name, selected=selected
+    )
+    return _encode_release_condition(chain_name, condition, config_path=config_path)
+
+
 def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
     if not kind:
         return False
@@ -976,12 +968,12 @@ def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
 def materialize_escrow_terms_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
-) -> list[Any]:
-    """Convert the seller-accepted proposal into concrete ``EscrowTerms``.
+) -> list[EscrowTerms]:
+    """Convert a negotiated proposal into concrete ``EscrowTerms``.
 
     Negotiation messages remain proposal-shaped, but the final agreement is
     the exact on-chain obligation data. Literal fields and concrete proposal
@@ -990,17 +982,24 @@ def materialize_escrow_terms_from_proposal(
     is authoritative for the flat ``amount`` field because proposals can carry
     stale round amounts while settlement receives the final negotiated total.
 
-    The obligation's ``arbiter`` and ``demand`` come only from the proposal's
-    selected release condition, which a seller has authorized against its
-    listing (``market_alkahest.proposals.authorize_escrow_proposal``). A
-    proposal selecting none, or one the codecs cannot encode, raises
-    ``ReleaseConditionError``. ``seller_wallet_address`` is not read.
+    The obligation's ``arbiter`` and ``demand`` are the release condition
+    ``listing`` authorizes on the proposal's chain, and nothing else: a
+    condition the proposal selects must be one the listing authorizes, a
+    proposal selecting none takes the listing's, and an ``arbiter`` or
+    ``demand`` stated among the escrow's fields is overwritten. ``listing`` is
+    the listing the proposal was negotiated against, a mapping or model
+    carrying its ``demands``. A listing authorizing none, a selection it does
+    not authorize, and a condition the codecs cannot encode raise
+    ``ReleaseConditionError`` before any obligation data is built.
     """
-    from market_alkahest.schemas import (
-        EscrowTerms,
-        RateValue,
-        accepted_demands,
-        compute_rate_total,
+    # The release condition is the one the listing authorizes, and nothing
+    # else: an arbiter or demand stated among the escrow's fields, or a
+    # recipient implied by them, is never a condition of the obligation.
+    arbiter, demand = encode_authorized_release_condition(
+        listing,
+        chain_name=proposal.chain_name,
+        selected=selected_release_condition(proposal),
+        config_path=addr_config_path,
     )
 
     literal_fields = dict(getattr(proposal, "literal_fields", None) or {})
@@ -1044,24 +1043,7 @@ def materialize_escrow_terms_from_proposal(
     ):
         obligation_data["amount"] = int(agreed_amount)
 
-    # The release condition is the proposal's selected demand and nothing
-    # else: a seller authorizes it against its listing before materializing,
-    # and an arbiter or demand stated among the escrow's fields, or a
-    # recipient implied by them, is never a condition of the obligation.
-    demands = accepted_demands(proposal)
-    if len(demands) > 1:
-        raise ReleaseConditionError(
-            "release_condition_ambiguous: a proposal selects at most one "
-            "release condition; listing demands[] remains the allowed-options list"
-        )
-    if not demands:
-        raise ReleaseConditionError(
-            "release_condition_unselected: the proposal names no release "
-            "condition to materialize the escrow under"
-        )
-    obligation_data["arbiter"], obligation_data["demand"] = encode_release_condition(
-        proposal.chain_name, demands[0], config_path=addr_config_path
-    )
+    obligation_data["arbiter"], obligation_data["demand"] = arbiter, demand
 
     return [EscrowTerms(
         maker="buyer",
@@ -1075,7 +1057,7 @@ def materialize_escrow_terms_from_proposal(
 def materialize_escrow_terms_payload_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
@@ -1083,7 +1065,7 @@ def materialize_escrow_terms_payload_from_proposal(
     """Materialize proposal terms as JSON-serializable payload dicts."""
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=seller_wallet_address,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,

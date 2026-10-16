@@ -10,10 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from market_alkahest import AlkahestConditionalEscrowClient, create_alkahest_registration
-from market_alkahest.proposals import (
-    accepted_escrow_artifacts_from_proposal,
-    authorize_escrow_proposal,
-)
+from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
 from market_alkahest.escrow_verification import verify_escrow_for_settlement
 from market_alkahest.txlock import chain_tx_lock
 from market_arkhai_payments import create_arkhai_payments_registration
@@ -189,28 +186,26 @@ def build_api_credit_accepted_artifacts(
     buyer_principal: Identity,
     seller_principal: Identity,
     proposal: Any,
+    listing: Mapping[str, Any],
     agreed_amount: int,
     uses_scalar_amount: bool = True,
     duration_seconds: int = 0,
-    listing: Mapping[str, Any] | None = None,
     **_unused: Any,
 ) -> dict[str, Any]:
     """Materialize the domain's durationless accepted settlement artifacts.
 
     The escrow settles under the release condition ``listing`` authorizes on
-    its chain, which a condition the proposal selects must be; a listing
-    authorizing none refuses with
+    its chain, which a condition the proposal selects must be; the kit refuses
+    any other, and a listing authorizing none, with
     ``market_alkahest.proposals.ReleaseConditionError``.
     """
 
-    if proposal is not None:
-        proposal = authorize_escrow_proposal(proposal, listing=listing)
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=str(settings.get("wallet.address", "") or ""),
         chain_config_paths={name: chain.alkahest_address_config_path for name, chain in CHAINS.items()},
         heartbeat_interval_seconds=None,
     )
@@ -325,9 +320,8 @@ async def _prepare_alkahest_settlement(
         if isinstance(proposal_raw, dict)
         else None
     )
-    if proposal is not None:
-        # Verified against the condition the listing authorizes, as accepted.
-        proposal = authorize_escrow_proposal(proposal, listing=order)
+    # Verification and the plan below materialize the escrow under the release
+    # condition the listing authorizes; the kit refuses any other.
     matched_index = await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=settings.wallet.address or "",

@@ -310,9 +310,10 @@ def _refuse_without_release_condition(log: object, reason: str) -> None:
     here leaves nothing on chain.
     """
     error = (
-        f"Cannot create the escrow: {reason}. The seller's accepted escrow "
-        "proposal names the release condition it settles under; re-run "
-        "negotiation so it is captured."
+        f"Cannot create the escrow: {reason}. An escrow is created only under "
+        "the release condition the listing authorizes, from the seller's "
+        "accepted escrow terms or, against the listing, its accepted proposal; "
+        "re-run negotiation so they are captured."
     )
     log.event("escrow_release_condition_missing", error=error)
     typer.secho(error, err=True, fg=typer.colors.RED)
@@ -383,8 +384,8 @@ def create_cmd(
     from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
     from .buy_orchestrator import AgreedTerms
     from .escrow_client import (
-        make_buyer_payment_escrow_terms_fn,
         make_create_escrow_fn,
+        resumed_proposal_refusal,
     )
     from .common import (
         chain_by_name,
@@ -532,25 +533,9 @@ def create_cmd(
             EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
         ]
     elif deal.accepted_escrow_proposal is not None:
-        # Local, as this module's other Alkahest imports are: importing the kit
-        # costs the CLI about 0.4 s, and only escrow creation needs it.
-        from market_alkahest.proposals import ReleaseConditionError
-        from market_alkahest.schemas import EscrowProposal
-
-        proposal = EscrowProposal(**deal.accepted_escrow_proposal)
-        build_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain.chain_name,
-            addr_config_path=chain.alkahest_addr_config,
+        _refuse_without_release_condition(
+            log, resumed_proposal_refusal(deal.accepted_escrow_proposal)
         )
-        try:
-            escrow_terms_list = build_terms(
-                proposal,
-                seller_wallet or "",
-                float(deal.agreed_amount),
-                int(effective_duration_seconds),
-            )
-        except ReleaseConditionError as exc:
-            _refuse_without_release_condition(log, str(exc))
     else:
         # An escrow is created only under the release condition the seller
         # accepted; with neither accepted terms nor an accepted proposal there

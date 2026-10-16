@@ -341,16 +341,16 @@ def build_bare_metal_negotiation_runtime(
     trading_pause: TradingPause,
     plan_builder: PlanBuilder,
     accepted_obligation_dispatch: AcceptedObligationDispatch,
-    seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
-    ``plan_builder`` is called with ``seller_wallet_address`` and
+    ``plan_builder`` is called with the listing record and
     ``chain_config_paths``, the inputs settlement verification uses, so the plan
-    committed at acceptance is the plan settlement verifies.
+    committed at acceptance is the plan settlement verifies, under the release
+    condition the listing authorizes.
     """
 
     chain_paths = dict(chain_config_paths or {})
@@ -696,25 +696,25 @@ def build_bare_metal_negotiation_runtime(
             raise NegotiationStateError(
                 "an exact-option negotiation is accepted only when it opens"
             )
-        proposal = _authorized_escrow(
-            _escrow_proposal(acceptance.pinned_proposal), acceptance.listing_record
-        )
+        proposal = _escrow_proposal(acceptance.pinned_proposal)
         try:
             artifacts = plan_builder(
                 proposal=proposal,
+                listing=acceptance.listing_record,
                 agreed_amount=acceptance.agreed_amount,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
                 buyer_principal=acceptance.buyer_principal,
                 seller_principal=acceptance.seller_principal,
-                seller_wallet_address=seller_wallet_address,
                 chain_config_paths=chain_paths,
             )
         except BareMetalSettlementPlanError as exc:
             raise BareMetalNegotiationRefusal(str(exc)) from exc
         except ReleaseConditionError as exc:
-            # An authorized condition the codecs cannot encode, such as one
-            # paying an empty seller wallet, refuses like any other.
+            # The plan is materialized under the condition the listing record
+            # authorizes; one it no longer authorizes, or an authorized one the
+            # codecs cannot encode, such as one paying an empty seller wallet,
+            # refuses like any other.
             raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
         response = {
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts

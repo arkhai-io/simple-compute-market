@@ -172,7 +172,7 @@ requires-dist = [
     { name = "arkhai-apicredits-domain", specifier = ">=0.5.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-alkahest" },
+    { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
@@ -251,7 +251,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -260,7 +260,7 @@ dependencies = [
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]

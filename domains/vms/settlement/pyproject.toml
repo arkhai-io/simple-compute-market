@@ -6,7 +6,7 @@ description = "VM settlement terms, proposals, and fulfillment helpers, shared b
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-vms-listings>=0.4.1",
-    "arkhai-kit-alkahest",
+    "arkhai-kit-alkahest>=0.7.0",
 ]
 
 [build-system]

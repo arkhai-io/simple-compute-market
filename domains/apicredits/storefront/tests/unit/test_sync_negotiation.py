@@ -61,8 +61,8 @@ def test_normalize_api_credits_terms_rejects_unsupported_version() -> None:
 
 
 def test_accepted_artifacts_settle_under_the_listings_condition(monkeypatch):
-    """The accepted escrow is materialized under the listing's authorized
-    release condition, and the seller's configured wallet is passed with it."""
+    """The accepted escrow is materialized against the listing, whose
+    authorized release condition the kit materializes it under."""
     captured: dict = {}
 
     def _fake_artifacts(**kwargs):
@@ -72,7 +72,6 @@ def test_accepted_artifacts_settle_under_the_listings_condition(monkeypatch):
     monkeypatch.setattr(
         settlement_stages, "accepted_escrow_artifacts_from_proposal", _fake_artifacts
     )
-    monkeypatch.setattr(settlement_stages.settings.wallet, "address", "0xSeLLeR0000")
 
     condition = {
         "chain_name": "anvil",
@@ -91,8 +90,8 @@ def test_accepted_artifacts_settle_under_the_listings_condition(monkeypatch):
         agreed_amount=300,
         listing={"demands": [condition]},
     )
-    assert captured["proposal"].demand.model_dump(exclude_none=True) == condition
-    assert captured["seller_wallet_address"] == "0xSeLLeR0000"
+    assert captured["listing"] == {"demands": [condition]}
+    assert captured["proposal"]["escrow_address"] == _ESCROW
 
 
 def test_accepted_artifacts_refuse_a_listing_authorizing_no_condition():

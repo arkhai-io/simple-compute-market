@@ -52,10 +52,15 @@ def _anvil_proposal(**overrides) -> EscrowProposal:
     return EscrowProposal(**data)
 
 
-def _materialize(proposal: EscrowProposal) -> SettlementPlan:
+# The listing the proposals are negotiated against: it authorizes the dev
+# chain's recipient condition paying the seller.
+_LISTING = {"demands": [_recipient_condition(_SELLER)]}
+
+
+def _materialize(proposal: EscrowProposal, listing: dict = _LISTING) -> SettlementPlan:
     return materialize_settlement_plan_from_proposal(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=listing,
         agreed_amount=7_200_000,
         duration_seconds=3600,
         addr_config_path=_ANVIL_BOOK,
@@ -152,7 +157,7 @@ def test_plan_materialization_matches_terms_materialization() -> None:
     )
     kwargs = dict(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=_LISTING,
         agreed_amount=7_200_000,
         duration_seconds=3600,
         addr_config_path=_ANVIL_BOOK,
@@ -168,21 +173,33 @@ def test_plan_materialization_matches_terms_materialization() -> None:
     assert plan.service_terms == {}
 
 
-# A seller's plan is materialized only under a release condition its listing
-# authorizes: the condition the proposal selected, which authorization has
-# checked against the listing, never one the proposal implies some other way.
+# A plan is materialized only under a release condition its listing
+# authorizes: the condition the proposal selected, when the listing authorizes
+# it, or the listing's own, never one the proposal implies some other way.
 
 
-def test_a_proposal_selecting_no_condition_is_not_materialized() -> None:
+def _condition_of(plan: SettlementPlan) -> tuple[str, str]:
+    (obligation,) = plan.obligations
+    data = obligation.params["obligation_data"]
+    return data["arbiter"], data["demand"]
+
+
+_SELLER_CONDITION = (
+    _recipient_condition(_SELLER)["arbiter"],
+    "0x" + encode_recipient_demand(_SELLER).hex(),
+)
+
+
+def test_a_proposal_selecting_no_condition_takes_the_listings() -> None:
     """No recipient fallback: not the buyer's named recipient, not the wallet."""
-    with pytest.raises(ValueError, match="release condition"):
+    assert _condition_of(
         _materialize(
             _anvil_proposal(
                 literal_fields={"token": _TOKEN, "recipient": _BUYER_RECIPIENT}
             )
         )
-    with pytest.raises(ValueError, match="release condition"):
-        _materialize(_anvil_proposal())
+    ) == _SELLER_CONDITION
+    assert _condition_of(_materialize(_anvil_proposal())) == _SELLER_CONDITION
 
 
 def test_a_condition_stated_in_escrow_fields_is_not_materialized() -> None:
@@ -190,10 +207,11 @@ def test_a_condition_stated_in_escrow_fields_is_not_materialized() -> None:
         "arbiter": "0x" + "55" * 20,
         "demand": "0x" + encode_recipient_demand(_BUYER_RECIPIENT).hex(),
     }
-    with pytest.raises(ValueError, match="release condition"):
+    assert _condition_of(
         _materialize(
             _anvil_proposal(literal_fields={"token": _TOKEN, **buyer_condition})
         )
+    ) == _SELLER_CONDITION
 
 
 def test_the_selected_condition_is_the_one_materialized() -> None:
@@ -212,8 +230,11 @@ def test_the_selected_condition_is_the_one_materialized() -> None:
 def test_a_condition_paying_no_recipient_is_not_materialized() -> None:
     """A listing derived for an empty seller wallet advertises a recipient
     condition with no recipient; no escrow can be settled under it."""
+    empty = _recipient_condition("")
     with pytest.raises(ValueError, match="release_condition_unreadable"):
-        _materialize(_anvil_proposal(demand=_recipient_condition("")))
+        _materialize(_anvil_proposal(demand=empty), listing={"demands": [empty]})
+    with pytest.raises(ValueError, match="release_condition_unreadable"):
+        _materialize(_anvil_proposal(), listing={"demands": [empty]})
 
 
 def test_a_listing_authorizing_no_condition_builds_no_proposal() -> None:
@@ -240,9 +261,9 @@ def test_an_unmaterializable_condition_refuses_the_artifacts() -> None:
     with pytest.raises(ValueError, match="release condition"):
         accepted_escrow_artifacts_from_proposal(
             proposal=_anvil_proposal(),
+            listing={"demands": []},
             agreed_amount=7_200_000,
             duration_seconds=3600,
-            seller_wallet_address=_SELLER,
             chain_config_paths={"anvil": _ANVIL_BOOK},
         )
 

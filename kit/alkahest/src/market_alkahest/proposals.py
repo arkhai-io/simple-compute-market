@@ -5,177 +5,61 @@ artifacts (settlement plan + legacy flat terms) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
 every domain that settles through an Alkahest escrow.
 
-A seller settles an Alkahest escrow only under a release condition its listing
-authorizes, whatever seller policies ran: ``authorize_escrow_proposal`` and
-``escrow_proposal_from_accepted_entry`` give a proposal exactly the condition
-the listing authorizes for its chain, refusing a selection it does not
-authorize and a listing authorizing none, and materialization uses that
-condition and no other. A seller policy such as an escrow-shape guard may
-refuse earlier, but nothing here relies on one having run.
+An escrow settles only under a release condition its listing authorizes,
+whatever seller policies ran: every function here that builds a proposal or
+materializes an obligation takes the listing and authorizes the condition
+itself (``market_alkahest.release_authorization``), refusing a selection the
+listing does not authorize and a listing authorizing none. A seller policy
+such as an escrow-shape guard may refuse earlier, but nothing here relies on
+one having run, and no caller can reach a materialized condition its listing
+does not authorize.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
 from market_alkahest.alkahest import (
-    ReleaseConditionError,
     address_to_slot,
-    encode_release_condition,
+    encode_authorized_release_condition,
 )
 from market_alkahest.plans import (
     escrow_terms_from_settlement_plan,
     materialize_settlement_plan_from_proposal,
 )
+from market_alkahest.release_authorization import (
+    ReleaseConditionError,
+    authorized_release_condition,
+    authorized_release_conditions,
+    selected_release_condition,
+)
 from market_alkahest.schemas import (
-    EscrowDemand,
     EscrowProposal,
     accepted_demands,
     accepted_token_address,
 )
 
-
-def _listing_value(listing: Any, key: str) -> Any:
-    if isinstance(listing, Mapping):
-        return listing.get(key)
-    return getattr(listing, key, None)
-
-
-def _comparable(value: Any) -> Any:
-    """A condition's value with address and byte hex compared case-insensitively."""
-    if isinstance(value, Mapping):
-        return {str(key): _comparable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_comparable(item) for item in value]
-    if isinstance(value, str) and value[:2].lower() == "0x":
-        return value.lower()
-    return value
+__all__ = [
+    "ReleaseConditionError",
+    "accepted_escrow_artifacts_from_proposal",
+    "authorize_escrow_proposal",
+    "authorized_release_condition",
+    "authorized_release_conditions",
+    "escrow_proposal_from_accepted_entry",
+    "proposal_is_oracle_gated",
+    "proposal_is_splitter_gated",
+    "selected_release_condition",
+    "validate_selected_escrow_plan",
+]
 
 
-def authorized_release_conditions(
-    listing: Any, *, chain_name: str
-) -> list[EscrowDemand]:
-    """The release conditions ``listing`` authorizes on ``chain_name``, in order.
-
-    A listing's ``demands`` are its advertised conditions, each an arbiter and
-    its demand data, scoped to a chain by ``chain_name`` or to every chain
-    without one. Raises ``ReleaseConditionError`` when the listing authorizes
-    none on the chain, or states its conditions in a form that cannot be read:
-    either way there is no condition a seller may settle under.
-    """
-    raw = _listing_value(listing, "demands")
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError as exc:
-            raise ReleaseConditionError(
-                "release_condition_unreadable: the listing's demands are not JSON"
-            ) from exc
-    if raw is None:
-        raw = []
-    if not isinstance(raw, (list, tuple)):
-        raise ReleaseConditionError(
-            "release_condition_unreadable: the listing's demands are not a list"
-        )
-    authorized: list[EscrowDemand] = []
-    for item in raw:
-        if hasattr(item, "model_dump"):
-            item = item.model_dump(exclude_none=True)
-        if not isinstance(item, Mapping):
-            raise ReleaseConditionError(
-                "release_condition_unreadable: a listing demand is not an object"
-            )
-        scope = item.get("chain_name")
-        if scope is not None and not isinstance(scope, str):
-            raise ReleaseConditionError(
-                "release_condition_unreadable: a listing demand's chain_name is "
-                "not a string"
-            )
-        if scope and scope != chain_name:
-            continue
-        arbiter = item.get("arbiter")
-        demand_data = item.get("demand_data")
-        if not isinstance(arbiter, str) or not arbiter:
-            raise ReleaseConditionError(
-                "release_condition_unreadable: a listing demand names no arbiter"
-            )
-        if not isinstance(demand_data, Mapping):
-            raise ReleaseConditionError(
-                "release_condition_unreadable: a listing demand's demand_data is "
-                "not an object"
-            )
-        authorized.append(
-            EscrowDemand(
-                chain_name=scope or None,
-                arbiter=arbiter,
-                demand_data=dict(demand_data),
-            )
-        )
-    if not authorized:
-        raise ReleaseConditionError(
-            "release_condition_not_advertised: the listing authorizes no release "
-            f"condition on chain {chain_name!r}"
-        )
-    return authorized
-
-
-def authorized_release_condition(
-    listing: Any,
-    *,
-    chain_name: str,
-    selected: Any = None,
-) -> EscrowDemand:
-    """The condition an escrow on ``chain_name`` settles under for ``listing``.
-
-    ``selected`` is the condition a buyer's proposal names, if any: it must
-    equal one the listing authorizes on the chain, arbiter and demand data both,
-    and that listing condition is returned. With no selection, the listing's
-    first authorized condition on the chain is. Raises
-    ``ReleaseConditionError``.
-    """
-    authorized = authorized_release_conditions(listing, chain_name=chain_name)
-    if selected is None:
-        return authorized[0]
-    if hasattr(selected, "model_dump"):
-        selected = selected.model_dump(exclude_none=True)
-    if not isinstance(selected, Mapping):
-        raise ReleaseConditionError(
-            "release_condition_unreadable: the selected release condition is not "
-            "an object"
-        )
-    wanted = (
-        _comparable(selected.get("arbiter")),
-        _comparable(selected.get("demand_data")),
+def _escrow_proposal(proposal: EscrowProposal | Mapping[str, Any] | Any) -> EscrowProposal:
+    if isinstance(proposal, EscrowProposal):
+        return proposal
+    return EscrowProposal.model_validate(
+        proposal.model_dump() if hasattr(proposal, "model_dump") else proposal
     )
-    for condition in authorized:
-        if (
-            _comparable(condition.arbiter),
-            _comparable(condition.demand_data),
-        ) == wanted:
-            return condition
-    raise ReleaseConditionError(
-        "release_condition_not_authorized: the selected release condition is not "
-        f"one the listing authorizes on chain {chain_name!r}"
-    )
-
-
-def selected_release_condition(proposal: EscrowProposal | Mapping[str, Any] | None) -> Any:
-    """The release condition a proposal selects, or None when it selects none.
-
-    Read from its ``demand``, or the deprecated one-element ``demands`` list.
-    Raises ``ReleaseConditionError`` for a proposal selecting several.
-    """
-    if proposal is None:
-        return None
-    selected = accepted_demands(proposal)
-    if len(selected) > 1:
-        raise ReleaseConditionError(
-            "release_condition_ambiguous: a proposal selects at most one release "
-            "condition"
-        )
-    return selected[0] if selected else None
 
 
 def authorize_escrow_proposal(
@@ -191,13 +75,7 @@ def authorize_escrow_proposal(
     plays no part, so a proposal that leaves its contract unpinned is held to
     the listing all the same. Raises ``ReleaseConditionError``.
     """
-    model = (
-        proposal
-        if isinstance(proposal, EscrowProposal)
-        else EscrowProposal.model_validate(
-            proposal.model_dump() if hasattr(proposal, "model_dump") else proposal
-        )
-    )
+    model = _escrow_proposal(proposal)
     condition = authorized_release_condition(
         listing,
         chain_name=model.chain_name,
@@ -277,9 +155,8 @@ def validate_selected_escrow_plan(
     token = accepted_token_address(entry)
     if token and str(term.obligation_data.get("token", "")).lower() != token.lower():
         raise ValueError("selected Alkahest plan escrows another token")
-    condition = authorized_release_condition(listing, chain_name=str(chain or ""))
-    arbiter, demand = encode_release_condition(
-        str(chain or ""), condition, config_path=addr_config_path
+    arbiter, demand = encode_authorized_release_condition(
+        listing, chain_name=str(chain or ""), config_path=addr_config_path
     )
     if str(term.obligation_data.get("arbiter", "")).lower() != arbiter.lower():
         raise ValueError("selected Alkahest plan names another arbiter")
@@ -368,35 +245,29 @@ def proposal_is_splitter_gated(
 def accepted_escrow_artifacts_from_proposal(
     *,
     proposal: EscrowProposal | dict[str, Any] | None,
+    listing: Any,
     agreed_amount: int,
     duration_seconds: int,
     uses_scalar_amount: bool = True,
-    seller_wallet_address: str | None = None,
     chain_config_paths: dict[str, str | None] | None = None,
     heartbeat_interval_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Build accepted escrow response artifacts from a negotiated proposal.
 
     The codec layer owns materialization; the calling domain supplies the
-    agreed amount, the lease duration (0 for durationless deals such as
-    token credits), and the chain address-config lookup. ``proposal`` is one a
-    seller has authorized against its listing (``authorize_escrow_proposal``),
-    and the plan is materialized under exactly its selected condition. A
-    proposal whose condition cannot be materialized raises
-    ``ReleaseConditionError``; any other materialization failure is reported
-    as ``accepted_escrow_terms_error`` beside artifacts carrying no plan.
+    listing the proposal was negotiated against, the agreed amount, the lease
+    duration (0 for durationless deals such as token credits), and the chain
+    address-config lookup. The proposal is first authorized against
+    ``listing`` (``authorize_escrow_proposal``), so the recorded accepted
+    proposal names the listing's form of its condition and the plan is
+    materialized under exactly that condition. A condition the listing does not
+    authorize, or that cannot be materialized, raises ``ReleaseConditionError``;
+    any other materialization failure is reported as
+    ``accepted_escrow_terms_error`` beside artifacts carrying no plan.
     """
     if proposal is None:
         return {}
-    proposal_model = (
-        proposal
-        if isinstance(proposal, EscrowProposal)
-        else (
-            EscrowProposal.model_validate(proposal.model_dump())
-            if hasattr(proposal, "model_dump")
-            else EscrowProposal.model_validate(proposal)
-        )
-    )
+    proposal_model = authorize_escrow_proposal(proposal, listing=listing)
     fields = dict(proposal_model.fields or {})
     if uses_scalar_amount:
         fields["amount"] = str(agreed_amount)
@@ -435,7 +306,7 @@ def accepted_escrow_artifacts_from_proposal(
             }
         plan = materialize_settlement_plan_from_proposal(
             proposal=accepted,
-            seller_wallet_address=seller_wallet_address,
+            listing=listing,
             agreed_amount=int(agreed_amount),
             duration_seconds=int(duration_seconds),
             addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),

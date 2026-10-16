@@ -36,6 +36,17 @@ def _arbiter() -> str:
     return get_recipient_arbiter(_CHAIN, config_path=_ADDRESSES)
 
 
+# The listing the native escrow is negotiated against, stated as a seller may
+# store it: addresses lowercased.
+_LISTING = {
+    "demands": [{
+        "chain_name": _CHAIN,
+        "arbiter": get_recipient_arbiter(_CHAIN, config_path=_ADDRESSES).lower(),
+        "demand_data": {"recipient": _SELLER.lower()},
+    }],
+}
+
+
 def _native_proposal() -> EscrowProposal:
     entry = {
         "chain_name": _CHAIN,
@@ -45,15 +56,8 @@ def _native_proposal() -> EscrowProposal:
         "literal_fields": {},
         "rates": [{"field": "amount", "per": "hour", "value": str(_AMOUNT)}],
     }
-    listing = {
-        "demands": [{
-            "chain_name": _CHAIN,
-            "arbiter": _arbiter().lower(),
-            "demand_data": {"recipient": _SELLER.lower()},
-        }],
-    }
     return escrow_proposal_from_accepted_entry(
-        listing=listing, entry=entry, expiration_unix=_EXPIRATION,
+        listing=_LISTING, entry=entry, expiration_unix=_EXPIRATION,
     )
 
 
@@ -72,7 +76,7 @@ async def _verify(proposal: EscrowProposal) -> int:
         seller_wallet=_SELLER,
         agreed_price=_AMOUNT,
         agreed_duration_seconds=3600,
-        listing={},
+        listing=_LISTING,
         alkahest_client=object(),
         chain_name=_CHAIN,
         alkahest_address_config_path=_ADDRESSES,

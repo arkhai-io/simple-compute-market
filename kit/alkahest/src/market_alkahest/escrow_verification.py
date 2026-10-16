@@ -272,8 +272,8 @@ async def verify_escrow_for_settlement(
     escrow_uid:
         The 0x-prefixed 32-byte attestation uid handed to us by the buyer.
     seller_wallet:
-        Our wallet address; participates in the expected obligation_data
-        via the RecipientArbiter demand encoding.
+        Our wallet address; the RecipientArbiter recipient of the expected
+        obligation_data on a legacy thread with no proposal.
     agreed_price, agreed_duration_seconds:
         From the negotiation thread; ``agreed_price`` is the absolute
         payment amount in base units (the DB column name is retained
@@ -282,9 +282,11 @@ async def verify_escrow_for_settlement(
         token + arbiter and the chain config they determine the entire
         expected obligation_data dict.
     listing:
-        The seller's listing row (after ``load_listing``); used as the
-        fallback source for the payment token when no proposal is
-        available (legacy threads).
+        The seller's listing row (after ``load_listing``). With a proposal,
+        its ``demands`` authorize the release condition the expected
+        obligation is materialized under, so an escrow under any condition
+        the listing does not authorize fails verification. Without one
+        (legacy threads), it is the source of the payment token.
     alkahest_client:
         An ``AlkahestClient`` already bound to the right chain.
     chain_name, alkahest_address_config_path:
@@ -293,7 +295,8 @@ async def verify_escrow_for_settlement(
     escrow_proposal:
         The buyer's ``EscrowProposal``, persisted on the negotiation
         thread at /negotiate/new. When present, the verifier materializes
-        the same concrete ``EscrowTerms`` shape the buyer used and compares
+        the same concrete ``EscrowTerms`` shape the buyer used, under the
+        release condition ``listing`` authorizes, and compares
         its ``obligation_data`` with the chain-read obligation. None for
         legacy threads — verifier falls back to the listing-derived token
         and the ``escrow_kind`` default.
@@ -369,7 +372,7 @@ async def verify_escrow_for_settlement(
             try:
                 expected_terms = _codecs.materialize_escrow_terms_from_proposal(
                     proposal=escrow_proposal,
-                    seller_wallet_address=effective_recipient,
+                    listing=listing,
                     agreed_amount=int(agreed_price),
                     duration_seconds=int(agreed_duration_seconds),
                     addr_config_path=alkahest_address_config_path,
@@ -422,7 +425,6 @@ async def verify_escrow_for_settlement(
             obligation_data_builder = _codecs.build_payment_obligation_data
         try:
             expected_obligation_raw = obligation_data_builder(
-                demands=None,
                 recipient=effective_recipient,
                 agreed_amount=int(agreed_price),
                 duration_seconds=int(agreed_duration_seconds),

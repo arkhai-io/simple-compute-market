@@ -66,6 +66,8 @@ _CONDITION = EscrowDemand(
     arbiter=get_recipient_arbiter("anvil", config_path=_ANVIL_BOOK),
     demand_data={"recipient": _SELLER},
 )
+# A listing authorizing ``_CONDITION``, which the proposals below select.
+_LISTING = {"demands": [_CONDITION.model_dump(exclude_none=True)]}
 
 
 @pytest.fixture
@@ -555,7 +557,7 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=_LISTING,
         agreed_amount=9500,
         duration_seconds=3600,
         addr_config_path=_ANVIL_BOOK,
@@ -577,7 +579,7 @@ def test_materialize_escrow_terms_payload_matches_model_dump():
         term.model_dump()
         for term in materialize_escrow_terms_from_proposal(
             proposal=proposal,
-            seller_wallet_address=_SELLER,
+            listing=_LISTING,
             agreed_amount=9500,
             duration_seconds=3600,
             addr_config_path=_ANVIL_BOOK,
@@ -586,7 +588,7 @@ def test_materialize_escrow_terms_payload_matches_model_dump():
 
     assert materialize_escrow_terms_payload_from_proposal(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=_LISTING,
         agreed_amount=9500,
         duration_seconds=3600,
         addr_config_path=_ANVIL_BOOK,
@@ -609,7 +611,7 @@ def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=_LISTING,
         agreed_amount=999,
         duration_seconds=7200,
         addr_config_path=_ANVIL_BOOK,
@@ -632,7 +634,7 @@ def test_materialize_escrow_terms_does_not_add_amount_for_amountless_escrow():
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=_SELLER,
+        listing=_LISTING,
         agreed_amount=999,
         duration_seconds=7200,
         addr_config_path=_ANVIL_BOOK,
