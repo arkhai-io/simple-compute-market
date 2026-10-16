@@ -29,14 +29,11 @@ Physical delivery is deliberately separate from commercial agreement. A seller m
 
 Not every market has physical delivery. API credits reuse the same schema-opaque negotiation and settlement roles while a quota authority issues prepaid bearer-key balances. They do not acquire compute-provisioning dependencies merely to fit the physical lifecycle.
 
-```text
-buyer (`market`) ── discovery ──> registry
-       │                            ▲
-       └─ signed negotiation ──> storefront
-                                  │
-                                  ├─ settlement ──> chain / Arkhai payments
-                                  └─ capacity + fulfillment ──> site authority / compute provisioner
-```
+The diagram below places every process at the boundary of the operator that runs it. The resource service stands for whatever seller infrastructure delivers a domain's resource, such as the compute provisioner or the API-credits service; each domain's own diagram names it. The contact-exchange mechanism settles inside the storefront and buyer with no external party, so it has no node here.
+
+![Every process at the boundary of the operator that runs it](diagrams/system-overview.svg)
+
+The diagram's source is [`diagrams/system-overview.drawio`](diagrams/system-overview.drawio); the SVG beside it is the export and also opens in draw.io.
 
 Production permits independently operated registries and seller stacks. Buyers may be ephemeral CLI invocations or long-running agents. Local development adds an Anvil fixture and test-only composition.
 
@@ -87,15 +84,9 @@ The first two are stated below as rules a check can hold; the third is stated as
 
 ### Repository layers
 
-```text
-composition      roles, storefronts, buyers, deployed services — where composing happens
-        ↓
-specialization   what a family or domain supplies to be composed — vocabulary, contracts,
-        ↓        clients, codecs, policies, adapters, family kits
-kit              reusable capabilities that compose nothing and discover nothing
-        ↓
-core             carriers with no internal dependencies
-```
+![The four package layers in dependency order](diagrams/repository-layers.svg)
+
+The diagram's source is [`diagrams/repository-layers.drawio`](diagrams/repository-layers.drawio); the SVG beside it is the export and also opens in draw.io. The kit areas diagram below uses the same layers and colours and adds scope and kind.
 
 A package depends only on its own layer or a lower one, and dependencies within one layer are acyclic. Any import is a dependency — at module top level, inside a function, under `TYPE_CHECKING`, or behind `try`/`except` — so every layer shares one definition of "depends on", and a boundary check walks every import, not only module-level ones. A distribution a package imports is declared in its `pyproject.toml`; an internal distribution declared but never imported is suspect and is either removed or carries a stated runtime reason (an entry point, a driver, an optional extra). A distribution only a project's tests import belongs in its `dev` dependency group, which is not a runtime dependency and which the check does not read, so a runtime declaration is removed only once neither the source nor the tests import it. The check reads import statements: a package loaded by name through `importlib` or `__import__` is an edge it cannot see, and no internal package is loaded that way.
 
@@ -195,23 +186,14 @@ The kit layer is not a flat peer group. Within it, capabilities fall into areas 
 
 1. **Foundation capabilities** — identity, configuration, generic policy, `kit/negotiation-runtime`'s schema-opaque round lifecycle, settlement-mechanism primitives, `kit/settlement-runtime`'s domain-neutral obligation/operation lifecycle, `kit/capability-shape`'s family-grouped capability shapes, which import only the standard library so buyers, pool administration, sites, and domains can all depend on them, `kit/capability-pricing`'s exact pricing of a shape from per-family rates behind a replaceable aggregator, which imports only the standard library and the shape kit so storefronts, buyers, and hold billing can all price a shape, and `kit/capability-admissibility`'s evaluation of which shapes a seller will sell, the only reader of a shape constraint, which imports only the standard library and the shape kit so storefronts, buyers, and pool administration can all evaluate a policy (see the [market composition architecture](../../openspec/specs/market-composition/architecture.md#capability-shape-admissibility)).
 2. **Authority capabilities** — `kit/site` and `kit/resource-pools`, which own capacity and pool administration and depend only on foundation capabilities.
-3. **Fulfillment lifecycle** — `kit/fulfillment`, which owns provider-neutral scheduling and provider execution contracts and may depend on authority capabilities.
+3. **Orchestration capabilities** — kits that drive a lifecycle across the authorities and may depend on them. `kit/fulfillment` is the one today: it owns provider-neutral scheduling and provider execution contracts.
 4. **Storefront role composition** — `kit/storefront`, which composes the core storefront shell with injected domain service and route hooks. It owns the storefront loop controller that holds every storefront's timer loops, the process-local trading pause, and the framework-free deal-control route services: the stage-event read, evaluate-negotiate, and force-accept. It may depend only on core storefront contracts and foundation capabilities; its Alkahest client construction makes it depend on `kit/alkahest`, a divergence listed under "Where the current tree diverges".
 
 `kit/capacity-publication` and `kit/pool-overrides` are storefront-side kits in the same area as `kit/storefront`: composed by storefronts, never by a site or a buyer.
 
-```text
-kit/fulfillment
-    ├──> kit/site
-    └──> kit/resource-pools
+The diagram below places the kit layer between the layers above and below it and draws the areas as numbered bands inside it. Each layer states the scope bound from the table above, and the composition and specialization layers group their packages by the scope they hold. A kit may depend on the bands below its own, on the mechanism and thin-client groups where the rules above allow, and on `kit/identity` and `arkhai-core`, which every kit may use. A package's fill colour is its kind, library, executable, contracts or client, and a corner dot marks the plugin property; the legend under the diagram keys both. A package with a dashed border carries a tracked divergence: an exception row in [`ARCHITECTURE.toml`](ARCHITECTURE.toml) or an edge named under "Where the current tree diverges". The specialization layer's family provisioning capabilities are what the prose above calls the compute family kit; the diagram names them by their layer rather than by that word. The diagram's source is [`diagrams/kit-areas.drawio`](diagrams/kit-areas.drawio); the SVG beside it is the export and also opens in draw.io.
 
-kit/site ───────────────> foundation only
-kit/resource-pools ─────> foundation only
-
-kit/storefront
-    ├──> core/storefront
-    └──> foundation only
-```
+![Package layers, their scope bounds, kinds, and the kit areas](diagrams/kit-areas.svg)
 
 Dependencies never point upward. Kit packages never import deployed services or domain adapters.
 
