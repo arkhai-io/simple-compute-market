@@ -100,25 +100,25 @@ and its existing `tests/unit/test_pool_models.py`; authority `service.py` and
 `tests/integration/test_resource_pool_service.py`; provisioning service
 `tests/integration/test_pools_api.py`. Shared hint definitions stay in contracts.
 
-- [ ] 2.1 Extend the existing model validators to call declarations plus all five
+- [x] 2.1 Extend the existing model validators to call declarations plus all five
   shared hint checks (D11). Check tags on create/replace and only when supplied
   on patch. Extend contracts unit tests with the complete invalid/valid hint
   matrix, omitted patch tags, opaque unknown tags and structurally valid
   domain-specific values. Verify construction fails before any transport call.
-- [ ] 2.2 Remove `_require_valid_policy_tag_hints` and its duplicate calls from
+- [x] 2.2 Remove `_require_valid_policy_tag_hints` and its duplicate calls from
   individual service methods (D6/D11). Keep raw-document validators, stable codes
   and paths, handler-registry validation and provider-config normalization.
   Update affected library tests to put exhaustive model refusals at model level
   while retaining document/state evidence. Verify invalid YAML hints remain
   structured validate-only problems and HTTP 400 import refusals.
-- [ ] 2.3 Update provisioning API tests for the accepted status change (D11).
+- [x] 2.3 Update provisioning API tests for the accepted status change (D11).
   Through canonical clients, exercise representative rejection on create, replace
   and tag-supplying patch using deliberately malformed construction per
   `docs/development/TESTING.md`'s rejection-path exception. Assert HTTP 422 and
   unchanged stored state, not validation-response field names. Keep valid hint
   round trips and provider/configuration HTTP 400 refusals covered. Evidence:
   `provisioning/compute/service/tests/integration/test_pools_api.py` passes.
-- [ ] 2.4 **Verification checkpoint.** Unit: contracts model/hint suites.
+- [x] 2.4 **Verification checkpoint.** Unit: contracts model/hint suites.
   Library integration: pool service against real SQLite. Application integration:
   `test_pools_api.py` through canonical clients and the real app. Run
   `make dist-ci`, `make -C kit/resource-pools-contracts test`,
@@ -131,6 +131,41 @@ and its existing `tests/unit/test_pool_models.py`; authority `service.py` and
 existing marker proves malformed-hint HTTP 422. No new system test is owed:
 request-model rules and a single-service error boundary belong to unit and
 application integration tests, not duplicated cross-service scenarios.
+
+**Section 2 implementation notes:**
+
+- Create/replace and tag-supplying patch validate declarations and all five
+  shared hint checks in contracts. The full contracts unit target passed:
+  375 tests, including the invalid/valid three-model matrix, aggregate problems,
+  omitted patch tags, opaque tags and domain-owned shape/period/pricing values.
+  Ordinary malformed construction raises before a caller can dispatch the model.
+- Removed the service helper and its individual-write calls. Raw document
+  validators and provider normalization are unchanged. Authority unit/library
+  target passed: 103 tests, including real-SQLite document problems and failed
+  import preserving metadata/configuration and an omitted pool's enabled state.
+  Prior direct-service tests bypassing model construction were removed; that
+  unsupported path no longer receives duplicate model checks (D11).
+- Provisioning service target passed: 675 unit and 455 application integration
+  tests. Its pool API tests use canonical clients and explicit rejection-path
+  `model_construct` bodies for create, replace and patch: HTTP 422 and preserved
+  state. Valid five-hint writes round-trip; malformed raw documents retain
+  structured validate-only problems and HTTP 400 on import. Unknown-provider
+  and invalid provider-configuration HTTP 400 coverage stays in the suite.
+- `make dist-ci` and final `make check-packaging` passed, including architecture
+  with zero warnings. Full `make test` passed all aggregate targets, including
+  954 release-tooling tests and Helm rendering/loader checks; existing suite
+  skips/warnings remain disclosed in its output. Comment hygiene, scoped
+  citations and whitespace passed. No dependencies/locks or skill files changed
+  in this section; none of the three projects exposes a typing target.
+- Fresh-context compliance review found no guidance violations or overstated
+  evidence; no fixes or declined findings. The reviewer did not rerun suites.
+- Handoff: source/helper validators deliberately retain their accepted semantics,
+  including arbitrary domain vocabulary and unknown tags. No new provider or
+  backing comparison is introduced here; section 3 owns stored-state refusal,
+  and section 4 owns handler cleanup. Existing deployed markers
+  `e2e_listing_shapes`, `e2e_vm_introduction` and `e2e_bare_metal_publication`
+  cover valid hint flows only; they have not run locally and prove no HTTP 422.
+  Permanent promotion remains in section 5.
 
 ## 3. Enforce immutable provider across API and document administration
 

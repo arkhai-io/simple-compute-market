@@ -91,322 +91,115 @@ class TestCreatePool:
         assert exc_info.value.status_code == 400
 
 
-class TestHoldPreferenceValidationThroughAdminApi:
-    """An invalid `max_reservation_hold_seconds` must be rejected through
-    the real pool-admin HTTP API a real operator uses, not only through a
-    direct service-level call -- proves the `PoolValidationError` ->
-    `HTTPException(400)` mapping this layer depends on.
-    """
+class TestPolicyHintValidationThroughAdminApi:
+    """Model refusals cross the HTTP boundary without changing stored state."""
 
-    async def test_create_pool_with_negative_hold_returns_400(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.create_pool(
-                PoolCreate(
-                    id="hetzner-eu",
-                    label="Hetzner EU",
-                    provider="ansible",
-                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": -1},
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert exc_info.value.status_code == 400
-        # Rejected before persistence -- confirmed by trying to fetch it,
-        # not just trusting the error code.
-        with pytest.raises(ComputeProvisioningError) as get_exc_info:
-            await client.pools.get_pool("hetzner-eu")
-        assert get_exc_info.value.status_code == 404
-
-    async def test_create_pool_with_valid_hold_round_trips(self, client_and_queue):
-        client, _ = client_and_queue
-        pool = await client.pools.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": 120},
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        assert pool.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "max_reservation_hold_seconds": 120,
-        }
-
-        fetched = await client.pools.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "max_reservation_hold_seconds": 120,
-        }
-
-    async def test_replace_pool_with_invalid_hold_returns_400_and_does_not_change_stored_metadata(
+    async def test_create_malformed_hint_returns_422_without_creating_pool(
         self, client_and_queue,
     ):
         client, _ = client_and_queue
-        await client.pools.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": 60},
-                provider_config=_ANSIBLE_CONFIG,
-            )
+        before = await client.pools.export_pools_yaml()
+        # Rejection-path test: bypass local construction to exercise the
+        # server's model validation through the canonical typed client.
+        malformed = PoolCreate.model_construct(
+            id="malformed", label="Malformed", provider="ansible", enabled=True,
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed",
+                         "max_reservation_hold_seconds": -1},
+            provider_config=_ANSIBLE_CONFIG,
         )
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.replace_pool(
-                "hetzner-eu",
-                PoolReplace(
-                    label="Hetzner EU",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "max_reservation_hold_seconds": "soon"},
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert exc_info.value.status_code == 400
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.pools.create_pool(malformed)
+        assert refused.value.status_code == 422
+        assert await client.pools.export_pools_yaml() == before
 
-        fetched = await client.pools.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "max_reservation_hold_seconds": 60,
-        }
-
-
-class TestSlaValidationThroughAdminApi:
-    """Same real-HTTP-route proof as TestHoldPreferenceValidationThroughAdminApi
-    (above), for the sibling `sla` hint the same shared validator covers --
-    SLA extends the public write contract just as much as hold preference
-    does, so it gets the same real typed-client coverage, not just the
-    unit-level `ResourcePoolService` proof."""
-
-    async def test_create_pool_with_negative_sla_returns_400(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.create_pool(
-                PoolCreate(
-                    id="hetzner-eu",
-                    label="Hetzner EU",
-                    provider="ansible",
-                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": -1},
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert exc_info.value.status_code == 400
-        with pytest.raises(ComputeProvisioningError) as get_exc_info:
-            await client.pools.get_pool("hetzner-eu")
-        assert get_exc_info.value.status_code == 404
-
-    async def test_create_pool_with_valid_sla_round_trips(self, client_and_queue):
-        client, _ = client_and_queue
-        pool = await client.pools.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": 99.9},
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        assert pool.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "sla": 99.9,
-        }
-
-        fetched = await client.pools.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "sla": 99.9,
-        }
-
-    async def test_replace_pool_with_invalid_sla_returns_400_and_does_not_change_stored_metadata(
+    async def test_replace_malformed_hint_returns_422_without_mutation(
         self, client_and_queue,
     ):
         client, _ = client_and_queue
-        await client.pools.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": 95.0},
-                provider_config=_ANSIBLE_CONFIG,
-            )
+        original = await _create_pool(client)
+        # Rejection-path test: deliberately construct a body the local model
+        # rejects. The typed client still owns routing and serialization.
+        malformed = PoolReplace.model_construct(
+            label="Changed", provider="ansible", enabled=False,
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed",
+                         "asking_rates": None},
+            provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 8},
         )
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.replace_pool(
-                "hetzner-eu",
-                PoolReplace(
-                    label="Hetzner EU",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "sla": "high"},
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert exc_info.value.status_code == 400
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.pools.replace_pool(original.id, malformed)
+        assert refused.value.status_code == 422
+        assert await client.pools.get_pool(original.id) == original
 
-        fetched = await client.pools.get_pool("hetzner-eu")
-        assert fetched.policy_tags == {
-            "advertisable_modes": [],
-            "capacity_backing": "backed",
-            "sla": 95.0,
+    async def test_patch_malformed_hint_returns_422_without_mutation(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        original = await _create_pool(client)
+        # Rejection-path test: send malformed tags past local construction;
+        # assert only HTTP status and stored state, not validation-body fields.
+        malformed = PoolUpdate.model_construct(
+            label="Changed", enabled=False,
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed",
+                         "pricing": {"memory": {"rates": "invalid"}}},
+            provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": 65536},
+        )
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.pools.patch_pool(original.id, malformed)
+        assert refused.value.status_code == 422
+        assert await client.pools.get_pool(original.id) == original
+
+    async def test_valid_hints_round_trip_through_create_replace_patch_and_read(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        tags = {
+            "advertisable_modes": [], "capacity_backing": "backed",
+            "max_reservation_hold_seconds": 120, "sla": 99.9,
+            "listing_shapes": {"vm": [{"gpu": {"count": 1, "model": "H100"}}]},
+            "asking_rates": {"vm": [{
+                "shape": {"gpu": {"count": 1, "model": "H100"}},
+                "amount": "2.10", "asset": "usd", "period": "hour",
+            }]},
+            "pricing": {"memory": {"rates": [{"asset": "usd", "rate": "0.05", "per": "hour"}]}},
+            "opaque_future_hint": {"value": [1, "two"]},
         }
+        created = await client.pools.create_pool(PoolCreate(
+            id="hinted", label="Hinted", provider="ansible",
+            policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
+        ))
+        assert created.policy_tags == tags
+        replaced = await client.pools.replace_pool("hinted", PoolReplace(
+            label="Replaced", provider="ansible", enabled=True,
+            policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
+        ))
+        assert replaced.policy_tags == tags
+        patched = await client.pools.patch_pool("hinted", PoolUpdate(policy_tags=tags))
+        assert patched.policy_tags == tags
+        renamed = await client.pools.patch_pool("hinted", PoolUpdate(label="Renamed"))
+        assert renamed.policy_tags == tags
+        assert (await client.pools.get_pool("hinted")).policy_tags == tags
 
-
-class TestListingShapesValidationThroughAdminApi:
-    """Rejection-path tests: a malformed `listing_shapes` hint is refused by the
-    server's shared validator. They assert status and stored state only."""
-
-    _TAGS = {"advertisable_modes": [], "capacity_backing": "backed"}
-    _SHAPES = {"vm": [{"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 64}}]}
-
-    async def test_create_pool_with_empty_shape_list_returns_400(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.create_pool(
-                PoolCreate(
-                    id="shaped",
-                    label="Shaped",
-                    provider="ansible",
-                    policy_tags={**self._TAGS, "listing_shapes": {"vm": []}},
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert exc_info.value.status_code == 400
-        with pytest.raises(ComputeProvisioningError) as get_exc_info:
-            await client.pools.get_pool("shaped")
-        assert get_exc_info.value.status_code == 404
-
-    async def test_replace_pool_with_malformed_shape_keeps_stored_metadata(
+    async def test_raw_document_malformed_hint_keeps_400_and_structured_problems(
         self, client_and_queue,
     ):
         client, _ = client_and_queue
-        await client.pools.create_pool(
-            PoolCreate(
-                id="shaped",
-                label="Shaped",
-                provider="ansible",
-                policy_tags={**self._TAGS, "listing_shapes": self._SHAPES},
-                provider_config=_ANSIBLE_CONFIG,
-            )
+        before = await client.pools.export_pools_yaml()
+        document = _declared_document(
+            "    policy_tags:\n"
+            "      advertisable_modes: []\n"
+            "      capacity_backing: backed\n"
+            "      max_reservation_hold_seconds: -1"
         )
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.replace_pool(
-                "shaped",
-                PoolReplace(
-                    label="Shaped",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags={**self._TAGS, "listing_shapes": {"vm": [{"gpu": 1}]}},
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert exc_info.value.status_code == 400
-        fetched = await client.pools.get_pool("shaped")
-        assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
-
-    async def test_create_pool_stating_one_base_shape_with_different_constraints_returns_400(
-        self, client_and_queue,
-    ):
-        client, _ = client_and_queue
-        conflicting = {"vm": [
-            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
-            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
-        ]}
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.create_pool(
-                PoolCreate(
-                    id="shaped",
-                    label="Shaped",
-                    provider="ansible",
-                    policy_tags={**self._TAGS, "listing_shapes": conflicting},
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert exc_info.value.status_code == 400
-        with pytest.raises(ComputeProvisioningError) as get_exc_info:
-            await client.pools.get_pool("shaped")
-        assert get_exc_info.value.status_code == 404
-
-    async def test_replace_pool_with_malformed_constraint_keeps_stored_metadata(
-        self, client_and_queue,
-    ):
-        client, _ = client_and_queue
-        await client.pools.create_pool(
-            PoolCreate(
-                id="shaped",
-                label="Shaped",
-                provider="ansible",
-                policy_tags={**self._TAGS, "listing_shapes": self._SHAPES},
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        malformed = {"vm": [{"gpu": {"model": "H100", "count": {"offer": 1, "min": 4, "max": 2}}}]}
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.replace_pool(
-                "shaped",
-                PoolReplace(
-                    label="Shaped",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags={**self._TAGS, "listing_shapes": malformed},
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert exc_info.value.status_code == 400
-        fetched = await client.pools.get_pool("shaped")
-        assert fetched.policy_tags == {**self._TAGS, "listing_shapes": self._SHAPES}
-
-
-class TestPricingRatesValidationThroughAdminApi:
-    """A malformed `pricing` rate list is refused by the server's shared
-    validator through the typed client, and a valid one round-trips."""
-
-    _TAGS = {"advertisable_modes": [], "capacity_backing": "backed"}
-    _PRICING = {
-        "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
-        "memory": {"rates": [{"asset": "usd", "rate": "0.05", "per": "hour"}]},
-    }
-
-    async def test_create_pool_with_a_malformed_rate_returns_400(self, client_and_queue):
-        client, _ = client_and_queue
-        with pytest.raises(ComputeProvisioningError) as exc_info:
-            await client.pools.create_pool(
-                PoolCreate(
-                    id="priced",
-                    label="Priced",
-                    provider="ansible",
-                    policy_tags={
-                        **self._TAGS,
-                        "pricing": {"memory": {"rates": [
-                            {"asset": "usd", "rate": "0.05x", "per": "hour"},
-                        ]}},
-                    },
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert exc_info.value.status_code == 400
-        with pytest.raises(ComputeProvisioningError) as get_exc_info:
-            await client.pools.get_pool("priced")
-        assert get_exc_info.value.status_code == 404
-
-    async def test_create_pool_with_valid_rates_round_trips(self, client_and_queue):
-        client, _ = client_and_queue
-        await client.pools.create_pool(
-            PoolCreate(
-                id="priced",
-                label="Priced",
-                provider="ansible",
-                policy_tags={**self._TAGS, "pricing": self._PRICING},
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        fetched = await client.pools.get_pool("priced")
-        assert fetched.policy_tags == {**self._TAGS, "pricing": self._PRICING}
+        result = await client.pools.validate_pools(document)
+        assert result.valid is False
+        assert result.diff is None
+        assert [(p.path, p.code) for p in result.problems] == [
+            ("pools[1].policy_tags.max_reservation_hold_seconds", "invalid_hold_preference"),
+        ]
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.pools.import_pools(document)
+        assert refused.value.status_code == 400
+        assert await client.pools.export_pools_yaml() == before
 
 
 class TestVmSizeDefaultsThroughAdminApi:

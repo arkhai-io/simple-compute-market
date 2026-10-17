@@ -23,7 +23,6 @@ from market_resource_pools_contracts.hints import (
     validate_hold_preference,
     validate_listing_shapes,
     validate_pricing_rates,
-    validate_pool_declarations,
     validate_sla_preference,
 )
 from .pool_config_handler import PoolConfigHandler
@@ -126,24 +125,6 @@ class ResourcePoolService:
 
     def _attach_provider_config(self, db: Session, pool: ResourcePool) -> None:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
-
-    def _require_valid_policy_tag_hints(self, policy_tags: Mapping[str, Any]) -> None:
-        """Reject malformed domain-neutral policy hints before any write.
-
-        Every individual-pool write path and the bulk YAML path uses these
-        same validators, so declaration semantics do not depend on which
-        administration surface an operator chooses.
-        """
-        problems = (
-            validate_pool_declarations(policy_tags)
-            + validate_hold_preference(policy_tags)
-            + validate_sla_preference(policy_tags)
-            + validate_listing_shapes(policy_tags)
-            + validate_asking_rates(policy_tags)
-            + validate_pricing_rates(policy_tags)
-        )
-        if problems:
-            raise PoolValidationError("; ".join(problems))
 
     @staticmethod
     def _require_backing_unchanged(
@@ -281,7 +262,6 @@ class ResourcePoolService:
         return pool
 
     def create_pool(self, data: PoolCreate) -> ResourcePool:
-        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             if db.query(ResourcePool).filter(ResourcePool.id == data.id).one_or_none():
@@ -299,7 +279,6 @@ class ResourcePoolService:
         return self.get_pool(data.id)  # type: ignore[return-value]
 
     def replace_pool(self, pool_id: str, data: PoolReplace) -> ResourcePool:
-        self._require_valid_policy_tag_hints(data.policy_tags)
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
@@ -315,8 +294,6 @@ class ResourcePoolService:
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
-        if data.policy_tags is not None:
-            self._require_valid_policy_tag_hints(data.policy_tags)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
             if data.policy_tags is not None:
