@@ -53,6 +53,8 @@ deny = [
 skill = "change-design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
+  # Read-only lens vocabulary extraction from intervention ledgers on stdin.
+  "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
   "Bash(make -C ../*-proposal check-change-index)",
