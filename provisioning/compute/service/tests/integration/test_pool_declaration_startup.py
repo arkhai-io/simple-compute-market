@@ -15,6 +15,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+import yaml
+
+from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import BareMetalPoolConfigHandler
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -74,7 +77,10 @@ class _Deployment:
         self.document = tmp_path / "pools.yaml"
         self.pool_service = ResourcePoolService(
             session_factory=self.session_factory,
-            handlers={"ansible": AnsiblePoolConfigHandler()},
+            handlers={
+                "ansible": AnsiblePoolConfigHandler(),
+                "bare_metal.ansible": BareMetalPoolConfigHandler(),
+            },
         )
         monkeypatch.setattr(
             _container_module,
@@ -158,3 +164,50 @@ def test_the_check_runs_after_the_pool_document_import():
 
     assert names.index("import-pool-definitions") < names.index("verify-pool-declarations")
     assert names.index("verify-pool-declarations") < names.index("seed-inventory")
+
+
+def test_changed_provider_document_retries_without_state_or_digest_changes_and_can_be_corrected(
+    deployment,
+):
+    deployment.document.write_text(_DECLARED_DOCUMENT, encoding="utf-8")
+    assert deployment.importer().import_pool_definitions().reconciled is True
+    before = deployment.pool_service.export_pools_yaml()
+    digest = deployment.recorded_digest()
+    assert digest == DefinitionDocumentImporter.digest_of(_DECLARED_DOCUMENT)
+    document = yaml.safe_load(_DECLARED_DOCUMENT)
+    document["pools"][0].update(
+        label="Changed", provider="bare_metal.ansible", provider_config={},
+    )
+    # A valid entry before the refusal must not be created by a failed startup.
+    document["pools"].insert(0, {
+        "id": "second", "label": "Second", "provider": "bare_metal.ansible",
+        "policy_tags": {"advertisable_modes": [], "capacity_backing": "backed"},
+        "provider_config": {},
+    })
+    deployment.document.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    for _ in range(2):
+        with pytest.raises(PoolValidationError) as refused:
+            deployment.importer().import_pool_definitions()
+        assert "pools[1].provider:" in str(refused.value)
+        assert "pool 'default'" in str(refused.value)
+        assert "migrate its members" in str(refused.value)
+        assert deployment.pool_service.export_pools_yaml() == before
+        assert deployment.recorded_digest() == digest
+        assert deployment.pool_service.get_pool("second") is None
+
+    document["pools"][1].update(
+        provider="ansible", provider_config={"playbook_path": "/configured/corrected.yaml"},
+    )
+    corrected = yaml.safe_dump(document)
+    deployment.document.write_text(corrected, encoding="utf-8")
+    assert deployment.importer().import_pool_definitions().reconciled is True
+    assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(corrected)
+    assert deployment.recorded_digest() != digest
+    default = deployment.pool_service.get_pool("default")
+    assert default.provider == "ansible"
+    assert default.label == "Changed"
+    assert default.provider_config["playbook_path"] == "/configured/corrected.yaml"
+    assert deployment.pool_service.get_pool("second").provider == "bare_metal.ansible"
+    assert deployment.importer().import_pool_definitions().reconciled is False
+    app_runtime.verify_pool_declarations()

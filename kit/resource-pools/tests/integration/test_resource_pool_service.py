@@ -32,8 +32,9 @@ from market_resource_pools import (
     PoolNotFoundError,
     PoolValidationError,
     ResourcePoolService,
+    PoolConfigValidationProblem,
 )
-from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolUpdate
+from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolResponse, PoolUpdate
 from market_resource_pools.db import Base, ResourcePool
 from sqlalchemy.orm import sessionmaker
 
@@ -81,8 +82,6 @@ class _AnsibleLikePoolConfigHandler:
         return normalized
 
     def validate_config_problems(self, config):
-        from market_resource_pools import PoolConfigValidationProblem
-
         problems: list[PoolConfigValidationProblem] = []
         for field in sorted(set(config) - self._FIELDS):
             problems.append(
@@ -1144,39 +1143,195 @@ class _StubPoolConfigHandler:
         self.configs.pop(pool_id, None)
 
 
-def test_replace_provider_cleans_up_old_provider_config(session_factory):
-    old_handler = _StubPoolConfigHandler("old")
-    new_handler = _StubPoolConfigHandler("new")
-    service = ResourcePoolService(
-        session_factory=session_factory,
-        handlers={"old": old_handler, "new": new_handler},
-    )
-    service.create_pool(
-        PoolCreate(
-            id="switchable",
-            label="Switchable",
-            provider="old",
-            policy_tags=_declared(),
-            provider_config={"old_setting": True},
-        )
+@pytest.fixture
+def recorded_pools(session_factory):
+    handlers = {provider: _StubPoolConfigHandler(provider) for provider in ("old", "new")}
+    service = ResourcePoolService(session_factory=session_factory, handlers=handlers)
+    for pool_id in ("default", "existing", "omitted"):
+        service.create_pool(PoolCreate(
+            id=pool_id, label=pool_id, provider="old", policy_tags=_declared({"region": "eu"}),
+            provider_config={"setting": pool_id},
+        ))
+    return service, handlers
+
+
+def _pool_snapshot(service):
+    return [PoolResponse.model_validate(pool) for pool in service.list_pools()]
+
+
+@pytest.mark.parametrize("operation", ["replace", "patch"])
+def test_provider_change_refuses_before_any_metadata_or_config_write(recorded_pools, operation):
+    service, handlers = recorded_pools
+    before = _pool_snapshot(service)
+    writes = {provider: list(handler.replaced) for provider, handler in handlers.items()}
+    data = dict(
+        label="Changed", provider="new", enabled=False,
+        policy_tags=_declared({"region": "us"}), provider_config={"new_setting": True},
     )
 
-    replaced = service.replace_pool(
-        "switchable",
-        PoolReplace(
-            label="Switched",
-            provider="new",
-            enabled=True,
-            policy_tags=_declared(),
-            provider_config={"new_setting": True},
-        ),
-    )
+    with pytest.raises(PoolValidationError) as refused:
+        if operation == "replace":
+            service.replace_pool("existing", PoolReplace(**data))
+        else:
+            service.update_pool("existing", PoolUpdate(**data))
 
-    assert replaced.provider == "new"
-    assert old_handler.deleted == ["switchable"]
-    assert "switchable" not in old_handler.configs
-    assert new_handler.replaced == ["switchable"]
-    assert new_handler.configs["switchable"] == {"new_setting": True}
+    assert str(refused.value) == (
+        "provider of pool 'existing' is fixed at creation as 'old' and cannot become 'new'; "
+        "declare a second pool with the intended provider and migrate its members instead"
+    )
+    assert _pool_snapshot(service) == before
+    for provider, handler in handlers.items():
+        assert handler.replaced == writes[provider]
+        assert handler.deleted == []
+    assert handlers["old"].configs["existing"] == {"setting": "existing"}
+    assert handlers["new"].configs == {}
+
+
+def test_equal_provider_patch_and_omitted_tags_do_not_write_config(recorded_pools):
+    service, handlers = recorded_pools
+    before = PoolResponse.model_validate(service.get_pool("existing"))
+    writes = list(handlers["old"].replaced)
+
+    unchanged = service.update_pool("existing", PoolUpdate(provider="old"))
+    assert PoolResponse.model_validate(unchanged) == before
+    renamed = service.update_pool("existing", PoolUpdate(label="Renamed"))
+    assert renamed.label == "Renamed"
+    assert renamed.provider == before.provider
+    assert renamed.policy_tags == before.policy_tags
+    assert renamed.provider_config == before.provider_config
+    assert handlers["old"].replaced == writes
+
+
+def test_same_provider_config_replace_and_patch_remain_editable(recorded_pools):
+    service, handlers = recorded_pools
+    replaced = service.replace_pool("existing", PoolReplace(
+        label="Replaced", provider="old", enabled=False, policy_tags=_declared(),
+        provider_config={"setting": "replacement"},
+    ))
+    assert replaced.provider_config == {"setting": "replacement"}
+    patched = service.update_pool("existing", PoolUpdate(
+        provider="old", provider_config={"setting": "patch"},
+    ))
+    assert patched.provider == "old"
+    assert patched.enabled is False
+    assert patched.provider_config == {"setting": "patch"}
+    assert handlers["new"].replaced == []
+
+
+def _provider_change_document(service):
+    document = yaml.safe_load(service.export_pools_yaml())
+    # A valid new entry precedes the immutable-field change and an existing
+    # entry is omitted, so refusal must prevent creation and disablement too.
+    document["pools"] = [
+        document["pools"][0],
+        {"id": "fresh", "label": "Fresh", "provider": "new",
+         "policy_tags": _declared(), "provider_config": {"setting": "new"}},
+        {**document["pools"][1], "label": "Changed", "provider": "new",
+         "policy_tags": _declared({"capacity_backing": "unbacked"}),
+         "provider_config": {"setting": "changed"}},
+    ]
+    document["pools"][0]["label"] = "Changed default"
+    return yaml.safe_dump(document)
+
+
+def test_documents_report_both_immutable_fields_and_apply_nothing(recorded_pools, session_factory):
+    service, handlers = recorded_pools
+    before = _pool_snapshot(service)
+    exported = service.export_pools_yaml()
+    writes = {provider: list(handler.replaced) for provider, handler in handlers.items()}
+    document = _provider_change_document(service)
+
+    result = service.validate_pools(document)
+    assert result.valid is False
+    assert result.diff is None
+    assert [(p.path, p.code) for p in result.problems] == [
+        ("pools[2].provider", "provider_immutable"),
+        ("pools[2].policy_tags.capacity_backing", "capacity_backing_immutable"),
+    ]
+    for validate_only in (False, True):
+        with pytest.raises(PoolValidationError, match=r"pools\[2\]\.provider:"):
+            service.import_pools(document, validate_only=validate_only)
+    with pytest.raises(PoolValidationError, match=r"pools\[2\]\.policy_tags.capacity_backing:"):
+        with session_factory() as db, db.begin():
+            service.import_pools_in_session(db, document)
+    assert _pool_snapshot(service) == before
+    assert service.export_pools_yaml() == exported
+    for provider, handler in handlers.items():
+        assert handler.replaced == writes[provider]
+        assert handler.deleted == []
+    assert handlers["new"].configs == {}
+
+
+def test_new_document_entry_may_declare_a_different_provider(recorded_pools):
+    service, _ = recorded_pools
+    document = yaml.safe_load(service.export_pools_yaml())
+    document["pools"].append({
+        "id": "second", "label": "Second", "provider": "new",
+        "policy_tags": _declared(), "provider_config": {"setting": "new"},
+    })
+    result = service.validate_pools(yaml.safe_dump(document))
+    assert result.valid is True
+    assert result.diff.created == ["second"]
+    diff = service.import_pools(yaml.safe_dump(document))
+    assert diff.created == ["second"]
+    assert service.get_pool("second").provider == "new"
+
+
+def test_document_request_problems_precede_all_stored_comparisons(recorded_pools):
+    service, _ = recorded_pools
+    before = _pool_snapshot(service)
+    document = yaml.safe_load(_provider_change_document(service))
+    document["pools"][1]["label"] = ""
+    response = service.validate_pools(yaml.safe_dump(document))
+    assert response.diff is None
+    assert [(p.path, p.code) for p in response.problems] == [("pools[1].label", "required_field")]
+    with pytest.raises(PoolValidationError, match=r"pools\[1\]\.label:"):
+        service.import_pools(yaml.safe_dump(document))
+    assert _pool_snapshot(service) == before
+
+
+@pytest.mark.parametrize("operation", ["replace", "patch", "document"])
+def test_provider_configuration_validation_precedes_provider_comparison(session_factory, operation):
+    service = ResourcePoolService(session_factory, {
+        "ansible": _AnsibleLikePoolConfigHandler(), "old": _StubPoolConfigHandler("old"),
+    })
+    service.create_pool(PoolCreate(
+        id="default", label="Default", provider="old", policy_tags=_declared(), provider_config={},
+    ))
+    before = _pool_snapshot(service)
+    data = dict(label="Changed", provider="ansible", enabled=False,
+                policy_tags=_declared(), provider_config={})
+    if operation == "document":
+        document = yaml.safe_dump({"pools": [{"id": "default", **data}]})
+        response = service.validate_pools(document)
+        assert response.valid is False
+        assert response.diff is None
+        assert {p.code for p in response.problems} == {"required_field"}
+        with pytest.raises(PoolValidationError, match="playbook_path"):
+            service.import_pools(document)
+    else:
+        with pytest.raises(PoolValidationError, match="playbook_path"):
+            if operation == "replace":
+                service.replace_pool("default", PoolReplace(**data))
+            else:
+                service.update_pool("default", PoolUpdate(**data))
+    assert _pool_snapshot(service) == before
+
+
+@pytest.mark.parametrize("operation", ["replace", "patch", "document"])
+def test_unknown_provider_keeps_its_existing_refusal(recorded_pools, operation):
+    service, _ = recorded_pools
+    before = _pool_snapshot(service)
+    data = dict(label="Changed", provider="unknown", enabled=False,
+                policy_tags=_declared(), provider_config={})
+    with pytest.raises(PoolValidationError, match="no pool config handler registered"):
+        if operation == "replace":
+            service.replace_pool("existing", PoolReplace(**data))
+        elif operation == "patch":
+            service.update_pool("existing", PoolUpdate(**data))
+        else:
+            service.import_pools(yaml.safe_dump({"pools": [{"id": "default", **data}]}))
+    assert _pool_snapshot(service) == before
 
 
 # ---------------------------------------------------------------------------

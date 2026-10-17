@@ -79,7 +79,13 @@ class PoolUpdate(BaseModel):
     """Partial update body accepted by ``PATCH /api/v1/pools/{pool_id}``."""
 
     label: str | None = None
-    provider: str | None = None
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Must equal the pool's provider, which is fixed at creation. "
+            "Restating it has no effect and does not rewrite configuration."
+        ),
+    )
     enabled: bool | None = None
     policy_tags: dict[str, Any] | None = None
     provider_config: dict[str, Any] | None = None

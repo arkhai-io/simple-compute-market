@@ -26,6 +26,12 @@ from compute_provisioning_ansible import ssh_connection
 from .conftest import ProvisioningClients
 from compute_provisioning_client import ComputeProvisioningError
 import pytest
+import yaml
+
+from compute_provisioning_service import container as _container_module
+from market_resource_pools import ResourcePoolService
+from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import BareMetalPoolConfigHandler
+from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
 
 from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolUpdate
 from compute_provisioning_contracts import HostCreate, HostUpdate
@@ -805,3 +811,109 @@ class TestBackingFixedAtCreationThroughAdminApi:
 
         assert exc_info.value.status_code == 400
         assert (await client.pools.get_pool("hetzner-eu")).policy_tags == _BACKED_VM
+
+
+class _RecordingAnsiblePoolConfigHandler(AnsiblePoolConfigHandler):
+    def __init__(self):
+        super().__init__()
+        self.writes = []
+
+    def replace_config(self, db, pool_id, config):
+        self.writes.append(pool_id)
+        super().replace_config(db, pool_id, config)
+
+
+class TestProviderFixedAtCreationThroughAdminApi:
+    @pytest.mark.parametrize("operation", ["replace", "patch"])
+    async def test_provider_change_is_400_and_preserves_all_state(self, client_and_queue, operation):
+        client, _ = client_and_queue
+        original = await _create_pool(client)
+        exported = await client.pools.export_pools_yaml()
+        data = dict(
+            label="Changed", provider="bare_metal.ansible", enabled=False,
+            policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "region": "other"},
+            provider_config={},
+        )
+
+        with pytest.raises(ComputeProvisioningError) as refused:
+            if operation == "replace":
+                await client.pools.replace_pool(original.id, PoolReplace(**data))
+            else:
+                await client.pools.patch_pool(original.id, PoolUpdate(**data))
+
+        assert refused.value.status_code == 400
+        message = str(refused.value)
+        assert "'ansible'" in message and "'bare_metal.ansible'" in message
+        assert "declare a second pool" in message and "migrate its members" in message
+        assert await client.pools.get_pool(original.id) == original
+        assert await client.pools.export_pools_yaml() == exported
+
+    async def test_equal_provider_patch_writes_no_configuration(
+        self, client_and_queue, session_factory, monkeypatch,
+    ):
+        client, _ = client_and_queue
+        handler = _RecordingAnsiblePoolConfigHandler()
+        service = ResourcePoolService(session_factory, {
+            "ansible": handler, "bare_metal.ansible": BareMetalPoolConfigHandler(),
+        })
+        # The controller resolves its injected service through this accessor;
+        # keep real persistence and record only the handler's write boundary.
+        monkeypatch.setattr(_container_module, "resolved_resource_pool_service", service)
+        original = await _create_pool(client)
+        handler.writes.clear()
+
+        unchanged = await client.pools.patch_pool(original.id, PoolUpdate(provider="ansible"))
+        assert unchanged == original
+        renamed = await client.pools.patch_pool(original.id, PoolUpdate(label="Renamed"))
+        assert renamed.policy_tags == original.policy_tags
+        assert renamed.provider_config == original.provider_config
+        assert handler.writes == []
+
+        replaced = await client.pools.replace_pool(original.id, PoolReplace(
+            label="Replaced", provider="ansible", enabled=True,
+            policy_tags=original.policy_tags,
+            provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 8},
+        ))
+        assert replaced.provider == "ansible"
+        assert replaced.provider_config["default_vm_vcpus"] == 8
+        patched = await client.pools.patch_pool(original.id, PoolUpdate(
+            provider="ansible", provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 16},
+        ))
+        assert patched.provider == "ansible"
+        assert patched.provider_config["default_vm_vcpus"] == 16
+        assert handler.writes == [original.id, original.id]
+
+    async def test_document_provider_change_is_indexed_and_import_is_atomic(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.pools.import_pools(TestImportAndValidatePools._YAML)
+        omitted = await _create_pool(client, "omitted")
+        before = await client.pools.list_pools()
+        exported = await client.pools.export_pools_yaml()
+        document = yaml.safe_load(exported)
+        default = next(p for p in document["pools"] if p["id"] == "default")
+        changed = next(p for p in document["pools"] if p["id"] == "hetzner-eu-central")
+        default["label"] = "Changed default"
+        changed.update(provider="bare_metal.ansible", provider_config={}, enabled=False)
+        changed["policy_tags"] = {"advertisable_modes": [], "capacity_backing": "unbacked"}
+        document["pools"] = [default, {
+            "id": "fresh", "label": "Fresh", "provider": "bare_metal.ansible",
+            "policy_tags": {"advertisable_modes": [], "capacity_backing": "backed"},
+            "provider_config": {},
+        }, changed]
+        text = yaml.safe_dump(document)
+
+        result = await client.pools.validate_pools(text)
+        assert result.valid is False
+        assert result.diff is None
+        assert [(p.path, p.code) for p in result.problems] == [
+            ("pools[2].provider", "provider_immutable"),
+            ("pools[2].policy_tags.capacity_backing", "capacity_backing_immutable"),
+        ]
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.pools.import_pools(text)
+        assert refused.value.status_code == 400
+        assert "pools[2].provider:" in str(refused.value)
+        assert "migrate its members" in str(refused.value)
+        assert await client.pools.list_pools() == before
+        assert await client.pools.get_pool(omitted.id) == omitted
+        assert await client.pools.export_pools_yaml() == exported

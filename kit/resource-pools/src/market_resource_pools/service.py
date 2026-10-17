@@ -50,6 +50,54 @@ class PoolValidationError(ValueError):
 
 
 @dataclass(frozen=True)
+class PoolImmutabilityProblem:
+    field: str
+    code: str
+    stored: Any
+    supplied: Any
+    message: str
+
+
+def pool_immutability_problems(
+    pool: ResourcePool, provider: str, policy_tags: Mapping[str, Any]
+) -> tuple[PoolImmutabilityProblem, ...]:
+    """Compare routing and admission context without accessing persistence.
+
+    Changing either in place would reinterpret existing members or listings.
+    Missing backing may be supplied to repair a stored declaration; provider
+    identity always belongs to the pool's lifetime.
+    """
+    problems: list[PoolImmutabilityProblem] = []
+    if provider != pool.provider:
+        problems.append(PoolImmutabilityProblem(
+            field="provider",
+            code="provider_immutable",
+            stored=pool.provider,
+            supplied=provider,
+            message=(
+                f"provider of pool '{pool.id}' is fixed at creation as "
+                f"'{pool.provider}' and cannot become '{provider}'; declare a "
+                "second pool with the intended provider and migrate its members instead"
+            ),
+        ))
+    stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
+    supplied = policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
+    if stored is not None and supplied != stored:
+        problems.append(PoolImmutabilityProblem(
+            field=f"policy_tags.{CAPACITY_BACKING_POLICY_TAG}",
+            code="capacity_backing_immutable",
+            stored=stored,
+            supplied=supplied,
+            message=(
+                f"{CAPACITY_BACKING_POLICY_TAG} of pool '{pool.id}' is fixed at "
+                f"creation as '{stored}' and cannot become '{supplied}'; "
+                "declare a second pool with the intended backing instead"
+            ),
+        ))
+    return tuple(problems)
+
+
+@dataclass(frozen=True)
 class PoolDefinition:
     id: str
     label: str
@@ -127,26 +175,12 @@ class ResourcePoolService:
         pool.provider_config = self._handler(pool.provider).read_config(db, pool.id)
 
     @staticmethod
-    def _require_backing_unchanged(
-        pool: ResourcePool, policy_tags: Mapping[str, Any]
+    def _require_immutable_fields_unchanged(
+        pool: ResourcePool, provider: str, policy_tags: Mapping[str, Any]
     ) -> None:
-        """Refuse a write changing a pool's backing.
-
-        Every listing derived from a pool inherits its backing, so changing it
-        in place would reinterpret listings already published. Moving supply
-        between backed and unbacked is a second pool with its capacity
-        resources migrated across. A stored pool carrying no value yet may be
-        given one; the service refuses to start while any pool lacks one, so
-        that case is a repair, not a change.
-        """
-        stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
-        supplied = policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
-        if stored is not None and supplied != stored:
-            raise PoolValidationError(
-                f"{CAPACITY_BACKING_POLICY_TAG} of pool '{pool.id}' is fixed at "
-                f"creation as '{stored}' and cannot become '{supplied}'; "
-                "declare a second pool with the intended backing instead"
-            )
+        problems = pool_immutability_problems(pool, provider, policy_tags)
+        if problems:
+            raise PoolValidationError(problems[0].message)
 
     def stored_declaration_problems(
         self, db: Session
@@ -282,12 +316,8 @@ class ResourcePoolService:
         config = self._normalize_config(data.provider, data.provider_config)
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
-            self._require_backing_unchanged(pool, data.policy_tags)
-            old_provider = pool.provider
-            if old_provider != data.provider:
-                self._handler(old_provider).delete_config(db, pool_id)
+            self._require_immutable_fields_unchanged(pool, data.provider, data.policy_tags)
             pool.label = data.label
-            pool.provider = data.provider
             pool.enabled = data.enabled
             pool.policy_tags = data.policy_tags
             self._handler(data.provider).replace_config(db, pool_id, config)
@@ -296,9 +326,7 @@ class ResourcePoolService:
     def update_pool(self, pool_id: str, data: PoolUpdate) -> ResourcePool:
         with self._session_factory() as db, db.begin():
             pool = self._require_pool(db, pool_id)
-            if data.policy_tags is not None:
-                self._require_backing_unchanged(pool, data.policy_tags)
-            provider = data.provider or pool.provider
+            provider = data.provider if data.provider is not None else pool.provider
             current_config = self._handler(pool.provider).read_config(db, pool_id)
             config = (
                 data.provider_config
@@ -306,17 +334,17 @@ class ResourcePoolService:
                 else current_config
             )
             normalized = self._normalize_config(provider, config)
-            if provider != pool.provider:
-                self._handler(pool.provider).delete_config(db, pool_id)
+            self._require_immutable_fields_unchanged(
+                pool, provider,
+                data.policy_tags if data.policy_tags is not None else (pool.policy_tags or {}),
+            )
             if data.label is not None:
                 pool.label = data.label
-            if data.provider is not None:
-                pool.provider = data.provider
             if data.enabled is not None:
                 pool.enabled = data.enabled
             if data.policy_tags is not None:
                 pool.policy_tags = data.policy_tags
-            if data.provider is not None or data.provider_config is not None:
+            if data.provider_config is not None:
                 self._handler(provider).replace_config(db, pool_id, normalized)
         return self.get_pool(pool_id)  # type: ignore[return-value]
 
@@ -596,32 +624,26 @@ class ResourcePoolService:
         return DocumentValidationResult(tuple(definitions), tuple(problems))
 
     @staticmethod
-    def _backing_change_problems(
+    def _immutable_field_problems(
         db: Session, desired: tuple[PoolDefinition, ...]
     ) -> list[PoolValidationProblem]:
-        """Document entries that would change an existing pool's backing."""
+        """Adapt stored-state problems to submitted document entry paths."""
         existing = {p.id: p for p in db.query(ResourcePool).all()}
         problems: list[PoolValidationProblem] = []
         for definition in desired:
             pool = existing.get(definition.id)
             if pool is None:
                 continue
-            stored = (pool.policy_tags or {}).get(CAPACITY_BACKING_POLICY_TAG)
-            supplied = definition.policy_tags.get(CAPACITY_BACKING_POLICY_TAG)
-            if stored is not None and supplied != stored:
+            for problem in pool_immutability_problems(
+                pool, definition.provider, definition.policy_tags
+            ):
                 problems.append(
                     PoolValidationProblem(
                         path=(
-                            f"pools[{definition.source_index}].policy_tags."
-                            f"{CAPACITY_BACKING_POLICY_TAG}"
+                            f"pools[{definition.source_index}].{problem.field}"
                         ),
-                        code="capacity_backing_immutable",
-                        message=(
-                            f"{CAPACITY_BACKING_POLICY_TAG} of pool '{definition.id}' "
-                            f"is fixed at creation as '{stored}' and cannot become "
-                            f"'{supplied}'; declare a second pool with the intended "
-                            "backing instead"
-                        ),
+                        code=problem.code,
+                        message=problem.message,
                     )
                 )
         return problems
@@ -685,13 +707,7 @@ class ResourcePoolService:
             )
             db.add(pool)
             db.flush()
-            old_provider = None
-        else:
-            old_provider = pool.provider
-        if old_provider and old_provider != definition.provider:
-            self._handler(old_provider).delete_config(db, definition.id)
         pool.label = definition.label
-        pool.provider = definition.provider
         pool.enabled = definition.enabled
         pool.policy_tags = definition.policy_tags
         self._handler(definition.provider).replace_config(
@@ -722,7 +738,7 @@ class ResourcePoolService:
                 valid=False, problems=list(validation.problems), diff=None
             )
         with self._session_factory() as db:
-            stored_problems = self._backing_change_problems(db, validation.definitions)
+            stored_problems = self._immutable_field_problems(db, validation.definitions)
             if stored_problems:
                 return PoolValidateResponse(
                     valid=False, problems=stored_problems, diff=None
@@ -762,7 +778,7 @@ class ResourcePoolService:
         validation = self._validate_document(yaml_text)
         if not validation.valid:
             raise self._problems_error(validation.problems)
-        stored_problems = self._backing_change_problems(db, validation.definitions)
+        stored_problems = self._immutable_field_problems(db, validation.definitions)
         if stored_problems:
             raise self._problems_error(stored_problems)
         plan = self._calculate_reconciliation(db, validation.definitions)

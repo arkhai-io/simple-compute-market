@@ -182,42 +182,42 @@ Files: authority `service.py`, new
 Production startup importer/controller semantics remain unchanged unless wiring
 needed to use the shared refusal is demonstrated by these tests.
 
-- [ ] 3.1 Implement one pure stored/proposed comparison for provider and backing,
+- [x] 3.1 Implement one pure stored/proposed comparison for provider and backing,
   returning field-specific problems (D5/D6). Replace the duplicated backing
   comparisons with thin API/document adapters. Preserve backing repair when no
   value is stored, omit-field patch behavior, both problem codes and submitted
   source indices. Unit evidence: provider/backing equal/different combinations,
   repair, stable messages and codes; no database collaborator needed.
-- [ ] 3.2 Apply that comparison before any mutation in replace and patch (D1/D3–D7).
+- [x] 3.2 Apply that comparison before any mutation in replace and patch (D1/D3–D7).
   Remove swap/deletion branches from these paths; an equal provider alone must
   perform no config write, while same-provider config edits retain existing
   secret semantics. Document `PoolUpdate.provider`'s restriction. Library
   evidence: complete metadata/config preservation, same-provider edits, provider
   no-op and omitted tags, using a recording injected handler and a real database.
-- [ ] 3.3 Apply the same comparison in validate-only and session-scoped import
+- [x] 3.3 Apply the same comparison in validate-only and session-scoped import
   before reconciliation application (D1/D5/D6/D8). Remove import's swap/deletion
   branch. Library evidence: indexed `provider_immutable`, both immutable fields
   reported together, no diff, all-or-nothing valid-entry/omitted-pool effects,
   new entries accepted and backing repair preserved. Request/provider-config
   failures keep their existing phase order and import detail text shape.
-- [ ] 3.4 Add application-integration cases in `test_pools_api.py` (D1/D3–D8):
+- [x] 3.4 Add application-integration cases in `test_pools_api.py` (D1/D3–D8):
   otherwise-valid requests against registered providers receive HTTP 400, preserve
   all state and explain the second-pool path. Cover replace, patch, same-provider
   edit/no-op, document validate/import and unchanged export. Canonical clients own
   route/body/response shapes. Assert no handler write for equal-provider-only patch.
-- [ ] 3.5 Extend `test_pool_declaration_startup.py` (service integration with real
+- [x] 3.5 Extend `test_pool_declaration_startup.py` (service integration with real
   SQLite, mounted file and real startup importer) for a changed-provider document
   (D8). Verify failure names the entry, no entry/config change lands, the prior
   digest is unchanged, another startup retries, and correction can succeed;
   unchanged-document skip stays covered. No new state/digest mechanism is needed.
-- [ ] 3.6 Carry the design audit's migration evidence into the implementation note
+- [x] 3.6 Carry the design audit's migration evidence into the implementation note
   (D9), checking no fixture or caller introduced a provider-swap dependency.
   Cite the site-capacity requirement and existing
   `kit/site/tests/integration/test_ledger.py` drain/race tests plus
   `provisioning/compute/service/tests/integration/test_host_pool_moves_api.py`
   for the distinct host hook. Do not add a pool-level guard or duplicate those
   authorities' tests. Verify the refusal says “migrate its members”.
-- [ ] 3.7 **Verification checkpoint.** Run unit/shared-comparison tests, library
+- [x] 3.7 **Verification checkpoint.** Run unit/shared-comparison tests, library
   pool-service integration and the named application/startup suites, followed by
   `make dist-ci`, `make -C kit/resource-pools-contracts test`,
   `make -C kit/resource-pools test`, `make -C provisioning/compute/service test`
@@ -230,6 +230,83 @@ single-authority transactions. `multi_registry`, `e2e_listing_shapes`,
 `e2e_deal`, `e2e_vm_introduction`, `e2e_bare_metal_publication` and
 `e2e_bare_metal_mock_deal` exercise ordinary pool-backed flows after deployment;
 their green result is regression evidence, not direct proof of immutability.
+
+**Section 3 implementation notes:**
+
+- One pure `pool_immutability_problems` comparison returns relative fields, codes,
+  stored/supplied values and messages. Individual writes raise its first message;
+  documents prefix all problems with submitted entry indices. Provider has no
+  repair allowance; missing backing retains its repair allowance. Omitted patch
+  fields compare using stored values. Provider registration/configuration checks
+  remain service-owned and precede provider comparison; document request problems
+  still prevent stored-state comparison. The backing problem code/message remains
+  unchanged. Contracts describe the retained patch provider restriction.
+- Authority unit/library target passed: 124 tests. The new pure unit matrix
+  covers both fields independently/together, missing backing repair, removal and
+  exact messages. Real-SQLite library integration, with recording injected
+  handlers, proves refused replace/patch preserve all pool fields (including
+  timestamps) and configuration without handler writes; equal-provider-only and
+  omitted-tag patches write no configuration. Same-provider edits still succeed.
+  Document tests cover source index 2, both problems/no diff, ordinary,
+  validate-only and caller-session import refusal before valid-entry creation,
+  mutable updates or omitted-pool disablement; new-provider entries and the
+  existing backing repair tests pass. Unknown-provider/configuration precedence
+  remains covered. Injected fake configurations are in memory; the database is
+  real, and refusal must occur before any handler write.
+- Focused `test_pools_api.py` and `test_pool_declaration_startup.py` passed
+  55 tests together. The API cases are application integration; canonical clients prove
+  registered-provider replace/patch HTTP 400, explanatory member-migration text,
+  complete preserved responses/export, document problems/import atomicity and
+  same-provider edit/no-op behavior. A recording real Ansible handler injected
+  through the controller's resolved-service seam proves the no-op does not write.
+  Full provisioning target passed: 675 unit and 460 integration tests.
+- Startup evidence is service integration against file-backed SQLite, a mounted
+  temporary document and the real importer, not a running application. A changed
+  provider document fails twice naming `pools[1].provider`, leaves every pool and
+  configuration plus the prior digest unchanged, and creates no valid preceding
+  entry. A correction succeeds and records its digest; unchanged-document skip
+  and the existing declaration/startup-order tests remain green. No startup or
+  controller production change was needed.
+- Migration audit: the supported route is a second pool and explicit member
+  reassignment. `openspec/specs/site-capacity/spec.md`'s “A capacity resource does
+  not move pools under live obligations” owns the capacity guard. Existing
+  `kit/site/tests/integration/test_ledger.py` tests
+  `test_a_held_resource_cannot_change_pool_until_it_is_drained`,
+  `test_the_lock_is_held_from_the_obligation_check_through_the_commit` and
+  `test_a_reservation_racing_a_pool_move_never_survives_against_the_moved_resource`
+  cover drain and serialization. Separately,
+  `provisioning/compute/service/tests/integration/test_host_pool_moves_api.py`
+  proves the host hook refuses a relay-changing move under tunnel leases and
+  permits a drained host move. A host move preserving its relay is not the
+  capacity-resource move. No guard or duplicate member tests were added.
+  Source/caller inspection found no production fixture/setup dependency on a
+  provider swap; the old kit swap test now proves refusal. The refusal explicitly
+  says “migrate its members”.
+- Deployed coverage confirmed in `e2e-tests/pyproject.toml` and scenario callers:
+  `multi_registry`, `e2e_listing_shapes`, `e2e_deal`, `e2e_vm_introduction`,
+  `e2e_bare_metal_publication` and `e2e_bare_metal_mock_deal` exercise ordinary
+  pool-backed flows, not provider refusal. None submits a provider change or
+  changed-provider startup document. No new system scenario is owed under the
+  test-level boundary; deployed/Helm pipeline evidence remains for validation.
+- `make dist-ci`, contracts (375 unit), pool (124 unit/library) and provisioning
+  service targets passed. Comment hygiene, scoped documentation citations,
+  change index, task structure and whitespace checks passed. Full `make test`
+  passed every aggregate target, including 954 release-tooling tests and Helm
+  render/loader checks, retaining existing suite skips/warnings. Final
+  `make check-packaging` and standalone `make check-architecture` passed all
+  four architecture checks with no warnings. No dependency/lock or skill files
+  changed; the three affected projects expose no typing target.
+- Fresh-context compliance review found no guidance violations or overstated
+  evidence. No findings were fixed or declined. The reviewer did not rerun
+  suites. Imports added/touched are at module level and comments describe
+  current invariants. The campaign row remains in implementation, with section 4
+  next; its independent dependency node is unchanged. Deployed scenarios have
+  not run locally and are not counted as provider-refusal proof.
+- Handoff: section 4 removes the still-present deletion protocol, handler/fake
+  methods, direct deletion test and composition required hook together. This
+  section removes only the three production call sites. Configuration writes
+  remain provider-owned and same-provider semantics are unchanged. Permanent
+  behavior/rationale promotion remains in section 5; no member authority changed.
 
 ## 4. Remove configuration deletion from handlers and runtime composition
 
