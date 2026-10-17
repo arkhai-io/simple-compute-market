@@ -22,17 +22,17 @@ update that package's `__init__.py`, `pyproject.toml` and generated locks; adapt
 `service.py`; split structural coverage from `kit/resource-pools/tests/unit/test_asking_rates.py`
 into `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`.
 
-- [ ] 1.1 Move `ASKING_RATES_POLICY_TAG`, `asking_rate_entry_problems`,
+- [x] 1.1 Move `ASKING_RATES_POLICY_TAG`, `asking_rate_entry_problems`,
   `validate_asking_rates` and their structural helpers to contracts. Declare
   `arkhai-kit-capability-shape` in dependencies and the package allowlist (D11).
   Verify absent/empty declarations, malformed fields and accepted opaque periods
   through contracts unit tests, with no authority/provider imports.
-- [ ] 1.2 Point the authority's service, resolver and existing exports at the shared
+- [x] 1.2 Point the authority's service, resolver and existing exports at the shared
   implementation (D11); retain one definition and the existing resolution API.
   Keep domain callbacks, accepted publication periods, precedence and rate carriers
   in the authority. Verify the authority's resolver unit tests still prove exact
   matching, override precedence and unreadable-input behavior.
-- [ ] 1.3 Refresh wheels and generated locks using `make lock`, as required by
+- [x] 1.3 Refresh wheels and generated locks using `make lock`, as required by
   `docs/development/BUILD_AND_PACKAGING.md`; do not hand-edit locks or source-share
   siblings. Review changes to the contracts lock and every lock resolving its
   wheel: `core/storefront`; `domains/apicredits/{service,storefront}`;
@@ -41,7 +41,7 @@ into `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`.
   `kit/{capacity-publication,fulfillment,pool-overrides,resource-pools,resource-pools-client,resource-pools-contracts,site,site-client,storefront}`;
   and `provisioning/compute`, its ansible distribution and service. Evidence:
   generated lock diffs, successful refreshed imports and `make check-packaging`.
-- [ ] 1.4 **Verification checkpoint.** Unit: contracts `test_asking_rates.py` and
+- [x] 1.4 **Verification checkpoint.** Unit: contracts `test_asking_rates.py` and
   authority `test_asking_rates.py`. Library integration: existing
   `kit/resource-pools/tests/integration/test_resource_pool_service.py` exercises
   raw-document checks using the relocated implementation. Run
@@ -55,6 +55,39 @@ into `kit/resource-pools-contracts/tests/unit/test_asking_rates.py`.
 `e2e_bare_metal_publication` exercise valid asking-rate declaration/resolution and
 publication. They do not prove structural rejection or module placement. No new
 system scenario is owed for this pure relocation; unit and library evidence own it.
+
+**Section 1 implementation notes:**
+
+- Contracts own the structural helper and export it; authority root/module exports
+  remain supported and resolver semantics are unchanged. Contracts unit suite:
+  212 passed, including the relocated structure matrix. Authority unit/library
+  suite: 121 passed, including real-SQLite document validation and resolver tests.
+- Removed the authority's newly unused direct shape dependency as required by
+  dependency discipline; source and tests no longer import that distribution.
+  `make lock` regenerated the contracts lock and 23 consumer locks, relocating this metadata without
+  introducing a new installed distribution. No lock was hand-edited.
+  Full tests exposed two release-guide dependency-table drift failures; corrected
+  only the two package dependency cells in `docs/development/RELEASING.md`.
+  This keeps release metadata accurate; behavior/rationale promotion stays in 5.
+- Wheel inspection confirms contracts ship the structural module and `py.typed`;
+  refreshed imports identify one contracts-owned helper through all exports.
+  Neither project's Makefile/pyproject exposes a typing check.
+- Final `make check-packaging` passed, including architecture with zero warnings.
+  `make test` passed all aggregate targets, including 954 release-tooling tests
+  and Helm rendering/loader checks; the rerun resolved both release-guide
+  failures. It retains existing suite skips/warnings, not new skipped checks.
+  Focused package targets passed (contracts 212 unit; authority 121 unit/library
+  integration). Comment hygiene, scoped citations, change index and whitespace
+  checks passed. No agent skill files changed.
+- Fresh-context compliance review found one workflow issue: the index still
+  carried its pre-implementation phase and round-agreement note. Corrected both;
+  the reviewer confirmed no remaining guidance violations or overstated evidence.
+  No findings were declined. The reviewer did not independently rerun suites.
+- Handoff: model validation/HTTP status changes remain in section 2; provider
+  immutability and handler deletion remain in sections 3/4. Permanent promotion
+  remains in section 5. Existing deployed markers were confirmed in e2e tests:
+  `e2e_vm_introduction` and `e2e_bare_metal_publication` exercise valid flows,
+  not structural rejection or module placement. They have not run locally.
 
 ## 2. Reject malformed hints in typed models and API bodies
 

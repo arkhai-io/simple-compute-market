@@ -8,7 +8,10 @@ from typing import Any, Callable, Mapping, Optional
 import yaml
 from sqlalchemy.orm import Session, sessionmaker
 
-from .asking_rates import ASKING_RATES_POLICY_TAG, validate_asking_rates
+from market_resource_pools_contracts.asking_rates import (
+    ASKING_RATES_POLICY_TAG,
+    validate_asking_rates,
+)
 from market_resource_pools_contracts.hints import (
     CAPACITY_BACKING_POLICY_TAG,
     MAX_RESERVATION_HOLD_SECONDS_POLICY_TAG,

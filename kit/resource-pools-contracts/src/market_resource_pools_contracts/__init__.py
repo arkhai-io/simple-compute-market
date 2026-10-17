@@ -1,5 +1,10 @@
 """Resource-pool wire models, declaration vocabulary, backing, and route declarations."""
 
+from .asking_rates import (
+    ASKING_RATES_POLICY_TAG,
+    asking_rate_entry_problems,
+    validate_asking_rates,
+)
 from .backing import (
     BACKED,
     UNBACKED,
@@ -48,6 +53,9 @@ from .pools import (
 from .routes import RESOURCE_POOL_ROUTES, pool_route
 
 __all__ = [
+    "ASKING_RATES_POLICY_TAG",
+    "asking_rate_entry_problems",
+    "validate_asking_rates",
     "ADVERTISABLE_MODES_POLICY_TAG",
     "BACKED",
     "CAPACITY_BACKING_POLICY_TAG",
