@@ -808,9 +808,6 @@ def test_independent_sessions_serialize_fulfillment_acceptance_deterministically
         def replace_config(self, db, pool_id, config):
             pass
 
-        def delete_config(self, db, pool_id):
-            pass
-
     database = tmp_path / "fulfillment.db"
     engine = create_engine(
         f"sqlite:///{database}",

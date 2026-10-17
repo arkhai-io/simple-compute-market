@@ -323,17 +323,17 @@ VM adapter `services/ansible_pool_config_handler.py`; bare-metal adapter
 `kit/fulfillment/tests/integration/test_scheduler_host_requirement.py`,
 `kit/fulfillment/tests/unit/{test_fulfillment,test_fulfillment_persistence,test_scheduler}.py`.
 
-- [ ] 4.1 Remove `delete_config` from protocol, both handlers and every test fake;
+- [x] 4.1 Remove `delete_config` from protocol, both handlers and every test fake;
   remove its direct handler-deletion test (D2). In the same change remove it from
   `_validate_pool_config_handler`'s required hooks (accepted 14-design F1).
   Verify a repository search finds no remaining code requirement/call and
   same-provider replace/read behavior still passes.
-- [ ] 4.2 Extend `provisioning/compute/tests/unit/test_composition.py` for F1:
+- [x] 4.2 Extend `provisioning/compute/tests/unit/test_composition.py` for F1:
   deletion-free handlers with the remaining hooks compose successfully, while
   missing/non-callable remaining required hooks are still refused. Preserve
   provider identity checks and duplicate registration behavior; do not broaden
   the accepted runtime interface. Unit tests prove the observable composition.
-- [ ] 4.3 Verify the real service composes VM and bare-metal adapters after removal
+- [x] 4.3 Verify the real service composes VM and bare-metal adapters after removal
   (D2/F1), using existing service composition/startup and pool application tests;
   retain the disabled-pool configuration read case. Evidence: named handler/pool
   integration suites and `tests/unit/test_authority_composition.py` pass, proving
@@ -354,6 +354,49 @@ VM adapter `services/ansible_pool_config_handler.py`; bare-metal adapter
 handlers; they expose a retained deletion-hook requirement. No dedicated
 `delete_config` marker exists or is owed. Full pipeline/Helm evidence is obtained
 by validation, and closeout confirms it against the latest committed code.
+
+
+**Section 4 implementation notes:**
+
+- Removed the standalone deletion operation from the protocol, both real
+  handlers, runtime composition's required hooks and every fake. Removed the
+  direct Ansible deletion test and the recording fake's obsolete deletion
+  bookkeeping/assertions from section 3. Its refused-write tests still compare
+  complete pool/configuration snapshots and replacement calls. A repository-wide
+  Python search finds no remaining `delete_config` declaration, call or
+  requirement. Same-provider replacement and both read levels remain unchanged.
+- Family composition unit tests accept the deletion-free fake by object
+  identity and reject each of the four remaining required hooks when absent or
+  non-callable (eight cases). Existing provider identity, provider/handler pairing
+  and duplicate-registration cases remain green. The runtime required-hook set
+  otherwise stays unchanged; execution reads remain on the protocol and handlers.
+- Focused targets passed: pool authority 124 unit/library integration;
+  fulfillment 171 tests; compute family 231 tests; VM adapter 29 unit tests
+  (including its inventory-view suite); bare-metal adapter 40 tests; provisioning
+  service 675 unit and 459 integration tests. Fulfillment and compute include
+  real-database library integration, including cases still filed under `unit/`;
+  suite placement is not a claim that those database tests are isolated units.
+- The service target includes `tests/unit/test_authority_composition.py`, whose
+  real container composes both adapter bundles, plus the handler persistence,
+  startup and pool API integration suites. Handler persistence/startup cases
+  exercise real SQLite without a running app; pool API cases use canonical
+  clients against the real app. The existing disabled-pool GET case now also
+  asserts its returned configuration and playbook remain available. No new
+  startup or persistence mechanism was needed.
+- `make dist-ci`, comment hygiene, scoped documentation citations, task structure,
+  change-index and whitespace checks passed. Full aggregate tests and final
+  packaging/architecture checks are pending. No dependency, lock or skill file
+  changed; none of the six focused projects exposes a typing target.
+- Deployed marker coverage confirmed in `e2e-tests/pyproject.toml` and scenario
+  modules: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal` start
+  stacks composing these handlers. They are startup/regression evidence once
+  deployed; none is a dedicated deletion-hook scenario. No new system scenario
+  is owed for this interface removal. Deployed pipeline and cluster Helm tests
+  have not run locally and remain validation's responsibility.
+- Handoff: sections 1–4's code is ready for the agreed single implementation
+  round once the outstanding checks finish. Permanent behavior/rationale and
+  Evidence promotion remain in section 5 after review; no member authority,
+  provider registration semantics, dependency or configuration schema changed.
 
 ## 5. Closeout
 

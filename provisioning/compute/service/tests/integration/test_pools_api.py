@@ -350,6 +350,8 @@ class TestDeletePool:
         # Still resolvable via GET — not gone.
         pool = await client.pools.get_pool("hetzner-eu")
         assert pool.enabled is False
+        assert pool.provider_config == deleted.provider_config
+        assert pool.provider_config["playbook_path"] == _ANSIBLE_CONFIG["playbook_path"]
 
     async def test_delete_missing_pool_returns_404(self, client_and_queue):
         client, _ = client_and_queue

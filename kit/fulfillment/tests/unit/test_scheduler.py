@@ -50,7 +50,6 @@ class _Handler:
         # it would let a caller reach the wrong read without the suite noticing.
         return self.read_config(db, pool_id)
     def replace_config(self, db, pool_id, config): pass
-    def delete_config(self, db, pool_id): pass
 
 
 @pytest.fixture

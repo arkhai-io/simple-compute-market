@@ -258,12 +258,3 @@ class AnsiblePoolConfigHandler:
             new_relay_id=normalized["relay_id"],
         )
         row.relay_id = normalized["relay_id"]
-
-    def delete_config(self, db: Session, pool_id: str) -> None:
-        row = (
-            db.query(AnsiblePoolConfig)
-            .filter(AnsiblePoolConfig.pool_id == pool_id)
-            .one_or_none()
-        )
-        if row is not None:
-            db.delete(row)

@@ -181,15 +181,3 @@ class TestPersistence:
         with session_factory() as db:
             read_back = handler.read_config(db, "pool-a")
         assert read_back["default_vm_ram"] is None
-
-    def test_delete_config_removes_size_defaults_with_the_row(self, handler, session_factory):
-        with session_factory() as db:
-            handler.replace_config(
-                db, "pool-a", {**_BASE_CONFIG, "default_vm_ram": 65536},
-            )
-            db.commit()
-            handler.delete_config(db, "pool-a")
-            db.commit()
-
-        with session_factory() as db:
-            assert handler.read_config(db, "pool-a") == {}

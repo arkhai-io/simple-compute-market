@@ -224,9 +224,6 @@ def ledger_services(tmp_path):
         def replace_config(self, db, pool_id, config):
             pass
 
-        def delete_config(self, db, pool_id):
-            pass
-
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
     # Declared, because admission refuses a claim whose offering mode no
     # matching pool delivers -- the reservation this test attaches to has to
@@ -379,9 +376,6 @@ def contended_ledger_services(tmp_path):
             return {}
 
         def replace_config(self, db, pool_id, config):
-            pass
-
-        def delete_config(self, db, pool_id):
             pass
 
     pools = ResourcePoolService(factory, {"ansible": _Handler()})

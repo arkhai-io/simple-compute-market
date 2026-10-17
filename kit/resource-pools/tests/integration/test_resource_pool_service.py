@@ -137,10 +137,6 @@ class _AnsibleLikePoolConfigHandler:
             self._configs: dict[str, dict] = {}
         self._configs[pool_id] = dict(config)
 
-    def delete_config(self, db, pool_id: str) -> None:
-        if hasattr(self, "_configs"):
-            self._configs.pop(pool_id, None)
-
 
 @pytest.fixture
 def svc(session_factory):
@@ -1116,7 +1112,6 @@ class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider
         self.configs: dict[str, dict] = {}
-        self.deleted: list[str] = []
         self.replaced: list[str] = []
 
     def validate_config(self, config):
@@ -1137,10 +1132,6 @@ class _StubPoolConfigHandler:
     def replace_config(self, db, pool_id: str, config):
         self.replaced.append(pool_id)
         self.configs[pool_id] = dict(config)
-
-    def delete_config(self, db, pool_id: str):
-        self.deleted.append(pool_id)
-        self.configs.pop(pool_id, None)
 
 
 @pytest.fixture
@@ -1182,7 +1173,6 @@ def test_provider_change_refuses_before_any_metadata_or_config_write(recorded_po
     assert _pool_snapshot(service) == before
     for provider, handler in handlers.items():
         assert handler.replaced == writes[provider]
-        assert handler.deleted == []
     assert handlers["old"].configs["existing"] == {"setting": "existing"}
     assert handlers["new"].configs == {}
 
@@ -1258,7 +1248,6 @@ def test_documents_report_both_immutable_fields_and_apply_nothing(recorded_pools
     assert service.export_pools_yaml() == exported
     for provider, handler in handlers.items():
         assert handler.replaced == writes[provider]
-        assert handler.deleted == []
     assert handlers["new"].configs == {}
 
 
