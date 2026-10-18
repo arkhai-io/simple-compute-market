@@ -56,13 +56,13 @@ class BareMetalPoolOverrideTerms(BaseModel):
         return self
 
 
-MAX_DURATION_SECONDS_ENV = "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"
+def positive_lease_bound(seconds: int | None) -> int | None:
+    """A maximum lease duration that bounds a listing, or None for one that cannot.
 
-
-def configured_max_duration_seconds(environ: Mapping[str, str]) -> int | None:
-    """The configured lease maximum, or None when none is configured."""
-    raw = environ.get(MAX_DURATION_SECONDS_ENV)
-    return None if raw is None or raw == "" else int(raw)
+    ``[pricing].default_max_duration_seconds`` may be absent, zero, or negative;
+    none of those bounds a lease, so a pool relying on it publishes nothing.
+    """
+    return seconds if seconds is not None and seconds > 0 else None
 
 
 def effective_duration_problems(
@@ -285,8 +285,8 @@ __all__ = [
     "BareMetalPoolOverrideTerms",
     "accepted_site_projection",
     "compile_publication_clauses",
-    "configured_max_duration_seconds",
     "effective_duration_problems",
+    "positive_lease_bound",
     "read_bare_metal_pool_overrides",
     "record_accepted_generation",
 ]

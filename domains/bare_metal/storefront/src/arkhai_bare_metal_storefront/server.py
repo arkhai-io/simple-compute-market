@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable, Iterable
 from functools import partial
 from importlib import import_module
@@ -18,7 +17,6 @@ from market_arkhai_payments import run_payment_reconciliation
 from market_contact_exchange import run_introduction_retention_sweep
 from market_core import MarketDomainContract
 from market_storefront_kit import (
-    NegotiationWatchdogPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
@@ -35,7 +33,7 @@ from .lifecycle_steps import (
     SETTLEMENT_SERVICING,
 )
 from .response_auth import authenticate_response
-from .runtime import BareMetalStorefrontRuntime, build_runtime_from_environment
+from .runtime import BareMetalStorefrontRuntime, build_runtime_from_configuration
 from .storefront_registry import build_bare_metal_storefront_registry
 
 DESCRIPTION = (
@@ -47,21 +45,11 @@ DESCRIPTION = (
 
 logger = logging.getLogger(__name__)
 
-def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    return NegotiationWatchdogPolicy(
-        timeout_seconds=float(
-            os.environ.get("BARE_METAL_NEGOTIATION_TIMEOUT_SECONDS", "1800")
-        ),
-        interval_seconds=float(
-            os.environ.get("BARE_METAL_NEGOTIATION_WATCHDOG_INTERVAL", "60")
-        ),
-    )
-
 
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     set_stage_event_db_path(runtime.db.db_path)
     loops = runtime.loops
-    policy = _negotiation_watchdog_policy()
+    policy = runtime.negotiation_watchdog
     loops.start_loop(
         StorefrontBackgroundTask(
             name=NEGOTIATION_WATCHDOG,
@@ -99,9 +87,7 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
                 task_factory=partial(
                     run_payment_reconciliation,
                     lambda: runtime.settlement_service().reconcile_payments_once(),
-                    interval_seconds=float(
-                        os.environ.get("BARE_METAL_PAYMENT_RECONCILIATION_INTERVAL", "30")
-                    ),
+                    interval_seconds=runtime.payment_reconciliation_interval_seconds,
                     logger=logger,
                     paused=loops.loop_gate(PAYMENT_RECONCILIATION),
                     wait=loops.idle,
@@ -148,7 +134,7 @@ def build_bare_metal_storefront_app(
         elif runtime is not None:
             selected_runtime = runtime
         else:
-            selected_runtime = build_runtime_from_environment(domain=domain)
+            selected_runtime = build_runtime_from_configuration(domain=domain)
         if selected_runtime.domain is not domain:
             raise RuntimeError(
                 "bare-metal runtime must carry the exact registered domain contract"

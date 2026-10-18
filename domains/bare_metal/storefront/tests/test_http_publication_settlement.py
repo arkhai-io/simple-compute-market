@@ -17,7 +17,6 @@ from market_identity import TrustedIdentitySet
 from storefront_client import StorefrontClient
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.pool_overrides import configured_max_duration_seconds
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_composition import (
     publication_payload_builder,
@@ -53,7 +52,7 @@ class _Sites:
 async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertises(
     tmp_path, monkeypatch
 ):
-    composition, environ = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
     site = Site(pool("pool-1", member("r1", "pool-1")))
 
     def cycle(runtime):
@@ -64,17 +63,19 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
             ),
             site_clients={SITE: site},
             registry_client_factory=RecordingRegistries(),
-            registry_url=REGISTRY_URL,
+            registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
-            build_payload=publication_payload_builder(runtime, environ),
-            configured_max_duration_seconds=configured_max_duration_seconds(environ),
+            build_payload=publication_payload_builder(runtime),
+            default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 
     runtime = dataclasses.replace(
         _runtime(str(tmp_path / "storefront.db")),
         seller_evm_address=SELLER_WALLET,
         settlement_composition=composition,
+        publication_clauses=clauses,
+        default_max_duration_seconds=3600,
         # Servicing sweeps on an interval no test waits out.
         settlement_servicing_interval_seconds=3600,
         site_bindings=(

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 import pytest
-from market_identity import Identity
+from market_identity import Identity, TrustedIdentitySet
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.site_clients import (
@@ -22,20 +21,16 @@ PRINCIPAL = {
 }
 
 
-def _bindings_json() -> str:
-    return json.dumps(
-        [
-            {
-                "site_id": "site-a",
-                "authority_url": "https://provisioning.internal:8443",
-                "authority_principal": PRINCIPAL,
-            }
-        ]
-    )
+def _peers(*site_ids: str) -> dict:
+    """One service peer for each site named, as the configuration states them."""
+    principals = TrustedIdentitySet(identities=(Identity.model_validate(PRINCIPAL),))
+    return {f"{site_id}-peer": ("service", site_id, principals) for site_id in site_ids}
 
 
 def test_site_binding_diagnostics_redact_routing_url() -> None:
-    binding = parse_site_bindings(_bindings_json())[0]
+    binding = parse_site_bindings(
+        {"site-a": "https://provisioning.internal:8443"}, _peers("site-a")
+    )[0]
     assert binding.diagnostic() == {
         "site_id": "site-a",
         "authority_principal": PRINCIPAL,
@@ -45,47 +40,26 @@ def test_site_binding_diagnostics_redact_routing_url() -> None:
 
 
 @pytest.mark.parametrize(
-    "payload",
+    ("sites", "peers"),
     [
-        "not-json",
-        "[]",
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://user:secret@example.test",
-                    "authority_principal": PRINCIPAL,
-                }
-            ]
-        ),
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://user:secret＠example.test",
-                    "authority_principal": PRINCIPAL,
-                }
-            ]
-        ),
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://one.example.test",
-                    "authority_principal": PRINCIPAL,
-                },
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://two.example.test",
-                    "authority_principal": PRINCIPAL,
-                },
-            ]
-        ),
+        pytest.param({}, {}, id="no site"),
+        pytest.param({"site-a": "https://user:secret@example.test"}, _peers("site-a"),
+                     id="credentials in the URL"),
+        pytest.param({"site-a": "https://user:secret\uff20example.test"}, _peers("site-a"),
+                     id="a full-width at sign"),
+        pytest.param({"site-a": "https://one.example.test?secret=1"}, _peers("site-a"),
+                     id="a query"),
+        pytest.param({"site a": "https://one.example.test"}, _peers("site a"),
+                     id="an invalid site ID"),
+        pytest.param({"site-a": "https://one.example.test"}, {}, id="no service peer"),
+        pytest.param({"site-a": "https://one.example.test"},
+                     {**_peers("site-a"), "second": _peers("site-a")["site-a-peer"]},
+                     id="two service peers"),
     ],
 )
-def test_invalid_site_bindings_fail_closed_without_echoing_payload(payload: str) -> None:
+def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers) -> None:
     with pytest.raises(ValueError) as raised:
-        parse_site_bindings(payload)
+        parse_site_bindings(sites, peers)
     assert "secret" not in str(raised.value)
     assert "one.example.test" not in str(raised.value)
 

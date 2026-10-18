@@ -29,8 +29,9 @@ RUN apt-get update && \
     chown appuser:appuser /var/lib/arkhai
 
 COPY --from=builder /opt/venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH" \
-    BARE_METAL_STOREFRONT_DB_PATH=/var/lib/arkhai/bare-metal-storefront.db
+# The storefront's settings come from its mounted configuration files; its
+# database defaults to a path under the working directory, the data volume.
+ENV PATH="/opt/venv/bin:$PATH"
 
 USER appuser
 WORKDIR /var/lib/arkhai

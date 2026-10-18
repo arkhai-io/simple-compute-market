@@ -221,9 +221,10 @@ e2e-vm-logs:
 	@cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) logs --no-color
 
 # Bare-metal lane: one site, the bare-metal storefront, its registry, and the
-# dev chain. Every value comes from `make e2e-bare-metal-dev-env`, which
-# generates the publication deadlines at each run; see
-# compose.bare-metal-local.yml.
+# dev chain. Every stack value comes from `make e2e-bare-metal-dev-env`, which
+# names the storefront's development configuration files
+# (domains/bare_metal/storefront/storefront.dev.toml and its secrets overlay);
+# see compose.bare-metal-local.yml.
 E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
 E2E_BARE_METAL_PROJECT := simple-market-bare-metal
 E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \

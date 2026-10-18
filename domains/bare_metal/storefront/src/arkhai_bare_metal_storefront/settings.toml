@@ -1,0 +1,104 @@
+# ---------------------------------------------------------------------------
+# Bare-metal storefront base defaults.
+# This file documents every supported key and its default. Do NOT put
+# environment-specific values here.
+#
+# Override via (highest priority first):
+#   1. BARE_METAL_STOREFRONT_* environment variables (separator __), an
+#      operator's escape hatch only
+#   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
+#   3. $XDG_CONFIG_HOME/arkhai/storefront.json          (rendered by a chart)
+#   4. $XDG_CONFIG_HOME/arkhai/storefront.toml          (an operator's own file)
+#   5. This file
+#
+# A list stated here is merged with, not replaced by, a list a later layer
+# states, so every list below ships empty.
+# ---------------------------------------------------------------------------
+
+# The storefront's public URL: listings name it as their storefront, and the
+# administrator commands connect to it unless told otherwise.
+base_url = "http://localhost:8000"
+# Relative to the working directory, which the image sets to its data volume.
+db_path  = "bare-metal-storefront.db"
+
+# Negotiation watchdog: an open negotiation idle this long is abandoned, swept
+# at this interval.
+negotiation_timeout_seconds   = 1800
+negotiation_watchdog_interval = 60
+# Settlement servicing sweep cadence (seconds): how often due obligations are
+# checked for collectable conditions and retried collections.
+settlement_servicing_interval_seconds = 30
+# How often accepted payment deals are reconciled, while payments are configured.
+payment_reconciliation_interval = 30
+
+# Marketplace identity (public). Signing material is supplied only through
+# the ARKHAI_IDENTITY_CREDENTIAL secret environment variable.
+# [Identity.principal]
+# scheme     = "eip191"
+# identifier = "0x..."
+#
+# Stable administrator subjects, one or two principals in all:
+# [Identity.administrators.operator]
+# principals = [{ scheme = "eip191", identifier = "0x..." }]
+#
+# Each configured site is trusted through exactly one service peer bound to it:
+# [Identity.service_peers.<peer>]
+# role       = "service"
+# site_id    = "<a [capacity.sites] key>"
+# principals = [{ scheme = "eip191", identifier = "0x..." }]
+
+[Settlement]
+# The storefront enables no settlement mechanism implicitly. Operators add
+# [Settlement.alkahest], [Settlement.arkhai_payments], and/or
+# [Settlement.contact] and name each enabled one in priority. A storefront
+# that enables none refuses to start.
+schema_version = 1
+priority = []
+
+# [Wallet] and [Chains.<name>] are the Alkahest mechanism's inputs, stated
+# together with an Alkahest section and never without one:
+# [Wallet]
+# address = "0x..."            # the seller's address
+# private_key belongs only in storefront.secrets.toml.
+#
+# [Chains.<name>]
+# rpc_url = "..."
+# alkahest_address_config_path = "/path/to/address-book.json"
+
+# Seller-side delivery of each revealed introduction ([Delivery], as every
+# storefront states it); sink credentials belong in storefront.secrets.toml.
+
+[registry]
+# Every registry listings are published to, each pinned below by its URL.
+urls = []
+
+[registry.authorities]
+# Public URL -> stable registry authority name plus canonical response-signing
+# principals. Keys must exactly match [registry].urls after URL normalization.
+
+[capacity]
+# How reservations are placed among sites: "fill_first" (configuration
+# order) or "most_available".
+placement = "fill_first"
+# Seconds between site-projection polls.
+poll_interval = 5
+# The publication loop's interval between cycles, in seconds.
+publication_interval_seconds = 30
+
+[capacity.sites]
+# Stable site ID -> the site authority's URL. Required: a storefront with no
+# site refuses to start.
+
+[pricing]
+# Structured settlement publication clauses, each one complete. A pool's
+# storefront override replaces the list for that pool.
+settlements = []
+# The maximum lease duration a listing publishes, in seconds, unless a pool's
+# override states its own. A pool for which neither states a positive bound is
+# held at publication rather than published without one.
+# default_max_duration_seconds = 86400
+
+[negotiation]
+# The seller policies run after the required guards; unset runs the default
+# chain.
+# policies = ["escrow_shape_guard", "bisection"]

@@ -38,13 +38,9 @@ def register_bare_metal_lifecycle_steps(runtime: BareMetalStorefrontRuntime) -> 
     loops = runtime.loops
 
     async def negotiation_watchdog_step() -> Mapping[str, Any]:
-        # Imported when the step runs: the composition root imports this
-        # module, and owns the watchdog's environment schedule.
-        from .server import _negotiation_watchdog_policy
-
         abandoned = await sweep_stale_negotiations(
             runtime.db,
-            _negotiation_watchdog_policy(),
+            runtime.negotiation_watchdog,
             emit_stage_event=stage_event,
             logger=logger,
         )

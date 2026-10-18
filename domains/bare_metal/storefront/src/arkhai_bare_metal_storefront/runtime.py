@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from core_storefront.identity_config import IdentityConfig, resolve_storefront_signer
 from core_storefront.models.system_models import ProjectionFamilyStatus
 from market_alkahest import ReleaseModelError, create_alkahest_registration
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
@@ -28,11 +25,12 @@ from market_contact_exchange import (
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
 from market_core import MarketDomainContract, validate_domain_contract
 from market_core.schemas import Agreement, SettlementPlan
-from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_identity import Identity, Signer, TrustedIdentitySet
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_settlement_runtime import (
     SettlementObligationRecord,
+    SettlementPublicationClause,
     SettlementRuntime,
     SettlementServicingWorker,
     SettlementSQLiteRepository,
@@ -40,11 +38,19 @@ from market_settlement_runtime import (
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
+    NegotiationWatchdogPolicy,
     StorefrontLoopController,
     TradingPause,
     build_alkahest_clients,
 )
 
+from .config import (
+    IDENTITY_CREDENTIAL_ENV,
+    BareMetalStorefrontSettings,
+    ChainSettings,
+    identity_credential,
+    load_storefront_settings,
+)
 from .delivery import storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
 from .fulfillment_service import BareMetalFulfillmentService
@@ -56,7 +62,7 @@ from .pool_overrides import (
     BareMetalPoolOverrideContribution,
     accepted_site_projection,
     compile_publication_clauses,
-    configured_max_duration_seconds,
+    positive_lease_bound,
 )
 from .publication_service import BareMetalRegistryConfiguration
 from .settlement import build_bare_metal_settlement_plan
@@ -72,6 +78,7 @@ from .site_clients import (
     parse_site_bindings,
 )
 from .sqlite_client import SQLiteClient
+from .startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +175,14 @@ class BareMetalStorefrontRuntime:
         default=None, init=False, repr=False
     )
     settlement_servicing_interval_seconds: float = 30.0
+    #: How often accepted payment deals are reconciled, while payments are composed.
+    payment_reconciliation_interval_seconds: float = 30.0
+    #: When an idle negotiation is abandoned, and how often that is swept for.
+    negotiation_watchdog: NegotiationWatchdogPolicy = field(
+        default_factory=lambda: NegotiationWatchdogPolicy(
+            timeout_seconds=1800, interval_seconds=60
+        )
+    )
     obligation_servicing: Mapping[str, ObligationServicing] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -184,10 +199,15 @@ class BareMetalStorefrontRuntime:
     # The seller chain after the required guards, in any form the policy kit
     # normalizes; None selects the default (``negotiation.DEFAULT_SELLER_POLICIES``).
     negotiation_policies: Any = None
-    #: The registry publication writes to; its reachability is a status check.
+    #: Every registry publication writes to; their reachability is a status check.
     registry_configuration: BareMetalRegistryConfiguration | None = None
+    #: The storefront's publication clauses, which a pool's override replaces.
+    publication_clauses: tuple[SettlementPublicationClause, ...] = ()
+    #: The maximum lease duration a listing publishes unless its pool's override
+    #: states one; a pool for which neither is positive is held at publication.
+    default_max_duration_seconds: int | None = None
     # Composes one publication cycle for the administrator's publication step;
-    # None composes it from the process environment as the command does.
+    # None composes it from this runtime as the command does.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
         field(default=None, repr=False)
     )
@@ -526,8 +546,8 @@ class BareMetalStorefrontRuntime:
             contributions={
                 BareMetalPoolOverrideContribution.offering_mode: (
                     BareMetalPoolOverrideContribution(
-                        configured_max_duration_seconds=lambda: (
-                            configured_max_duration_seconds(os.environ)
+                        configured_max_duration_seconds=lambda: positive_lease_bound(
+                            self.default_max_duration_seconds
                         )
                     )
                 )
@@ -676,109 +696,70 @@ class BareMetalStorefrontRuntime:
         return dict(results)
 
 
-def _build_chain_clients_from_environment() -> tuple[
-    dict[str, Any],
-    dict[str, str | None],
-]:
-    raw = os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "{}")
-    try:
-        values = json.loads(raw)
-        if not isinstance(values, dict):
-            raise TypeError("chain configuration must be a JSON object")
-        chains = tuple(
-            AlkahestChain(
-                name=str(name),
-                rpc_url=str(value["rpc_url"]),
-                address_config_path=(
-                    str(value["alkahest_address_config_path"])
-                    if value.get("alkahest_address_config_path")
-                    else None
-                ),
-            )
-            for name, value in values.items()
-            if isinstance(value, dict)
+def _build_chain_clients(
+    chains: Mapping[str, ChainSettings],
+    *,
+    private_key: str,
+    build_clients: Callable[..., Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """The Alkahest chain clients for ``[Chains]``, signing with the wallet's key."""
+    alkahest_chains = tuple(
+        AlkahestChain(
+            name=name,
+            rpc_url=chain.rpc_url,
+            address_config_path=chain.alkahest_address_config_path or None,
         )
-        if len(chains) != len(values):
-            raise TypeError("every chain configuration must be a JSON object")
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_CHAINS must map chain names to rpc_url "
-            "and optional alkahest_address_config_path"
-        ) from exc
-    private_key = os.environ.get("BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY", "").strip()
-    missing = ("wallet.private_key",) if chains and not private_key else ()
-    clients = build_alkahest_clients(
+        for name, chain in chains.items()
+    )
+    missing = ("wallet.private_key",) if alkahest_chains and not private_key else ()
+    clients = build_clients(
         AlkahestClientPolicy(
             private_key=private_key,
-            chains=chains,
+            chains=alkahest_chains,
             missing_requirements=missing,
         ),
         logger=logger,
     )
-    return clients, {chain.name: chain.address_config_path for chain in chains}
+    return dict(clients), {
+        chain.name: chain.address_config_path for chain in alkahest_chains
+    }
 
 
-def storefront_signer_from_environment(environ: Mapping[str, str]) -> Signer:
-    """The storefront's own marketplace signer, from its public identity and
-    credential inputs. The server and the operator commands both sign with it,
-    so a command can act only as an identity the server would also be.
-
-    Raises ``KeyError`` or ``ValueError`` when an input is missing or does not
-    match.
-    """
-    identity_config = IdentityConfig(
-        scheme=IdentityScheme(environ.get("BARE_METAL_STOREFRONT_IDENTITY_SCHEME", "")),
-        identifier=environ.get("BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER", ""),
-    )
-    return resolve_storefront_signer(identity_config, environ["ARKHAI_IDENTITY_CREDENTIAL"])
-
-
-def build_runtime_from_environment(
+def build_runtime_from_configuration(
+    settings: BareMetalStorefrontSettings | None = None,
     *,
+    credential: str | None = None,
     domain: MarketDomainContract | None = None,
+    build_chain_clients: Callable[..., Mapping[str, Any]] = build_alkahest_clients,
 ) -> BareMetalStorefrontRuntime:
-    """Build the minimal runtime; trusted site bindings are composed later."""
+    """Compose the runtime from the storefront's configuration files.
+
+    ``settings`` defaults to what the configuration files say now, and
+    ``credential`` to ``ARKHAI_IDENTITY_CREDENTIAL``. Nothing durable is built
+    until the configuration is known to publish: the startup refusal runs
+    before the signer, the settlement composition, or the database.
+    ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
+    the chains the storefront settles on.
+    """
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
     )
+    active = load_storefront_settings() if settings is None else settings
+    require_publishable_storefront(active)
     try:
-        signer = storefront_signer_from_environment(os.environ)
+        signer = active.signer(identity_credential() if credential is None else credential)
         # The signer resolves only when it owns the configured principal, so its
         # identity is the storefront's public principal.
         principal = signer.identity
-        raw_admin_identities = json.loads(
-            os.environ["BARE_METAL_STOREFRONT_ADMIN_IDENTITIES"],
-        )
-        if not isinstance(raw_admin_identities, list):
-            raise TypeError("admin identities must be a JSON list")
-        admin_principals = TrustedIdentitySet(
-            identities=tuple(
-                Identity.model_validate(value) for value in raw_admin_identities
-            ),
-        )
+        admin_principals = active.administrator_principals()
     except (KeyError, TypeError, ValueError) as exc:
         raise RuntimeError(
-            "bare-metal storefront requires public storefront identity, "
-            "1-2 admin identities, and a matching ARKHAI_IDENTITY_CREDENTIAL",
+            "bare-metal storefront requires [Identity.principal], one or two "
+            "administrator principals under [Identity.administrators], and a "
+            f"matching {IDENTITY_CREDENTIAL_ENV}: {exc}",
         ) from exc
-    storefront_url = os.environ.get(
-        "BARE_METAL_STOREFRONT_PUBLIC_URL",
-        "",
-    ).rstrip("/")
-    if not storefront_url:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_PUBLIC_URL is required for listing ownership",
-        )
-    raw_settlement = os.environ.get("BARE_METAL_STOREFRONT_SETTLEMENT", "").strip()
-    if not raw_settlement:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_SETTLEMENT is required: the storefront enables "
-            "no settlement mechanism implicitly"
-        )
+    settlement_config = active.settlement
     try:
-        settlement_config = json.loads(raw_settlement)
-        if not isinstance(settlement_config, dict):
-            raise TypeError("settlement config must be a JSON object")
         section_check = BareMetalStorefrontSettlementComposition.from_raw_config(
             settlement_config,
             resources={"marketplace_signer": signer, "claimant_principal": principal},
@@ -787,25 +768,19 @@ def build_runtime_from_environment(
         # A well-formed section asking for a release model bare metal cannot
         # deliver: the refusal names the model rather than calling it malformed.
         raise RuntimeError(str(exc)) from exc
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_SETTLEMENT must be strict shared settlement config"
-        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("[Settlement] must be strict shared settlement config") from exc
     # A configured Alkahest section, enabled or not, owns the obligations
     # accepted under it, so its recovery resources are required whenever the
     # section exists; with no section they would be a second, stale statement
     # of what the settlement root says.
     alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
-    seller_evm_address = os.environ.get(
-        "BARE_METAL_STOREFRONT_EVM_ADDRESS",
-        "",
-    ).strip()
-    raw_chains = os.environ.get("BARE_METAL_STOREFRONT_CHAINS", "").strip()
-    private_key = os.environ.get("BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY", "").strip()
+    seller_evm_address = active.wallet.address.strip()
+    private_key = active.wallet.private_key.strip()
     supplied = {
-        "BARE_METAL_STOREFRONT_EVM_ADDRESS": bool(seller_evm_address),
-        "BARE_METAL_STOREFRONT_CHAINS": raw_chains not in ("", "{}"),
-        "BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY": bool(private_key),
+        "[Wallet].address": bool(seller_evm_address),
+        "[Chains]": bool(active.chains),
+        "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
         missing = [name for name, present in supplied.items() if not present]
@@ -814,7 +789,9 @@ def build_runtime_from_environment(
                 "a configured Alkahest settlement section, enabled or not, requires "
                 + ", ".join(missing)
             )
-        chain_clients, chain_config_paths = _build_chain_clients_from_environment()
+        chain_clients, chain_config_paths = _build_chain_clients(
+            active.chains, private_key=private_key, build_clients=build_chain_clients
+        )
     else:
         stale = [name for name, present in supplied.items() if present]
         if stale:
@@ -831,26 +808,25 @@ def build_runtime_from_environment(
             "wallet": seller_evm_address or None,
             "wallet_ready": bool(seller_evm_address),
             "clients": chain_clients,
-            "chains": json.loads(raw_chains) if raw_chains else {},
+            "chains": {
+                name: chain.model_dump(exclude_none=True)
+                for name, chain in active.chains.items()
+            },
         },
     )
     try:
+        publication_clauses = compile_publication_clauses(active.pricing.settlements)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"[pricing].settlements do not compile: {exc}") from exc
+    storefront_url = active.storefront_url
+    try:
         site_bindings = parse_site_bindings(
-            os.environ["BARE_METAL_STOREFRONT_SITES"],
+            active.capacity.sites, active.service_peer_configs()
         )
-        site_placement = os.environ.get(
-            "BARE_METAL_STOREFRONT_SITE_PLACEMENT",
-            "fill_first",
-        ).strip()
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(
-            "bare-metal storefront requires valid trusted site bindings",
-        ) from exc
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"bare-metal storefront site bindings are invalid: {exc}") from exc
     db = SQLiteClient(
-        os.environ.get(
-            "BARE_METAL_STOREFRONT_DB_PATH",
-            "bare-metal-storefront.db",
-        ),
+        active.db_path,
         domain=selected_domain,
         local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
@@ -860,7 +836,7 @@ def build_runtime_from_environment(
             bindings=site_bindings,
             signer=signer,
             db_path=db.db_path,
-            placement=site_placement,
+            placement=active.capacity.placement,
         )
     except (RuntimeError, TypeError, ValueError) as exc:
         raise RuntimeError(
@@ -868,29 +844,19 @@ def build_runtime_from_environment(
         ) from exc
     try:
         introduction_delivery = storefront_introduction_delivery(
+            active.delivery,
             known_origins=[binding.site_id for binding in site_bindings],
             signer=signer,
         )
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_DELIVERY must be a strict [Delivery] section"
-        ) from exc
-    try:
-        negotiation_policies = json.loads(
-            os.environ.get("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES", "null")
-        )
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES must be a JSON list of policy names"
-        ) from exc
-    registry_configuration = (
-        BareMetalRegistryConfiguration.from_environment(os.environ)
-        if os.environ.get("BARE_METAL_STOREFRONT_REGISTRY_URL")
-        else None
-    )
-    runtime = BareMetalStorefrontRuntime(
-        negotiation_policies=negotiation_policies,
-        registry_configuration=registry_configuration,
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("[Delivery] must be a strict delivery section") from exc
+    return BareMetalStorefrontRuntime(
+        negotiation_policies=active.negotiation.policies,
+        registry_configuration=BareMetalRegistryConfiguration(
+            authorities=active.registry_authorities()
+        ),
+        publication_clauses=publication_clauses,
+        default_max_duration_seconds=active.pricing.default_max_duration_seconds,
         introduction_delivery=introduction_delivery,
         db=db,
         domain=selected_domain,
@@ -905,8 +871,10 @@ def build_runtime_from_environment(
         site_bindings=site_bindings,
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
-        settlement_servicing_interval_seconds=float(
-            os.environ.get("BARE_METAL_SETTLEMENT_SERVICING_INTERVAL_SECONDS", "30")
+        settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,
+        payment_reconciliation_interval_seconds=active.payment_reconciliation_interval,
+        negotiation_watchdog=NegotiationWatchdogPolicy(
+            timeout_seconds=active.negotiation_timeout_seconds,
+            interval_seconds=active.negotiation_watchdog_interval,
         ),
     )
-    return runtime

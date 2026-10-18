@@ -44,7 +44,10 @@ from market_site_client.fixtures.resource_pools import (
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
-from arkhai_bare_metal_storefront.pool_overrides import accepted_site_projection
+from arkhai_bare_metal_storefront.pool_overrides import (
+    accepted_site_projection,
+    compile_publication_clauses,
+)
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_composition import (
     publication_payload_builder,
@@ -208,7 +211,9 @@ class Storefront:
         self.sites = sites
         self.registries = RecordingRegistries()
         self.terms = Terms()
-        self.configured_max: int | None = None
+        # The configured [pricing].default_max_duration_seconds; a pool resolves
+        # its lease bound from its override first, then from this.
+        self.default_max_duration: int | None = 3600
 
     async def run(self, *, dry_run: bool = False) -> dict[str, Any]:
         self.registries.sent.clear()
@@ -219,11 +224,11 @@ class Storefront:
             ),
             site_clients=self.sites,
             registry_client_factory=self.registries,
-            registry_url=REGISTRY_URL,
+            registry_urls=(REGISTRY_URL,),
             storefront_url=STOREFRONT_URL,
             seller_principal=SELLER,
             build_payload=self.terms,
-            configured_max_duration_seconds=self.configured_max,
+            default_max_duration_seconds=self.default_max_duration,
         )
         return await cycle.run(dry_run=dry_run)
 
@@ -583,7 +588,7 @@ async def test_a_sellers_close_is_left_closed(db):
     seller_close = build_publication_runtime(
         db,
         storefront.registries,
-        registry_url=REGISTRY_URL,
+        registry_urls=(REGISTRY_URL,),
         storefront_url=STOREFRONT_URL,
     )
     await seller_close.close(
@@ -980,16 +985,58 @@ async def test_an_override_minimum_above_the_configured_maximum_holds_its_pool(d
     """Written while the configured maximum allowed it; configuration then fell
     below the override's minimum, so the effective pair is unordered."""
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.default_max_duration = 10800
     await storefront.run()
     listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
     await _override(db, terms={"min_duration_seconds": 7200})
-    storefront.configured_max = 3600
+    storefront.default_max_duration = 3600
 
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
     assert {item["reason"] for item in actions(report, "hold")} == {
         "pool_override_terms_conflict"
+    }
+    assert storefront.registries.operations() == []
+
+
+async def test_a_pool_resolving_no_lease_bound_is_held_while_others_publish(db):
+    """No configured default maximum: the pool whose override states one
+    publishes, the pool with nothing to publish as its maximum is held and
+    reported, and the cycle completes. Spec scenario: "A bare-metal pool
+    resolves no lease bound"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")), pool("pool-2", member("r2", "pool-2")))
+    storefront = Storefront(db, {"site-a": site})
+    storefront.default_max_duration = None
+    await _override(db, terms={"max_duration_seconds": 7200})
+
+    report = await storefront.run()
+
+    assert set(storefront.listings()) == {("site-a", "pool-1", "r1")}
+    assert actions(report, "hold") == [
+        {
+            "action": "hold",
+            "site_id": "site-a",
+            "pool_id": "pool-2",
+            "reason": "pool_lease_bound_missing",
+        }
+    ]
+
+
+@pytest.mark.parametrize("bound", [0, -1])
+async def test_a_bound_that_is_not_positive_holds_its_pools_listings_open(db, bound):
+    """A configured maximum that bounds nothing holds rather than closes: the
+    listing it published under an earlier bound stays as it was."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.default_max_duration = bound
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert {item["reason"] for item in actions(report, "hold")} == {
+        "pool_lease_bound_missing"
     }
     assert storefront.registries.operations() == []
 
@@ -1079,9 +1126,10 @@ ALKAHEST_ADDRESS_BOOK = str(anvil_address_book_path())
 def alkahest_publication(tmp_path, monkeypatch, signer):
     """Alkahest settlement publishing one clause on the anvil chain.
 
-    Returns the composition and the configured publication inputs the payload
-    builder reads. The deal token's metadata is cached where the option builder
-    reads it, so the real Alkahest option builds without a chain to ask.
+    Returns the composition and the configured publication clauses, as the
+    runtime holds them from ``[pricing].settlements``. The deal token's metadata
+    is cached where the option builder reads it, so the real Alkahest option
+    builds without a chain to ask.
     """
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     tokens = tmp_path / "cache" / "arkhai" / "tokens"
@@ -1112,24 +1160,21 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
             }
         },
     )
-    environ = {
-        "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES": json.dumps(
-            [
-                {
-                    "mechanism": "alkahest.v1",
-                    "asset": DEAL_TOKEN,
-                    "rate": "1",
-                    "per": "hour",
-                    "mechanism_input": {
-                        "chain": "anvil",
-                        "escrow_kind": "erc20_escrow_obligation_default",
-                    },
-                }
-            ]
-        ),
-        "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600",
-    }
-    return composition, environ
+    clauses = compile_publication_clauses(
+        [
+            {
+                "mechanism": "alkahest.v1",
+                "asset": DEAL_TOKEN,
+                "rate": "1",
+                "per": "hour",
+                "mechanism_input": {
+                    "chain": "anvil",
+                    "escrow_kind": "erc20_escrow_obligation_default",
+                },
+            }
+        ]
+    )
+    return composition, clauses
 
 
 #: The release condition a listing on the anvil chain advertises by default.
@@ -1144,7 +1189,7 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
     db, tmp_path, monkeypatch
 ):
     signer = create_signer("ed25519", b"\x21" * 32)
-    composition, environ = alkahest_publication(tmp_path, monkeypatch, signer)
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, signer)
     runtime = BareMetalStorefrontRuntime(
         db=db,
         domain=get_market_domain_contract(),
@@ -1154,9 +1199,11 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
         marketplace_signer=signer,
         seller_evm_address=SELLER_WALLET,
         settlement_composition=composition,
+        publication_clauses=clauses,
+        default_max_duration_seconds=3600,
     )
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
-    storefront.terms = publication_payload_builder(runtime, environ)
+    storefront.terms = publication_payload_builder(runtime)
 
     await storefront.run()
 

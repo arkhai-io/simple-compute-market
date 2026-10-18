@@ -3019,19 +3019,60 @@ storefront that cannot publish refuses to start"). Touches bare metal's storefro
 Compose files, the root `Makefile`, `e2e-tests/`, and `scripts/tests/`. Large: every
 environment read changes in one commit so the lane never runs half-converted.
 
-- [ ] 11.1 `src/settings.toml` (new, packaged): defaults under VM's keys and defaults —
+- [x] 11.1 `src/settings.toml` (new, packaged): defaults under VM's keys and defaults —
       `[Identity]`, `[Settlement]`, `[registry]`, `[capacity]` (`poll_interval = 5`,
       `publication_interval_seconds = 30`), `[pricing]`, `[negotiation]`, `[Delivery]`,
       `[Wallet]`, `[Chains]`, `base_url`, `db_path`, `negotiation_timeout_seconds`,
       `negotiation_watchdog_interval`, `settlement_servicing_interval_seconds`,
       `payment_reconciliation_interval`; and the site list, each site's URL and its service
       peer. `pyproject.toml` packages it and declares `arkhai-kit-config`.
-- [ ] 11.2 `src/config.py` (new): the loader over `market_config.storefront_config_files()`
+      Done: `src/arkhai_bare_metal_storefront/settings.toml`, in the wheel (checked by
+      listing the built wheel). Shipped: `base_url = "http://localhost:8000"`, `db_path =
+      "bare-metal-storefront.db"` (bare metal's own default, relative to the image's working
+      directory, its data volume; VM's default path is VM's tree), the four interval keys at
+      1800/60/30/30, `[Settlement] schema_version = 1, priority = []`, `[registry] urls = []`
+      and an empty `[registry.authorities]`, `[capacity]` (`placement = "fill_first"`,
+      `poll_interval = 5`, `publication_interval_seconds = 30`) and an empty
+      `[capacity.sites]`, `[pricing] settlements = []`; `[Identity]`, `[Delivery]`,
+      `[Wallet]`, `[Chains]`, `[negotiation].policies`, and
+      `[pricing].default_max_duration_seconds` are documented, commented, not shipped (C10:
+      an absent bound holds the pool; Dynaconf merges lists across layers, so every shipped
+      list is empty). The site list is VM's: `[capacity.sites]` maps each site to its URL, and
+      each site's service peer is an `[Identity.service_peers.<peer>]` with `role`, `site_id`,
+      and `principals`. `pyproject.toml` declares `arkhai-kit-config>=0.3.0` and
+      `dynaconf>=3.0.0` (both imported) and raises `arkhai-core-storefront` to `>=0.13.0`
+      (`core_storefront.service_peers`).
+- [x] 11.2 `src/config.py` (new): the loader over `market_config.storefront_config_files()`
       with the packaged defaults and the loader's documented environment override layer,
       as VM's `utils/config.py` builds it, and typed models for bare metal's sections,
       named for their concepts (D14a). The signing credential stays
       `ARKHAI_IDENTITY_CREDENTIAL` and is never loaded into settings.
-- [ ] 11.3 Every environment read moves to configuration, the variables retiring:
+      Done. `settings_source()` builds the Dynaconf VM's loader builds (defaults file, the
+      present files of `storefront_config_files()`, `merge_enabled`, no dotenv), read afresh
+      on each call rather than at import, so a process or test reads the files present when
+      it asks. **Decided (not in `design.md`):** the override layer's prefix is
+      `BARE_METAL_STOREFRONT` (separator `__`), the service's own, as
+      `DEPLOYMENT_AND_CONFIG.md` says each service picks its own (VM `STOREFRONT`, API credits
+      `APICREDITS_STOREFRONT`); for 17.9's "Bare-metal role configuration". Typed models:
+      `BareMetalStorefrontSettings` over `StorefrontIdentitySettings` (`principal`,
+      `administrators` of `AdministratorSettings`, `service_peers` of `ServicePeerSettings`),
+      `RegistrySettings` (`urls`, `authorities` of `RegistryAuthoritySettings`),
+      `CapacitySettings`, `PricingSettings`, `NegotiationSettings`, `WalletSettings`
+      (`private_key` marked secret and kept out of `repr`), and `ChainSettings`. Section and
+      key names are read in any case at each typed level (a principal's `scheme` and
+      `identifier` too, which the override layer states in upper case); names inside a table
+      keyed by name keep their spelling; an unknown key inside a typed section is refused and
+      an unknown top-level key ignored, as VM's untyped keys are. `[Settlement]` is lowercased
+      at every depth, as VM's `settlement_config_mapping` does, and `[Delivery]` keeps its
+      spelling, as VM's does. A setting that cannot be read raises
+      `BareMetalConfigurationError` naming each key path and reason, never a value.
+      Helpers: `signer(credential)`, `administrator_principals()` (every subject's
+      principals, one or two in all, as bare metal's admission takes them),
+      `service_peer_configs()` (core's `ServicePeerConfigs` shape, ready for 12.1), and
+      `registry_authorities()` (VM's exact-match pin rule over normalized URLs).
+      `identity_credential()` reads `ARKHAI_IDENTITY_CREDENTIAL`, which the prefix does not
+      match, so it never reaches settings.
+- [x] 11.3 Every environment read moves to configuration, the variables retiring:
       `server.py` (watchdog, timeout, payment-reconciliation interval), `delivery.py`,
       `runtime.py` (chains, wallet key and address, identity, administrators, public URL,
       settlement, sites, placement, database path, negotiation policies, registry,
@@ -3042,16 +3083,68 @@ environment read changes in one commit so the lane never runs half-converted.
       `[Chains.<name>]` and the overlay's wallet key replace their variables, and the
       all-or-none Alkahest input rule keeps its refusal (C11). Bare metal publishes to
       every `[registry].urls` entry (C10).
-- [ ] 11.4 C10: a pool whose effective maximum lease duration, through its override and
+      Done; `config.py`'s credential read is the package's one environment read.
+      `runtime.build_runtime_from_configuration(settings=None, *, credential=None,
+      domain=None, build_chain_clients=build_alkahest_clients)` replaces
+      `build_runtime_from_environment`; `storefront_signer_from_environment` and
+      `_build_chain_clients_from_environment` go. The runtime carries what its consumers
+      read: `negotiation_watchdog` (a `NegotiationWatchdogPolicy` from the timeout and
+      interval), `payment_reconciliation_interval_seconds`, `settlement_servicing_interval_seconds`,
+      `publication_clauses`, `default_max_duration_seconds`, and `registry_configuration`.
+      `server._start_runtime` and the watchdog step read the runtime, so the step's
+      function-local import of `server` goes. `delivery.storefront_introduction_delivery`
+      takes the `[Delivery]` section. `publication_service.BareMetalRegistryConfiguration`
+      holds every registry's pin (`authorities`, in configured order): its client factory
+      fans out over all of them and status asks each, reporting the first that fails;
+      the cycle takes `registry_urls` and the kit runtime publishes and converges every one.
+      `publication_composition` reads the runtime only. `pool_overrides`'s environment reader
+      becomes `positive_lease_bound`. The all-or-none rule names `[Wallet].address`,
+      `[Chains]`, and `[Wallet].private_key`; `resources["wallet"]` stays the address string
+      and `resources["chains"]` a mapping of chain name to its settings (Section 6's
+      handoff). **Differed:** `[pricing].settlements` compile at startup, a clause that does
+      not refusing startup naming the key, where the variable's clauses were compiled at each
+      publication step; `parse_site_bindings(sites, peers)` takes each site's URL from
+      `[capacity.sites]` and its principal from its one service peer's primary (first)
+      principal, configuration-time trust until Section 12's durable state. **Also changed:**
+      the image's `ENV BARE_METAL_STOREFRONT_DB_PATH` goes from `Dockerfile`: under the override
+      layer's prefix it would have overridden every operator's `db_path`.
+- [x] 11.4 C10: a pool whose effective maximum lease duration, through its override and
       then `[pricing].default_max_duration_seconds`, is absent or not positive is held and
       reported in the cycle's per-site report; the absent default is not a startup refusal.
-- [ ] 11.5 Startup refusal (D6), at composition: no `[registry].urls` or a registry without
+      Done in `publication.BareMetalPublicationCycle._hold_unbounded_pools`: an admitted pool
+      whose override's maximum, else the configured default, is absent or not positive is
+      held -- its candidates are not published and its open listings neither refreshed nor
+      closed -- and reported once, `hold` with `reason: pool_lease_bound_missing`, its site,
+      and its pool. A non-positive default is treated as absent in the override-conflict
+      check too, so such a pool is reported for its missing bound rather than as an override
+      conflict. The cycle takes `default_max_duration_seconds` (was
+      `configured_max_duration_seconds`).
+- [x] 11.5 Startup refusal (D6), at composition: no `[registry].urls` or a registry without
       its authority pin; no enabled settlement mechanism; no configured site. (The
       one-peer-per-site refusal lands with durable trust in Section 12.) Each problem named,
       no loop started.
-- [ ] 11.6 CLIs: `pool-override` and `publish` read the storefront's URL and identity from
+      Done: `src/startup_refusal.py`, VM's shape: `publication_startup_problems(settings)`
+      and `require_publishable_storefront(settings)` raising `BareMetalStartupError` ("the
+      storefront cannot publish: ...", every problem `;`-joined), the first step of
+      `build_runtime_from_configuration`, before the signer, the settlement composition, or
+      the database. Problems: `[registry].urls` empty; pins not exactly the URLs; `[Settlement]`
+      unresolvable or enabling nothing; `[capacity.sites]` empty. **Differed:** the
+      one-peer-per-site refusal is in place now, through core's
+      `require_one_service_peer_per_site` (`[Identity.service_peers]: site ... is bound to no
+      service peer`), because 11.3's site bindings take each site's principal from its peer and
+      cannot be composed without exactly one; 12.1 keeps it and adds the durable seeding. No
+      retired-settings catalogue: bare metal had no file configuration before, so it states no
+      retired key, and it introduces neither `enable_registry_discovery` nor
+      `[provisioning.identity]`.
+- [x] 11.6 CLIs: `pool-override` and `publish` read the storefront's URL and identity from
       the same configuration files; `publish` still runs in-process until Section 14.
-- [ ] 11.7 Development and lane files (C9): a committed development `storefront.toml` for
+      Done. `pool-override` loads the settings and signs with `settings.signer(identity_credential())`,
+      connecting to `--storefront-url`, else the configured `base_url` (whose packaged default
+      is the old local fallback); its loading stays inside `_client`, under the existing
+      lazy-load reason (help and the other commands load none of the client, identity, or
+      configuration stack). `publish` and `redeliver-introduction` compose the runtime with
+      `build_runtime_from_configuration()`; `run_publication_once` loses its `environ`.
+- [x] 11.7 Development and lane files (C9): a committed development `storefront.toml` for
       bare metal (`domains/bare_metal/storefront/storefront.dev.toml`, fixture values
       commented as such) with shortened intervals as VM's overlays have, and a secrets file
       the lane writes; `domains/bare_metal/compose.yml`, `compose.bare-metal.yml`, and
@@ -3060,7 +3153,26 @@ environment read changes in one commit so the lane never runs half-converted.
       `e2e-bare-metal-dev-env` produces only bare-metal files and the variables the
       Compose files still read; `e2e-tests/Makefile` and `e2e-tests/config/config-docker.yml`
       follow.
-- [ ] 11.8 Tests. `tests/test_runtime_environment.py` becomes `tests/test_config_loader.py`
+      Done. `storefront.dev.toml` carries what the lane's variables carried (principal,
+      administrator, the site and its service peer, the pinned registry, Alkahest and contact
+      exchange with the 5-second retention window, `[Wallet].address`, `[Chains.anvil]`, the
+      Alkahest clause, `default_max_duration_seconds = 86400`, the `bisection` seller chain),
+      plus watchdog, servicing, and reconciliation intervals of 2 s and `poll_interval = 1`, as
+      Bob's overlay has; every value is commented as a development value. **Differed (the
+      secrets file):** the lane does not generate it: it is committed,
+      `dev-env/identities/bare-metal.storefront.secrets.toml` (`[Wallet].private_key`, Anvil
+      account 2's published key), as VM's `bob.storefront.secrets.toml` is, replacing
+      `bare-metal.wallet.env`; the identities README follows. Compose: the domain file sets
+      `XDG_CONFIG_HOME=/etc` and mounts `${BARE_METAL_STOREFRONT_CONFIG_FILE}` at
+      `/etc/arkhai/storefront.toml`; the wrapper keeps the credential's env file and mounts
+      `${BARE_METAL_STOREFRONT_SECRETS_FILE}` at `/etc/arkhai/storefront.secrets.toml` (required,
+      as VM's overlay is); the development overlay keeps the chain wait and the address-book
+      mount and loses the policy variable. `e2e-bare-metal-dev-env` names the two files and
+      keeps only what the Compose files read (the storefront principal's two variables stay:
+      the provisioning service binds its seller role to them); the never-read deadline
+      variables and the unused constants go. `e2e-tests/Makefile` and `config-docker.yml`'s
+      comments name the development storefront.toml.
+- [x] 11.8 Tests. `tests/test_runtime_environment.py` becomes `tests/test_config_loader.py`
       (unit): defaults, file layering, the overlay winning, an override through the
       loader's environment layer applying and never refusing (spec scenario "An operator
       overrides a setting on a development cluster"), and the credential never in
@@ -3073,10 +3185,138 @@ environment read changes in one commit so the lane never runs half-converted.
       `XDG_CONFIG_HOME` instead. `scripts/tests/test_bare_metal_compose.py` and
       `scripts/tests/test_lane_compose.py`: the storefront's environment carries only the
       credential and the configuration directory.
-- [ ] 11.9 Refresh the locks. Validation: `make test-bare-metal`, `make test-e2e-unit`,
+      Done. Shared helper `tests/storefront_configuration.py` writes `storefront.json`,
+      `storefront.toml`, and the overlay under a temporary `XDG_CONFIG_HOME` and builds a
+      publishable document. Unit, `tests/test_config_loader.py` (13): packaged defaults; each
+      file layering over the one before; the overlay winning (and the wallet key out of
+      `repr`); the override layer applying over every file, a principal's `@str` identifier
+      included; the credential never in the settings' dump or `repr`, read apart and owning
+      the principal; a missing credential named; names in any case, a site ID keeping its
+      spelling; five unreadable settings refused by key (an unknown key, a zero interval, a
+      boolean interval, a bound as text, a malformed principal); administrators across
+      subjects. `test_runtime_environment.py` is deleted; its composition cases move into
+      `tests/test_app_composition.py` over the files (composition: the root's builder over
+      real SQLite, the chain clients injected through `build_chain_clients` instead of the
+      old module patch): principal, administrators, and the site's peer principal; a
+      mismatched credential; the credential from its variable; every interval and term; the
+      default and an unknown seller chain; every configured registry reaching the fan-out;
+      clauses that do not compile; Alkahest composing (enabled and disabled), each of the three
+      inputs required, each refused without a section, the undeliverable release model; the
+      contact-only root. Application startup (the real app and lifespan from the files):
+      `test_a_storefront_that_cannot_publish_refuses_to_start`, five cases -- no registry
+      (spec "A bare-metal storefront has no registry"), an unpinned registry, no mechanism, no
+      site, a site with no peer -- each `BareMetalStartupError` naming its problem, no database
+      file, no storefront installed and so no loop; every problem named in one refusal
+      (composition); and `test_a_storefront_configured_through_files_starts_and_serves`: from
+      the files alone, with `BARE_METAL_STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL=45` injected,
+      the lifespan starts, the override applies, and `StorefrontClient.get_health()` answers
+      `ok` (spec "An operator overrides a setting on a development cluster"). **Corrected
+      (level):** `test_publication_cycle.py` is the cycle's public API over a real database
+      with site and registry doubles (its own docstring says so), not application integration:
+      `test_a_pool_resolving_no_lease_bound_is_held_while_others_publish` (spec "A bare-metal
+      pool resolves no lease bound": the pool whose override states a maximum publishes, the
+      other is held and reported) and `test_a_bound_that_is_not_positive_holds_its_pools_listings_open`
+      (0 and -1); both fail with the hold removed (edited, then restored). The application
+      integration case is in `tests/test_http_publication_rates.py`, through
+      `StorefrontClient`: `test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app`
+      (the step reports `pool_lease_bound_missing` and publishes nothing; an override stating
+      a maximum then publishes). Its `test_a_bound_conflict_after_the_write_holds_rather_than_fails`
+      changed premise: a configuration change is now a restart, a second app over the same
+      database, since an absent maximum holds the pool before any write. Adapted:
+      `test_publication_cli.py` (every registry handed to the cycle; no registry refused; the
+      command composed from the files), `test_pool_override_cli.py` (the URL order; and,
+      application integration over the loopback-served app, `pool-override list` signing as
+      the configured principal at the configured `base_url`), `test_introduction_delivery.py`
+      (the section read from the files), `test_site_clients.py` (bindings from sites and
+      peers, the refusals not echoing a URL), `test_pool_overrides_api.py` (the configured
+      maximum on the runtime), `test_http_system.py` (registry status over the new
+      configuration, and a second registry not asked once the first fails),
+      `test_pool_override_terms.py` (`positive_lease_bound`), `test_http_publication_settlement.py`,
+      and the cycle harness (`default_max_duration`, 3600 unless a case says otherwise). Static
+      configuration tests (`scripts/tests`): the bare-metal render's storefront environment is
+      exactly `XDG_CONFIG_HOME` and `ARKHAI_IDENTITY_CREDENTIAL`, both files mount at
+      `/etc/arkhai/`, the address book only with the development overlay
+      (`test_bare_metal_compose.py`), and the lane render's the same
+      (`test_lane_compose.py::test_the_bare_metal_storefront_reads_its_settings_from_mounted_files`);
+      `e2e-tests/tests/unit/test_domain_stack_configuration.py` requires the configuration and
+      overlay files and no wallet key in the wrapper.
+- [x] 11.9 Refresh the locks. Validation: `make test-bare-metal`, `make test-e2e-unit`,
       `make check-architecture`, `make check-packaging`, `make test`. End-to-end
       (bare-metal lane): `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_introduction`.
+      Done. No package version moved. `scripts/uv_project.py lock` relocked bare metal's
+      storefront and `e2e-tests` (each records the storefront's two new dependencies; bare
+      metal's own the new specifiers); VM storefront's lock, which locks the bare-metal
+      storefront for the combined image, was edited by hand with exactly the two dependency
+      lines uv wrote into `e2e-tests/uv.lock` for the same package (16.6 relocks it).
+      `docs/development/RELEASING.md`'s row for `arkhai-bare-metal-storefront` gains
+      `arkhai-kit-config`, which release tooling's
+      `test_the_release_guide_states_each_package_internal_deps` requires. Evidence: `make
+      test-bare-metal`: domain 134, storefront 355 (324 before), buyer 11, adapter 40 passed;
+      `make test-e2e-unit` 38 passed; the Compose render tests (`scripts/tests/test_bare_metal_compose.py`,
+      `test_lane_compose.py`, static configuration tests over `docker compose config`) 21
+      passed; `make check-architecture` and `make check-packaging` pass; `make -k test`: every
+      suite it ran passed but release tooling's release-guide row (fixed above; `make
+      test-release-tooling` then 944 passed), and it stopped only at the reinit of `kit/policy`,
+      `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch index is refused here, as in
+      2.6); VM storefront, which installs the rebuilt bare-metal wheel, ran frozen with it
+      reinstalled: unit 1071 passed, 1 skipped, integration 446 passed; `kit/policy` and the VM
+      buyer lock nothing this section changed and were not rerun. `make -C helm test-render`
+      (with `STOREFRONT_PYTHON`) passed, the bare-metal chart's render tests unchanged.
+      `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), `make check-tasks`, `make
+      check-change-index`, and `openspec validate --strict` pass. No repository typing target
+      exists. The pipeline was not run; the end-to-end reading is in the notes below.
+
+Section 11 notes:
+
+- End-to-end, read from the lane's files (the pipeline was not run): every bare-metal-lane
+  scenario -- `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`, and
+  `e2e_bare_metal_introduction` -- now starts a storefront configured only through
+  `storefront.dev.toml` and `bare-metal.storefront.secrets.toml`, passes the startup refusal
+  (one pinned registry, Alkahest and contact exchange enabled, `bare-metal-e2e` bound to one
+  peer), and publishes with the lane's clause and 86400-second bound through the registry
+  fan-out; the mock deal settles with the overlay's wallet key and the introduction scenario
+  reads the contact and retention window from the file. No scenario starts a storefront that
+  cannot publish or holds a pool for its lease bound: those are application-integration and
+  application-startup evidence only. No VM-lane or API-credit-lane scenario reaches this
+  section's code; the VM image installs the rebuilt bare-metal contribution unchanged in
+  behaviour.
+
+Section 11 handoff:
+
+- The runtime is composed once, by `build_runtime_from_configuration`, from a
+  `BareMetalStorefrontSettings`; consumers read the values the runtime carries, never the
+  settings or the environment. Section 13 must add the runtime fields it needs
+  (`[capacity].poll_interval`, `publication_interval_seconds`, and the confirmation window)
+  the same way. `CapacitySettings` refuses keys it does not name, so 13.4 adds
+  `source_confirmation_seconds` to it (optional, three poll intervals by default) before 13.7
+  states it in `storefront.dev.toml`, or the lane's storefront refuses to start.
+- 12.1: `settings.service_peer_configs()` is core's `ServicePeerConfigs`; the startup refusal
+  already names a site bound to no peer or several. 12.2 replaces the configuration-time
+  principal `parse_site_bindings` takes (the peer's first) with the peer's durable provider;
+  `DurableReservationSiteMap` still pins that principal. 12.6's development `storefront.toml`
+  already declares the site's peer (`bare_metal_e2e_site`).
+- 13.2's disclosed error types: `BareMetalConfigurationError` names keys and reasons only;
+  `BareMetalStartupError` never reaches a cycle.
+- 14.2: the API-client `publish` signs as `settings.signer(identity_credential())` at
+  `settings.base_url`, as `pool-override` now does.
+- Section 16: the chart still passes the retired variables as pod `env` (accepted until then).
+  Under the override layer's prefix `BARE_METAL_STOREFRONT_DB_PATH` would now override
+  `db_path`; the other old names land as top-level keys the storefront ignores. The typed
+  models are what the values-schema generator reads: `WalletSettings.private_key` is marked
+  secret as VM's is; the other sections are public.
+- Dynaconf merges two spellings of one key silently, so the loader cannot refuse them (a
+  test for that was tried and dropped); the chart's generated schema refuses them at render.
+- For 17.9: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration", "Per-domain stack
+  composition" (the development overlay and the two mounted files), and "Storefront listing
+  shapes and pool overrides" (the bare-metal command's identity and URL, the maximum as
+  `[pricing].default_max_duration_seconds`, a pool with no bound held) still describe the
+  retired variables, as does `docs/bare-metal-seller-quickstart.md`; the override prefix
+  `BARE_METAL_STOREFRONT` and the committed development files are the destinations' facts.
+- Tests compose the storefront from files through `tests/storefront_configuration.py`;
+  `storefront_config_files()` reads nothing under pytest unless `XDG_CONFIG_HOME` points
+  away from the home directory, which `write_configuration` does.
 
 ## 12. Bare-metal durable site trust
 

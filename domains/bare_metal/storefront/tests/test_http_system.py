@@ -577,16 +577,18 @@ async def test_status_reports_what_a_deal_depends_on_and_health_does_not(
     assert health.provisioning_contract_version is None
 
 
+_REGISTRY_TRUST = RegistryAuthorityTrust(
+    authority="registry",
+    principals=TrustedIdentitySet(
+        identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
+    ),
+)
+
+
 async def test_an_unreachable_registry_degrades_status(tmp_path) -> None:
     unreachable = BareMetalRegistryConfiguration(
         # Nothing listens on the discard port, so the connection is refused.
-        url="http://127.0.0.1:9",
-        trust=RegistryAuthorityTrust(
-            authority="registry",
-            principals=TrustedIdentitySet(
-                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
-            ),
-        ),
+        authorities={"http://127.0.0.1:9": _REGISTRY_TRUST},
     )
     runtime = _status_runtime(
         str(tmp_path / "storefront.db"), registry_configuration=unreachable
@@ -617,19 +619,37 @@ def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable() -> None:
     """The registry client verifies every reply, so an unsigned one reads as
     the client's own 502 rather than as whatever status it carried."""
     configuration = BareMetalRegistryConfiguration(
-        url="http://registry",
-        trust=RegistryAuthorityTrust(
-            authority="registry",
-            principals=TrustedIdentitySet(
-                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
-            ),
-        ),
+        authorities={"http://registry": _REGISTRY_TRUST},
     )
     transport = httpx.MockTransport(lambda _request: httpx.Response(503, text="down"))
 
     result = asyncio.run(configuration.reachability(SELLER_SIGNER, transport=transport))
 
     assert result == "http_502"
+
+
+def test_status_reads_every_registry_and_reports_the_first_that_fails() -> None:
+    """Publication reaches every configured registry, so its status asks each:
+    one answering is not enough while another does not."""
+    asked: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.host)
+        return httpx.Response(503, text="down")
+
+    configuration = BareMetalRegistryConfiguration(
+        authorities={
+            "http://registry-a": _REGISTRY_TRUST,
+            "http://registry-b": _REGISTRY_TRUST,
+        },
+    )
+
+    result = asyncio.run(
+        configuration.reachability(SELLER_SIGNER, transport=httpx.MockTransport(answer))
+    )
+
+    assert result == "http_502"
+    assert asked == ["registry-a"], "the first failure is reported without asking on"
 
 
 async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(

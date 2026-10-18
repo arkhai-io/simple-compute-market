@@ -7,17 +7,18 @@ always named, never defaulted.
 
 Every command calls the storefront's administrator API over the pool-override
 kit's client and never reads the database. It signs as the storefront's own
-marketplace signer, from the identity inputs the server reads, so that identity
-must be listed in ``BARE_METAL_STOREFRONT_ADMIN_IDENTITIES``. A write takes
-effect at the storefront's next publication run.
+marketplace signer, from ``[Identity.principal]`` in the configuration files the
+server reads and ``ARKHAI_IDENTITY_CREDENTIAL``, so that principal must be one of
+``[Identity.administrators]``. It connects to ``--storefront-url``, else the
+configured ``base_url``. A write takes effect at the storefront's next
+publication run.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
-import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -25,47 +26,41 @@ import typer
 
 pool_override_app = typer.Typer(no_args_is_help=True)
 
-_DEFAULT_STOREFRONT_URL = "http://localhost:8000"
-
 _STOREFRONT_URL = typer.Option(
     None,
     "--storefront-url",
-    help=(
-        "Storefront base URL; defaults to BARE_METAL_STOREFRONT_PUBLIC_URL, "
-        f"then {_DEFAULT_STOREFRONT_URL}."
-    ),
+    help="Storefront base URL; defaults to the configured base_url.",
 )
 _SITE = typer.Option(..., "--site", help="The site the pool belongs to.")
 _POOL = typer.Option(..., "--pool", help="The pool, as its site names it.")
 _MODE = typer.Option(..., "--mode", help="The offering mode, such as bare_metal.")
 
 
-def storefront_url(explicit: str | None, environ: Mapping[str, str]) -> str:
-    """The flag, else the storefront's public URL, else the local default."""
-    url = explicit or environ.get("BARE_METAL_STOREFRONT_PUBLIC_URL") or ""
-    return url.rstrip("/") or _DEFAULT_STOREFRONT_URL
+def storefront_url(explicit: str | None, configured: str) -> str:
+    """The flag, else the configured ``base_url``."""
+    return (explicit or configured).rstrip("/")
 
 
 @contextlib.contextmanager
 def _client(explicit_url: str | None) -> Iterator[Any]:
     # Imported here so the CLI's help and its other commands load none of the
-    # client or identity stack.
+    # client, identity, or configuration stack.
     from market_identity import TrustedIdentitySet
     from market_pool_overrides import SyncPoolOverrideClient
     from storefront_client import SyncStorefrontClient
 
-    from .runtime import storefront_signer_from_environment
+    from .config import identity_credential, load_storefront_settings
 
     try:
-        signer = storefront_signer_from_environment(os.environ)
+        settings = load_storefront_settings()
+        signer = settings.signer(identity_credential())
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(
-            "the storefront identity (BARE_METAL_STOREFRONT_IDENTITY_SCHEME, "
-            "BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER) and a matching "
-            "ARKHAI_IDENTITY_CREDENTIAL are required"
+            "the storefront identity ([Identity.principal]) and a matching "
+            f"ARKHAI_IDENTITY_CREDENTIAL are required: {exc}"
         ) from exc
     with SyncStorefrontClient(
-        storefront_url(explicit_url, os.environ),
+        storefront_url(explicit_url, settings.base_url),
         signer=signer,
         caller_role="admin",
         expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),

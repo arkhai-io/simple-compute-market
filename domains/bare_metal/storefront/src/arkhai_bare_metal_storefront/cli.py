@@ -55,7 +55,11 @@ def serve_cmd(
 
 @app.command("publish")
 def publish_cmd() -> None:
-    """Publish one authenticated round from fresh trusted-site projections."""
+    """Publish one authenticated round from fresh trusted-site projections.
+
+    The storefront is composed in this process from the same configuration
+    files the server reads.
+    """
 
     import json
 
@@ -79,9 +83,9 @@ def redeliver_introduction_cmd(
 
     from market_contact_exchange import IntroductionPayloadsDeletedError
 
-    from .runtime import build_runtime_from_environment
+    from .runtime import build_runtime_from_configuration
 
-    runtime = build_runtime_from_environment()
+    runtime = build_runtime_from_configuration()
     delivery = runtime.introduction_delivery
     if delivery is None:
         raise typer.BadParameter("no delivery sinks are configured")

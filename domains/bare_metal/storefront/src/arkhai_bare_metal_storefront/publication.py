@@ -5,9 +5,10 @@ site's own client, reads each pool's declarations and region (see
 ``site_reading``), and classifies every bare-metal resource (see
 ``arkhai_bare_metal.storefront_publication``). Candidates are published,
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
-close; listings at a site whose projection could not be read, or in a pool
-whose declarations do not resolve, are held. Every run then converges each
-registry on its listings' local status.
+close; listings at a site whose projection could not be read, in a pool whose
+declarations do not resolve, or in a pool whose maximum lease duration resolves
+to nothing positive, are held. Every run then converges each registry the
+storefront publishes to on its listings' local status.
 
 Sites are fetched one by one rather than through the aggregate capacity
 client, whose snapshot omits a site it could not reach: an unreachable site
@@ -26,7 +27,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -77,6 +78,7 @@ from .publication_service import (
 )
 from .pool_overrides import (
     BareMetalPoolOverride,
+    positive_lease_bound,
     read_bare_metal_pool_overrides,
     record_accepted_generation,
 )
@@ -158,14 +160,16 @@ class BareMetalPublicationCycle:
         registry: StorefrontDomainRegistry,
         site_clients: Mapping[str, Any],
         registry_client_factory: RegistryClientFactory,
-        registry_url: str,
+        registry_urls: Sequence[str],
         storefront_url: str,
         seller_principal: Identity,
         build_payload: PayloadBuilder,
-        configured_max_duration_seconds: int | None = None,
+        default_max_duration_seconds: int | None = None,
     ) -> None:
         self._db = sqlite_client
-        self._configured_max_duration = configured_max_duration_seconds
+        # A configured bound that is absent or not positive bounds nothing, so
+        # a pool relying on it is held rather than published unbounded.
+        self._default_max_duration = positive_lease_bound(default_max_duration_seconds)
         self._registry = registry
         self._site_clients = dict(site_clients)
         self._storefront_url = storefront_url
@@ -174,7 +178,7 @@ class BareMetalPublicationCycle:
         self._runtime = build_publication_runtime(
             sqlite_client,
             registry_client_factory,
-            registry_url=registry_url,
+            registry_urls=registry_urls,
             storefront_url=storefront_url,
         )
         self._hooks = BareMetalPublicationHooks(sqlite_client)
@@ -206,7 +210,7 @@ class BareMetalPublicationCycle:
         self._overrides = await asyncio.to_thread(
             read_bare_metal_pool_overrides,
             self._db.db_path,
-            configured_max_duration_seconds=self._configured_max_duration,
+            configured_max_duration_seconds=self._default_max_duration,
         )
         for site_id in sorted(self._site_clients):
             await self._classify_site(site_id)
@@ -331,7 +335,10 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
+        unbounded = self._hold_unbounded_pools(site_id, reading, site_overrides)
         for candidate in classification.candidates:
+            if candidate["pool_id"] in unbounded:
+                continue
             override = site_overrides.get(candidate["pool_id"])
             if override is not None:
                 _apply_override(candidate, override)
@@ -342,6 +349,42 @@ class BareMetalPublicationCycle:
                 candidate["shape_digest"],
             )
             self._candidates.append(candidate)
+
+    def _hold_unbounded_pools(
+        self,
+        site_id: str,
+        reading: SitePoolReading,
+        site_overrides: Mapping[str, BareMetalPoolOverride],
+    ) -> set[str]:
+        """Hold each admitted pool whose maximum lease duration resolves to nothing.
+
+        A pool's bound is its override's maximum, else the configured default;
+        one that is absent or not positive leaves its listings nothing to
+        publish as their maximum, so they are held -- neither published,
+        refreshed, nor closed -- and the pool is reported.
+        """
+        unbounded: set[str] = set()
+        for pool_id, admission in sorted(reading.admission.items()):
+            if admission != POOL_ADMITTED:
+                continue
+            override = site_overrides.get(pool_id)
+            stated = override.max_duration_seconds if override is not None else None
+            bound = stated if stated is not None else self._default_max_duration
+            if positive_lease_bound(bound) is not None:
+                continue
+            unbounded.add(pool_id)
+            self._held_pools.add((site_id, pool_id))
+            self.report.record(
+                "hold", site_id=site_id, pool_id=pool_id, reason="pool_lease_bound_missing"
+            )
+            logger.warning(
+                "bare-metal pool %s at %s resolves no positive maximum lease "
+                "duration from its override or [pricing].default_max_duration_seconds; "
+                "its listings are held",
+                pool_id,
+                site_id,
+            )
+        return unbounded
 
     def _report_pools(self, site_id: str, reading: SitePoolReading) -> None:
         """Record every pool-level reason a site's pools publish nothing."""

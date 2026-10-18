@@ -19,9 +19,11 @@ from market_delivery import (
 )
 from market_identity import Ed25519Signer
 
+from arkhai_bare_metal_storefront.config import load_storefront_settings
 from arkhai_bare_metal_storefront.delivery import storefront_introduction_delivery
 
 from loopback import serving
+from storefront_configuration import write_configuration
 from test_http_introductions import (
     _BUYER_CONTACT,
     _SELLER_CONTACT,
@@ -198,43 +200,45 @@ async def test_redelivery_of_a_deleted_introduction_contacts_no_sink(tmp_path) -
     assert received == []
 
 
-def test_delivery_configuration_is_read_from_this_storefronts_environment(
+def test_delivery_configuration_is_read_from_the_storefronts_configuration_files(
     monkeypatch, tmp_path
 ) -> None:
     target = tmp_path / "introductions.jsonl"
-    monkeypatch.setenv(
-        "BARE_METAL_STOREFRONT_DELIVERY",
-        json.dumps({"enabled": ["file"], "file": {"path": str(target)}}),
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"Delivery": {"enabled": ["file"], "file": {"path": str(target)}}},
     )
 
     delivery = storefront_introduction_delivery(
-        known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+        load_storefront_settings().delivery,
+        known_origins={"default"},
+        signer=Ed25519Signer(b"s" * 32),
     )
 
     assert delivery is not None
     assert [sink.name for sink in delivery.sinks] == ["file"]
 
 
-def test_no_delivery_configured_installs_no_dispatch(monkeypatch) -> None:
-    monkeypatch.delenv("BARE_METAL_STOREFRONT_DELIVERY", raising=False)
+def test_no_delivery_configured_installs_no_dispatch(monkeypatch, tmp_path) -> None:
+    write_configuration(monkeypatch, tmp_path)
 
     assert (
         storefront_introduction_delivery(
-            known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+            load_storefront_settings().delivery,
+            known_origins={"default"},
+            signer=Ed25519Signer(b"s" * 32),
         )
         is None
     )
 
 
-def test_an_operator_mistake_fails_before_any_deal_exists(monkeypatch) -> None:
-    monkeypatch.setenv(
-        "BARE_METAL_STOREFRONT_DELIVERY",
-        json.dumps({"enabled": ["pigeon"], "pigeon": {}}),
-    )
-
+def test_an_operator_mistake_fails_before_any_deal_exists() -> None:
     with pytest.raises(DeliveryConfigurationError, match="not installed"):
         storefront_introduction_delivery(
-            known_origins={"default"}, signer=Ed25519Signer(b"s" * 32)
+            {"enabled": ["pigeon"], "pigeon": {}},
+            known_origins={"default"},
+            signer=Ed25519Signer(b"s" * 32),
         )
 
 
@@ -265,13 +269,10 @@ async def test_a_credentialed_sink_stays_out_of_every_public_surface(tmp_path) -
     assert "secret-token" not in published
 
 
-def test_a_multi_site_storefront_must_route_its_deliveries(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv(
-        "BARE_METAL_STOREFRONT_DELIVERY",
-        json.dumps({"enabled": ["file"], "file": {"path": str(tmp_path / "x.jsonl")}}),
-    )
-
+def test_a_multi_site_storefront_must_route_its_deliveries(tmp_path) -> None:
     with pytest.raises(DeliveryConfigurationError, match="Delivery.origins"):
         storefront_introduction_delivery(
-            known_origins={"rack-a", "rack-b"}, signer=Ed25519Signer(b"s" * 32)
+            {"enabled": ["file"], "file": {"path": str(tmp_path / "x.jsonl")}},
+            known_origins={"rack-a", "rack-b"},
+            signer=Ed25519Signer(b"s" * 32),
         )

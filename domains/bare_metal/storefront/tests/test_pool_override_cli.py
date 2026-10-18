@@ -9,6 +9,7 @@ and that it signs only as the storefront's own identity.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 
 import pytest
@@ -19,11 +20,22 @@ from market_pool_overrides import (
     PoolOverrideWriteResponse,
     ProjectionGeneration,
 )
+from market_identity import TrustedIdentitySet
 from storefront_client import StorefrontClientError
 from typer.testing import CliRunner
 
 from arkhai_bare_metal_storefront import pool_override_cli
 from arkhai_bare_metal_storefront.cli import app
+from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
+from loopback import serving
+from storefront_configuration import (
+    SELLER,
+    SELLER_CREDENTIAL,
+    publishable_configuration,
+    write_configuration,
+)
+from test_http_system import _app, _runtime
+from test_pool_overrides_api import _with_sites
 
 ADDRESS = {"site_id": "site-a", "pool_id": "pool-1", "offering_mode": "bare_metal"}
 STORED = PoolOverride(
@@ -132,20 +144,41 @@ def test_a_storefront_refusal_exits_nonzero_with_its_message(monkeypatch):
     assert "shapes refused" in result.output
 
 
-def test_the_url_is_the_flag_then_the_public_url_then_local():
-    env = {"BARE_METAL_STOREFRONT_PUBLIC_URL": "https://seller.example/"}
-    assert pool_override_cli.storefront_url("http://other:9", env) == "http://other:9"
-    assert pool_override_cli.storefront_url(None, env) == "https://seller.example"
-    assert pool_override_cli.storefront_url(None, {}) == "http://localhost:8000"
+def test_the_url_is_the_flag_then_the_configured_base_url():
+    assert pool_override_cli.storefront_url("http://other:9", "https://seller.example/") == (
+        "http://other:9"
+    )
+    assert pool_override_cli.storefront_url(None, "https://seller.example/") == (
+        "https://seller.example"
+    )
 
 
-def test_without_the_storefront_identity_it_refuses_before_connecting(monkeypatch):
-    for name in (
-        "BARE_METAL_STOREFRONT_IDENTITY_SCHEME",
-        "BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER",
-        "ARKHAI_IDENTITY_CREDENTIAL",
-    ):
-        monkeypatch.delenv(name, raising=False)
+def test_it_signs_as_the_configured_identity_at_the_configured_url(monkeypatch, tmp_path):
+    """Application integration: the command reads the storefront's principal and
+    its ``base_url`` from the configuration files the server reads, and its
+    credential from ARKHAI_IDENTITY_CREDENTIAL, then lists through the running
+    app's administrator API, which admits only that principal."""
+    runtime = dataclasses.replace(
+        _with_sites(_runtime(str(tmp_path / "storefront.db")), "site-a"),
+        admin_principals=TrustedIdentitySet(identities=(SELLER.identity,)),
+    )
+    with serving(_app(runtime)) as base_url:
+        document = publishable_configuration(tmp_path / "unused.db")
+        document["base_url"] = base_url
+        write_configuration(monkeypatch, tmp_path, document)
+        monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+
+        result = runner.invoke(app, ["pool-override", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {"overrides": []}
+
+
+def test_without_the_storefront_identity_it_refuses_before_connecting(
+    monkeypatch, tmp_path
+):
+    write_configuration(monkeypatch, tmp_path)
+    monkeypatch.delenv(IDENTITY_CREDENTIAL_ENV, raising=False)
 
     result = runner.invoke(
         app, ["pool-override", "list", "--storefront-url", "http://127.0.0.1:9"]

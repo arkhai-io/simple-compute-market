@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from collections.abc import Mapping
@@ -25,11 +24,11 @@ from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
 )
+from core_storefront.service_peers import SERVICE_PEER_ROLE, ServicePeerConfigs
 from market_identity import Identity, Signer, TrustedIdentitySet
 from market_site_client import SiteCapacityClient
 
 _SITE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_BINDING_FIELDS = frozenset({"site_id", "authority_url", "authority_principal"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,53 +72,39 @@ def _authority_url(value: Any, *, site_id: str) -> str:
     return value.strip().rstrip("/")
 
 
-def parse_site_bindings(raw_json: str) -> tuple[BareMetalSiteBinding, ...]:
-    """Parse exact site bindings without ever returning raw configuration."""
-    try:
-        raw = json.loads(raw_json)
-    except Exception as exc:
-        raise ValueError("trusted site bindings must be valid JSON") from exc
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("trusted site bindings must be a non-empty JSON list")
+def parse_site_bindings(
+    sites: Mapping[str, str],
+    peers: ServicePeerConfigs,
+) -> tuple[BareMetalSiteBinding, ...]:
+    """Bind each configured site to its URL and to its one service peer's
+    principal, without ever returning raw configuration.
 
+    ``sites`` is ``[capacity.sites]``, each stable site ID to its authority URL;
+    ``peers`` the configured service peers, each bound to one site. A site's
+    responses verify against its peer's primary principal, the first it names.
+    """
+    if not sites:
+        raise ValueError("at least one site must be configured")
     bindings: list[BareMetalSiteBinding] = []
-    seen: set[str] = set()
-    for index, item in enumerate(raw):
-        if not isinstance(item, dict):
-            raise ValueError(f"trusted site binding {index} must be an object")
-        unknown = sorted(set(item) - _BINDING_FIELDS)
-        missing = sorted(_BINDING_FIELDS - set(item))
-        if unknown or missing:
-            raise ValueError(
-                f"trusted site binding {index} has invalid fields; "
-                f"missing={missing}, unknown={unknown}"
-            )
-        site_id = item["site_id"]
+    for site_id, url in sites.items():
         if not isinstance(site_id, str) or _SITE_ID.fullmatch(site_id) is None:
+            raise ValueError("a configured site has an invalid site ID")
+        bound = [
+            principals
+            for role, peer_site, principals in peers.values()
+            if role == SERVICE_PEER_ROLE and peer_site == site_id
+        ]
+        if len(bound) != 1:
             raise ValueError(
-                f"trusted site binding {index} has an invalid site_id"
+                f"site {site_id!r} must be bound to exactly one service peer"
             )
-        if site_id in seen:
-            raise ValueError(f"duplicate trusted site_id {site_id!r}")
-        try:
-            authority_principal = Identity.model_validate(
-                item["authority_principal"]
-            )
-        except Exception as exc:
-            raise ValueError(
-                f"site {site_id!r} has an invalid authority principal"
-            ) from exc
         bindings.append(
             BareMetalSiteBinding(
                 site_id=site_id,
-                authority_url=_authority_url(
-                    item["authority_url"],
-                    site_id=site_id,
-                ),
-                authority_principal=authority_principal,
+                authority_url=_authority_url(url, site_id=site_id),
+                authority_principal=bound[0].identities[0],
             )
         )
-        seen.add(site_id)
     return tuple(bindings)
 
 

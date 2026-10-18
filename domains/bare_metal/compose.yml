@@ -83,10 +83,14 @@ services:
     ports:
       - "${BARE_METAL_STOREFRONT_PORT:-8000}:8000"
     environment:
-      - BARE_METAL_STOREFRONT_DB_PATH=/var/lib/arkhai/storefront.db
-      - BARE_METAL_STOREFRONT_SITES=${BARE_METAL_STOREFRONT_SITES_JSON:?set exact selected-site authority bindings JSON}
-      - BARE_METAL_STOREFRONT_SITE_PLACEMENT=${BARE_METAL_STOREFRONT_SITE_PLACEMENT:?set fill_first or most_available}
+      # The storefront's one configuration-bearing variable: where its loader
+      # finds the mounted files, $XDG_CONFIG_HOME/arkhai/ = /etc/arkhai/. Every
+      # setting is in those files, never in this environment.
+      - XDG_CONFIG_HOME=/etc
     volumes:
+      # The operator's storefront.toml: sites, registries, settlement, terms.
+      - ${BARE_METAL_STOREFRONT_CONFIG_FILE:?set the storefront configuration file}:/etc/arkhai/storefront.toml:ro
+      # The storefront's working directory; its database defaults to a file here.
       - bare-metal-storefront-data:/var/lib/arkhai
     restart: unless-stopped
     healthcheck:
