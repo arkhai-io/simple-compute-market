@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Collection, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,7 +79,7 @@ from market_storefront.settlement_composition import (
 )
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     FakeProjectionSite,
@@ -340,6 +340,35 @@ class RecordingRegistries:
         ]
 
 
+@contextlib.contextmanager
+def recorded_registries() -> Iterator[RecordingRegistries]:
+    """Configure the two test registries, each pinned to its authority, with
+    ``RecordingRegistries`` standing for their client.
+
+    A storefront publishes to every configured registry, so a test that
+    publishes, closes, or reopens a listing needs registries to reach.
+    """
+    recording = RecordingRegistries()
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(replaced_setting("registry.urls", list(REGISTRY_URLS)))
+        stack.enter_context(
+            replaced_setting(
+                "registry.authorities",
+                {
+                    url: {
+                        "authority": f"registry-{index}",
+                        "principals": [REGISTRY_SIGNER.identity.model_dump(mode="json")],
+                    }
+                    for index, url in enumerate(REGISTRY_URLS)
+                },
+            )
+        )
+        stack.enter_context(
+            patch.object(multi_registry_client, "MultiRegistryClient", recording)
+        )
+        yield recording
+
+
 def pool(
     pool_id: str,
     *,
@@ -415,20 +444,6 @@ class HarnessProjectionSite(FakeProjectionSite):
         return await super().capacity_bucket_projection()
 
 
-@contextlib.contextmanager
-def _replaced_setting(key: str, value: Any):
-    settings = storefront_config.settings
-    original = deepcopy(settings.get(key))
-    settings.set(key, deepcopy(value), merge=False)
-    try:
-        yield
-    finally:
-        if original is None:
-            settings.unset(key, force=True)
-        else:
-            settings.set(key, original, merge=False)
-
-
 @dataclass
 class PublicationApp:
     client: StorefrontClient
@@ -463,7 +478,6 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
-    registries: bool = False,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
     admissibility_default: Mapping[str, Any] | None = None,
@@ -475,8 +489,8 @@ async def publication_app(
     under which an unbacked listing has no settlement option it may publish.
     ``negotiation`` adds the negotiation route, its runtime, and a buyer client,
     so a listing the loop published can be negotiated in the same app.
-    ``registries`` enables registry publication to two registries, recorded by
-    ``RecordingRegistries``; otherwise publication records locally only.
+    Publication goes to two registries, recorded by ``RecordingRegistries``, as
+    a storefront always publishes to every configured registry.
     ``second_site`` configures ``SITE_B`` after ``SITE``, with its own fake site,
     pool list, and projection cache; ``SITE`` stays the home site.
     ``contacts`` composes contact exchange, keyed by site, as the lifespan composes
@@ -512,58 +526,31 @@ async def publication_app(
         )
     }
     with contextlib.ExitStack() as stack:
-        recording = RecordingRegistries() if registries else None
-        stack.enter_context(
-            settings_overrides(
-                enable_registry_discovery=registries,
-                **{"wallet.address": SELLER_WALLET},
-            )
-        )
+        recording = stack.enter_context(recorded_registries())
+        stack.enter_context(settings_overrides(**{"wallet.address": SELLER_WALLET}))
         # Replaced rather than overridden: an override merges into the test
         # configuration's own values, which would append to its lists.
-        stack.enter_context(_replaced_setting("storefront_domains", STOREFRONT_DOMAINS))
+        stack.enter_context(replaced_setting("storefront_domains", STOREFRONT_DOMAINS))
         stack.enter_context(
-            _replaced_setting(
+            replaced_setting(
                 "settlement",
                 contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
+
         stack.enter_context(
-            _replaced_setting(
-                "registry.urls", list(REGISTRY_URLS) if registries else []
-            )
-        )
-        if registries:
-            stack.enter_context(
-                _replaced_setting(
-                    "registry.authorities",
-                    {
-                        url: {
-                            "authority": f"registry-{index}",
-                            "principals": [
-                                REGISTRY_SIGNER.identity.model_dump(mode="json")
-                            ],
-                        }
-                        for index, url in enumerate(REGISTRY_URLS)
-                    },
-                )
-            )
-        stack.enter_context(
-            _replaced_setting("pricing.settlements", [settlement_clause()])
+            replaced_setting("pricing.settlements", [settlement_clause()])
         )
         if admissibility_default is not None:
             # Replaced at its root: unsetting a dotted key leaves the table behind.
             stack.enter_context(
-                _replaced_setting(
+                replaced_setting(
                     "admissibility", {"defaults": {"vm": admissibility_default}}
                 )
             )
         stack.enter_context(patch.dict(storefront_config.CHAINS, chains, clear=True))
         stack.enter_context(patch.object(negotiation_runtime, "CHAINS", chains))
-        if recording is not None:
-            stack.enter_context(
-                patch.object(multi_registry_client, "MultiRegistryClient", recording)
-            )
+
         stack.enter_context(
             patch.object(
                 admin_identity,

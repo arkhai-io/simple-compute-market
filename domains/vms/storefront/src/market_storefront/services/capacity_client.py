@@ -58,7 +58,6 @@ from market_site import dict_resource_satisfies_claim
 from market_site_client import SiteCapacityClient
 
 from market_storefront import container
-from market_storefront.utils.config import get_provisioning_authorities
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +117,8 @@ class _LateServicePeerTrust:
     The runtime is cached across compositions in one process, so each
     composition root binds its own trust here; a site's provider reads whichever
     is bound at each response. A runtime nothing has bound verifies no response.
+    The fulfillment clients built beside the runtime read the same binding, so
+    a site's capacity and fulfillment responses verify against one trust.
     """
 
     def __init__(self) -> None:
@@ -158,6 +159,20 @@ def _capacity_reconciler(
             # unknown and nothing may be closed or reopened on it.
             logger.warning("[CAPACITY] no site projection state; delta not reconciled")
             return
+        # A fungible listing's availability is read from its site's capacity
+        # buckets, which change with the event being reconciled; the held
+        # generation is the last poll's, older than the event. Refresh the
+        # event's site (every site, for a full reconcile) first, as inline
+        # reconciliation refreshes what it reconciles: this never wakes
+        # publication, and a failed fetch leaves the held generation stale,
+        # which is reconciled over as it stands.
+        delta_site = context.delta.site if context.delta is not None else None
+        for site_id in (
+            [delta_site]
+            if delta_site is not None
+            else [projection.site_id for projection in context.projections]
+        ):
+            await state.refresh_site(site_id, families=[CAPACITY_BUCKET])
         db = sqlite_client_factory()
         projection = site_pool_projection(state)
         buckets = site_capacity_buckets(state)
@@ -216,7 +231,7 @@ _capacity_runtime_state: dict[str, Any] = {
     "key": None,
     "runtime": None,
     "site_projections": None,
-    "service_peer_trust": None,
+    "service_peer_trust": _LateServicePeerTrust(),
 }
 
 
@@ -270,6 +285,8 @@ def build_capacity_runtime_for(
     )
     if _capacity_runtime_state["key"] != key:
         late = _LateSiteProjections()
+        # A fresh binding for a fresh runtime, which verifies nothing until a
+        # root binds its trust; the fulfillment clients follow it.
         late_trust = _LateServicePeerTrust()
         _capacity_runtime_state["key"] = key
         _capacity_runtime_state["site_projections"] = late
@@ -525,8 +542,31 @@ class AggregateFulfillmentClient:
 _fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
 
+#: Builds one site's fulfillment client from its site ID, authority URL, the
+#: storefront's signer, and the provider of that site's trusted principals.
+ProvisioningSiteClientFactory = Callable[
+    [str, str, Any, Callable[[], TrustedIdentitySet]], Any
+]
+
+
+def _provisioning_site_client(
+    _site_id: str,
+    url: str,
+    signer: Any,
+    authorities: Callable[[], TrustedIdentitySet],
+) -> ComputeProvisioningClient:
+    return ComputeProvisioningClient(
+        url,
+        signer=signer,
+        caller_role="seller",
+        expected_authorities=authorities,
+    )
+
+
 def build_fulfillment_client(
     capacity_client: AggregateCapacityClient,
+    *,
+    client_factory: ProvisioningSiteClientFactory | None = None,
 ) -> AggregateFulfillmentClient:
     """Assemble the storefront's fulfillment client, paired with ``capacity_client``.
 
@@ -536,31 +576,34 @@ def build_fulfillment_client(
     ``ARCHITECTURE.md``, "Runtime service map") and its exact
     ``reservation_sites`` dict instance, so routing knowledge learned by one
     aggregator is immediately visible to the other.
+
+    Each site's client verifies its responses against that site's own service
+    peer's active principals, through the trust the capacity runtime's site
+    clients read, so a rotation reaches both and one site's principal verifies
+    no other site's responses. ``client_factory`` replaces how a site's client
+    is built from its ID, URL, signer, and provider of trusted principals, and
+    is part of what the cached aggregate is keyed by.
     """
     sites, _ = _capacity_settings()
     signer = container.resolved_marketplace_signer
     if signer is None:
         raise RuntimeError("storefront marketplace signer is unavailable")
-    expected_authorities = get_provisioning_authorities()
+    trust = _capacity_runtime_state["service_peer_trust"]
+    # No principal is part of the key, as for the capacity runtime: each
+    # site's trust is read from the bound service-peer trust at every response.
     key = (
         tuple(sorted(sites.items())),
         signer.identity.scheme.value,
         signer.identity.identifier,
-        tuple(
-            (principal.scheme.value, principal.identifier)
-            for principal in expected_authorities.identities
-        ),
+        trust,
+        client_factory,
     )
     if _fulfillment_aggregate_state["key"] == key:
         return _fulfillment_aggregate_state["client"]
+    build = client_factory or _provisioning_site_client
     aggregate = AggregateFulfillmentClient(
         {
-            name: ComputeProvisioningClient(
-                url,
-                signer=signer,
-                caller_role="seller",
-                expected_authorities=expected_authorities,
-            )
+            name: build(name, url, signer, trust.site_authorities(name))
             for name, url in sites.items()
         },
         reservation_sites=capacity_client.reservation_sites,
@@ -621,29 +664,29 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
 
     The aggregate name is what the admin advance route addresses and what a
     storefront with no site configured still reports; the per-site gates are
-    what actually hold the pollers, since the kit owns their fan-out.
+    what actually hold the pollers, since the kit owns their fan-out, and each
+    site's timer cycles record their outcomes under the same per-site names.
     """
     from market_storefront.utils import config
     from market_storefront.lifecycle import (
         CAPACITY_EVENTS_POLLER,
+        capacity_site_cycle_recorder,
         capacity_site_loop_name,
         declare_and_gate,
         gate,
         idle,
     )
 
-    interval = float(
-        getattr(
-            getattr(config.settings, "capacity", None),
-            "poll_interval",
-            5,
-        )
-        or 5
+    interval = config.site_projection_poll_interval()
+    # The runtime the capacity-events step drains, so the timer and the step
+    # address one runtime's sites.
+    runtime = container.resolved_capacity_runtime or build_capacity_runtime(
+        lambda: sqlite_client
     )
-    runtime = build_capacity_runtime(lambda: sqlite_client)
     await run_capacity_event_pollers(
         functools.partial(runtime.poll_events, interval_seconds=interval),
         gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
         site_gate=lambda site: declare_and_gate(capacity_site_loop_name(site)),
         wait=idle,
+        record_site_cycle=capacity_site_cycle_recorder,
     )

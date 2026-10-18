@@ -33,6 +33,7 @@ import market_storefront.container as _container
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     settings,
+    site_projection_poll_interval,
     source_confirmation_seconds,
 )
 from market_storefront.utils.logging_config import setup_file_logging
@@ -105,8 +106,14 @@ def _require_readable_family_rates() -> None:
 
 
 def _require_source_confirmation_window() -> None:
-    """Refuse to start with a source-confirmation window that is not a positive
-    number, naming the key, rather than refuse every negotiation round."""
+    """Refuse to start, naming the key, with a projection poll interval or a
+    source-confirmation window that is not a positive, finite number, rather
+    than start loops on it or refuse every negotiation round.
+
+    The poll interval is checked first: when the window is not stated it is
+    derived from it.
+    """
+    site_projection_poll_interval()
     source_confirmation_seconds()
 
 

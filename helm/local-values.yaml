@@ -2,9 +2,121 @@
 # values.yaml. Persistent volumes are not retained when the release is
 # uninstalled, so uninstalling and deploying again starts every service from no
 # state rather than from whatever an earlier deployment of other code wrote.
+#
+# Bob also sells here. A storefront with no enabled settlement mechanism refuses
+# to start, and the chart defaults enable none, so this overlay enables Alkahest
+# on the Anvil chain the dev-env chart deploys, and contact exchange. Helm
+# replaces lists rather than merging them, so Bob's agent entry is repeated in
+# full; only `Wallet`, `Chains`, `pricing`, and `Settlement` differ from
+# values.yaml.
 storefront:
   persistence:
     retainOnUninstall: false
+  agents:
+    - name: bob
+      port: 8001
+      component: seller
+      identity:
+        credentialSecret:
+          name: arkhai-bob-identity
+          key: credential
+      internalRegistryTrust:
+        authority: registry-a
+        principals:
+          - scheme: eip191
+            identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+      # The Secret overlay carries the wallet's private key, the one value
+      # Alkahest needs that the chart never renders.
+      secret:
+        createSecret: false
+        secretName: arkhai-bob-runtime
+        configKey: storefront.secrets.toml
+      config:
+        agent_id: bob
+        log_file_path: ./logs/bob.log
+        storefront_domains:
+          - contribution: vms
+            offering_mode: vm
+            domain_identity: compute.v1
+            contract_version: "1.0"
+          - contribution: bare_metal
+            offering_mode: bare_metal
+            domain_identity: bare_metal.v1
+            contract_version: "1.0"
+        Identity:
+          principal:
+            scheme: eip191
+            identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+          service_peers:
+            provisioning_default:
+              role: service
+              site_id: default
+              principals:
+                - scheme: eip191
+                  identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          administrators:
+            operator:
+              principals:
+                - scheme: eip191
+                  identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        # Widened for this development release, as in values.yaml.
+        capacity:
+          source_confirmation_seconds: 3600
+        provisioning:
+          mode: mock
+          identity:
+            principals:
+              - scheme: eip191
+                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+        negotiation:
+          policies:
+            - has_matching_inventory_guard
+            - escrow_shape_guard
+            - bisection
+        # Development values only, never for a public network: the address is
+        # Anvil's deterministic account 2, whose key every Anvil instance
+        # publishes, and the chain is the release's own Anvil.
+        Wallet:
+          address: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        Chains:
+          anvil:
+            rpc_url: http://arkhai-node-operator-dev-env:8545
+            chain_id: 31337
+            alkahest_address_config_path: /app/alkahest_anvil_addresses.json
+        pricing:
+          # The dev chain's deterministic test token, as the Compose lane sells.
+          settlements:
+            - mechanism: alkahest.v1
+              asset: "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+              rate: "100"
+              per: hour
+              mechanism_input:
+                chain: anvil
+                escrow_kind: erc20_escrow_obligation_default
+        Settlement:
+          schema_version: 1
+          priority:
+            - alkahest.v1
+            - contact-exchange.v1
+          alkahest:
+            enabled: true
+            address_config_path: /app/alkahest_anvil_addresses.json
+            oracle_gated: false
+            trusted_oracle_addresses: []
+            interruptible: false
+            interruptible_oracle_addresses: []
+          # Offered only on listings whose clauses select it, such as a pool
+          # override's. A development contact on a reserved domain.
+          contact:
+            enabled: true
+            origins:
+              default:
+                contact_payload:
+                  email: bob-sales@seller.invalid
+            profiles:
+              default:
+                channel: email
+                terms: Quoted per engagement; reply within one business day.
 provisioning:
   persistence:
     retainOnUninstall: false

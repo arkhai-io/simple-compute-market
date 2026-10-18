@@ -48,7 +48,8 @@ credential, secret, or private URL reaches status. The controller MUST be the on
 registers its step and its interval, the controller's timer runs the step through the same
 operation an operator's step does, and that operation holds the loop's lock, so the timer and a
 step never run a cycle concurrently. A kit runtime that fans one loop out into independent
-per-site cycles MUST serialize each site's cycle and that site's step instead.
+per-site cycles MUST serialize each site's cycle and that site's step instead, and MUST record
+each site's timer cycle with the controller under that site's own loop name.
 The controller MUST report, in one snapshot, every loop's state and the last outcome each loop
 recorded, for a storefront's system status to read; a loop that has exited or been cancelled
 MUST remain distinguishable from a running loop whose last cycle failed.
@@ -64,6 +65,12 @@ MUST remain distinguishable from a running loop whose last cycle failed.
 - **WHEN** an operator steps a loop whose timer cycle is in progress
 - **THEN** the step runs after that cycle completes, never alongside it, and each records its
   own outcome
+
+#### Scenario: One site's capacity-event feed fails
+
+- **WHEN** one site's capacity-event poller cycle fails while another site's succeeds
+- **THEN** the controller's snapshot reports the failing site's loop with that cycle failed, by
+  its error's type, and the other site's loop with its own outcome
 
 #### Scenario: A cycle fails on an unexpected exception
 

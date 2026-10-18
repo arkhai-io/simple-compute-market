@@ -33,8 +33,8 @@ from market_delivery import SINK_KEY, discover_sink_settings_models
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
+from market_storefront.retired_settings import RETIRED_KEYS
 from market_storefront.utils.config import (
-    RENAMED_SETTINGS,
     IdentityConfigDeclaration,
     RegistryConfigDeclaration,
     WalletConfigDeclaration,
@@ -49,19 +49,10 @@ SCHEMA_FILES = (
     "helm/charts/storefront/values.schema.json",
 )
 
-#: Keys of the storefront's own configuration that it no longer reads, refused
-#: in an agent's ``config`` in any spelling: the local-inventory settings, whose
-#: inventory is declared at provisioning, and each renamed setting
-#: (``utils.config.RENAMED_SETTINGS``), which also refuses startup. The chart's
-#: own retired values shape is refused by the chart's schema beside this
-#: definition, not here.
-RETIRED_KEYS: tuple[str, ...] = (
-    "resources_csv_path",
-    "resources_csv_inline",
-    "escrow_templates",
-    "capacity.use_site_projection_for_listings",
-    *RENAMED_SETTINGS,
-)
+# The keys of the storefront's own configuration that it no longer reads
+# (`market_storefront.retired_settings`) are refused in an agent's ``config`` in
+# any spelling. The chart's own retired values shape is refused by the chart's
+# schema beside this definition, not here.
 
 # ``[Delivery]``'s own settings: one entry per key in the delivery kit's
 # ``RESERVED_SECTION_KEYS``.

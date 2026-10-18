@@ -215,26 +215,6 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     return float(active.get("settlement_servicing_interval_seconds", 30))
 
 
-#: Settings the storefront has renamed, each to the key that replaced it. A
-#: configuration stating one refuses startup rather than run at a default the
-#: operator did not choose.
-RENAMED_SETTINGS: dict[str, str] = {
-    "claims_sweep_interval": "settlement_servicing_interval_seconds",
-}
-
-
-def renamed_setting_problems(source: Dynaconf | None = None) -> list[str]:
-    """Name each renamed setting the configuration still states, with its
-    replacement."""
-
-    active = settings if source is None else source
-    return [
-        f"{old} was renamed {new}; state {new} instead"
-        for old, new in RENAMED_SETTINGS.items()
-        if active.get(old) is not None
-    ]
-
-
 def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
     """`[capacity.sites]`: each stable site ID and its authority URL."""
 
@@ -264,10 +244,19 @@ _CONFIRMATION_POLL_INTERVALS = 3
 
 
 def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
-    """`[capacity].poll_interval`: seconds between the projection poller's cycles."""
+    """`[capacity].poll_interval`: seconds between the projection poller's
+    cycles and the capacity-event pollers', five unless stated.
+
+    A stated value that is not a positive, finite number is refused by key
+    rather than defaulted: it also sets the default source-confirmation window,
+    which must stay a usable bound.
+    """
 
     active = settings if source is None else source
-    return float(active.get("capacity.poll_interval") or _DEFAULT_POLL_INTERVAL_SECONDS)
+    stated = active.get("capacity.poll_interval")
+    if stated is None:
+        return _DEFAULT_POLL_INTERVAL_SECONDS
+    return _positive_seconds(stated, key="capacity.poll_interval")
 
 
 def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
@@ -290,7 +279,10 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
 
 
 def _positive_seconds(value: Any, *, key: str) -> float:
-    """A stated duration, refused by key when it is not a positive number."""
+    """A stated duration, refused by key unless it is a positive, finite number.
+
+    `nan` fails the comparison, so it is refused with zero and the negatives.
+    """
 
     if isinstance(value, bool):
         raise ValueError(f"[{key}] must be a positive number of seconds")

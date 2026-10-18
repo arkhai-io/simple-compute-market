@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from dynaconf import Dynaconf
 
 from market_capacity_publication import CAPACITY_BUCKET, RESOURCE_POOL, PublicationBinding
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
@@ -15,7 +16,11 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.listing_source_check import check_listing_source
-from market_storefront.utils.config import source_confirmation_seconds
+from market_storefront.utils.config import (
+    settings,
+    site_projection_poll_interval,
+    source_confirmation_seconds,
+)
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
@@ -467,3 +472,30 @@ async def test_startup_refuses_a_window_that_is_not_a_positive_number(stated):
     with settings_overrides(**{"capacity.source_confirmation_seconds": stated}):
         with pytest.raises(ValueError, match=r"capacity\.source_confirmation_seconds"):
             _require_source_confirmation_window()
+
+
+@pytest.mark.parametrize(
+    "stated", [0, -1, "often", float("nan"), float("inf"), "nan", "inf", True]
+)
+async def test_startup_refuses_a_poll_interval_the_unstated_window_derives_from(stated):
+    """With no window stated, the window is three poll intervals, so a poll
+    interval that is not a positive, finite number is refused at startup by its
+    own key, rather than defaulted or carried into the window."""
+    from market_storefront.startup import _require_source_confirmation_window
+
+    with settings_overrides(**{"capacity.poll_interval": stated}):
+        assert settings.get("capacity.source_confirmation_seconds") is None
+        with pytest.raises(ValueError, match=r"capacity\.poll_interval"):
+            site_projection_poll_interval()
+        with pytest.raises(ValueError, match=r"capacity\.poll_interval"):
+            source_confirmation_seconds()
+        with pytest.raises(ValueError, match=r"capacity\.poll_interval"):
+            _require_source_confirmation_window()
+
+
+async def test_an_unstated_poll_interval_is_five_seconds():
+    source = Dynaconf(environments=False)
+    assert site_projection_poll_interval(source) == 5.0
+    assert source_confirmation_seconds(source) == 15.0
+    source.set("capacity", {"poll_interval": 2})
+    assert site_projection_poll_interval(source) == 2.0

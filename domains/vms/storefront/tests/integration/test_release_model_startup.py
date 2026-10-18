@@ -23,7 +23,7 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.utils import sqlite_client as sqlite_module
-from tests.publication_app import _replaced_setting
+from tests._settings_overrides import replaced_setting
 
 # A deterministic development key; never used on any network.
 SEED = b"\x75" * 32
@@ -56,9 +56,9 @@ async def test_both_oracle_gated_and_interruptible_refuse_startup(
         },
     }
     with (
-        _replaced_setting("settlement", settlement),
-        _replaced_setting("db_path", str(db_path)),
-        _replaced_setting(
+        replaced_setting("settlement", settlement),
+        replaced_setting("db_path", str(db_path)),
+        replaced_setting(
             "identity.principal", SIGNER.identity.model_dump(mode="json")
         ),
     ):

@@ -95,6 +95,16 @@ def _render(*, agent: dict | None = None, extra: dict | None = None, files=()) -
         return subprocess.run(command, check=False, capture_output=True, text=True)
 
 
+def _render_local() -> subprocess.CompletedProcess[str]:
+    """The release `make -C helm deploy-local` installs: values.yaml with local-values.yaml."""
+    command = [
+        "helm", "template", RELEASE, str(UMBRELLA),
+        "--values", str(UMBRELLA / "values.yaml"),
+        "--values", str(UMBRELLA / "local-values.yaml"),
+    ]
+    return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
 def _ok(rendered: subprocess.CompletedProcess[str]) -> str:
     assert rendered.returncode == 0, rendered.stderr
     return rendered.stdout
@@ -371,6 +381,13 @@ def test_the_renamed_servicing_interval_is_refused_in_any_spelling() -> None:
     assert config["settlement_servicing_interval_seconds"] == 30
 
 
+def test_the_removed_registry_switch_is_refused_in_any_spelling() -> None:
+    """The storefront refuses to start on the switch it no longer honours,
+    whatever its value; the schema refuses it first."""
+    for key, value in (("enable_registry_discovery", False), ("ENABLE_REGISTRY_DISCOVERY", True)):
+        _refused(_render(agent=_with_config(**{key: value})), key)
+
+
 def test_a_stated_port_must_be_a_number_equal_to_the_agents() -> None:
     _refused(_render(agent=_with_config(port="8001")), "must be a number")
     _refused(_render(agent=_with_config(port=8001.5)), "differs from the agent's port")
@@ -484,6 +501,59 @@ def test_evm_fixture_waits_for_its_chain() -> None:
 
     assert _config(manifest)["Chains"]["anvil"]["chain_id"] == 31337
     assert "wait-for-rpc" in _source(manifest, "deployment.yaml")
+
+
+def test_the_local_release_sells_on_its_own_chain_and_the_defaults_enable_nothing() -> None:
+    defaults = _config(_ok(_render()))
+    local = _config(_ok(_render_local()))
+
+    assert defaults["Settlement"] == {"priority": []}
+    assert local["Settlement"]["priority"] == ["alkahest.v1", "contact-exchange.v1"]
+    assert local["Settlement"]["alkahest"]["enabled"] is True
+    assert local["Settlement"]["contact"]["enabled"] is True
+    assert local["Settlement"]["contact"]["origins"]["default"]["contact_payload"] == {
+        "email": "bob-sales@seller.invalid"
+    }
+    assert local["Chains"]["anvil"]["rpc_url"] == "http://arkhai-node-operator-dev-env:8545"
+    assert local["Wallet"]["address"] == local["Identity"]["principal"]["identifier"]
+    assert local["capacity"]["sites"] == {"default": PROVISIONING_URL}
+
+
+def _startup_refusal(config: dict, python: str) -> list[str]:
+    """What the storefront's own startup refusal reports for one rendered document."""
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        probe = (
+            "import json, warnings; warnings.simplefilter('ignore')\n"
+            "from market_storefront.startup_refusal import StorefrontStartupError,"
+            " require_publishable_storefront\n"
+            "try:\n"
+            "    require_publishable_storefront()\n"
+            "    print(json.dumps([]))\n"
+            "except StorefrontStartupError as exc:\n"
+            "    print(json.dumps([str(exc)]))"
+        )
+        loaded = subprocess.run(
+            [python, "-c", probe],
+            env={**os.environ, "XDG_CONFIG_HOME": home},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    return json.loads(loaded.stdout.strip().splitlines()[-1])
+
+
+def test_the_local_release_passes_the_storefronts_startup_refusal() -> None:
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    assert _startup_refusal(_config(_ok(_render_local())), python) == []
+    # The chart defaults enable no mechanism, so the same check refuses them.
+    (refusal,) = _startup_refusal(_config(_ok(_render())), python)
+    assert "no settlement mechanism is enabled under [Settlement]" in refusal, refusal
 
 
 def test_rendered_document_loads_with_the_storefront_loader() -> None:

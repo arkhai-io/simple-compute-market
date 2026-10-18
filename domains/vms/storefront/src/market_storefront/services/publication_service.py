@@ -79,7 +79,9 @@ def build_publication_runtime(
     return PublicationRuntime(
         repository=sqlite_client,
         hooks=VmPublicationHooks(sqlite_client),
-        enabled=settings.enable_registry_discovery,
+        # Always on: a storefront with no registry to publish to refuses to
+        # start, so publication never runs without one.
+        enabled=True,
         registry_urls=tuple(settings.registry.urls),
         registry_client_factory=registry_client_factory,
         listing_request_factory=ListingRequest,

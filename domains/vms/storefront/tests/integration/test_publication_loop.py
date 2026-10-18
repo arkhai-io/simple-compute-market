@@ -520,6 +520,40 @@ async def test_a_capacity_event_acts_only_on_backed_listings(world):
     assert await state(unbacked) == ("closed", "reconciliation")
 
 
+async def test_a_capacity_event_reconciles_on_the_buckets_current_with_it(world):
+    """A capacity event refreshes its site's buckets before it reconciles.
+
+    The site's availability moves and its event arrives with no projection poll
+    between them, so the buckets the storefront held were the last poll's: the
+    event's own reconciliation must fetch them, closing the backed fungible
+    listing a reservation leaves without capacity and reopening it on release,
+    and it wakes no publication.
+    """
+    world.pools.append(pool("pool-b", backing="backed"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+
+    def set_available(units):
+        for projected in world.pools:
+            projected["resources"][0]["available"]["gpu_count"] = units
+
+    async def state():
+        row = await _listing(world, listing_id)
+        return row["status"], row["closed_by"]
+
+    wakes = len(world.wakes)
+    set_available(0)
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    assert await state() == ("closed", "reconciliation")
+
+    set_available(1)
+    world.site.emit("released")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    assert await state() == ("open", None)
+    assert len(world.wakes) == wakes
+
+
 def _vm_provision(duration_seconds: int = 3600) -> dict:
     return {
         "kind": "compute.v1",
@@ -683,7 +717,7 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
 @pytest.fixture
 async def registry_world(tmp_path):
     async with publication_app(
-        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, registries=True
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE
     ) as app:
         yield app
 

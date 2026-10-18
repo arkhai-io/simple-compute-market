@@ -30,7 +30,12 @@ from datetime import UTC, datetime
 import pytest
 
 from core_storefront.app_startup import StorefrontBackgroundTask
-from market_storefront_kit import LoopNotFound, PreviewNotOffered, StorefrontLoopController
+from market_storefront_kit import (
+    CycleOutcome,
+    LoopNotFound,
+    PreviewNotOffered,
+    StorefrontLoopController,
+)
 
 #: A wait no test should ever see expire; a loop parked in it is woken only by a
 #: tick or a pause request.
@@ -982,6 +987,42 @@ class TestCycleOutcomes:
         error = controller.last_outcome("publication").error
         assert error.type == "_ConfigurationProblem"
         assert error.message == "no registry is configured: [registry].urls is empty"
+
+    async def test_a_cycle_a_kit_runtime_ran_is_recorded_under_its_name(self):
+        """A per-site cycle a kit runtime serialized itself reports its outcome
+        here, disclosed by the same rule, and status reads it in the snapshot
+        beside the loop's own state."""
+        stamp = datetime(2026, 10, 16, 9, 0, tzinfo=UTC)
+        controller = StorefrontLoopController(
+            disclosed_errors=(_ConfigurationProblem,), clock=lambda: stamp
+        )
+        gate = controller.declare("events:east")
+        assert gate() is False
+        secret_url = "https://east.invalid/feed?token=canary-91c2"
+
+        controller.record_cycle("events:east")
+        assert controller.last_outcome("events:east") == CycleOutcome(
+            finished_at=stamp, trigger="timer", completed=True
+        )
+
+        controller.record_cycle("events:east", error=ConnectionError(secret_url))
+        controller.record_cycle(
+            "events:west", error=_ConfigurationProblem("site 'west' has no peer")
+        )
+
+        snapshot = controller.snapshot()
+        east = snapshot["events:east"]
+        assert east.state == "running"
+        assert east.last_outcome.completed is False
+        assert east.last_outcome.stage == "run"
+        assert east.last_outcome.error.to_dict() == {
+            "type": "ConnectionError",
+            "message": None,
+        }
+        assert secret_url not in repr(east.to_dict())
+        assert snapshot["events:west"].last_outcome.error.message == (
+            "site 'west' has no peer"
+        )
 
     async def test_a_timer_cycle_that_fails_is_recorded_as_a_step_would_be(self, observed):
         controller, lock = observed

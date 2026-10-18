@@ -227,11 +227,6 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         "resolve_marketplace_signer",
         lambda: built.setdefault("signer", signer),
     )
-    # The configuration under test publishes nowhere; the refusal it would
-    # meet is tested in tests/integration/test_publishable_startup.py.
-    monkeypatch.setattr(server, "require_publishable_storefront", lambda: None)
-    monkeypatch.setattr(server, "get_service_peer_configs", lambda: {})
-    monkeypatch.setattr(server, "ServicePeerTrust", fake_service_peer_trust)
     monkeypatch.setattr(server, "set_stage_event_db_path", lambda _path: None)
     monkeypatch.setattr(server, "_build_alkahest_clients", lambda: {})
     monkeypatch.setattr(
@@ -287,8 +282,16 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
     second_registry = _registry(second)
     first_registration = first_registry.resolve_mode("vm")
     second_registration = second_registry.resolve_mode("vm")
-    first_app = server.build_vm_storefront_app(registry=first_registry)
-    second_app = server.build_vm_storefront_app(registry=second_registry)
+    configured_peers = {"provisioning_default": ("service", "default", object())}
+    seams = server.VmCompositionSeams(
+        service_peer_configs=lambda: configured_peers,
+        service_peer_trust=fake_service_peer_trust,
+        # The configuration under test publishes nowhere; the refusal it would
+        # meet is tested in tests/integration/test_publishable_startup.py.
+        startup_refusal=lambda: None,
+    )
+    first_app = server.build_vm_storefront_app(registry=first_registry, seams=seams)
+    second_app = server.build_vm_storefront_app(registry=second_registry, seams=seams)
 
     assert first_app.state.storefront_binding == first_registration.binding
     assert second_app.state.storefront_binding == second_registration.binding
@@ -325,6 +328,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         # lifespan, verifying the runtime's site responses and the callbacks.
         trust = built["service_peer_trust"]
         assert trust.db_path == first_services.sqlite_client.db_path
+        assert trust.peers is configured_peers
         assert trust.seeded
         assert built["runtime_trust"] is trust
         assert first_services.service_peer_trust is trust

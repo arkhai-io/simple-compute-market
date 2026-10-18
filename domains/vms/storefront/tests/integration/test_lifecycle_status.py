@@ -1,23 +1,25 @@
 """System status reports every lifecycle loop and its last cycle's outcome.
 
-Driven through the typed client against ``tests.publication_app``. Each case
-makes the publication cycle fail where it composes what it reads, through the
-capacity runtime the cycle takes from the container, and reads system status:
-the publication loop's state and its last outcome, whether the controller's
-timer or an operator's step ran the cycle.
+Driven through the typed client against ``tests.publication_app``. The
+publication cases make the cycle fail where it composes what it reads, through
+the capacity runtime the cycle takes from the container, and read system
+status: the publication loop's state and its last outcome, whether the
+controller's timer or an operator's step ran the cycle. The capacity-event case
+fails one site's feed and reads that site's poller's outcome.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 from market_capacity_publication import CapacityConfigurationError
 from storefront_client import StorefrontClientError
 
 import market_storefront.container as container
-from market_storefront import lifecycle, lifecycle_steps
-from tests.publication_app import publication_app
+from market_storefront import lifecycle, lifecycle_steps, startup
+from tests.publication_app import SITE, publication_app
 
 pytestmark = pytest.mark.asyncio
 
@@ -140,3 +142,46 @@ async def test_every_loop_is_reported_with_its_state(world):
     ):
         assert loops[name]["state"] == "paused", name
         assert loops[name]["last_outcome"] is None, name
+
+
+class _FailedCycleSeen(logging.Handler):
+    """Set once the loop controller logs a failed cycle of loop ``name``.
+
+    The controller logs each failure as it records it, so this is the point a
+    test can read status at, with no wait on time.
+    """
+
+    def __init__(self, name: str) -> None:
+        super().__init__(level=logging.ERROR)
+        self.name_ = name
+        self.seen = asyncio.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.args and record.args[0] == self.name_:
+            self.seen.set()
+
+
+async def test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop(world):
+    """Each site's capacity-event poller records its timer cycles' outcomes
+    under the site's own loop name, the failure by type alone: its text names
+    the site's address."""
+    world.site.reachable = False
+    name = lifecycle.capacity_site_loop_name(SITE)
+    seen = _FailedCycleSeen(name)
+    lifecycle_logger = logging.getLogger(lifecycle.__name__)
+    lifecycle_logger.addHandler(seen)
+    try:
+        startup._start_capacity_events_poller(world.db)
+        await asyncio.wait_for(seen.seen.wait(), timeout=1)
+    finally:
+        lifecycle_logger.removeHandler(seen)
+
+    loops = (await world.client.get_system_status()).lifecycle
+
+    assert loops[name]["state"] == "running"
+    outcome = loops[name]["last_outcome"]
+    assert outcome["trigger"] == "timer"
+    assert outcome["completed"] is False
+    assert outcome["error"] == {"type": "SiteCapacityClientError", "message": None}
+    # The aggregate loop runs no cycle of its own to record.
+    assert loops[lifecycle.CAPACITY_EVENTS_POLLER]["last_outcome"] is None

@@ -236,11 +236,13 @@ class TestCapacityEventPollers:
         started = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 started.set()
                 await asyncio.Event().wait()
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         name = lifecycle.CAPACITY_EVENTS_POLLER
         async with _registered(partial(cc.capacity_events_poller_loop, object()), name):
             # The fan-out starts only once the aggregate has passed its first
@@ -265,7 +267,9 @@ class TestCapacityEventPollers:
         started = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 gates = [paused(site) for site in ("site-a", "site-b")]
                 started.set()
                 while True:
@@ -273,7 +277,7 @@ class TestCapacityEventPollers:
                         gate()
                     await wait(_LONG_INTERVAL)
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         async with _registered(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,
@@ -301,7 +305,9 @@ class TestCapacityEventPollers:
         declared = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 gate_a = paused("site-a")
                 # site-b's gate is bound -- so it is declared and waited on --
                 # but never consulted, standing in for a cycle still in flight.
@@ -311,7 +317,7 @@ class TestCapacityEventPollers:
                     gate_a()
                     await wait(_LONG_INTERVAL)
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         async with _registered(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,

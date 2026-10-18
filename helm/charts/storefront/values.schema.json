@@ -815,7 +815,8 @@
             "^[uU][sS][eE]_[sS][iI][tT][eE]_[pP][rR][oO][jJ][eE][cC][tT][iI][oO][nN]_[fF][oO][rR]_[lL][iI][sS][tT][iI][nN][gG][sS]$": false
           }
         },
-        "^[cC][lL][aA][iI][mM][sS]_[sS][wW][eE][eE][pP]_[iI][nN][tT][eE][rR][vV][aA][lL]$": false
+        "^[cC][lL][aA][iI][mM][sS]_[sS][wW][eE][eE][pP]_[iI][nN][tT][eE][rR][vV][aA][lL]$": false,
+        "^[eE][nN][aA][bB][lL][eE]_[rR][eE][gG][iI][sS][tT][rR][yY]_[dD][iI][sS][cC][oO][vV][eE][rR][yY]$": false
       }
     }
   },

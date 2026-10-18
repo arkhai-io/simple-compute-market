@@ -104,6 +104,9 @@ class SiteEventCycle:
     #: The page was truncated: more events are already waiting.
     truncated: bool = False
     error: str | None = None
+    #: The exception that ended a failed cycle, for a caller recording the
+    #: cycle's outcome by its type; never part of the report.
+    exception: BaseException | None = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -277,6 +280,7 @@ async def _drain_site_events_locked(
             feed_head=feed_head,
             cursor=cursor.last_applied,
             error=str(exc),
+            exception=exc,
         )
     return SiteEventCycle(
         site_name=cursor.site_name,
@@ -301,6 +305,7 @@ async def site_events_poller(
     full_reconcile: Callable[[], Awaitable[None]],
     paused: Callable[[], bool] | None = None,
     wait: Callable[[float], Awaitable[None]] | None = None,
+    record: Callable[[SiteEventCycle], None] | None = None,
 ) -> None:
     """Tail one site authority's capacity-event feed into the local bus.
 
@@ -323,6 +328,10 @@ async def site_events_poller(
     pause is requested, so a pause reaches the gate without waiting out the
     interval. A gated poller requires one: gated but uninterruptible is the
     combination that lets a pause outlast its own bounded wait.
+
+    ``record`` receives every cycle the poller ran, failed or not, once its
+    cursor lock is released -- a held cycle ran nothing and is not reported --
+    so the caller can record each cycle's outcome under this site's loop name.
     """
     if paused is not None and wait is None:
         raise TypeError("a gated site poller requires an interruptible wait")
@@ -353,6 +362,8 @@ async def site_events_poller(
         if cycle is None:
             await asyncio.sleep(_PAUSED_POLL_SECONDS)
             continue
+        if record is not None:
+            record(cycle)
         if cycle.truncated:
             continue  # truncated page — keep draining before waiting
         await (wait(interval) if wait is not None else asyncio.sleep(interval))

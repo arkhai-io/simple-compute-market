@@ -170,10 +170,16 @@ and never retries the request. Each refresh path belongs to one category (02 F4)
 | Poller cycle, `site-projections` step, VM admin refresh route | poll-and-notify | on a resource-pool change |
 | Topology drift check | poll-and-notify | on a resource-pool change |
 | Inline reconciliation (admin reserve, fulfillment event, failure release) | refresh-and-reconcile | never |
+| Capacity-event reconciliation (the event's site's capacity-bucket family; every site's for a full reconcile) | refresh-and-reconcile | never |
 | Override write | refresh-and-wake | always, through the override service's hook |
 
-A wake never advances a held loop: a held publication loop stays held, and the wake makes it
-run promptly once resumed. A failed refresh in any category keeps the site's previous
+A capacity event's reconciliation judges a fungible listing's availability on its site's capacity
+buckets, which move with the event, so it refreshes that family first rather than reconcile over
+the last poll's generation; the delta carries no bucket counts, and waiting for the next poll would
+leave a reservation's listing open for up to a poll interval (decided 2026-10-16, review 06 F2;
+rejected: capacity events advisory until the next poll, which the normative "close-before-reopen
+over availability-backed listings" does not allow). A wake never advances a held loop: a held
+publication loop stays held, and the wake makes it run promptly once resumed. A failed refresh in any category keeps the site's previous
 generation as `stale` with its error and never counts as a confirmation. The compute storefront will eventually pull every
 resource pool once for all listing types, so one uniform state is the shape to refactor
 from. Rejected: families chosen per composition (bare metal holding resource-pool only),
@@ -221,9 +227,8 @@ the computation depend on freshness and the rule domain-specific.
 
 A storefront that derives listings from site projections refuses to start when publishing is
 impossible for the whole storefront (01 F2 / 02 F3): no registry to publish to, or a registry
-without its authority pin (while VM's `enable_registry_discovery` is true); no enabled
-settlement mechanism, so no option can ever be built; and, for bare metal, no configured site
-or a site without exactly one service peer. A storefront that services existing deals only is
+without its authority pin; no enabled settlement mechanism, so no option can ever be built; and
+no configured site or a site without exactly one service peer. A storefront that services existing deals only is
 not supported. Settlement clauses and bare metal's lease bound are per-pool terms that a pool
 override or a pool's hint may supply in place of the storefront-wide defaults, so an empty
 `[pricing].settlements` or an absent `[pricing].default_max_duration_seconds` is not a
@@ -266,6 +271,34 @@ visible.
 Rejected: starting the bare-metal loop only when configured, with publication reported
 unconfigured; and always starting a loop that fails every cycle.
 
+**Decided with the owner, 2026-10-16 (round 05/06 triage):**
+
+- *VM's registry switch is removed* (05 F3). `enable_registry_discovery` let VM start and publish
+  nowhere, the unsupported deployment this decision refuses, so VM always publishes to every
+  `[registry].urls` entry and checks the registry and its pin unconditionally. A configuration
+  stating the key, whatever its value, refuses startup naming it removed, rather than ignoring
+  it, so an operator who had turned publication off is not silently switched on. Rejected:
+  writing an exemption for the switch into this decision and the delta.
+- *Retired keys refuse under their own heading.* The startup refusal names a renamed or removed
+  setting under "the storefront states retired settings", apart from "the storefront cannot
+  publish", since a stale key is not a reason publication is impossible (05 F10).
+- *Each capacity-event site poller records its own outcome* (06 F4). The kit's fan-out keeps
+  each site's cycle under that site's cursor lock rather than the controller's, so each site's
+  timer cycle reports to a recorder the controller provides (`record_cycle`) under the site's
+  loop name, `capacity_events_poller:<site>`, and status reports it; a failure is recorded by
+  type unless disclosed, as every cycle's is. The aggregate `capacity-events` step keeps its own
+  outcome, and the aggregate loop, which runs no cycle, records none. Rejected: narrowing the
+  market-composition requirement to exempt the pollers.
+- *The development release can start* (06 F1 / 05 F2). The charts' defaults enable no
+  settlement mechanism, so a release from them alone is refused, as intended: Alkahest needs a
+  chain and wallet a production release supplies. `helm/local-values.yaml`, which
+  `make -C helm deploy-local` layers, repeats Bob's agent with Alkahest enabled on the Anvil
+  chain the dev-env chart deploys, Bob's development wallet address (Anvil's deterministic
+  account 2, its key in the out-of-band `arkhai-bob-runtime` overlay as before), and contact
+  exchange with a development contact on a reserved domain. A render test runs the
+  storefront's real startup refusal over that render's `storefront.json`, and over the defaults'
+  to show it refuses them. Rejected: enabling a mechanism in the chart defaults.
+
 ### D14. Bare-metal configuration follows the VM storefront's conventions
 
 `DEPLOYMENT_AND_CONFIG.md` is correct, so the bare-metal storefront stops reading
@@ -298,7 +331,16 @@ Secrets is owed. Accepted scope beyond the original proposal.
   development cluster, so these schema changes are written as fresh schema with no upgrade or
   backfill logic. `[provisioning.identity]` remains only for the provisioning service client.
   VM gains per-site pinning; bare metal gains rotation; site URLs are public configuration as
-  VM's are. Bare metal's administrators stay on configuration. Rejected: configuration as the
+  VM's are. Bare metal's administrators stay on configuration. As delivered (Section 10 and its
+  round 05/06 fixes): every client that talks to a site authority -- VM's capacity clients and its
+  per-site fulfillment clients alike -- verifies against that site's peer through one
+  `ServicePeerTrust`, and `[provisioning.identity]` is read only for the provisioning-service
+  client (`fulfillment_service._provisioning_client`), which addresses
+  `provisioning.service_url` rather than a site (05 F1; the plan's 10.2 first left the per-site
+  fulfillment clients on it, which this decision does not allow). A reload of the trust that
+  fails after a change committed never fails or masks the change; the trust turns stale, trusts
+  nothing on its old records, and reloads at its next read, refusing with 503 while that fails
+  (05 F4). Rejected: configuration as the
   response trust set, which splits response and callback trust on every rotation and leaves
   bare-metal rotation blocking restarts; durable trust for VM only; and a new per-site table
   renaming VM's keys.
@@ -441,6 +483,16 @@ Secrets is owed. Accepted scope beyond the original proposal.
   older release ignores the new key and services at its 30-second default (01 F3). Rejected:
   an alias for a transition, which needs a removal owner, and naming the old key while
   ignoring it, which drops a customized cadence silently.
+
+  **Two homes for retired keys** (decided in Section 10, 10.3). A key of the storefront's own
+  configuration that it no longer reads is retired in the storefront's catalogue
+  (`market_storefront.retired_settings`: the local-inventory keys, the renamed
+  `claims_sweep_interval`, the removed `enable_registry_discovery`), which the generated values
+  schema refuses in any spelling, `market-storefront config set` refuses to write naming what
+  replaces it, and startup refuses for a renamed or removed key (the inventory keys, which nothing
+  replaces, do not refuse startup). The chart's hand-written `config.allOf` block holds only the
+  chart's own retired values shape, the pre-0.2.0 keys. One catalogue serves the three refusals,
+  so they cannot drift (05 F9 found `config set` keeping a third list).
 - **C5. Bare-metal status reads held state.** `/health`'s `site_projections` comes from
   `status()` for both families and calls no site.
 - **C6. Bare-metal scenarios hold the loops** through an opt-in per-module fixture resumed

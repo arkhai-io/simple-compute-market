@@ -15,6 +15,7 @@ negotiation runtime.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -24,7 +25,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
 )
-from core_storefront.service_peers import ServicePeerTrust
+from core_storefront.service_peers import ServicePeerConfigs, ServicePeerTrust
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
 from market_capacity_publication import CapacityRuntime, SiteProjectionState
@@ -250,11 +251,30 @@ class VmStorefrontServices:
     introduction_delivery: Any
 
 
+@dataclass(frozen=True, slots=True)
+class VmCompositionSeams:
+    """What the composition root reads its service-peer trust and its startup
+    refusal through.
+
+    The defaults are production's: the configured service peers, the durable
+    trust over the storefront's database, and the refusal of a configuration
+    that states a retired setting or could never publish. A test of the root's
+    wiring supplies compatible objects instead of patching the module.
+    """
+
+    service_peer_configs: Callable[[], ServicePeerConfigs] = get_service_peer_configs
+    service_peer_trust: Callable[[str, ServicePeerConfigs], ServicePeerTrust] = (
+        ServicePeerTrust
+    )
+    startup_refusal: Callable[[], None] = require_publishable_storefront
+
+
 def _build_vm_services(
     *,
     registry: StorefrontDomainRegistry,
     binding: StorefrontDomainBinding,
     domain: MarketDomainContract,
+    seams: VmCompositionSeams = VmCompositionSeams(),
 ) -> VmStorefrontServices:
     registration = registry.resolve_registration(binding)
     if registration.contract is not domain:
@@ -267,7 +287,7 @@ def _build_vm_services(
     # than running without it.
     admissibility_default = parse_configured_admissibility_default()
     require_vm_release_model(domain)
-    require_publishable_storefront()
+    seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
@@ -276,8 +296,8 @@ def _build_vm_services(
 
     # Each site's responses and callbacks are verified against its service
     # peer's principals, which this trust holds once the lifespan seeds it.
-    service_peer_trust = ServicePeerTrust(
-        sqlite_client.db_path, get_service_peer_configs()
+    service_peer_trust = seams.service_peer_trust(
+        sqlite_client.db_path, seams.service_peer_configs()
     )
     site_projections: SiteProjectionState | None = None
     # Capacity reconciliation reads the state built just below, over this
@@ -470,8 +490,15 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
 import market_storefront.lifecycle_steps  # noqa: E402,F401
 
 
-def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
-    """Build the VM HTTP application from one explicit frozen registry."""
+def build_vm_storefront_app(
+    *,
+    registry: StorefrontDomainRegistry,
+    seams: VmCompositionSeams = VmCompositionSeams(),
+):
+    """Build the VM HTTP application from one explicit frozen registry.
+
+    ``seams`` defaults to production's service-peer trust and startup refusal.
+    """
 
     registration = registry.resolve_mode("vm")
     selected_domain = validate_vm_storefront_domain(registration.contract)
@@ -486,6 +513,7 @@ def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
             registry=registry,
             binding=selected_binding,
             domain=domain,
+            seams=seams,
         )
 
     return build_composed_storefront_app(

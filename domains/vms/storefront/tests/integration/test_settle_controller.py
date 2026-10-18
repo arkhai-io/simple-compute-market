@@ -41,13 +41,9 @@ _TEST_SELLER_PRINCIPAL = Identity(
 
 ADMIN_SIGNER = Ed25519Signer(b"\x51" * 32)
 STOREFRONT_SIGNER = Ed25519Signer(b"\x52" * 32)
-PROVISIONING_SIGNER = Ed25519Signer(b"\x53" * 32)
 ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 STOREFRONT_AUTHORITIES = TrustedIdentitySet(
     identities=(STOREFRONT_SIGNER.identity,)
-)
-PROVISIONING_AUTHORITIES = TrustedIdentitySet(
-    identities=(PROVISIONING_SIGNER.identity,)
 )
 
 
@@ -121,10 +117,6 @@ async def admin_client(
         lambda: {"integration-admin": ADMINISTRATORS},
     )
     initialize_administrator_identities(db.db_path)
-    monkeypatch.setattr(
-        "market_storefront.services.capacity_client.get_provisioning_authorities",
-        lambda: PROVISIONING_AUTHORITIES,
-    )
     monkeypatch.setattr(_container, "resolved_alkahest_clients", {})
     _container.resolved_sqlite_client = db
     _container.resolved_marketplace_signer = STOREFRONT_SIGNER

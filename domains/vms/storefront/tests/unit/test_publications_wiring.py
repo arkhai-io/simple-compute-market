@@ -242,7 +242,6 @@ class TestPublishOrderRecordsPublications:
         }
         factory = Mock()
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -263,7 +262,6 @@ class TestPublishOrderRecordsPublications:
         factory = Mock()
 
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -305,7 +303,6 @@ class TestPublishOrderRecordsPublications:
                 "market_storefront.services.publication_service.stage_event",
             ) as stage_event,
             settings_overrides(
-                enable_registry_discovery=True,
                 registry__urls=["http://r1", "http://r2"],
             ),
         ):
@@ -344,7 +341,6 @@ class TestPublishOrderRecordsPublications:
         await _persist_bound_listing(patched_sqlite, order)
         cm, client = _mock_multi_registry(["http://r1", "http://r3"], [])
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -387,7 +383,6 @@ class TestPublishOrderRecordsPublications:
         cm, _client = _mock_multi_registry(["http://r1", "http://r2"], results)
         factory = Mock(return_value=cm)
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -456,7 +451,6 @@ class TestRegistryTargets:
             results,
         )
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2", "http://r3"],
         ):
             runtime = publication_service.build_publication_runtime(
@@ -506,7 +500,6 @@ class TestRegistryTargets:
         ]
         cm, client = _mock_multi_registry(["http://r1", "http://r2"], results)
         with settings_overrides(
-            enable_registry_discovery=True,
             registry__urls=["http://r1", "http://r2"],
         ):
             runtime = publication_service.build_publication_runtime(

@@ -18,7 +18,6 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import fulfillment_service
 from market_storefront.settlement_stages import VmAlkahestSellerStage
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     TEST_SITE_AUTHORITIES,
@@ -27,6 +26,7 @@ from tests.fake_site import (
     site_capacity,
 )
 from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
+from tests.publication_app import recorded_registries
 
 _TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
 _TEST_PROVISIONING_AUTHORITIES = TEST_SITE_AUTHORITIES
@@ -278,10 +278,7 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         controlled_provision,
     )
 
-    with settings_overrides(
-        enable_registry_discovery=False,
-        registry__urls=[],
-    ):
+    with recorded_registries():
         async with site_capacity(
             fake,
             sqlite_client_factory=lambda: client,

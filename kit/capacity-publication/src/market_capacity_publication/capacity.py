@@ -480,6 +480,7 @@ class CapacityRuntime:
         interval_seconds: float,
         paused: Callable[[str], Callable[[], bool]] | None = None,
         wait: Callable[[float], Awaitable[None]] | None = None,
+        record: Callable[[str], Callable[[SiteEventCycle], None]] | None = None,
     ) -> None:
         """Tail every configured authority and reconcile at feed boundaries.
 
@@ -489,7 +490,9 @@ class CapacityRuntime:
         -- a single shared predicate could only stop all of them together.
         Supplying the gate per site keeps the naming with the caller, which is
         the only party that knows what each loop is registered as. ``wait`` is
-        the interruptible wait each site poller uses between cycles.
+        the interruptible wait each site poller uses between cycles. ``record``
+        is a factory in the same way: given a site id, it returns what that
+        site's poller reports each cycle it ran to.
         """
         if interval_seconds <= 0:
             raise CapacityConfigurationError("poll interval must be positive")
@@ -504,6 +507,7 @@ class CapacityRuntime:
                     full_reconcile=self.reconcile_now,
                     paused=paused(site_id) if paused is not None else None,
                     wait=wait,
+                    record=record(site_id) if record is not None else None,
                 )
                 for site_id in self.site_ids
             )
@@ -524,13 +528,20 @@ async def run_capacity_event_pollers(
     gate: Callable[[], bool],
     site_gate: Callable[[str], Callable[[], bool]],
     wait: Callable[[float], Awaitable[None]],
+    record_site_cycle: Callable[[str], Callable[[SiteEventCycle], None]] | None = None,
     gate_seconds: float = AGGREGATE_GATE_SECONDS,
 ) -> None:
     """Run the per-site capacity-event pollers under one gated aggregate loop.
 
     ``poll_events`` is a runtime's ``poll_events`` with its interval bound; it
-    receives ``site_gate`` as its per-site gate factory and ``wait`` as the
-    interruptible wait each site poller uses between cycles. It gathers the site
+    receives ``site_gate`` as its per-site gate factory, ``wait`` as the
+    interruptible wait each site poller uses between cycles, and
+    ``record_site_cycle`` as its per-site factory of where each cycle a site's
+    poller ran is reported. The fan-out serializes each site's cycles under its
+    own lock rather than the loop controller's, so this is how each site's
+    timer cycles reach the controller's record of outcomes, under that site's
+    loop name; the aggregate loop records none of its own, since it runs no
+    cycle. It gathers the site
     pollers and never returns while a site is configured, so awaiting it from a
     gated loop would let that loop gate exactly once and then sit inside the
     call forever -- reaching its gate once is enough to be acknowledged and not
@@ -540,7 +551,13 @@ async def run_capacity_event_pollers(
     surfaced here rather than idled over, so the aggregate loop ends with it.
     """
 
-    pollers = asyncio.create_task(poll_events(paused=site_gate, wait=wait))
+    pollers = asyncio.create_task(
+        poll_events(
+            paused=site_gate,
+            wait=wait,
+            **({} if record_site_cycle is None else {"record": record_site_cycle}),
+        )
+    )
     try:
         while True:
             if gate():

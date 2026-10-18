@@ -2208,6 +2208,10 @@ configuration.
       from `trust.peers`; it no longer imports `get_service_peer_configs`, retiring the
       module patch three VM test files used. The admin rotation and retirement routes
       commit through `trust.identity_authority()` (503 when no trust is composed).
+      **Corrected (round 05/06, 05 F1):** this task's text left `build_fulfillment_client` on
+      `[provisioning.identity]`, wider than D14b, which keeps that set for the
+      provisioning-service client alone; 10.8 moves the per-site fulfillment clients onto their
+      site's peer.
 - [x] 10.3 Interval key (C4): `src/settings.toml`, `src/settlement_composition.py`,
       `src/startup.py`, `src/utils/config.py`'s `settlement_servicing_interval()` (the one
       reader, used by the servicing worker and `src/lifecycle_steps.py`'s registration),
@@ -2371,7 +2375,7 @@ Section 10 handoff:
   site's peer (and `[provisioning.identity]` only for the provisioning client), the
   renamed key, and the two homes of retired keys (10.3).
 
-### Round 05/06 triage fixes (owner dispositions 2026-10-16; not yet made)
+### Round 05/06 triage fixes (owner dispositions 2026-10-16)
 
 Review 06 (external, Sections 8–10) and check 05 (Section 10's fresh-context check), both of
 `5eff4a6`, were triaged together; every finding is disposed of, in
@@ -2380,78 +2384,336 @@ commit naming the round, followed by a fresh-context check of it and the gate qu
 ask the owner: whether validation of `5eff4a6` (no end-to-end run yet) is run or waived for this
 round.
 
-- [ ] 10.7 (06 F1 / 05 F2) **Default release starts locally.** Chart defaults stay free of
+- [x] 10.7 (06 F1 / 05 F2) **Default release starts locally.** Chart defaults stay free of
       Alkahest. `helm/local-values.yaml` enables Alkahest against the Anvil instance the chart
       deploys, with the known development wallets (public, commented as test-only, never for a
       public network), and contact exchange with a development contact. A render test loads the
       `deploy-local` render's `storefront.json` through `STOREFRONT_PYTHON` and runs the real startup
       refusal (`publication_startup_problems`), asserting no problem. Document in
       `DEPLOYMENT_AND_CONFIG.md` at closeout (17.9).
-- [ ] 10.8 (05 F1) **Per-site fulfillment trust.** `build_fulfillment_client` gives each per-site
+      Done. `helm/local-values.yaml` repeats Bob's agent in full (Helm replaces lists), adding
+      `Wallet.address` (Anvil's deterministic account 2, commented as a development value
+      never for a public network), `Chains.anvil` on the dev-env chart's Anvil
+      (`http://arkhai-node-operator-dev-env:8545`, chain 31337, the image's address book), an
+      Alkahest publication clause in the dev chain's test token as the Compose lane sells, and
+      `[Settlement]` with `alkahest.v1` and `contact-exchange.v1` enabled, the contact
+      `bob-sales@seller.invalid` for `default`. The wallet key stays in the out-of-band
+      `arkhai-bob-runtime` overlay, since the chart renders no key material and the refusal
+      needs only an enabled mechanism. Chart defaults unchanged (`Settlement: {priority: []}`
+      in both `values.yaml`). Chart render tests (`TESTING.md` "Chart Render Tests"; the loader
+      half needs `STOREFRONT_PYTHON`): `test_the_local_release_sells_on_its_own_chain_and_the_defaults_enable_nothing`
+      renders values.yaml with local-values.yaml, as `deploy-local` does, and the defaults;
+      `test_the_local_release_passes_the_storefronts_startup_refusal` loads that render's
+      `storefront.json` with the storefront's own loader and runs the real refusal,
+      `require_publishable_storefront()` -- `publication_startup_problems` and, since 10.18,
+      the retired-settings check beside it -- with no problem, and over the defaults' render it
+      reports "no settlement mechanism is enabled under [Settlement]". With the overlay's
+      mechanisms disabled (edited, then restored) both fail. `make -C helm test-render` with
+      `STOREFRONT_PYTHON` passed, these run, not skipped. Evidence of a render the storefront
+      accepts at its refusal, not of a running release: the steps after the refusal need the
+      cluster, which validation's Helm part (`make validate-helm`, deploying `deploy-local`)
+      exercises. `DEPLOYMENT_AND_CONFIG.md` at 17.9.
+- [x] 10.8 (05 F1) **Per-site fulfillment trust.** `build_fulfillment_client` gives each per-site
       `ComputeProvisioningClient` its site's peer provider from `ServicePeerTrust`, as the capacity
       clients have; `[provisioning.identity]` stays only on the provisioning-service client
       (`fulfillment_service.py` `_provisioning_client`). Correct 10.2's text, which widened the
       exception beyond D14b. Tests: a rotation moves fulfillment response verification; one site's
       principal is refused on another site's fulfillment responses.
-- [ ] 10.9 (06 F2) **Capacity events refresh buckets inline.** Capacity-event reconciliation calls
+      Done. `build_fulfillment_client(capacity_client, *, client_factory=None)` gives each
+      site's `ComputeProvisioningClient` `site_authorities(site)` of the trust the capacity
+      runtime's site clients read (`_capacity_runtime_state["service_peer_trust"]`, which the
+      root binds to its `ServicePeerTrust`; created at import, so a client built before any
+      runtime fails closed), keyed by that binding and the factory, no principal.
+      `get_provisioning_authorities` is now read only by `fulfillment_service._provisioning_client`;
+      `capacity_client` no longer imports it, so four test modules that patched it there
+      (`test_listings_api.py`, `test_settle_controller.py`, `test_sync_negotiation_seller_round_hook.py`,
+      `test_order_pause_state.py`) drop the patch. 10.2's text is corrected beside it. Tests in
+      `tests/integration/test_site_trust.py` (10.14; the production builder with each site's
+      provisioning transport replaced by a fake answering a fulfillment status read signed as
+      the site's current principal): before the rotation only the current principal verifies,
+      during the overlap either, after completion only the replacement, the other site
+      untouched; each site's principal is refused on the other's fulfillment responses. With
+      every site's client given one site's provider (module edited, then restored) both tests
+      fail.
+- [x] 10.9 (06 F2) **Capacity events refresh buckets inline.** Capacity-event reconciliation calls
       `refresh_site(site_id, families=[CAPACITY_BUCKET])` before deriving candidates and never wakes
       publication (refresh-and-reconcile); a failed fetch keeps the generation stale and reconciles
       over what is held. Add the row to `design.md` D4 and a scenario to the storefront-publication
       delta. Regression test (application integration): change availability and emit a reserving
       event without stepping `site-projections` — the backed fungible listing closes; release —
       it reopens. Keep the existing explicit-refresh test.
-- [ ] 10.10 (05 F3) **Registry discovery switch removed.** `enable_registry_discovery` is no
+      Done. `services/capacity_client._capacity_reconciler` refreshes the capacity-bucket
+      family of the delta's site -- every configured site's for a full reconcile, whose delta
+      is none -- through `refresh_site(site, families=[CAPACITY_BUCKET])` before it derives
+      anything; `refresh_site` wakes nothing and never raises, so a failed fetch leaves the
+      held generation stale and the reconcile runs over it. `design.md` D4 gains the table row
+      and a paragraph with the rejected alternative; the storefront-publication delta's
+      "Projection-backed listing candidate derivation" gains a sentence and the scenario "A
+      capacity event arrives before the next poll". Application integration through
+      `StorefrontClient`, over `tests.publication_app`:
+      `test_publication_loop.py::test_a_capacity_event_reconciles_on_the_buckets_current_with_it`
+      -- availability set to 0 and a `reserved` event emitted, `capacity-events` stepped with
+      no `site-projections` step: the backed fungible listing is closed by reconciliation;
+      availability 1 and `released`: reopened; no publication wake recorded. With the refresh
+      removed (module edited, then restored) it fails. The explicit-refresh test
+      (`test_a_capacity_event_acts_only_on_backed_listings`) is kept.
+- [x] 10.10 (05 F3) **Registry discovery switch removed.** `enable_registry_discovery` is no
       longer read; registry publication is always on, so the startup refusal checks the registry
       and its authority pin unconditionally. A configuration stating the key refuses startup naming
       it as removed (refusing, not ignoring, so an operator who turned publication off is not
       silently switched on); add it to `RETIRED_KEYS` and regenerate both schemas. Reword D6's
       parenthetical; update tests that set the switch.
-- [ ] 10.11 (06 F4) **Per-site capacity-event outcomes.** `run_capacity_event_pollers` (kit) records
+      Done. VM no longer reads the switch: `settings.toml` and the `config init` template drop
+      it, `publication_service.build_publication_runtime` passes `enabled=True`, and the
+      startup refusal checks the registry and its pin unconditionally. The key is retired in
+      the new catalogue `market_storefront/retired_settings.py` (`REMOVED_SETTINGS`, in
+      `RETIRED_KEYS`, 10.18): stated with any value it refuses startup, "enable_registry_discovery
+      was removed: …", under the retired-settings heading; `make helm-values-schema`
+      regenerated both schemas, which refuse it in any spelling. D6 reworded, with the
+      decision. Tests that set the switch drop it (`test_startup_refusal.py`,
+      `test_publications_wiring.py`, `test_admissibility_default_composition.py`,
+      `test_publishable_startup.py`); those that turned it off to publish nowhere now publish to
+      the two recorded test registries through the new `tests.publication_app.recorded_registries()`
+      (`test_fulfillment_service.py`, `test_listings_api.py`, `test_admin_api.py`), and so does
+      the publication harness, whose default was registries off: its `registries` parameter
+      goes and it always records. `test_listings_api.py`'s seeded listings name the configured
+      storefront URL, so `test_resume_returns_registry_status` now reads `published` where it
+      read `disabled`. Unit: `test_startup_refusal.py` -- the switch stated true or false is
+      refused and the registry is still checked. Application startup (real app and lifespan):
+      `test_publishable_startup.py` "the removed registry switch". Chart render:
+      `test_the_removed_registry_switch_is_refused_in_any_spelling` (fails against the schemas
+      before regeneration). CLI unit: 10.18. The API-credit storefront keeps its own
+      `enable_registry_discovery`: it derives no listings from site projections, so D6's
+      refusal does not cover it.
+- [x] 10.11 (06 F4) **Per-site capacity-event outcomes.** `run_capacity_event_pollers` (kit) records
       each per-site timer cycle's outcome through a callback the controller provides, under a
       per-site loop name in the snapshot, keeping the per-site cursor lock; the aggregate step keeps
       its aggregate outcome. VM composes it; a status test shows a failing site feed. Bump the kit
       and move pins. Section 15's API-credit pollers reuse it.
-- [ ] 10.12 (06 F3) **Poll interval validated.** `site_projection_poll_interval()` applies the
+      Done. Kit capacity-publication: `SiteEventCycle.exception` (the exception ending a
+      failed cycle, never in `to_dict()`); `site_events_poller(record=)` is called with every
+      cycle it ran, after the cursor lock is released (a held cycle ran nothing and reports
+      nothing); `CapacityRuntime.poll_events(record=)` takes a per-site factory, as `paused`
+      is; `run_capacity_event_pollers(record_site_cycle=)` hands it through; `SiteEventCycle` is
+      exported. Kit storefront: `StorefrontLoopController.record_cycle(name, *, error=None,
+      trigger="timer")`, recording as `run_cycle` records (a failure in stage `run`, its
+      message only for a disclosed type) under any name, so the snapshot reports it beside the
+      declared gate's state. VM: `lifecycle.capacity_site_cycle_recorder(site)` records under
+      `capacity_events_poller:<site>`, passed by `capacity_events_poller_loop`, which now polls
+      the container's runtime -- the one the `capacity-events` step drains -- falling back to the
+      cached builder, and reads its interval through `site_projection_poll_interval()` (10.12).
+      The aggregate step keeps its outcome; the aggregate loop records none. Versions:
+      `arkhai-kit-capacity-publication` 0.10.0 (pinning core `==0.15.1`, 10.13),
+      `arkhai-kit-storefront` 0.6.0; the VM, bare-metal, API-credit storefronts' and the
+      provisioning service's exact pins follow. market-composition delta: the fan-out clause
+      and the scenario "One site's capacity-event feed fails"; D6 records the decision. Tests:
+      kit unit, `make -C kit test-capacity-publication` 97 passed (three new in
+      `test_capacity_event_pollers.py`: each site's poller reports every cycle with the
+      exception ending a failed one, another site's its own; a held poller reports nothing
+      while a step for its site still runs; the aggregate hands each site's recorder to the
+      fan-out); kit unit, `make -C kit test-storefront` 101 passed (one new: an outcome recorded
+      under a per-site name, disclosed by the rule, in the snapshot beside the declared gate).
+      VM application integration through `StorefrontClient`, over `tests.publication_app`:
+      `test_lifecycle_status.py::test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop`
+      -- the site unreachable, the pollers started by startup's `_start_capacity_events_poller`,
+      the controller's failure log observed through a logging handler (no wait on time), then
+      `get_system_status()` reports `capacity_events_poller:site-a` running with a failed timer
+      outcome `{"type": "SiteCapacityClientError", "message": None}` and the aggregate with no
+      outcome. `test_loop_gate_wiring.py`'s three capacity-poller cases inject their fake
+      runtime through the container instead of patching `build_capacity_runtime`, the fake
+      taking `record`. Section 15's API-credit pollers can pass the same recorder.
+- [x] 10.12 (06 F3) **Poll interval validated.** `site_projection_poll_interval()` applies the
       positive, finite rule (zero refused, not defaulted); startup validates the interval and the
       derived window before anything runs. Tests: zero, negative, non-numeric, `nan`, `inf`, window
       unset.
-- [ ] 10.13 (05 F4) **Trust reload never masks a commit.** In `ServicePeerTrust`, a reload failure
+      Done. `utils.config.site_projection_poll_interval()`: unset is five seconds; a stated
+      value goes through `_positive_seconds`, so zero (no longer defaulted), negatives, text,
+      a boolean, `nan`, and `inf` are refused naming `capacity.poll_interval`, and the derived
+      window inherits only a usable interval. `capacity_events_poller_loop` read the interval
+      itself, defaulting zero to five; it now reads this. Startup's
+      `_require_source_confirmation_window` checks the interval and then the window, before any
+      loop starts. **Differed:** it stays a startup step, as it was, after the database opens,
+      rather than move into the pre-database refusal; nothing reads either value before it.
+      Unit (`test_listing_source_check.py`): eight values with the window unset, each refused by
+      key from `site_projection_poll_interval`, `source_confirmation_seconds`, and the startup
+      step; unset gives five and a fifteen-second window. Application startup: 10.16's lifespan
+      case stops at this step on `poll_interval = 0`.
+- [x] 10.13 (05 F4) **Trust reload never masks a commit.** In `ServicePeerTrust`, a reload failure
       after a committed change is logged, never raised; the commit's result or refusal is returned;
       the trust is marked stale and the next verification or callback check retries the reload.
       `register_subject` is routed through the trust. Library integration test forcing a reload
       failure after a commit.
-- [ ] 10.14 (05 F5) **Site-trust test at its stated level.** Run the real app with its lifespan (the
+      Done. `core_storefront.service_peers.ServicePeerTrust.reload_after_change()`, called by
+      the trust's identity authority after every change -- `register_subject` now among them --
+      catches any failure, logs it, and marks the trust stale; the change's own result or
+      refusal is what the call returns or raises. While stale, a read (`_site_status`, behind
+      both the site provider and the callback check) reloads first and, while that fails,
+      refuses with a 503 `AuthError`, so nothing verifies against records that predate a
+      committed change. The load is factored into `_read_sites`. `arkhai-core-storefront`
+      0.15.1; VM requires `>=0.15.1`. Library integration
+      (`core/storefront/tests/integration/test_service_peers.py`, three new, through a test
+      subclass whose `_read_sites` fails while armed, as `ARCHITECTURE.md` permits a narrow
+      persistence interface to be paused): a rotation whose reload failed returns, durable state
+      holds it, reads refuse 503 until the reload succeeds and then follow the rotation; a
+      disable whose reload failed leaves its principal untrusted; a refused `register_subject`
+      raises its own refusal. With the catch narrowed and the stale retry removed (module
+      edited, then restored) all three fail. `make test-core`: core storefront 216 passed, 2
+      skipped.
+- [x] 10.14 (05 F5) **Site-trust test at its stated level.** Run the real app with its lifespan (the
       trust startup seeds), observe response verification through a storefront operation that
       calls the site, send `capacity_released` signed by the old principal after the overlap
       (refused) and the new one (accepted), reset state only through public seams; fix the
       docstring. If the lifespan cannot run without a reachable provisioning service, keep the
       router-level test and label it honestly.
-- [ ] 10.15 (05 F6) **No module patches in the composition test.** Inject the peer configuration
+      Done at the router level, labelled so. The lifespan cannot run here without a reachable
+      provisioning service: startup's `preflight_provisioning` probes
+      `provisioning.service_url` over the network with real waits, and its projection load and
+      capacity-event pollers reach the sites through the root's runtime, which takes no
+      transport. `tests/integration/test_site_trust.py` is rewritten and its docstring says
+      what it is: router-level application integration -- the admin router behind both
+      authentication middlewares, over the production capacity runtime, fulfillment client
+      builder, projection state, and a trust seeded as startup seeds it, injected through the
+      container. Verification is observed through storefront operations: a `site-projections`
+      cycle through `admin_run_lifecycle_cycle` (the poll's signed answer verifies, or the
+      site's family turns stale with its error) and a fulfillment status read (10.8). After the
+      overlap a `capacity_released` callback through the typed client
+      (`notify_capacity_released`) signed by the retired principal is refused (403, before any
+      handler) and one signed by the replacement is applied, releasing a reservation at the
+      site. State is reset only through public seams: a fresh client factory keys a fresh
+      runtime and trust binding, container fields are restored, and settings go through
+      `settings_overrides` and `replaced_setting`; no private module state is touched. Two
+      cases pass.
+- [x] 10.15 (05 F6) **No module patches in the composition test.** Inject the peer configuration
       and trust into the composition root (production defaults) instead of patching
       `server.get_service_peer_configs`, `server.ServicePeerTrust`,
       `server.require_publishable_storefront`; assert "no database" through the file's absence, not
       `sqlite_module._sqlite_client`; move `_replaced_setting` to a public test utility.
-- [ ] 10.16 (05 F7) **Empty settlements start.** If cheap, a lifespan case with empty
+      Done. `server.VmCompositionSeams(service_peer_configs, service_peer_trust,
+      startup_refusal)`, production's by default, is taken by `build_vm_storefront_app(...,
+      seams=)` and `_build_vm_services`; `test_server_app_composition.py` passes one instead of
+      patching `server.get_service_peer_configs`, `server.ServicePeerTrust`, and
+      `server.require_publishable_storefront`, and asserts the configured peers reach the one
+      trust. `test_publishable_startup.py`'s refused cases assert no database by the file's
+      absence and no longer reset or read `sqlite_module._sqlite_client`. `_replaced_setting`
+      becomes `tests._settings_overrides.replaced_setting`, documented, and its five importers
+      follow. The composition test's other module patches predate Section 10 and stay.
+- [x] 10.16 (05 F7) **Empty settlements start.** If cheap, a lifespan case with empty
       `[pricing].settlements` passing the refusal and reaching the database open; otherwise record
       the disclosed split as accepted.
-- [ ] 10.17 (05 F8) **Decisions recorded.** In `design.md`: the two homes for retired keys (beside
+      Done. Application startup, the real app and lifespan:
+      `test_publishable_startup.py::test_a_storefront_whose_terms_live_in_its_pools_starts` --
+      with `[pricing].settlements` empty the refusal passes and the lifespan opens the
+      storefront's database (the file exists), then stops at the next startup check, a
+      `poll_interval` of 0 (10.12), because the steps after it reach the network; no loop
+      starts. The case isolates the process's SQLite client (reset to none, restored), which
+      the lifespan creates and does not own clearing. That such a storefront publishes under its
+      pools' clauses stays `test_pool_overrides_api.py`'s evidence.
+- [x] 10.17 (05 F8) **Decisions recorded.** In `design.md`: the two homes for retired keys (beside
       C4), `[provisioning.identity]` only for the provisioning client (D14b), and this round's
       decisions (local-values settlement, capacity-event inline refresh in D4, the removed
       discovery switch in D6, per-site poller outcomes in D6). Name each destination in 17.9:
       `DEPLOYMENT_AND_CONFIG.md` "Storefront agents: pass-through configuration" (retired keys,
       removed switch, local-values settlement), storefront-publication architecture "Trusted site
       routing", the storefront-publication and market-composition deltas.
-- [ ] 10.18 (05 F9, F10, F11) **Smaller fixes.** `market-storefront config set` refuses every key in
+      Done. `design.md`: C4's "Two homes for retired keys" (now one catalogue for the
+      storefront's own keys, 10.18); D14b's as-delivered note (every site client on the site's
+      peer, `[provisioning.identity]` only for the provisioning-service client, the stale-trust
+      rule); D4's capacity-event row and paragraph; D6's reworded refusal and its "Decided with
+      the owner, 2026-10-16" list (the removed switch, the retired-settings heading, per-site
+      poller outcomes, the local release's settlement). 17.9 names the destinations.
+- [x] 10.18 (05 F9, F10, F11) **Smaller fixes.** `market-storefront config set` refuses every key in
       `RETIRED_KEYS`, naming its replacement, and the duplicate `_RETIRED_INVENTORY_KEYS` goes (unit
       test: `config set claims_sweep_interval` refused naming `settlement_servicing_interval_seconds`);
       the startup refusal reports retired-key problems under their own heading, separate from
       publication problems, docstring and test text updated; remove the unused
       `container.service_peer_trust()`; add a 17.10 note to confirm `startup_refusal.py`'s docstring
       citation resolves after the archive.
-- [ ] 10.19 Validation for the round: VM storefront frozen, kit capacity-publication, core storefront,
+      Done. `market_storefront/retired_settings.py` is the one catalogue: the inventory keys,
+      `RENAMED_SETTINGS`, `REMOVED_SETTINGS`, `RETIRED_KEYS`, `retired_setting(key)` (any
+      spelling, a key under a retired table included), and `retired_setting_explanation`; it
+      imports only the standard library, so the command line reads it without loading the
+      storefront. `values_schema.RETIRED_KEYS` is it; `market-storefront config set` refuses
+      every retired key with its explanation, and `_RETIRED_INVENTORY_KEYS` goes (CLI unit,
+      `tests/unit/cli/test_config.py`: `claims_sweep_interval` in two spellings refused naming
+      `settlement_servicing_interval_seconds`, `enable_registry_discovery` refused as removed,
+      the inventory case unchanged). `utils.config`'s `RENAMED_SETTINGS` and
+      `renamed_setting_problems` move to the catalogue and `startup_refusal.retired_setting_problems`;
+      `require_publishable_storefront` reports "the storefront states retired settings: …"
+      and "the storefront cannot publish: …" as separate sections, and
+      `publication_startup_problems` reports publication problems only; module docstring and
+      tests updated (`test_startup_refusal.py`, `test_config_loader.py`,
+      `test_publishable_startup.py`, whose cases each assert their heading and not the other).
+      `container.service_peer_trust()` removed. 17.10 carries the docstring citation note.
+- [x] 10.19 Validation for the round: VM storefront frozen, kit capacity-publication, core storefront,
       `make -C helm test-render` with `STOREFRONT_PYTHON`, `make helm-values-schema` committed,
       `make -k test` plus the frozen projects, packaging, hygiene, citations, `openspec validate
       --strict`; then a fresh-context check and the gate question for reviews 05/06.
+      Done, except the fresh-context check and the gate, which the orchestrator runs. VM
+      storefront frozen with the rebuilt core, capacity-publication, and kit-storefront wheels
+      reinstalled (`UV_FROZEN=1 make test-unit test-integration`): unit 1069 passed, 1 skipped;
+      integration 444 passed (application integration and application startup; `test_alkahest`
+      against Anvil included). `make -C kit test-capacity-publication` 97 passed and `make -C
+      kit test-storefront` 101 passed (unit); `make test-core`: core storefront 216 passed, 2
+      skipped (library integration among them). `make helm-values-schema` regenerated both
+      schemas (the one new retired pattern each), committed; `make -C helm test-render` with
+      `STOREFRONT_PYTHON` passed, the loader and startup-refusal checks run, not skipped. `make -k
+      test`: every suite it ran passed -- bare metal 134 + 324 + 11 + 40, API-credit storefront
+      153, provisioning service 675 + 463, e2e unit 943, the Helm and deployment-packaging suites
+      among them -- and it stopped only at the reinit of `kit/policy`, `domains/vms/storefront`,
+      and `domains/vms/buyer` (the PyTorch index is refused here, as in 2.6), run frozen:
+      `kit/policy` 80 passed, VM buyer 202 passed, VM storefront as above. Locks:
+      `scripts/uv_project.py lock` relocked the nine projects locking a bumped package that
+      resolve here (`core/storefront`, `kit/capacity-publication`, `kit/storefront`,
+      `domains/vms/domain`, `domains/bare_metal`, `domains/bare_metal/storefront`,
+      `domains/apicredits/storefront`, `provisioning/compute/service`, `e2e-tests`); VM
+      storefront's lock was edited by hand with the six substitutions uv wrote into bare metal's
+      lock for the three packages (versions and wheel names) plus its three root specifiers
+      (core floor, the two exact pins); neither `kit/policy` nor VM buyer locks any of them (16.6
+      relocks VM storefront). `make check-packaging` (architecture rules included), `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks CHANGE=share-site-projection-state`, and `openspec
+      validate --strict` pass. No repository typing target exists. The pipeline was not run.
+      **End-to-end, read from the lanes' configuration (the pipeline was not run):** every
+      VM-lane scenario starts Bob's and Alice's storefronts, whose overlays state neither retired
+      key and pass the refusal, and whose packaged defaults no longer state
+      `enable_registry_discovery`, so each start exercises the retired-settings check; every
+      deal scenario's fulfillment reads (`e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`,
+      `e2e_non_erc20_settlement`) now verify against the `default` site's peer, whose principal
+      the overlays also name under `[provisioning.identity]`, so the lane's trust is unchanged in
+      effect; every scenario stepping `capacity-events` (`e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`,
+      `e2e_non_erc20_settlement`) refreshes the site's bucket family in the step;
+      and every VM-lane poller records per-site outcomes no scenario reads. Validation's Helm
+      part deploys `deploy-local`, whose Bob now passes the refusal (10.7); the Helm smoke tests
+      run against it. No bare-metal or API-credit scenario reaches the round's VM code; their
+      storefronts take the kit and core bumps, unchanged in behaviour.
+
+Round 05/06 handoff:
+
+- VM's one retired-key catalogue is `market_storefront.retired_settings`; a key retired later
+  goes there (and its model loses the field first, 5's handoff), and the schemas regenerate.
+  Startup refuses renamed and removed keys only; the inventory keys stay schema and `config
+  set` refusals.
+- Every VM site client verifies against the late-bound trust in
+  `capacity_client._capacity_runtime_state["service_peer_trust"]`; a new runtime key makes a
+  fresh, unbound binding, which the root then binds. `build_fulfillment_client(...,
+  client_factory=)` is the fulfillment seam, as `site_client_factory` is the capacity one.
+  Bare metal's 12.2 needs the same for its per-site `ComputeProvisioningClient`s.
+- `ServicePeerTrust.reload_after_change()` is the post-change reload; `reload()` still raises
+  and is what seeding and a deliberate reload use. A test pauses the load by overriding
+  `_read_sites` in a subclass.
+- The capacity-event recorder: Section 15's API-credit storefront can pass
+  `record_site_cycle=` a per-site `controller.record_cycle` wrapper as VM's
+  `lifecycle.capacity_site_cycle_recorder` does. `capacity_events_poller_loop` now polls the
+  container's runtime, so a test injects its runtime there, not by patching
+  `build_capacity_runtime`.
+- `server.VmCompositionSeams` is where further root seams belong; the composition test still
+  patches the root's other builders (pre-existing).
+- `tests.publication_app` always publishes to two recorded registries
+  (`recorded_registries()`, usable alone); a test that closes or reopens a listing outside the
+  harness needs it, since publication no longer runs without a registry.
+- The API-credit storefront keeps its own `enable_registry_discovery`; D6's refusal does not
+  cover it (it derives no listings from site projections). Section 15 renames only its interval
+  key.
 
 ## 11. Bare-metal configuration through files
 
@@ -2780,9 +3042,26 @@ documentation only; a part needing code returns the change to implementation.
       - The `spec.md` files the deltas cover (`storefront-publication`,
         `market-composition`, `deployment-state`, `negotiation-protocol`) are written by the
         archive in 17.11; the record names them.
+      - **Amended (round 05/06, 10.17):** `DEPLOYMENT_AND_CONFIG.md` "Storefront agents:
+        pass-through configuration" -- the storefront's one retired-key catalogue beside the
+        chart's own retired values block (C4's two homes), `enable_registry_discovery` removed
+        and refused, and `helm/local-values.yaml` enabling Alkahest on the release's Anvil and
+        contact exchange for `deploy-local` while the chart defaults enable none (D6);
+        `storefront-publication/architecture.md` "Trusted site routing" -- every site client,
+        capacity and fulfillment, on its site's peer, `[provisioning.identity]` only for the
+        provisioning-service client, and the stale-trust rule (D14b), and "Unknown sites and
+        inline reconciliation" -- a capacity event refreshes its site's buckets first (D4);
+        `market-composition/architecture.md` "Storefront composition kit" -- per-site
+        capacity-event outcomes through the controller's `record_cycle` (D6). The normative
+        halves are in the storefront-publication and market-composition deltas.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.
+      **Amended (round 05/06, 05 F11):** after 17.11's archive, confirm that the requirement
+      `domains/vms/storefront/src/market_storefront/startup_refusal.py`'s docstring cites, "A
+      storefront that cannot publish refuses to start" in
+      `openspec/specs/storefront-publication/spec.md`, exists there; until the archive it is
+      only in the change's delta.
 - [ ] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
       -y`, merging the four deltas; the index row links the archive.
 

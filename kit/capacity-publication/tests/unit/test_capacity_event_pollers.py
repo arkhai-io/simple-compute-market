@@ -1,5 +1,6 @@
 """The aggregate capacity-event loop holds while gated and surfaces a failed fan-out,
-and each site's cycle is serialized with that site's step.
+each site's cycle is serialized with that site's step, and each site's poller
+reports every cycle it ran.
 
 The aggregate's cadence is the injected wait, which the test drives: each wait
 parks until the test ticks it or a pause is requested. Nothing here waits on time.
@@ -348,3 +349,138 @@ async def test_a_poller_held_while_it_waited_on_a_step_runs_no_cycle(_fresh_curs
     finally:
         poller.cancel()
         await asyncio.gather(poller, return_exceptions=True)
+
+
+class _Feed:
+    """One site's event feed, failing its reads while ``failing`` is set."""
+
+    def __init__(self, site_id: str) -> None:
+        self.base_url = f"http://{site_id}.invalid"
+        self.failing: Exception | None = None
+
+    async def events_after(self, after: int, limit: int | None = None):
+        if self.failing is not None:
+            raise self.failing
+        return [], after
+
+
+class _Recorder:
+    """Where each site's poller reports the cycles it ran, by site."""
+
+    def __init__(self) -> None:
+        self.cycles: dict[str, list] = {}
+        self.reported = asyncio.Event()
+
+    def __call__(self, site_id: str):
+        def record(cycle) -> None:
+            self.cycles.setdefault(site_id, []).append(cycle)
+            self.reported.set()
+
+        return record
+
+    async def next_report(self) -> None:
+        self.reported.clear()
+        await asyncio.wait_for(self.reported.wait(), timeout=1)
+
+
+async def test_each_sites_poller_reports_every_cycle_it_ran_with_any_failure(_fresh_cursors):
+    """A failed cycle is reported with the exception that ended it, so its
+    outcome can be recorded by type; another site's cycles are its own."""
+    feeds = {"east": _Feed("east"), "west": _Feed("west")}
+    refused = ConnectionError("http://east.invalid refused the connection")
+    feeds["east"].failing = refused
+    runtime = CapacityRuntime(
+        sites=[CapacitySite(site, f"http://{site}.invalid", None) for site in feeds],
+        signer=object(),
+        placement=fill_first,
+        reconcile=_no_reconcile,
+        site_client_factory=lambda site, signer: feeds[site.site_id],
+    )
+    for site in feeds:
+        site_event_cursor(site).last_applied = 1
+    recorder = _Recorder()
+    control = _Control()
+
+    pollers = asyncio.create_task(
+        runtime.poll_events(
+            interval_seconds=60, paused=None, wait=control.wait, record=recorder
+        )
+    )
+    try:
+        while set(recorder.cycles) != {"east", "west"}:
+            await recorder.next_report()
+        (east,) = recorder.cycles["east"]
+        (west,) = recorder.cycles["west"]
+        assert east.exception is refused
+        assert east.error == str(refused)
+        assert "exception" not in east.to_dict()
+        assert west.exception is None and west.error is None
+    finally:
+        pollers.cancel()
+        await asyncio.gather(pollers, return_exceptions=True)
+
+
+async def test_a_held_poller_reports_no_cycle(_fresh_cursors):
+    feed = _Feed("east")
+    runtime = CapacityRuntime(
+        sites=[CapacitySite("east", "http://east.invalid", None)],
+        signer=object(),
+        placement=fill_first,
+        reconcile=_no_reconcile,
+        site_client_factory=lambda site, signer: feed,
+    )
+    site_event_cursor("east").last_applied = 1
+    recorder = _Recorder()
+    gate_reads = asyncio.Event()
+
+    def held() -> bool:
+        gate_reads.set()
+        return True
+
+    poller = asyncio.create_task(
+        site_events_poller(
+            runtime.client(),
+            "east",
+            feed,
+            60,
+            full_reconcile=runtime.reconcile_now,
+            paused=held,
+            wait=_park,
+            record=recorder("east"),
+        )
+    )
+    try:
+        await asyncio.wait_for(gate_reads.wait(), timeout=1)
+        # A step for the held site still runs, and is the step's to report.
+        cycle = await asyncio.wait_for(runtime.drain_events_once("east"), timeout=1)
+        assert cycle.error is None
+        assert recorder.cycles == {}
+    finally:
+        poller.cancel()
+        await asyncio.gather(poller, return_exceptions=True)
+
+
+async def test_the_aggregate_hands_each_site_where_its_cycles_are_reported():
+    received = {}
+    started = asyncio.Event()
+    control = _Control()
+    recorder = _Recorder()
+
+    async def _poll_events(*, paused, wait, record):
+        received.update(paused=paused, wait=wait, record=record)
+        started.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(
+        run_capacity_event_pollers(
+            _poll_events,
+            gate=control.gate,
+            site_gate=_site_gate,
+            wait=control.wait,
+            record_site_cycle=recorder,
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await _stop(task)
+
+    assert received == {"paused": _site_gate, "wait": control.wait, "record": recorder}

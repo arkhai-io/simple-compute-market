@@ -39,28 +39,12 @@ from market_storefront.publication_migration import (
     format_publication_migration_result,
     migrate_publication_config,
 )
+from market_storefront.retired_settings import (
+    retired_setting,
+    retired_setting_explanation,
+)
 
 config_app = typer.Typer(no_args_is_help=True)
-
-#: Settings the storefront no longer reads. Physical inventory, the pricing
-#: templates its rows referred to, and the switch that read listings from it are
-#: declared at provisioning now, so no command migrates them.
-_RETIRED_INVENTORY_KEYS = (
-    "resources_csv_path",
-    "resources_csv_inline",
-    "escrow_templates",
-    "capacity.use_site_projection_for_listings",
-)
-_INVENTORY_UPGRADE_GUIDE = 'docs/seller-quickstart.md, "Upgrading from CSV inventory"'
-
-
-def _retired_inventory_key(key: str) -> str | None:
-    """The retired setting ``key`` names or lies under, in any spelling."""
-    normalized = key.strip().lower()
-    for retired in _RETIRED_INVENTORY_KEYS:
-        if normalized == retired or normalized.startswith(f"{retired}."):
-            return retired
-    return None
 
 
 def _validate_settlement_candidate(
@@ -153,14 +137,10 @@ def config_set(
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(2) from exc
-    retired = _retired_inventory_key(key)
+    retired = retired_setting(key)
     if retired is not None:
-        typer.secho(
-            f"{retired!r} was removed: the storefront reads inventory only from "
-            f"its sites' provisioning services. See {_INVENTORY_UPGRADE_GUIDE}.",
-            err=True,
-            fg=typer.colors.RED,
-        )
+        # Written, the key would refuse the schema or startup, or never be read.
+        typer.secho(retired_setting_explanation(retired), err=True, fg=typer.colors.RED)
         raise typer.Exit(2)
     coerced: object = value
     low = value.strip().lower()
@@ -379,7 +359,6 @@ _INIT_USER_TEMPLATE = """\
 # Discovery / lifecycle
 # ---------------------------------------------------------------------------
 
-# enable_registry_discovery = true
 # max_discovery_agents = 10
 # enable_order_retry = true
 # order_retry_interval = 300

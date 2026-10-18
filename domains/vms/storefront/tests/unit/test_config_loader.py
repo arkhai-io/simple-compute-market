@@ -235,18 +235,13 @@ def test_the_servicing_interval_is_read_from_its_key():
 
 
 @pytest.mark.parametrize("spelling", ["claims_sweep_interval", "CLAIMS_SWEEP_INTERVAL"])
-def test_the_retired_servicing_interval_is_named_with_its_replacement(spelling):
-    """A configuration stating the old key is refused rather than silently run
-    at the default; the refusal names the key that replaced it."""
+def test_the_retired_servicing_interval_is_not_read_as_the_interval(spelling):
+    """The startup refusal names the old key with its replacement
+    (tests/unit/test_startup_refusal.py); the loader never reads it in its
+    place."""
     source = Dynaconf(environments=False)
     source.set(spelling, 5)
-    assert agent_config.renamed_setting_problems(source) == [
-        "claims_sweep_interval was renamed settlement_servicing_interval_seconds; "
-        "state settlement_servicing_interval_seconds instead"
-    ]
-    # The old key is not read as the interval.
     assert agent_config.settlement_servicing_interval(source) == 30.0
-    assert agent_config.renamed_setting_problems(Dynaconf(environments=False)) == []
 
 
 # ---------------------------------------------------------------------------

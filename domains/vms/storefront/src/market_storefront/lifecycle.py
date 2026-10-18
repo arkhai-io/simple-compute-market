@@ -12,8 +12,9 @@ cancelling it. Every loop but the capacity-event pollers is registered with
 `register_loop` and has no body of its own: the controller's timer gates, runs
 the loop's step through the one cycle boundary an operator's step also takes,
 and waits. The capacity-event pollers fan out one cycle per site inside the
-capacity-publication kit, which takes `loop_gate(name)` and `idle` and
-serializes each site's cycle with that site's step itself.
+capacity-publication kit, which takes `loop_gate(name)` and `idle`, serializes
+each site's cycle with that site's step itself, and reports each cycle to
+`capacity_site_cycle_recorder(site)` for its outcome.
 """
 
 from __future__ import annotations
@@ -28,7 +29,11 @@ from core_storefront.domain_registry import (
     StorefrontDomainBindingError,
     StorefrontDomainRegistryError,
 )
-from market_capacity_publication import CapacityBindingError, CapacityConfigurationError
+from market_capacity_publication import (
+    CapacityBindingError,
+    CapacityConfigurationError,
+    SiteEventCycle,
+)
 from market_storefront_kit import (
     LoopSnapshot,
     LoopStep,
@@ -205,6 +210,21 @@ def enter_stage(stage: str) -> None:
     _CONTROLLER.enter_stage(stage)
 
 
+def capacity_site_cycle_recorder(site: str) -> Callable[[SiteEventCycle], None]:
+    """Where one site's capacity-event poller reports each cycle its timer ran.
+
+    The kit serializes each site's cycles under that site's cursor lock rather
+    than the controller's, so each cycle's outcome is recorded here, under the
+    site's loop name, for status to report beside the aggregate step's.
+    """
+    name = capacity_site_loop_name(site)
+
+    def record(cycle: SiteEventCycle) -> None:
+        _CONTROLLER.record_cycle(name, error=cycle.exception)
+
+    return record
+
+
 def snapshot() -> dict[str, LoopSnapshot]:
     """Every loop's state and the last outcome its cycles recorded."""
     return _CONTROLLER.snapshot()
@@ -227,6 +247,7 @@ __all__ = [
     "SETTLEMENT_SERVICING",
     "SITE_PROJECTION_POLLER",
     "await_quiescence",
+    "capacity_site_cycle_recorder",
     "capacity_site_loop_name",
     "controller",
     "declare_and_gate",

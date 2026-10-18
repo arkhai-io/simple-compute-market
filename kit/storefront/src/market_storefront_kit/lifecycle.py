@@ -752,6 +752,25 @@ class StorefrontLoopController:
         if cycle is not None and cycle.controller is self:
             cycle.stage = stage
 
+    def record_cycle(
+        self,
+        name: str,
+        *,
+        error: BaseException | None = None,
+        trigger: str = TIMER_TRIGGER,
+    ) -> None:
+        """Record the outcome of one cycle that ran outside `run_cycle`.
+
+        A kit runtime that fans one loop out into independent per-site cycles
+        serializes each site's cycle under that site's own lock, not this
+        controller's, so it reports each cycle its timer ran here, under the
+        site's loop name. The outcome is recorded as `run_cycle` records one: a
+        failure is in the one stage such a cycle has, and its message is shown
+        only for a disclosed error type.
+        """
+
+        self._record(name, trigger, DEFAULT_CYCLE_STAGE, error, self._generation)
+
     def _record(
         self,
         name: str,

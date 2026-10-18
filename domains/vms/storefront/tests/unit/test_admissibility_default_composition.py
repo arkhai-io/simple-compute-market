@@ -50,7 +50,6 @@ async def test_the_lifespan_publishes_the_composed_default_to_the_container():
     container.resolved_domain_registry = None
     try:
         with (
-            settings_overrides(enable_registry_discovery=False),
             patch.object(server, "initialize_administrator_identities"),
             patch.object(server, "_run_startup_tasks", startup_tasks),
         ):

@@ -20,10 +20,10 @@ import pytest
 from market_pool_overrides import PoolOverrideClient, pool_override_statuses
 from storefront_client import StorefrontClientError
 
+from tests._settings_overrides import replaced_setting
 from tests.publication_app import (
     SITE,
     SITE_B,
-    _replaced_setting,
     pool,
     publication_app,
     settlement_clause,
@@ -200,7 +200,7 @@ async def test_a_storefront_with_no_configured_clauses_publishes_a_pool_whose_ov
     settlement clause, a pool resolving none publishes nothing, and one whose
     override states clauses publishes under them. That such a storefront starts
     is tests/unit/test_startup_refusal.py's."""
-    with _replaced_setting("pricing.settlements", []):
+    with replaced_setting("pricing.settlements", []):
         world.pools.append(_shaped())
         await _cycle(world)
         assert await _open_rows(world) == {}

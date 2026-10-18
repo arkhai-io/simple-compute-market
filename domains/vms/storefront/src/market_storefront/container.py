@@ -132,13 +132,6 @@ def site_projections() -> SiteProjectionState:
     return resolved_site_projections
 
 
-def service_peer_trust() -> ServicePeerTrust:
-    """The process's service-peer trust; composition sets it before serving."""
-    if resolved_service_peer_trust is None:
-        raise RuntimeError("service-peer trust is not composed")
-    return resolved_service_peer_trust
-
-
 def get_alkahest_client(chain_name: str) -> Any | None:
     """Return the AlkahestClient for ``chain_name``, or ``None`` if absent."""
     return resolved_alkahest_clients.get(chain_name)

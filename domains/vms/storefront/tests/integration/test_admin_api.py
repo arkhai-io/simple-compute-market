@@ -43,7 +43,7 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
-from tests._settings_overrides import settings_overrides
+from tests.publication_app import recorded_registries
 from tests.fake_site import (
     FakeProjectionSite,
     loaded_site_projection_state,
@@ -1020,10 +1020,7 @@ class TestRealOrchestrationCacheToReconciliation:
             ),
         )
 
-        with settings_overrides(
-            enable_registry_discovery=False,
-            registry__urls=[],
-        ):
+        with recorded_registries():
             # Aggregate subscription is the public capacity-publication hook:
             # it carries this repository into the real VM reconciler.
             await runtime.client().emit_site_delta(

@@ -287,6 +287,36 @@ def test_config_set_refuses_a_retired_inventory_key_naming_the_upgrade_guide(
     assert "Upgrading from CSV inventory" in result.output
 
 
+@pytest.mark.parametrize(
+    ("key", "named"),
+    [
+        (
+            "claims_sweep_interval",
+            "claims_sweep_interval was renamed settlement_servicing_interval_seconds",
+        ),
+        ("CLAIMS_SWEEP_INTERVAL", "settlement_servicing_interval_seconds"),
+        ("enable_registry_discovery", "enable_registry_discovery was removed"),
+    ],
+)
+def test_config_set_refuses_a_renamed_or_removed_key_naming_what_replaces_it(
+    monkeypatch, runner, app, key, named
+):
+    import market_storefront.groups.config as config_group
+
+    monkeypatch.setattr(
+        config_group,
+        "write_user_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired edit reached writer")
+        ),
+    )
+
+    result = runner.invoke(app, ["config", "set", key, "30"])
+
+    assert result.exit_code == 2
+    assert named in result.output
+
+
 def test_config_set_accepts_other_capacity_keys(monkeypatch, tmp_path, runner, app):
     import market_storefront.groups.config as config_group
 

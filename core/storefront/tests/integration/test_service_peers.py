@@ -250,3 +250,78 @@ def test_a_disabled_peer_authenticates_nothing(db_path: str) -> None:
         trust.site_active_principals("home", now=1_002)
     with pytest.raises(AuthError, match="not active"):
         trust.site_authorities("home")()
+
+
+class _ReloadFailingTrust(ServicePeerTrust):
+    """A trust whose durable reads fail while ``failing`` names an error, as a
+    busy or locked database fails them. Its writes go through untouched."""
+
+    failing: Exception | None = None
+
+    def _read_sites(self):
+        if self.failing is not None:
+            raise self.failing
+        return super()._read_sites()
+
+
+def test_a_failed_reload_never_masks_a_committed_change(db_path: str) -> None:
+    """The rotation's result is returned although the reload after it failed;
+    the trust then reloads at its next read rather than verify against the
+    records the rotation replaced."""
+    trust = _ReloadFailingTrust(db_path, _peers(_CURRENT), clock=lambda: 1_010)
+    trust.seed(now=1_000)
+    trust.failing = sqlite3.OperationalError("database is locked")
+
+    _rotate(db_path, now=1_000, overlap_seconds=30, authority=trust.identity_authority())
+
+    status = StorefrontIdentityAuthority(db_path).status(
+        authority=SERVICE_PEER_AUTHORITY, subject="provisioning-home"
+    )
+    assert status.active_principals(1_010) == {_CURRENT.identity, _REPLACEMENT.identity}
+    # Still failing: the stale records verify nothing, and a read refuses with 503.
+    with pytest.raises(AuthError, match="could not be reloaded") as refused:
+        trust.site_authorities("home")()
+    assert refused.value.status_code == 503
+    with pytest.raises(AuthError, match="could not be reloaded"):
+        trust.site_active_principals("home", now=1_010)
+
+    trust.failing = None
+    assert trust.site_authorities("home")() == _pins(_REPLACEMENT, _CURRENT)
+
+
+def test_a_disable_whose_reload_failed_does_not_leave_its_principal_trusted(
+    db_path: str,
+) -> None:
+    trust = _ReloadFailingTrust(db_path, _peers(_CURRENT), clock=lambda: 1_002)
+    trust.seed(now=1_000)
+    trust.failing = sqlite3.OperationalError("database is locked")
+
+    trust.identity_authority().disable(
+        authority=SERVICE_PEER_AUTHORITY,
+        subject="provisioning-home",
+        principal=_CURRENT.identity,
+        operator=_CURRENT.identity,
+        operation_id="disable-home",
+        now=1_001,
+    )
+
+    trust.failing = None
+    with pytest.raises(AuthError, match="not active"):
+        trust.site_active_principals("home", now=1_002)
+
+
+def test_a_refused_change_is_raised_whatever_the_reload_did(db_path: str) -> None:
+    trust = _ReloadFailingTrust(db_path, _peers(_CURRENT), clock=lambda: 1_010)
+    trust.seed(now=1_000)
+    trust.failing = sqlite3.OperationalError("database is locked")
+
+    with pytest.raises(Exception) as refused:
+        trust.identity_authority().register_subject(
+            authority=SERVICE_PEER_AUTHORITY,
+            subject="provisioning-home",
+            role="administrator",
+            principal=_CURRENT.identity,
+            now=1_005,
+        )
+    assert not isinstance(refused.value, sqlite3.OperationalError)
+    assert "role cannot change" in str(refused.value)

@@ -16,6 +16,7 @@ openspec/specs/storefront-publication/spec.md#requirement-site-authority-princip
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 import time
@@ -32,6 +33,8 @@ from core_storefront.identity_authority import (
     IdentitySubjectStatus,
     StorefrontIdentityAuthority,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Peer ID to its role, the site it is bound to, and its configured principals,
 #: as a storefront's configuration states its service peers.
@@ -184,7 +187,9 @@ class _TrustReloadingAuthority(StorefrontIdentityAuthority):
 
     The reload follows each change whether or not it committed: a reload reads
     what is durable, so an extra one is harmless, and a change that committed
-    before failing must not leave the trust behind it.
+    before failing must not leave the trust behind it. A reload that fails never
+    replaces the change's own result or refusal; it leaves the trust to reload
+    at its next read (:meth:`ServicePeerTrust.reload_after_change`).
     """
 
     def __init__(
@@ -193,11 +198,17 @@ class _TrustReloadingAuthority(StorefrontIdentityAuthority):
         super().__init__(db_path, **kwargs)
         self._trust = trust
 
+    def register_subject(self, **kwargs: Any) -> IdentitySubjectStatus:
+        try:
+            return super().register_subject(**kwargs)
+        finally:
+            self._trust.reload_after_change()
+
     def register_service_peer(self, **kwargs: Any) -> IdentitySubjectStatus:
         try:
             return super().register_service_peer(**kwargs)
         finally:
-            self._trust.reload()
+            self._trust.reload_after_change()
 
     def apply_rotation(
         self, request: RotationRequest, **kwargs: Any
@@ -205,25 +216,25 @@ class _TrustReloadingAuthority(StorefrontIdentityAuthority):
         try:
             return super().apply_rotation(request, **kwargs)
         finally:
-            self._trust.reload()
+            self._trust.reload_after_change()
 
     def complete_rotation(self, **kwargs: Any) -> IdentitySubjectStatus:
         try:
             return super().complete_rotation(**kwargs)
         finally:
-            self._trust.reload()
+            self._trust.reload_after_change()
 
     def retire(self, **kwargs: Any) -> IdentitySubjectStatus:
         try:
             return super().retire(**kwargs)
         finally:
-            self._trust.reload()
+            self._trust.reload_after_change()
 
     def disable(self, **kwargs: Any) -> IdentitySubjectStatus:
         try:
             return super().disable(**kwargs)
         finally:
-            self._trust.reload()
+            self._trust.reload_after_change()
 
 
 class ServicePeerTrust:
@@ -242,6 +253,13 @@ class ServicePeerTrust:
     A site that durable state does not bind to exactly one active peer, or whose
     peer disagrees with its configuration, authenticates nothing: reading its
     trust raises the reason as an :class:`AuthError`.
+
+    A reload that fails after a change committed leaves the trust stale rather
+    than failing the change: the records it holds predate a change durable state
+    already has, such as a disabled principal, so it trusts nothing on them. The
+    next read reloads first, and while that fails too, every read refuses with a
+    503 :class:`AuthError`. Only that read touches SQLite on the caller's
+    thread, and only while the trust is stale.
     """
 
     def __init__(
@@ -258,6 +276,9 @@ class ServicePeerTrust:
         # Replaced whole by each reload, so a reader on another thread sees one
         # complete load or the next, never a mixture.
         self._sites: Mapping[str, IdentitySubjectStatus | AuthError] | None = None
+        # Set when a reload after a change fails; read and cleared under the
+        # reload lock, with the load that clears it.
+        self._stale = False
 
     @property
     def peers(self) -> ServicePeerConfigs:
@@ -274,23 +295,63 @@ class ServicePeerTrust:
 
         Blocking: run it off the event loop once the storefront is serving.
         """
-        site_ids = {site_id for _role, site_id, _principals in self._peers.values()}
         with self._reload_lock:
-            loaded: dict[str, IdentitySubjectStatus | AuthError] = {}
-            for site_id in site_ids:
-                try:
-                    loaded[site_id] = _site_peer_status(
-                        self._db_path, self._peers, site_id
-                    )
-                except AuthError as exc:
-                    loaded[site_id] = exc
-            self._sites = MappingProxyType(loaded)
+            self._load_locked()
+
+    def reload_after_change(self) -> None:
+        """Reload after an identity change, never raising.
+
+        A failure is logged and leaves the trust stale, so the next read
+        reloads before it answers; the change itself stands as it committed or
+        was refused.
+        """
+        with self._reload_lock:
+            try:
+                self._load_locked()
+            except Exception:
+                self._stale = True
+                logger.exception(
+                    "[IDENTITY] Service-peer trust could not be reloaded after an "
+                    "identity change; it reloads at its next read"
+                )
+
+    def _load_locked(self) -> None:
+        self._sites = MappingProxyType(dict(self._read_sites()))
+        self._stale = False
+
+    def _read_sites(self) -> Mapping[str, IdentitySubjectStatus | AuthError]:
+        """Each configured site's durable peer status, or why it has none."""
+        loaded: dict[str, IdentitySubjectStatus | AuthError] = {}
+        for site_id in {site_id for _role, site_id, _principals in self._peers.values()}:
+            try:
+                loaded[site_id] = _site_peer_status(self._db_path, self._peers, site_id)
+            except AuthError as exc:
+                loaded[site_id] = exc
+        return loaded
+
+    def _reload_if_stale(self) -> None:
+        if not self._stale:
+            return
+        with self._reload_lock:
+            if not self._stale:
+                return
+            try:
+                self._load_locked()
+            except Exception as exc:
+                logger.warning(
+                    "[IDENTITY] Service-peer trust is still stale: %s", exc
+                )
+                raise AuthError(
+                    "Service-peer trust could not be reloaded after an identity change",
+                    status_code=503,
+                ) from exc
 
     def identity_authority(self, **kwargs: Any) -> StorefrontIdentityAuthority:
         """The identity authority whose every binding change reloads this trust."""
         return _TrustReloadingAuthority(self._db_path, self, **kwargs)
 
     def _site_status(self, site_id: str) -> IdentitySubjectStatus:
+        self._reload_if_stale()
         sites = self._sites
         if sites is None:
             raise AuthError(

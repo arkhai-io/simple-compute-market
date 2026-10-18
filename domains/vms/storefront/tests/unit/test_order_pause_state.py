@@ -169,17 +169,11 @@ async def db(tmp_path) -> SQLiteClient:
 @pytest.fixture
 def marketplace_signer(monkeypatch):
     from market_storefront import container
-    from market_storefront.services import capacity_client
 
     monkeypatch.setattr(
         container,
         "resolved_marketplace_signer",
         _SELLER_SIGNER,
-    )
-    monkeypatch.setattr(
-        capacity_client,
-        "get_provisioning_authorities",
-        lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
 

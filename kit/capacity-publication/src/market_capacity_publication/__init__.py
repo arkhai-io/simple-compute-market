@@ -22,6 +22,7 @@ from .capacity import (
     remote_site_clients,
     run_capacity_event_pollers,
 )
+from .capacity_remote import SiteEventCycle
 from .cycle import (
     PublicationCycleDriver,
     PublicationCycleStopped,
@@ -76,6 +77,7 @@ __all__ = [
     "ReconciliationPlan",
     "CAPACITY_BUCKET",
     "RESOURCE_POOL",
+    "SiteEventCycle",
     "SiteProjectionState",
     "freshly_confirmed",
 ]
