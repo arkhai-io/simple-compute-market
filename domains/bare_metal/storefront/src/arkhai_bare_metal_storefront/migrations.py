@@ -382,6 +382,34 @@ def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
         )
 
 
+class RetiredReservationBindingError(RuntimeError):
+    """The database records reservations without their site's service peer."""
+
+
+def _refuse_reservations_without_their_peer(conn: sqlite3.Connection) -> None:
+    """Refuse a database whose reservations name no service peer.
+
+    A reservation is pinned to its site's service peer, a column the
+    selected-site table has had since it was first created; a database created
+    before then records only the principal, which no longer identifies the
+    site's authority once that principal rotates. Its reservations cannot be
+    rebound without guessing, and no upgrade is kept, so startup refuses and
+    names the remedy rather than failing on the missing column later. Recognized
+    by structure, as the retired listing kind is.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(bare_metal_selected_site_bindings)")
+    }
+    if columns and "service_peer" not in columns:
+        raise RetiredReservationBindingError(
+            "this bare-metal storefront database records reservations without "
+            "their site's service peer and cannot be read; reset it as described "
+            "in docs/bare-metal-seller-quickstart.md, "
+            "\"Resetting the storefront database\""
+        )
+
+
 #: Each site's latest projection generation a publication run accepted. Override
 #: status reads it: publication may run in another process, or before a restart,
 #: so no in-memory record could answer for it.
@@ -507,5 +535,12 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0013-alkahest-lease-ready-evidence",
         apply=_add_alkahest_lease_ready_evidence,
+    ),
+    # After every migration that creates or alters the selected-site table, so
+    # a fresh database passes it and records it, and a database whose table
+    # predates the service-peer column is refused at every start.
+    Migration(
+        id="bare-metal-storefront-0014-refuse-reservations-without-their-peer",
+        apply=_refuse_reservations_without_their_peer,
     ),
 )

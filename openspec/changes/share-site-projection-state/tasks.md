@@ -3371,10 +3371,14 @@ storefront and its development configuration.
       Administrators stay on configuration.
       Done in `runtime.build_runtime_from_configuration`: once the database exists it builds
       one `ServicePeerTrust` over it and `settings.service_peer_configs()` and calls
-      `seed()`, as VM's root does, so the publication command's composition seeds too; a
+      `seed()`, so the publication command's composition seeds too; a
       seeding refusal (a new peer with two principals, configuration that no longer covers
       the peer's durable principals) raises a `RuntimeError` naming it ("service peers cannot
-      be seeded into its identity state: ..."). The runtime carries it as
+      be seeded into its identity state: ..."). **Corrected (check):** VM seeds when its
+      server starts, not when it composes, so this is a divergence, recorded in `design.md`
+      D14b with its reason (the one-shot commands compose the runtime and must find the trust
+      seeded); the root now seeds one peer at a time and the refusal names the peer
+      ("service peer 'site_a_authority' cannot be seeded ..."). The runtime carries it as
       `service_peer_trust` (None authenticates no site). The one-peer-per-site refusal stays
       11.5's, before the database. Administrators are untouched (`admin_principals` from
       configuration). Composition (the root's builder over real SQLite,
@@ -3417,9 +3421,11 @@ storefront and its development configuration.
       authenticates against the site its body names, as VM's callback does (the proof covers
       the body), so the after-the-fact principal comparison goes; the service-role status
       read accepts any configured site's peer, bare metal's own choice where VM requires
-      exactly one peer (Section 4 handoff). Application integration through the typed
+      exactly one peer (Section 4 handoff; VM adopts bare metal's rule in the check fixes). Application integration through the typed
       client: `test_deal_controls.py::test_only_the_named_sites_authority_may_report_a_release`
-      (an impostor 403, another site's report 403, an unknown reservation 404) and
+      (an impostor 403, a report naming an unconfigured site 403, an unknown reservation
+      404; **corrected (check):** first described as "another site's report", which it is
+      not, see the check fixes) and
       `test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not`,
       `test_http_settlement.py`'s release after a restart, and
       `test_http_system.py::test_a_configured_site_reads_status_as_a_service_and_another_cannot`,
@@ -3474,6 +3480,8 @@ storefront and its development configuration.
       `tests/test_deal_controls.py`'s per-site callback checks pass against peers;
       `tests/test_migrations.py` covers the fresh schema.
       Done. `test_site_clients.py` (composition, real SQLite): the renamed restart test --
+      a restart at the composition level, rebuilding the trust and the reservation map over
+      the same database, not an application restart --
       rotation applied and completed through the trust's identity authority, restart with
       configuration naming the replacement (durable state then requires it: stale
       configuration refuses, 12.1), the reservation still bound and its audit principal the
@@ -3535,6 +3543,53 @@ Section 12 notes:
   on VM. The delta scenario "A bare-metal storefront restarts after a rotation" holds under
   that configuration, which its text leaves implicit; closeout may state it.
 
+Section 12 check fixes (fresh-context check of `0d293ef..41f8b9a`; decisions in `design.md`
+D14b):
+
+- **The service-role status read accepts every configured site's peer, in both
+  storefronts.** VM's rule (exactly one configured peer, else 503) answered 503 to every
+  site's readiness probe on a multi-site VM storefront; VM's `service_peer_auth` now verifies
+  the read against the union of every configured site's active principals, skipping a site
+  the trust cannot answer for and refusing as unavailable only when it can answer for none,
+  as bare metal's `_site_authority_principals` does. The two are domain-local loops over the
+  trust's public `site_active_principals`: a shared helper in `core_storefront` would have
+  moved its version and, through `kit/capacity-publication`'s exact pin, every storefront's
+  pins and locks, for six lines. Application integration through the typed client: VM
+  `test_admin_api.py::TestHealthEndpoint::test_any_configured_sites_peer_reads_status` (site
+  B's peer reads, a stranger is refused 403; fails against the old rule, checked by stashing
+  the fix) and bare metal
+  `test_http_system.py::test_every_configured_sites_peer_reads_status`.
+- **A callback names one site and returns the trust's own refusal.** Bare metal's
+  `capacity_released` refuses with the trust's reason and status for its named site (an
+  unconfigured site: 403 "Provisioning site must have exactly one configured service peer"),
+  as VM's callback does; only the status read skips a failing site. Both pass the request's
+  one `now` to the principal lookup and to `authenticate_request`.
+- **Evidence, truthfully.** New `test_deal_controls.py::test_one_configured_sites_authority_cannot_report_anothers_release`,
+  two configured sites each with its peer: site B's authority signing a report naming site A
+  is refused 403 (it fails site A's authentication); signing one naming itself for site A's
+  reservation authenticates and is refused 404 "belongs to another site"; site A's own report
+  is applied. The existing test now asserts the unconfigured site's 403 reason.
+- **A database whose reservations name no peer is refused by structure.** Migration
+  `bare-metal-storefront-0014-refuse-reservations-without-their-peer` (last in the chain, so a
+  fresh database passes and records it) raises `RetiredReservationBindingError`, naming
+  `docs/bare-metal-seller-quickstart.md`'s "Resetting the storefront database", when the
+  selected-site table lacks `service_peer`; it rewrites nothing. Unit, over a connection
+  (`test_migrations.py::test_reservations_without_their_peer_are_refused_by_structure`: no
+  table, the old table, the new one) and a migration test over a real database whose table
+  was replaced by the old shape (`test_a_database_whose_reservations_name_no_peer_refuses_every_start`,
+  refused on two opens, its row unchanged). 12.4's "fails at composition (`no such column`)"
+  is superseded by this refusal.
+- `design.md` D14b says configuration seeds and must then cover the peer's durable
+  principals, so a restart after a rotation needs configuration naming the replacement, and
+  records the four delivered points above (binding and reservation, seeding at composition,
+  the status read, the identity routes).
+- Evidence: bare-metal storefront 372 passed; VM storefront frozen, the rebuilt bare-metal
+  wheel reinstalled, unit 1071 passed, 1 skipped, integration 447 passed; `make
+  check-packaging` (architecture rules included), `make check-comment-hygiene`, `make
+  check-doc-citations CHANGE=share-site-projection-state` (nothing reported), `make
+  check-tasks`, and `openspec validate --strict` pass. Core storefront was not touched. No
+  package version moved and no lock changed.
+
 Section 12 handoff:
 
 - `runtime.service_peer_trust` is the process's one trust; every site client in
@@ -3551,9 +3606,9 @@ Section 12 handoff:
   whose live check this change keeps; it does not depend on health's live version read,
   which 13.6 turns into held state.
 - Migration 0004 was edited in place (fresh schema, owner's rule): a bare-metal database that
-  applied the earlier 0004 fails composition on the missing `service_peer` column. 17.9 may
-  name this beside `docs/bare-metal-seller-quickstart.md`'s "Resetting the storefront
-  database".
+  applied the earlier 0004 is refused at every start by migration 0014, naming
+  `docs/bare-metal-seller-quickstart.md`'s "Resetting the storefront database", whose text
+  17.9 should extend beyond the retired listing kind.
 - For 17.9: `storefront-publication/architecture.md` "Trusted site routing" and "Role and
   service-peer identity" (bare metal's site binding names its peer; a reservation pins the
   peer subject and records the principal for audit; bare metal serves the identity routes;
@@ -3818,6 +3873,18 @@ documentation only; a part needing code returns the change to implementation.
         of `record_cycle`); `TESTING.md` "Chart Render Tests" -- the storefront chart's
         `STOREFRONT_PYTHON` check runs the startup refusal and derives the local release's
         Alkahest release conditions over its render, beside the loader check.
+      - **Amended (Section 12 and its check):** besides Section 12's handoff destinations,
+        state that bare metal's identity routes cannot rotate an administrator (refused as not
+        registered, its administrators being configuration); that the status read accepts
+        every configured site's peer in both storefronts (`DEPLOYMENT_AND_CONFIG.md` and
+        `storefront-publication/architecture.md` "Role and service-peer identity"); that a
+        restart after a rotation needs configuration naming the replacement; and that the
+        site-binding shape is a site, its URL, and its service peer, where
+        `docs/bare-metal-seller-quickstart.md` (around line 156, the `authority_principal` in
+        `BARE_METAL_STOREFRONT_SITES_JSON`) and `helm/charts/bare-metal-storefront/values.yaml`
+        (around line 30, `siteBindingsSecret`'s entry shape, Section 16's) still show a
+        principal, and health's `sites` entries now report `service_peer` and
+        `authority_principals`.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

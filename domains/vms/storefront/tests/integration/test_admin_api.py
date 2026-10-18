@@ -237,6 +237,45 @@ class TestHealthEndpoint:
         result = await service_client.get_system_status()
         assert result.status in ("ok", "degraded")
 
+    async def test_any_configured_sites_peer_reads_status(self, admin_app, db):
+        """Two sites, each bound to its own peer: the read names no site, so the
+        second site's peer reads status as the first's does, and a principal no
+        configured peer holds is refused."""
+        site_b = Ed25519Signer(b"\x65" * 32)
+        stranger = Ed25519Signer(b"\x66" * 32)
+        trust = ServicePeerTrust(
+            db.db_path,
+            {
+                "system-status": ("service", "default", _SERVICE_PRINCIPALS),
+                "site-b-peer": (
+                    "service",
+                    "site-b",
+                    TrustedIdentitySet(identities=(site_b.identity,)),
+                ),
+            },
+        )
+        trust.seed()
+        _container.resolved_service_peer_trust = trust
+        transport = httpx.ASGITransport(app=admin_app)
+        results = {}
+        for name, signer in (("a", _SERVICE_SIGNER), ("b", site_b), ("stranger", stranger)):
+            async with StorefrontClient(
+                "http://test",
+                transport=transport,
+                signer=signer,
+                caller_role="service",
+                expected_publishers=_MARKETPLACE_PUBLISHERS,
+            ) as service:
+                try:
+                    results[name] = (await service.get_system_status()).status
+                except StorefrontClientError as exc:
+                    # Refused before any handler: an unsigned 403 the client reports.
+                    results[name] = str(exc)
+
+        assert results["a"] in ("ok", "degraded")
+        assert results["b"] in ("ok", "degraded")
+        assert results["stranger"].startswith("HTTP 403"), results["stranger"]
+
     async def test_system_status_includes_registry_check(self, admin_client):
         result = await admin_client.get_system_status()
         registry_check = result.checks.get("registry")

@@ -12,7 +12,8 @@ from typing import Any
 
 from core_storefront.auth import AuthError
 from core_storefront.models.system_models import ProjectionFamilyStatus
-from core_storefront.service_peers import ServicePeerTrust
+from core_storefront.identity_authority import IdentityAuthorityError
+from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
 from market_alkahest import ReleaseModelError, create_alkahest_registration
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_contact_exchange import (
@@ -861,14 +862,21 @@ def build_runtime_from_configuration(
         local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
     )
-    service_peer_trust = ServicePeerTrust(db.db_path, active.service_peer_configs())
-    try:
-        service_peer_trust.seed()
-    except AuthError as exc:
-        raise RuntimeError(
-            "bare-metal storefront service peers cannot be seeded into its "
-            f"identity state: {exc.detail}"
-        ) from exc
+    # Seeded here, at composition rather than at the server's start, because
+    # the one-shot commands compose the runtime too and must find the site's
+    # trust seeded on a fresh database. One peer at a time, so a refusal names
+    # the peer it concerns.
+    peers = active.service_peer_configs()
+    for peer_id, peer in peers.items():
+        try:
+            seed_service_peers(db.db_path, {peer_id: peer})
+        except (AuthError, IdentityAuthorityError) as exc:
+            raise RuntimeError(
+                f"bare-metal storefront service peer {peer_id!r} cannot be seeded "
+                f"into its identity state: {exc}"
+            ) from exc
+    service_peer_trust = ServicePeerTrust(db.db_path, peers)
+    service_peer_trust.reload()
     try:
         capacity_client, fulfillment_client = build_trusted_site_clients(
             bindings=site_bindings,

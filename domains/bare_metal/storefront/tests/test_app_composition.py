@@ -424,7 +424,7 @@ def test_configuration_that_no_longer_covers_a_seeded_peer_is_refused(
         OTHER_SITE.identity.model_dump(mode="json")
     ]
 
-    with pytest.raises(RuntimeError, match="service peers cannot be seeded"):
+    with pytest.raises(RuntimeError, match="service peer 'site_a_authority' cannot be seeded"):
         _configured_runtime(monkeypatch, tmp_path, document)
 
 

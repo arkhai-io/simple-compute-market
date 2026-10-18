@@ -11,7 +11,11 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_storefront_kit import TradingPause
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.migrations import RetiredListingKindError
+from arkhai_bare_metal_storefront.migrations import (
+    BARE_METAL_STOREFRONT_MIGRATIONS,
+    RetiredListingKindError,
+    RetiredReservationBindingError,
+)
 from arkhai_bare_metal_storefront.negotiation import default_seller_round_hook
 from arkhai_bare_metal_storefront.negotiation_runtime import (
     build_bare_metal_negotiation_runtime,
@@ -256,6 +260,86 @@ def test_a_fresh_database_pins_each_reservation_to_its_sites_peer(tmp_path) -> N
                     "WHERE capacity_reservation_id = 'reservation-1'",
                     (value,),
                 )
+    finally:
+        conn.close()
+
+
+_OLD_SELECTED_SITE_TABLE = (
+    "CREATE TABLE bare_metal_selected_site_bindings ("
+    "capacity_reservation_id TEXT PRIMARY KEY, site_id TEXT NOT NULL, "
+    "authority_scheme TEXT NOT NULL, authority_identifier TEXT NOT NULL)"
+)
+
+
+def _refusal_of_reservations_without_their_peer():
+    (migration,) = [
+        migration
+        for migration in BARE_METAL_STOREFRONT_MIGRATIONS
+        if migration.id == "bare-metal-storefront-0014-refuse-reservations-without-their-peer"
+    ]
+    return migration.apply
+
+
+@pytest.mark.parametrize(
+    ("table", "refused"),
+    [
+        pytest.param(None, False, id="no table yet"),
+        pytest.param(_OLD_SELECTED_SITE_TABLE, True, id="a table without the peer"),
+        pytest.param(
+            _OLD_SELECTED_SITE_TABLE.replace(
+                "site_id TEXT NOT NULL,", "site_id TEXT NOT NULL, service_peer TEXT NOT NULL,"
+            ),
+            False,
+            id="a table pinning the peer",
+        ),
+    ],
+)
+def test_reservations_without_their_peer_are_refused_by_structure(table, refused) -> None:
+    conn = sqlite3.connect(":memory:")
+    try:
+        if table is not None:
+            conn.execute(table)
+        check = _refusal_of_reservations_without_their_peer()
+        if refused:
+            with pytest.raises(
+                RetiredReservationBindingError, match="Resetting the storefront database"
+            ):
+                check(conn)
+        else:
+            check(conn)
+    finally:
+        conn.close()
+
+
+def test_a_database_whose_reservations_name_no_peer_refuses_every_start(tmp_path) -> None:
+    """Migration: a database created before reservations pinned their site's
+    peer is refused when the storefront opens it, naming the remedy, rather
+    than failing later on the missing column; nothing in it is rewritten."""
+    path = tmp_path / "storefront.db"
+    SQLiteClient(str(path))
+    conn = sqlite3.connect(path)
+    conn.execute("DROP TABLE bare_metal_selected_site_bindings")
+    conn.execute(_OLD_SELECTED_SITE_TABLE)
+    conn.execute(
+        "INSERT INTO bare_metal_selected_site_bindings VALUES "
+        "('reservation-1', 'site-a', 'eip191', '0x1')"
+    )
+    conn.execute(
+        "DELETE FROM schema_migrations "
+        "WHERE id='bare-metal-storefront-0014-refuse-reservations-without-their-peer'"
+    )
+    conn.commit()
+    conn.close()
+
+    for _ in range(2):
+        with pytest.raises(RetiredReservationBindingError):
+            SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute(
+            "SELECT * FROM bare_metal_selected_site_bindings"
+        ).fetchall() == [("reservation-1", "site-a", "eip191", "0x1")]
     finally:
         conn.close()
 

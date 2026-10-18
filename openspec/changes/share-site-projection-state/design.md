@@ -362,9 +362,13 @@ Secrets is owed. Accepted scope beyond the original proposal.
   image's working directory, the data volume.
 - **D14b. Per-site trust from the site's durable service peer, in both storefronts.** Each
   configured site is bound to exactly one `[Identity.service_peers.<peer>]`; startup refuses a
-  site with no peer or more than one. Configuration only seeds the peer: once initialized,
+  site with no peer or more than one. Configuration seeds the peer: once initialized,
   its principals are the durable identity state's, rotated through the two-proof rotation
-  route, as "Storefront authorization bindings are durable" requires. A site's client verifies
+  route, as "Storefront authorization bindings are durable" requires, and configuration must
+  keep covering them. Startup refuses a seeded peer whose configuration no longer names its
+  durable primary and every principal active in an overlap ("Startup configuration is stale
+  during rotation"), so after a rotation the storefront restarts only once configuration
+  names the replacement; a rotation reaches verification when it commits, not at a restart. A site's client verifies
   responses against that peer's currently active principals (`active_principals(now)`),
   obtained at verification time through a provider `kit/site-client` accepts in place of a
   fixed `TrustedIdentitySet` — the same set callbacks are checked against (01 F1). Bare metal
@@ -393,9 +397,37 @@ Secrets is owed. Accepted scope beyond the original proposal.
   reload never installs an older load (decided with the owner 2026-10-18, 08 F6; rejected: a
   stale flag that retried the read on the caller's thread at every verification, which 10.13
   first delivered). Rejected: configuration as the
-  response trust set, which splits response and callback trust on every rotation and leaves
-  bare-metal rotation blocking restarts; durable trust for VM only; and a new per-site table
-  renaming VM's keys.
+  response trust set, which splits response and callback trust on every rotation and makes a
+  rotation reach responses only through a configuration change and a restart, where durable
+  trust reaches them as it commits and needs configuration to name the replacement only before
+  the next restart; durable trust for VM only; and a new per-site table renaming VM's keys.
+
+  As delivered for bare metal (Section 12 and its check):
+  - *The site binding names the peer, and a reservation pins it.* A bare-metal site binding
+    carries its service peer's ID, not a principal, and both of the site's clients verify
+    against the trust's provider. A reservation's durable site binding records the peer
+    subject, and the principal beside it, the peer's primary when the reservation was made, is
+    an audit record never compared. The table is fresh schema (migration 0004 edited in place,
+    the owner's rule for bare metal); a database whose table predates the peer column is
+    refused at every start by a structural check (migration 0014), naming the reset remedy in
+    `docs/bare-metal-seller-quickstart.md`, as migration 0009 refuses the retired listing kind.
+    It is a refusal, not an upgrade: the old rows cannot be rebound to a peer without guessing.
+  - *Seeding at composition* (a divergence from VM, which seeds when its server starts). The
+    bare-metal root seeds each peer, one at a time so a refusal names it, when it composes the
+    runtime, because the one-shot commands compose the runtime too: `publish`, which still
+    runs a cycle in its own process until Section 14 makes it an API client, reads the sites
+    through the trust and must find it seeded on a fresh database.
+  - *The service-role status read accepts every configured site's peer* (a divergence found
+    in Section 12's check; VM adopts bare metal's rule). The read names no site and returns
+    readiness alone, so VM's rule -- exactly one configured peer, else 503 -- answered 503 to
+    every site's readiness probe on any multi-site VM storefront. Both storefronts now verify
+    it against the union of every configured site's active principals, skipping a site the
+    trust cannot answer for, and refuse it as unavailable only when the trust can answer for
+    none. A callback names one site and is verified against that site's peer alone, refused
+    with the trust's own reason when the site has none.
+  - *Bare metal serves VM's identity routes* (rotation, retirement, status), committing through
+    the trust. Its administrators are configuration and never a durable subject, so an
+    administrator rotation is refused there as not registered.
 - **D14c. The values-schema generator moves to `kit/config`.** The generic generator
   (field publicizing, secret refusal, sink typing, render, drift check) leaves
   `market_storefront.values_schema`; each storefront keeps only its section list, passes

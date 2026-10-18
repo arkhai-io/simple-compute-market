@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -147,6 +147,7 @@ async def _principal(
     expected_principal: Identity | None = None,
     allowed_principals: tuple[Identity, ...] | None = None,
     body: Any = EMPTY_BODY,
+    now: int | None = None,
 ) -> Identity:
     bind_response_contract(request, operation=operation, resource=resource)
     try:
@@ -160,6 +161,7 @@ async def _principal(
             replay_store=runtime.db,
             expected_principal=expected_principal,
             allowed_principals=allowed_principals,
+            now=now,
         )
     except AuthError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -242,31 +244,37 @@ def _site_authority_principals(
     *,
     operation: str,
     resource: str,
-    site_ids: Iterable[str],
+    site_ids: tuple[str, ...],
+    now: int,
 ) -> tuple[Identity, ...]:
-    """The principals that authenticate the named sites' authorities now.
+    """The principals that may send a request on behalf of ``site_ids`` at ``now``.
 
     They are each site's service-peer principals the trust holds, the set that
     site's responses are verified against too, so a rotation reaches callbacks
-    and responses at once. A site that is not configured, or that the trust
-    cannot answer for, contributes none; while the trust holds nothing at all,
-    the request is refused as unavailable.
+    and responses at once. A request naming one site is refused with the
+    trust's own reason when that site has none to offer. A request any of
+    several sites may make, the status read, takes the union, skipping a site
+    the trust cannot answer for, and is refused as unavailable only when it can
+    answer for none.
     """
     bind_response_contract(request, operation=operation, resource=resource)
     trust = runtime.service_peer_trust
     if trust is None:
         raise HTTPException(status_code=503, detail="service-peer trust is not composed")
-    configured = {binding.site_id for binding in runtime.site_bindings}
-    now = int(time.time())
     principals: set[Identity] = set()
+    answered = False
     for site_id in site_ids:
-        if site_id not in configured:
-            continue
         try:
             principals |= trust.site_active_principals(site_id, now=now)
         except AuthError as exc:
-            if exc.status_code == 503:
-                raise HTTPException(status_code=503, detail=exc.detail) from exc
+            if len(site_ids) == 1 or exc.status_code == 503:
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            continue
+        answered = True
+    if not answered:
+        raise HTTPException(
+            status_code=503, detail="no configured site's service peer can be trusted"
+        )
     return tuple(
         sorted(principals, key=lambda principal: (principal.scheme.value, principal.identifier))
     )
@@ -1105,6 +1113,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
     if as_site:
+        now = int(time.time())
         await _principal(
             request=request,
             runtime=runtime,
@@ -1116,8 +1125,10 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
                 runtime,
                 operation="admin_system_status",
                 resource="system/status",
-                site_ids=[binding.site_id for binding in runtime.site_bindings],
+                site_ids=tuple(binding.site_id for binding in runtime.site_bindings),
+                now=now,
             ),
+            now=now,
         )
     else:
         await _admin(
@@ -1252,6 +1263,7 @@ async def capacity_released(
     """
     runtime = _runtime(request)
     operation = "fulfillment_capacity_released"
+    now = int(time.time())
     await _principal(
         request=request,
         runtime=runtime,
@@ -1263,9 +1275,11 @@ async def capacity_released(
             runtime,
             operation=operation,
             resource=body.capacity_reservation_id,
-            site_ids=[body.site_id],
+            site_ids=(body.site_id,),
+            now=now,
         ),
         body=await _request_body(request),
+        now=now,
     )
     try:
         recorded = await capacity_admin_routes(runtime).capacity_released(

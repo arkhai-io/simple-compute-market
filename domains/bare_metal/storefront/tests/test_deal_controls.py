@@ -40,7 +40,11 @@ def _client(app, signer, role: str) -> StorefrontClient:
     )
 
 
-async def _runtime(tmp_path, *, verifier=None, provisioning=None):
+# A second site authority's development key; never used on any public network.
+SITE_B_SIGNER = Eip191Signer(bytes.fromhex("56" * 32))
+
+
+async def _runtime(tmp_path, *, verifier=None, provisioning=None, authorities=None):
     async def accept(**_kwargs):
         return 1
 
@@ -50,7 +54,9 @@ async def _runtime(tmp_path, *, verifier=None, provisioning=None):
     capacity = _CapacityClient()
     # The site's callbacks verify against its service peer, seeded as startup
     # seeds it.
-    bindings, trust = seeded_sites(runtime.db.db_path, {"site-a": SITE_SIGNER.identity})
+    bindings, trust = seeded_sites(
+        runtime.db.db_path, authorities or {"site-a": SITE_SIGNER.identity}
+    )
     runtime = replace(
         runtime,
         capacity_client=capacity,
@@ -218,9 +224,44 @@ async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> 
             with pytest.raises(StorefrontClientError) as other_site:
                 await site.notify_capacity_released("reservation-a", site_id="site-b")
 
+    # An impostor fails the site's authentication; the site's own report of a
+    # reservation the storefront does not hold is not found; and a report naming
+    # an unconfigured site is refused with the trust's reason, before any handler.
     assert forged.value.status_code == 403
     assert unknown.value.status_code == 404
     assert other_site.value.status_code == 403
+    assert "exactly one configured service peer" in str(other_site.value)
+
+
+async def test_one_configured_sites_authority_cannot_report_anothers_release(
+    tmp_path,
+) -> None:
+    """Two configured sites, each with its own peer. Site B's authority signing a
+    report that names site A fails site A's authentication (403); signing one
+    that names itself authenticates, and the reservation, held at site A, is
+    then not found as site B's (404)."""
+    runtime, negotiation_id, _capacity = await _runtime(
+        tmp_path,
+        authorities={"site-a": SITE_SIGNER.identity, "site-b": SITE_B_SIGNER.identity},
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_B_SIGNER, "service") as site_b:
+            with pytest.raises(StorefrontClientError) as as_site_a:
+                await site_b.notify_capacity_released("reservation-a", site_id="site-a")
+            with pytest.raises(StorefrontClientError) as as_itself:
+                await site_b.notify_capacity_released("reservation-a", site_id="site-b")
+        async with _client(app, SITE_SIGNER, "service") as site_a:
+            released = await site_a.notify_capacity_released("reservation-a", site_id="site-a")
+
+    assert as_site_a.value.status_code == 403
+    assert as_itself.value.status_code == 404
+    assert "belongs to another site" in str(as_itself.value)
+    assert released == {"capacity_reservation_id": "reservation-a", "state": "released"}
 
 
 async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(

@@ -527,10 +527,16 @@ async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_
 SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 
 
-def _status_runtime(path: str, **changes) -> BareMetalStorefrontRuntime:
+# A second site authority's key, also a development identity.
+SITE_B_SIGNER = Eip191Signer(bytes.fromhex("45" * 32))
+
+
+def _status_runtime(path: str, *, authorities=None, **changes) -> BareMetalStorefrontRuntime:
     runtime = _runtime(path)
     # The site reads status as its service peer, seeded as startup seeds it.
-    bindings, trust = seeded_sites(runtime.db.db_path, {"site-a": SITE_SIGNER.identity})
+    bindings, trust = seeded_sites(
+        runtime.db.db_path, authorities or {"site-a": SITE_SIGNER.identity}
+    )
     return dataclasses.replace(
         runtime, site_bindings=bindings, service_peer_trust=trust, **changes
     )
@@ -645,6 +651,25 @@ def test_status_reads_every_registry_and_reports_the_first_that_fails() -> None:
 
     assert result == "http_502"
     assert asked == ["registry-a"], "the first failure is reported without asking on"
+
+
+async def test_every_configured_sites_peer_reads_status(tmp_path) -> None:
+    """The read names no site, so with two sites each bound to its own peer,
+    site B's peer reads status as site A's does."""
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"),
+        authorities={"site-a": SITE_SIGNER.identity, "site-b": SITE_B_SIGNER.identity},
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _status_client(app, SITE_SIGNER, "service") as site_a:
+            read_by_a = await site_a.get_system_status()
+        async with _status_client(app, SITE_B_SIGNER, "service") as site_b:
+            read_by_b = await site_b.get_system_status()
+
+    assert read_by_a.checks["database"] == "ok"
+    assert read_by_b.checks["database"] == "ok"
+    assert read_by_b.settlement_manual_required is None
 
 
 async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(
