@@ -128,6 +128,10 @@ def test_a_binding_names_its_peer_and_diagnoses_its_principals_without_its_url(
                      id="a full-width at sign"),
         pytest.param({"site-a": "https://one.example.test?secret=1"}, _peers("site-a"),
                      id="a query"),
+        pytest.param({"site-a": "https://one.example.test/secret"}, _peers("site-a"),
+                     id="a path"),
+        pytest.param({"site-a": "https://one.example.test:secret"}, _peers("site-a"),
+                     id="a port that is not a number"),
         pytest.param({"site a": "https://one.example.test"}, _peers("site a"),
                      id="an invalid site ID"),
         pytest.param({"site-a": "https://one.example.test"}, {}, id="no service peer"),
@@ -141,6 +145,23 @@ def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers)
         parse_site_bindings(sites, peers)
     assert "secret" not in str(raised.value)
     assert "one.example.test" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        pytest.param("https://one.example.test/v1", "without a path", id="a path"),
+        pytest.param("https://one.example.test:bad", "with a numeric port",
+                     id="a port that is not a number"),
+    ],
+)
+def test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site(url, reason) -> None:
+    """A path would prefix every route the site's clients join to it, and a
+    port that is not a number fails only when a client is built."""
+    with pytest.raises(
+        ValueError, match=rf"site 'site-a' authority_url must be an HTTP\(S\) origin {reason}$"
+    ):
+        parse_site_bindings({"site-a": url}, _peers("site-a"))
 
 
 @pytest.mark.parametrize(

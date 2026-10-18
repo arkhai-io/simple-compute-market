@@ -7,7 +7,6 @@ import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
 
 from compute_provisioning_client import AuthorityTrust, ComputeProvisioningClient
 from compute_provisioning_contracts import (
@@ -30,6 +29,7 @@ from core_storefront.service_peers import (
     ServicePeerConfigs,
     ServicePeerTrust,
 )
+from market_config.setting_types import site_authority_url
 from market_identity import Signer
 from market_site_client import SiteCapacityClient
 
@@ -76,28 +76,10 @@ class BareMetalSiteBinding:
 
 
 def _authority_url(value: Any, *, site_id: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"site {site_id!r} authority_url must be a string")
     try:
-        parsed = urlsplit(value.strip())
-    except ValueError:
-        raise ValueError(
-            f"site {site_id!r} authority_url must be an HTTP(S) origin "
-            "without credentials, query, or fragment"
-        ) from None
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError(
-            f"site {site_id!r} authority_url must be an HTTP(S) origin "
-            "without credentials, query, or fragment"
-        )
-    return value.strip().rstrip("/")
+        return site_authority_url(value)
+    except ValueError as exc:
+        raise ValueError(f"site {site_id!r} authority_url {exc}") from None
 
 
 def parse_site_bindings(

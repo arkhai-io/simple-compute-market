@@ -42,6 +42,7 @@ from core_storefront.service_peers import ServicePeerConfigs
 from dynaconf import Dynaconf
 from market_config.config_loader import storefront_config_files
 from market_config.registry_url import normalize_registry_url
+from market_config.setting_types import PositiveSeconds, positive_seconds
 from market_identity import Identity, Signer, TrustedIdentitySet
 from pydantic import (
     BaseModel,
@@ -61,6 +62,8 @@ ENVVAR_SEPARATOR = "__"
 IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
 
 _DEFAULTS_FILE = Path(__file__).with_name("settings.toml")
+#: How many poll intervals an unstated source-confirmation window spans.
+_CONFIRMATION_POLL_INTERVALS = 3
 
 
 class BareMetalConfigurationError(ValueError):
@@ -69,19 +72,6 @@ class BareMetalConfigurationError(ValueError):
     Its message names keys and reasons, never a configured value, so it is safe
     to report where an operator reads it.
     """
-
-
-def _refuse_bool(value: Any) -> Any:
-    # A float field would read `true` as 1.0; a duration is never a boolean.
-    if isinstance(value, bool):
-        raise ValueError("must be a number of seconds, not a boolean")
-    return value
-
-
-#: A positive, finite number of seconds.
-PositiveSeconds = Annotated[
-    float, BeforeValidator(_refuse_bool), Field(gt=0, allow_inf_nan=False)
-]
 
 
 def _principal_keys_in_any_case(value: Any) -> Any:
@@ -184,12 +174,28 @@ class CapacitySettings(_Section):
     publication_interval_seconds: PositiveSeconds
     source_confirmation_seconds: PositiveSeconds | None = None
 
+    @model_validator(mode="after")
+    def _derived_window_is_usable(self) -> "CapacitySettings":
+        # An unstated window is three poll intervals, which can exceed what a
+        # timedelta holds although the interval itself does not; unrefused here,
+        # the opening recheck would raise at every comparison instead.
+        if self.source_confirmation_seconds is None:
+            try:
+                positive_seconds(_CONFIRMATION_POLL_INTERVALS * self.poll_interval)
+            except ValueError as exc:
+                raise ValueError(
+                    "poll_interval sets source_confirmation_seconds when it is not "
+                    f"stated, to {_CONFIRMATION_POLL_INTERVALS} poll intervals, which "
+                    f"{exc}"
+                ) from None
+        return self
+
     @property
     def confirmation_window_seconds(self) -> float:
         """The source-confirmation window: as stated, else three poll intervals."""
         if self.source_confirmation_seconds is not None:
             return self.source_confirmation_seconds
-        return 3 * self.poll_interval
+        return _CONFIRMATION_POLL_INTERVALS * self.poll_interval
 
 
 class PricingSettings(_Section):

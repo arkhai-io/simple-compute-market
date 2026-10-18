@@ -140,6 +140,11 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
                      id="a zero interval"),
         pytest.param({"capacity": {"source_confirmation_seconds": -1}},
                      "capacity.source_confirmation_seconds", id="a negative window"),
+        pytest.param({"capacity": {"source_confirmation_seconds": 1e14}},
+                     "capacity.source_confirmation_seconds",
+                     id="a window no timedelta holds"),
+        pytest.param({"capacity": {"poll_interval": 1e14}}, "capacity.poll_interval",
+                     id="an interval no timedelta holds"),
         pytest.param({"negotiation_watchdog_interval": True},
                      "negotiation_watchdog_interval", id="a boolean interval"),
         pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
@@ -173,6 +178,28 @@ def test_the_confirmation_window_is_three_poll_intervals_unless_stated(
     assert derived.source_confirmation_seconds is None
     assert derived.confirmation_window_seconds == 6
     assert stated.confirmation_window_seconds == 3600
+
+
+def test_a_derived_window_no_timedelta_holds_is_refused_by_its_interval(
+    monkeypatch, tmp_path
+):
+    """Three poll intervals of 3e13 seconds exceed what a timedelta holds,
+    though one does not: unstated, the window is refused at load, naming the
+    interval it derives from, rather than raising at the first recheck. Stated,
+    the same interval is accepted."""
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 3e13}})
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "capacity: " in str(refused.value)
+    assert "poll_interval sets source_confirmation_seconds" in str(refused.value)
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"capacity": {"poll_interval": 3e13, "source_confirmation_seconds": 3600}},
+    )
+    assert load_storefront_settings().capacity.confirmation_window_seconds == 3600
 
 
 def test_a_key_the_storefront_does_not_read_is_ignored(monkeypatch, tmp_path):

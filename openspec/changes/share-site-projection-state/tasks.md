@@ -3767,10 +3767,12 @@ store"). Touches bare metal's storefront and `e2e-tests/`.
       cycle the poller's wake ran; the seam is a cycle factory reporting each completed
       cycle, waited on with a bound, no sleep) and `test_startup_starts_every_loop_on_the_controllers_timer`
       (the four timers and their routes; shutdown stops them) make no client call: they are
-      the running app's composition observed through the controller and that seam. The
-      timer test's factory builds `BareMetalPublicationCycle` itself, with a recording
-      registry and fixed terms, so `build_publication_cycle` is not exercised on the timer
-      path (the step's tests and the cycle tests cover what it passes).
+      the running app's composition observed through the controller and that seam.
+      **Corrected (round 10, 10 F4):** the timer test's factory first built
+      `BareMetalPublicationCycle` itself, with a recording registry and fixed terms, so the
+      production composition was not exercised on the timer path; it now composes each cycle
+      through `compose_publication_cycle` from the runtime, with Alkahest settlement terms and
+      only the registry's fan-out replaced (13.13).
       `test_a_failed_publication_cycle_is_recorded_with_its_stage` steps publication through
       `StorefrontClient` and reads the outcome through the controller, not status (no
       registry: `compose`, `BareMetalPublicationError` with its message; a cycle raising
@@ -3928,6 +3930,149 @@ divergences judged justified):
   composed from the files, handed to the command); its docstring says why no case lets the
   command compose its own (it would poll the configured site over the network).
 - The mock deal's driver asserts the stepped generation changed. Nits: `__all__` sorted.
+
+### Round 10 triage fixes (owner dispositions 2026-10-18)
+
+Review 10 (`reviews/10-implementation-external.md`, the owner's external review of Sections
+11-13 at `fa212f0`) was triaged in `reviews/10-implementation-external.triage.md`; its gate passed
+2026-10-18, with these fixes to land and the fix commit to be validated (no validation record
+exists for `fa212f0`). F3 (bare-metal tests never reach the real provisioning application) was
+dispositioned as validation of the fix commit, not a fix: the client-to-API contract is
+provisioning's integration suite's, and the wiring the end-to-end lane's.
+
+- [x] 13.10 (10 F1, F2) **Shared setting types in `kit/config`.** A module of two Pydantic
+      annotated types, each over a plain function, exported from `market_config`:
+      `PositiveSeconds`, a positive, finite number of seconds a `timedelta` can represent, and
+      `SiteAuthorityUrl`, an HTTP(S) origin. `kit/config` 0.3.0 to 0.4.0; both storefronts'
+      floors `>=0.4.0`; every lock `make check-packaging` asks for refreshed.
+      Done. `market_config/setting_types.py`: `positive_seconds` reads a number or numeric
+      string and refuses a boolean (by name), NaN, infinity, zero, a negative, a non-number, and
+      anything at or above `MAX_SECONDS` (`timedelta.max.total_seconds()`); `site_authority_url`
+      refuses a non-string, a scheme other than http/https, no host, credentials, a query or
+      fragment (a bare `?` or `#` included), a path other than empty or `/`, a URL `urlsplit`
+      cannot parse, and a port that does not parse as a number in range, and strips whitespace
+      and a trailing `/`. Each reason names no value. **Differed (bound):** the ceiling is
+      exclusive, not "anything above": `timedelta.max.total_seconds()` rounds up to
+      `86400000000000.0`, which `timedelta` itself refuses, so the bound refuses it too and the
+      largest float below it builds one. The types are `PlainValidator`s over the functions with
+      a `WithJsonSchema`: the duration's schema states `exclusiveMinimum` 0 and
+      `exclusiveMaximum` `MAX_SECONDS`, the origin's is a string. `make dist`, then `make lock
+      PROJECTS=...` relocked the sixteen projects that lock `arkhai-kit-config` and resolve here
+      (kit capacity-publication, config, storefront; core buyer and storefront; VM domain and
+      provisioning adapter; bare-metal domain, buyer, storefront, provisioning adapter;
+      API-credit buyer and storefront; compute provisioning ansible and service; e2e-tests): the
+      version and wheel name, and bare metal's root specifier. **Hand-edited (disclosed):**
+      `domains/vms/storefront/uv.lock` and `domains/vms/buyer/uv.lock` cannot be relocked here
+      (the PyTorch index is refused), so their `arkhai-kit-config` entries were edited to match
+      exactly how uv wrote the same package in bare metal's regenerated lock (version `0.4.0`,
+      wheel `arkhai_kit_config-0.4.0-py3-none-any.whl`, and VM storefront's root specifier
+      `>=0.4.0`); `kit/policy` locks no `arkhai-kit-config`, so its lock is unchanged; 16.6
+      relocks them. Unit (`kit/config/tests/unit/test_setting_types.py`): accepted durations and
+      origins through the function and a `TypeAdapter`; each refused value; the boolean named;
+      the bound refused and the float below it building a `timedelta`; 1e14 and `"1e14"`
+      refused; no value echoed; both JSON schemas.
+- [x] 13.11 (10 F1, F2) **Bare metal uses them.** `config.py`'s own `PositiveSeconds` is
+      replaced by `kit/config`'s; the derived window (three `poll_interval`s) is refused by key
+      when unrepresentable; `site_clients._authority_url` applies the origin rule, its
+      refusals still naming the site.
+      Done. `CapacitySettings` refuses, after its fields, an unstated window whose three poll
+      intervals the shared rule refuses: `capacity: ... poll_interval sets
+      source_confirmation_seconds when it is not stated, to 3 poll intervals, which must be
+      below ... seconds`, naming keys only (`_CONFIRMATION_POLL_INTERVALS` is the one statement
+      of three). `_authority_url` calls `site_authority_url`, the plain function behind
+      `SiteAuthorityUrl`, and prefixes its reason with `site '<id>' authority_url`, so the
+      refusal names the site without unpacking a `ValidationError`. Unit
+      (`tests/test_config_loader.py`): a stated window of 1e14 refused by
+      `capacity.source_confirmation_seconds`, a poll interval of 1e14 by `capacity.poll_interval`,
+      and `test_a_derived_window_no_timedelta_holds_is_refused_by_its_interval` (3e13 refused
+      unstated, accepted with a stated window). Unit (`tests/test_site_clients.py`): the
+      parametrized invalid-binding test gains a path and a port that is not a number (neither
+      echoed), and `test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site` asserts
+      the message.
+- [x] 13.12 (10 F1, F2) **VM uses them.** `utils/config.py`'s `_positive_seconds` delegates to
+      `PositiveSeconds` through a `TypeAdapter`, refusing by key; the derived window is
+      refused when unrepresentable; `configured_capacity_sites` validates each URL through
+      `SiteAuthorityUrl`, refusing by key.
+      Done. One module-level `TypeAdapter` per type; a refusal is `[<key>] <reason>`, the reason
+      taken from the type's `ValueError`. `source_confirmation_seconds()` refuses an unstated
+      window three poll intervals cannot represent as `[capacity.poll_interval] sets
+      [capacity].source_confirmation_seconds when it is not stated, ...`, so
+      `_require_source_confirmation_window` refuses startup by the interval's key. A site URL
+      is refused as `[capacity.sites.<site>] <reason>` (a `RuntimeError`, which the startup
+      refusal already reports); an empty site ID keeps its own refusal. Docstrings of the
+      interval reader and the startup check name the representability rule. Unit
+      (`tests/unit/test_listing_source_check.py`): 1e14 and `"1e14"` windows and a 1e14 poll
+      interval refused by key; `test_startup_refuses_a_derived_window_no_timedelta_holds_by_its_interval`;
+      the startup check imported at module level. Unit (`tests/unit/test_startup_refusal.py`):
+      `test_a_site_url_that_is_not_an_http_origin_is_refused_under_its_key` (path, bad port,
+      credentials, query, no scheme, empty; none echoed) and
+      `test_a_site_url_is_read_as_its_origin`. Chart render tests ran with `STOREFRONT_PYTHON`
+      (VM's environment): the loader, start-and-derive, and generated-schema checks pass over
+      the chart-derived `capacity.sites`; VM's typed models do not use the new types, so its
+      generated schema is unchanged.
+- [x] 13.13 (10 F4) **The timer test runs the production composition.**
+      `test_a_site_declaring_new_supply_is_published_by_the_timer` composes its cycle through
+      `compose_publication_cycle(runtime, cycle_factory=...)` with a reporting subclass of
+      `BareMetalPublicationCycle`, substituting only the registry through the runtime's
+      registry seam; the 13.8 note is corrected.
+      Done (`tests/test_http_system.py`, application integration over the real app and its
+      lifespan). `_ReportedCycle` subclasses `BareMetalPublicationCycle`, reporting each
+      completed pass; `_ObservedCycles` returns `compose_publication_cycle(runtime,
+      cycle_factory=partial(_ReportedCycle, completed=...))`; the runtime's
+      `registry_configuration` is `_RecordedRegistries`, a `BareMetalRegistryConfiguration`
+      whose `client_factory` returns the recording registry, so the registry's fan-out is the
+      one collaborator replaced. The runtime publishes under real Alkahest settlement
+      (`test_publication_cycle.alkahest_publication`: the composition and compiled clauses, the
+      payload built by `publication_payload_builder`), with the seller wallet and lease bound a
+      configured runtime carries, and settlement servicing on an hour's interval. The runtime's
+      settlement setup did not block it. `test_the_projection_step_while_held_polls_and_publication_waits_for_resume`
+      shares the seam and so now runs the production composition too.
+- [x] 13.14 Validation for the round: kit/config unit, the bare-metal storefront suite, VM
+      storefront unit and integration (frozen), `make -k test` with the three PyTorch-index
+      projects frozen, `make check-packaging`, `make check-comment-hygiene`, `make
+      check-doc-citations`, `make check-tasks`, `openspec validate --strict`, chart render
+      tests; the fresh-context check of the diff against `fa212f0`.
+      Done. `kit/config` unit 213 passed (161 at round 08; `test_setting_types.py` among them).
+      Bare-metal storefront 395 passed (388 before: unit configuration and binding cases, and
+      the application-integration timer and held-step tests over the production composition).
+      VM storefront frozen, with the 0.4.0 `kit/config` wheel and the rebuilt bare-metal
+      storefront wheel installed (`uv sync --frozen --reinstall-package`; `UV_FROZEN=1 make
+      test-unit test-integration`): unit 1082 passed, 1 skipped (1071 before); integration 447
+      passed (application integration and application startup). Chart render tests (`make -C
+      helm test-render`, `TESTING.md` "Chart Render Tests", `STOREFRONT_PYTHON` set to VM's
+      environment): passed, the loader and start-and-derive checks run, not skipped. `make -k
+      test`: every suite it ran passed -- core 123 + 134 + 217 (2 skipped) + 62, the kits
+      (config 213, capacity-publication 97, storefront 106, pool-overrides 81, alkahest 296
+      among them), provisioning service 675 + 463, bare metal 134 + 395 + 11 + 40, API-credit
+      storefront 153, e2e unit 38, release tooling 944 -- and it stopped only at the reinit of
+      `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch index is
+      refused here, as in 2.6), run frozen: `kit/policy` 80 passed, VM buyer 202 passed (its
+      environment synced frozen to the 0.4.0 wheel), VM storefront as above. `make
+      check-packaging` (architecture rules included), `make check-comment-hygiene`, `make
+      check-doc-citations CHANGE=share-site-projection-state` (nothing reported), `make
+      check-tasks CHANGE=share-site-projection-state`, `make check-change-index`, and `openspec
+      validate --strict` pass. No repository typing target exists. The pipeline was not run: the
+      fix commit is validated next (the triage's disposition, which also carries F3).
+      Fresh-context check of the diff against `fa212f0`: _to be recorded by the orchestrator_.
+      **End-to-end, read from the lanes' configuration (the pipeline was not run):** every
+      VM-lane storefront states `[capacity.sites]` URLs that are origins (`http://provisioning:8081`,
+      `http://alice-provisioning:8081`, the chart's `{default: <provisioning URL>}`) and
+      intervals far below the ceiling, so each starts as before; the bare-metal lane's
+      `storefront.dev.toml` names `http://bare-metal-provisioning:8081` and a 3600-second window.
+      No scenario states an unrepresentable duration or a URL with a path: those are unit
+      evidence only. No API-credit scenario reaches the round's code.
+
+Round 10 handoff:
+
+- `market_config.setting_types` (`kit/config` 0.4.0) holds `PositiveSeconds` / `positive_seconds`
+  and `SiteAuthorityUrl` / `site_authority_url`. A new duration or site URL either storefront
+  reads uses them: a typed model declares the type, an untyped VM read goes through a
+  `TypeAdapter` and reports `[<key>] <reason>`. Section 16's bare-metal values schema takes the
+  duration bounds from the typed models without a copy; the origin is typed as a string there.
+- The bare-metal timer seam (`test_http_system._ObservedCycles`) composes through
+  `compose_publication_cycle` with real Alkahest terms, so a timer test needs `monkeypatch`
+  (for `alkahest_publication`'s token cache) and `_timed_runtime(tmp_path, monkeypatch, ...)`.
+- 16.6 relocks VM storefront and VM buyer, whose `arkhai-kit-config` entries were edited by hand.
 
 ## 14. Bare-metal status and the publish command
 
@@ -4136,6 +4281,15 @@ documentation only; a part needing code returns the change to implementation.
         (around line 30, `siteBindingsSecret`'s entry shape, Section 16's) still show a
         principal, and health's `sites` entries now report `service_peer` and
         `authority_principals`.
+      - **Amended (round 10, 13.10-13.12):** `docs/development/ARCHITECTURE.md` "Kit areas" --
+        `kit/config` holds the setting types storefronts share, `PositiveSeconds` and
+        `SiteAuthorityUrl`, beside its values-schema generator; `DEPLOYMENT_AND_CONFIG.md`
+        "Storefront agents: pass-through configuration" and "Bare-metal role configuration" --
+        every duration a storefront reads is a positive, finite number of seconds a `timedelta`
+        can hold, the unstated source-confirmation window (three poll intervals) included and
+        refused under `[capacity].poll_interval`, and every `[capacity.sites]` URL an HTTP(S)
+        origin with no path, credentials, query, or fragment and a numeric port, refused at
+        startup under the site's key (D6 and D14b's round-10 notes).
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

@@ -359,6 +359,20 @@ VM does, with these choices of its own:
 - *The publish command loads its own state* with one poll before its cycle, since it composes
   a runtime in its own process until it becomes an API client (C1).
 
+**Decided with the owner, 2026-10-18 (round 10 triage, 10 F1).** Every duration either
+storefront reads -- its loop intervals and the source-confirmation window, stated or derived --
+is a positive, finite number of seconds below `timedelta.max.total_seconds()`, a representability
+ceiling, not a policy maximum. The window is compared against elapsed time as a `timedelta`, so a
+finite window above what one holds started cleanly and raised `OverflowError` at the opening
+recheck. The ceiling is exclusive because that bound rounds up to a float `timedelta` itself
+cannot hold. The unstated window, three poll intervals, is checked as well and refused by the
+interval's key, since an interval below the ceiling can derive a window above it: bare metal
+refuses it when its `[capacity]` section loads, VM when its startup reads the window. The rule
+is `kit/config`'s shared `PositiveSeconds` (D14b's round-10 note says why it lives there).
+Rejected: having the kit's `freshly_confirmed` treat an unrepresentable window as unconfirmed,
+which would turn a configuration mistake into a retryable refusal of every round and need a kit
+bump.
+
 ### D14. Bare-metal configuration follows the VM storefront's conventions
 
 `DEPLOYMENT_AND_CONFIG.md` is correct, so the bare-metal storefront stops reading
@@ -466,6 +480,24 @@ Secrets is owed. Accepted scope beyond the original proposal.
   - *Bare metal serves VM's identity routes* (rotation, retirement, status), committing through
     the trust. Its administrators are configuration and never a durable subject, so an
     administrator rotation is refused there as not registered.
+
+  **Decided with the owner, 2026-10-18 (round 10 triage, 10 F2).** A site's authority URL is an
+  HTTP(S) origin in both storefronts, and VM adopts bare metal's rule, the better one: an `http`
+  or `https` scheme, a host, a port (if stated) that parses as a number, and no credentials, query,
+  fragment, or path other than `/`, read without surrounding whitespace or a trailing `/`. A
+  site's clients join their routes to the URL, so a path became a prefix of every route and
+  failed only at the first poll; VM had checked only that a URL was non-empty, and bare metal's
+  check, which already refused credentials, a query, and a fragment, accepted a path and a port
+  that is not a number. The rule names the site's key and never echoes the URL. Both shared rules,
+  this one and the duration (D6's round-10 note), are Pydantic annotated types in `kit/config`,
+  `SiteAuthorityUrl` and `PositiveSeconds`, each over a plain function: a typed settings model
+  declares a field with the type (bare metal's intervals), an untyped loader validates through a
+  `TypeAdapter` of it (VM's `[capacity]` reads), and a values schema generated from a typed model
+  carries it, so Section 16's bare-metal schema takes the same rule without a copy (the duration's
+  JSON schema states its bounds; the origin's is a string, its rule applied by the loader). Bare
+  metal's site bindings apply the origin rule through its plain function, so the refusal names
+  the site. Rejected: a local copy of the rule in VM, which drifts; and the types staying in the
+  bare-metal storefront for VM to import, a dependency between two domains.
 - **D14c. The values-schema generator moves to `kit/config`.** The generic generator
   (field publicizing, secret refusal, sink typing, render, drift check) leaves
   `market_storefront.values_schema`; each storefront keeps only its section list, passes

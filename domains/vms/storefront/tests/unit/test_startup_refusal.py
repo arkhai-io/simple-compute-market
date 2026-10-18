@@ -16,6 +16,7 @@ from market_storefront.startup_refusal import (
     require_publishable_storefront,
     retired_setting_problems,
 )
+from market_storefront.utils.config import configured_capacity_sites
 
 # Deterministic development keys; never used on a public network.
 _REGISTRY = Ed25519Signer(b"\x71" * 32)
@@ -131,6 +132,45 @@ def test_no_enabled_settlement_mechanism_is_refused() -> None:
 def test_no_configured_site_is_refused() -> None:
     (problem,) = publication_startup_problems(_source(capacity={"sites": {}}))
     assert "[capacity.sites]" in problem
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        pytest.param("http://home:8081/v1", "without a path", id="a path"),
+        pytest.param("http://home:secret", "with a numeric port",
+                     id="a port that is not a number"),
+        pytest.param("https://user:secret@home:8081", "without credentials",
+                     id="credentials"),
+        pytest.param("http://home:8081?secret=1", "without a query or fragment",
+                     id="a query"),
+        pytest.param("home:8081", "its scheme is http or https", id="no scheme"),
+        pytest.param("", "its scheme is http or https", id="empty"),
+    ],
+)
+def test_a_site_url_that_is_not_an_http_origin_is_refused_under_its_key(
+    url: str, reason: str
+) -> None:
+    """The site's clients join their routes to its URL, so a path would prefix
+    every route and fail only at the first poll; the refusal names the site's
+    key and the reason, never the URL."""
+    source = _source(
+        capacity={"sites": {"home": url, "away": "http://away:8081"}},
+    )
+    (problem,) = publication_startup_problems(source)
+    assert problem.startswith("[capacity.sites.home] must be an HTTP(S) origin")
+    assert reason in problem
+    assert "secret" not in problem
+
+
+def test_a_site_url_is_read_as_its_origin() -> None:
+    source = _source(
+        capacity={"sites": {"home": " http://home:8081/ ", "away": "https://away"}},
+    )
+    assert configured_capacity_sites(source) == {
+        "home": "http://home:8081",
+        "away": "https://away",
+    }
 
 
 def test_a_site_bound_to_no_service_peer_or_to_two_is_refused() -> None:

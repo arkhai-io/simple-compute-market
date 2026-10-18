@@ -28,8 +28,9 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
     storefront_config_files,
 )
 from market_config.registry_url import normalize_registry_url
+from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -215,8 +216,21 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     return float(active.get("settlement_servicing_interval_seconds", 30))
 
 
+_POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
+_SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
+
+
+def _refusal_reason(exc: ValidationError) -> str:
+    """The reason a shared setting type gave, which names no configured value."""
+
+    return "; ".join(
+        str(error.get("ctx", {}).get("error", error["msg"])) for error in exc.errors()
+    )
+
+
 def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
-    """`[capacity.sites]`: each stable site ID and its authority URL."""
+    """`[capacity.sites]`: each stable site ID and its authority URL, an
+    HTTP(S) origin; a URL that is not one is refused under its site's key."""
 
     active = settings if source is None else source
     raw_sites = active.get("capacity.sites")
@@ -228,10 +242,14 @@ def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
     sites: dict[str, str] = {}
     for raw_name, raw_url in dict(raw_sites).items():
         site_id = str(raw_name).strip()
-        url = str(raw_url or "").strip().rstrip("/")
-        if not site_id or not url:
-            raise RuntimeError("capacity site IDs and authority URLs must be non-empty")
-        sites[site_id] = url
+        if not site_id:
+            raise RuntimeError("capacity site IDs must be non-empty")
+        try:
+            sites[site_id] = _SITE_AUTHORITY_URL.validate_python(raw_url)
+        except ValidationError as exc:
+            raise RuntimeError(
+                f"[capacity.sites.{site_id}] {_refusal_reason(exc)}"
+            ) from None
     return sites
 
 
@@ -247,9 +265,9 @@ def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
     """`[capacity].poll_interval`: seconds between the projection poller's
     cycles and the capacity-event pollers', five unless stated.
 
-    A stated value that is not a positive, finite number is refused by key
-    rather than defaulted: it also sets the default source-confirmation window,
-    which must stay a usable bound.
+    A stated value that is not a positive, finite number of seconds a
+    `timedelta` can hold is refused by key rather than defaulted: it also sets
+    the default source-confirmation window, which must stay a usable bound.
     """
 
     active = settings if source is None else source
@@ -275,24 +293,27 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
     stated = active.get("capacity.source_confirmation_seconds")
     if stated is not None:
         return _positive_seconds(stated, key="capacity.source_confirmation_seconds")
-    return _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+    derived = _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+    try:
+        return _POSITIVE_SECONDS.validate_python(derived)
+    except ValidationError as exc:
+        # The interval is usable, but three of them are not: refused by the
+        # interval's key, since no window is stated.
+        raise ValueError(
+            "[capacity.poll_interval] sets [capacity].source_confirmation_seconds "
+            f"when it is not stated, to {_CONFIRMATION_POLL_INTERVALS} poll "
+            f"intervals, which {_refusal_reason(exc)}"
+        ) from None
 
 
 def _positive_seconds(value: Any, *, key: str) -> float:
-    """A stated duration, refused by key unless it is a positive, finite number.
+    """A stated duration, refused by key unless it is a positive, finite number
+    of seconds a `timedelta` can hold."""
 
-    `nan` fails the comparison, so it is refused with zero and the negatives.
-    """
-
-    if isinstance(value, bool):
-        raise ValueError(f"[{key}] must be a positive number of seconds")
     try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"[{key}] must be a positive number of seconds") from None
-    if not seconds > 0 or seconds == float("inf"):
-        raise ValueError(f"[{key}] must be a positive number of seconds")
-    return seconds
+        return _POSITIVE_SECONDS.validate_python(value)
+    except ValidationError as exc:
+        raise ValueError(f"[{key}] {_refusal_reason(exc)}") from None
 
 
 class AdministratorDeclaration(BaseModel):

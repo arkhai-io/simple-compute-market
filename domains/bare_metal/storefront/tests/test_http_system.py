@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 
 import httpx
 import pytest
@@ -21,6 +22,7 @@ from arkhai_bare_metal_storefront.lifecycle_steps import (
     bare_metal_loop_controller,
 )
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
+from arkhai_bare_metal_storefront.publication_composition import compose_publication_cycle
 from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
 from arkhai_bare_metal_storefront.runtime import (
     BareMetalStorefrontRuntime,
@@ -38,9 +40,10 @@ from settlement_compositions import alkahest_composition
 from site_trust import seeded_sites
 from test_publication_cycle import (
     REGISTRY_URL,
+    SELLER_WALLET,
     RecordingRegistries,
     Site,
-    Terms,
+    alkahest_publication,
     member,
     pool,
     projections_over,
@@ -415,56 +418,78 @@ async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) ->
     assert log == ["start first", "end first", "start second", "end second"]
 
 
-class _ObservedCycles:
-    """Composes each publication cycle over the runtime's held projections and a
-    recording registry, as the production composition does, and reports each
-    cycle that completes: the seam a test waits on instead of a timer."""
+class _ReportedCycle(BareMetalPublicationCycle):
+    """The production cycle, reporting each pass that completes: the seam a test
+    waits on instead of a timer."""
 
-    def __init__(self) -> None:
-        self.registries = RecordingRegistries()
-        self.completed: asyncio.Queue[dict[str, object]] = asyncio.Queue()
-
-    def __call__(self, runtime: BareMetalStorefrontRuntime) -> "_ReportedCycle":
-        cycle = BareMetalPublicationCycle(
-            sqlite_client=runtime.db,
-            registry=build_bare_metal_storefront_registry(domain=runtime.domain),
-            site_projections=runtime.site_projections,
-            site_ids=[binding.site_id for binding in runtime.site_bindings],
-            registry_client_factory=self.registries,
-            registry_urls=(REGISTRY_URL,),
-            storefront_url=runtime.storefront_url,
-            seller_principal=runtime.seller_principal,
-            build_payload=Terms(),
-            default_max_duration_seconds=3600,
-            enter_stage=runtime.loops.enter_stage,
-        )
-        return _ReportedCycle(cycle, self.completed)
-
-    async def next_cycle(self) -> dict[str, object]:
-        return await asyncio.wait_for(self.completed.get(), timeout=5)
-
-
-class _ReportedCycle:
-    def __init__(self, cycle: BareMetalPublicationCycle, completed: asyncio.Queue) -> None:
-        self._cycle = cycle
+    def __init__(self, *, completed: asyncio.Queue, **composed: object) -> None:
+        super().__init__(**composed)
         self._completed = completed
 
     async def run(self, *, dry_run: bool = False) -> dict[str, object]:
-        report = await self._cycle.run(dry_run=dry_run)
+        report = await super().run(dry_run=dry_run)
         if not dry_run:
             self._completed.put_nowait(report)
         return report
+
+
+@dataclasses.dataclass(frozen=True)
+class _RecordedRegistries(BareMetalRegistryConfiguration):
+    """The runtime's registry configuration, its fan-out replaced by a recording
+    registry: the one collaborator the composition is given in place of the
+    real one."""
+
+    recording: RecordingRegistries = dataclasses.field(default_factory=RecordingRegistries)
+
+    def client_factory(self, signer):
+        return self.recording
+
+
+class _ObservedCycles:
+    """Composes each publication cycle through the production composition, from
+    the runtime's held projections, settlement terms, and registry
+    configuration, as a cycle that reports each completed pass."""
+
+    def __init__(self) -> None:
+        self.registry_configuration = _RecordedRegistries(
+            authorities={REGISTRY_URL: _REGISTRY_TRUST}
+        )
+        self.registries = self.registry_configuration.recording
+        self.completed: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+    def __call__(self, runtime: BareMetalStorefrontRuntime) -> BareMetalPublicationCycle:
+        return compose_publication_cycle(
+            runtime,
+            cycle_factory=functools.partial(_ReportedCycle, completed=self.completed),
+        )
+
+    async def next_cycle(self) -> dict[str, object]:
+        return await asyncio.wait_for(self.completed.get(), timeout=5)
 
 
 def _published(report: dict[str, object]) -> list[dict[str, object]]:
     return [item for item in report["actions"] if item["action"] == "publish"]
 
 
-def _timed_runtime(path: str, site: Site, cycles: _ObservedCycles, **changes):
+def _timed_runtime(
+    tmp_path, monkeypatch, site: Site, cycles: _ObservedCycles, **changes
+):
     """A runtime over one site whose loops run on their timers from the start,
-    publication's interval far longer than any test waits."""
+    publication's interval far longer than any test waits.
+
+    It publishes under Alkahest settlement, composed as the storefront composes
+    it, to the registry ``cycles`` records; settlement servicing sweeps on an
+    interval no test waits out.
+    """
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
     return dataclasses.replace(
-        _sited_runtime(path, {"site-a": site}),
+        _sited_runtime(str(tmp_path / "storefront.db"), {"site-a": site}),
+        seller_evm_address=SELLER_WALLET,
+        settlement_composition=composition,
+        publication_clauses=clauses,
+        default_max_duration_seconds=3600,
+        settlement_servicing_interval_seconds=3600,
+        registry_configuration=cycles.registry_configuration,
         publication_cycle_factory=cycles,
         loop_controller_factory=bare_metal_loop_controller,
         publication_interval_seconds=3600,
@@ -472,15 +497,19 @@ def _timed_runtime(path: str, site: Site, cycles: _ObservedCycles, **changes):
     )
 
 
-async def test_a_site_declaring_new_supply_is_published_by_the_timer(tmp_path) -> None:
+async def test_a_site_declaring_new_supply_is_published_by_the_timer(
+    tmp_path, monkeypatch
+) -> None:
     """With the loops running, a pool a site declares is published with no
     operator command: the poller's timer sees the site's new generation and
-    wakes publication, whose interval has not passed. Spec scenario "A
-    bare-metal site declares new supply"."""
+    wakes publication, whose interval has not passed, and the timer's cycle is
+    the one the production composition builds from the runtime. Spec scenario
+    "A bare-metal site declares new supply"."""
     site = Site(pool("pool-0"))
     cycles = _ObservedCycles()
     runtime = _timed_runtime(
-        str(tmp_path / "storefront.db"),
+        tmp_path,
+        monkeypatch,
         site,
         cycles,
         site_projection_poll_interval_seconds=0.05,
@@ -502,7 +531,7 @@ async def test_a_site_declaring_new_supply_is_published_by_the_timer(tmp_path) -
 
 
 async def test_the_projection_step_while_held_polls_and_publication_waits_for_resume(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
     """Stepping the held site-projection poller runs exactly its cycle: it
     polls, sees the site's change, and wakes publication, which stays held and
@@ -516,7 +545,7 @@ async def test_the_projection_step_while_held_polls_and_publication_waits_for_re
     cycle that follows the resume."""
     site = Site(pool("pool-0"))
     cycles = _ObservedCycles()
-    runtime = _timed_runtime(str(tmp_path / "storefront.db"), site, cycles)
+    runtime = _timed_runtime(tmp_path, monkeypatch, site, cycles)
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):

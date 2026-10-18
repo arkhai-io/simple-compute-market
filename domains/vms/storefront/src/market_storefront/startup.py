@@ -107,8 +107,9 @@ def _require_readable_family_rates() -> None:
 
 def _require_source_confirmation_window() -> None:
     """Refuse to start, naming the key, with a projection poll interval or a
-    source-confirmation window that is not a positive, finite number, rather
-    than start loops on it or refuse every negotiation round.
+    source-confirmation window that is not a positive, finite number of seconds
+    a `timedelta` can hold, rather than start loops on it or refuse every
+    negotiation round.
 
     The poll interval is checked first: when the window is not stated it is
     derived from it.
