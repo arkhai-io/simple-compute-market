@@ -39,6 +39,7 @@ def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
     assert settings.payment_reconciliation_interval == 30
     assert settings.capacity.poll_interval == 5
     assert settings.capacity.publication_interval_seconds == 30
+    assert settings.capacity.confirmation_window_seconds == 15
     assert settings.capacity.placement == "fill_first"
     # No lease bound is shipped: a pool that resolves none is held, not refused.
     assert settings.pricing.default_max_duration_seconds is None
@@ -137,6 +138,8 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
     [
         pytest.param({"capacity": {"poll_interval": 0}}, "capacity.poll_interval",
                      id="a zero interval"),
+        pytest.param({"capacity": {"source_confirmation_seconds": -1}},
+                     "capacity.source_confirmation_seconds", id="a negative window"),
         pytest.param({"negotiation_watchdog_interval": True},
                      "negotiation_watchdog_interval", id="a boolean interval"),
         pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
@@ -154,6 +157,24 @@ def test_a_setting_that_cannot_be_read_is_refused_by_key(
         load_storefront_settings()
 
 
+def test_the_confirmation_window_is_three_poll_intervals_unless_stated(
+    monkeypatch, tmp_path
+):
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 2}})
+    derived = load_storefront_settings().capacity
+
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"capacity": {"poll_interval": 2, "source_confirmation_seconds": 3600}},
+    )
+    stated = load_storefront_settings().capacity
+
+    assert derived.source_confirmation_seconds is None
+    assert derived.confirmation_window_seconds == 6
+    assert stated.confirmation_window_seconds == 3600
+
+
 def test_a_key_the_storefront_does_not_read_is_ignored(monkeypatch, tmp_path):
     """As VM's loader ignores one, so a release still starts on configuration a
     newer release wrote; the chart's values schema refuses a misspelling."""
@@ -161,7 +182,7 @@ def test_a_key_the_storefront_does_not_read_is_ignored(monkeypatch, tmp_path):
         monkeypatch,
         tmp_path,
         {
-            "capacity": {"poll_interval": 3, "source_confirmation_seconds": 60},
+            "capacity": {"poll_interval": 3, "drift_check_seconds": 60},
             "Wallet": {"ssh_public_key": "ssh-ed25519 AAAA test"},
             "agent_id": "bob",
         },

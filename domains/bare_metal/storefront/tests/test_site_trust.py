@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -31,6 +32,7 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
 )
+from held_loops import held_loop_controller
 from signed_sites import SignedSite, SignedSites
 from storefront_configuration import (
     ADMIN,
@@ -133,8 +135,13 @@ async def test_a_rotation_through_the_routes_moves_responses_and_callbacks(
     domain = get_market_domain_contract()
     app = build_bare_metal_storefront_app(
         registry=build_bare_metal_storefront_registry(domain=domain),
-        runtime_factory=lambda: build_runtime_from_configuration(
-            credential=SELLER_CREDENTIAL, domain=domain, site_clients=sites.factories()
+        # The loops start held: no timer polls the site or publishes behind
+        # the test while it rotates the site's principal.
+        runtime_factory=lambda: replace(
+            build_runtime_from_configuration(
+                credential=SELLER_CREDENTIAL, domain=domain, site_clients=sites.factories()
+            ),
+            loop_controller_factory=held_loop_controller,
         ),
     )
 

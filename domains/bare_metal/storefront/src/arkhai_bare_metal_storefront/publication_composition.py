@@ -1,10 +1,11 @@
 """How one bare-metal publication cycle is composed from a running storefront.
 
-The publication command and the administrator's publication step both compose
-their cycle here, so the two cannot run different cycles. Each trusted site's
-own capacity client and every configured registry come from the storefront
-runtime; terms of sale come from its configuration, replaced for one site's pool
-by the storefront's stored override.
+The publication loop's timer and step, and the publication command, compose
+their cycle here, so none can run a different cycle. The held site projections
+and every configured registry come from the storefront runtime; terms of sale
+come from its configuration, replaced for one site's pool by the storefront's
+stored override. A cycle that cannot be composed raises
+``BareMetalPublicationError`` naming what is missing.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from core_storefront.publication_runner import PublicationPayload
 from market_resource_pools_contracts.backing import capacity_backing
 
 from .pool_overrides import compile_publication_clauses
-from .publication import BareMetalPublicationCycle
+from .publication import BareMetalPublicationCycle, BareMetalPublicationError
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
 from .storefront_registry import build_bare_metal_storefront_registry
@@ -35,7 +36,7 @@ def publication_payload_builder(
     """
     composition = runtime.settlement_composition
     if composition is None:
-        raise RuntimeError(
+        raise BareMetalPublicationError(
             "shared settlement configuration is required for publication"
         )
     clauses = runtime.publication_clauses
@@ -91,21 +92,14 @@ def build_publication_cycle(
     registry_configuration: BareMetalRegistryConfiguration,
     cycle_factory: Callable[..., BareMetalPublicationCycle] = BareMetalPublicationCycle,
 ) -> BareMetalPublicationCycle:
-    """Compose one cycle from the runtime's own trusted per-site clients.
-
-    Each site's client is the one the runtime composed for that site, never
-    the aggregate client, whose snapshot cannot tell an unreachable site from
-    an empty one.
-    """
-    if runtime.capacity_client is None:
-        raise RuntimeError("trusted site capacity clients are unavailable")
+    """Compose one cycle over the runtime's held projection of every configured site."""
+    if runtime.site_projections is None:
+        raise BareMetalPublicationError("site projection state is unavailable")
     return cycle_factory(
         sqlite_client=runtime.db,
         registry=build_bare_metal_storefront_registry(domain=runtime.domain),
-        site_clients={
-            binding.site_id: runtime.capacity_client.site(binding.site_id)
-            for binding in runtime.site_bindings
-        },
+        site_projections=runtime.site_projections,
+        site_ids=[binding.site_id for binding in runtime.site_bindings],
         registry_client_factory=registry_configuration.client_factory(
             runtime.marketplace_signer
         ),
@@ -114,6 +108,7 @@ def build_publication_cycle(
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime),
         default_max_duration_seconds=runtime.default_max_duration_seconds,
+        enter_stage=runtime.loops.enter_stage,
     )
 
 
@@ -124,7 +119,7 @@ def compose_publication_cycle(
 ) -> BareMetalPublicationCycle:
     """Compose one cycle from the runtime and every registry it configures."""
     if runtime.registry_configuration is None:
-        raise RuntimeError("no registry is configured for publication")
+        raise BareMetalPublicationError("no registry is configured for publication")
     return build_publication_cycle(
         runtime,
         registry_configuration=runtime.registry_configuration,

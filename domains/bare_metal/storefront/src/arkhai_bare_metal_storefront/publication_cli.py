@@ -23,13 +23,21 @@ def run_publication_once(
     runtime: BareMetalStorefrontRuntime | None = None,
     cycle_factory: Callable[..., BareMetalPublicationCycle] = BareMetalPublicationCycle,
 ) -> dict[str, Any]:
-    """Run one publication pass and report what it did.
+    """Run one publication cycle and report what it did.
 
     With no ``runtime`` it is composed from the storefront's configuration files.
+    The command's process holds its own projection state, which it loads with
+    one poll first, as a storefront's startup does.
     """
     runtime = runtime or build_runtime_from_configuration()
     cycle = compose_publication_cycle(runtime, cycle_factory=cycle_factory)
-    return to_jsonable_python(asyncio.run(cycle.run()))
+
+    async def run() -> Any:
+        if runtime.site_projections is not None:
+            await runtime.site_projections.poll_once()
+        return await cycle.run()
+
+    return to_jsonable_python(asyncio.run(run()))
 
 
 __all__ = ["run_publication_once"]

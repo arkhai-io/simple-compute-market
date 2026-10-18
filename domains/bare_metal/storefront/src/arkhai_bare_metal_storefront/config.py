@@ -174,13 +174,22 @@ class RegistrySettings(_Section):
 
 
 class CapacitySettings(_Section):
-    """``[capacity]``: the sites, how reservations are placed among them, and the
-    projection poll and publication intervals."""
+    """``[capacity]``: the sites, how reservations are placed among them, the
+    projection poll and publication intervals, and how long a poll's
+    confirmation lets the opening recheck confirm a listing."""
 
     sites: dict[str, str] = Field(default_factory=dict)
     placement: str
     poll_interval: PositiveSeconds
     publication_interval_seconds: PositiveSeconds
+    source_confirmation_seconds: PositiveSeconds | None = None
+
+    @property
+    def confirmation_window_seconds(self) -> float:
+        """The source-confirmation window: as stated, else three poll intervals."""
+        if self.source_confirmation_seconds is not None:
+            return self.source_confirmation_seconds
+        return 3 * self.poll_interval
 
 
 class PricingSettings(_Section):

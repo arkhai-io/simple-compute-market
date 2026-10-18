@@ -53,7 +53,7 @@ from market_alkahest.dev_chain import anvil_address_book_path
 from seeded_threads import seed_thread
 from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
 from site_trust import seeded_sites
-from source_sites import SourceSites
+from source_sites import SourceSites, loaded_source_projections
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -929,6 +929,9 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
         chain_config_paths={"anvil": str(anvil_address_book_path())},
         escrow_verifier=verifier,
         capacity_client=SourceSites(),
+        # The opening rechecks the listing against the projection held for its
+        # site, loaded as startup loads it.
+        site_projections=await loaded_source_projections(),
     )
     condition = {
         "chain_name": "anvil",

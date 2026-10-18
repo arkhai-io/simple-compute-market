@@ -46,6 +46,13 @@ principals = [
 [capacity]
 placement     = "fill_first"
 poll_interval = 1
+# How long a confirmed projection poll lets the opening recheck confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production keeps
+# the shipped window. A development value.
+source_confirmation_seconds = 3600
 
 [capacity.sites]
 bare-metal-e2e = "http://bare-metal-provisioning:8081"

@@ -221,6 +221,67 @@ def test_a_fresh_database_passes_the_retired_kind_check(tmp_path) -> None:
         conn.close()
 
 
+_ACCEPTED_GENERATIONS = "bare_metal_accepted_site_generations"
+_ACCEPTED_GENERATIONS_ID = "bare-metal-storefront-0011-accepted-site-generations"
+
+
+def test_a_fresh_database_holds_no_projection_generation(tmp_path) -> None:
+    """Override status reads the held projection, so no generation is
+    persisted: a fresh database has no table for one, and no migration
+    records 0011's ID."""
+    path = tmp_path / "storefront.db"
+
+    SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name=?", (_ACCEPTED_GENERATIONS,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM schema_migrations WHERE id LIKE 'bare-metal-storefront-0011-%'"
+        ).fetchone() is None
+    finally:
+        conn.close()
+
+
+def test_a_database_that_recorded_accepted_generations_keeps_them_frozen(tmp_path) -> None:
+    """A database that applied 0011 keeps its table as it is: the chain no
+    longer lists the ID, so nothing reruns, drops, or rewrites it."""
+    path = tmp_path / "storefront.db"
+    SQLiteClient(str(path))
+    # Service-internal state no API expresses: what a storefront that recorded
+    # accepted generations left behind.
+    conn = sqlite3.connect(path)
+    try:
+        with conn:
+            conn.execute(
+                f"CREATE TABLE {_ACCEPTED_GENERATIONS} (site_id TEXT PRIMARY KEY, "
+                "revision INTEGER NOT NULL, digest TEXT NOT NULL, pool_ids TEXT NOT NULL)"
+            )
+            conn.execute(
+                f"INSERT INTO {_ACCEPTED_GENERATIONS} VALUES ('site-a', 3, 'd3', '[\"pool-a\"]')"
+            )
+            conn.execute(
+                "INSERT INTO schema_migrations (id) VALUES (?)", (_ACCEPTED_GENERATIONS_ID,)
+            )
+    finally:
+        conn.close()
+
+    SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        rows = conn.execute(f"SELECT * FROM {_ACCEPTED_GENERATIONS}").fetchall()
+    finally:
+        conn.close()
+    assert rows == [("site-a", 3, "d3", '["pool-a"]')]
+    assert all(
+        migration.id != _ACCEPTED_GENERATIONS_ID
+        for migration in BARE_METAL_STOREFRONT_MIGRATIONS
+    )
+
+
 def test_a_fresh_database_pins_each_reservation_to_its_sites_peer(tmp_path) -> None:
     """The selected-site table records the site's service peer beside the
     audit principal, and its trigger keeps every recorded column unchanged."""

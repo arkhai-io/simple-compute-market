@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core_storefront.auth import AuthError
-from core_storefront.models.system_models import ProjectionFamilyStatus
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
 from market_alkahest import ReleaseModelError, create_alkahest_registration
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
+from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
@@ -58,13 +58,17 @@ from .config import (
 from .delivery import storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
 from .fulfillment_service import BareMetalFulfillmentService
-from .lifecycle_steps import register_bare_metal_lifecycle_steps
+from .lifecycle_steps import (
+    PublicationWake,
+    bare_metal_loop_controller,
+    register_bare_metal_lifecycle_steps,
+    site_projection_status,
+)
 from .listing_source_check import build_listing_source_check
 from .negotiation import default_seller_round_hook, seller_chain_check
 from .negotiation_runtime import build_bare_metal_negotiation_runtime
 from .pool_overrides import (
     BareMetalPoolOverrideContribution,
-    accepted_site_projection,
     compile_publication_clauses,
     positive_lease_bound,
 )
@@ -103,8 +107,8 @@ def _status_check_healthy(name: str, value: str) -> bool:
     return False
 
 
-# The family name VM's health reports a site's resource-pool projection under.
-RESOURCE_POOL_PROJECTION_FAMILY = "resource_pool"
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
@@ -211,6 +215,37 @@ class BareMetalStorefrontRuntime:
     service_peer_trust: ServicePeerTrust | None = field(default=None, repr=False)
     capacity_client: Any | None = field(default=None, repr=False)
     fulfillment_client: Any | None = field(default=None, repr=False)
+    #: Every configured site's resource-pool and capacity-bucket projections,
+    #: held once for the process over ``capacity_client``'s sites: what
+    #: publication, the opening recheck, override status, and health read, so
+    #: none of them calls a site. None holds no site, so no listing can be
+    #: confirmed or published.
+    site_projections: SiteProjectionState | None = field(
+        default=None, repr=False, compare=False
+    )
+    #: Runs the publication loop without waiting out its interval: the
+    #: projection state sets it on a resource-pool change, and an accepted
+    #: pool-override write sets it too.
+    publication_wake: PublicationWake = field(
+        default_factory=PublicationWake, repr=False, compare=False
+    )
+    #: Seconds between the site-projection poller's cycles.
+    site_projection_poll_interval_seconds: float = field(
+        default_factory=lambda: packaged_settings().capacity.poll_interval
+    )
+    #: Seconds between publication cycles, unless a wake runs one sooner.
+    publication_interval_seconds: float = field(
+        default_factory=lambda: packaged_settings().capacity.publication_interval_seconds
+    )
+    #: How old a site's last successful poll may be for the opening recheck to
+    #: confirm a listing against it.
+    source_confirmation_seconds: float = field(
+        default_factory=lambda: packaged_settings().capacity.confirmation_window_seconds
+    )
+    #: The time a confirmation's age is measured at.
+    source_confirmation_clock: Callable[[], datetime] = field(
+        default=_utc_now, repr=False, compare=False
+    )
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     introduction_delivery: Any | None = field(default=None, repr=False)
@@ -227,26 +262,23 @@ class BareMetalStorefrontRuntime:
     #: The maximum lease duration a listing publishes unless its pool's override
     #: states one; a pool for which neither is positive is held at publication.
     default_max_duration_seconds: int | None = None
-    # Composes one publication cycle for the administrator's publication step;
-    # None composes it from this runtime as the command does.
+    # Composes one publication cycle for the publication loop; None composes
+    # it from this runtime as the command does.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
         field(default=None, repr=False)
-    )
-    # One publication pass at a time within this process. A pass racing the
-    # command in another process is refused by the durable binding's unique
-    # derivation key instead.
-    publication_lock: asyncio.Lock = field(
-        default_factory=asyncio.Lock, repr=False, compare=False
     )
     # Builds the process's one loop controller. A factory rather than the
     # controller itself, so a runtime copied with `dataclasses.replace` builds
     # its own controller and registers its steps there once, instead of
     # sharing the original's.
     loop_controller_factory: Callable[[], StorefrontLoopController] = field(
-        default=StorefrontLoopController, repr=False, compare=False
+        default=bare_metal_loop_controller, repr=False, compare=False
     )
     # The process's one loop controller: it holds this storefront's timer loops
-    # under one pause and steps each loop's cycle on request.
+    # under one pause, runs each loop's cycles one at a time whether its timer
+    # or an operator's step started one, and records each cycle's outcome. A
+    # cycle racing the publication command in another process is refused by the
+    # durable binding's unique derivation key instead.
     loops: StorefrontLoopController = field(init=False, repr=False, compare=False)
     # Whether this process opens new negotiations; separate from the loops' pause.
     trading_pause: TradingPause = field(
@@ -304,7 +336,9 @@ class BareMetalStorefrontRuntime:
                 round_hook=default_seller_round_hook(self.negotiation_policies),
                 listing_source_check=build_listing_source_check(
                     self.db,
-                    self.capacity_client.site if self.capacity_client is not None else None,
+                    self.site_projections,
+                    confirmation_window_seconds=self.source_confirmation_seconds,
+                    clock=self.source_confirmation_clock,
                 ),
                 trading_pause=self.trading_pause,
                 plan_builder=self.plan_builder,
@@ -552,16 +586,16 @@ class BareMetalStorefrontRuntime:
     def pool_override_service(self) -> PoolOverrideService | None:
         """The storefront's pool-override service, or ``None`` without sites.
 
-        Neither after-write effect applies: this storefront caches no site
-        projection and publishes only when a run is invoked, so a write takes
-        effect at the next run. Status is judged against the generations
-        publication runs durably recorded.
+        A write is checked against its site's live projection, then refreshes
+        the projection the storefront holds of that site and wakes the
+        publication loop, which publishes under it. Status is judged against the
+        held projection, so a site it holds no generation of is ``unknown``.
         """
         if self.capacity_client is None:
             return None
-        db_path = self.db.db_path
+        state = self.site_projections
         return PoolOverrideService(
-            store=SQLitePoolOverrideStore(db_path),
+            store=SQLitePoolOverrideStore(self.db.db_path),
             site_ids=lambda: [binding.site_id for binding in self.site_bindings],
             site_client=self.capacity_client.site,
             contributions={
@@ -574,9 +608,11 @@ class BareMetalStorefrontRuntime:
                 )
             },
             compile_clauses=compile_publication_clauses,
-            projection_source=lambda: accepted_site_projection(db_path),
-            refresh_site=None,
-            wake_publication=None,
+            projection_source=lambda: (
+                dict(state.values(RESOURCE_POOL)) if state is not None else {}
+            ),
+            refresh_site=state.refresh_site if state is not None else None,
+            wake_publication=self.publication_wake,
         )
 
     def _commercial_settlement_check(self) -> str:
@@ -598,11 +634,12 @@ class BareMetalStorefrontRuntime:
     async def health(self) -> dict[str, object]:
         """Report composed authorities without implying fulfillment readiness.
 
-        Each trusted site's resource-pool projection is reported per site in
-        ``site_projections`` and enters no gated check: one site being down
-        must not present as the whole storefront being degraded. See
-        openspec/specs/site-capacity/spec.md, "Per-site projection load-state
-        visibility".
+        Each site's projection families are reported per site in
+        ``site_projections``, as the storefront holds them, and enter no gated
+        check: one site being down must not present as the whole storefront
+        being degraded. Reading them calls no site, so health stays a liveness
+        probe. See openspec/specs/site-capacity/spec.md, "Per-site projection
+        load-state visibility".
         """
 
         def _check_database() -> None:
@@ -639,7 +676,11 @@ class BareMetalStorefrontRuntime:
                 binding.diagnostic(self.service_peer_trust)
                 for binding in self.site_bindings
             ],
-            "site_projections": await self._site_projections(),
+            "site_projections": (
+                site_projection_status(self.site_projections)
+                if self.site_projections is not None
+                else {}
+            ),
             "disclosures": self._disclosures(),
         }
 
@@ -682,42 +723,6 @@ class BareMetalStorefrontRuntime:
         if self.contact_settlement_config() is None:
             return {}
         return self.contact_exchange.disclosures()
-
-    async def _site_projections(self) -> dict[str, dict[str, dict[str, object]]]:
-        """Each trusted site's resource-pool projection as fetched just now.
-
-        Only the version is fetched: the health route is also the image's
-        health probe, and the version carries exactly the revision and digest
-        reported. Nothing is cached between calls, so a site is either
-        ``loaded`` or ``unavailable``.
-        """
-        if self.capacity_client is None:
-            return {}
-
-        async def _one(site_id: str) -> tuple[str, dict[str, object]]:
-            try:
-                version = await self.capacity_client.site(
-                    site_id
-                ).resource_pool_projection_version()
-            except Exception as exc:
-                status = ProjectionFamilyStatus(
-                    state="unavailable", last_error=str(exc)
-                )
-            else:
-                status = ProjectionFamilyStatus(
-                    state="loaded",
-                    revision=version.get("revision"),
-                    digest=version.get("digest"),
-                    fetched_at=datetime.now(timezone.utc).isoformat(),
-                )
-            return site_id, {
-                RESOURCE_POOL_PROJECTION_FAMILY: status.model_dump(mode="json")
-            }
-
-        results = await asyncio.gather(
-            *(_one(binding.site_id) for binding in self.site_bindings)
-        )
-        return dict(results)
 
 
 def _build_chain_clients(
@@ -890,6 +895,13 @@ def build_runtime_from_configuration(
         raise RuntimeError(
             "bare-metal storefront trusted site composition is invalid",
         ) from exc
+    # The process's one held projection of every configured site, over the
+    # sites' aggregate client, so publication and the opening recheck read one
+    # generation per site and family; startup loads it with a first poll.
+    publication_wake = PublicationWake()
+    site_projections = SiteProjectionState(
+        capacity_client, on_resource_pool_change=publication_wake
+    )
     try:
         introduction_delivery = storefront_introduction_delivery(
             active.delivery,
@@ -920,6 +932,11 @@ def build_runtime_from_configuration(
         service_peer_trust=service_peer_trust,
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
+        site_projections=site_projections,
+        publication_wake=publication_wake,
+        site_projection_poll_interval_seconds=active.capacity.poll_interval,
+        publication_interval_seconds=active.capacity.publication_interval_seconds,
+        source_confirmation_seconds=active.capacity.confirmation_window_seconds,
         settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,
         payment_reconciliation_interval_seconds=active.payment_reconciliation_interval,
         negotiation_watchdog=_watchdog_policy(active),

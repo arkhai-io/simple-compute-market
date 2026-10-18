@@ -1,8 +1,10 @@
 """Asking rates through the bare-metal storefront app and its typed clients.
 
-The real app, database, and composition run; publication is the administrator's
-step route. Each site and the registry are the in-process doubles the cycle
-tests use, standing where this codebase wraps those services. A declared rate
+The real app, database, held projection state, and composition run, the loops
+held from the start; publication is the administrator's step route, after a
+``site-projections`` step wherever the site changed. Each site and the registry
+are the in-process doubles the cycle tests use, standing where this codebase
+wraps those services. A declared rate
 and a storefront override are each read back as the published listing a buyer
 fetches, and each refreshes the same listing in place.
 """
@@ -22,11 +24,13 @@ from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contra
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
+from held_loops import held_loop_controller
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
     REGISTRY_URL,
     RecordingRegistries,
     Site,
+    projections_over,
     Terms,
     _priced,
     _rate,
@@ -61,7 +65,8 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
         return BareMetalPublicationCycle(
             sqlite_client=runtime.db,
             registry=build_bare_metal_storefront_registry(domain=get_market_domain_contract()),
-            site_clients={SITE: site},
+            site_projections=runtime.site_projections,
+            site_ids=[SITE],
             registry_client_factory=registries,
             registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
@@ -80,6 +85,9 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
             ),
         ),
         capacity_client=_Sites(site),
+        # The storefront's held projection of the site, which startup loads.
+        site_projections=projections_over({SITE: site}),
+        loop_controller_factory=held_loop_controller,
         publication_cycle_factory=cycle,
         default_max_duration_seconds=default_max_duration_seconds,
     )
@@ -142,6 +150,7 @@ async def test_an_unreadable_rate_holds_the_listing_a_buyer_reads(tmp_path):
         listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
 
         site.serve(_priced({**_rate("11.00"), "period": "month"}))
+        await admin.admin_run_lifecycle_cycle("site-projections")
         report = await admin.admin_run_lifecycle_cycle("publication")
         held = await public.get_listing(listing_id)
 

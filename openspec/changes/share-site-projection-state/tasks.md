@@ -3630,39 +3630,114 @@ loop", "A site whose projection is not held holds its listings", "Bare-metal ope
 rechecks its listing against its source", "Bare metal joins the site-scoped pool-override
 store"). Touches bare metal's storefront and `e2e-tests/`.
 
-- [ ] 13.1 `src/runtime.py`: builds one `SiteProjectionState` over the sites' aggregate
+- [x] 13.1 `src/runtime.py`: builds one `SiteProjectionState` over the sites' aggregate
       client with the publication wake as `on_resource_pool_change`, held by the runtime and
       passed to every consumer; startup loads it with `poll_once()`.
-- [ ] 13.2 Loops (`src/lifecycle_steps.py`, `src/server.py`): `site_projections` (step:
+      Done. `build_runtime_from_configuration` builds the state over the aggregate
+      `capacity_client` (`build_trusted_site_clients`'), whose site clients already verify
+      against each site's peer through the trust (Section 12), and a `PublicationWake`
+      (`lifecycle_steps`: a callable that sets its current `asyncio.Event`, renewed at each
+      publication timer registration, as VM's `new_publication_wake`) as
+      `on_resource_pool_change`. The runtime carries `site_projections` (None holds no site:
+      nothing can be confirmed or published), `publication_wake`, and, read once from
+      `[capacity]`, `site_projection_poll_interval_seconds`, `publication_interval_seconds`,
+      and `source_confirmation_seconds`, each defaulting from `config.packaged_settings()`;
+      `source_confirmation_clock` is the recheck's clock seam. Consumers read the state from
+      the runtime: publication composition, the opening recheck (built in `__post_init__`),
+      override status, health. `server._start_runtime` runs the escrow backfill, then
+      `poll_once()`, then registers and starts the timers (13.2). A direct runtime (tests)
+      composes its own state over a fake aggregate (`tests/source_sites.py`'s
+      `source_projections`, `test_publication_cycle.projections_over`).
+- [x] 13.2 Loops (`src/lifecycle_steps.py`, `src/server.py`): `site_projections` (step:
       `poll_once()` and `status()`, C2) and `publication` (interval
       `[capacity].publication_interval_seconds`, woken by the state) join
       `negotiation_watchdog`, `settlement_servicing`, `payment_reconciliation`, and
       `introduction_retention`, each registered with `register_loop`; `publication_lock`
       goes. Publication names its stages, and bare metal's configuration and publication
       errors are the controller's disclosed types. Each loop catches its failing cycle.
-- [ ] 13.3 `src/publication.py`: `_classify_site` reads `values(RESOURCE_POOL)` and runs
+      Done. One table of loops (`lifecycle_steps._loops`) feeds
+      `register_bare_metal_lifecycle_steps` (steps, when the runtime is built) and
+      `register_bare_metal_loops` (timers, when the server starts), so the timer and the
+      route run one operation. **Differed (name):** the poller is VM's
+      `site_projection_poller` on route `site-projections`, not a loop named
+      `site_projections`, so both storefronts report it alike. Its step polls and returns
+      `{"loop", "sites": site_projection_status(state)}` (503 with no state). Publication and
+      the poller start at once; the watchdog, servicing, payment reconciliation, and
+      retention (its policy's sweep interval) one interval later, as VM's sweeps. The kit's
+      `run_negotiation_watchdog`, `SettlementServicingWorker.run`,
+      `run_payment_reconciliation`, and `run_introduction_retention_sweep` are no longer
+      started; the watchdog and retention steps log what they did, as VM's do.
+      `publication_lock` is gone. Stages: the step enters `compose` before composing the
+      cycle; `BareMetalPublicationCycle(enter_stage=)` enters `compose` (overrides and held
+      views), `run` (the driver), and `converge`. Disclosed: `DISCLOSED_CYCLE_ERRORS` --
+      `BareMetalConfigurationError`, the new `BareMetalPublicationError` (a
+      `LifecycleRouteError` 503 raised by composition for no projection state, no registry,
+      no settlement composition), and VM's four kit/core capacity and registration errors;
+      `bare_metal_loop_controller()` is the runtime's default `loop_controller_factory`.
+      **Also changed:** the server gains a stop hook, `_stop_runtime`, that stops and awaits
+      every timer (`stop_loops`), a divergence from VM recorded in `design.md` D6 (as
+      delivered for bare metal).
+- [x] 13.3 `src/publication.py`: `_classify_site` reads `values(RESOURCE_POOL)` and runs
       `trusted_bare_metal_projection` on the held value; a site holding nothing is
       `site_projection_unknown`, a refused generation `site_projection_refused`; the cycle
       fetches no site and records no generation.
-- [ ] 13.4 `src/listing_source_check.py`: the recheck reads `view(site, RESOURCE_POOL)`,
+      Done. The cycle takes `site_projections` and `site_ids` in place of `site_clients`.
+      **Differed:** it reads each configured site's `view(site, RESOURCE_POOL)` -- value and
+      identity together, every site before anything is awaited -- rather than `values()`,
+      because a candidate carries the generation's revision and digest; a view with no value
+      is `site_projection_unknown` (with the state's last error when there is one), and a
+      stale one is derived from (D3). `record_accepted_generation` is no longer called.
+- [x] 13.4 `src/listing_source_check.py`: the recheck reads `view(site, RESOURCE_POOL)`,
       requires `freshly_confirmed` within `[capacity].source_confirmation_seconds`
       (default three poll intervals) and an accepted generation, and calls no site (D5).
-- [ ] 13.5 Overrides: `src/runtime.py`'s `pool_override_service()` gives
+      Done. `build_listing_source_check(db, site_projections, *,
+      confirmation_window_seconds, clock)`: an unconfigured site, no value, a generation not
+      freshly confirmed (stale, or older than the window), or one `trusted_bare_metal_projection`
+      refuses are each `unverifiable` (retryable), naming the reason; no state is unverifiable
+      as before. `CapacitySettings.source_confirmation_seconds` (optional, positive) and
+      `confirmation_window_seconds` (it, else three `poll_interval`s); `settings.toml`
+      documents the key, commented. The window is resolved at composition (`design.md` D6,
+      as delivered for bare metal), where VM reads it at each check.
+- [x] 13.5 Overrides: `src/runtime.py`'s `pool_override_service()` gives
       `PoolOverrideService` `projection_source` over `values(RESOURCE_POOL)`, `refresh_site`
       over the state's `refresh_site`, and the publication wake; the write's live check is
       unchanged. C3: fresh databases stop creating `bare_metal_accepted_site_generations`,
       migration `bare-metal-storefront-0011` stays in the chain with its ID retired, and
       `record_accepted_generation` and `accepted_site_projection` go.
-- [ ] 13.6 C5, C7: `health()`'s `site_projections` comes from `status()` for both families
+      Done. `refresh_site` refreshes both of the site's families, as VM's write does.
+      **Corrected (wording):** "stays in the chain" contradicts C3 and
+      `DEPLOYMENT_AND_CONFIG.md`'s frozen-table rule (a migration whose only effect is on a
+      frozen table leaves the chain, its ID never reused); 0011 left the chain, with a comment
+      at its place saying no migration takes its ID and a database that applied it keeps the
+      table unread. `_add_accepted_site_generations`, `ACCEPTED_GENERATIONS_TABLE`,
+      `record_accepted_generation`, and `accepted_site_projection` go; `pool_overrides`'
+      docstring says status reads the held projection.
+- [x] 13.6 C5, C7: `health()`'s `site_projections` comes from `status()` for both families
       and calls no site; `capacity_released` and the administrator reserve refresh nothing.
-- [ ] 13.7 C6 (`e2e-tests/`): an opt-in per-module fixture holding the bare-metal loops,
+      Done: `health()` reports `site_projection_status(state)` (`{}` with no state) and
+      the live version read `_site_projections` goes. The callback and the reserve already
+      refreshed nothing; a test now holds them to it (13.8).
+- [x] 13.7 C6 (`e2e-tests/`): an opt-in per-module fixture holding the bare-metal loops,
       resumed in a finaliser, taken with `pytest.mark.usefixtures` by
       `test_bare_metal_publication.py`, `test_bare_metal_mock_deal.py`, and
       `test_bare_metal_introduction.py` (whose `held_loops` it replaces); each steps
       `site-projections` wherever a site changed before stepping publication. The
       development `storefront.toml` widens `source_confirmation_seconds` for held
       scenarios, as 9.3 does for VM.
-- [ ] 13.8 Tests, application integration through the typed client:
+      Done. `scenarios/bare_metal/conftest.py`'s `bare_metal_loops_held` pauses through
+      `pause_storefront` (every loop at its gate, retention's included, which
+      introduction's own fixture asserted) and resumes in its finaliser. Site-projection
+      steps: publication -- after declaring supply, withdrawing and reinstating the pool,
+      pricing it, and the regionless pool (`_step_after_the_site_changed`), not after the
+      override write, which refreshes the site itself, nor its deletion; introduction --
+      after declaring the two hosts; mock deal -- the driver's `seed_supply` steps it (its
+      health read is replaced by the step's own report, `loaded`), and 09a2 (machine leased)
+      and 12a (released) step it before their previews. Module docstrings no longer say
+      publication has no timer. `storefront.dev.toml`: `source_confirmation_seconds = 3600`,
+      commented as VM's overlays are. Checked by compiling the modules and
+      `make test-e2e-unit` (38 passed, the stage-set check among them); the scenarios run only
+      in the pipeline.
+- [x] 13.8 Tests, application integration through the typed client:
       `tests/test_publication_cycle.py` — an unknown site keeps its listings while another
       reconciles, a refused generation holds its site, a new pool publishes on the timer
       without a command, and two consumers read one generation without a site call ("Two
@@ -3674,9 +3749,139 @@ store"). Touches bare metal's storefront and `e2e-tests/`.
       becomes status from the held projection, unknown before the first poll and after a
       restart, and an accepted write refreshes the site and wakes publication;
       `tests/test_migrations.py` — a fresh database has no accepted-generation table.
-- [ ] 13.9 Validation: `make test-bare-metal`, `make test-e2e-unit`, `make test`.
+      Done; bare-metal storefront 388 passed (372 before). **Corrected (level):** as 11.8
+      found, `tests/test_publication_cycle.py` is the cycle's public API over a real database
+      and a real held state with site and registry doubles, not application integration;
+      its harness polls every site before each cycle, as the lane steps `site-projections`,
+      and a second `Storefront` over the same database is a restart. There: an unknown site
+      (unreachable since a restart) and a refused generation each hold their site's listings
+      while another site reconciles; a failed poll keeps deriving from the stale generation
+      (spec "An operator refreshes every site during an outage"); publication and the recheck
+      read one held generation with no site call ("Two consumers read one site"); a cycle
+      fetches no site, sees a change only after a poll, and records no generation; a cycle
+      names `compose`, `run`, `converge`. **Moved (level):** "a new pool publishes on the
+      timer" needs the running app's timers, so it is in `tests/test_http_system.py`.
+      Application integration through `StorefrontClient`, `tests/test_http_system.py`:
+      `test_a_site_declaring_new_supply_is_published_by_the_timer` (loops running, poller at
+      0.05 s, publication's interval an hour: the site's new pool is published by a `timer`
+      cycle the poller's wake ran; the seam is a cycle factory reporting each completed
+      cycle, waited on with a bound, no sleep); `test_the_projection_step_while_held_polls_and_publication_waits_for_resume`
+      (stepping `site-projections` while held polls and wakes, publication runs nothing until
+      resumed, then publishes); `test_startup_starts_every_loop_on_the_controllers_timer`
+      (the four timers and their routes; shutdown stops them); `test_a_failed_publication_cycle_is_recorded_with_its_stage`
+      (no registry: `compose`, `BareMetalPublicationError` with its message; a cycle raising
+      `ConnectionError` naming a URL: type only); health from held state, both families, no
+      site call (`test_every_site_held_is_reported_loaded_and_health_calls_no_site`) and one
+      site never answering (`unavailable`, outside the gate); the step, preview, and
+      `test_concurrent_publication_steps_run_one_after_the_other` kept (the latter now over
+      the controller's held `run_cycle` lock). Recheck, through the typed client
+      (`tests/test_http_negotiation.py`): not held (site never answered), stale (the
+      parametrized counter, accept, and force-accept cases step `site-projections` after the
+      site fails), expired (`test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site`:
+      the runtime's clock 61 s past a 60 s window refuses 503 with no site call; after a
+      held step it counters, the loops still held), and refused
+      (`test_an_opening_on_a_refused_generation_is_refused_as_retryable`) each refuse as
+      retryable with no site call; the declaration-changed and machine-taken cases step the
+      poller before the round. With the freshness test disabled (edited, then restored) the
+      expired and three stale cases fail. Overrides (`tests/test_pool_overrides_api.py`):
+      `test_status_follows_the_generations_publication_accepted` becomes
+      `test_status_follows_the_held_projection_of_the_overrides_site` (applied, orphaned after
+      a poll, site-unconfigured) and `test_status_is_unknown_until_a_poll_holds_the_site` (a
+      restart while unreachable is `unknown`, a step then `applied`); an accepted write
+      refreshes the held projection to the site's new generation and wakes publication once,
+      a refused one does neither. C7 (`tests/test_deal_controls.py`): an administrator
+      reserve, a settlement, and a `capacity_released` callback make no site call and leave
+      the held confirmation unchanged. Migrations (`tests/test_migrations.py`): a fresh
+      database has no accepted-generation table and records no 0011; one that applied 0011
+      keeps its table and row untouched. Unit (`tests/test_config_loader.py`): the window's
+      default, a stated window, a negative one refused by key. Adapted: every test whose
+      runtime rechecks a listing gives it a held state over its `SourceSite` (the fixture's
+      digest now covers its content, so a changed projection is a new generation a poll
+      fetches); app tests that step loops, or are composed with a registry nothing serves,
+      start their loops held (`tests/held_loops.py`'s `held_loop_controller`); the
+      file-composed lifespan and site-trust tests replace only the site's transport
+      (`SignedSites`), so startup's first poll reaches a double; `test_publication_cli.py`
+      shows the command hands the cycle the held state, loaded by one poll first.
+- [x] 13.9 Validation: `make test-bare-metal`, `make test-e2e-unit`, `make test`.
       End-to-end (bare-metal lane): `e2e_bare_metal_publication`,
       `e2e_bare_metal_mock_deal`, `e2e_bare_metal_introduction`.
+      Done. No package version moved and no dependency changed, so no lock changed.
+      `make test-bare-metal`: domain 134, storefront 388 (372 before), buyer 11, adapter 40
+      passed; `make test-e2e-unit` 38 passed. `make -k test`: every suite it ran passed --
+      core 123 + 134 + 217 (2 skipped) + 62, the kits (capacity-publication 97, storefront
+      106, pool-overrides 81 among them), provisioning service 675 + 463, bare metal as above,
+      API-credit storefront 153, e2e unit 38, release tooling 944 -- and it stopped only at the
+      reinit of `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch
+      index is refused here, as in 2.6), run frozen: VM storefront, with the rebuilt
+      bare-metal wheel reinstalled (it installs the contribution for the combined image), unit
+      1071 passed, 1 skipped, integration 447 passed; `kit/policy` 80 passed; VM buyer 202
+      passed. `make check-packaging` (architecture rules included), `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks`, `make check-change-index`, and `openspec
+      validate --strict` pass. Not run: `make -C helm test-render` (no chart or loader input
+      changed); no repository typing target exists; the pipeline was not run (the end-to-end
+      reading is in the notes below).
+
+Section 13 notes:
+
+- End-to-end, read from the scenarios' code and the lane's files (the pipeline was not run):
+  every bare-metal-lane scenario starts a storefront that loads its site's projections at
+  startup and runs every loop on the controller's timer, publication and the
+  site-projection poller among them. `e2e_bare_metal_publication`,
+  `e2e_bare_metal_mock_deal`, and `e2e_bare_metal_introduction` hold the loops through
+  `bare_metal_loops_held` and step `site-projections` wherever the site changed before
+  stepping or previewing publication; publication reads only what that step loaded, the
+  override write in the publication scenario refreshes the site itself, and every opening and
+  acceptance recheck reads the held projection inside the lane's widened 3600-second window
+  (the mock deal's second deal after 12a's step). No scenario lets a timer publish, observes
+  a stale or expired generation, or reads `lifecycle`: those are application-integration
+  evidence only. Between modules the loops run (publication every 30 s, the poller every
+  1 s). No VM-lane or API-credit-lane scenario reaches this section's code; the VM image
+  installs the rebuilt bare-metal contribution, whose registration is unchanged.
+- The startup test case `test_a_storefront_configured_through_files_starts_and_serves` now
+  replaces the site's transport and holds the loops; before this section its health read
+  reached the configured site's URL over the network, and a startup poll and a publication
+  timer would reach the site and the registry too.
+
+Section 13 handoff:
+
+- `runtime.site_projections` is the one state; `runtime.loops` the controller, built by
+  `lifecycle_steps.bare_metal_loop_controller` with `DISCLOSED_CYCLE_ERRORS`. Steps are
+  registered in `__post_init__`; timers in `server._start_runtime` through
+  `register_bare_metal_loops`, after the first poll; `_stop_runtime` stops and awaits them, so
+  outcomes are cleared at shutdown and a second lifespan over one runtime starts afresh. A
+  second app started over a runtime whose loops still run is refused by `register_loop`
+  ("already running").
+- 14.1: `runtime.loops.snapshot()` gives each loop's state and last outcome (core's
+  `HealthResponse.lifecycle` and the typed client's already carry the shape, Section 9);
+  publication's per-site holds are in each cycle's report (`hold` with `site_id` and
+  `reason`: `site_projection_unknown`, `site_projection_refused`, the pool reasons), which the
+  cycle does not yet keep beyond the step's answer. `test_a_failed_publication_cycle_is_recorded_with_its_stage`
+  reads the outcome through the controller, not status.
+- 14.2: `publication_cli.run_publication_once` loads its own process's state with one poll
+  before its cycle; an API-client `publish` drops that, and `test_publication_cli.py`'s
+  composition cases become the in-process app's.
+- Tests: a runtime that rechecks needs `site_projections`; `tests/source_sites.py`'s
+  `source_projections` / `loaded_source_projections` (over `SourceSite`, whose digest covers
+  its content) and `test_publication_cycle.projections_over` (over its `Site`, which serves
+  both families). App tests that step loops, or carry a registry nothing serves, use
+  `tests/held_loops.py`'s `held_loop_controller` as `loop_controller_factory`; a test of
+  timer behaviour uses `bare_metal_loop_controller` and waits on a reported-cycle seam with a
+  bound (`test_http_system._ObservedCycles`), never a sleep. A runtime with no registry logs
+  a failed `compose` at each unheld publication cycle, harmlessly.
+- For the owner: VM's stop hook does not stop its loops; bare metal's does (`design.md` D6,
+  as delivered for bare metal). Whether VM adopts it is open.
+- For 17.9, besides its list: `ARCHITECTURE.md` "Capacity publication and multi-domain
+  storefront composition" ("bare-metal publication fetches each site's resource-pool
+  projection itself on every run") and "Storefront capacity boundary" ("Bare-metal
+  publication remains operator-invoked"); `DEPLOYMENT_AND_CONFIG.md` "Per-domain stack
+  composition" ("The bare-metal storefront has no publication timer"), "Combined
+  compute-family storefront" ("bare-metal publication remains an operator-invoked
+  command"), and "Storefront listing shapes and pool overrides" (a bare-metal write refreshes
+  the held projection and wakes the loop; status is judged against the held projection, not
+  a recorded generation); `TESTING.md`'s two bare-metal rows become one (publication and
+  `site-projections` among the held loops), and `[capacity].source_confirmation_seconds` for
+  bare metal beside VM's.
 
 ## 14. Bare-metal status and the publish command
 

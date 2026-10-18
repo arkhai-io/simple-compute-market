@@ -23,7 +23,7 @@ from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
-from source_sites import listing_source_projection
+from source_sites import SourceSite, listing_source_projection, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
@@ -236,6 +236,8 @@ async def harness(tmp_path, enabled):
         marketplace_signer=SELLER,
         settlement_composition=_composition(payments),
         capacity_client=Capacity(),
+        # Openings recheck the listing against the projection held for its site.
+        site_projections=source_projections((SITE, SourceSite())),
         fulfillment_client=provisioning,
     )
     await _publish(runtime)
@@ -422,6 +424,8 @@ def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMeta
         marketplace_signer=SELLER,
         settlement_composition=_composition(payments),
         capacity_client=Capacity(),
+        # Openings recheck the listing against the projection held for its site.
+        site_projections=source_projections((SITE, SourceSite())),
         fulfillment_client=provisioning,
     )
     return runtime, provisioning

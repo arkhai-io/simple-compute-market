@@ -44,7 +44,7 @@ from market_settlement_runtime import (
 from market_storefront_kit import TradingPause
 from pydantic import BaseModel, ConfigDict
 
-from source_sites import SourceSites
+from source_sites import loaded_source_projections
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -211,7 +211,9 @@ async def _service(tmp_path) -> tuple[_Opening, dict[str, Any]]:
         domain=domain,
         seller_principal=SELLER_SIGNER.identity,
         round_hook=default_seller_round_hook(),
-        listing_source_check=build_listing_source_check(db, SourceSites().site),
+        listing_source_check=build_listing_source_check(
+            db, await loaded_source_projections(), confirmation_window_seconds=60
+        ),
         trading_pause=TradingPause(),
         plan_builder=lambda **kwargs: {},
         accepted_obligation_dispatch=_intro_dispatch(),
@@ -374,7 +376,9 @@ async def _payment_service(tmp_path, settlement_data_calls: list) -> tuple[_Open
         domain=domain,
         seller_principal=SELLER_SIGNER.identity,
         round_hook=default_seller_round_hook(),
-        listing_source_check=build_listing_source_check(db, SourceSites().site),
+        listing_source_check=build_listing_source_check(
+            db, await loaded_source_projections(), confirmation_window_seconds=60
+        ),
         trading_pause=TradingPause(),
         plan_builder=lambda **kwargs: {},
         # Composed with no obligation builder: it settles from the Agreement.

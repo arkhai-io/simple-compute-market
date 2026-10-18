@@ -27,7 +27,9 @@ from test_http_settlement import (
     _ProvisioningClient,
 )
 
+from held_loops import held_loop_controller
 from site_trust import seeded_sites
+from source_sites import SourceSite, source_projections
 
 
 def _client(app, signer, role: str) -> StorefrontClient:
@@ -286,3 +288,36 @@ async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(
     assert released[0].data["capacity_reservation_id"] == "reservation-a"
     assert released[0].data["negotiation_id"] == negotiation_id
     assert released[0].data["site_id"] == "site-a"
+
+
+async def test_a_reserve_and_a_release_refresh_no_held_projection(tmp_path) -> None:
+    """Bare metal reconciles nothing inline, so neither the administrator's
+    reserve nor the site's capacity-released callback refreshes the projection
+    it holds of the site: the poller's next cycle sees the change."""
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path)
+    site = SourceSite()
+    runtime = replace(
+        runtime,
+        site_projections=source_projections(site),
+        loop_controller_factory=held_loop_controller,
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        loaded = site.calls
+        confirmed = runtime.site_projections.view("site-a", "resource_pool").fetched_at
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_reserve_capacity(required_attributes={}, listing_id="listing-1")
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_SIGNER, "service") as reporting_site:
+            released = await reporting_site.notify_capacity_released(
+                "reservation-a", site_id="site-a"
+            )
+        after = runtime.site_projections.view("site-a", "resource_pool").fetched_at
+
+    assert released["state"] == "released"
+    assert site.calls == loaded
+    assert after == confirmed
+

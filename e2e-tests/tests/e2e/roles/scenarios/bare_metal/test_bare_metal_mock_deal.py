@@ -20,8 +20,11 @@ own stages are inserted in place:
                              storefront records one release
 
 Every transition is previewed where a preview exists, then advanced explicitly:
-the storefront's loops are held from stage 00, fulfillment convergence for the
-whole module, and the lease watchdog while a stage drives it.
+the storefront's loops are held for the whole module, fulfillment convergence
+too, and the lease watchdog while a stage drives it. Wherever the site changes
+-- the supply seeded, the machine leased, then released -- a stage steps the
+storefront's site-projection poller before publication, which reads what the
+poller holds.
 """
 
 from __future__ import annotations
@@ -79,12 +82,13 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     pytest.mark.e2e_bare_metal_mock_deal,
-    # This module advances fulfillment convergence itself, so its timer is
-    # stopped for the module's duration.
-    pytest.mark.usefixtures("convergence_advanced_explicitly"),
+    # This module advances the storefront's loops and fulfillment convergence
+    # itself, so their timers are held for the module's duration.
+    pytest.mark.usefixtures("bare_metal_loops_held", "convergence_advanced_explicitly"),
 ]
 
 PUBLICATION = "publication"
+SITE_PROJECTIONS = "site-projections"
 
 
 def _actions(report: dict, action: str) -> list[dict]:
@@ -158,9 +162,10 @@ class TestStage03a_PublicationDryRun:
     ):
         """The publication dry run reports the deal's machine as a publish.
 
-        Bare metal's publication has no timer: each pass is one an operator, or
-        this scenario, asks for. The preview names the cause the step will act
-        on, before anything reaches the registry.
+        The storefront's loops are held, so each publication cycle is one this
+        scenario asks for, over the projection the supply's seeding stepped the
+        poller to. The preview names the cause the step will act on, before
+        anything reaches the registry.
         """
         require_state(
             deal_state, "_lifecycle_paused", "_supply_seeded", "_registry_reachable"
@@ -248,6 +253,9 @@ class TestStage09a2_PublicationClosesTheListing:
         """
         require_state(deal_state, "seller_listing_id", "provisioning_result_injected")
         listing_id = deal_state.seller_listing_id
+        # The deal's lease took the machine at the site; the held poller sees
+        # it only when stepped.
+        advance_storefront(storefront_admin_client, SITE_PROJECTIONS)
         preview = dry_run_storefront(storefront_admin_client, PUBLICATION)
         assert _with_listing(preview, listing_id) == [
             {"action": "close", "listing_id": listing_id, "reason": "unavailable"}
@@ -357,6 +365,8 @@ class TestStage12a_PublicationReopensTheListing:
             f"the first deal's lease is not released, so its machine is not free: {lease}"
         )
         listing_id = deal_state.seller_listing_id
+        # The release freed the machine at the site; one poller step sees it.
+        advance_storefront(storefront_admin_client, SITE_PROJECTIONS)
         preview = dry_run_storefront(storefront_admin_client, PUBLICATION)
         assert [item["action"] for item in _with_listing(preview, listing_id)] == [
             "reopen"

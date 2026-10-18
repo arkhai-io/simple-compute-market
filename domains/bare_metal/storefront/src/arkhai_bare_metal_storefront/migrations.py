@@ -413,23 +413,6 @@ def _refuse_reservations_without_their_peer(conn: sqlite3.Connection) -> None:
 #: Each site's latest projection generation a publication run accepted. Override
 #: status reads it: publication may run in another process, or before a restart,
 #: so no in-memory record could answer for it.
-ACCEPTED_GENERATIONS_TABLE = "bare_metal_accepted_site_generations"
-
-
-def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {ACCEPTED_GENERATIONS_TABLE} (
-          site_id TEXT PRIMARY KEY,
-          revision INTEGER NOT NULL,
-          digest TEXT NOT NULL,
-          pool_ids TEXT NOT NULL,
-          accepted_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """
-    )
-
-
 def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
     """Abandon threads opened before negotiation moved to the kit runtime, and drop
     the durable trading pause.
@@ -524,10 +507,10 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
         id="bare-metal-storefront-0010-drop-derived-publications",
         apply=_drop_derived_publication_tracking,
     ),
-    Migration(
-        id="bare-metal-storefront-0011-accepted-site-generations",
-        apply=_add_accepted_site_generations,
-    ),
+    # No migration takes 0011's ID: its table, the projection generations
+    # publication once accepted, is frozen. A database that applied it keeps
+    # the table, which nothing reads or writes. See
+    # docs/development/DEPLOYMENT_AND_CONFIG.md, "Migrations at startup".
     Migration(
         id="bare-metal-storefront-0012-retire-storefront-negotiation",
         apply=_retire_storefront_negotiation,

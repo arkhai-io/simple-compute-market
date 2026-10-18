@@ -55,10 +55,10 @@ def serve_cmd(
 
 @app.command("publish")
 def publish_cmd() -> None:
-    """Publish one authenticated round from fresh trusted-site projections.
+    """Run one publication cycle from freshly polled trusted-site projections.
 
     The storefront is composed in this process from the same configuration
-    files the server reads.
+    files the server reads, and its projection state loaded with one poll.
     """
 
     import json

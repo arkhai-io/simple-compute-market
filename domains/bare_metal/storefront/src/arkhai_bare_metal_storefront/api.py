@@ -1505,9 +1505,8 @@ async def resume(request: Request) -> AdminPauseResponse:
 
 
 # Lifecycle controls: one pause holding the timer loops, and one step per loop.
-# Publication has no timer, so it is stepped and never held. The signed
-# operations and resources are the canonical storefront client's, so one
-# administrator client drives every storefront.
+# The signed operations and resources are the canonical storefront client's,
+# so one administrator client drives every storefront.
 
 
 def _lifecycle_routes(runtime: BareMetalStorefrontRuntime) -> StorefrontLifecycleRouteService:
@@ -1550,8 +1549,10 @@ async def resume_lifecycle_loops(request: Request) -> dict[str, Any]:
 async def run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
     """Run one cycle of a lifecycle loop and return what it reports.
 
-    The publication pass is exactly the one the publication command runs,
-    composed the same way. Passes are serialized within this process.
+    It is the cycle the loop's timer runs, whether or not the loops are held,
+    and runs after any cycle of that loop already in progress, never alongside
+    it. The publication cycle is composed as the publication command composes
+    its own.
     """
     runtime = _runtime(request)
     await _admin(

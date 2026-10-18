@@ -1,9 +1,10 @@
 """Bare-metal pool overrides through the kit's typed client against the app.
 
-The app is the real bare-metal storefront over a real database; each site is the
-projection double the opening guard tests use, behind the runtime's per-site
-client seam. Override status is judged against the generations publication runs
-record, so these tests record one exactly as a run does.
+The app is the real bare-metal storefront over a real database and its held
+projection state; each site is the projection double the opening guard tests
+use, behind the runtime's per-site client seam (the write's live check) and
+under the state (what status reads), which startup loads with its first poll.
+The loops start held, so publication runs only when a test steps it.
 """
 
 from __future__ import annotations
@@ -18,9 +19,10 @@ from market_pool_overrides import PoolOverrideClient, pool_override_statuses
 from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
 
-from arkhai_bare_metal_storefront.pool_overrides import record_accepted_generation
+from arkhai_bare_metal_storefront.lifecycle_steps import PublicationWake
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
-from source_sites import SourceSite
+from held_loops import held_loop_controller
+from source_sites import SourceSite, listing_source_projection, source_projections
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 
 pytestmark = pytest.mark.asyncio
@@ -58,7 +60,25 @@ async def _admin(runtime):
             yield admin
 
 
-def _with_sites(runtime, *site_ids: str):
+class _CountingWake(PublicationWake):
+    """The runtime's publication wake, counting each time it is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 0
+
+    def __call__(self) -> None:
+        self.count += 1
+        super().__call__()
+
+
+def _with_sites(runtime, *site_ids: str, sites: dict[str, SourceSite] | None = None):
+    """``runtime`` configured for ``site_ids``, each served by a ``SourceSite``.
+
+    The same double answers the write's live check and the held state's polls.
+    """
+    served = sites if sites is not None else {site_id: SourceSite() for site_id in site_ids}
+    wake = _CountingWake()
     return dataclasses.replace(
         runtime,
         site_bindings=tuple(
@@ -69,7 +89,14 @@ def _with_sites(runtime, *site_ids: str):
             )
             for site_id in site_ids
         ),
-        capacity_client=_Sites({site_id: SourceSite() for site_id in site_ids}),
+        capacity_client=_Sites(served),
+        site_projections=(
+            source_projections(*served.items(), on_resource_pool_change=wake)
+            if served
+            else None
+        ),
+        publication_wake=wake,
+        loop_controller_factory=held_loop_controller,
     )
 
 
@@ -143,30 +170,95 @@ async def test_a_pool_the_live_site_lacks_is_refused(world):
     assert refusal.status_code == 404
 
 
-async def test_status_follows_the_generations_publication_accepted(world):
-    runtime, admin = world
-    overrides = PoolOverrideClient(admin)
-    await overrides.put_pool_override(_record(terms={"max_duration_seconds": 60}))
+async def test_status_follows_the_held_projection_of_the_overrides_site(tmp_path):
+    """Applied while the held generation projects the pool, orphaned once a
+    poll holds one that does not, and unconfigured without the site. Spec
+    scenario "Status while a site's projection is held"."""
+    site = SourceSite()
+    runtime = _with_sites(_runtime(str(tmp_path / "storefront.db")), SITE, sites={SITE: site})
+    async with _admin(runtime) as admin:
+        await PoolOverrideClient(admin).put_pool_override(
+            _record(terms={"max_duration_seconds": 60})
+        )
+        applied = await _states(admin)
 
-    assert await _states(admin) == {(SITE, POOL): "unknown"}
-
-    record_accepted_generation(
-        runtime.db.db_path, site_id=SITE, revision=1, digest="d1", pool_ids=[POOL]
-    )
-    assert await _states(admin) == {(SITE, POOL): "applied"}
-
-    record_accepted_generation(
-        runtime.db.db_path, site_id=SITE, revision=2, digest="d2", pool_ids=["pool-b"]
-    )
-    assert await _states(admin) == {(SITE, POOL): "orphaned"}
+        site.projection = listing_source_projection(pool_id="pool-b")
+        await admin.admin_run_lifecycle_cycle("site-projections")
+        orphaned = await _states(admin)
 
     # The same database under a storefront no longer configured for the site.
     async with _admin(_with_sites(runtime)) as without_site:
-        assert await _states(without_site) == {(SITE, POOL): "site_unconfigured"}
+        unconfigured = await _states(without_site)
+
+    assert applied == {(SITE, POOL): "applied"}
+    assert orphaned == {(SITE, POOL): "orphaned"}
+    assert unconfigured == {(SITE, POOL): "site_unconfigured"}
 
 
-async def test_a_signed_caller_who_is_not_an_administrator_is_refused(world):
-    runtime, _ = world
+async def test_status_is_unknown_until_a_poll_holds_the_site(tmp_path):
+    """After a restart while the site cannot be reached, the storefront holds
+    no generation of it, so its override is unknown, never judged against pools
+    nobody has read; once the site answers a poll, it is applied. Spec scenario
+    "Status before the first run"."""
+    site = SourceSite()
+    runtime = _with_sites(_runtime(str(tmp_path / "storefront.db")), SITE, sites={SITE: site})
+    async with _admin(runtime) as admin:
+        await PoolOverrideClient(admin).put_pool_override(
+            _record(terms={"max_duration_seconds": 60})
+        )
+
+    site.error = ConnectionError("site unreachable")
+    async with _admin(_with_sites(runtime, SITE, sites={SITE: site})) as restarted:
+        unknown = await _states(restarted)
+        site.error = None
+        await restarted.admin_run_lifecycle_cycle("site-projections")
+        applied = await _states(restarted)
+
+    assert unknown == {(SITE, POOL): "unknown"}
+    assert applied == {(SITE, POOL): "applied"}
+
+
+async def test_an_accepted_write_refreshes_the_site_and_wakes_publication(tmp_path):
+    """The write's live check sees the site's new generation; once it is
+    stored, the storefront's held projection of the site is refreshed to it and
+    the publication loop is woken. Spec scenario "A bare-metal override is
+    accepted between runs"."""
+    site = SourceSite()
+    runtime = _with_sites(_runtime(str(tmp_path / "storefront.db")), SITE, sites={SITE: site})
+    async with _admin(runtime) as admin:
+        before = (await admin.get_system_status()).site_projections[SITE]
+        woken = runtime.publication_wake.count
+        site.projection = {**listing_source_projection(), "revision": 2}
+
+        await PoolOverrideClient(admin).put_pool_override(
+            _record(terms={"max_duration_seconds": 60})
+        )
+        after = (await admin.get_system_status()).site_projections[SITE]
+
+    assert before["resource_pool"]["revision"] == 1
+    assert after["resource_pool"]["revision"] == 2
+    assert after["resource_pool"]["state"] == "loaded"
+    assert runtime.publication_wake.count == woken + 1
+
+
+async def test_a_refused_write_refreshes_nothing_and_wakes_nothing(world):
+    runtime, admin = world
+    calls = runtime.capacity_client.site(SITE).calls
+    woken = runtime.publication_wake.count
+
+    await _refused(
+        PoolOverrideClient(admin).put_pool_override(
+            _record(pool_id="pool-zz", terms={"max_duration_seconds": 60})
+        )
+    )
+
+    # One live check, and no refresh after it.
+    assert runtime.capacity_client.site(SITE).calls == calls + 1
+    assert runtime.publication_wake.count == woken
+
+
+async def test_a_signed_caller_who_is_not_an_administrator_is_refused(tmp_path):
+    runtime = _with_sites(_runtime(str(tmp_path / "storefront.db")), SITE)
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with StorefrontClient(

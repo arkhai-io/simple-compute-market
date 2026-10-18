@@ -23,6 +23,7 @@ from arkhai_bare_metal_storefront.publication_composition import (
 )
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
+from held_loops import held_loop_controller
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
     RECIPIENT_CONDITION,
@@ -30,6 +31,7 @@ from test_publication_cycle import (
     SELLER_WALLET,
     RecordingRegistries,
     Site,
+    projections_over,
     alkahest_publication,
     member,
     pool,
@@ -61,7 +63,8 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
             registry=build_bare_metal_storefront_registry(
                 domain=get_market_domain_contract()
             ),
-            site_clients={SITE: site},
+            site_projections=runtime.site_projections,
+            site_ids=[SITE],
             registry_client_factory=RecordingRegistries(),
             registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
@@ -86,6 +89,9 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
             ),
         ),
         capacity_client=_Sites(site),
+        # The storefront's held projection of the site, which startup loads.
+        site_projections=projections_over({SITE: site}),
+        loop_controller_factory=held_loop_controller,
         publication_cycle_factory=cycle,
     )
     app = _app(runtime)

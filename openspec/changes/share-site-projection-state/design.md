@@ -321,6 +321,40 @@ unconfigured; and always starting a loop that fails every cycle.
     level (C8). Rejected: a drift guard over the repeated agent, alone or before a separate
     change.
 
+**As delivered for bare metal (Section 13).** Bare metal composes the state and its loops as
+VM does, with these choices of its own:
+
+- *The root builds the state and its wake.* `build_runtime_from_configuration` builds one
+  `SiteProjectionState` over the sites' aggregate client, with the runtime's `PublicationWake`
+  as `on_resource_pool_change`; the runtime holds both, and publication, the opening recheck,
+  override status, and health read the state from it and call no site. The wake renews its
+  `asyncio.Event` at each timer registration, as VM's `new_publication_wake` does, and an
+  accepted override write sets it too.
+- *Every loop on `register_loop`, its timer registered at startup.* Steps register when the
+  runtime is built, so every route can run one, and timers when the server starts, after the
+  first poll, as VM splits them. The poller takes VM's names, `site_projection_poller` on route
+  `site-projections`; publication and the poller run their first cycle at once, the sweeps one
+  interval later; `publication_lock` is gone, the controller's cycle lock serializing timer
+  and step.
+- *The loops stop at shutdown* (a divergence: VM's lifespan leaves its loops running until
+  the process exits, and its tests stop them with `reset_for_tests`). Bare metal's stop hook
+  cancels and awaits every timer, so a publication cycle cut off at shutdown unwinds its
+  worker thread before the event loop closes, and an app rebuilt over the same runtime starts
+  its loops afresh. VM could adopt it in its stop hook; not done here, and for the owner.
+- *Disclosed errors* are bare metal's `BareMetalConfigurationError` and a new
+  `BareMetalPublicationError` -- a cycle that cannot be composed, naming what is missing (the
+  projection state, a registry, the settlement composition), answered as a 503 lifecycle route
+  error -- with the capacity and domain-registration errors VM discloses.
+- *Publication reads each site's held view*, value and identity together, for every site
+  before anything is awaited, because a candidate carries the generation's revision and
+  digest and `values()` gives rows alone; a site whose view holds no value is unknown.
+- *The confirmation window is resolved once, at composition*
+  (`[capacity].source_confirmation_seconds`, else three poll intervals), and carried on the
+  runtime as bare metal's other intervals are, where VM reads it at each check; the recheck's
+  clock is a runtime seam, as VM's `source_confirmation_clock` is.
+- *The publish command loads its own state* with one poll before its cycle, since it composes
+  a runtime in its own process until it becomes an API client (C1).
+
 ### D14. Bare-metal configuration follows the VM storefront's conventions
 
 `DEPLOYMENT_AND_CONFIG.md` is correct, so the bare-metal storefront stops reading

@@ -84,6 +84,12 @@ placement = "fill_first"
 poll_interval = 5
 # The publication loop's interval between cycles, in seconds.
 publication_interval_seconds = 30
+# How old, in seconds, a site's last successful projection poll may be for the
+# opening recheck to confirm a listing against it. A recheck past the window is
+# refused as retryable, so a storefront whose loops are held while it trades
+# does not judge negotiations on projections nobody is polling. Unset, it is
+# three poll intervals; stepping `site-projections` restores it.
+# source_confirmation_seconds = 15
 
 [capacity.sites]
 # Stable site ID -> the site authority's URL. Required: a storefront with no

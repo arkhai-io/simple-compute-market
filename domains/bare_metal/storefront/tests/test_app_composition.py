@@ -40,6 +40,8 @@ from arkhai_bare_metal_storefront.settlement_composition import (
     BareMetalStorefrontSettlementComposition,
 )
 from arkhai_bare_metal_storefront.startup_refusal import BareMetalStartupError
+from held_loops import held_loop_controller
+from signed_sites import SignedSite, SignedSites
 from storefront_configuration import (
     ADMIN,
     CONTACT_SECTION,
@@ -150,10 +152,16 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
     runtime = SimpleNamespace(domain=domain)
     started = []
 
+    stopped = []
+
     async def start(selected):
         started.append(selected)
 
+    async def stop(selected):
+        stopped.append(selected)
+
     monkeypatch.setattr(server_module, "_start_runtime", start)
+    monkeypatch.setattr(server_module, "_stop_runtime", stop)
     app = build_bare_metal_storefront_app(
         registry=_registry(domain),
         runtime=runtime,
@@ -164,6 +172,7 @@ async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
         assert app.state.storefront_container.domain is domain
     assert app.state.storefront_container is None
     assert started == [runtime]
+    assert stopped == [runtime]
 
 
 def test_installed_contribution_exposes_complete_bare_metal_contract() -> None:
@@ -714,13 +723,25 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
 ):
     """Application startup through the lifespan, from the files alone, with an
     override through the loader's environment layer applied rather than refused.
-    Spec scenario: "An operator overrides a setting on a development cluster"."""
+    Only the site's transport is replaced, and startup loads the site's
+    projections before health reads them. The loops start held, so no timer
+    publishes to the configured registry, which nothing serves. Spec scenario:
+    "An operator overrides a setting on a development cluster"."""
     write_configuration(
         monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
     )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
     monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
-    app = build_bare_metal_storefront_app(registry=_registry())
+    monkeypatch.setenv("STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
+    sites = SignedSites({"site-a.test": SignedSite(SITE)})
+    domain = get_market_domain_contract()
+    app = build_bare_metal_storefront_app(
+        registry=_registry(domain),
+        runtime_factory=lambda: replace(
+            build_runtime_from_configuration(domain=domain, site_clients=sites.factories()),
+            loop_controller_factory=held_loop_controller,
+        ),
+    )
 
     async with app.router.lifespan_context(app):
         runtime = app.state.storefront_container
@@ -730,6 +751,12 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
             health = await public.get_health()
 
     assert runtime.negotiation_watchdog.interval_seconds == 45
+    assert runtime.site_projection_poll_interval_seconds == 7
+    # The window follows the poll interval when no window is stated.
+    assert runtime.source_confirmation_seconds == 21
     assert runtime.seller_principal == SELLER.identity
     assert health.status == "ok"
+    assert {
+        family: status["state"] for family, status in health.site_projections[SITE_ID].items()
+    } == {"resource_pool": "loaded", "capacity_bucket": "loaded"}
     assert (tmp_path / "storefront.db").exists()

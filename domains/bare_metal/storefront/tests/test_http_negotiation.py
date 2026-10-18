@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import copy
 import sqlite3
 import time
 import uuid
 from dataclasses import replace
+from datetime import datetime, timedelta
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
@@ -39,7 +41,13 @@ from market_identity import (
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from settlement_compositions import alkahest_composition
-from source_sites import SourceSite, SourceSites, listing_source_projection
+from held_loops import held_loop_controller
+from source_sites import (
+    SourceSite,
+    SourceSites,
+    listing_source_projection,
+    source_projections,
+)
 
 def _app(runtime: BareMetalStorefrontRuntime):
     return build_bare_metal_storefront_app(
@@ -92,6 +100,27 @@ def _headers(
     }
 
 
+def _sourced(site: SourceSite) -> dict:
+    """The runtime fields that put the seeded listing's site behind ``site``.
+
+    Openings recheck each listing against the projection the storefront holds
+    for the site that published it, which startup loads with its first poll; a
+    change the site makes reaches it at the next ``site-projections`` step. The
+    loops start held, so no timer polls behind a test's back.
+    """
+    return {
+        "capacity_client": SourceSites(site),
+        "site_projections": source_projections(site),
+        "loop_controller_factory": held_loop_controller,
+    }
+
+
+async def _poll_sites(app) -> None:
+    """Step the held site-projection poller, as a scenario does after a site changes."""
+    async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+        await admin.admin_run_lifecycle_cycle("site-projections")
+
+
 def _runtime(path: str) -> BareMetalStorefrontRuntime:
     domain = get_market_domain_contract()
     return BareMetalStorefrontRuntime(
@@ -102,8 +131,7 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
             identities=(ADMIN_SIGNER.identity,),
         ),
         storefront_url="http://seller:8000",
-        # Openings recheck each listing against the site that published it.
-        capacity_client=SourceSites(),
+        **_sourced(SourceSite()),
         marketplace_signer=SELLER_SIGNER,
         seller_evm_address=SELLER_WALLET,
         settlement_composition=alkahest_composition(
@@ -398,20 +426,20 @@ async def _open_against(tmp_path, site: SourceSite):
     """Open a negotiation on the seeded listing, its site answering ``site``.
 
     Returns the refusal the typed client raised, the thread count the
-    administrator then reads, and the site double.
+    administrator then reads, and how many calls the opening made to the site.
     """
-    runtime = replace(
-        _runtime(str(tmp_path / "storefront.db")), capacity_client=SourceSites(site)
-    )
+    runtime = replace(_runtime(str(tmp_path / "storefront.db")), **_sourced(site))
     await _insert_listing(runtime)
     app = _app(runtime)
     async with app.router.lifespan_context(app):
+        loaded = site.calls
         async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
             with pytest.raises(StorefrontClientError) as refused:
                 await _negotiate(buyer)
+        opening_calls = site.calls - loaded
         async with _typed(app, ADMIN_SIGNER, "admin") as admin:
             threads = await admin.list_negotiations("listing-1")
-    return refused.value, threads.count, site
+    return refused.value, threads.count, opening_calls
 
 
 @pytest.mark.parametrize(
@@ -429,16 +457,19 @@ async def _open_against(tmp_path, site: SourceSite):
 async def test_an_opening_on_a_listing_its_source_no_longer_supports_is_refused(
     tmp_path, projection
 ) -> None:
-    refused, threads, site = await _open_against(tmp_path, SourceSite(projection))
+    refused, threads, opening_calls = await _open_against(tmp_path, SourceSite(projection))
 
     assert refused.status_code == 409
     assert "no_matching_declaration" in str(refused)
     assert threads == 0
-    assert site.calls == 1
+    # The recheck reads the held projection and calls no site.
+    assert opening_calls == 0
 
 
 async def test_an_opening_whose_site_cannot_answer_is_refused_as_retryable(tmp_path) -> None:
-    refused, threads, _ = await _open_against(
+    """The site never answered a poll, so the storefront holds no projection of
+    it. Spec scenario "The site's projection is not held"."""
+    refused, threads, opening_calls = await _open_against(
         tmp_path, SourceSite(error=ConnectionError("site unreachable"))
     )
 
@@ -446,10 +477,13 @@ async def test_an_opening_whose_site_cannot_answer_is_refused_as_retryable(tmp_p
     # The refusal names no source detail; the seller's log carries it.
     assert "listing_source_unverifiable" in str(refused)
     assert threads == 0
+    assert opening_calls == 0
 
 
 async def test_an_opening_with_no_site_authority_is_refused_as_retryable(tmp_path) -> None:
-    runtime = replace(_runtime(str(tmp_path / "storefront.db")), capacity_client=None)
+    runtime = replace(
+        _runtime(str(tmp_path / "storefront.db")), capacity_client=None, site_projections=None
+    )
     await _insert_listing(runtime)
     app = _app(runtime)
 
@@ -461,6 +495,78 @@ async def test_an_opening_with_no_site_authority_is_refused_as_retryable(tmp_pat
     assert refused.value.status_code == 503
 
 
+
+
+def _refused_generation() -> dict:
+    """The seeded listing's projection with its bare-metal view naming a pool
+    other than the one containing it, a generation bare metal refuses whole."""
+    projection = copy.deepcopy(listing_source_projection())
+    resource = projection["resource_pools"][0]["resources"][0]
+    resource["publication_views"]["bare_metal.v2"]["pool_id"] = "pool-elsewhere"
+    return projection
+
+
+async def test_an_opening_on_a_refused_generation_is_refused_as_retryable(tmp_path) -> None:
+    """Spec scenario "The held generation is refused"."""
+    refused, threads, opening_calls = await _open_against(
+        tmp_path, SourceSite(_refused_generation())
+    )
+
+    assert refused.status_code == 503
+    assert "listing_source_unverifiable" in str(refused)
+    assert threads == 0
+    assert opening_calls == 0
+
+
+async def test_an_expired_confirmation_refuses_until_a_poll_confirms_the_site(
+    tmp_path,
+) -> None:
+    """With the loops held and trading live, an opening more than the window
+    after the site's last confirmed poll is refused as retryable, with no site
+    call; once the operator steps the site-projection loop, an opening within
+    the window of that poll proceeds. Spec scenarios "The held generation's
+    confirmation has expired" and "The loops are held past the confirmation
+    window"."""
+    site = SourceSite()
+    now: list[datetime] = []
+    runtime = replace(
+        _countering_runtime(str(tmp_path / "storefront.db"), site),
+        source_confirmation_seconds=60,
+        source_confirmation_clock=lambda: now[0],
+    )
+    await _insert_listing(runtime)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            loaded = _confirmed_at(await admin.get_system_status())
+            now.append(loaded + timedelta(seconds=61))
+            calls = site.calls
+            async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+                with pytest.raises(StorefrontClientError) as expired:
+                    await _open_countered(buyer)
+            refused_calls = site.calls - calls
+
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            polled = _confirmed_at(await admin.get_system_status())
+            now[0] = polled + timedelta(seconds=1)
+            async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+                opened = await _open_countered(buyer)
+            held = runtime.loops.is_pause_requested()
+
+    assert expired.value.status_code == 503
+    assert "listing_source_unverifiable" in str(expired.value)
+    assert refused_calls == 0
+    assert polled > loaded
+    assert opened["action"] == "counter"
+    assert held, "stepping the poller must not resume the loops"
+
+
+def _confirmed_at(status) -> datetime:
+    """When the seeded listing's site was last confirmed, as status reports it."""
+    return datetime.fromisoformat(
+        status.site_projections["site-a"]["resource_pool"]["fetched_at"]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +581,7 @@ def _countering_runtime(path: str, site: SourceSite) -> BareMetalStorefrontRunti
     return replace(
         _runtime(path),
         negotiation_policies=_COUNTERING_CHAIN,
-        capacity_client=SourceSites(site),
+        **_sourced(site),
     )
 
 
@@ -519,12 +625,14 @@ async def test_a_countering_seller_negotiates_over_rounds_to_acceptance(tmp_path
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
+        loaded = site.calls
         async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
             opened = await _open_countered(buyer)
             countered = int(opened["proposal"]["fields"]["amount"])
             accepted = await buyer.negotiate_continue(
                 opened["negotiation_id"], action="accept"
             )
+        negotiation_calls = site.calls - loaded
 
     assert accepted["action"] == "accept"
     thread, terms = await _accepted_records(runtime, opened["negotiation_id"])
@@ -532,14 +640,15 @@ async def test_a_countering_seller_negotiates_over_rounds_to_acceptance(tmp_path
     assert int(thread["agreed_price"]) == countered
     assert terms is not None and terms.host_id == "machine-1"
     assert thread["settlement_plan"] is not None
-    # One recheck at the opening, one before the buyer's accept.
-    assert site.calls == 2
+    # A recheck at the opening and one before the buyer's accept, each reading
+    # the held projection: neither calls the site.
+    assert negotiation_calls == 0
 
 
 async def test_force_accept_records_terms_and_plan_and_reserves_nothing(tmp_path) -> None:
     site = SourceSite()
-    sites = SourceSites(site)
-    runtime = replace(_countering_runtime(str(tmp_path / "storefront.db"), site), capacity_client=sites)
+    runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)
+    sites = runtime.capacity_client
     await _insert_listing(runtime)
     app = _app(runtime)
 
@@ -722,6 +831,7 @@ async def test_a_counter_rechecks_the_source(tmp_path, change, status, reason) -
         async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
             opened = await _open_countered(buyer)
             _change_source(site, change)
+            await _poll_sites(app)
             if status == 503:
                 with pytest.raises(StorefrontClientError) as refused:
                     await buyer.negotiate_continue(
@@ -762,6 +872,7 @@ async def test_a_buyer_accept_rechecks_the_source(tmp_path, change, status, reas
         async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
             opened = await _open_countered(buyer)
             _change_source(site, change)
+            await _poll_sites(app)
             with pytest.raises(StorefrontClientError) as refused:
                 await buyer.negotiate_continue(opened["negotiation_id"], action="accept")
 
@@ -784,6 +895,7 @@ async def test_a_force_accept_rechecks_the_source(tmp_path, change, status, reas
         async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
             opened = await _open_countered(buyer)
         _change_source(site, change)
+        await _poll_sites(app)
         async with _typed(app, ADMIN_SIGNER, "admin") as admin:
             with pytest.raises(StorefrontClientError) as refused:
                 await admin.force_accept_negotiation(
@@ -884,7 +996,7 @@ def _materializing_runtime(path: str, *, policies=None) -> BareMetalStorefrontRu
         chain_config_paths={"anvil": str(anvil_address_book_path())},
         seller_evm_address=SELLER_WALLET,
         negotiation_policies=policies,
-        capacity_client=SourceSites(SourceSite()),
+        **_sourced(SourceSite()),
     )
 
 

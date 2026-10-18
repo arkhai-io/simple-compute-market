@@ -1,10 +1,14 @@
 """The bare-metal publication cycle's orchestration and persistence.
 
-The cycle's public API runs against a real storefront database, with the site
-authorities and the registry replaced by doubles: each site answers with a
-resource-pool projection built from the site-client contract fixture, its
-bare-metal views from this domain's view fixture, and the registry client
-records what each registry is sent.
+The cycle's public API runs against a real storefront database and a real
+held projection state, with the site authorities and the registry replaced by
+doubles: each site answers with a resource-pool projection built from the
+site-client contract fixture, its bare-metal views from this domain's view
+fixture, and the registry client records what each registry is sent. The state
+holds what each site served at its last poll, as it does in production, so a
+run polls every site first, as the lane steps ``site-projections`` before
+publication; a site that has never answered is a storefront restarted while it
+was unreachable.
 
 This is not integration evidence under ``docs/development/TESTING.md``. The
 bare-metal storefront is an application, and the site authority and the
@@ -24,6 +28,7 @@ from typing import Any
 
 import pytest
 from arkhai_bare_metal import derive_bare_metal_shape
+from core_storefront.aggregation import AggregateCapacityClient
 from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_CAPACITY,
     DEFAULT_GPU_MODEL,
@@ -32,7 +37,11 @@ from arkhai_bare_metal.fixtures.publication_view import (
 from core_storefront.publication_runner import PublicationPayload
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
-from market_capacity_publication import BoundListing, PublicationBinding
+from market_capacity_publication import (
+    BoundListing,
+    PublicationBinding,
+    SiteProjectionState,
+)
 from market_identity import TrustedIdentitySet, create_signer
 from market_resource_pools_contracts.backing import BACKED
 from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
@@ -44,10 +53,7 @@ from market_site_client.fixtures.resource_pools import (
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.listing_source_check import build_listing_source_check
-from arkhai_bare_metal_storefront.pool_overrides import (
-    accepted_site_projection,
-    compile_publication_clauses,
-)
+from arkhai_bare_metal_storefront.pool_overrides import compile_publication_clauses
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.publication_composition import (
     publication_payload_builder,
@@ -118,9 +124,14 @@ def unresolvable(pool_id: str, *members: dict[str, Any]) -> dict[str, Any]:
 
 
 class Site:
-    """A site authority's typed client, answering its resource-pool projection."""
+    """A site authority's typed client, answering both projection families.
+
+    It serves the resource-pool projection a test sets and an empty
+    capacity-bucket projection; ``calls`` counts every call made to it.
+    """
 
     def __init__(self, *pools: dict[str, Any]) -> None:
+        self.calls = 0
         self.serve(*pools)
 
     def serve(self, *pools: dict[str, Any]) -> None:
@@ -135,11 +146,49 @@ class Site:
     def fail(self) -> None:
         self.error = ConnectionError("site unreachable")
 
-    async def resource_pool_projection(self) -> dict[str, Any]:
+    def _answer(self) -> dict[str, Any]:
+        self.calls += 1
         if self.error is not None:
             raise self.error
         assert self.response is not None
         return self.response
+
+    async def resource_pool_projection_version(self) -> dict[str, Any]:
+        response = self._answer()
+        return {"revision": response["revision"], "digest": response["digest"]}
+
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        return self._answer()
+
+    async def capacity_bucket_projection_version(self) -> dict[str, Any]:
+        self._answer()
+        return {"revision": 1, "digest": "buckets-1"}
+
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        self._answer()
+        return {"revision": 1, "digest": "buckets-1", "capacity_buckets": []}
+
+    def set_topology_error_handler(self, _handler: Any) -> None:
+        return None
+
+
+def projections_over(
+    sites: dict[str, Site],
+    *,
+    wakes: list[str] | None = None,
+    on_resource_pool_change: Any = None,
+):
+    """The storefront's held projection state over ``sites``, holding nothing yet.
+
+    ``on_resource_pool_change`` is the publication wake the state raises; with
+    none given, ``wakes`` records each one.
+    """
+    recorded = wakes if wakes is not None else []
+    return SiteProjectionState(
+        AggregateCapacityClient(dict(sites)),
+        on_resource_pool_change=on_resource_pool_change
+        or (lambda: recorded.append("wake")),
+    )
 
 
 # -- registry --------------------------------------------------------------
@@ -206,29 +255,46 @@ class Terms:
 
 
 class Storefront:
+    """One storefront process: its database, its held projections, its terms.
+
+    A second ``Storefront`` over the same database is the storefront restarted:
+    its projection state holds nothing until it polls.
+    """
+
     def __init__(self, db: SQLiteClient, sites: dict[str, Site]) -> None:
         self.db = db
         self.sites = sites
+        self.wakes: list[str] = []
+        self.stages: list[str] = []
+        self.projections = projections_over(sites, wakes=self.wakes)
         self.registries = RecordingRegistries()
         self.terms = Terms()
         # The configured [pricing].default_max_duration_seconds; a pool resolves
         # its lease bound from its override first, then from this.
         self.default_max_duration: int | None = 3600
 
-    async def run(self, *, dry_run: bool = False) -> dict[str, Any]:
+    async def run(self, *, dry_run: bool = False, poll: bool = True) -> dict[str, Any]:
+        """Poll every site, as the lane steps ``site-projections``, then run a cycle.
+
+        With ``poll`` false the cycle reads what the state already holds.
+        """
+        if poll:
+            await self.projections.poll_once()
         self.registries.sent.clear()
         cycle = BareMetalPublicationCycle(
             sqlite_client=self.db,
             registry=build_bare_metal_storefront_registry(
                 domain=get_market_domain_contract()
             ),
-            site_clients=self.sites,
+            site_projections=self.projections,
+            site_ids=list(self.sites),
             registry_client_factory=self.registries,
             registry_urls=(REGISTRY_URL,),
             storefront_url=STOREFRONT_URL,
             seller_principal=SELLER,
             build_payload=self.terms,
             default_max_duration_seconds=self.default_max_duration,
+            enter_stage=self.stages.append,
         )
         return await cycle.run(dry_run=dry_run)
 
@@ -479,8 +545,12 @@ async def test_a_listing_bound_under_the_legacy_key_closes_and_its_successor_pub
 # -- sites -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("unknown", ["unreachable", "view-names-another-pool"])
+@pytest.mark.parametrize("unknown", ["unreachable-since-restart", "view-names-another-pool"])
 async def test_an_unknown_site_keeps_its_listings_while_another_reconciles(db, unknown):
+    """A site whose projection is not held, or whose held generation bare metal
+    refuses, holds its listings while every other site reconciles. Spec
+    scenarios "The storefront starts while a site is unreachable" and "A
+    bare-metal site serves a generation bare metal refuses"."""
     site_a = Site(pool("pool-1", member("a1", "pool-1")))
     site_b = Site(pool("pool-1", member("b1", "pool-1")))
     storefront = Storefront(db, {"site-a": site_a, "site-b": site_b})
@@ -488,8 +558,11 @@ async def test_an_unknown_site_keeps_its_listings_while_another_reconciles(db, u
     a_id = storefront.listing("site-a", "pool-1", "a1")[0]
     b_id = storefront.listing("site-b", "pool-1", "b1")[0]
 
-    if unknown == "unreachable":
+    if unknown == "unreachable-since-restart":
+        # The storefront restarts while site-a cannot be reached: its new
+        # projection state never holds a generation of it.
         site_a.fail()
+        storefront = Storefront(db, {"site-a": site_a, "site-b": site_b})
         reason = "site_projection_unknown"
     else:
         site_a.serve(
@@ -506,6 +579,73 @@ async def test_an_unknown_site_keeps_its_listings_while_another_reconciles(db, u
     assert {"action": "hold", "site_id": "site-a", "reason": reason}.items() <= next(
         item for item in actions(report, "hold") if item["site_id"] == "site-a"
     ).items()
+
+
+async def test_a_site_whose_poll_fails_keeps_deriving_from_its_last_generation(db):
+    """A failed poll keeps the site's last generation, reported stale, and its
+    listings keep deriving from it rather than becoming unknown. Spec scenario
+    "An operator refreshes every site during an outage"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    site.fail()
+    storefront.terms.max_duration_seconds = 7200
+    report = await storefront.run()
+
+    assert storefront.projections.status()["site-a"]["resource_pool"].state == "stale"
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert [item["listing_id"] for item in actions(report, "refresh")] == [listing_id]
+    assert actions(report, "hold") == []
+
+
+async def test_publication_and_the_opening_recheck_read_one_held_generation(db):
+    """Both read the site's generation from the one state, and neither fetches
+    the site. Spec scenario "Two consumers read one site"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.projections.poll_once()
+    calls = site.calls
+
+    await storefront.run(poll=False)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    check = build_listing_source_check(
+        db, storefront.projections, confirmation_window_seconds=60
+    )
+    verdict = await check(listing_id)
+
+    assert verdict.outcome == "matches"
+    assert site.calls == calls
+    assert storefront.registries.operations() == [("publish", listing_id)]
+
+
+async def test_a_cycle_names_each_stage_it_reaches(db):
+    """Reading what it derives from, running the publication driver, and
+    converging the registries, in order, for the loop controller's record."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+
+    await storefront.run()
+
+    assert storefront.stages == ["compose", "run", "converge"]
+
+
+async def test_a_cycle_fetches_no_site_and_records_no_generation(db):
+    """What a cycle reads is what the state held; a change the site makes after
+    the last poll waits for the next one."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.projections.poll_once()
+    site.serve(pool("pool-1", member("r1", "pool-1")), pool("pool-2", member("r2", "pool-2")))
+    calls = site.calls
+
+    await storefront.run(poll=False)
+
+    assert site.calls == calls
+    assert set(storefront.listings()) == {("site-a", "pool-1", "r1")}
+    with sqlite3.connect(db.db_path) as conn:
+        tables = {name for (name,) in conn.execute("SELECT name FROM sqlite_master")}
+    assert not any("generation" in name for name in tables)
 
 
 # -- ordering and convergence ----------------------------------------------
@@ -683,7 +823,9 @@ async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(d
     storefront = Storefront(db, {"site-a": site})
     await storefront.run()
     listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
-    check = build_listing_source_check(db, lambda _site_id: site)
+    check = build_listing_source_check(
+        db, storefront.projections, confirmation_window_seconds=60
+    )
     assert (await check(listing_id)).outcome == "matches"
     with sqlite3.connect(db.db_path) as conn:
         conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
@@ -932,14 +1074,6 @@ async def _override(db: SQLiteClient, **stated: Any) -> None:
         PoolOverrideRecord(site_id="site-a", pool_id="pool-1", offering_mode="bare_metal",
                            **stated)
     )
-
-
-async def test_a_run_records_each_site_generation_it_accepts(db):
-    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
-
-    await storefront.run()
-
-    assert accepted_site_projection(db.db_path) == {"site-a": [{"pool_id": "pool-1"}]}
 
 
 async def test_an_override_rate_and_bound_reach_the_published_listing(db):
