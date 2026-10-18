@@ -1,20 +1,10 @@
-"""Unit tests for deterministic Capacity Settlement Assignment scheduling.
-
-Moved and adapted from ``provisioning/compute/service/tests/unit/services/
-test_physical_settlement_scheduler.py`` (tombstoned at its old location).
-Adaptations, both required by the fulfillment contract migration:
-
-- ``allocation_id``/``agreement_id`` request fields become
-  ``capacity_reservation_id`` only; the old agreement-mismatch test is
-  dropped (the scheduler no longer receives an agreement identity to
-  mismatch against -- see scheduler.py's module docstring).
-- The scheduler fixture now passes ``default_resource_kind="compute.gpu"``
-  explicitly, since ``_requirement`` no longer silently defaults it.
-"""
+"""Library integration tests for deterministic settlement scheduling in SQLite."""
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Event, Lock
 
 import pytest
 from sqlalchemy import create_engine
@@ -30,11 +20,14 @@ from market_fulfillment import (
     PhysicalSettlementScheduler,
     SettlementEntityNotFoundError,
     SettlementRequestMismatchError,
+    SqlAlchemySchedulingTransaction,
+    SqlAlchemySchedulingUnitOfWork,
 )
 from market_resource_pools import ResourcePoolService
 from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
-from market_site.db import Base as SiteBase
+from market_site.db import Base as SiteBase, CapacityBucket
+from market_fulfillment.settlement_repository import SettlementRepository
 from market_site.ledger import CapacityLedgerService
 
 
@@ -215,7 +208,6 @@ def test_resource_without_pool_is_not_schedulable(services):
     _pool(pools, DEFAULT_POOL_ID)
     ledger.register_resource(resource_id="orphan", total_units=4, attributes={}, pool_id="default")
     # A legacy row stored with no pool; registration can no longer write one.
-    from market_site.db import CapacityBucket
 
     with ledger._session_factory() as db:
         db.query(CapacityBucket).filter_by(backing_resource_id="orphan").one().pool_id = None
@@ -312,8 +304,7 @@ def test_scheduler_selects_candidate_that_fits_every_dimension(services):
 
 
 def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
-    """Reservations made before pass 1 (no dimensions) keep scheduling
-    exactly as they did under round-robin."""
+    """GPU-only reservations schedule without unrelated dimensions."""
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _resource(ledger, "r1", "pool-a", units=10)
@@ -371,30 +362,11 @@ def test_schedule_request_narrower_than_reservation_is_permitted(services):
 
 
 def test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation(services):
-    """Pins intended behavior: scheduled dimensions, not the reservation's own
-    dimensions unconditionally, are what a fulfillment provider receives.
+    """Providers receive scheduled dimensions, including a narrower request.
 
-    A negotiation may narrow a scheduling request without (yet) resizing the
-    underlying reservation -- e.g. a placement/pricing check against a
-    candidate counter-listing_resource shape. What gets provisioned if that shape is
-    accepted is the narrower, scheduled shape, not the original reservation's
-    full amount. `_resource_from_record` (scheduler.py) correctly populates
-    `SettlementResource.dimensions` from `record.scheduling_requirements`
-    (the possibly-narrowed request), not from the reservation's own
-    dimensions. See `openspec/specs/site-capacity/spec.md`'s "Committed
-    dimensions remain authoritative through scheduling" requirement and
-    `docs/development/ARCHITECTURE.md`'s "Capacity reservation" section for
-    the normative statement of this and the surrounding negotiation model.
-
-    No VM caller in this repository currently sends a narrower
-    ``requirements.dimensions`` to ``schedule_resource`` (confirmed:
-    ``_do_provision`` builds ``FulfillmentScheduleRequest`` with no
-    ``requirements`` at all, so every VM schedule call falls back to the
-    full reservation dimensions today); negotiation-driven reservation
-    resizing (`resize_reservation`) has no caller yet either. This test
-    exercises the scheduler contract directly so it holds once either
-    caller exists, rather than waiting to be proven by a real negotiation
-    path landing first.
+    The reservation bounds the request; it does not replace the shape that
+    scheduling actually selected. See `openspec/specs/site-capacity/spec.md`'s
+    "Committed dimensions remain authoritative through scheduling" requirement.
     """
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
@@ -463,9 +435,7 @@ def test_schedule_request_adding_an_ungoverned_dimension_is_not_rejected(service
 # ----------------------------------------------------------------------
 
 def test_cursor_persists_across_a_fresh_scheduler_instance(services):
-    """Unlike the old in-memory cursor, fairness state must survive the
-    scheduler object itself being discarded and rebuilt -- e.g. a process
-    restart -- because it is now read from and written to the database."""
+    """Database-backed fairness survives rebuilding the scheduler instance."""
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
     _pool(pools, "pool-b")
@@ -491,7 +461,6 @@ def test_stale_persisted_cursor_recovers_deterministically(services):
     first sorted eligible pool/resource, and durably replace the active cursor
     position without requiring eager pruning of unrelated historical entries.
     """
-    from market_fulfillment import SettlementRepository
 
     pools, ledger, _ = services
     _pool(pools, "pool-a", enabled=False)
@@ -612,7 +581,6 @@ def test_failed_schedule_leaves_no_partial_cursor_or_settlement_state(services):
     record commits must roll back both together -- proving
     ``schedule_resource``'s one-transaction guarantee rather than assuming
     it from the code structure alone."""
-    from market_fulfillment import SettlementRepository
 
     class _ExplodingRepository(SettlementRepository):
         def schedule(self, *args, **kwargs):
@@ -641,13 +609,7 @@ def test_failed_schedule_leaves_no_partial_cursor_or_settlement_state(services):
 def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_path):
     """A controlled transaction barrier proves SQLite writer serialization
     without relying on an uncontrolled race or elapsed-time ordering."""
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event, Lock
 
-    from market_fulfillment import (
-        SqlAlchemySchedulingTransaction,
-        SqlAlchemySchedulingUnitOfWork,
-    )
 
     database = tmp_path / "scheduling.db"
     engine = create_engine(
@@ -730,14 +692,7 @@ def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(t
     must roll back cleanly: A leaves no settlement, capacity rebind, or
     cursor advance, and B -- once allowed to proceed -- receives the
     original first fairness turn against a still-usable database."""
-    from concurrent.futures import ThreadPoolExecutor
-    from threading import Event, Lock
 
-    from market_fulfillment import (
-        SqlAlchemySchedulingTransaction,
-        SqlAlchemySchedulingUnitOfWork,
-    )
-    from market_fulfillment.settlement_repository import SettlementRepository
 
     database = tmp_path / "scheduling_rollback.db"
     engine = create_engine(
@@ -825,7 +780,6 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
     serialize rather than truly overlap -- this proves independent-session
     serialization correctly isolates per-kind cursor state, not portable
     row locking or a process-level multi-replica proof."""
-    from concurrent.futures import ThreadPoolExecutor
 
     database = tmp_path / "scheduling_interleaved.db"
     engine = create_engine(
@@ -878,7 +832,6 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
     assert [cpu_1.pool_id, cpu_2.pool_id] == ["pool-a", "pool-b"]
 
     with factory() as db:
-        from market_fulfillment.settlement_repository import SettlementRepository
 
         repo = SettlementRepository()
         gpu_row = repo.get_cursor_in_session(db, "compute.gpu")
@@ -892,10 +845,8 @@ def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cur
 #
 # Round-robin placement is deliberate: a site admin may back a deal with any
 # resource that satisfies it, and spreading load across pools is the point.
-# What these cover is the boundary on that freedom -- the constraints the deal
-# was actually admitted against. `dimensions` always survived into scheduling;
-# the categorical half of the claim did not, so every resource with room was
-# eligible for every deal and which one won came down to a site-wide cursor.
+# Placement remains bounded by both the admitted dimensions and categorical
+# constraints, so room alone cannot authorize a different GPU model.
 # ---------------------------------------------------------------------------
 
 
@@ -923,9 +874,8 @@ def test_categorical_claim_excludes_a_resource_the_deal_was_not_admitted_against
 ):
     """A deal sold as one GPU model does not settle on another.
 
-    Both candidates have room and both pools deliver the mode, so before the
-    reservation carried its claim this was decided by the round-robin cursor
-    alone -- an H200 was a legal placement for an RTX-5080 deal.
+    Both candidates have room and both pools deliver the mode; the admitted
+    model constraint excludes the other model before the cursor chooses.
     """
     pools, ledger, scheduler = services
     _pool(pools, "pool-a")
@@ -1018,7 +968,7 @@ def test_a_request_may_narrow_the_claim_but_not_contradict_it(services):
 
 
 def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_resource(
-    tmp_path, monkeypatch
+    tmp_path,
 ):
     """Independent sessions on a file-backed database. A pool move of `dest`
     is paused after checking `dest` for live obligations while the scheduler
@@ -1027,9 +977,28 @@ def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_
     window: it either commits after the move, against `dest` in its new pool,
     or not at all. Assigning onto a resource after it has moved is not what
     the rule forbids; moving a resource that holds a live obligation is."""
-    import threading
 
-    from market_fulfillment import SqlAlchemySchedulingUnitOfWork
+
+    checked, release = Event(), Event()
+    move_committed = Event()
+    assignment_attempted, assignment_opened = Event(), Event()
+
+    class PausingLedger(CapacityLedgerService):
+        def _refuse_reassignment_under_obligation(self, db, bucket, new_pool_id):
+            super()._refuse_reassignment_under_obligation(db, bucket, new_pool_id)
+            checked.set()
+            assert release.wait(timeout=10), "test never released the pool move"
+
+    class ObservedTransaction(SqlAlchemySchedulingTransaction):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            assignment_opened.set()
+            assert move_committed.is_set(), "assignment opened before the move committed"
+
+    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
+        def transaction(self):
+            assignment_attempted.set()
+            return super().transaction()
 
     engine = create_engine(
         f"sqlite:///{tmp_path / 'scheduling.db'}",
@@ -1040,7 +1009,7 @@ def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_
     FulfillmentBase.metadata.create_all(bind=engine)
     factory = sessionmaker(bind=engine)
     pools = ResourcePoolService(factory, {"ansible": _Handler()})
-    ledger = CapacityLedgerService(
+    ledger = PausingLedger(
         factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
     )
     _pool(pools, "pool-a")
@@ -1050,56 +1019,38 @@ def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_
     reservation_id = _reserve(ledger, agreement="race")
     assert ledger.get_reservation_backing_resource_id(reservation_id) == "src"
 
-    checked, release = threading.Event(), threading.Event()
-    refuse = ledger._refuse_reassignment_under_obligation
-
-    def refuse_then_wait(db, bucket, new_pool_id):
-        refuse(db, bucket, new_pool_id)
-        checked.set()
-        assert release.wait(timeout=10), "test never released the pool move"
-
-    monkeypatch.setattr(ledger, "_refuse_reassignment_under_obligation", refuse_then_wait)
-
-    commits: list[str] = []
-
     def move():
         with ledger.serialized(), factory() as db:
             ledger.register_resource_in_session(
                 db, resource_id="dest", pool_id="pool-b", total_units=4
             )
             db.commit()
-        commits.append("move")
-
-    outcomes: dict[str, object] = {}
+            # Record the durable boundary before releasing serialization.
+            move_committed.set()
 
     def assign():
+        with ObservedUnitOfWork(
+            factory, pools, ledger, transaction_type=ObservedTransaction,
+        ).transaction() as tx:
+            tx.rebind_capacity(
+                capacity_reservation_id=reservation_id, settlement_resource_id="dest"
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        mover = executor.submit(move)
         try:
-            with SqlAlchemySchedulingUnitOfWork(factory, pools, ledger).transaction() as tx:
-                tx.rebind_capacity(
-                    capacity_reservation_id=reservation_id, settlement_resource_id="dest"
-                )
-            commits.append("assign")
-            outcomes["assign"] = "committed"
-        except Exception as exc:  # a refusal is an acceptable outcome
-            outcomes["assign"] = exc
+            assert checked.wait(timeout=10), "the pool move never reached its check"
+            assigner = executor.submit(assign)
+            assert assignment_attempted.wait(timeout=10), "assignment never attempted its transaction"
+            assert not assignment_opened.is_set()
+        finally:
+            release.set()
+        mover.result(timeout=10)
+        assigner.result(timeout=10)
 
-    mover = threading.Thread(target=move)
-    assigner = threading.Thread(target=assign)
-    mover.start()
-    assert checked.wait(timeout=10), "the pool move never reached its check"
-    assigner.start()
-    # The assignment gets the whole pause to run in. Serialized, it cannot
-    # start its transaction while the move holds the ledger lock, so this
-    # wait expires and the move resumes; unserialized, it would commit here,
-    # against `dest` in its old pool. The assertion does not depend on it.
-    assigner.join(timeout=1)
-    release.set()
-    mover.join(timeout=10)
-    assigner.join(timeout=10)
-
+    assert assignment_opened.is_set()
     dest = next(row for row in ledger.list_resources() if row["resource_id"] == "dest")
     assert dest["pool_id"] == "pool-b"
-    assert commits[0] == "move", (
-        f"the assignment committed inside the move's window: {commits}, "
-        f"assignment {outcomes['assign']!r}"
-    )
+    assert ledger.get_reservation_backing_resource_id(reservation_id) == "dest"
+    with factory() as db:
+        assert ledger.backing_pool_id_in_session(db, reservation_id) == "pool-b"

@@ -338,7 +338,7 @@ VM adapter `services/ansible_pool_config_handler.py`; bare-metal adapter
   retain the disabled-pool configuration read case. Evidence: named handler/pool
   integration suites and `tests/unit/test_authority_composition.py` pass, proving
   the runtime guard accepts actual reduced implementations.
-- [ ] 4.4 **Verification checkpoint.** Rebuild with `make dist-ci`; run
+- [x] 4.4 **Verification checkpoint.** Rebuild with `make dist-ci`; run
   `make -C kit/resource-pools test`, `make -C kit/fulfillment test`,
   `make -C provisioning/compute test`,
   `make -C domains/vms/provisioning/adapter test`,
@@ -354,7 +354,6 @@ VM adapter `services/ansible_pool_config_handler.py`; bare-metal adapter
 handlers; they expose a retained deletion-hook requirement. No dedicated
 `delete_config` marker exists or is owed. Full pipeline/Helm evidence is obtained
 by validation, and closeout confirms it against the latest committed code.
-
 
 **Section 4 implementation notes:**
 
@@ -374,8 +373,12 @@ by validation, and closeout confirms it against the latest committed code.
   fulfillment 171 tests; compute family 231 tests; VM adapter 29 unit tests
   (including its inventory-view suite); bare-metal adapter 40 tests; provisioning
   service 675 unit and 459 integration tests. Fulfillment and compute include
-  real-database library integration, including cases still filed under `unit/`;
-  suite placement is not a claim that those database tests are isolated units.
+  real-database library integration. Correction after fresh-context review:
+  the 38 touched database-backed fulfillment cases now live in `integration/`
+  (34 scheduler, three ledger persistence, one acceptance concurrency), with their
+  fixtures/helpers. The two isolated mocked persistence cases retain unit
+  placement, dropping only their unused real-database fixture dependency.
+  Other cases in the mixed unit modules are unchanged.
 - The service target includes `tests/unit/test_authority_composition.py`, whose
   real container composes both adapter bundles, plus the handler persistence,
   startup and pool API integration suites. Handler persistence/startup cases
@@ -383,20 +386,62 @@ by validation, and closeout confirms it against the latest committed code.
   clients against the real app. The existing disabled-pool GET case now also
   asserts its returned configuration and playbook remain available. No new
   startup or persistence mechanism was needed.
-- `make dist-ci`, comment hygiene, scoped documentation citations, task structure,
-  change-index and whitespace checks passed. Full aggregate tests and final
-  packaging/architecture checks are pending. No dependency, lock or skill file
-  changed; none of the six focused projects exposes a typing target.
+- `make dist-ci` and final `make check-packaging` passed, including all four
+  architecture checks; standalone `make check-architecture` also passed without
+  warnings. Full `make test` passed every aggregate target, including 954
+  release-tooling tests and Helm render/loader checks. The aggregate retains
+  existing skips (two core tests and one storefront collection skip) and
+  warnings; deployed scenarios and cluster Helm tests are separate and unrun.
+  Comment hygiene, scoped documentation citations, task structure, change-index
+  and whitespace checks passed. No dependency, lock or skill file changed;
+  none of the six focused projects exposes a typing target.
 - Deployed marker coverage confirmed in `e2e-tests/pyproject.toml` and scenario
   modules: `e2e_deal`, `e2e_deal_buyer_cli` and `e2e_bare_metal_mock_deal` start
   stacks composing these handlers. They are startup/regression evidence once
   deployed; none is a dedicated deletion-hook scenario. No new system scenario
   is owed for this interface removal. Deployed pipeline and cluster Helm tests
   have not run locally and remain validation's responsibility.
-- Handoff: sections 1–4's code is ready for the agreed single implementation
-  round once the outstanding checks finish. Permanent behavior/rationale and
-  Evidence promotion remain in section 5 after review; no member authority,
-  provider registration semantics, dependency or configuration schema changed.
+- Fresh-context review found the explicit requirement to move touched
+  real-database library tests out of `unit/`. Fixed the 38 cases above, moved
+  their imports to module level and rewrote historical comments/docstrings in
+  the moved regions as current constraints. Only scheduler evidence paths in
+  the fulfillment and site-capacity permanent specs changed; behavior promotion
+  remains at closeout. The relocated provider fake initially failed because its
+  host requirement must be a class-level boolean; the explicit mock subclass
+  fixes that setup, and the focused fulfillment rerun passes all 171 tests.
+  A second fresh-context review identified inherited future-work narration
+  and timing/order assumptions in the moved scheduler race case. Replaced the
+  prose with its current invariant and the race controls with explicit
+  transaction-attempt/open events, a commit event set inside serialization,
+  bounded futures and durable pool/backing assertions. Its 171-test focused
+  rerun passed; the reviewer confirmed all findings resolved, with no remaining
+  guidance violations or evidence overstatements. None was declined. Test-name
+  inspection confirms all 79 functions across the three original modules are
+  preserved without duplication. The reviewers did not rerun behavioral suites.
+- The repeated aggregate initially failed in the unchanged VM storefront test
+  `test_settlement_is_pending_until_a_verified_receipt_then_delivers_once`:
+  expected `provisioning`, observed `ready`. Its delivery fake completes without
+  using its available event gates, while the coordinator starts delivery before
+  awaiting the response's database read; fast completion can precede that read.
+  The normal-permission focused rerun passed (one test); no unrelated source or
+  test change was made. A sandboxed diagnostic attempt stalled during fixture
+  setup and was explicitly interrupted; it is not counted as a passed test.
+  The final stable-tree `make test` passed, including that test and all 411
+  VM storefront integration tests, all remaining aggregate targets, 954
+  release-tooling tests and Helm render/loader checks. Final
+  `make check-packaging` and standalone `make check-architecture` passed;
+  hygiene, scoped citations, task structure, change-index and whitespace checks
+  passed again. Existing aggregate skips/warnings remain as disclosed above.
+- The owner checkpointed the section's code and preliminary notes in
+  `0f8232cf` ("Section 4 pre-verification") during the session interruption.
+  Recovery verified the exact diff and the completed full-test process's zero
+  exit status, preserving that checkpoint. The section-completion commit records
+  final verification and the handoff without amending the owner's commit.
+- Handoff: sections 1–4 are ready for the agreed single implementation round.
+  Permanent behavior/rationale and Evidence promotion remain in section 5 after
+  review; no member authority, provider registration semantics, dependency or
+  configuration schema changed. The campaign stays in implementation and its
+  independent dependency node is unchanged.
 
 ## 5. Closeout
 

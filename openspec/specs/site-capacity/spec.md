@@ -251,7 +251,7 @@ Capacity projection events MUST remain anonymous and versioned, while deal-scope
 **Evidence**
 
 - Explicit request identity, absence and undeclared-mode refusal, legacy reservation behavior, declaration narrowing, and independent cross-mode accounting: `kit/site/tests/integration/test_ledger.py`.
-- Scheduling-time mode enforcement and withdrawal after reservation: `kit/fulfillment/tests/unit/test_scheduler.py`.
+- Scheduling-time mode enforcement and withdrawal after reservation: `kit/fulfillment/tests/integration/test_scheduler.py`.
 - Pre-dispatch enforcement, including a previously prepared operation after declaration withdrawal: `kit/fulfillment/tests/unit/test_fulfillment.py`.
 - Durable reservation/settlement/job backfill, quarantine, idempotency, and schema drift: `provisioning/compute/service/tests/unit/test_pool_offering_mode_migration.py`.
 - Deployed reservation-boundary refusal before a hold exists: `e2e-tests/tests/e2e/roles/scenarios/vms/test_pool_declared_offering_modes.py`.
