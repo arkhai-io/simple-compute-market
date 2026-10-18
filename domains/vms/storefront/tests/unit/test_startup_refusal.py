@@ -138,8 +138,13 @@ def test_no_configured_site_is_refused() -> None:
     ("url", "reason"),
     [
         pytest.param("http://home:8081/v1", "without a path", id="a path"),
-        pytest.param("http://home:secret", "with a numeric port",
+        pytest.param("http://home:secret", "with a port, if stated, from 1 to 65535",
                      id="a port that is not a number"),
+        pytest.param("http://home:0", "with a port, if stated, from 1 to 65535",
+                     id="port zero"),
+        pytest.param("http://ho me:8081", "without whitespace or control characters",
+                     id="whitespace inside"),
+        pytest.param("http://-:8081", "naming a host", id="not a host name"),
         pytest.param("https://user:secret@home:8081", "without credentials",
                      id="credentials"),
         pytest.param("http://home:8081?secret=1", "without a query or fragment",
@@ -161,6 +166,17 @@ def test_a_site_url_that_is_not_an_http_origin_is_refused_under_its_key(
     assert problem.startswith("[capacity.sites.home] must be an HTTP(S) origin")
     assert reason in problem
     assert "secret" not in problem
+
+
+def test_a_refused_site_url_carries_no_value_in_its_exception_chain() -> None:
+    """A `ValidationError` keeps the value it refused, so the refusal is raised
+    with no exception context."""
+    source = _source(capacity={"sites": {"home": "https://user:secret@home:8081"}})
+    with pytest.raises(RuntimeError) as refused:
+        configured_capacity_sites(source)
+    assert "secret" not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
 
 
 def test_a_site_url_is_read_as_its_origin() -> None:

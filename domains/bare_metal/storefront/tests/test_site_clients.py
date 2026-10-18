@@ -151,8 +151,15 @@ def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers)
     ("url", "reason"),
     [
         pytest.param("https://one.example.test/v1", "without a path", id="a path"),
-        pytest.param("https://one.example.test:bad", "with a numeric port",
+        pytest.param("https://one.example.test:bad", "with a port, if stated, from 1 to 65535",
                      id="a port that is not a number"),
+        pytest.param("https://one.example.test:", "with a port, if stated, from 1 to 65535",
+                     id="an empty port"),
+        pytest.param("https://one example.test", "without whitespace or control characters",
+                     id="whitespace inside"),
+        pytest.param("https://one.example.test;x",
+                     "naming a host: a DNS name or an IP address, an IPv6 address bracketed",
+                     id="not a host name"),
     ],
 )
 def test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site(url, reason) -> None:
@@ -162,6 +169,16 @@ def test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site(url, reason
         ValueError, match=rf"site 'site-a' authority_url must be an HTTP\(S\) origin {reason}$"
     ):
         parse_site_bindings({"site-a": url}, _peers("site-a"))
+
+
+def test_a_refused_site_url_carries_no_value_in_its_exception_chain() -> None:
+    with pytest.raises(ValueError) as refused:
+        parse_site_bindings(
+            {"site-a": "https://user:secret@one.example.test"}, _peers("site-a")
+        )
+    assert "secret" not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

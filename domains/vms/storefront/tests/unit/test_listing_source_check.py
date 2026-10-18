@@ -465,7 +465,7 @@ async def test_an_unstated_window_is_the_configured_one(repository):
     assert past.outcome == "unverifiable"
 
 
-@pytest.mark.parametrize("stated", [0, -5, "soon", True, 1e14, "1e14"])
+@pytest.mark.parametrize("stated", [0, -5, "soon", True, 1e11, "1e11", 1e-7])
 async def test_startup_refuses_a_window_that_is_not_a_positive_number(stated):
     """Refused at startup, naming the key, rather than by every round."""
     with settings_overrides(**{"capacity.source_confirmation_seconds": stated}):
@@ -474,7 +474,7 @@ async def test_startup_refuses_a_window_that_is_not_a_positive_number(stated):
 
 
 @pytest.mark.parametrize(
-    "stated", [0, -1, "often", float("nan"), float("inf"), "nan", "inf", True, 1e14]
+    "stated", [0, -1, "often", float("nan"), float("inf"), "nan", "inf", True, 1e11, 1e-7]
 )
 async def test_startup_refuses_a_poll_interval_the_unstated_window_derives_from(stated):
     """With no window stated, the window is three poll intervals, so a poll
@@ -490,20 +490,20 @@ async def test_startup_refuses_a_poll_interval_the_unstated_window_derives_from(
             _require_source_confirmation_window()
 
 
-async def test_startup_refuses_a_derived_window_no_timedelta_holds_by_its_interval():
-    """Three poll intervals of 3e13 seconds exceed what a timedelta holds,
-    though one does not: unstated, the window is refused at startup by the
+async def test_startup_refuses_a_derived_window_too_long_to_apply_by_its_interval():
+    """Three poll intervals of 3e10 seconds exceed the longest duration a
+    setting may state, though one does not: unstated, the window is refused at startup by the
     interval's key, rather than raising at the first source check. Stated, the
     same interval is accepted."""
-    with settings_overrides(**{"capacity.poll_interval": 3e13}):
-        assert site_projection_poll_interval() == 3e13
+    with settings_overrides(**{"capacity.poll_interval": 3e10}):
+        assert site_projection_poll_interval() == 3e10
         with pytest.raises(
             ValueError,
             match=r"^\[capacity\.poll_interval\] sets \[capacity\]\.source_confirmation_seconds",
         ):
             _require_source_confirmation_window()
     with settings_overrides(
-        **{"capacity.poll_interval": 3e13, "capacity.source_confirmation_seconds": 600}
+        **{"capacity.poll_interval": 3e10, "capacity.source_confirmation_seconds": 600}
     ):
         assert source_confirmation_seconds() == 600
 

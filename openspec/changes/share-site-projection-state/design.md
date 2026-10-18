@@ -359,16 +359,24 @@ VM does, with these choices of its own:
 - *The publish command loads its own state* with one poll before its cycle, since it composes
   a runtime in its own process until it becomes an API client (C1).
 
-**Decided with the owner, 2026-10-18 (round 10 triage, 10 F1).** Every duration either
-storefront reads -- its loop intervals and the source-confirmation window, stated or derived --
-is a positive, finite number of seconds below `timedelta.max.total_seconds()`, a representability
-ceiling, not a policy maximum. The window is compared against elapsed time as a `timedelta`, so a
-finite window above what one holds started cleanly and raised `OverflowError` at the opening
-recheck. The ceiling is exclusive because that bound rounds up to a float `timedelta` itself
-cannot hold. The unstated window, three poll intervals, is checked as well and refused by the
-interval's key, since an interval below the ceiling can derive a window above it: bare metal
-refuses it when its `[capacity]` section loads, VM when its startup reads the window. The rule
-is `kit/config`'s shared `PositiveSeconds` (D14b's round-10 note says why it lives there).
+**Decided with the owner, 2026-10-18 (round 10 triage, 10 F1).** The durations that read
+through the shared type -- every bare-metal interval and timeout its typed settings declare
+(`[capacity].poll_interval`, `publication_interval_seconds`, `source_confirmation_seconds`,
+`negotiation_timeout_seconds`, `negotiation_watchdog_interval`,
+`settlement_servicing_interval_seconds`, `payment_reconciliation_interval`), and VM's
+`[capacity].poll_interval` and `source_confirmation_seconds` -- are positive, finite numbers of
+seconds that can be applied to an instant without leaving `datetime`'s range: at most the span
+from year 1 to the Unix epoch, about 1,969 years, so subtracting one from any instant after 1970
+stays after year 1 and adding one to any instant before about 8030 stays before 9999. It is a
+representability ceiling, not a policy maximum: a finite window or timeout above it started
+cleanly and overflowed where it was applied, the window at the opening recheck and the timeout at
+the watchdog's "now minus the timeout". A value below half a microsecond, which a `timedelta`
+holds as zero, is refused too, so "positive" holds after conversion. The unstated window, three
+poll intervals, is checked as well and refused by the interval's key, since an interval below the
+ceiling can derive a window above it: bare metal refuses it when its `[capacity]` section loads,
+VM when its startup reads the window. The rule is `kit/config`'s shared `PositiveSeconds`
+(D14b's round-10 note says why it lives there). VM's `settlement_servicing_interval_seconds` and
+its retention sweep interval are read without it; converting them is not part of this decision.
 Rejected: having the kit's `freshly_confirmed` treat an unrepresentable window as unconfirmed,
 which would turn a configuration mistake into a retryable refusal of every round and need a kit
 bump.
@@ -488,16 +496,20 @@ Secrets is owed. Accepted scope beyond the original proposal.
   site's clients join their routes to the URL, so a path became a prefix of every route and
   failed only at the first poll; VM had checked only that a URL was non-empty, and bare metal's
   check, which already refused credentials, a query, and a fragment, accepted a path and a port
-  that is not a number. The rule names the site's key and never echoes the URL. Both shared rules,
-  this one and the duration (D6's round-10 note), are Pydantic annotated types in `kit/config`,
-  `SiteAuthorityUrl` and `PositiveSeconds`, each over a plain function: a typed settings model
-  declares a field with the type (bare metal's intervals), an untyped loader validates through a
-  `TypeAdapter` of it (VM's `[capacity]` reads), and a values schema generated from a typed model
-  carries it, so Section 16's bare-metal schema takes the same rule without a copy (the duration's
-  JSON schema states its bounds; the origin's is a string, its rule applied by the loader). Bare
-  metal's site bindings apply the origin rule through its plain function, so the refusal names
-  the site. Rejected: a local copy of the rule in VM, which drifts; and the types staying in the
-  bare-metal storefront for VM to import, a dependency between two domains.
+  that is not a number. The rule also refuses whitespace or control characters inside the URL, an
+  empty port and port 0, and a host that is neither a DNS name nor an IP address (an IPv6 one
+  bracketed), and returns the origin as parsed (`<scheme>://<host>[:<port>]`). A refusal names the
+  site's key and carries no URL, in its message or its exception chain. Both shared rules, this one
+  and the duration (D6's round-10 note), are Pydantic annotated types in `kit/config`,
+  `SiteAuthorityUrl` and `PositiveSeconds`, each over a plain function. The origin rule's
+  placement rests on one rule shared by both storefronts with no dependency from one domain to
+  another; the duration's also lets a values schema generated from a typed model carry its bounds,
+  which the origin's does not (its JSON schema is a string, with no pattern). Bare metal's
+  `[capacity].sites` is a `dict[str, str]`, so the origin rule runs in `parse_site_bindings`,
+  through the plain function so the refusal names the site, and a bad URL is refused by key when
+  the pod starts, not at `helm install`; VM's untyped `[capacity]` validates each URL through a
+  `TypeAdapter`. Rejected: a local copy of the rule in VM, which drifts; and the types staying in
+  the bare-metal storefront for VM to import, a dependency between two domains.
 - **D14c. The values-schema generator moves to `kit/config`.** The generic generator
   (field publicizing, secret refusal, sink typing, render, drift check) leaves
   `market_storefront.values_schema`; each storefront keeps only its section list, passes

@@ -140,11 +140,16 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
                      id="a zero interval"),
         pytest.param({"capacity": {"source_confirmation_seconds": -1}},
                      "capacity.source_confirmation_seconds", id="a negative window"),
-        pytest.param({"capacity": {"source_confirmation_seconds": 1e14}},
+        pytest.param({"capacity": {"source_confirmation_seconds": 1e11}},
                      "capacity.source_confirmation_seconds",
-                     id="a window no timedelta holds"),
-        pytest.param({"capacity": {"poll_interval": 1e14}}, "capacity.poll_interval",
-                     id="an interval no timedelta holds"),
+                     id="a window too long to apply to an instant"),
+        pytest.param({"capacity": {"poll_interval": 1e11}}, "capacity.poll_interval",
+                     id="an interval too long to apply to an instant"),
+        pytest.param({"negotiation_timeout_seconds": 1e11},
+                     "negotiation_timeout_seconds",
+                     id="a timeout the watchdog could not subtract from now"),
+        pytest.param({"capacity": {"poll_interval": 1e-7}}, "capacity.poll_interval",
+                     id="an interval that rounds to no time"),
         pytest.param({"negotiation_watchdog_interval": True},
                      "negotiation_watchdog_interval", id="a boolean interval"),
         pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
@@ -180,14 +185,29 @@ def test_the_confirmation_window_is_three_poll_intervals_unless_stated(
     assert stated.confirmation_window_seconds == 3600
 
 
-def test_a_derived_window_no_timedelta_holds_is_refused_by_its_interval(
+def test_a_refusal_carries_no_secret_value_in_its_exception_chain(monkeypatch, tmp_path):
+    """A wallet key that cannot be read is refused by key, and the refusal has
+    no exception context: the ValidationError behind it keeps the value."""
+    write_configuration(monkeypatch, tmp_path, {"Wallet": {"private_key": [WALLET_KEY]}})
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "wallet.private_key" in str(refused.value)
+    assert WALLET_KEY not in str(refused.value)
+    assert "55" * 32 not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
+
+
+def test_a_derived_window_too_long_to_apply_is_refused_by_its_interval(
     monkeypatch, tmp_path
 ):
-    """Three poll intervals of 3e13 seconds exceed what a timedelta holds,
-    though one does not: unstated, the window is refused at load, naming the
-    interval it derives from, rather than raising at the first recheck. Stated,
-    the same interval is accepted."""
-    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 3e13}})
+    """Three poll intervals of 3e10 seconds exceed the longest duration a
+    setting may state, though one does not: unstated, the window is refused at
+    load, naming the interval it derives from, rather than overflowing at the
+    first recheck. Stated, the same interval is accepted."""
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 3e10}})
 
     with pytest.raises(BareMetalConfigurationError) as refused:
         load_storefront_settings()
@@ -197,7 +217,7 @@ def test_a_derived_window_no_timedelta_holds_is_refused_by_its_interval(
     write_configuration(
         monkeypatch,
         tmp_path,
-        {"capacity": {"poll_interval": 3e13, "source_confirmation_seconds": 3600}},
+        {"capacity": {"poll_interval": 3e10, "source_confirmation_seconds": 3600}},
     )
     assert load_storefront_settings().capacity.confirmation_window_seconds == 3600
 

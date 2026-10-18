@@ -534,7 +534,10 @@ reservation's selected site, MUST remain bound to it across an authorized rotati
 A storefront that derives listings from site projections MUST refuse to start, naming each
 problem, when publishing is impossible for the whole storefront: it has no registry to publish
 to, or a registry without its authority pin; it has no enabled settlement mechanism; or it has
-no configured site, or a site not bound to exactly one service peer. A storefront that only
+no configured site, a site not bound to exactly one service peer, or a site whose authority URL
+is not an HTTP(S) origin: an `http` or `https` scheme, a host, and a port only as a number from
+1 to 65535, with no credentials, path, query, or fragment. A refusal names the site and never
+echoes its URL. A storefront that only
 services deals already accepted is not a supported deployment. Settlement clauses and a lease
 bound MAY come from a pool's override or hint instead of the storefront's defaults, so missing
 defaults MUST NOT refuse startup; a pool that resolves no clauses, or no lease bound its domain
@@ -544,6 +547,12 @@ requires, from any tier MUST be held and reported per site.
 
 - **WHEN** a bare-metal storefront starts with no `[registry].urls`
 - **THEN** it refuses to start, naming the missing registry, and starts no loop
+
+#### Scenario: A site's authority URL is not an origin
+
+- **WHEN** a VM or bare-metal storefront starts with a `[capacity.sites]` URL that states a
+  path, credentials, a query, a fragment, or a port that is not a number
+- **THEN** it refuses to start, naming the site, without echoing the URL
 
 #### Scenario: No settlement mechanism is enabled
 

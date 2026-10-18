@@ -436,8 +436,9 @@ class _ReportedCycle(BareMetalPublicationCycle):
 @dataclasses.dataclass(frozen=True)
 class _RecordedRegistries(BareMetalRegistryConfiguration):
     """The runtime's registry configuration, its fan-out replaced by a recording
-    registry: the one collaborator the composition is given in place of the
-    real one."""
+    registry: the one collaborator ``compose_publication_cycle`` is given in
+    place of the real one. The sites and chain clients stay at the test doubles
+    the other app tests use."""
 
     recording: RecordingRegistries = dataclasses.field(default_factory=RecordingRegistries)
 
@@ -448,7 +449,12 @@ class _RecordedRegistries(BareMetalRegistryConfiguration):
 class _ObservedCycles:
     """Composes each publication cycle through the production composition, from
     the runtime's held projections, settlement terms, and registry
-    configuration, as a cycle that reports each completed pass."""
+    configuration, as a cycle that reports each completed pass.
+
+    The runtime is given this factory, so its default -- ``compose_publication_cycle``
+    itself when ``publication_cycle_factory`` is ``None`` -- is bypassed; the two
+    differ only in the cycle class, which here reports each pass.
+    """
 
     def __init__(self) -> None:
         self.registry_configuration = _RecordedRegistries(

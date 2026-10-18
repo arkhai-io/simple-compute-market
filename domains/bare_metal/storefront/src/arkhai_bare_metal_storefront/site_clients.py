@@ -79,7 +79,9 @@ def _authority_url(value: Any, *, site_id: str) -> str:
     try:
         return site_authority_url(value)
     except ValueError as exc:
-        raise ValueError(f"site {site_id!r} authority_url {exc}") from None
+        reason = str(exc)
+    # Raised outside the handler, so the refusal carries no exception context.
+    raise ValueError(f"site {site_id!r} authority_url {reason}")
 
 
 def parse_site_bindings(

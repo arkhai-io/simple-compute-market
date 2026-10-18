@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -60,20 +60,36 @@ def test_a_boolean_is_refused_by_name():
         positive_seconds(True)
 
 
-def test_every_accepted_duration_builds_a_timedelta():
-    """The bound itself is refused: it rounds up to a float timedelta cannot
-    hold. The largest float below it is accepted and builds one."""
-    largest = math.nextafter(MAX_SECONDS, 0)
+def test_the_longest_duration_can_be_applied_to_any_instant_in_use():
+    """The longest accepted duration subtracted from now, as a watchdog takes
+    "now minus the timeout", stays after year 1, and added to an instant in
+    the year 8000 stays before 9999. A value just above it is refused."""
+    longest = positive_seconds(MAX_SECONDS)
+    now = datetime.now(timezone.utc)
 
-    assert timedelta(seconds=positive_seconds(largest))
-    with pytest.raises(OverflowError):
-        timedelta(seconds=MAX_SECONDS)
+    assert (now - timedelta(seconds=longest)).year >= 1
+    assert (datetime(8000, 1, 1) + timedelta(seconds=longest)).year < 9999
+    with pytest.raises(ValueError, match="inside datetime's range"):
+        positive_seconds(math.nextafter(MAX_SECONDS, math.inf))
 
 
-@pytest.mark.parametrize("stated", [MAX_SECONDS, 1e14, 1e300, "1e14"])
-def test_a_duration_timedelta_cannot_hold_is_refused(stated):
-    with pytest.raises(ValueError, match="longest duration a timedelta holds"):
+@pytest.mark.parametrize("stated", [1e11, 1e14, 1e300, "1e14", MAX_SECONDS + 1])
+def test_a_duration_that_would_leave_datetimes_range_is_refused(stated):
+    """1e11 seconds builds a timedelta, but subtracted from now it overflows."""
+    with pytest.raises(ValueError, match="inside datetime's range"):
         positive_seconds(stated)
+
+
+@pytest.mark.parametrize("stated", [1e-7, 5e-7, 5e-324])
+def test_a_duration_that_rounds_to_no_time_is_refused(stated):
+    """Positive, but below half a microsecond a timedelta holds zero."""
+    assert timedelta(seconds=stated) == timedelta(0)
+    with pytest.raises(ValueError, match="at least a microsecond"):
+        positive_seconds(stated)
+
+
+def test_a_microsecond_is_accepted():
+    assert positive_seconds(1e-6) == 1e-6
 
 
 def test_a_refusal_names_no_value():
@@ -88,10 +104,10 @@ def test_the_duration_schema_states_its_bounds():
 
     schema = Settings.model_json_schema(mode="validation")["properties"]["interval"]
 
-    assert {key: schema[key] for key in ("type", "exclusiveMinimum", "exclusiveMaximum")} == {
+    assert {key: schema[key] for key in ("type", "exclusiveMinimum", "maximum")} == {
         "type": "number",
         "exclusiveMinimum": 0,
-        "exclusiveMaximum": MAX_SECONDS,
+        "maximum": MAX_SECONDS,
     }
 
 
@@ -101,8 +117,10 @@ def test_the_duration_schema_states_its_bounds():
         ("http://site-a:8081", "http://site-a:8081"),
         ("https://site.example.test", "https://site.example.test"),
         ("  https://site.example.test/  ", "https://site.example.test"),
-        ("HTTP://site-a", "HTTP://site-a"),
+        ("HTTP://site-a", "http://site-a"),
         ("http://[::1]:8081", "http://[::1]:8081"),
+        ("http://10.0.0.7:8081", "http://10.0.0.7:8081"),
+        ("http://site-a:65535", "http://site-a:65535"),
     ],
 )
 def test_an_origin_is_accepted_without_its_trailing_slash(stated, origin):
@@ -120,6 +138,17 @@ def test_an_origin_is_accepted_without_its_trailing_slash(stated, origin):
         ("ftp://site-a", "scheme is http or https"),
         ("http://", "naming a host"),
         ("http://:8081", "naming a host"),
+        ("http://si\tte-a", "without whitespace or control characters"),
+        ("http://site\n-a", "without whitespace or control characters"),
+        ("http://site a", "without whitespace or control characters"),
+        ("http://site\x00-a", "without whitespace or control characters"),
+        ("http://site-a;x", "naming a host"),
+        ("http://-:80", "naming a host"),
+        ("http://site-.example", "naming a host"),
+        ("http://%41", "naming a host"),
+        ("http://[not-ipv6]", r"must be an HTTP\(S\) origin$"),
+        ("http://site-a:", "with a port, if stated, from 1 to 65535"),
+        ("http://site-a:0", "with a port, if stated, from 1 to 65535"),
         ("https://user:pass@site.example.test", "without credentials"),
         ("https://token@site.example.test", "without credentials"),
         ("https://site.example.test?x=1", "without a query or fragment"),
@@ -127,8 +156,8 @@ def test_an_origin_is_accepted_without_its_trailing_slash(stated, origin):
         ("https://site.example.test#top", "without a query or fragment"),
         ("https://site.example.test/v1", "without a path"),
         ("https://site.example.test//", "without a path"),
-        ("https://site.example.test:bad", "numeric port"),
-        ("https://site.example.test:70000", "numeric port"),
+        ("https://site.example.test:bad", "with a port, if stated, from 1 to 65535"),
+        ("https://site.example.test:70000", "with a port, if stated, from 1 to 65535"),
         ("http://[::1", r"must be an HTTP\(S\) origin$"),
         ("https://user:secret\uff20site.example.test", r"must be an HTTP\(S\) origin$"),
     ],
@@ -140,10 +169,28 @@ def test_a_url_that_is_not_an_http_origin_is_refused(stated, reason):
         ORIGIN.validate_python(stated)
 
 
-def test_an_origin_refusal_names_no_value():
+@pytest.mark.parametrize(
+    "stated",
+    [
+        "https://operator:hunter2@site.example.test",
+        "https://operator:hunter2\uff20site.example.test",
+        "https://hunter2.example.test:hunter2",
+    ],
+)
+def test_an_origin_refusal_carries_no_value_even_in_its_context(stated):
+    """A parse error's message can quote the value, so the refusal is raised
+    with no exception context at all, not only with its cause suppressed."""
     with pytest.raises(ValueError) as refused:
-        site_authority_url("https://operator:hunter2@site.example.test")
+        site_authority_url(stated)
     assert "hunter2" not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
+
+
+def test_a_duration_refusal_carries_no_context():
+    with pytest.raises(ValueError) as refused:
+        positive_seconds("123456789-secret")
+    assert refused.value.__context__ is None
 
 
 def test_the_origin_schema_is_a_string():

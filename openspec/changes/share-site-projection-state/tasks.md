@@ -3954,7 +3954,9 @@ provisioning's integration suite's, and the wiring the end-to-end lane's.
       and a trailing `/`. Each reason names no value. **Differed (bound):** the ceiling is
       exclusive, not "anything above": `timedelta.max.total_seconds()` rounds up to
       `86400000000000.0`, which `timedelta` itself refuses, so the bound refuses it too and the
-      largest float below it builds one. The types are `PlainValidator`s over the functions with
+      largest float below it builds one. **Superseded (round 10 check fixes, below):** the
+      ceiling is the span from year 1 to the epoch, inclusive, a duration below a microsecond is
+      refused, and the origin rule is stricter. The types are `PlainValidator`s over the functions with
       a `WithJsonSchema`: the duration's schema states `exclusiveMinimum` 0 and
       `exclusiveMaximum` `MAX_SECONDS`, the origin's is a string. `make dist`, then `make lock
       PROJECTS=...` relocked the sixteen projects that lock `arkhai-kit-config` and resolve here
@@ -4020,8 +4022,11 @@ provisioning's integration suite's, and the wiring the end-to-end lane's.
       completed pass; `_ObservedCycles` returns `compose_publication_cycle(runtime,
       cycle_factory=partial(_ReportedCycle, completed=...))`; the runtime's
       `registry_configuration` is `_RecordedRegistries`, a `BareMetalRegistryConfiguration`
-      whose `client_factory` returns the recording registry, so the registry's fan-out is the
-      one collaborator replaced. The runtime publishes under real Alkahest settlement
+      whose `client_factory` returns the recording registry, so the registry is the one
+      collaborator `compose_publication_cycle` is given in place of the real one; the sites and
+      chain clients stay at the usual test doubles. The test sets `publication_cycle_factory`,
+      so the runtime's default (`None`, composing through `compose_publication_cycle` with the
+      plain cycle class) is functionally equivalent but bypassed. The runtime publishes under real Alkahest settlement
       (`test_publication_cycle.alkahest_publication`: the composition and compiled clauses, the
       payload built by `publication_payload_builder`), with the seller wallet and lease bound a
       configured runtime carries, and settlement servicing on an hour's interval. The runtime's
@@ -4053,7 +4058,8 @@ provisioning's integration suite's, and the wiring the end-to-end lane's.
       check-tasks CHANGE=share-site-projection-state`, `make check-change-index`, and `openspec
       validate --strict` pass. No repository typing target exists. The pipeline was not run: the
       fix commit is validated next (the triage's disposition, which also carries F3).
-      Fresh-context check of the diff against `fa212f0`: _to be recorded by the orchestrator_.
+      Fresh-context check of `fa212f0..3944152`: eight findings and a nit, all fixed in the
+      "Round 10 check fixes" below, none declined.
       **End-to-end, read from the lanes' configuration (the pipeline was not run):** every
       VM-lane storefront states `[capacity.sites]` URLs that are origins (`http://provisioning:8081`,
       `http://alice-provisioning:8081`, the chart's `{default: <provisioning URL>}`) and
@@ -4062,13 +4068,65 @@ provisioning's integration suite's, and the wiring the end-to-end lane's.
       No scenario states an unrepresentable duration or a URL with a path: those are unit
       evidence only. No API-credit scenario reaches the round's code.
 
+Round 10 check fixes (fresh-context check of `fa212f0..3944152`):
+
+- The duration ceiling is the span from year 1 to the epoch, `(datetime(1970, 1, 1) -
+  datetime(1, 1, 1)).total_seconds()` (about 6.2e10 s, inclusive), not
+  `timedelta.max.total_seconds()`: 1e11 s built a `timedelta` but overflowed the watchdog's
+  "now minus `negotiation_timeout_seconds`". The schema's bound is `maximum`. Tests: the bound
+  subtracted from now and added to 8000-01-01 stay in range, the float above it and 1e11 are
+  refused; bare metal refuses a 1e11 `negotiation_timeout_seconds`, window, and interval by key.
+  The derived-window tests use 3e10 (three of them exceed the bound, one does not).
+- A positive duration a `timedelta` holds as zero (below half a microsecond) is refused: 1e-7,
+  5e-7, 5e-324 in kit/config; 1e-7 in bare metal and VM.
+- The origin rule refuses whitespace and control characters anywhere in the value (checked
+  before `urlsplit`, which drops tabs and newlines), an empty port and port 0, and a host that is
+  neither a DNS name (labels of letters, digits, and hyphens, not starting or ending with one)
+  nor an IP address (IPv6 bracketed), and returns the parsed origin `<scheme>://<netloc>` (so
+  `HTTP://` reads as `http://`). The check's cases are kit/config unit cases; bare metal and VM
+  add whitespace, empty-port or port-zero, and bad-host cases.
+- Refusals carry no value in their exception chain: kit/config's functions, bare metal's
+  `_authority_url` and derived-window validator, and VM's `configured_capacity_sites` and
+  `_positive_seconds` (through `_validated_setting`, which returns the reason) raise outside the
+  handler, so `__context__` is `None`; tests assert it for credential-bearing URLs in all three
+  packages and for a duration in kit/config.
+- `design.md` D6's round-10 note names the durations that use the type and the two VM reads that
+  do not (also in the handoff); D14b's says the values schema carries the duration only, the
+  origin's placement rests on one rule shared without a domain-to-domain dependency, and bare
+  metal refuses a bad URL at pod start in `parse_site_bindings`; the 17.9 amendment is narrowed
+  to match.
+- The storefront-publication delta's "A storefront that cannot publish refuses to start" gains
+  the origin clause and the scenario "A site's authority URL is not an origin" (VM and bare
+  metal, naming the site, never the URL).
+- The 13.13 note and `_RecordedRegistries`' and `_ObservedCycles`' docstrings say the registry is
+  the one collaborator `compose_publication_cycle` is given in place of the real one, the sites
+  and chain clients stay doubles, and the runtime's default factory path is bypassed.
+- Nit: `market_config/__init__.py`'s imports are in module order.
+- Bare metal's `config._validated` raises its keys-and-reasons refusal outside the
+  `except ValidationError` too, since that error keeps the refused values (a `[Wallet]` private
+  key among them); `test_a_refusal_carries_no_secret_value_in_its_exception_chain` refuses an
+  unreadable private key by key with no context and no value. Bare-metal storefront then 402
+  passed.
+- Evidence: kit/config unit 234 passed; bare-metal storefront 401 passed; VM storefront frozen
+  (rebuilt 0.4.0 kit-config and bare-metal storefront wheels reinstalled) unit 1088 passed, 1
+  skipped, integration 447 passed; `make -C helm test-render` with `STOREFRONT_PYTHON` passed,
+  loader and start-and-derive checks run; `make check-packaging` (locks included; the 0.4.0 wheel
+  is unreleased, so no bump, and the hand-edited VM locks record no hash), `make
+  check-comment-hygiene`, `make check-doc-citations`, `make check-tasks`, and `openspec validate
+  --strict` pass. `make test` was not rerun for these fixes (no package outside kit/config and
+  the two storefronts changed).
+
 Round 10 handoff:
 
 - `market_config.setting_types` (`kit/config` 0.4.0) holds `PositiveSeconds` / `positive_seconds`
   and `SiteAuthorityUrl` / `site_authority_url`. A new duration or site URL either storefront
   reads uses them: a typed model declares the type, an untyped VM read goes through a
   `TypeAdapter` and reports `[<key>] <reason>`. Section 16's bare-metal values schema takes the
-  duration bounds from the typed models without a copy; the origin is typed as a string there.
+  duration bounds from the typed models without a copy; the origin is typed as a string there,
+  with no pattern, and is refused when the pod starts, by key, in `parse_site_bindings`.
+- Unconverted duration reads: VM's `settlement_servicing_interval` (`utils/config.py`, a bare
+  `float(...)` of `settlement_servicing_interval_seconds`) and its introduction-retention sweep
+  interval (`startup.py`) do not go through `PositiveSeconds`.
 - The bare-metal timer seam (`test_http_system._ObservedCycles`) composes through
   `compose_publication_cycle` with real Alkahest terms, so a timer test needs `monkeypatch`
   (for `alkahest_publication`'s token cache) and `_timed_runtime(tmp_path, monkeypatch, ...)`.
@@ -4285,11 +4343,17 @@ documentation only; a part needing code returns the change to implementation.
         `kit/config` holds the setting types storefronts share, `PositiveSeconds` and
         `SiteAuthorityUrl`, beside its values-schema generator; `DEPLOYMENT_AND_CONFIG.md`
         "Storefront agents: pass-through configuration" and "Bare-metal role configuration" --
-        every duration a storefront reads is a positive, finite number of seconds a `timedelta`
-        can hold, the unstated source-confirmation window (three poll intervals) included and
-        refused under `[capacity].poll_interval`, and every `[capacity.sites]` URL an HTTP(S)
-        origin with no path, credentials, query, or fragment and a numeric port, refused at
-        startup under the site's key (D6 and D14b's round-10 notes).
+        bare metal's typed intervals and timeouts and VM's `[capacity].poll_interval` and
+        `source_confirmation_seconds` are positive, finite numbers of seconds that can be applied
+        to an instant without leaving `datetime`'s range (at most the span from year 1 to the
+        epoch) and at least a microsecond, the unstated source-confirmation window (three poll
+        intervals) included and refused under `[capacity].poll_interval`; VM's
+        `settlement_servicing_interval_seconds` and retention sweep interval are not checked so;
+        and every `[capacity.sites]` URL is an HTTP(S) origin (a DNS-name or IP host, a port from
+        1 to 65535 if stated, no path, credentials, query, fragment, or whitespace), refused when
+        the storefront starts under the site's key, not by the chart's values schema (D6 and
+        D14b's round-10 notes). The normative half is the storefront-publication delta's "A
+        storefront that cannot publish refuses to start".
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

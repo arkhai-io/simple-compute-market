@@ -179,16 +179,18 @@ class CapacitySettings(_Section):
         # An unstated window is three poll intervals, which can exceed what a
         # timedelta holds although the interval itself does not; unrefused here,
         # the opening recheck would raise at every comparison instead.
-        if self.source_confirmation_seconds is None:
-            try:
-                positive_seconds(_CONFIRMATION_POLL_INTERVALS * self.poll_interval)
-            except ValueError as exc:
-                raise ValueError(
-                    "poll_interval sets source_confirmation_seconds when it is not "
-                    f"stated, to {_CONFIRMATION_POLL_INTERVALS} poll intervals, which "
-                    f"{exc}"
-                ) from None
-        return self
+        if self.source_confirmation_seconds is not None:
+            return self
+        try:
+            positive_seconds(_CONFIRMATION_POLL_INTERVALS * self.poll_interval)
+        except ValueError as exc:
+            reason = str(exc)
+        else:
+            return self
+        raise ValueError(
+            "poll_interval sets source_confirmation_seconds when it is not "
+            f"stated, to {_CONFIRMATION_POLL_INTERVALS} poll intervals, which {reason}"
+        )
 
     @property
     def confirmation_window_seconds(self) -> float:
@@ -400,9 +402,11 @@ def _validated(raw: Mapping[str, Any]) -> BareMetalStorefrontSettings:
         problems = "; ".join(
             f"{_error_location(error['loc'])}: {error['msg']}" for error in exc.errors()
         )
-        raise BareMetalConfigurationError(
-            f"the storefront's configuration cannot be read: {problems}"
-        ) from None
+    # Raised outside the handler: the ValidationError keeps the values it
+    # refused, a wallet key among them, so the refusal carries no context.
+    raise BareMetalConfigurationError(
+        f"the storefront's configuration cannot be read: {problems}"
+    )
 
 
 def identity_credential(environ: Mapping[str, str] | None = None) -> str:

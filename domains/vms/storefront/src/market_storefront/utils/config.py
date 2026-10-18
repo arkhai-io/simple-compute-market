@@ -220,12 +220,20 @@ _POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
 _SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
 
 
-def _refusal_reason(exc: ValidationError) -> str:
-    """The reason a shared setting type gave, which names no configured value."""
+def _validated_setting(adapter: TypeAdapter[Any], value: Any) -> tuple[Any, str | None]:
+    """``value`` validated by a shared setting type, and ``None``; or ``None``
+    and the reason the type refused it, which names no configured value.
 
-    return "; ".join(
-        str(error.get("ctx", {}).get("error", error["msg"])) for error in exc.errors()
-    )
+    The caller raises its refusal outside this handler, so the refusal carries
+    no exception context: a `ValidationError` keeps the value it refused.
+    """
+
+    try:
+        return adapter.validate_python(value), None
+    except ValidationError as exc:
+        return None, "; ".join(
+            str(error.get("ctx", {}).get("error", error["msg"])) for error in exc.errors()
+        )
 
 
 def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
@@ -244,12 +252,10 @@ def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
         site_id = str(raw_name).strip()
         if not site_id:
             raise RuntimeError("capacity site IDs must be non-empty")
-        try:
-            sites[site_id] = _SITE_AUTHORITY_URL.validate_python(raw_url)
-        except ValidationError as exc:
-            raise RuntimeError(
-                f"[capacity.sites.{site_id}] {_refusal_reason(exc)}"
-            ) from None
+        url, reason = _validated_setting(_SITE_AUTHORITY_URL, raw_url)
+        if reason is not None:
+            raise RuntimeError(f"[capacity.sites.{site_id}] {reason}")
+        sites[site_id] = url
     return sites
 
 
@@ -265,8 +271,8 @@ def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
     """`[capacity].poll_interval`: seconds between the projection poller's
     cycles and the capacity-event pollers', five unless stated.
 
-    A stated value that is not a positive, finite number of seconds a
-    `timedelta` can hold is refused by key rather than defaulted: it also sets
+    A stated value that is not a positive, finite number of seconds that can be
+    applied to an instant is refused by key rather than defaulted: it also sets
     the default source-confirmation window, which must stay a usable bound.
     """
 
@@ -294,26 +300,27 @@ def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
     if stated is not None:
         return _positive_seconds(stated, key="capacity.source_confirmation_seconds")
     derived = _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
-    try:
-        return _POSITIVE_SECONDS.validate_python(derived)
-    except ValidationError as exc:
+    window, reason = _validated_setting(_POSITIVE_SECONDS, derived)
+    if reason is not None:
         # The interval is usable, but three of them are not: refused by the
         # interval's key, since no window is stated.
         raise ValueError(
             "[capacity.poll_interval] sets [capacity].source_confirmation_seconds "
             f"when it is not stated, to {_CONFIRMATION_POLL_INTERVALS} poll "
-            f"intervals, which {_refusal_reason(exc)}"
-        ) from None
+            f"intervals, which {reason}"
+        )
+    return window
 
 
 def _positive_seconds(value: Any, *, key: str) -> float:
     """A stated duration, refused by key unless it is a positive, finite number
-    of seconds a `timedelta` can hold."""
+    of seconds that can be applied to an instant without leaving `datetime`'s
+    range."""
 
-    try:
-        return _POSITIVE_SECONDS.validate_python(value)
-    except ValidationError as exc:
-        raise ValueError(f"[{key}] {_refusal_reason(exc)}") from None
+    seconds, reason = _validated_setting(_POSITIVE_SECONDS, value)
+    if reason is not None:
+        raise ValueError(f"[{key}] {reason}")
+    return seconds
 
 
 class AdministratorDeclaration(BaseModel):
