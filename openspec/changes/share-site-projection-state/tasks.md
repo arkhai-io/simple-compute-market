@@ -3388,6 +3388,10 @@ storefront and its development configuration.
       `test_configuration_that_no_longer_covers_a_seeded_peer_is_refused`. Application
       startup (the real app and lifespan): `test_a_storefront_that_cannot_publish_refuses_to_start`
       gains "a site with two service peers", and both peer cases now match the site's name.
+      **Superseded (Section 14 check fixes):** seeding moved to the server's start hook, as
+      VM seeds (`runtime.seed_service_peer_trust`, still one peer at a time and naming it);
+      composition builds the trust unseeded. Both composition tests became application
+      startup tests.
 - [x] 12.2 `src/site_clients.py`: `BareMetalSiteBinding` carries the site's peer, not a
       principal; `parse_site_bindings` reads the configuration of 11.1;
       `build_trusted_site_clients` gives each site's `SiteCapacityClient` and
@@ -4274,6 +4278,11 @@ metal's storefront.
       accepted-generation table (spec "Publication runs from the command"); the command's
       module imports no database layer (an AST check, as VM's); a missing credential is refused
       before connecting. These replace the in-process composition cases the handoff named.
+      **Corrected (check):** the command tests double the cycle (`RecordingCycle`), so they
+      prove the command -> typed client -> step route path and the composition the storefront
+      hands its cycle, not the cycle itself, whose evidence is `test_http_system.py`'s; the
+      override case proved nothing the command did, and the AST check read one module (see
+      the check fixes below).
       `tests/test_pool_override_cli.py`'s URL test imports `storefront_url` from `admin_cli`.
       Bare-metal storefront 412 passed (405 before).
 - [x] 14.4 Validation: `make test-bare-metal`, `make test`. End-to-end (bare-metal lane):
@@ -4327,6 +4336,99 @@ Section 14 handoff:
   (Section 14) name the decisions.
 - For the owner: whether bare metal's `publish` should gain VM's `--abort-all`, and whether VM's
   dry run should stop recording derivation reports (bare metal's preview records none).
+  **Decided (2026-10-18):** both yes; the dry-run rule is in the check fixes below, and
+  `--abort-all` is blocked on bare metal serving a seller close route (below).
+- Also for 17.9 (Section 12's handoff): seeding is at the server's start now, as VM's (12.1's
+  amendment).
+
+Section 14 check fixes (fresh-context check of `5eca7dc..2dcebd3`; owner decisions 2026-10-18,
+recorded in `design.md` D6, C1, and D14b):
+
+- **A pool resolving no settlement clause is held at compose** (`_hold_pools_without_clauses`,
+  beside the lease-bound hold): its override's clauses, else the configured ones, empty holds
+  it as `pool_settlement_clauses_missing`, recorded in the derivation. The cycle takes
+  `publication_clauses` (required), from the runtime through `build_publication_cycle`; the
+  cycle tests' harnesses pass `test_publication_cycle.CONFIGURED_CLAUSES`. Application
+  integration
+  (`test_http_system.py::test_status_reports_a_pool_resolving_no_settlement_clause_held`):
+  status reports the hold, and the cycle neither publishes nor refuses the candidate.
+- **The derivation is the last cycle's.** The publication step clears it as each cycle starts
+  (timer and step alike), the cycle records it after compose, and a preview does neither.
+  `test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status`: a cycle that
+  derived, then one failing in `compose`, leaves status's derivation `{}` beside the failed
+  outcome. Both new tests fail with their change removed (edited, then restored).
+- **Site error text stays** (owner: site URLs are not sensitive, and credentials cannot
+  appear, since `SiteAuthorityUrl` refuses them at load); `design.md` D6's "no private URL
+  reaches status" is corrected to what is true. Nothing was redacted.
+- **"Publication fails every cycle" fails cycles a production way:** another process holding
+  the storefront's database under `BEGIN EXCLUSIVE` fails each timer cycle in `compose`
+  (`OperationalError`, by type), the loops running; status reports publication `running` with
+  the failed timer outcome and no derivation. **Found:** an unreachable registry does not fail
+  a cycle -- the cycle records `fail` for the publish and converges later (probed) -- so the
+  spec scenario's example ("because a registry cannot be reached") is not a failing cycle for
+  bare metal; for the owner or 17.9. The test waits through an injected seam:
+  `bare_metal_loop_controller` takes a `logger` in place of the module's, and the test's
+  handler sets an event on the controller's failure record, bounded (30 s; the lock's busy
+  timeout is 5 s).
+- **Command tests:** status, not the controller, is read through the typed client
+  (`_publication_status`); the override case is deleted (`pool-override set` refreshes the
+  site itself, and no production code creates the accepted-generation table, so it proved
+  nothing; status from the held projection is `test_pool_overrides_api.py`'s); the AST check
+  is replaced by `test_the_command_loads_none_of_the_storefronts_database_or_runtime`, which
+  runs `publish` in a fresh interpreter against a storefront nothing answers for and asserts
+  no `sqlite_client`, `runtime`, `publication_composition`, or `migrations` module was loaded
+  and no database file created.
+- **Owner decisions:** (B) `-a` for `--storefront-url` on `publish` and `pool-override`, as VM's;
+  (C) the service peers are seeded at the server's start (12.1's amendment), since
+  `redeliver-introduction`, the one command still composing a runtime, reads no site
+  (`ServicePeerTrust.reload` over an unseeded database records each site's refusal and raises
+  nothing, so composing stays safe); (12) a storefront nothing answers for is reported as
+  "Storefront error: no storefront answered at <scheme://host:port> (<error type>)", exit 1,
+  no traceback, by bare metal's `admin_cli.reporting_failures` (both commands) and VM's
+  `cli_common.storefront_failure_message` and `STOREFRONT_FAILURES` (`publish`,
+  `pool-override`). Bare metal now declares `httpx>=0.27`, which `admin_cli` imports. Tests:
+  bare metal, through the commands against a closed port (`test_publication_cli.py`,
+  `test_pool_override_cli.py`, both flags); VM, CLI unit with the existing client seams
+  raising `httpx.ConnectError` (`tests/unit/cli/test_publish_command.py`,
+  `tests/unit/cli/test_pool_overrides.py`).
+- **VM's preview publishes no derivation report** (owner, 2026-10-18). `arkhai-vms-listings`
+  0.6.0: `available_compute_slices`, `current_available_resource_keys`, and
+  `stale_open_listing_ids` take `record_reports` (default true, so every existing recorder --
+  real cycles, source checks, capacity-event and inline reconciliation -- is unchanged, and
+  override feasibility keeps its explicit false), and `available_compute_slices` fills an
+  optional `reports` out-parameter. VM's publication cycle passes `record_reports=not
+  dry_run` to both derivations and reads its regionless holds from `reports` instead of the
+  published `derivation_reports()`, so a preview still reports them. A preview logs none of the
+  change-only derivation warnings, which accompany publishing a report. Application
+  integration
+  (`tests/integration/test_publication_loop.py::test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_it`):
+  after a cycle reporting a regionless pool, the pool gains its region; a preview reports no
+  hold while status still reports the pool, and the next cycle clears it; it fails with the
+  preview recording (edited, then restored). VM storefront requires `>=0.6.0`.
+- **Not done (A, blocked):** `--abort-all` seller-closes each open listing
+  (`StorefrontClient.close_listing`, `POST /api/v1/listings/{listing_id}/close`, seller role),
+  which bare metal does not serve, nor the resume a seller re-lists with; the permanent
+  spec's "A seller's close is durable" already says a seller MUST be able to reopen what they
+  closed. Adding those routes is new API surface beyond this section; for the owner.
+- Smaller: `cli.py`'s redundant local `import json` in `redeliver-introduction` goes;
+  `test_publication_cycle.py`'s docstring names where the step's composition is tested; the
+  over-long seeding comment went with the seeding.
+- Locks: `make lock PROJECTS="domains/bare_metal/storefront e2e-tests"` (httpx; the listings
+  wheel); VM storefront's and VM buyer's locks hand-edited exactly as uv wrote
+  `e2e-tests/uv.lock` (the listings version and wheel name; VM storefront's root specifier
+  `>=0.6.0` and the bare-metal storefront's `httpx` dependency line). 16.6 relocks them.
+- Evidence: bare-metal storefront 417 passed (412 before); `make -k test`: every suite it ran
+  passed (core, the kits, provisioning service 675 + 463, bare metal 134 + 417 + 11 + 40,
+  API-credit storefront 153, e2e unit 38, release tooling 944, the Helm render suites), stopping
+  only at the reinit of the three PyTorch-index projects, run frozen with the rebuilt
+  `arkhai-vms-listings` 0.6.0 and bare-metal storefront wheels reinstalled: VM storefront unit
+  1089 passed, 1 skipped (CLI unit among them), integration 448 passed; VM buyer 202 passed;
+  `kit/policy` 80 passed. `make check-packaging` (locks and architecture rules included),
+  `make check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+  (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. The pipeline
+  was not run; end-to-end, every bare-metal-lane scenario's storefront now seeds its peer at
+  start (as before, only later), and no scenario runs `publish`, previews VM publication and
+  then reads status, or reaches a pool with no clause.
 
 ## 15. The API-credit storefront's loops, and the controller's one loop form
 

@@ -108,6 +108,7 @@ def build_publication_cycle(
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
         build_payload=publication_payload_builder(runtime),
+        publication_clauses=runtime.publication_clauses,
         default_max_duration_seconds=runtime.default_max_duration_seconds,
         enter_stage=runtime.loops.enter_stage,
         derivation=runtime.publication_derivation,

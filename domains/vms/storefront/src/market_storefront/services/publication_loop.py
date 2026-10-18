@@ -37,7 +37,6 @@ from arkhai_vms_listings.listing_comparison import (
 from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
-    derivation_reports,
     open_listing_resource_keys,
     ReconciliationScope,
     stale_open_listing_ids,
@@ -243,6 +242,9 @@ class VmPublicationCycle:
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
+        # A preview derives exactly as the cycle would and publishes no
+        # derivation report, so status keeps describing the last cycle that ran.
+        reports: dict[str, dict[str, Any]] = {}
         candidates = available_compute_slices(
             db_path,
             member_availability=self._availability,
@@ -254,6 +256,8 @@ class VmPublicationCycle:
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
+            record_reports=not self.dry_run,
+            reports=reports,
         )
         for kind, site_id, source_id in sorted(holds):
             if kind == "site":
@@ -268,7 +272,6 @@ class VmPublicationCycle:
         # derivation's own report rather than from the candidates, because a
         # pool with no available slice yields no candidate and is held all
         # the same.
-        reports = derivation_reports()
         for site_id in sorted(self._projection):
             for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
                 self.report.record(
@@ -286,6 +289,7 @@ class VmPublicationCycle:
             scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
             admissibility_default=self._admissibility_default,
+            record_reports=not self.dry_run,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")

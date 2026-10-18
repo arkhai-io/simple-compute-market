@@ -224,6 +224,7 @@ dependencies = [
     { name = "arkhai-kit-storefront" },
     { name = "dynaconf" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -675,7 +676,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -686,7 +687,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.6.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -831,7 +832,7 @@ requires-dist = [
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.7.0" },
     { name = "arkhai-vms", specifier = ">=0.6.0" },
-    { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.4.0" },
+    { name = "arkhai-vms-listings", extras = ["pools", "overrides"], specifier = ">=0.6.0" },
     { name = "arkhai-vms-negotiation", specifier = ">=0.4.0" },
     { name = "arkhai-vms-settlement", specifier = ">=0.3.0" },
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },

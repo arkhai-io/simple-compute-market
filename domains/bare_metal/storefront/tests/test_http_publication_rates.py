@@ -27,6 +27,7 @@ from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from held_loops import held_loop_controller
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
+    CONFIGURED_CLAUSES,
     REGISTRY_URL,
     RecordingRegistries,
     Site,
@@ -72,6 +73,7 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
             build_payload=Terms(),
+            publication_clauses=CONFIGURED_CLAUSES,
             default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 

@@ -261,8 +261,13 @@ records its cycle's outcome through and a snapshot of states and last outcomes (
   raised, naming the stage that failed (`compose`, `run`, or `converge`);
 - a recorded error carries the exception's type, and its message only when the exception is
   one of the storefront's own configuration or publication errors, whose text names keys and
-  reasons rather than values; full detail stays in the log, so no credential, secret, or
-  private URL reaches status;
+  reasons rather than values; full detail stays in the log, so a cycle's own outcome carries no
+  credential, secret, or other value an unexpected exception's text may hold. (As amended on
+  2026-10-18 with the owner, after Section 14's check: status and health do report site errors
+  with their text, a site's URL included, for diagnosis -- the projection families'
+  `last_error`, and a publication derivation's held site -- since site URLs are not
+  sensitive; no credential can appear among them, because a site URL carrying credentials is
+  refused when the configuration loads, `SiteAuthorityUrl`.)
 - a preview records nothing;
 - an exited or cancelled loop stays distinct from a running loop whose last cycle failed.
 
@@ -367,20 +372,31 @@ in VM's shape (the controller's snapshot, each loop's state and last outcome) an
   VM's own categories (unresolvable pools, regionless pools, infeasible shapes, ...); bare
   metal's reasons are its cycle report's, so each configured site maps to `holds`, `refusals`,
   and `reports`, each entry the report's site-scoped action without its action and site (a
-  reason, the pool or Physical Resource where there is one, and its problems or error). A
-  site that derived cleanly is present with empty lists, so status tells it from a site no
-  cycle has read; before any cycle the section is empty.
-- *Only a cycle records it* (a divergence: VM's dry run derives through the same reconciler,
-  which records its reports). A bare-metal preview records nothing, as it records no outcome,
-  so `publication_derivation` and `lifecycle`'s last outcome describe the same cycle, the one
-  publication last ran. It is recorded once the cycle's compose stage has read every site, so
-  a cycle failing later in `run` or `converge` still reports what it derived.
+  reason, the pool or Physical Resource where there is one, and its problems or error, a
+  site's error text included). A site that derived cleanly is present with empty lists, so
+  status tells it from a site no cycle has read; before any cycle the section is empty.
+- *Only a cycle records it, and each cycle replaces it.* The publication step clears it as a
+  cycle starts, and the cycle records it once its compose stage has read every site, so a
+  cycle failing later in `run` or `converge` still reports what it derived and one failing
+  before then, composing or reading, reports none; a preview neither clears nor records, as it
+  records no outcome. So `publication_derivation` is always the derivation of the cycle whose
+  outcome `lifecycle` last reports, or nothing. VM adopts the preview rule (decided with the
+  owner, 2026-10-18, after Section 14's check): its dry run derives with `record_reports`
+  false, so a preview publishes no report, and logs none of the warnings a changed report
+  logs; its real cycles, source checks, and capacity-event reconciliation record as before
+  (`arkhai-vms-listings` 0.6.0 threads `record_reports` through `available_compute_slices`,
+  `current_available_resource_keys`, and `stale_open_listing_ids`, and returns each site's
+  report to a caller through `reports`, which the dry run reads its regionless holds from).
+- *A pool resolving no settlement clause is held at compose* (Section 14's check), as one
+  resolving no lease bound is: its override's clauses, else `[pricing].settlements`, empty
+  holds it as `pool_settlement_clauses_missing`, so the hold reaches the derivation instead of
+  surfacing later as a payload refusal.
 - *Both status readers receive them*, as VM's one status response carries them to the
   administrator and a site's service-role read alike; pool overrides and obligations waiting
   for an operator stay the administrator's alone.
 
 **C1 as delivered (Section 14).** `bare-metal-storefront publish [--dry-run]
-[--storefront-url]` calls `admin_run_lifecycle_cycle("publication")` or
+[--storefront-url | -a]` calls `admin_run_lifecycle_cycle("publication")` or
 `admin_dry_run_lifecycle_cycle` through the canonical `SyncStorefrontClient`, signing as
 `[Identity.principal]` with `ARKHAI_IDENTITY_CREDENTIAL` at `--storefront-url`, else the
 configured `base_url`, through one administrator client it shares with `pool-override`
@@ -388,14 +404,17 @@ configured `base_url`, through one administrator client it shares with `pool-ove
 runs over what its own poller holds. Divergences from VM's `market-storefront publish`: it
 prints the cycle's report as JSON, as every other bare-metal command prints its result and as
 the command printed it before, rather than VM's table, so a script reads it unchanged; and it
-has no `--abort-all`,
-which seller-closes every open listing, an operation no task asks of this change, left to the
-owner. A storefront refusal (a cycle it cannot compose answers 503 naming what is missing)
-exits 1 with its message, as `pool-override` does.
-
-With `publish` no longer composing a runtime, the one command that does is
-`redeliver-introduction`; seeding the service peers at composition (D14b, as delivered for
-bare metal) stays, since that command composes the runtime over the same database.
+has no `--abort-all`, which seller-closes every open listing: the owner decided bare metal
+adopts it (2026-10-18), but bare metal serves no seller close route for it to call (VM's
+`POST /api/v1/listings/{listing_id}/close`, nor the resume route a seller re-lists with), so
+it waits on the owner's decision about those routes. `-a` is VM's short form of
+`--storefront-url`, adopted by both bare-metal commands. A storefront refusal (a cycle it
+cannot compose answers 503 naming what is missing) exits 1 with its message, as
+`pool-override` does; and a request no storefront answers exits 1 naming the origin it was
+sent to and the transport error's type, never a traceback, in both bare-metal commands and in
+VM's `publish` and `pool-override`, which adopt it (decided with the owner, 2026-10-18). Each
+domain states the rule in its own CLI helper (`admin_cli`, `cli_common`), since neither may
+import the other and no kit carries CLI helpers.
 
 **Decided with the owner, 2026-10-18 (round 10 triage, 10 F1).** The durations that read
 through the shared type -- every bare-metal interval and timeout its typed settings declare
@@ -510,11 +529,14 @@ Secrets is owed. Accepted scope beyond the original proposal.
     refused at every start by a structural check (migration 0014), naming the reset remedy in
     `docs/bare-metal-seller-quickstart.md`, as migration 0009 refuses the retired listing kind.
     It is a refusal, not an upgrade: the old rows cannot be rebound to a peer without guessing.
-  - *Seeding at composition* (a divergence from VM, which seeds when its server starts). The
-    bare-metal root seeds each peer, one at a time so a refusal names it, when it composes the
-    runtime, because the one-shot commands compose the runtime too: `publish`, which still
-    runs a cycle in its own process until Section 14 makes it an API client, reads the sites
-    through the trust and must find it seeded on a fresh database.
+  - *Seeding at the server's start, as VM seeds* (revised with the owner, 2026-10-18, after
+    Section 14's check). Section 12 seeded at composition, because the in-process `publish`
+    read the sites through the trust; once `publish` became an API client, the one command
+    composing a runtime, `redeliver-introduction`, reads no site and runs over a database the
+    server has seeded. The root builds the trust unseeded, and the server's start hook seeds
+    each peer, one at a time so a refusal names it, and loads the trust before the escrow
+    backfill and the first projection poll, so no site is called before the trust holds its
+    peer.
   - *The service-role status read accepts every configured site's peer* (a divergence found
     in Section 12's check; VM adopts bare metal's rule). The read names no site and returns
     readiness alone, so VM's rule -- exactly one configured peer, else 503 -- answered 503 to

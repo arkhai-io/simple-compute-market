@@ -66,6 +66,7 @@ def publish_cmd(
     storefront_url: str | None = typer.Option(
         None,
         "--storefront-url",
+        "-a",
         help="Storefront base URL; defaults to the configured base_url.",
     ),
 ) -> None:
@@ -90,7 +91,6 @@ def redeliver_introduction_cmd(
     """Send an already-revealed introduction to this operator's sinks again."""
 
     import asyncio
-    import json
 
     from market_contact_exchange import IntroductionPayloadsDeletedError
 

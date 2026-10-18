@@ -81,12 +81,12 @@ DISCLOSED_CYCLE_ERRORS: tuple[type[BaseException], ...] = (
 def bare_metal_loop_controller(**options: Any) -> StorefrontLoopController:
     """The loop controller for one bare-metal storefront process.
 
-    ``options`` are the controller's own seams (a clock, a cycle-lock factory);
-    the disclosed error types are always this storefront's.
+    ``options`` are the controller's own seams (a clock, a cycle-lock factory, a
+    logger in place of this module's); the disclosed error types are always this
+    storefront's.
     """
-    return StorefrontLoopController(
-        logger=logger, disclosed_errors=DISCLOSED_CYCLE_ERRORS, **options
-    )
+    options.setdefault("logger", logger)
+    return StorefrontLoopController(disclosed_errors=DISCLOSED_CYCLE_ERRORS, **options)
 
 
 class PublicationWake:
@@ -194,7 +194,10 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
     async def publication_step() -> Mapping[str, Any]:
         # Composing the cycle is its compose stage, so a storefront that
         # cannot compose one fails there; the cycle names the stages after it.
+        # The previous cycle's derivation goes as this one starts, so status
+        # never pairs this cycle's outcome with another cycle's derivation.
         loops.enter_stage("compose")
+        runtime.publication_derivation.clear()
         cycle = compose_publication()
         return to_jsonable_python(await cycle.run())
 

@@ -196,3 +196,17 @@ def test_without_the_storefront_identity_it_refuses_before_connecting(
 
     assert result.exit_code != 0
     assert "ARKHAI_IDENTITY_CREDENTIAL" in result.output
+
+
+@pytest.mark.parametrize("flag", ["--storefront-url", "-a"])
+def test_a_storefront_nothing_answers_for_is_reported_without_a_traceback(
+    monkeypatch, tmp_path, flag
+):
+    write_configuration(monkeypatch, tmp_path, publishable_configuration(tmp_path / "unused.db"))
+    monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+
+    result = runner.invoke(app, ["pool-override", "list", flag, "http://127.0.0.1:9"])
+
+    assert result.exit_code == 1
+    assert "no storefront answered at http://127.0.0.1:9 (ConnectError)" in result.output
+    assert "Traceback" not in result.output

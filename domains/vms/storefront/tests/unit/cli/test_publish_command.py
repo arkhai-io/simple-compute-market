@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import inspect
 
+import httpx
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -14,10 +15,11 @@ from tests.fixtures.publication_cycle import build_cycle_report
 
 
 class _Client:
-    def __init__(self, report=None, pages=None):
+    def __init__(self, report=None, pages=None, error=None):
         self.report = report
         self.pages = list(pages or [])
         self.calls: list[tuple] = []
+        self.error = error
 
     def __enter__(self):
         return self
@@ -27,6 +29,8 @@ class _Client:
 
     def admin_run_lifecycle_cycle(self, loop):
         self.calls.append(("run", loop))
+        if self.error is not None:
+            raise self.error
         return self.report
 
     def admin_dry_run_lifecycle_cycle(self, loop):
@@ -66,6 +70,21 @@ def test_a_run_advances_exactly_one_publication_cycle(app, monkeypatch):
     assert result.exit_code == 0, result.output
     assert client.calls == [("run", "publication")]
     assert "publish: 1" in result.output
+
+
+def test_a_storefront_nothing_answers_for_is_reported_without_a_traceback(
+    app, monkeypatch
+):
+    refused = httpx.ConnectError(
+        "connection refused",
+        request=httpx.Request("POST", "http://127.0.0.1:9/api/v1/admin/lifecycle"),
+    )
+
+    result = _invoke(app, monkeypatch, _Client(error=refused))
+
+    assert result.exit_code == 1
+    assert "no storefront answered at http://127.0.0.1:9 (ConnectError)" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
 def test_dry_run_previews_without_advancing(app, monkeypatch):

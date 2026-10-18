@@ -5,11 +5,14 @@ Application integration: the real app runs with its lifespan on a loopback port
 and the storefront's ``base_url`` from the configuration files the server reads
 -- runs one cycle, or previews one, through the administrator API. The cycle the
 step runs is composed inside the storefront, by ``compose_publication_cycle``
-from its runtime, with only the cycle class replaced by one recording what it
-was handed and when it ran. The command opens no database: the configuration's
-``db_path`` names a file that never comes to exist. Spec scenarios "An operator
-runs the bare-metal publication command" and "Publication runs from the
-command".
+from its runtime, with only the cycle class replaced by ``RecordingCycle``, which
+records what it was handed and when it ran. So these tests prove the path from
+the command through the typed client to the step route, and the composition the
+storefront hands its cycle; the real cycle behind the step is
+``test_http_system.py``'s. The command opens no database: the configuration's
+``db_path`` names a file that never comes to exist, and running the command
+loads none of the storefront's database or runtime modules. Spec scenario "An
+operator runs the bare-metal publication command".
 """
 
 from __future__ import annotations
@@ -17,9 +20,9 @@ from __future__ import annotations
 import ast
 import contextlib
 import dataclasses
-import inspect
 import json
-import sqlite3
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -33,7 +36,6 @@ from market_identity import Eip191Signer, TrustedIdentitySet
 from storefront_client import SyncStorefrontClient
 from typer.testing import CliRunner
 
-from arkhai_bare_metal_storefront import publication_cli
 from arkhai_bare_metal_storefront.cli import app as cli
 from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
 from arkhai_bare_metal_storefront.lifecycle_steps import PUBLICATION
@@ -133,6 +135,17 @@ def _configured_for(monkeypatch, tmp_path: Path, base_url: str) -> Iterator[Path
     assert not db_path.exists(), "the command opened a database"
 
 
+def _publication_status(base_url: str) -> dict[str, Any]:
+    """The publication loop as the running storefront's status reports it."""
+    with SyncStorefrontClient(
+        base_url,
+        signer=SELLER,
+        caller_role="admin",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
+    ) as admin:
+        return admin.get_system_status().lifecycle[PUBLICATION]
+
+
 def _sites(runtime: BareMetalStorefrontRuntime) -> dict[str, SourceSite]:
     return {site_id: runtime.capacity_client.site(site_id) for site_id in SITE_IDS}
 
@@ -149,8 +162,7 @@ def test_the_command_runs_one_cycle_of_the_running_storefronts_loop(
         with _configured_for(monkeypatch, tmp_path, base_url):
             result = runner.invoke(cli, ["publish"])
         after = {site_id: site.calls for site_id, site in _sites(runtime).items()}
-        outcome = runtime.loops.last_outcome(PUBLICATION)
-        state = runtime.loops.snapshot()[PUBLICATION].state
+        publication = _publication_status(base_url)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output) == {
@@ -182,8 +194,9 @@ def test_the_command_runs_one_cycle_of_the_running_storefronts_loop(
     }
     assert after == polled
     # The storefront ran it as an operator's step of its loop, which stays held.
-    assert (outcome.trigger, outcome.completed) == ("step", True)
-    assert state == "paused"
+    assert publication["state"] == "paused"
+    assert publication["last_outcome"]["trigger"] == "step"
+    assert publication["last_outcome"]["completed"] is True
 
 
 def test_the_registry_transport_is_every_configured_registry(monkeypatch, tmp_path):
@@ -205,13 +218,13 @@ def test_dry_run_previews_one_cycle_and_records_no_outcome(monkeypatch, tmp_path
     with serving(_app(runtime)) as base_url:
         with _configured_for(monkeypatch, tmp_path, base_url):
             result = runner.invoke(cli, ["publish", "--dry-run"])
-        outcome = runtime.loops.last_outcome(PUBLICATION)
+        publication = _publication_status(base_url)
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["dry_run"] is True
     (cycle,) = RecordingCycle.constructed
     assert [run["dry_run"] for run in cycle.runs] == [True]
-    assert outcome is None
+    assert publication["last_outcome"] is None
 
 
 @pytest.mark.parametrize(
@@ -228,88 +241,76 @@ def test_a_cycle_the_storefront_cannot_compose_fails_the_command(
     with serving(_app(runtime)) as base_url:
         with _configured_for(monkeypatch, tmp_path, base_url):
             result = runner.invoke(cli, ["publish"])
-        outcome = runtime.loops.last_outcome(PUBLICATION)
+        outcome = _publication_status(base_url)["last_outcome"]
 
     assert result.exit_code == 1
     assert reason in result.output
     assert RecordingCycle.constructed == []
-    assert (outcome.completed, outcome.stage) == (False, "compose")
+    assert (outcome["completed"], outcome["stage"]) == (False, "compose")
 
 
+@pytest.mark.parametrize("flag", ["--storefront-url", "-a"])
 def test_the_flag_names_the_storefront_in_place_of_the_configured_url(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, flag
 ):
     runtime = _runtime(tmp_path, monkeypatch)
     with serving(_app(runtime)) as base_url:
         with _configured_for(monkeypatch, tmp_path, "http://127.0.0.1:9"):
-            result = runner.invoke(cli, ["publish", "--storefront-url", base_url])
+            result = runner.invoke(cli, ["publish", flag, base_url])
 
     assert result.exit_code == 0, result.output
     assert len(RecordingCycle.constructed) == 1
 
 
-def test_an_override_reports_applied_after_the_command_runs_with_no_generation_recorded(
+def test_a_storefront_nothing_answers_for_is_reported_without_a_traceback(
     monkeypatch, tmp_path
 ):
-    """The running storefront judges an override against the projection it
-    holds of the site, so once the command has run a cycle it reports the
-    override applied, and no generation is recorded for the purpose. Spec
-    scenario "Publication runs from the command"."""
-    runtime = _runtime(tmp_path, monkeypatch)
-    record = tmp_path / "override.json"
-    record.write_text(
-        json.dumps(
-            {
-                "site_id": "site-a",
-                "pool_id": "pool-a",
-                "offering_mode": "bare_metal",
-                "terms": {"max_duration_seconds": 60},
-            }
-        )
+    with _configured_for(monkeypatch, tmp_path, "http://127.0.0.1:9"):
+        result = runner.invoke(cli, ["publish"])
+
+    assert result.exit_code == 1
+    assert "no storefront answered at http://127.0.0.1:9 (ConnectError)" in result.output
+    assert "Traceback" not in result.output
+
+
+_LOADED_BY_PUBLISH = """
+import sys
+from typer.testing import CliRunner
+from arkhai_bare_metal_storefront.cli import app
+
+result = CliRunner().invoke(app, ["publish"])
+assert result.exit_code == 1, result.output
+print(sorted(name for name in sys.modules if name.startswith("arkhai_bare_metal_storefront")))
+"""
+
+
+def test_the_command_loads_none_of_the_storefronts_database_or_runtime(
+    monkeypatch, tmp_path
+):
+    """In a fresh interpreter, every module ``publish`` imports while it runs,
+    against a storefront nothing answers for, is listed: none is the
+    storefront's database layer, its runtime, or its publication composition."""
+    directory = write_configuration(
+        monkeypatch, tmp_path, publishable_configuration(tmp_path / "never.db")
     )
-    with serving(_app(runtime)) as base_url:
-        with _configured_for(monkeypatch, tmp_path, base_url):
-            written = runner.invoke(cli, ["pool-override", "set", "--file", str(record)])
-            published = runner.invoke(cli, ["publish"])
-        with SyncStorefrontClient(
-            base_url,
-            signer=SELLER,
-            caller_role="admin",
-            expected_publishers=TrustedIdentitySet(identities=(SELLER.identity,)),
-        ) as admin:
-            status = admin.get_system_status()
+    monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+    document = json.loads((directory / "storefront.json").read_text())
+    document["base_url"] = "http://127.0.0.1:9"
+    (directory / "storefront.json").write_text(json.dumps(document))
 
-    assert written.exit_code == 0, written.output
-    assert published.exit_code == 0, published.output
-    assert [
-        (entry["site_id"], entry["pool_id"], entry["state"])
-        for entry in status.extra["pool_overrides"]
-    ] == [("site-a", "pool-a", "applied")]
-    # Read directly: no route reports the storefront's tables.
-    with contextlib.closing(sqlite3.connect(runtime.db.db_path)) as conn:
-        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
-    assert "bare_metal_accepted_site_generations" not in tables
-
-
-def test_the_command_never_opens_the_storefront_database():
-    """No module the command runs imports the storefront's database layer."""
-    tree = ast.parse(inspect.getsource(publication_cli))
-    imported = {
-        node.module
-        for node in ast.walk(tree)
-        if isinstance(node, ast.ImportFrom) and node.module
-    } | {
-        alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.Import, ast.ImportFrom))
-        for alias in node.names
-    }
-
-    assert "sqlite3" not in imported
-    assert not any(
-        name.endswith(("sqlite_client", "runtime", "publication_composition"))
-        for name in imported
+    completed = subprocess.run(
+        [sys.executable, "-c", _LOADED_BY_PUBLISH],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
     )
+
+    loaded = set(ast.literal_eval(completed.stdout.strip().splitlines()[-1]))
+    assert "arkhai_bare_metal_storefront.publication_cli" in loaded
+    for module in ("sqlite_client", "runtime", "publication_composition", "migrations"):
+        assert f"arkhai_bare_metal_storefront.{module}" not in loaded
+    assert not (tmp_path / "never.db").exists()
 
 
 def test_without_the_storefront_identity_it_refuses_before_connecting(

@@ -770,6 +770,29 @@ def _build_chain_clients(
     }
 
 
+def seed_service_peer_trust(runtime: BareMetalStorefrontRuntime) -> None:
+    """Seed each configured site's service peer, then load the trust from it.
+
+    The database's durable identity state owns a peer's principals from then
+    on: a peer seen for the first time is written from configuration, and one
+    already seeded must still be covered by it, or startup refuses. One peer at
+    a time, so a refusal names the peer it concerns. Blocking; the server runs
+    it before it serves.
+    """
+    trust = runtime.service_peer_trust
+    if trust is None:
+        return
+    for peer_id, peer in trust.peers.items():
+        try:
+            seed_service_peers(runtime.db.db_path, {peer_id: peer})
+        except (AuthError, IdentityAuthorityError) as exc:
+            raise RuntimeError(
+                f"bare-metal storefront service peer {peer_id!r} cannot be seeded "
+                f"into its identity state: {exc}"
+            ) from exc
+    trust.reload()
+
+
 def build_runtime_from_configuration(
     settings: BareMetalStorefrontSettings | None = None,
     *,
@@ -788,10 +811,8 @@ def build_runtime_from_configuration(
     the chains the storefront settles on, and ``site_clients`` each site's
     clients, the boundary to the site authorities.
 
-    Each configured site's service peer is seeded into the database's durable
-    identity state, which from then on owns the peer's principals: a peer seen
-    for the first time is written from configuration, and one already seeded
-    must still be covered by it, or startup refuses.
+    The service-peer trust is built here and holds nothing until the server
+    starts and ``seed_service_peer_trust`` seeds and loads it.
     """
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
@@ -883,21 +904,9 @@ def build_runtime_from_configuration(
         local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
     )
-    # Seeded here, at composition rather than at the server's start, because
-    # the one-shot ``redeliver-introduction`` command composes the runtime too
-    # and must find the site's trust seeded on a fresh database. One peer at a time, so a refusal names
-    # the peer it concerns.
-    peers = active.service_peer_configs()
-    for peer_id, peer in peers.items():
-        try:
-            seed_service_peers(db.db_path, {peer_id: peer})
-        except (AuthError, IdentityAuthorityError) as exc:
-            raise RuntimeError(
-                f"bare-metal storefront service peer {peer_id!r} cannot be seeded "
-                f"into its identity state: {exc}"
-            ) from exc
-    service_peer_trust = ServicePeerTrust(db.db_path, peers)
-    service_peer_trust.reload()
+    # Built here and seeded when the server starts (``seed_service_peer_trust``),
+    # so composing a runtime writes nothing to the identity state.
+    service_peer_trust = ServicePeerTrust(db.db_path, active.service_peer_configs())
     try:
         capacity_client, fulfillment_client = build_trusted_site_clients(
             bindings=site_bindings,

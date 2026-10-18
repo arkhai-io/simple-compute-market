@@ -275,6 +275,24 @@ async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world)
     assert report["regionless_pools"] == ["broker-a"]
 
 
+async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_it(world):
+    """A previewed cycle derives as the cycle would, holds included, and
+    publishes no derivation report: status keeps the last cycle's until a cycle
+    runs, so its derivation and the loop's last outcome describe one cycle."""
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+    await _cycle(world)
+    world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=2)
+
+    preview = await _cycle(world, dry_run=True)
+    previewed = (await world.client.get_system_status()).publication_derivation[SITE]
+    await _cycle(world)
+    ran = (await world.client.get_system_status()).publication_derivation[SITE]
+
+    assert [action for action in preview["actions"] if action["action"] == "hold"] == []
+    assert previewed["regionless_pools"] == ["broker-a"]
+    assert ran["regionless_pools"] == []
+
+
 async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
     """A backed pool with nothing available yields no candidate; publication
     still reports it as held for its missing region."""

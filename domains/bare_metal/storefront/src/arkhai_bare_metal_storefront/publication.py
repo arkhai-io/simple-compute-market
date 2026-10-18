@@ -8,8 +8,8 @@ domain reads them, reads each pool's declarations and region (see
 ``arkhai_bare_metal.storefront_publication``). Candidates are published,
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
 close; listings at a site whose projection is not held or whose generation this
-domain refuses, in a pool whose declarations do not resolve, or in a pool whose
-maximum lease duration resolves to nothing positive, are held. Every cycle then
+domain refuses, in a pool whose declarations do not resolve, or in a pool that
+resolves no settlement clause or no positive maximum lease duration, are held. Every cycle then
 converges each registry the storefront publishes to on its listings' local
 status.
 
@@ -134,15 +134,22 @@ class PublicationDerivation:
 
     For each site the cycle read: every hold (a site whose projection is not
     held or whose generation this domain refuses, and each pool or resource held
-    for its declarations, region, rates, override, or lease bound), every pool
+    for its declarations, region, rates, override, settlement clauses, or lease
+    bound), every pool
     refused, and every report, each with its reason. A site that derived cleanly
     is present with empty lists, so status tells it from a site no cycle has
-    read. Only a cycle records here, once its compose stage has read every site;
-    a preview records nothing, so status describes what publication last did.
+    read. The publication step clears it as each cycle starts, and the cycle
+    records it once its compose stage has read every site, so a cycle that fails
+    before then reports none; a preview neither clears nor records. What status
+    reports is therefore always the derivation of the cycle whose outcome the
+    publication loop last recorded, or nothing.
     """
 
     def __init__(self) -> None:
         self._latest: dict[str, SiteDerivation] = {}
+
+    def clear(self) -> None:
+        self._latest = {}
 
     def record(self, summary: Mapping[str, SiteDerivation]) -> None:
         self._latest = copy.deepcopy(dict(summary))
@@ -210,7 +217,9 @@ class BareMetalPublicationCycle:
     """One cycle of bare-metal publication over every configured site.
 
     ``site_projections`` is the storefront's one held projection state and
-    ``site_ids`` its configured sites. ``enter_stage`` names each stage the
+    ``site_ids`` its configured sites. ``publication_clauses`` and
+    ``default_max_duration_seconds`` are the configured terms a pool's override
+    replaces. ``enter_stage`` names each stage the
     cycle reaches -- ``compose``, ``run``, ``converge`` -- for the loop
     controller's record of a failed cycle, and ``derivation`` receives each
     site's derivation summary once compose has read every site.
@@ -228,6 +237,7 @@ class BareMetalPublicationCycle:
         storefront_url: str,
         seller_principal: Identity,
         build_payload: PayloadBuilder,
+        publication_clauses: Sequence[Any],
         default_max_duration_seconds: int | None = None,
         enter_stage: Callable[[str], None] = _no_stage,
         derivation: PublicationDerivation | None = None,
@@ -236,6 +246,7 @@ class BareMetalPublicationCycle:
         # A configured bound that is absent or not positive bounds nothing, so
         # a pool relying on it is held rather than published unbounded.
         self._default_max_duration = positive_lease_bound(default_max_duration_seconds)
+        self._publication_clauses = tuple(publication_clauses)
         self._registry = registry
         self._site_projections = site_projections
         self._site_ids = tuple(site_ids)
@@ -430,9 +441,11 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
-        unbounded = self._hold_unbounded_pools(site_id, reading, site_overrides)
+        unpublishable = self._hold_unbounded_pools(
+            site_id, reading, site_overrides
+        ) | self._hold_pools_without_clauses(site_id, reading, site_overrides)
         for candidate in classification.candidates:
-            if candidate["pool_id"] in unbounded:
+            if candidate["pool_id"] in unpublishable:
                 continue
             override = site_overrides.get(candidate["pool_id"])
             if override is not None:
@@ -480,6 +493,43 @@ class BareMetalPublicationCycle:
                 site_id,
             )
         return unbounded
+
+    def _hold_pools_without_clauses(
+        self,
+        site_id: str,
+        reading: SitePoolReading,
+        site_overrides: Mapping[str, BareMetalPoolOverride],
+    ) -> set[str]:
+        """Hold each admitted pool that resolves no settlement clause.
+
+        A pool's clauses are its override's, else the configured ones; with
+        none, no settlement option can be built for its listings, so they are
+        held -- neither published, refreshed, nor closed -- and the pool is
+        reported, as a pool with no lease bound is.
+        """
+        unclaused: set[str] = set()
+        for pool_id, admission in sorted(reading.admission.items()):
+            if admission != POOL_ADMITTED:
+                continue
+            override = site_overrides.get(pool_id)
+            stated = override.clauses if override is not None else None
+            if (stated if stated is not None else self._publication_clauses):
+                continue
+            unclaused.add(pool_id)
+            self._held_pools.add((site_id, pool_id))
+            self.report.record(
+                "hold",
+                site_id=site_id,
+                pool_id=pool_id,
+                reason="pool_settlement_clauses_missing",
+            )
+            logger.warning(
+                "bare-metal pool %s at %s resolves no settlement clause from its "
+                "override or [pricing].settlements; its listings are held",
+                pool_id,
+                site_id,
+            )
+        return unclaused
 
     def _report_pools(self, site_id: str, reading: SitePoolReading) -> None:
         """Record every pool-level reason a site's pools publish nothing."""

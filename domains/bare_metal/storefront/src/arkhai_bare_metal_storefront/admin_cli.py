@@ -61,15 +61,38 @@ def storefront_admin_client(explicit_url: str | None) -> Iterator[Any]:
         yield client
 
 
+def _origin(exc: Any) -> str:
+    """The scheme, host, and port a failed request was sent to."""
+    try:
+        url = exc.request.url
+    except RuntimeError:
+        return "the storefront URL"
+    port = f":{url.port}" if url.port is not None else ""
+    return f"{url.scheme}://{url.host}{port}"
+
+
 @contextlib.contextmanager
 def reporting_failures() -> Iterator[None]:
-    """Report a storefront's refusal on stderr and exit with status 1."""
+    """Report a storefront's refusal, or its absence, on stderr and exit with status 1.
+
+    A request no storefront answered is reported by the origin it was sent to
+    and the transport error's type, never a traceback.
+    """
+    import httpx
     from storefront_client import StorefrontClientError
 
     try:
         yield
     except StorefrontClientError as exc:
         typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    except httpx.TransportError as exc:
+        typer.secho(
+            f"Storefront error: no storefront answered at {_origin(exc)} "
+            f"({type(exc).__name__})",
+            err=True,
+            fg=typer.colors.RED,
+        )
         raise typer.Exit(code=1) from exc
 
 

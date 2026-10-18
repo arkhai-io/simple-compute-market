@@ -70,6 +70,7 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
             build_payload=publication_payload_builder(runtime),
+            publication_clauses=runtime.publication_clauses,
             default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 

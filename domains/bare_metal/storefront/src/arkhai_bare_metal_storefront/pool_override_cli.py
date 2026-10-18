@@ -28,6 +28,7 @@ pool_override_app = typer.Typer(no_args_is_help=True)
 _STOREFRONT_URL = typer.Option(
     None,
     "--storefront-url",
+    "-a",
     help="Storefront base URL; defaults to the configured base_url.",
 )
 _SITE = typer.Option(..., "--site", help="The site the pool belongs to.")

@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import functools
 import logging
+import sqlite3
 
 import httpx
 import pytest
@@ -22,7 +23,10 @@ from arkhai_bare_metal_storefront.lifecycle_steps import (
     PublicationWake,
     bare_metal_loop_controller,
 )
-from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
+from arkhai_bare_metal_storefront.publication import (
+    BareMetalPublicationCycle,
+    BareMetalPublicationError,
+)
 from arkhai_bare_metal_storefront.publication_composition import compose_publication_cycle
 from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
 from arkhai_bare_metal_storefront.runtime import (
@@ -489,18 +493,20 @@ def _timed_runtime(
     interval no test waits out.
     """
     composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
+    fields = {
+        "seller_evm_address": SELLER_WALLET,
+        "settlement_composition": composition,
+        "publication_clauses": clauses,
+        "default_max_duration_seconds": 3600,
+        "settlement_servicing_interval_seconds": 3600,
+        "registry_configuration": cycles.registry_configuration,
+        "publication_cycle_factory": cycles,
+        "loop_controller_factory": bare_metal_loop_controller,
+        "publication_interval_seconds": 3600,
+    }
     return dataclasses.replace(
         _sited_runtime(str(tmp_path / "storefront.db"), {"site-a": site}),
-        seller_evm_address=SELLER_WALLET,
-        settlement_composition=composition,
-        publication_clauses=clauses,
-        default_max_duration_seconds=3600,
-        settlement_servicing_interval_seconds=3600,
-        registry_configuration=cycles.registry_configuration,
-        publication_cycle_factory=cycles,
-        loop_controller_factory=bare_metal_loop_controller,
-        publication_interval_seconds=3600,
-        **changes,
+        **{**fields, **changes},
     )
 
 
@@ -627,45 +633,64 @@ async def test_a_failed_publication_cycle_is_reported_in_status_with_its_stage(
 
 
 class _CycleFailures(logging.Handler):
-    """Sets ``failed`` when the loop controller logs a failed publication cycle:
-    the seam a test waits on instead of the timer."""
+    """Sets ``failed`` each time the loop controller it is given logs a failed
+    timer cycle of publication: the seam a test waits on instead of the timer."""
 
     def __init__(self) -> None:
         super().__init__()
         self.failed = asyncio.Event()
+        self.logger = logging.getLogger(f"{__name__}.loops.{id(self)}")
+        self.logger.addHandler(self)
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.getMessage().startswith(f"[LIFECYCLE] {PUBLICATION} timer cycle failed"):
             self.failed.set()
 
+    def controller(self):
+        return bare_metal_loop_controller(logger=self.logger)
 
-async def test_status_reports_a_running_loop_whose_timer_cycles_fail(tmp_path) -> None:
-    """With the loops running and no registry to publish to, publication's
-    timer cycle fails; status reports the loop as running and its last cycle
-    as failed with the error, with no operator step. Spec scenario
-    "Publication fails every cycle"."""
-    runtime = _runtime(str(tmp_path / "storefront.db"))
+
+async def test_status_reports_a_running_loop_whose_timer_cycles_fail(
+    tmp_path, monkeypatch
+) -> None:
+    """With the loops running, another process holding the storefront's
+    database locked fails each publication cycle the timer runs; status reports
+    the loop as running and its last cycle as failed, in ``compose``, by the
+    error's type, with no operator step. Spec scenario "Publication fails every
+    cycle".
+
+    A registry that cannot be reached does not fail a cycle: the cycle records
+    the failed publish and converges on the next one."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    cycles = _ObservedCycles()
     failures = _CycleFailures()
-    logger = logging.getLogger("arkhai_bare_metal_storefront.lifecycle_steps")
-    logger.addHandler(failures)
+    runtime = _timed_runtime(
+        tmp_path, monkeypatch, site, cycles, loop_controller_factory=failures.controller
+    )
     app = _app(runtime)
-    try:
-        async with app.router.lifespan_context(app):
-            await asyncio.wait_for(failures.failed.wait(), timeout=5)
-            async with _admin_client(app) as admin:
-                status = await admin.get_system_status()
-    finally:
-        logger.removeHandler(failures)
+
+    async with app.router.lifespan_context(app):
+        await cycles.next_cycle()
+        holder = sqlite3.connect(runtime.db.db_path, isolation_level=None)
+        try:
+            holder.execute("BEGIN EXCLUSIVE")
+            runtime.publication_wake()
+            await asyncio.wait_for(failures.failed.wait(), timeout=30)
+        finally:
+            holder.close()
+        async with _admin_client(app) as admin:
+            status = await admin.get_system_status()
 
     publication = status.lifecycle[PUBLICATION]
     assert publication["state"] == "running"
-    assert publication["last_outcome"]["trigger"] == "timer"
-    assert publication["last_outcome"]["completed"] is False
-    assert publication["last_outcome"]["error"] == {
-        "type": "BareMetalPublicationError",
-        "message": "no registry is configured for publication",
-    }
-    assert status.lifecycle["negotiation_watchdog"]["state"] == "running"
+    outcome = publication["last_outcome"]
+    assert (outcome["trigger"], outcome["completed"], outcome["stage"]) == (
+        "timer",
+        False,
+        "compose",
+    )
+    assert outcome["error"] == {"type": "OperationalError", "message": None}
+    assert status.publication_derivation == {}
 
 
 def _derivation_runtime(tmp_path, monkeypatch, sites: dict, **changes):
@@ -749,6 +774,66 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
         "settlement_servicing": "paused",
         "site_projection_poller": "paused",
     }
+
+
+async def test_status_reports_a_pool_resolving_no_settlement_clause_held(
+    tmp_path, monkeypatch
+) -> None:
+    """A pool whose override states no clauses, with none configured, is held
+    at compose with its own reason, and its listing is neither published nor
+    refused later in the cycle. Spec "A storefront that cannot publish refuses
+    to start": a pool that resolves no clauses from any tier is held and
+    reported per site."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites, publication_clauses=())
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    (hold,) = status.publication_derivation["site-a"]["holds"]
+    assert hold == {"pool_id": "pool-1", "reason": "pool_settlement_clauses_missing"}
+    assert report["counts"].get("publish") is None
+    assert report["counts"].get("refuse") is None
+
+
+async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status(
+    tmp_path, monkeypatch
+) -> None:
+    """The derivation status reports is the last cycle's: a cycle that fails
+    before it has read every site clears the one before it, so status never
+    pairs a failed outcome with an earlier cycle's holds."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    composed = iter((True, False))
+
+    def factory(runtime):
+        if next(composed):
+            return compose_publication_cycle(runtime)
+        raise BareMetalPublicationError("the settlement composition is unavailable")
+
+    runtime = _derivation_runtime(
+        tmp_path,
+        monkeypatch,
+        sites,
+        default_max_duration_seconds=None,
+        publication_cycle_factory=factory,
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            await admin.admin_run_lifecycle_cycle("publication")
+            derived = (await admin.get_system_status()).publication_derivation
+            with pytest.raises(StorefrontClientError):
+                await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert derived["site-a"]["holds"] != []
+    assert status.publication_derivation == {}
+    outcome = status.lifecycle[PUBLICATION]["last_outcome"]
+    assert (outcome["completed"], outcome["stage"]) == (False, "compose")
 
 
 class _NothingDue:

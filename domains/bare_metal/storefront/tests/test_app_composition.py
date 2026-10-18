@@ -390,39 +390,85 @@ def test_the_runtime_takes_its_principal_and_administrators_from_configuration(
     assert runtime.pool_override_service() is not None
 
 
-def test_startup_seeds_each_sites_service_peer_into_durable_identity_state(
+def _started_app(monkeypatch, tmp_path, document=None):
+    """The app over a runtime composed from the configuration files, only the
+    site's transport replaced and its loops held, so starting it seeds the peers
+    and loads the site without any timer publishing."""
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        publishable_configuration(tmp_path / "storefront.db") if document is None else document,
+    )
+    monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+    sites = SignedSites({"site-a.test": SignedSite(SITE)})
+    domain = get_market_domain_contract()
+    composed = []
+
+    def runtime_factory():
+        composed.append(
+            replace(
+                build_runtime_from_configuration(domain=domain, site_clients=sites.factories()),
+                loop_controller_factory=held_loop_controller,
+            )
+        )
+        return composed[-1]
+
+    return build_bare_metal_storefront_app(
+        registry=_registry(domain), runtime_factory=runtime_factory
+    ), composed
+
+
+def _durable_peer(db_path, peer_id: str = "site_a_authority"):
+    return StorefrontIdentityAuthority(str(db_path)).status(
+        authority=SERVICE_PEER_AUTHORITY, subject=peer_id
+    )
+
+
+async def test_startup_seeds_each_sites_service_peer_into_durable_identity_state(
     monkeypatch, tmp_path
 ):
-    """Composition: the root's builder over real SQLite. The site is bound to its
-    peer, not a principal, and the peer's principal is what durable state, and
-    so the trust its responses and callbacks verify against, now holds."""
+    """Application startup: composing the runtime writes no identity state, and
+    the lifespan's start seeds each site's peer before anything calls a site, so
+    the trust its responses and callbacks verify against holds the peer's
+    principal. The site is bound to its peer, not a principal."""
     runtime = _configured_runtime(monkeypatch, tmp_path)
+    with pytest.raises(KeyError):
+        _durable_peer(runtime.db.db_path)
 
-    assert runtime.site_bindings[0].service_peer == "site_a_authority"
-    assert runtime.service_peer_trust.site_trusted_set(SITE_ID).identities == (
-        SITE.identity,
-    )
-    durable = StorefrontIdentityAuthority(runtime.db.db_path).status(
-        authority=SERVICE_PEER_AUTHORITY, subject="site_a_authority"
-    )
+    app, composed = _started_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        (started,) = composed
+        trusted = started.service_peer_trust.site_trusted_set(SITE_ID).identities
+        loaded = started.site_projections.status()[SITE_ID]["resource_pool"].state
+
+    assert started.site_bindings[0].service_peer == "site_a_authority"
+    assert trusted == (SITE.identity,)
+    assert loaded == "loaded"
+    durable = _durable_peer(started.db.db_path)
     assert durable.primary == SITE.identity
     assert durable.role == "service"
 
 
-def test_configuration_that_no_longer_covers_a_seeded_peer_is_refused(
+async def test_configuration_that_no_longer_covers_a_seeded_peer_is_refused(
     monkeypatch, tmp_path
 ):
-    """Composition: a peer already seeded owns its principals, so configuration
-    naming another primary for it refuses startup rather than overwrite them
-    (spec "Startup configuration is stale during rotation")."""
-    _configured_runtime(monkeypatch, tmp_path)
+    """Application startup: a peer already seeded owns its principals, so
+    configuration naming another primary for it refuses the start rather than
+    overwrite them (spec "Startup configuration is stale during rotation")."""
+    app, _composed = _started_app(monkeypatch, tmp_path)
+    async with app.router.lifespan_context(app):
+        pass
     document = publishable_configuration(tmp_path / "storefront.db")
     document["Identity"]["service_peers"]["site_a_authority"]["principals"] = [
         OTHER_SITE.identity.model_dump(mode="json")
     ]
+    restarted, _composed = _started_app(monkeypatch, tmp_path, document)
 
     with pytest.raises(RuntimeError, match="service peer 'site_a_authority' cannot be seeded"):
-        _configured_runtime(monkeypatch, tmp_path, document)
+        async with restarted.router.lifespan_context(restarted):
+            pass
+
+    assert _durable_peer(tmp_path / "storefront.db").primary == SITE.identity
 
 
 def test_a_credential_that_does_not_own_the_identity_is_refused(monkeypatch, tmp_path):

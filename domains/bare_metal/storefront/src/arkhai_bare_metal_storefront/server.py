@@ -23,7 +23,11 @@ from .api import router as http_router
 from .domain_runtime import get_market_domain_contract
 from .lifecycle_steps import register_bare_metal_loops
 from .response_auth import authenticate_response
-from .runtime import BareMetalStorefrontRuntime, build_runtime_from_configuration
+from .runtime import (
+    BareMetalStorefrontRuntime,
+    build_runtime_from_configuration,
+    seed_service_peer_trust,
+)
 from .storefront_registry import build_bare_metal_storefront_registry
 
 DESCRIPTION = (
@@ -39,12 +43,15 @@ logger = logging.getLogger(__name__)
 async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
     """Start the storefront's loops over its composed runtime.
 
-    The first projection load runs before any timer, so neither the
-    site-projection poller nor publication runs its first cycle over
-    projections nothing has loaded, and the escrow backfill before servicing,
-    which reads what it records. Every loop then runs on the controller's
-    timer over its registered step.
+    Each site's service peer is seeded first, so the trust every site client
+    verifies against holds the peer before anything calls a site. The first
+    projection load runs before any timer, so neither the site-projection
+    poller nor publication runs its first cycle over projections nothing has
+    loaded, and the escrow backfill before servicing, which reads what it
+    records. Every loop then runs on the controller's timer over its
+    registered step.
     """
+    seed_service_peer_trust(runtime)
     set_stage_event_db_path(runtime.db.db_path)
     if runtime.settlement_runtime is not None:
         await backfill_escrow_obligation_records(

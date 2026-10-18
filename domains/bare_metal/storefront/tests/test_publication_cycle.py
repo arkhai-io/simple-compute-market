@@ -17,7 +17,8 @@ so these tests prove how a run orchestrates, persists, closes, holds, and
 converges, and nothing about either service's contract. That contract is
 covered elsewhere: the projection and its bare-metal view over the canonical
 site client against the real provisioning service, the view's contract fixture
-on both sides, and the publication command's composition test.
+on both sides, and the composition of the cycle the running storefront's
+publication step runs (``test_publication_cli.py``, ``test_http_system.py``).
 """
 
 from __future__ import annotations
@@ -273,6 +274,8 @@ class Storefront:
         # The configured [pricing].default_max_duration_seconds; a pool resolves
         # its lease bound from its override first, then from this.
         self.default_max_duration: int | None = 3600
+        # The configured [pricing].settlements, which a pool's override replaces.
+        self.clauses: tuple[Any, ...] = tuple(CONFIGURED_CLAUSES)
 
     async def run(self, *, dry_run: bool = False, poll: bool = True) -> dict[str, Any]:
         """Poll every site, as the lane steps ``site-projections``, then run a cycle.
@@ -294,6 +297,7 @@ class Storefront:
             storefront_url=STOREFRONT_URL,
             seller_principal=SELLER,
             build_payload=self.terms,
+            publication_clauses=self.clauses,
             default_max_duration_seconds=self.default_max_duration,
             enter_stage=self.stages.append,
         )
@@ -1320,6 +1324,25 @@ DEAL_CHAIN_ID = 424242
 ALKAHEST_ADDRESS_BOOK = str(anvil_address_book_path())
 
 
+#: The storefront's configured ``[pricing].settlements``: one Alkahest clause on
+#: the anvil chain. A cycle holds a pool resolving no clause; ``Terms`` builds
+#: each payload without reading them.
+CONFIGURED_CLAUSES = compile_publication_clauses(
+    [
+        {
+            "mechanism": "alkahest.v1",
+            "asset": DEAL_TOKEN,
+            "rate": "1",
+            "per": "hour",
+            "mechanism_input": {
+                "chain": "anvil",
+                "escrow_kind": "erc20_escrow_obligation_default",
+            },
+        }
+    ]
+)
+
+
 def alkahest_publication(tmp_path, monkeypatch, signer):
     """Alkahest settlement publishing one clause on the anvil chain.
 
@@ -1357,21 +1380,7 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
             }
         },
     )
-    clauses = compile_publication_clauses(
-        [
-            {
-                "mechanism": "alkahest.v1",
-                "asset": DEAL_TOKEN,
-                "rate": "1",
-                "per": "hour",
-                "mechanism_input": {
-                    "chain": "anvil",
-                    "escrow_kind": "erc20_escrow_obligation_default",
-                },
-            }
-        ]
-    )
-    return composition, clauses
+    return composition, CONFIGURED_CLAUSES
 
 
 #: The release condition a listing on the anvil chain advertises by default.
