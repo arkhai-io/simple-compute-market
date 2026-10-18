@@ -520,7 +520,12 @@ Secrets is owed. Accepted scope beyond the original proposal.
   to their site clients. The boundary is parse versus existence: the parser decides syntax, so a
   host the standard accepts but nothing resolves (`-`, `site-a;x`, `%41`, which it reads as `a`)
   is accepted and fails as unreachable at the first poll, and port 0, which the standard allows,
-  is accepted. A refusal's reason is built from the parser's error type and fixed text, never its
+  is accepted. One guard precedes the parse, a check rather than a parser: an ASCII control
+  character (U+0000 to U+001F, U+007F) anywhere in the value is refused, because the standard
+  would rewrite the URL rather than refuse it -- it drops a tab or newline inside the URL and C0
+  controls at its ends, so `http://si<TAB>te` would bind to `http://site`. Empty credentials
+  (`http://@a`, `http://:@a`) are dropped by the parser and accepted as `http://a`, which loses
+  nothing. A refusal's reason is built from the parser's error type and fixed text, never its
   message, which keeps the input. Rejected: our own parser, which every edge case the standard
   already settles had to be written and tested again. The owner's standing rule: prefer an
   established parser or validator over writing one, weighed against how heavy the library is to

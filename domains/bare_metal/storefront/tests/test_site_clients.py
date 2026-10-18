@@ -155,6 +155,8 @@ def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers)
                      id="a port that is not a number"),
         pytest.param("https://one example.test", ": it is not a valid URL",
                      id="a space in the host"),
+        pytest.param("https://one.exa\tmple.test", " without control characters",
+                     id="a tab inside, which the standard would drop"),
         pytest.param("ftp://one.example.test", ": its scheme is http or https",
                      id="not HTTP"),
     ],

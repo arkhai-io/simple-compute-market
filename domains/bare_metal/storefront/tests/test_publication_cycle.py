@@ -1250,6 +1250,40 @@ async def test_a_dry_run_logs_a_refresh_it_would_make_as_a_preview_not_a_failure
     ]
 
 
+async def test_a_dry_run_logs_a_reopen_it_would_make_as_a_preview_not_a_failure(
+    db, caplog
+):
+    """A listing closed while its machine was leased would be reopened once it
+    is free again: the preview reports the reopen, logs it at info, reopens
+    nothing, and logs no failed candidate."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    leased = storefront.listing("site-a", "pool-1", "r1")[0]
+    site.serve(pool("pool-1", member("r1", "pool-1", available=False)))
+    await storefront.run()
+    site.serve(pool("pool-1", member("r1", "pool-1")))
+
+    with caplog.at_level(logging.INFO, logger="arkhai_bare_metal_storefront.publication"):
+        preview = await storefront.run(dry_run=True)
+
+    logged = [
+        record
+        for record in caplog.records
+        if record.name == "arkhai_bare_metal_storefront.publication"
+    ]
+    (reopen,) = actions(preview, "reopen")
+    assert (reopen["listing_id"], reopen["status"]) == (leased, "dry_run")
+    assert [(record.levelno, record.getMessage()) for record in logged] == [
+        (
+            logging.INFO,
+            f"bare-metal listing {leased} would be reopened (dry run): {reopen['fields']}",
+        )
+    ]
+    assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
+    assert storefront.registries.sent == []
+
+
 async def test_a_dry_run_reports_closes_and_refreshes_and_applies_neither(db):
     site = Site(pool("pool-1", member("r1", "pool-1")), pool("pool-2", member("r2", "pool-2")))
     storefront = Storefront(db, {"site-a": site})

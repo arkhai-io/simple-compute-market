@@ -129,6 +129,11 @@ def test_an_origin_is_accepted_as_the_url_standard_normalizes_it(stated, origin)
     assert ORIGIN.validate_python(stated) == origin
 
 
+@pytest.mark.parametrize("stated", ["http://@a", "http://:@a"])
+def test_empty_credentials_are_dropped_by_the_parser(stated):
+    assert site_authority_url(stated) == "http://a"
+
+
 @pytest.mark.parametrize("stated", ["http://-", "http://site-a;x", "http://%41"])
 def test_a_host_the_standard_accepts_is_accepted_whether_or_not_it_exists(stated):
     """The parser decides syntax, not existence: such a host fails as
@@ -156,6 +161,10 @@ def test_a_host_the_standard_accepts_is_accepted_whether_or_not_it_exists(stated
         ("https://site.example.test:bad", "not a valid URL"),
         ("https://site.example.test:70000", "not a valid URL"),
         ("http://site a", "not a valid URL"),
+        ("http://si\tte-a", "without control characters"),
+        ("http://site\n-a", "without control characters"),
+        ("http://site\x00-a", "without control characters"),
+        ("http://site-a\x7f", "without control characters"),
         ("http://[::1", "not a valid URL"),
     ],
 )
@@ -173,6 +182,7 @@ def test_a_url_that_is_not_an_http_origin_is_refused(stated, reason):
         "https://operator:hunter2\uff20site.example.test",
         "https://hunter2.example.test:hunter2",
         "http://hunter 2.example.test",
+        "http://hunter2\t.example.test",
     ],
 )
 def test_an_origin_refusal_carries_no_value_even_in_its_context(stated):

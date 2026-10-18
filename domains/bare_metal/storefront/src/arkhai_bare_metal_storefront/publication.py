@@ -829,8 +829,9 @@ class BareMetalPublicationCycle:
                 "refreshed" if is_open else "reopened",
                 list(comparison.differing_fields),
             )
-            # The preview changes nothing, so to the driver the listing is
-            # unchanged; any other status it counts as a failed candidate.
+            # The preview changes nothing, so the driver is told the listing is
+            # unchanged, which it skips; it counts `published` and `disabled` as
+            # published and any other status as a failed candidate.
             return {"status": REOPEN_UNCHANGED}
 
         await self._db.update_listing(

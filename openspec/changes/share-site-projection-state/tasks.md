@@ -4148,6 +4148,19 @@ Round 10 follow-up (owner, 2026-10-18, after the check fixes):
   Unit-level cycle test (`tests/test_publication_cycle.py`, the cycle's public API over a real
   database): `test_a_dry_run_logs_a_refresh_it_would_make_as_a_preview_not_a_failure`, through
   `caplog`; against the unfixed code it fails with the reported warning.
+- **Check of `12445bf`.** Before the parse, an ASCII control character anywhere in the value
+  is refused (`without control characters`), since the standard drops a tab or newline inside a
+  URL and C0 controls at its ends, which would rewrite the host rather than refuse it; kit/config
+  unit cases `\t`, `\n`, `\x00`, `\x7f` and a tab in the no-echo, no-context test; bare metal's
+  site-naming test a tab. Empty credentials (`http://@a`, `http://:@a`) are dropped by the parser
+  and accepted as `http://a` (a kit/config case; D14b). The dry-run comment names the driver's
+  rule (`unchanged` skipped, `published`/`disabled` counted published, any other status failed).
+  `test_a_dry_run_logs_a_reopen_it_would_make_as_a_preview_not_a_failure` (a listing closed while
+  leased, free again): the report's `reopen` is `dry_run`, it is logged at info as "would be
+  reopened", nothing reopens, no failure is logged; against the unfixed code it fails with the
+  warning. kit/config unit 235 passed; bare-metal storefront 405 passed; VM storefront unit
+  frozen, rebuilt kit-config wheel reinstalled, 1087 passed, 1 skipped; `make check-packaging`, `make
+  check-comment-hygiene`, `make check-tasks`, and `openspec validate --strict` pass.
 - Evidence: kit/config unit 228 passed; bare-metal storefront 403 passed; VM storefront frozen
   (rebuilt 0.4.0 kit-config and bare-metal storefront wheels reinstalled) unit 1087 passed, 1
   skipped, integration 447 passed; `make check-packaging` (locks included), `make check-comment-hygiene`, `make

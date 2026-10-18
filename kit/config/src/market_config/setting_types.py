@@ -14,6 +14,7 @@ context either: a parsing error keeps the value it failed on.
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
@@ -80,6 +81,9 @@ PositiveSeconds = Annotated[
 
 _NOT_AN_ORIGIN = "must be an HTTP(S) origin"
 
+#: U+0000 to U+001F and U+007F, which the URL standard strips or drops.
+_ASCII_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
 #: Parses a URL as the WHATWG URL standard does, refusing a scheme other than
 #: ``http`` or ``https``.
 _HTTP_URL: TypeAdapter[AnyHttpUrl] = TypeAdapter(AnyHttpUrl)
@@ -112,13 +116,21 @@ def site_authority_url(value: Any) -> str:
     path would become a prefix of every route. The normalized origin is what a
     storefront hands its site client.
 
+    One guard precedes the parse: an ASCII control character anywhere in the
+    value is refused, because the standard would rewrite the URL rather than
+    refuse it -- it drops a tab or newline inside it, so ``http://si<TAB>te``
+    would bind to ``http://site``, and C0 controls at its ends.
+
     The parser decides syntax, not existence: a host the standard accepts but no
     resolver will (``-``, say) is accepted here and fails as unreachable at the
-    first poll.
+    first poll. Empty credentials (``http://@a``, ``http://:@a``) are dropped by
+    the parser, so they are accepted as ``http://a``; nothing is lost.
     """
 
     if not isinstance(value, str):
         raise ValueError("must be a string")
+    if _ASCII_CONTROL.search(value.strip()):
+        raise ValueError(f"{_NOT_AN_ORIGIN} without control characters")
     url, reason = _parsed(value)
     if url is None:
         raise ValueError(reason)
