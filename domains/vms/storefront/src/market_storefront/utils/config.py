@@ -437,18 +437,6 @@ def get_registry_authorities(
     return authorities
 
 
-def get_provisioning_authorities(
-    source: Dynaconf | None = None,
-) -> TrustedIdentitySet:
-    """Return the ordered public trust pins for the provisioning service."""
-
-    active = settings if source is None else source
-    return _trusted_identity_set(
-        active.get("provisioning.identity.principals"),
-        field="provisioning.identity",
-    )
-
-
 def get_service_peer_configs(
     source: Dynaconf | None = None,
 ) -> dict[str, tuple[str, str, TrustedIdentitySet]]:

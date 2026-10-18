@@ -1,9 +1,10 @@
 {{/*
-One Deployment per agent in .Values.agents. Each pod mounts two files at
-/etc/arkhai/ — storefront.json (ConfigMap, non-sensitive) and
-storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME
-at /etc so dynaconf picks them up via its layered discovery and merge.
-No env-var-based config.
+One Deployment per agent in .Values.agents, named for its key. Each pod mounts
+two files at /etc/arkhai/ — storefront.json (ConfigMap, non-sensitive) and
+storefront.secrets.toml (Secret, sensitive) — and points XDG_CONFIG_HOME at /etc
+so dynaconf picks them up via its layered discovery and merge. An agent naming
+an Alkahest address-book ConfigMap mounts it read-only too. No env-var-based
+config.
 
 checksum/config + checksum/secrets annotations force a rollout when
 either source object changes, independently — flipping a log level
@@ -19,7 +20,10 @@ when zerotier_network is unset in the storefront config — entrypoint.sh is alr
 fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
 when zerotier_network is absent.
 */}}
-{{- range $agent := .Values.agents }}
+{{- range $name, $entry := .Values.agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
+{{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -153,6 +157,11 @@ spec:
             {{- end }}
             - name: arkhai-data
               mountPath: {{ $.Values.persistence.mountPath | quote }}
+            {{- if $addressBook.configMapName }}
+            - name: alkahest-address-book
+              mountPath: {{ $addressBook.mountPath | quote }}
+              readOnly: true
+            {{- end }}
           # /health performs only a fast SQLite ping — safe as a Kubernetes
           # liveness/readiness probe with no outbound calls or blocking I/O.
           livenessProbe:
@@ -205,6 +214,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- if $addressBook.configMapName }}
+        - name: alkahest-address-book
+          configMap:
+            name: {{ $addressBook.configMapName | quote }}
+            items:
+              - key: {{ $addressBook.key | quote }}
+                path: {{ $addressBook.key | quote }}
+        {{- end }}
       {{- with $.Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

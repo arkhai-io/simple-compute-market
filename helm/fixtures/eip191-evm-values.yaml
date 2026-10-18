@@ -46,73 +46,34 @@ provisioning:
     principals:
       - scheme: eip191
         identifier: "0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc"
-  storefront:
-    agentName: evm-bob
 
 e2e-tests:
   enabled: false
   createSecret: false
   secretName: arkhai-e2e-credentials
 
+# Bob's agent with its own signer and wallet Secrets, selling under Alkahest on
+# the dev-env chart's Anvil with that chart's address book mounted. Agents are
+# keyed by name, so only what differs from Bob's default agent is stated. Every
+# principal and address here is a deterministic development value, never for a
+# public network.
 storefront:
   image:
     digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
   agents:
-    - name: evm-bob
-      port: 8001
-      component: seller
+    bob:
       identity:
         credentialSecret:
           name: evm-bob-marketplace-identity
-          key: credential
-      internalRegistryTrust:
-        authority: registry-a
-        principals:
-          - scheme: eip191
-            identifier: '0x90f79bf6eb2c4f870365e785982e1f101e93b906'
       secret:
-        createSecret: false
         secretName: evm-bob-runtime
-        configKey: storefront.secrets.toml
+      alkahestAddressBook:
+        configMapName: arkhai-node-operator-dev-env-alkahest-addresses
+        key: alkahest_anvil_addresses.json
+        mountPath: /etc/arkhai/alkahest
       config:
         agent_id: evm_bob
         log_file_path: ./logs/evm-bob.log
-        storefront_domains:
-          - contribution: vms
-            offering_mode: vm
-            domain_identity: compute.v1
-            contract_version: '1.0'
-          - contribution: bare_metal
-            offering_mode: bare_metal
-            domain_identity: bare_metal.v1
-            contract_version: '1.0'
-        Identity:
-          principal:
-            scheme: eip191
-            identifier: '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc'
-          service_peers:
-            provisioning_default:
-              role: service
-              site_id: default
-              principals:
-                - scheme: eip191
-                  identifier: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
-          administrators:
-            operator:
-              principals:
-                - scheme: eip191
-                  identifier: '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc'
-        provisioning:
-          mode: mock
-          identity:
-            principals:
-              - scheme: eip191
-                identifier: '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266'
-        negotiation:
-          policies:
-            - has_matching_inventory_guard
-            - escrow_shape_guard
-            - bisection
         Wallet:
           address: '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc'
           ssh_public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoPublicKeyForComputeAccess bob@example.com
@@ -120,13 +81,14 @@ storefront:
           anvil:
             rpc_url: http://arkhai-node-operator-dev-env:8545
             chain_id: 31337
+            alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
         Settlement:
           schema_version: 1
           priority:
             - alkahest.v1
           alkahest:
             enabled: true
-            address_config_path: /app/alkahest_anvil_addresses.json
+            address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
             oracle_gated: false
             trusted_oracle_addresses: []
             interruptible: false

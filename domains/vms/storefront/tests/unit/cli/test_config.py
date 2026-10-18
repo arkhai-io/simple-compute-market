@@ -296,6 +296,7 @@ def test_config_set_refuses_a_retired_inventory_key_naming_the_upgrade_guide(
         ),
         ("CLAIMS_SWEEP_INTERVAL", "settlement_servicing_interval_seconds"),
         ("enable_registry_discovery", "enable_registry_discovery was removed"),
+        ("provisioning.identity.principals", "provisioning.identity was removed"),
     ],
 )
 def test_config_set_refuses_a_renamed_or_removed_key_naming_what_replaces_it(

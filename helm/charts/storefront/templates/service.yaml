@@ -1,4 +1,6 @@
-{{- range $agent := .Values.agents }}
+{{- range $name, $entry := .Values.agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 apiVersion: v1
 kind: Service
 metadata:

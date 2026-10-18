@@ -36,7 +36,7 @@ def test_settings_toml_provides_baseline_defaults():
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
-    assert list(s.provisioning.identity.principals) == []
+    assert s.provisioning.get("identity") is None
     # Default policy chain ends in "bisection" (not "rl") — prevents
     # silent RL failures when torch is unavailable.
     assert s.negotiation.policies == [
@@ -179,7 +179,7 @@ def test_public_administrator_binding_is_scheme_tagged():
     }
 
 
-def test_public_provisioning_authorities_and_service_peer_bindings_are_structured():
+def test_service_peer_bindings_are_structured():
     current = create_signer("ed25519", b"\x03" * 32).identity
     next_authority = create_signer("ed25519", b"\x06" * 32).identity
     principals = [
@@ -187,7 +187,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
         next_authority.model_dump(mode="json"),
     ]
     source = Dynaconf(environments=False)
-    source.set("provisioning.identity.principals", principals)
     source.set(
         "identity.service_peers",
         {
@@ -200,7 +199,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
     )
 
     trust = TrustedIdentitySet(identities=(current, next_authority))
-    assert agent_config.get_provisioning_authorities(source) == trust
     assert agent_config.get_service_peer_configs(source) == {
         "provisioning_default": ("service", "default", trust)
     }

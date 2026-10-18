@@ -2413,6 +2413,12 @@ round.
       accepts at its refusal, not of a running release: the steps after the refusal need the
       cluster, which validation's Helm part (`make validate-helm`, deploying `deploy-local`)
       exercises. `DEPLOYMENT_AND_CONFIG.md` at 17.9.
+      **Corrected (round 08, 08 F1, F7):** `/app/alkahest_anvil_addresses.json` was not "the
+      image's address book": the VM image carries no such file and the chart mounted none, so
+      the release started but derived no Alkahest listing, which a refusal-only check cannot
+      see. 10.20 mounts the dev-env chart's copy and derives the release conditions over the
+      render, and 10.27 removes the repeated agent (agents are keyed by name); the first test
+      named here is renamed there.
 - [x] 10.8 (05 F1) **Per-site fulfillment trust.** `build_fulfillment_client` gives each per-site
       `ComputeProvisioningClient` its site's peer provider from `ServicePeerTrust`, as the capacity
       clients have; `[provisioning.identity]` stays only on the provisioning-service client
@@ -2723,7 +2729,7 @@ together; dispositions in `reviews/08-implementation.triage.md`. The gate for re
 2026-10-18. The owner directed: make these fixes as one commit, run `make test` (with the frozen
 projects), and begin Sections 11–14 with no end-to-end run or further review first.
 
-- [ ] 10.20 (08 F1) **The local release's Alkahest address book is mounted.** The storefront chart
+- [x] 10.20 (08 F1) **The local release's Alkahest address book is mounted.** The storefront chart
       gains an optional address-book ConfigMap mount per agent, as the bare-metal chart's
       `alkahestAddressBook` already does; the local release mounts the development Anvil address
       book (a chart-carried copy of `kit/alkahest`'s deterministic Anvil file, marked development
@@ -2733,7 +2739,39 @@ projects), and begin Sections 11–14 with no end-to-end run or further review f
       that every configured address path is mounted, rename the over-claiming test, correct 10.7's
       note. Record for 17.9 (`DEPLOYMENT_AND_CONFIG.md`) which keys `arkhai-bob-runtime` must carry
       for `deploy-local` to sell under Alkahest.
-- [ ] 10.21 (08 F2) **Lease termination per site; `[provisioning.identity]` retired.** VM's
+      Done. The storefront chart's agent takes `alkahestAddressBook` (`configMapName`, empty
+      mounting nothing; `key`, default `alkahest_addresses.json`; `mountPath`, default
+      `/etc/arkhai/alkahest`), typed in both schemas as the bare-metal chart types its own, and
+      the Deployment mounts that ConfigMap's key read-only at `<mountPath>/<key>`. **Placed (not
+      named by the task):** the ConfigMap is the dev-env chart's,
+      `<release>-dev-env-alkahest-addresses` from `helm/charts/dev-env/files/alkahest_anvil_addresses.json`,
+      since that chart deploys the Anvil state the book describes (`dev-env/generate_state.py`
+      writes both); its template's comment marks it development only, naming nothing on a public
+      network (JSON carries no comment). `helm/local-values.yaml` mounts it, and both
+      `Chains.anvil.alkahest_address_config_path` and `[Settlement.alkahest].address_config_path`
+      name `/etc/arkhai/alkahest/alkahest_anvil_addresses.json`; the EVM fixture, which named the
+      same unmounted `/app` path, mounts it too. Chart render tests (`TESTING.md` "Chart Render
+      Tests"; the probe half needs `STOREFRONT_PYTHON`, set to VM's environment, and ran):
+      `test_an_agent_mounts_its_named_address_book_read_only`;
+      `test_the_local_release_names_only_the_dev_chains_mounted_address_book` -- every
+      configured address path is the mounted `<mountPath>/<key>`, the release renders that
+      ConfigMap, and its content equals `kit/alkahest`'s file (the copy's drift check); the EVM
+      fixture's test asserts the same; `test_the_local_release_enables_alkahest_and_contact_exchange_and_the_defaults_nothing`
+      (renamed from `..._sells_on_its_own_chain_...`, which over-claimed);
+      `test_the_local_release_starts_and_derives_its_alkahest_release_conditions` (replacing the
+      refusal-only test) runs the storefront's `require_publishable_storefront()` and then
+      `demands_for_publication_clauses(settlement_publication_defaults(), wallet_address=get_evm_wallet_address())`
+      over the local render's `storefront.json`, the mounted file re-rooted under a temporary
+      directory because the probe runs outside the pod, and asserts one condition on `anvil`:
+      the mounted book's recipient arbiter, paying Bob's wallet; over the defaults the refusal
+      still names "no settlement mechanism". With the chain's path back at `/app/...` (edited,
+      restored) the mount assertion fails and the probe raises `FileNotFoundError` for it, as 08
+      F1 reproduced. Still render evidence, not a running release (16.5). For 17.9:
+      `arkhai-bob-runtime`'s `storefront.secrets.toml` must carry `[Wallet] private_key`, Anvil
+      account 2's published development key and never one for a public network, for
+      `deploy-local` to build Bob's Alkahest client; `[registry.auth]` only for a registry that
+      requires write keys, which the local registry does not.
+- [x] 10.21 (08 F2) **Lease termination per site; `[provisioning.identity]` retired.** VM's
       `terminate_vm_lease` routes through the per-site fulfillment aggregate by the site that holds
       the reservation, as bare metal's teardown does (`site_clients.terminate_lease`), verifying
       against that site's peer; it stays the plumbing `vm-storefront-fulfillment` requires for a
@@ -2743,28 +2781,122 @@ projects), and begin Sections 11–14 with no end-to-end run or further review f
       moves onto the site's service peer; the lane overlays, chart values, and fixtures drop it;
       D14b's exception is removed. Test: termination reaches the reservation's own site and its
       response verifies against that site's peer.
-- [ ] 10.22 (08 F3) **`proposal.md` current.** Amend What Changes and Impact: the `core/storefront`
+      Done. `AggregateFulfillmentClient.terminate_lease(capacity_reservation_id, *, site_id,
+      reason=None)` sends `LeaseTermination` to that site's client alone, as
+      `begin_fulfillment_teardown` addresses its recorded site;
+      `fulfillment_service.terminate_vm_lease(fulfillment_client, *, capacity_reservation_id,
+      site_id, reason=None)` takes the storefront's per-site fulfillment client
+      (`build_fulfillment_client`) and the site the deal's records bind the reservation to, and
+      returns the site's `LeaseView`; it still has no caller (its docstring says so, citing
+      `vm-storefront-fulfillment`). **Decided (signature):** the site is the caller's, as every
+      record-bound VM fulfillment call passes it, rather than read from the in-memory
+      `reservation_sites` cache; and the client is passed in, so the router-level test reaches
+      the fake site transports through `build_fulfillment_client`'s factory seam.
+      `_provisioning_client` and `utils.config.get_provisioning_authorities` are gone; the
+      packaged `settings.toml`, the `config init` template, and both lane overlays drop
+      `[provisioning.identity]`; `retired_settings.REMOVED_SETTINGS` gains it (stated, in any
+      spelling, it refuses startup under the retired-settings heading, "provisioning.identity was
+      removed: ...", and `config set` refuses it); `make helm-values-schema` regenerated both
+      schemas, which refuse it. The chart's provisioning check is the existing service-peer one
+      alone (`_helpers.tpl`); `values.yaml` and the fixtures drop the set. D14b's exception is
+      removed (design.md, with the decision). Tests: unit
+      `test_fulfillment_service.py::test_terminate_vm_lease_asks_only_the_reservations_site`
+      (only the named site is asked, not the cached one; the reason passes through), the fakes of
+      a `ComputeProvisioningClient` the module no longer uses dropped from two tests;
+      application integration, router-level as 10.14,
+      `test_site_trust.py::test_a_lease_terminates_only_at_its_sites_and_verifies_against_its_peer`
+      -- through the production `build_fulfillment_client`, the termination reaches only the
+      `away` site's fake provisioning surface with its reason and returns its lease, and the
+      same answer signed by the `home` site's principal is refused
+      (`ComputeProvisioningAuthenticationError`); unit `test_startup_refusal.py` (the set
+      refused, publication unaffected); CLI unit `test_config.py` (`config set
+      provisioning.identity.principals` refused); application startup
+      `test_publishable_startup.py` "the removed provisioning trust set" (replaced at its root:
+      a dotted override left an empty `provisioning.identity` table behind, which refused the
+      next test); chart render `test_the_removed_provisioning_trust_set_is_refused_in_any_spelling`
+      and a release-check case for a service peer lacking the release's principal. Tests that set
+      the set to no effect drop it (`test_config_loader.py`, `test_remote_capacity_client.py`,
+      `tests/publication_app.py`, `test_negotiate_controller.py`).
+- [x] 10.22 (08 F3) **`proposal.md` current.** Amend What Changes and Impact: the `core/storefront`
       and `core/storefront-client` changes; the removed registry switch's and
       `[provisioning.identity]`'s startup refusals; `deploy-local` enabling Alkahest and contact
       exchange with its address book; per-site lease termination; the storefront chart's `agents`
       map (10.27).
-- [ ] 10.23 (08 F4) **Per-site loop state follows the fan-out.** A per-site capacity-event loop
+      Done. What Changes gains the removed registry switch's and `[provisioning.identity]`'s
+      refusals, per-site lease termination, the trust's failed-reload rule, and "A local Helm
+      release that sells" (the address book and the `agents` map); Impact gains `core/storefront`
+      (`ProjectionCache`, `ServicePeerTrust`, `HealthResponse.lifecycle`) and
+      `core/storefront-client` (`HealthResponse.lifecycle`; checked against the branch's diff,
+      nothing else changed there), the kit controller's fan-out children, the charts' changes
+      (storefront and umbrella 0.3.0, dev-env's ConfigMap), and the deployment consequences.
+- [x] 10.23 (08 F4) **Per-site loop state follows the fan-out.** A per-site capacity-event loop
       reports the aggregate fan-out's terminal state once it has ended (e.g. per-site names declared
       as children of the aggregate loop). Kit unit test: a fan-out ending while sites are declared.
-- [ ] 10.24 (08 F5) **Per-site recorders only.** Replace the general `record_cycle` with recorders
+      Done. `StorefrontLoopController.declare(name, *, parent=None)`: a name declared with the
+      loop whose task runs its cycles reports that loop's `exited` or `cancelled` once its task
+      has ended (in `states`, `snapshot`, `failed_loop_names`, and `loops_check`), and a pause no
+      longer waits for it; a name declared alone behaves as before (the API-credit storefront's
+      `loops.declare(name)` is unchanged; Section 15 can pass `parent=`). VM:
+      `lifecycle.capacity_site_gate(site)` declares `capacity_events_poller:<site>` as the child
+      of `capacity_events_poller`, and `capacity_events_poller_loop` passes it as the fan-out's
+      `site_gate`; the unused `declare_and_gate` goes. Kit unit (`test_lifecycle_controller.py`,
+      `TestAFanOutsChildrenFollowItsEnd`, three): a fan-out that declares two sites and raises
+      leaves both `exited` beside it and named as failed; a pause with an unbounded quiescence
+      window returns at once over an ended fan-out's child; a cancelled fan-out's child reports
+      `cancelled`, having reported `running` before.
+- [x] 10.24 (08 F5) **Per-site recorders only.** Replace the general `record_cycle` with recorders
       the controller issues only for names declared through the fan-out, so a loop the controller
       runs cannot be written to. Kit unit test.
-- [ ] 10.25 (08 F6) **Stale trust never blocks the loop.** On a failed reload after a change,
+      Done. `record_cycle` is replaced by `StorefrontLoopController.cycle_recorder(name)`, which
+      returns `record(error=None)` only for a name declared with its parent, and raises
+      `ValueError` for any other name -- one never declared, one declared alone, and one the
+      controller runs as a loop or a step even if declared as a child. A recorder carries the
+      generation it was issued in, so after `clear_loops` it records nothing. VM's
+      `capacity_site_cycle_recorder(site)` takes the site's recorder (the fan-out calls the gate
+      factory first, so the name is declared). `arkhai-kit-storefront` 0.7.0 (an incompatible
+      removal); the VM, bare-metal, and API-credit storefronts' exact pins follow. Kit unit: the
+      per-site recording test now records through issued recorders;
+      `test_only_a_fan_outs_declared_child_is_issued_a_recorder` and
+      `test_a_recorder_records_nothing_once_its_fan_out_is_torn_down` (new). VM's
+      `test_lifecycle_status.py::test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop`
+      passes unchanged over the new wiring.
+- [x] 10.25 (08 F6) **Stale trust never blocks the loop.** On a failed reload after a change,
       `ServicePeerTrust` holds nothing (`_sites = None`), so every read refuses with 503 from memory;
       the stale flag and the synchronous retry on reads go; a background reload retries with backoff
       off the event loop until it succeeds. The reload lock stays, ordering reloads so a slower
       reload can never install an older snapshot. Correct the `site_authorities` docstring. Test: a
       read during the outage returns at once without touching SQLite; the trust recovers after the
       background reload.
-- [ ] 10.26 (08 F8) **Comments.** `scripts/validate_slice.py:64-66` names what the Helm release still
+      Done. `ServicePeerTrust.reload_after_change()`: a failed load sets `_sites = None`, so
+      every read refuses with the 503 "not loaded" `AuthError` from memory, and starts one
+      background retry if none is pending; the stale flag and `_reload_if_stale` are gone, and no
+      read touches SQLite. The retry waits `RELOAD_RETRY_FIRST_SECONDS` (0.5), doubling to
+      `RELOAD_RETRY_MAX_SECONDS` (30), and reloads under the reload lock until one succeeds; a
+      burst of failed reloads starts one retry. The lock stays: every reload reads durable state
+      while holding it, so loads install in the order they ran. Seams, by constructor:
+      `retry_wait` (default `time.sleep`) and `start_retry` (default a daemon thread). The class
+      and `site_authorities` docstrings now say reads touch only memory and when they refuse.
+      `arkhai-core-storefront` 0.15.2; `arkhai-kit-capacity-publication` 0.10.1 pins it exactly,
+      and the VM, bare-metal, API-credit storefronts' and the provisioning service's exact pins
+      follow; VM requires `>=0.15.2`. Library integration
+      (`core/storefront/tests/integration/test_service_peers.py`, over the test subclass whose
+      `_read_sites` fails while armed and counts its reads, with the retry captured rather than
+      started): a rotation whose reload failed returns, every read then refuses 503 with no
+      durable read attempted, and the captured retry reloads and the trust follows the rotation;
+      a retry failing three times waits 0.5, 1, 2, and 4 seconds and then succeeds, a second
+      failed change meanwhile starting no second retry; a disable whose reload failed trusts
+      nothing until the retry, then refuses the principal as not active; a refused change still
+      raises its own refusal.
+- [x] 10.26 (08 F8) **Comments.** `scripts/validate_slice.py:64-66` names what the Helm release still
       lacks (touch only that comment); `test_site_trust.py`'s docstring says the fulfillment client
       the storefront builds is called directly.
-- [ ] 10.27 (08 F7) **The storefront chart's `agents` is a map keyed by agent name.** Helm merges maps
+      Done. `scripts/validate_slice.py`'s Helm comment names what the release lacks (a second
+      storefront and registry, the API-credits and bare-metal services, Mailpit forwarding) and
+      that the local release enables Alkahest and contact exchange; the `NOT_SERVED` string
+      beside it still says "no settlement mechanism", left as directed (only the comment). The
+      `test_site_trust.py` docstring says the built fulfillment client is called directly, for
+      the status read and the lease termination. The `site_authorities` docstring rides 10.25.
+- [x] 10.27 (08 F7) **The storefront chart's `agents` is a map keyed by agent name.** Helm merges maps
       key by key but replaces lists, so every overlay restated Bob's whole agent. Convert
       `storefront.agents` (umbrella and storefront chart) to `agents: {<name>: {...}}`: templates
       range over name/value, the generated values schema types map values, and the list shape is
@@ -2775,12 +2907,107 @@ projects), and begin Sections 11–14 with no end-to-end run or further review f
       (`DEPLOYMENT_AND_CONFIG.md` "Storefront agents: pass-through configuration") the map shape and
       the guidance that a chart value overlays change per entry is keyed, not listed. Section 16's
       bare-metal chart keeps its one-agent-at-top-level shape (C8).
-- [ ] 10.28 (08 F9) **Closeout note placed.** Move 17.10's post-archive citation note into 17.11
+      Done. Every storefront template ranges over `name, entry` and gives the entry its key as
+      `name` (`mergeOverwrite`, with an empty `secret` so an agent may omit its overlay); the
+      smoke test and the umbrella's test configuration select `targetAgentName` or else the first
+      agent by name. Both schemas: `agents` (and `storefrontAgent`) is an object of agents, at
+      least one, each refusing `name` (its key is its name); a list is refused by an `if`/`then`
+      whose message names the map ("agents is a map keyed by agent name, such as agents: {bob:
+      {port: 8001}}, not a list"), since a schema error carries no other text. **Differed
+      (found):** the storefront subchart now ships `agents: {}`, its old default agent kept as a
+      commented example, because Helm does not remove a subchart's default from a parent's values
+      with null (tried: `bob: null` left the subchart's `bob`), so a parent could never drop or
+      replace it; the umbrella's `values.yaml` declares Bob. The storefront chart and the
+      umbrella go to 0.3.0 (the values contract changed). `helm/local-values.yaml` and the four
+      fixtures state only what they change: the EVM and payments fixtures now overlay Bob rather
+      than replace him with `evm-bob` and `payments-bob` (their `provisioning.storefront.agentName`
+      goes; the Secret names `test-render.sh` checks are unchanged; resource names are now
+      `-storefront-bob`), and the missing-signer fixture blanks Bob's credential Secret name.
+      `test-render.sh`'s `--set` paths read `storefront.agents.bob...`. Render tests now state an
+      overlay of Bob's default agent, nulling what a case removes, so they exercise the merge an
+      operator's overlay gets; new: an overlay changing one agent and adding another, a null
+      removing an agent, the list refused naming the map, an entry's `name` refused. VM's
+      `test_values_schema.py` reads each values file's agents merged into the umbrella's, as Helm
+      renders them. `VALIDATION_RUNBOOK.md`'s `--set storefront.agents[0]...` becomes
+      `storefront.agents.arkhai...` and its contact-exchange text no longer says Bob is repeated.
+      No `scripts/` or `e2e-tests/` code read the list. For 17.9 (`DEPLOYMENT_AND_CONFIG.md`
+      "Storefront agents: pass-through configuration"): `storefront.agents` is a map keyed by
+      agent name and a list is refused naming it; an overlay states only what it changes, and
+      `null` removes a key or an agent (`bob: null` drops the default agent, as a values file
+      that defined its own agent in place of Bob must now say); a chart value that overlays
+      change per entry is keyed, not listed; the subchart ships no agent.
+- [x] 10.28 (08 F9) **Closeout note placed.** Move 17.10's post-archive citation note into 17.11
       (after the `archive` command, before the commit).
-- [ ] 10.29 Validation for the round: the affected suites, `make helm-values-schema` committed,
+      Done: the note now sits under 17.11, marked as moved.
+- [x] 10.29 Validation for the round: the affected suites, `make helm-values-schema` committed,
       `make -C helm test-render` with `STOREFRONT_PYTHON`, `make -k test` plus the three frozen
       projects, packaging, hygiene, citations, `make check-tasks`, `openspec validate --strict`. No
       end-to-end run or further review before Sections 11–14 (owner, 2026-10-18).
+      Done. VM storefront frozen, with the rebuilt core-storefront 0.15.2,
+      capacity-publication 0.10.1, and kit-storefront 0.7.0 wheels reinstalled (`UV_FROZEN=1
+      make test-unit test-integration`): unit 1071 passed, 1 skipped; integration 446 passed
+      (application integration and application startup; `test_alkahest` against Anvil included).
+      `make -C kit test-storefront` 106 passed and `make -C kit test-capacity-publication` 97
+      passed (unit); core storefront 217 passed, 2 skipped (library integration among them).
+      `make helm-values-schema` regenerated both schemas (the `provisioning.identity` refusal;
+      the `agents` map is their hand-written part), committed; `make -C helm test-render` with
+      `STOREFRONT_PYTHON` passed, the loader check and the start-and-derive check run, not
+      skipped. `make -k test`: every suite it ran passed -- core 123 + 134 + 217 + 62, the kits
+      (capacity-publication 97, storefront 106, config 161, alkahest 296 among them),
+      provisioning service 675 + 463, bare metal 134 + 324 + 11 + 40, API-credit storefront 153,
+      e2e unit 38 -- except release tooling, whose
+      `scripts/tests/test_multi_storefront_compose.py` read the lane overlays'
+      `[provisioning.identity]`; it now asserts the overlays state none beside its existing
+      service-peer assertion, and `make test-release-tooling` passed, 943. It stopped only at the
+      reinit of `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch index
+      is refused here, as in 2.6), run frozen: `kit/policy` 80 passed, VM buyer 202 passed, VM
+      storefront as above. Locks: `scripts/uv_project.py lock` relocked the nine projects that
+      lock a bumped package and resolve here (as 10.19's); VM storefront's lock was edited by hand
+      with the nine substitutions uv wrote into bare metal's lock for the same three packages
+      (versions, wheel names, root specifiers; neither `kit/policy` nor VM buyer locks any; 16.6
+      relocks VM storefront). `make check-packaging` (architecture rules included), `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks CHANGE=share-site-projection-state`, `make
+      check-change-index`, and `openspec validate --strict` pass. No repository typing target
+      exists. No end-to-end run and no fresh-context check here (owner, 2026-10-18; the
+      orchestrator runs the check).
+      **End-to-end, read from the lanes' configuration (the pipeline was not run):** every
+      VM-lane scenario starts Bob's and Alice's storefronts, whose overlays and packaged defaults
+      no longer state `[provisioning.identity]`, so each start passes the retired-settings check
+      with it in the catalogue; their site trust is the `default` peer's as before, and the
+      per-site capacity-event pollers now report as the aggregate loop's children, which no
+      scenario reads. No scenario terminates a lease or fails a trust reload: those are library
+      and application-integration evidence only. No lane deploys Helm; validation's Helm part
+      deploys `deploy-local`, whose Bob now mounts the dev-env chart's address book and derives
+      Alkahest release conditions over it, given an `arkhai-bob-runtime` Secret carrying the
+      wallet key (10.20's note). No bare-metal or API-credit scenario reaches the round's code;
+      their storefronts take the core and kit bumps, the API-credit storefront's per-site
+      pollers still declared without a parent.
+
+Round 08 handoff:
+
+- Agents are keyed by name in the storefront chart and the umbrella; a values file states only
+  what it changes in an agent, and `null` removes a key or an agent. The storefront subchart
+  ships no agent (Helm cannot null a subchart's default from a parent), so the umbrella's
+  `values.yaml` is where Bob lives. Section 16's bare-metal chart is untouched.
+- An agent's `alkahestAddressBook` mounts an existing ConfigMap; the dev-env chart renders the
+  Anvil book (`<release>-dev-env-alkahest-addresses`), whose copy a render test keeps equal to
+  `kit/alkahest`'s. A fixture naming dev-env Services or that ConfigMap renders under the
+  release name the Makefile installs (`arkhai-node-operator`), as the render tests now do.
+- A render test overlays Bob's default agent: to remove a key, set it to `None`; to replace an
+  agent outright, null it and add another key.
+- `[provisioning.identity]` is retired in VM's catalogue; a test setting a retired table must
+  replace its root (`replaced_setting("provisioning", ...)`), since a dotted override leaves an
+  empty table that the refusal counts as stated.
+- Fan-out children: `controller.declare(name, parent=...)` and `controller.cycle_recorder(name)`
+  replace `declare(name)` plus `record_cycle`; Section 15's API-credit pollers should declare
+  their sites with `parent=` and take recorders the same way (VM's `capacity_site_gate` and
+  `capacity_site_cycle_recorder` are the model).
+- `ServicePeerTrust(..., retry_wait=, start_retry=)` are the failed-reload seams; bare metal's
+  12.x trust gets the background retry for free. A test captures the retry with `start_retry`
+  and runs it when it chooses.
+- `terminate_vm_lease(fulfillment_client, *, capacity_reservation_id, site_id, reason=)` is the
+  plumbing a buyer-requested termination will call; it has no caller.
 
 ## 11. Bare-metal configuration through files
 
@@ -3121,16 +3348,36 @@ documentation only; a part needing code returns the change to implementation.
         `market-composition/architecture.md` "Storefront composition kit" -- per-site
         capacity-event outcomes through the controller's `record_cycle` (D6). The normative
         halves are in the storefront-publication and market-composition deltas.
+      - **Amended (round 08, 10.20, 10.21, 10.24, 10.25, 10.27; superseding the round 05/06
+        bullet where they differ):** `DEPLOYMENT_AND_CONFIG.md` "Storefront agents: pass-through
+        configuration" -- `storefront.agents` keyed by agent name, a list refused naming the map,
+        an overlay stating only what it changes and `null` removing a key or an agent, the
+        subchart shipping no agent, and the guidance that a chart value overlays change per
+        entry is keyed, not listed; the per-agent `alkahestAddressBook` and the dev-env chart's
+        Anvil address-book ConfigMap the local release mounts; the keys `arkhai-bob-runtime`
+        must carry for `deploy-local` to sell under Alkahest (10.20's note);
+        `[provisioning.identity]` removed and refused, so the section's sentence requiring
+        `config.provisioning.identity` is corrected to the site's service peer alone;
+        `storefront-publication/architecture.md` "Trusted site routing" -- no
+        `[provisioning.identity]` exception, early lease termination at the reservation's site,
+        and a failed reload after a change leaving the trust holding nothing until a background
+        reload succeeds (in place of the stale-trust rule); `market-composition/architecture.md`
+        "Storefront composition kit" -- per-site names declared as the aggregate loop's
+        children, following its end, and recorders the controller issues only to them (in place
+        of `record_cycle`); `TESTING.md` "Chart Render Tests" -- the storefront chart's
+        `STOREFRONT_PYTHON` check runs the startup refusal and derives the local release's
+        Alkahest release conditions over its render, beside the loader check.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.
-      **Amended (round 05/06, 05 F11):** after 17.11's archive, confirm that the requirement
+- [ ] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
+      -y`, merging the four deltas; the index row links the archive.
+      **Amended (round 05/06, 05 F11; moved here from 17.10 in round 08, 08 F9):** after the
+      `archive` command and before the commit, confirm that the requirement
       `domains/vms/storefront/src/market_storefront/startup_refusal.py`'s docstring cites, "A
       storefront that cannot publish refuses to start" in
       `openspec/specs/storefront-publication/spec.md`, exists there; until the archive it is
       only in the change's delta.
-- [ ] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
-      -y`, merging the four deltas; the index row links the archive.
 
 ## Design promotion record
 

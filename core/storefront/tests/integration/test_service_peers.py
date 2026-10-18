@@ -254,20 +254,49 @@ def test_a_disabled_peer_authenticates_nothing(db_path: str) -> None:
 
 class _ReloadFailingTrust(ServicePeerTrust):
     """A trust whose durable reads fail while ``failing`` names an error, as a
-    busy or locked database fails them. Its writes go through untouched."""
+    busy or locked database fails them, and which counts them. Its writes go
+    through untouched. A background retry is captured rather than started, and
+    each wait before an attempt is recorded rather than slept, so a test runs
+    the retry when it chooses. With ``recover_after`` set, the reads stop
+    failing at that wait."""
 
-    failing: Exception | None = None
+    def __init__(self, *args, **kwargs) -> None:
+        self.failing: Exception | None = None
+        self.recover_after: int | None = None
+        self.reads = 0
+        self.retries: list = []
+        self.waits: list[float] = []
+        super().__init__(
+            *args, retry_wait=self._wait, start_retry=self.retries.append, **kwargs
+        )
+
+    def _wait(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        if len(self.waits) == self.recover_after:
+            self.failing = None
 
     def _read_sites(self):
+        self.reads += 1
         if self.failing is not None:
             raise self.failing
         return super()._read_sites()
 
 
+def _refuses_at_once(trust: _ReloadFailingTrust) -> None:
+    """Every read refuses with 503 from memory: no durable read is attempted."""
+    reads = trust.reads
+    with pytest.raises(AuthError, match="not loaded") as refused:
+        trust.site_authorities("home")()
+    assert refused.value.status_code == 503
+    with pytest.raises(AuthError, match="not loaded"):
+        trust.site_active_principals("away", now=1_010)
+    assert trust.reads == reads
+
+
 def test_a_failed_reload_never_masks_a_committed_change(db_path: str) -> None:
     """The rotation's result is returned although the reload after it failed;
-    the trust then reloads at its next read rather than verify against the
-    records the rotation replaced."""
+    the trust then holds nothing, rather than verify against the records the
+    rotation replaced, until a background reload succeeds."""
     trust = _ReloadFailingTrust(db_path, _peers(_CURRENT), clock=lambda: 1_010)
     trust.seed(now=1_000)
     trust.failing = sqlite3.OperationalError("database is locked")
@@ -278,15 +307,46 @@ def test_a_failed_reload_never_masks_a_committed_change(db_path: str) -> None:
         authority=SERVICE_PEER_AUTHORITY, subject="provisioning-home"
     )
     assert status.active_principals(1_010) == {_CURRENT.identity, _REPLACEMENT.identity}
-    # Still failing: the stale records verify nothing, and a read refuses with 503.
-    with pytest.raises(AuthError, match="could not be reloaded") as refused:
-        trust.site_authorities("home")()
-    assert refused.value.status_code == 503
-    with pytest.raises(AuthError, match="could not be reloaded"):
-        trust.site_active_principals("home", now=1_010)
+    _refuses_at_once(trust)
+    (retry,) = trust.retries
 
     trust.failing = None
+    retry()
+
+    assert trust.waits == [0.5]
     assert trust.site_authorities("home")() == _pins(_REPLACEMENT, _CURRENT)
+    assert trust.site_authorities("away")() == _pins(_OTHER_SITE)
+
+
+def test_a_background_reload_backs_off_until_it_succeeds(db_path: str) -> None:
+    trust = _ReloadFailingTrust(db_path, _peers(_CURRENT), clock=lambda: 1_010)
+    trust.seed(now=1_000)
+    trust.failing = sqlite3.OperationalError("database is locked")
+    _rotate(db_path, now=1_000, overlap_seconds=30, authority=trust.identity_authority())
+    # A second change failing to reload while the first's retry is pending
+    # starts no second retry.
+    trust.identity_authority().disable(
+        authority=SERVICE_PEER_AUTHORITY,
+        subject="provisioning-away",
+        principal=_OTHER_SITE.identity,
+        operator=_OTHER_SITE.identity,
+        operation_id="disable-away",
+        now=1_005,
+    )
+    (retry,) = trust.retries
+
+    # Every attempt fails until the fourth wait.
+    trust.recover_after = 4
+    retry()
+
+    assert trust.waits == [0.5, 1.0, 2.0, 4.0]
+    assert trust.site_authorities("home")() == _pins(_REPLACEMENT, _CURRENT)
+    with pytest.raises(AuthError, match="not active"):
+        trust.site_authorities("away")()
+    # Recovered: the next failed reload starts a retry of its own.
+    trust.failing = sqlite3.OperationalError("database is locked")
+    trust.reload_after_change()
+    assert len(trust.retries) == 2
 
 
 def test_a_disable_whose_reload_failed_does_not_leave_its_principal_trusted(
@@ -305,7 +365,10 @@ def test_a_disable_whose_reload_failed_does_not_leave_its_principal_trusted(
         now=1_001,
     )
 
+    _refuses_at_once(trust)
     trust.failing = None
+    (retry,) = trust.retries
+    retry()
     with pytest.raises(AuthError, match="not active"):
         trust.site_active_principals("home", now=1_002)
 

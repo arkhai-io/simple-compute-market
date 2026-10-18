@@ -98,9 +98,11 @@ Argument: dict with `root` and `agent`.
 {{- end }}
 
 {{/*
-Per-agent fullname: {fullname}-{agent.name}.
+Per-agent fullname: {fullname}-{agent.name}, the agent's name being its key
+under agents:.
 Used as the Deployment / Service / Secret object name.
-Argument: dict with `root` (the chart root) and `agent` (one entry from agents:).
+Argument: dict with `root` (the chart root) and `agent` (one agent, with its
+name).
 */}}
 {{- define "storefront.agentFullname" -}}
 {{- printf "%s-%s" (include "storefront.fullname" .root) .agent.name | trunc 63 | trimSuffix "-" -}}
@@ -138,6 +140,19 @@ the agent fullname.
 {{- else -}}
 {{- printf "%s-config" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+The agent's Alkahest address book, as JSON for fromJson: `configMapName` (empty
+mounts nothing), `key`, and `mountPath`, each defaulted where the agent's
+alkahestAddressBook does not state it.
+*/}}
+{{- define "storefront.agentAddressBook" -}}
+{{- $book := .alkahestAddressBook | default dict -}}
+{{- toJson (dict
+  "configMapName" ($book.configMapName | default "")
+  "key" ($book.key | default "alkahest_addresses.json")
+  "mountPath" ($book.mountPath | default "/etc/arkhai/alkahest")) -}}
 {{- end }}
 
 {{/*
@@ -339,16 +354,11 @@ Argument: dict with `root` (chart root) and `agent`.
   {{- $_ := set $cfg $capacityKey $capacity -}}
 {{- end -}}
 
-{{- /* Trust in the release's provisioning service is stated, then checked. */ -}}
+{{- /* Trust in the release's provisioning service is stated, then checked:
+every capacity site it serves is verified against that site's service peer,
+which must include the release's provisioning principal. */ -}}
 {{- if eq $provisioningURL (trimSuffix "/" $internalProvisioningURL) -}}
   {{- $active := $root.Values.global.provisioningIdentity -}}
-  {{- $provisioningIdentity := include "storefront.foldedMap" (dict "doc" $provisioning "name" "identity") | fromJson -}}
-  {{- $principalsKey := include "storefront.foldedKey" (dict "doc" $provisioningIdentity "name" "principals") -}}
-  {{- $provisioningPrincipals := list -}}
-  {{- if $principalsKey -}}{{- $provisioningPrincipals = index $provisioningIdentity $principalsKey -}}{{- end -}}
-  {{- if not (include "storefront.includesPrincipal" (dict "principals" $provisioningPrincipals "principal" $active)) -}}
-    {{- fail (printf "storefront agent %s config provisioning.identity.principals must include the release's provisioning principal" $agent.name) -}}
-  {{- end -}}
   {{- $internalSites := list -}}
   {{- range $siteID, $siteURL := (index $capacity $sitesKey) -}}
     {{- if eq (trimSuffix "/" (toString $siteURL)) $provisioningURL -}}

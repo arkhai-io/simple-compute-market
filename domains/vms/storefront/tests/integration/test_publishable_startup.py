@@ -118,6 +118,11 @@ _CASES = {
         {"enable_registry_discovery": False},
         [RETIRED_SETTINGS_HEADING, "enable_registry_discovery was removed"],
     ),
+    "the removed provisioning trust set": (
+        # Replaced at its root, so the retired table is gone again afterwards.
+        {"provisioning": {"identity": {"principals": [_SITE.identity.model_dump(mode="json")]}}},
+        [RETIRED_SETTINGS_HEADING, "provisioning.identity was removed"],
+    ),
 }
 
 

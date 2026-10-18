@@ -12,9 +12,11 @@ cancelling it. Every loop but the capacity-event pollers is registered with
 `register_loop` and has no body of its own: the controller's timer gates, runs
 the loop's step through the one cycle boundary an operator's step also takes,
 and waits. The capacity-event pollers fan out one cycle per site inside the
-capacity-publication kit, which takes `loop_gate(name)` and `idle`, serializes
-each site's cycle with that site's step itself, and reports each cycle to
-`capacity_site_cycle_recorder(site)` for its outcome.
+capacity-publication kit inside the aggregate loop's task, which takes
+`capacity_site_gate(site)` and `idle`, serializes each site's cycle with that
+site's step itself, and reports each cycle to `capacity_site_cycle_recorder(site)`
+for its outcome. Each site's name is declared as the aggregate loop's child, so
+it reports the aggregate's end once the fan-out has ended.
 """
 
 from __future__ import annotations
@@ -161,11 +163,6 @@ def start_loops() -> dict[str, asyncio.Task[Any]]:
     return _CONTROLLER.start_loops(task_logger=logger)
 
 
-def declare_and_gate(name: str) -> Callable[[], bool]:
-    """Declare a gated name with no task handle here, and bind its gate."""
-    return _CONTROLLER.declare(name)
-
-
 def gate(name: str) -> bool:
     """The pause gate a named loop consults once per cycle, before any work."""
     return _CONTROLLER.gate(name)
@@ -210,19 +207,27 @@ def enter_stage(stage: str) -> None:
     _CONTROLLER.enter_stage(stage)
 
 
+def capacity_site_gate(site: str) -> Callable[[], bool]:
+    """Declare one site's capacity-event poller as a child of the aggregate
+    loop, whose task runs its cycles, and bind its gate."""
+    return _CONTROLLER.declare(capacity_site_loop_name(site), parent=CAPACITY_EVENTS_POLLER)
+
+
 def capacity_site_cycle_recorder(site: str) -> Callable[[SiteEventCycle], None]:
     """Where one site's capacity-event poller reports each cycle its timer ran.
 
     The kit serializes each site's cycles under that site's cursor lock rather
-    than the controller's, so each cycle's outcome is recorded here, under the
-    site's loop name, for status to report beside the aggregate step's.
+    than the controller's, so each cycle's outcome is recorded through the
+    recorder the controller issues the site's declared name
+    (`capacity_site_gate` first), for status to report beside the aggregate
+    step's.
     """
-    name = capacity_site_loop_name(site)
+    record = _CONTROLLER.cycle_recorder(capacity_site_loop_name(site))
 
-    def record(cycle: SiteEventCycle) -> None:
-        _CONTROLLER.record_cycle(name, error=cycle.exception)
+    def report(cycle: SiteEventCycle) -> None:
+        record(cycle.exception)
 
-    return record
+    return report
 
 
 def snapshot() -> dict[str, LoopSnapshot]:
@@ -248,9 +253,9 @@ __all__ = [
     "SITE_PROJECTION_POLLER",
     "await_quiescence",
     "capacity_site_cycle_recorder",
+    "capacity_site_gate",
     "capacity_site_loop_name",
     "controller",
-    "declare_and_gate",
     "enter_stage",
     "failed_loop_names",
     "gate",

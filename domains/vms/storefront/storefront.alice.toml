@@ -112,11 +112,6 @@ default = "http://alice-provisioning:8081"
 service_url   = "http://alice-provisioning:8081"
 poll_interval = 1
 
-[provisioning.identity]
-principals = [
-  { scheme = "ed25519", identifier = "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw" },
-]
-
 [negotiation]
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]
 

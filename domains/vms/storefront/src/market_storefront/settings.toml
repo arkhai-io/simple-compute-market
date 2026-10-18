@@ -177,11 +177,6 @@ poll_interval          = 15
 preflight_timeout      = 30
 fail_on_unreachable    = true
 
-[provisioning.identity]
-# Ordered old/new public response trust pins for provisioning HTTP calls.
-# Private material belongs only to the provisioning service's own Secret.
-principals = []
-
 [fulfillment.failure_policy]
 # Actions applied when provisioning/fulfillment fails. `release_capacity`
 # repairs local inventory/listings; `emit_event` writes to stage_events/SSE;

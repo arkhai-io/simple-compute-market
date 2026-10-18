@@ -36,6 +36,11 @@ from core_storefront.identity_authority import (
 
 logger = logging.getLogger(__name__)
 
+#: The first wait before a background reload retries, and the longest; each
+#: failure doubles the wait up to the longest.
+RELOAD_RETRY_FIRST_SECONDS = 0.5
+RELOAD_RETRY_MAX_SECONDS = 30.0
+
 #: Peer ID to its role, the site it is bound to, and its configured principals,
 #: as a storefront's configuration states its service peers.
 ServicePeerConfigs = Mapping[str, tuple[str, str, TrustedIdentitySet]]
@@ -188,8 +193,8 @@ class _TrustReloadingAuthority(StorefrontIdentityAuthority):
     The reload follows each change whether or not it committed: a reload reads
     what is durable, so an extra one is harmless, and a change that committed
     before failing must not leave the trust behind it. A reload that fails never
-    replaces the change's own result or refusal; it leaves the trust to reload
-    at its next read (:meth:`ServicePeerTrust.reload_after_change`).
+    replaces the change's own result or refusal; the trust then holds nothing
+    until a background reload succeeds (:meth:`ServicePeerTrust.reload_after_change`).
     """
 
     def __init__(
@@ -254,12 +259,21 @@ class ServicePeerTrust:
     peer disagrees with its configuration, authenticates nothing: reading its
     trust raises the reason as an :class:`AuthError`.
 
-    A reload that fails after a change committed leaves the trust stale rather
-    than failing the change: the records it holds predate a change durable state
-    already has, such as a disabled principal, so it trusts nothing on them. The
-    next read reloads first, and while that fails too, every read refuses with a
-    503 :class:`AuthError`. Only that read touches SQLite on the caller's
-    thread, and only while the trust is stale.
+    A reload that fails after a change committed does not fail the change. The
+    records the trust held predate a change durable state already has, such as
+    a disabled principal, so it drops them and holds nothing: every read refuses
+    with a 503 :class:`AuthError` from memory, never retrying SQLite on the
+    caller's thread, where a busy database would stall the event loop. A
+    background reload retries off the loop, waiting longer after each failure,
+    until one succeeds and the trust answers again.
+
+    Reloads take one lock, and each reads durable state while holding it, so
+    they install their loads in the order they ran: a slow reload never
+    installs an older load over a newer one.
+
+    ``retry_wait`` is how a background reload waits before each attempt, and
+    ``start_retry`` how one is started; by default the retry runs on a daemon
+    thread and waits with :func:`time.sleep`.
     """
 
     def __init__(
@@ -268,17 +282,22 @@ class ServicePeerTrust:
         peers: ServicePeerConfigs,
         *,
         clock: Callable[[], float] = time.time,
+        retry_wait: Callable[[float], object] = time.sleep,
+        start_retry: Callable[[Callable[[], None]], object] | None = None,
     ) -> None:
         self._db_path = db_path
         self._peers: ServicePeerConfigs = MappingProxyType(dict(peers))
         self._clock = clock
+        self._retry_wait = retry_wait
+        self._start_retry = start_retry or _start_daemon_thread
         self._reload_lock = threading.Lock()
         # Replaced whole by each reload, so a reader on another thread sees one
-        # complete load or the next, never a mixture.
+        # complete load or the next, never a mixture. None until the first load,
+        # and again from a failed reload after a change until a retry succeeds.
         self._sites: Mapping[str, IdentitySubjectStatus | AuthError] | None = None
-        # Set when a reload after a change fails; read and cleared under the
-        # reload lock, with the load that clears it.
-        self._stale = False
+        # Whether a background reload is pending; read and set under the reload
+        # lock, so a burst of failed reloads starts one retry.
+        self._retrying = False
 
     @property
     def peers(self) -> ServicePeerConfigs:
@@ -301,23 +320,25 @@ class ServicePeerTrust:
     def reload_after_change(self) -> None:
         """Reload after an identity change, never raising.
 
-        A failure is logged and leaves the trust stale, so the next read
-        reloads before it answers; the change itself stands as it committed or
-        was refused.
+        A failure is logged, the trust drops what it held, and a background
+        reload retries until one succeeds; the change itself stands as it
+        committed or was refused.
         """
         with self._reload_lock:
             try:
                 self._load_locked()
             except Exception:
-                self._stale = True
+                self._sites = None
                 logger.exception(
                     "[IDENTITY] Service-peer trust could not be reloaded after an "
-                    "identity change; it reloads at its next read"
+                    "identity change; it trusts no site until a retry succeeds"
                 )
+                if not self._retrying:
+                    self._retrying = True
+                    self._start_retry(self._retry_until_loaded)
 
     def _load_locked(self) -> None:
         self._sites = MappingProxyType(dict(self._read_sites()))
-        self._stale = False
 
     def _read_sites(self) -> Mapping[str, IdentitySubjectStatus | AuthError]:
         """Each configured site's durable peer status, or why it has none."""
@@ -329,29 +350,32 @@ class ServicePeerTrust:
                 loaded[site_id] = exc
         return loaded
 
-    def _reload_if_stale(self) -> None:
-        if not self._stale:
-            return
-        with self._reload_lock:
-            if not self._stale:
-                return
-            try:
-                self._load_locked()
-            except Exception as exc:
-                logger.warning(
-                    "[IDENTITY] Service-peer trust is still stale: %s", exc
-                )
-                raise AuthError(
-                    "Service-peer trust could not be reloaded after an identity change",
-                    status_code=503,
-                ) from exc
+    def _retry_until_loaded(self) -> None:
+        """Reload, waiting longer after each failure, until one succeeds."""
+        delay = RELOAD_RETRY_FIRST_SECONDS
+        while True:
+            self._retry_wait(delay)
+            with self._reload_lock:
+                try:
+                    self._load_locked()
+                except Exception as exc:
+                    logger.warning(
+                        "[IDENTITY] Service-peer trust reload failed again; "
+                        "retrying in %.1fs: %s",
+                        min(delay * 2, RELOAD_RETRY_MAX_SECONDS),
+                        exc,
+                    )
+                else:
+                    self._retrying = False
+                    logger.info("[IDENTITY] Service-peer trust reloaded")
+                    return
+            delay = min(delay * 2, RELOAD_RETRY_MAX_SECONDS)
 
     def identity_authority(self, **kwargs: Any) -> StorefrontIdentityAuthority:
         """The identity authority whose every binding change reloads this trust."""
         return _TrustReloadingAuthority(self._db_path, self, **kwargs)
 
     def _site_status(self, site_id: str) -> IdentitySubjectStatus:
-        self._reload_if_stale()
         sites = self._sites
         if sites is None:
             raise AuthError(
@@ -388,12 +412,20 @@ class ServicePeerTrust:
 
         A site client verifies each response against what it returns, so a
         response follows the site's rotation as its callbacks do. It reads only
-        memory, so it may run on the event loop.
+        memory, never SQLite, so it may run on the event loop; while the trust
+        holds nothing -- before its first load, or after a reload that failed
+        until a retry succeeds -- it refuses with a 503 :class:`AuthError`.
         """
         return partial(self.site_trusted_set, site_id)
 
 
+def _start_daemon_thread(run: Callable[[], None]) -> None:
+    threading.Thread(target=run, name="service-peer-trust-reload", daemon=True).start()
+
+
 __all__ = [
+    "RELOAD_RETRY_FIRST_SECONDS",
+    "RELOAD_RETRY_MAX_SECONDS",
     "SERVICE_PEER_ROLE",
     "ServicePeerConfigs",
     "ServicePeerConfigurationError",

@@ -51,8 +51,11 @@ buyer-chosen arbiter unchecked.
   durable accepted-generation table is frozen. The `publish` command becomes an API client.
 - **Startup refusal and loop status.** Both storefronts refuse to start when publishing is
   impossible for the whole storefront (no registry or authority pin, no enabled settlement
-  mechanism, no site or a site without exactly one service peer); clauses and lease bounds stay
-  per-pool terms, a pool resolving none being held and reported (in bare metal, also one with
+  mechanism, no site or a site without exactly one service peer). VM no longer has a switch to
+  publish to no registry: a configuration stating `enable_registry_discovery`, whatever its
+  value, refuses to start naming it removed, as one stating `[provisioning.identity]` does, and
+  both refusals are reported under their own heading apart from publication's. Clauses and lease
+  bounds stay per-pool terms, a pool resolving none being held and reported (in bare metal, also one with
   no positive maximum lease duration). Both report each loop's state
   and publication's last cycle in system status; the loop controller serializes each loop's
   timer cycle and step through one `run_cycle` boundary, for every storefront's loops, the
@@ -66,9 +69,19 @@ buyer-chosen arbiter unchecked.
   moves to `kit/config`. Site trust comes from each site's durable service peer in both
   storefronts: responses and callbacks are verified against the same active, rotating
   principals, and bare metal adopts durable service-peer state, written as fresh schema since
-  it has never been deployed outside the development cluster. VM's and the API-credit
+  it has never been deployed outside the development cluster. Every client of a site, VM's
+  early lease termination included, which goes to the site the reservation is recorded at, so
+  VM's shared `[provisioning.identity]` set is retired. A trust reload that fails after an
+  identity change leaves the storefront trusting no site, refusing from memory, until a
+  background reload succeeds. VM's and the API-credit
   storefront's `claims_sweep_interval` becomes `settlement_servicing_interval_seconds`, and the
   old key refuses startup.
+- **A local Helm release that sells.** The chart defaults enable no settlement mechanism, so
+  `helm/local-values.yaml`, which `make -C helm deploy-local` layers, enables Alkahest on the
+  dev-env chart's Anvil, with that chart's copy of the development address book mounted into
+  Bob's pod, and contact exchange. The storefront chart's `agents` becomes a map keyed by agent
+  name, so an overlay states only what it changes in one agent; a list is refused naming the
+  map, and the subchart ships no default agent.
 - **Alkahest release conditions for every domain.** Listing `demands` are derived by
   `kit/alkahest` from `[Settlement.alkahest]` for every domain, each domain declares the
   release models it can deliver, and `kit/alkahest`'s plan materialization uses exactly the
@@ -116,17 +129,25 @@ None.
 
 ## Impact
 
-- `kit/capacity-publication`: `SiteProjectionState` and its poller.
+- `core/storefront`: `ProjectionCache` runs one operation at a time on a family, its version
+  check included (D2); `ServicePeerTrust` holds each site's service-peer records in memory for
+  response and callback verification, reloading on each identity change and, after a failed
+  reload, in the background; `HealthResponse` gains `lifecycle` and its loop models.
+- `core/storefront-client`: `HealthResponse.lifecycle`.
+- `kit/capacity-publication`: `SiteProjectionState` and its poller; per-site capacity-event
+  cycle outcomes reported to the controller.
 - `kit/storefront`: per-loop serialization of timer cycle and step, per-cycle outcome
-  recording, and a status snapshot on the loop controller.
+  recording, a status snapshot on the loop controller, and fan-out children: per-site names
+  declared under their aggregate loop, which follow its end and alone are issued recorders.
 - `kit/site-client`: a provider of a site's active principals in place of a fixed trust set.
 - `kit/config`: the values-schema generator.
 - `kit/alkahest`: demand derivation, per-domain release-model declaration, and the
   release-condition invariant at plan materialization.
 - `kit/policy`: `escrow_shape_guard` fails closed.
-- `domains/vms/storefront`: consumers onto the injected state; the step; per-site trust;
-  startup refusal; lifecycle status; the generator's section list; demand derivation removed;
-  the interval key rename.
+- `domains/vms/storefront`: consumers onto the injected state; the step; per-site trust, early
+  lease termination routed to the reservation's site, and `[provisioning.identity]` retired;
+  startup refusal, the registry switch removed; lifecycle status; the generator's section list
+  and retired-settings catalogue; demand derivation removed; the interval key rename.
 - `domains/apicredits/storefront`: loops registered with step and interval; the interval key
   rename.
 - `domains/bare_metal/storefront`: publication, recheck, overrides, lifecycle steps, server
@@ -134,14 +155,21 @@ None.
   `settings.toml`, durable service-peer identity state, and a reservation binding that pins the
   site's peer subject; the accepted-generation table frozen.
 - `helm/charts/bare-metal-storefront` and the umbrella: config pass-through, overlay,
-  generated schema, render tests. `helm/charts/storefront`: the interval key rename.
+  generated schema, render tests. `helm/charts/storefront` (0.3.0) and the umbrella (0.3.0):
+  `agents` keyed by name, a per-agent Alkahest address-book mount, the provisioning check on the
+  site's service peer, and the retired keys refused; `helm/charts/dev-env`: the Anvil address
+  book as a ConfigMap; `helm/local-values.yaml` and the fixtures state only what they change.
 - `compose.bare-metal.yml`, `domains/bare_metal/compose.yml`, the root `Makefile`'s
   `e2e-bare-metal-dev-env`, and `e2e-tests/`: file-mounted configuration; bare-metal scenarios
   hold the loops.
 - Wire: additive `lifecycle` and derivation sections in system status; bare metal's
   `site_projections` gains the capacity-bucket family. Deployment: VM storefronts must
-  configure publication and a service peer per site to start; VM's interval key is renamed.
-  The bare-metal chart's values change shape; bare metal has no deployed release to migrate.
+  configure publication and a service peer per site to start; VM's interval key is renamed, and
+  a configuration stating `enable_registry_discovery` or `[provisioning.identity]` refuses to
+  start. A storefront chart values file with a list of agents is refused and is rewritten as a
+  map, an overlay that replaced Bob setting `bob: null`; `make -C helm deploy-local` deploys a
+  Bob selling under Alkahest and contact exchange, given its out-of-band runtime Secret. The
+  bare-metal chart's values change shape; bare metal has no deployed release to migrate.
 - Chart validation runs in three tiers: render tests (Helm, no cluster), a real-loader check of
   a rendered `storefront.json`, and deployment in a local session with a cluster.
 

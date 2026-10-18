@@ -39,6 +39,11 @@ REMOVED_SETTINGS: Mapping[str, str] = {
         "the storefront always publishes to every [registry].urls entry, and one "
         "that cannot publish refuses to start"
     ),
+    "provisioning.identity": (
+        "every site's responses are verified against the principals of the "
+        "[Identity.service_peers] entry bound to that site, which rotate through "
+        "the storefront's identity routes"
+    ),
 }
 
 #: Every retired key, as a dotted path.

@@ -375,10 +375,6 @@ async def client(db, monkeypatch):
     transport = httpx.ASGITransport(app=app)
     with settings_overrides(
         **{
-            "provisioning.identity.principals": [
-                _BUYER_SIGNER.identity.model_dump(mode="json"),
-                _SELLER_SIGNER.identity.model_dump(mode="json"),
-            ],
             "wallet.address": _RECIPIENT,
         }
     ):

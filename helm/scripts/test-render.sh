@@ -41,14 +41,12 @@ render "$EVM_RENDERED" "$RELEASE-evm" "$CHART_DIR" \
 render "$OVERLAP_RENDERED" "$RELEASE-overlap" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/identity-overlap-values.yaml" \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].identifier=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI'
+    --set-string 'storefront.agents.bob.config.Identity.service_peers.provisioning_default.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.config.Identity.service_peers.provisioning_default.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' \
+    --set-string 'storefront.agents.bob.config.Identity.administrators.operator.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.config.Identity.administrators.operator.principals[1].identifier=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' \
+    --set-string 'storefront.agents.bob.internalRegistryTrust.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y'
 render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/two-registries-values.yaml"
@@ -245,19 +243,19 @@ expect_render_failure \
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "legacy hosted values fail schema/render" \
-    --set 'storefront.agents[0].config.hostedSettlement.enabled=true'
+    --set 'storefront.agents.bob.config.hostedSettlement.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "a removed mechanism's section fails the generated storefront schema" \
-    --set 'storefront.agents[0].config.Settlement.stripe.enabled=true'
+    --set 'storefront.agents.bob.config.Settlement.stripe.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "an unknown payments field fails the generated storefront schema" \
-    --set-string 'storefront.agents[0].config.Settlement.arkhai_payments.api_key=forbidden'
+    --set-string 'storefront.agents.bob.config.Settlement.arkhai_payments.api_key=forbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
     "a wallet key in pass-through config fails the generated storefront schema" \
-    --set-string 'storefront.agents[0].config.Wallet.private_key=0xforbidden'
+    --set-string 'storefront.agents.bob.config.Wallet.private_key=0xforbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "key-gated registry without an acquisition pointer fails render" \

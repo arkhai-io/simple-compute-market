@@ -43,7 +43,8 @@ def test_storefront_authorities_are_isolated(tmp_path):
             "identifier": env["PROVISIONING_IDENTITY__IDENTIFIER"].removeprefix("@str "),
         }
         authority_ids.add(tuple(expected.values()))
-        assert profile["provisioning"]["identity"]["principals"] == [expected]
+        # The site's responses verify against its service peer alone.
+        assert "identity" not in profile["provisioning"]
         peer = profile["Identity"]["service_peers"]["provisioning_default"]
         assert peer["principals"] == [expected]
         assert peer["site_id"] == env["PROVISIONING_STOREFRONT_SITE_ID"]

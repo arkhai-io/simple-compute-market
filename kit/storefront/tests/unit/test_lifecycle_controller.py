@@ -284,6 +284,63 @@ class TestALoopThatEnds:
         assert controller.failed_loop_names() == ["alpha"]
 
 
+class TestAFanOutsChildrenFollowItsEnd:
+    """Per-site names a fan-out declares have no task of their own; the
+    aggregate loop's task runs their cycles, so once it ends they run none."""
+
+    async def test_children_report_the_fan_outs_end(self, controller):
+        declared = asyncio.Event()
+
+        async def _fan_out() -> None:
+            for site in ("east", "west"):
+                controller.declare(f"events:{site}", parent="events")()
+            declared.set()
+            raise RuntimeError("fan-out failed")
+
+        controller.start_loop(StorefrontBackgroundTask(name="events", task_factory=_fan_out))
+        await asyncio.wait_for(declared.wait(), timeout=1)
+        await _ended(controller, "events")
+
+        assert controller.states() == {
+            "events": "exited",
+            "events:east": "exited",
+            "events:west": "exited",
+        }
+        assert controller.failed_loop_names() == ["events", "events:east", "events:west"]
+        assert controller.snapshot()["events:east"].state == "exited"
+
+    async def test_a_pause_does_not_wait_for_the_children_of_an_ended_fan_out(self):
+        controller = StorefrontLoopController(quiescence_timeout=_FOREVER)
+
+        async def _fan_out() -> None:
+            controller.declare("events:east", parent="events")()
+
+        controller.start_loop(StorefrontBackgroundTask(name="events", task_factory=_fan_out))
+        await _ended(controller, "events")
+
+        states = await asyncio.wait_for(controller.pause(), timeout=1)
+
+        assert states == {"events": "exited", "events:east": "exited"}
+
+    async def test_children_of_a_cancelled_fan_out_report_it_cancelled(self, controller):
+        started = asyncio.Event()
+
+        async def _fan_out() -> None:
+            controller.declare("events:east", parent="events")()
+            started.set()
+            await asyncio.Event().wait()
+
+        handle = controller.start_loop(
+            StorefrontBackgroundTask(name="events", task_factory=_fan_out)
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert controller.states()["events:east"] == "running"
+        handle.cancel()
+        await asyncio.gather(handle, return_exceptions=True)
+
+        assert controller.states()["events:east"] == "cancelled"
+
+
 class TestGateNameDiscipline:
     async def test_gating_under_an_unregistered_name_is_reported(self, controller, caplog):
         """A misspelled name acknowledges something nobody waits on.
@@ -990,39 +1047,66 @@ class TestCycleOutcomes:
 
     async def test_a_cycle_a_kit_runtime_ran_is_recorded_under_its_name(self):
         """A per-site cycle a kit runtime serialized itself reports its outcome
-        here, disclosed by the same rule, and status reads it in the snapshot
-        beside the loop's own state."""
+        through the recorder its declared name was issued, disclosed by the same
+        rule, and status reads it in the snapshot beside the loop's own state."""
         stamp = datetime(2026, 10, 16, 9, 0, tzinfo=UTC)
         controller = StorefrontLoopController(
             disclosed_errors=(_ConfigurationProblem,), clock=lambda: stamp
         )
-        gate = controller.declare("events:east")
+        gate = controller.declare("events:east", parent="events")
+        controller.declare("events:west", parent="events")
         assert gate() is False
+        east = controller.cycle_recorder("events:east")
+        west = controller.cycle_recorder("events:west")
         secret_url = "https://east.invalid/feed?token=canary-91c2"
 
-        controller.record_cycle("events:east")
+        east()
         assert controller.last_outcome("events:east") == CycleOutcome(
             finished_at=stamp, trigger="timer", completed=True
         )
 
-        controller.record_cycle("events:east", error=ConnectionError(secret_url))
-        controller.record_cycle(
-            "events:west", error=_ConfigurationProblem("site 'west' has no peer")
-        )
+        east(ConnectionError(secret_url))
+        west(_ConfigurationProblem("site 'west' has no peer"))
 
         snapshot = controller.snapshot()
-        east = snapshot["events:east"]
-        assert east.state == "running"
-        assert east.last_outcome.completed is False
-        assert east.last_outcome.stage == "run"
-        assert east.last_outcome.error.to_dict() == {
+        reported = snapshot["events:east"]
+        assert reported.state == "running"
+        assert reported.last_outcome.completed is False
+        assert reported.last_outcome.stage == "run"
+        assert reported.last_outcome.error.to_dict() == {
             "type": "ConnectionError",
             "message": None,
         }
-        assert secret_url not in repr(east.to_dict())
+        assert secret_url not in repr(reported.to_dict())
         assert snapshot["events:west"].last_outcome.error.message == (
             "site 'west' has no peer"
         )
+
+    async def test_only_a_fan_outs_declared_child_is_issued_a_recorder(self, controller):
+        """A loop whose cycles the controller runs cannot be written to, and a
+        name nothing runs cannot report a cycle."""
+
+        async def _step() -> dict:
+            return {}
+
+        controller.register_loop("timed", step=_step, interval_seconds=_FOREVER)
+        controller.register_step("stepped", route="stepped", step=_step)
+        controller.declare("gated-alone")
+        controller.declare("timed", parent="events")
+        controller.declare("stepped", parent="events")
+        for name in ("never-declared", "gated-alone", "timed", "stepped"):
+            with pytest.raises(ValueError, match=repr(name)):
+                controller.cycle_recorder(name)
+        assert controller.snapshot()["timed"].last_outcome is None
+
+    async def test_a_recorder_records_nothing_once_its_fan_out_is_torn_down(self, controller):
+        controller.declare("events:east", parent="events")
+        record = controller.cycle_recorder("events:east")
+        controller.clear_loops()
+
+        record()
+
+        assert controller.last_outcome("events:east") is None
 
     async def test_a_timer_cycle_that_fails_is_recorded_as_a_step_would_be(self, observed):
         controller, lock = observed

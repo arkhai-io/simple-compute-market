@@ -217,12 +217,13 @@ storefront:
 
   # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
   # client and is invoked as a one-shot process (or a helm-test Job),
-  # not deployed alongside the storefront. Add more agents: entries to
-  # run multiple seller identities on one cluster.
+  # not deployed alongside the storefront. Agents are keyed by name: add a key
+  # to run another seller identity on one cluster, and in an overlay state only
+  # what changes, since Helm merges maps key by key (null removes a key).
   # See helm/charts/storefront/values.yaml for the per-agent shape: `config`
   # is the storefront's own configuration and passes through unchanged.
   agents:
-    - name: bob
+    bob:
       port: 8001
       component: seller
       identity:
@@ -276,10 +277,6 @@ storefront:
           source_confirmation_seconds: 3600
         provisioning:
           mode: mock
-          identity:
-            principals:
-              - scheme: eip191
-                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
         negotiation:
           policies:
             - has_matching_inventory_guard

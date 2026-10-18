@@ -243,9 +243,10 @@ class StorefrontLoopController:
         #: read once per cycle is logged once.
         self._unregistered_reported: set[str] = set()
         #: Gated names with no task handle of their own, such as per-site
-        #: pollers whose fan-out a kit runtime owns. Declaring one is what makes
-        #: a pause wait for it.
-        self._declared: set[str] = set()
+        #: pollers whose fan-out a kit runtime owns, each with the loop whose
+        #: task runs its cycles when it was declared as that fan-out's child.
+        #: Declaring one is what makes a pause wait for it.
+        self._declared: dict[str, str | None] = {}
         self._steps: dict[str, _RegisteredStep] = {}
         #: Loops whose timer this controller runs, by loop name.
         self._loops: dict[str, _RegisteredLoop] = {}
@@ -376,13 +377,28 @@ class StorefrontLoopController:
             )
         self._steps[route] = _RegisteredStep(name=name, step=step, preview=preview)
 
-    def declare(self, name: str) -> Callable[[], bool]:
-        """Declare a gated name this controller holds no handle for, and bind its gate."""
+    def declare(self, name: str, *, parent: str | None = None) -> Callable[[], bool]:
+        """Declare a gated name this controller holds no handle for, and bind its gate.
 
-        self._declared.add(name)
+        `parent` names the loop whose task runs this name's cycles: a fan-out,
+        such as a kit runtime's per-site pollers inside one aggregate loop.
+        Once that loop's task has ended, nothing runs this name's cycles either,
+        so it reports the loop's terminal state rather than the state its gate
+        last left, and a pause no longer waits for it. Only a name declared with
+        its parent is issued a `cycle_recorder`.
+        """
+
+        self._declared[name] = parent
         self._acked.setdefault(name, asyncio.Event())
         self._logger.info("[LIFECYCLE] declared gated name %s (no handle)", name)
         return partial(self.gate, name)
+
+    def _ended_parent(self, name: str) -> asyncio.Task[Any] | None:
+        """The ended task of the loop running a declared name's cycles, if it ended."""
+
+        parent = self._declared.get(name)
+        handle = self._handles.get(parent) if parent is not None else None
+        return handle if handle is not None and handle.done() else None
 
     def _log_loop_completion(self, name: str, handle: asyncio.Task[Any]) -> None:
         """Report a loop that ended, at the moment it ends.
@@ -551,7 +567,11 @@ class StorefrontLoopController:
             self._acked[name].wait()
             for name, handle in self._handles.items()
             if not handle.done() and name in self._acked
-        ] + [self._acked[name].wait() for name in sorted(self._declared) if name in self._acked]
+        ] + [
+            self._acked[name].wait()
+            for name in sorted(self._declared)
+            if name in self._acked and self._ended_parent(name) is None
+        ]
         if not pending:
             return
         try:
@@ -564,6 +584,7 @@ class StorefrontLoopController:
                 n
                 for n in [*self._handles, *self._declared]
                 if (n not in self._handles or not self._handles[n].done())
+                and self._ended_parent(n) is None
                 and not self._acked[n].is_set()
             )
             never_gated = sorted(n for n in unacked if not self._gate_calls.get(n))
@@ -591,13 +612,14 @@ class StorefrontLoopController:
         `pausing`: a loop that has never reached its gate cannot observe a
         pause, while a `pausing` loop has a cycle in flight that will finish.
         `exited` is distinct from `paused`: a loop that ended on its own is
-        neither idle nor healthy.
+        neither idle nor healthy. A name declared as a fan-out's child reports
+        its parent loop's `exited` or `cancelled` once that loop has ended.
         """
 
         paused = self._pause_requested
         states: dict[str, str] = {}
         entries: list[tuple[str, asyncio.Task[Any] | None]] = [
-            (n, None) for n in sorted(self._declared)
+            (n, self._ended_parent(n)) for n in sorted(self._declared)
         ] + list(self._handles.items())
         for name, handle in entries:
             if handle is not None and handle.done():
@@ -752,24 +774,41 @@ class StorefrontLoopController:
         if cycle is not None and cycle.controller is self:
             cycle.stage = stage
 
-    def record_cycle(
-        self,
-        name: str,
-        *,
-        error: BaseException | None = None,
-        trigger: str = TIMER_TRIGGER,
-    ) -> None:
-        """Record the outcome of one cycle that ran outside `run_cycle`.
+    def cycle_recorder(self, name: str) -> Callable[..., None]:
+        """Where a fan-out child's timer cycles report their outcomes.
 
         A kit runtime that fans one loop out into independent per-site cycles
         serializes each site's cycle under that site's own lock, not this
-        controller's, so it reports each cycle its timer ran here, under the
-        site's loop name. The outcome is recorded as `run_cycle` records one: a
-        failure is in the one stage such a cycle has, and its message is shown
-        only for a disclosed error type.
+        controller's, so each cycle its timer ran is reported through this
+        recorder, under the site's name: `record(error=None)` once per cycle,
+        `error` being the exception that ended a failed one. The outcome is
+        recorded as `run_cycle` records one: a failure is in the one stage such
+        a cycle has, and its message is shown only for a disclosed error type.
+
+        Only a name declared with its parent loop is issued one, so no caller
+        can record an outcome for a loop whose cycles this controller runs
+        itself, or for a name nothing runs. Raises `ValueError` otherwise. A
+        recorder issued before `clear_loops` records nothing after it.
         """
 
-        self._record(name, trigger, DEFAULT_CYCLE_STAGE, error, self._generation)
+        if self._declared.get(name) is None:
+            raise ValueError(
+                f"{name!r} was not declared as a fan-out's child; only those "
+                "names record cycles of their own"
+            )
+        if name in self._loops or name in self._handles or any(
+            registered.name == name for registered in self._steps.values()
+        ):
+            raise ValueError(f"{name!r} is a loop whose cycles this controller runs")
+
+        # A recorder outlives no teardown: once `clear_loops` has dropped the
+        # fan-out it was issued for, its cycles record nothing.
+        generation = self._generation
+
+        def record(error: BaseException | None = None) -> None:
+            self._record(name, TIMER_TRIGGER, DEFAULT_CYCLE_STAGE, error, generation)
+
+        return record
 
     def _record(
         self,

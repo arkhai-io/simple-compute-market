@@ -284,11 +284,16 @@ unconfigured; and always starting a loop that fails every cycle.
   publish", since a stale key is not a reason publication is impossible (05 F10).
 - *Each capacity-event site poller records its own outcome* (06 F4). The kit's fan-out keeps
   each site's cycle under that site's cursor lock rather than the controller's, so each site's
-  timer cycle reports to a recorder the controller provides (`record_cycle`) under the site's
-  loop name, `capacity_events_poller:<site>`, and status reports it; a failure is recorded by
-  type unless disclosed, as every cycle's is. The aggregate `capacity-events` step keeps its own
-  outcome, and the aggregate loop, which runs no cycle, records none. Rejected: narrowing the
-  market-composition requirement to exempt the pollers.
+  timer cycle reports to a recorder the controller provides under the site's loop name,
+  `capacity_events_poller:<site>`, and status reports it; a failure is recorded by type unless
+  disclosed, as every cycle's is. The aggregate `capacity-events` step keeps its own outcome, and
+  the aggregate loop, which runs no cycle, records none. Rejected: narrowing the
+  market-composition requirement to exempt the pollers. As revised on 2026-10-18 (08 F4, F5):
+  each site's name is declared as the aggregate loop's child (`declare(name, parent=)`), so once
+  the aggregate's task has ended the site reports its `exited` or `cancelled` state and a pause
+  no longer waits for it; and the controller issues a recorder (`cycle_recorder`) only for a
+  name so declared, never for a loop whose cycles it runs, replacing a `record_cycle` that wrote
+  under any name.
 - *The development release can start* (06 F1 / 05 F2). The charts' defaults enable no
   settlement mechanism, so a release from them alone is refused, as intended: Alkahest needs a
   chain and wallet a production release supplies. `helm/local-values.yaml`, which
@@ -297,7 +302,24 @@ unconfigured; and always starting a loop that fails every cycle.
   account 2, its key in the out-of-band `arkhai-bob-runtime` overlay as before), and contact
   exchange with a development contact on a reserved domain. A render test runs the
   storefront's real startup refusal over that render's `storefront.json`, and over the defaults'
-  to show it refuses them. Rejected: enabling a mechanism in the chart defaults.
+  to show it refuses them. Rejected: enabling a mechanism in the chart defaults. As revised on
+  2026-10-18 (08 F1, F7):
+  - *The local release mounts its address book.* The storefront chart gains a per-agent
+    `alkahestAddressBook` (an existing ConfigMap mounted read-only, as the bare-metal chart's),
+    and the dev-env chart, whose Anvil state the book describes, carries a copy of
+    `kit/alkahest`'s development Anvil address book as a ConfigMap; `helm/local-values.yaml`
+    mounts it and both address paths name the mounted file, so Bob's Alkahest listings derive
+    their release conditions. The `STOREFRONT_PYTHON` render check derives them over the local
+    render, not only the startup refusal. Rejected: the packaged copy's path inside the image's
+    virtual environment, and a reserved name the kit resolves.
+  - *The storefront chart's agents are keyed by name.* `storefront.agents` is a map from each
+    agent's name to its entry rather than a list, because Helm merges maps key by key and
+    replaces lists, so an overlay states only what it changes in one agent; a null removes a key
+    or an agent. A list is refused by the values schema naming the map. The storefront subchart
+    ships no default agent, since Helm cannot remove a subchart's default from a parent's values;
+    the umbrella's values declare Bob. The bare-metal chart keeps its one agent's keys at its top
+    level (C8). Rejected: a drift guard over the repeated agent, alone or before a separate
+    change.
 
 ### D14. Bare-metal configuration follows the VM storefront's conventions
 
@@ -329,18 +351,27 @@ Secrets is owed. Accepted scope beyond the original proposal.
   site's peer subject; the principal recorded on it is an audit record, so a restart after an
   authorized rotation keeps its reservations. Bare metal has never been deployed outside the
   development cluster, so these schema changes are written as fresh schema with no upgrade or
-  backfill logic. `[provisioning.identity]` remains only for the provisioning service client.
-  VM gains per-site pinning; bare metal gains rotation; site URLs are public configuration as
+  backfill logic. VM gains per-site pinning; bare metal gains rotation; site URLs are public configuration as
   VM's are. Bare metal's administrators stay on configuration. As delivered (Section 10 and its
-  round 05/06 fixes): every client that talks to a site authority -- VM's capacity clients and its
-  per-site fulfillment clients alike -- verifies against that site's peer through one
-  `ServicePeerTrust`, and `[provisioning.identity]` is read only for the provisioning-service
-  client (`fulfillment_service._provisioning_client`), which addresses
-  `provisioning.service_url` rather than a site (05 F1; the plan's 10.2 first left the per-site
-  fulfillment clients on it, which this decision does not allow). A reload of the trust that
-  fails after a change committed never fails or masks the change; the trust turns stale, trusts
-  nothing on its old records, and reloads at its next read, refusing with 503 while that fails
-  (05 F4). Rejected: configuration as the
+  round 05/06 and round 08 fixes): every client that talks to a site authority -- VM's capacity
+  clients and its per-site fulfillment clients alike -- verifies against that site's peer through
+  one `ServicePeerTrust` (05 F1; the plan's 10.2 first left the per-site fulfillment clients on
+  `[provisioning.identity]`, which this decision does not allow). VM's early lease termination,
+  the plumbing `vm-storefront-fulfillment` keeps for a future buyer-requested termination (the
+  buyer asks the storefront, which asks the site), goes through the per-site fulfillment client
+  to the site the reservation is recorded at, as bare metal's does, so it too verifies against
+  that site's peer; it was the last reader of `[provisioning.identity]`, which is retired: the
+  storefront refuses to start on it, the values schema and `market-storefront config set` refuse
+  it, and the chart's check of the release's provisioning principal is on the site's service peer
+  alone (decided with the owner 2026-10-18, 08 F2; rejected: deleting the termination plumbing,
+  which the permanent spec keeps). A reload of the trust that fails after a change committed
+  never fails or masks the change (05 F4): the trust drops the records it held, which predate
+  the change, so every read refuses with 503 from memory and none retries SQLite on the event
+  loop, and a background reload retries off the loop, waiting longer after each failure, until
+  one succeeds. Its reloads take one lock and read durable state while holding it, so a slower
+  reload never installs an older load (decided with the owner 2026-10-18, 08 F6; rejected: a
+  stale flag that retried the read on the caller's thread at every verification, which 10.13
+  first delivered). Rejected: configuration as the
   response trust set, which splits response and callback trust on every rotation and leaves
   bare-metal rotation blocking restarts; durable trust for VM only; and a new per-site table
   renaming VM's keys.

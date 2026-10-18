@@ -410,11 +410,6 @@ _INIT_USER_TEMPLATE = """\
 # poll_interval = 15
 # preflight_timeout = 30                        # how long startup waits for /health to come up
 # fail_on_unreachable = true                    # set false in dev when service comes up later
-# Public response authority overlap for the provisioning service:
-# [provisioning.identity]
-# principals = [
-#   { scheme = "ed25519", identifier = "<service-public-key>" },
-# ]
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,

@@ -15,7 +15,9 @@ the chart pins replicaCount + strategy: Recreate to enforce a single
 writer.
 */}}
 {{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
-{{- range $agent := .Values.agents }}
+{{- range $name, $entry := .Values.agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

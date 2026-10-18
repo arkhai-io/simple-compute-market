@@ -104,6 +104,20 @@ def test_the_removed_registry_switch_is_refused_and_registries_are_still_checked
     ]
 
 
+def test_the_removed_provisioning_trust_set_is_refused() -> None:
+    """Each site's responses verify against its own service peer, so a
+    configured provisioning trust set would be trust nothing reads."""
+    source = _source(
+        provisioning={"identity": {"principals": [{"scheme": "ed25519", "identifier": "x"}]}}
+    )
+    assert retired_setting_problems(source) == [
+        "provisioning.identity was removed: every site's responses are verified "
+        "against the principals of the [Identity.service_peers] entry bound to "
+        "that site, which rotate through the storefront's identity routes"
+    ]
+    assert publication_startup_problems(source) == []
+
+
 def test_no_enabled_settlement_mechanism_is_refused() -> None:
     for settlement in (
         {"schema_version": 1, "priority": []},

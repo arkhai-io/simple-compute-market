@@ -12,11 +12,13 @@ as startup seeds it and injected through the container, as every other
 collaborator is.
 
 An operator rotates a site's peer through the administrator identity routes
-with the typed client. The storefront then calls the site as it does in
-operation -- a ``site-projections`` cycle polls it, and a fulfillment status
-read reaches its provisioning surface -- and the site sends a
-``capacity_released`` callback signed by each principal. Nothing is rebuilt,
-reconfigured, or restarted.
+with the typed client. A ``site-projections`` cycle, run through the
+administrator route, then polls the site as the storefront does in operation;
+the fulfillment client the storefront builds is called directly for a status
+read and a lease termination at the site's provisioning surface, since no
+storefront route makes either; and the site sends a ``capacity_released``
+callback signed by each principal. Nothing is rebuilt, reconfigured, or
+restarted.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from compute_provisioning_contracts import (
     IDENTITY_IDENTIFIER_HEADER,
     IDENTITY_SCHEME_HEADER,
     PROVISIONING_ROUTE_TABLE,
+    LeaseState,
     REQUEST_ID_HEADER,
     ROLE_HEADER,
     SIGNATURE_HEADER,
@@ -75,6 +78,7 @@ from market_storefront.middleware.service_peer_auth import (
     service_peer_callback_middleware,
 )
 from market_storefront.services import capacity_client
+from market_storefront.services.fulfillment_service import terminate_vm_lease
 from market_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import FakeSite
@@ -96,27 +100,41 @@ def _pins(signer: Ed25519Signer) -> TrustedIdentitySet:
 
 
 class _FulfillmentSurface:
-    """One site's compute-provisioning fulfillment routes, answering a status
-    read signed as whichever principal its fake site currently signs with."""
+    """One site's compute-provisioning routes, answering a fulfillment status
+    read and a lease termination signed as whichever principal its fake site
+    currently signs with, and recording each termination it receives."""
 
     def __init__(self, site: FakeSite) -> None:
         self.site = site
+        self.terminations: list[tuple[str, Any]] = []
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        fulfillment_id = path.split("/")[-2]
-        body = {
-            "fulfillment_id": fulfillment_id,
-            "capacity_reservation_id": "reservation-1",
-            "state": "active",
-        }
+        sent = json.loads(request.content) if request.content else EMPTY_BODY
+        if path.endswith("/terminate"):
+            reservation = path.split("/")[-2]
+            self.terminations.append((reservation, sent.get("reason")))
+            body = {
+                "capacity_reservation_id": reservation,
+                "deal_ref": {"negotiation_id": "negotiation-1"},
+                "offering_mode": "vm",
+                "executor_target": "host-1",
+                "lease_end_utc": "2030-01-01T00:00:00+00:00",
+                "status": "releasing",
+            }
+        else:
+            body = {
+                "fulfillment_id": path.split("/")[-2],
+                "capacity_reservation_id": "reservation-1",
+                "state": "active",
+            }
         contract, resource = PROVISIONING_ROUTE_TABLE.resolve(
             request.method,
             path,
-            canonical_provisioning_request_body(request.method, path, EMPTY_BODY, query={}),
+            canonical_provisioning_request_body(request.method, path, sent, query={}),
         )
         signer = self.site.signer
         signed = sign_response(
@@ -156,6 +174,7 @@ class World:
     runtime: Any
     fulfillment: Any
     sites: dict[str, FakeSite]
+    surfaces: dict[str, _FulfillmentSurface]
 
 
 _CONTAINER_FIELDS = (
@@ -181,6 +200,7 @@ async def world(tmp_path) -> AsyncIterator[World]:
     sites["home"].signer = _HOME
     sites["away"].signer = _AWAY
     sites["home"].add_resource("home-gpu", 4, attributes={"offering_mode": "vm"})
+    surfaces = {name: _FulfillmentSurface(site) for name, site in sites.items()}
     trust = ServicePeerTrust(
         db.db_path,
         {
@@ -206,7 +226,7 @@ async def world(tmp_path) -> AsyncIterator[World]:
             signer=signer,
             caller_role="seller",
             expected_authorities=authorities,
-            transport=_FulfillmentSurface(sites[site_id]).transport(),
+            transport=surfaces[site_id].transport(),
         )
 
     try:
@@ -263,6 +283,7 @@ async def world(tmp_path) -> AsyncIterator[World]:
                     runtime=runtime,
                     fulfillment=fulfillment,
                     sites=sites,
+                    surfaces=surfaces,
                 )
     finally:
         for name, value in saved.items():
@@ -386,3 +407,30 @@ async def test_one_sites_principal_verifies_no_other_sites_responses(world: Worl
     assert await _fulfillment_verifies(world, "away", _AWAY)
     assert not await _fulfillment_verifies(world, "home", _AWAY)
     assert not await _fulfillment_verifies(world, "away", _HOME)
+
+
+async def test_a_lease_terminates_only_at_its_sites_and_verifies_against_its_peer(
+    world: World,
+):
+    """Early termination goes to the site the reservation is recorded at, and
+    that site's answer is trusted only under that site's own peer."""
+    lease = await terminate_vm_lease(
+        world.fulfillment,
+        capacity_reservation_id="reservation-9",
+        site_id="away",
+        reason="buyer requested early termination",
+    )
+
+    assert lease.capacity_reservation_id == "reservation-9"
+    assert lease.status is LeaseState.RELEASING
+    assert world.surfaces["away"].terminations == [
+        ("reservation-9", "buyer requested early termination")
+    ]
+    assert world.surfaces["home"].terminations == []
+
+    # The home site's principal does not verify the away site's answer.
+    world.sites["away"].signer = _HOME
+    with pytest.raises(ComputeProvisioningAuthenticationError):
+        await terminate_vm_lease(
+            world.fulfillment, capacity_reservation_id="reservation-9", site_id="away"
+        )

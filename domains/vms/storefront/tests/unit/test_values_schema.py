@@ -100,11 +100,27 @@ def test_identity_is_closed_to_its_public_keys_at_every_level(definition) -> Non
         assert _allowed(principal, "scheme", "identifier")
 
 
+def _overlaid(base, overlay):
+    """``overlay`` merged into ``base`` as Helm merges values files: mappings
+    key by key, a ``None`` removing the key, and anything else replaced."""
+    if not isinstance(base, dict) or not isinstance(overlay, dict):
+        return overlay
+    merged = dict(base)
+    for key, value in overlay.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = _overlaid(base.get(key), value)
+    return merged
+
+
 def _shipped_identity_tables():
     """Every operator-written storefront ``[Identity]`` table this repository ships.
 
     The packaged ``settings.toml`` is left out: its empty principal is a
-    placeholder the storefront refuses until an operator states one.
+    placeholder the storefront refuses until an operator states one. Each Helm
+    overlay's agents are read as the release renders them, merged into the
+    umbrella's default agents, since an overlay states only what it changes.
     """
     toml_files = (
         "domains/vms/storefront/storefront.alice.toml",
@@ -115,25 +131,23 @@ def _shipped_identity_tables():
         for key, value in document.items():
             if key.lower() == "identity":
                 yield name, value
-    values_files = [
-        REPO / "helm" / "values.yaml",
-        REPO / "helm" / "charts" / "storefront" / "values.yaml",
-        *sorted((REPO / "helm" / "fixtures").glob("*-values.yaml")),
-    ]
-    for path in values_files:
-        document = yaml.safe_load(path.read_text())
-        if not isinstance(document, dict):
-            continue
-        agents = (document.get("storefront") or {}).get("agents") or document.get("agents") or []
-        for agent in agents:
+    umbrella = REPO / "helm" / "values.yaml"
+    defaults = yaml.safe_load(umbrella.read_text())["storefront"]["agents"]
+    releases = [(umbrella, defaults)]
+    for path in [REPO / "helm" / "local-values.yaml", *sorted((REPO / "helm" / "fixtures").glob("*-values.yaml"))]:
+        overlay = ((yaml.safe_load(path.read_text()) or {}).get("storefront") or {}).get("agents")
+        if overlay:
+            releases.append((path, _overlaid(defaults, overlay)))
+    for path, agents in releases:
+        for name, agent in agents.items():
             for key, value in (agent.get("config") or {}).items():
                 if key.lower() == "identity":
-                    yield f"{path.relative_to(REPO)}:{agent.get('name')}", value
+                    yield f"{path.relative_to(REPO)}:{name}", value
 
 
 def test_identity_declaration_accepts_every_shipped_identity_table() -> None:
     tables = list(_shipped_identity_tables())
-    assert len(tables) >= 8
+    assert len(tables) >= 8, [source for source, _ in tables]
     for source, table in tables:
         # Configuration is text, so validate as JSON: strict models take enum
         # values as their string form there, as the storefront's parsers do.

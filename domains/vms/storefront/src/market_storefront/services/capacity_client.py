@@ -34,6 +34,8 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
+    LeaseTermination,
+    LeaseView,
 )
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
@@ -538,6 +540,23 @@ class AggregateFulfillmentClient:
 
         return await self._sites[site_id].begin_fulfillment_teardown(fulfillment_id)
 
+    async def terminate_lease(
+        self,
+        capacity_reservation_id: str,
+        *,
+        site_id: str,
+        reason: str | None = None,
+    ) -> LeaseView:
+        """End the reservation's lease at its recorded site, and only there.
+
+        The site converges teardown through the lease's fulfillment and releases
+        the capacity once; terminating a lease already ending returns it as it is.
+        """
+
+        return await self._sites[site_id].terminate_lease(
+            capacity_reservation_id, LeaseTermination(reason=reason)
+        )
+
 
 _fulfillment_aggregate_state: dict[str, Any] = {"key": None, "client": None}
 
@@ -665,14 +684,14 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
     The aggregate name is what the admin advance route addresses and what a
     storefront with no site configured still reports; the per-site gates are
     what actually hold the pollers, since the kit owns their fan-out, and each
-    site's timer cycles record their outcomes under the same per-site names.
+    site's timer cycles record their outcomes under the same per-site names,
+    declared as the aggregate loop's children.
     """
     from market_storefront.utils import config
     from market_storefront.lifecycle import (
         CAPACITY_EVENTS_POLLER,
         capacity_site_cycle_recorder,
-        capacity_site_loop_name,
-        declare_and_gate,
+        capacity_site_gate,
         gate,
         idle,
     )
@@ -686,7 +705,7 @@ async def capacity_events_poller_loop(sqlite_client: Any) -> None:
     await run_capacity_event_pollers(
         functools.partial(runtime.poll_events, interval_seconds=interval),
         gate=functools.partial(gate, CAPACITY_EVENTS_POLLER),
-        site_gate=lambda site: declare_and_gate(capacity_site_loop_name(site)),
+        site_gate=capacity_site_gate,
         wait=idle,
         record_site_cycle=capacity_site_cycle_recorder,
     )

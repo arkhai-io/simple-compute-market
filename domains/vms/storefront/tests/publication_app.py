@@ -647,16 +647,6 @@ async def publication_app(
             previous["resolved_negotiation_runtime"] = getattr(
                 container, "resolved_negotiation_runtime", None
             )
-            stack.enter_context(
-                settings_overrides(
-                    **{
-                        "provisioning.identity.principals": [
-                            BUYER_SIGNER.identity.model_dump(mode="json"),
-                            TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
-                        ],
-                    }
-                )
-            )
             thread_store.get_thread_store(
                 sqlite_client=db,
                 identity=PolicyIdentity(agent_url="http://test-seller:8001"),

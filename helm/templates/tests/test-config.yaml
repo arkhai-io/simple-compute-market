@@ -16,15 +16,15 @@ continue to work.
     {{- $rpcUrl = printf "http://%s:%d" $rpc.host (int $rpc.port) -}}
   {{- end -}}
 {{- end -}}
-{{- $agents := .Values.storefront.agents | default list -}}
+{{- $agents := .Values.storefront.agents | default dict -}}
 {{- if not $agents -}}
   {{- fail "helm test config requires at least one storefront agent" -}}
 {{- end -}}
 {{- $provisioningTargetName := .Values.provisioning.storefront.agentName -}}
 {{- $provisioningStorefrontFound := false -}}
 {{- $provisioningStorefrontTrusted := false -}}
-{{- range $agent := $agents -}}
-  {{- if eq $agent.name $provisioningTargetName -}}
+{{- range $name, $agent := $agents -}}
+  {{- if eq $name $provisioningTargetName -}}
     {{- $provisioningStorefrontFound = true -}}
     {{- $agentIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($agent.config | default dict) "name" "identity") | fromJson -}}
     {{- $agentPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $agentIdentity "name" "principal") | fromJson -}}
@@ -44,20 +44,11 @@ continue to work.
   {{- fail "provisioning storefront principals must include the active storefront signer principal" -}}
 {{- end -}}
 {{- $storefrontTests := .Values.storefront.tests | default dict -}}
-{{- $targetName := $storefrontTests.targetAgentName | default "" -}}
-{{- $targetAgent := first $agents -}}
-{{- if $targetName -}}
-  {{- $found := false -}}
-  {{- range $agent := $agents -}}
-    {{- if eq $agent.name $targetName -}}
-      {{- $targetAgent = $agent -}}
-      {{- $found = true -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if not $found -}}
-    {{- fail (printf "storefront test targetAgentName %q did not match any agent" $targetName) -}}
-  {{- end -}}
+{{- $targetName := $storefrontTests.targetAgentName | default (first (keys $agents | sortAlpha)) -}}
+{{- if not (hasKey $agents $targetName) -}}
+  {{- fail (printf "storefront test targetAgentName %q did not match any agent" $targetName) -}}
 {{- end -}}
+{{- $targetAgent := merge (dict "name" $targetName) (index $agents $targetName) -}}
 {{- $targetConfig := $targetAgent.config | default dict -}}
 {{- /* Smoke tests talk to the registry the target storefront uses: its first
 configured URL and that URL's trust entry, or the internal registry and the
