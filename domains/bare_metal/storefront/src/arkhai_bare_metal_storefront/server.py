@@ -60,10 +60,12 @@ async def _start_runtime(runtime: BareMetalStorefrontRuntime) -> None:
 
 
 async def _stop_runtime(runtime: BareMetalStorefrontRuntime) -> None:
-    """Cancel every loop and wait for each to end, so none outlives the app.
+    """Cancel every loop and wait for each task to end, so none outlives the app.
 
-    A publication cycle cut off here unwinds its worker thread before the
-    event loop it runs on closes.
+    No cycle is left running against a runtime its app has uninstalled, and an
+    app started again over the same runtime registers and starts its loops
+    afresh. A publication cycle cancelled mid-run stops its worker thread
+    through the kit's cycle driver; this waits for the loop's task only.
     """
     await runtime.loops.stop_loops()
 

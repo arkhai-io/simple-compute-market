@@ -3761,18 +3761,27 @@ store"). Touches bare metal's storefront and `e2e-tests/`.
       fetches no site, sees a change only after a poll, and records no generation; a cycle
       names `compose`, `run`, `converge`. **Moved (level):** "a new pool publishes on the
       timer" needs the running app's timers, so it is in `tests/test_http_system.py`.
-      Application integration through `StorefrontClient`, `tests/test_http_system.py`:
+      `tests/test_http_system.py`, over the real app and its lifespan:
       `test_a_site_declaring_new_supply_is_published_by_the_timer` (loops running, poller at
       0.05 s, publication's interval an hour: the site's new pool is published by a `timer`
       cycle the poller's wake ran; the seam is a cycle factory reporting each completed
-      cycle, waited on with a bound, no sleep); `test_the_projection_step_while_held_polls_and_publication_waits_for_resume`
-      (stepping `site-projections` while held polls and wakes, publication runs nothing until
-      resumed, then publishes); `test_startup_starts_every_loop_on_the_controllers_timer`
-      (the four timers and their routes; shutdown stops them); `test_a_failed_publication_cycle_is_recorded_with_its_stage`
-      (no registry: `compose`, `BareMetalPublicationError` with its message; a cycle raising
-      `ConnectionError` naming a URL: type only); health from held state, both families, no
-      site call (`test_every_site_held_is_reported_loaded_and_health_calls_no_site`) and one
-      site never answering (`unavailable`, outside the gate); the step, preview, and
+      cycle, waited on with a bound, no sleep) and `test_startup_starts_every_loop_on_the_controllers_timer`
+      (the four timers and their routes; shutdown stops them) make no client call: they are
+      the running app's composition observed through the controller and that seam. The
+      timer test's factory builds `BareMetalPublicationCycle` itself, with a recording
+      registry and fixed terms, so `build_publication_cycle` is not exercised on the timer
+      path (the step's tests and the cycle tests cover what it passes).
+      `test_a_failed_publication_cycle_is_recorded_with_its_stage` steps publication through
+      `StorefrontClient` and reads the outcome through the controller, not status (no
+      registry: `compose`, `BareMetalPublicationError` with its message; a cycle raising
+      `ConnectionError` naming a URL: type only). Through `StorefrontClient`:
+      `test_the_projection_step_while_held_polls_and_publication_waits_for_resume`
+      (stepping `site-projections` while held polls and wakes; the pause reports publication
+      at its gate and the controller's snapshot keeps it `paused` with its first cycle's
+      outcome, the gate being re-read under the cycle lock; once resumed the wake runs the
+      cycle that publishes); health from held state, both families, no site call
+      (`test_every_site_held_is_reported_loaded_and_health_calls_no_site`) and one site never
+      answering (`unavailable`, outside the gate); the step, preview, and
       `test_concurrent_publication_steps_run_one_after_the_other` kept (the latter now over
       the controller's held `run_cycle` lock). Recheck, through the typed client
       (`tests/test_http_negotiation.py`): not held (site never answered), stale (the
@@ -3870,7 +3879,13 @@ Section 13 handoff:
   bound (`test_http_system._ObservedCycles`), never a sleep. A runtime with no registry logs
   a failed `compose` at each unheld publication cycle, harmlessly.
 - For the owner: VM's stop hook does not stop its loops; bare metal's does (`design.md` D6,
-  as delivered for bare metal). Whether VM adopts it is open.
+  as delivered for bare metal). Whether VM adopts it, or the kit shell stops every
+  storefront's loops, is `design.md`'s open question.
+- A kit candidate: `lifecycle_steps.site_projection_status` is word for word VM's
+  `services/capacity_client.site_projection_status`; `SiteProjectionState` could offer it.
+- The mock deal's driver now asserts its `site-projections` step fetched a new generation
+  (revision and digest changed), not merely `loaded`, which held before the step; VM's
+  driver's equivalent check after its admin refresh asserts only `loaded` and is as weak.
 - For 17.9, besides its list: `ARCHITECTURE.md` "Capacity publication and multi-domain
   storefront composition" ("bare-metal publication fetches each site's resource-pool
   projection itself on every run") and "Storefront capacity boundary" ("Bare-metal
@@ -3881,7 +3896,38 @@ Section 13 handoff:
   the held projection and wakes the loop; status is judged against the held projection, not
   a recorded generation); `TESTING.md`'s two bare-metal rows become one (publication and
   `site-projections` among the held loops), and `[capacity].source_confirmation_seconds` for
-  bare metal beside VM's.
+  bare metal beside VM's. `design.md` D6's bare-metal decisions go to:
+  `storefront-publication/architecture.md` "Autonomous publication" (bare metal's loops on
+  the controller, stopped at shutdown, its disclosed errors, the window resolved at
+  composition) and "Projection families" (publication reading each site's held view, value
+  and identity, stale included); `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration"
+  (`[capacity].source_confirmation_seconds`, three poll intervals unless stated).
+
+Section 13 check fixes (fresh-context check of `2285e3e..fdaa4fe`; the five reported
+divergences judged justified):
+
+- Removed the orphaned comment of the deleted accepted-generation table in `migrations.py`.
+- `test_app_composition.py`'s lifespan test no longer patches `server._start_runtime` or
+  `_stop_runtime`: it runs the real hooks over a directly built runtime with held loops and
+  observes them through its controller (both loops started, none registered after
+  shutdown).
+- The 13.8 note labels the timer, startup-loop, and failed-cycle tests by what they
+  exercise, and says the timer test's factory builds the cycle itself.
+- The held-step test's hold is read from the controller (gate state and unchanged last
+  outcome) instead of an empty queue observed at an unsynchronized moment.
+- The stop hook's docstring and `design.md` D6 state its real reasons: no cycle running
+  against an uninstalled runtime, clean teardown, a fresh start over the same runtime; it
+  awaits the loops' tasks, not a cycle's worker thread.
+- `design.md`: VM's stop hook as an open question; D2's `values()` sentence points to bare
+  metal's `view()` per site; the D6 decisions' permanent destinations are in the 17.9 list
+  above.
+- `kit/pool-overrides`' `PoolOverrideService` docstring no longer describes an
+  operator-invoked publication; docstring only, so `arkhai-kit-pool-overrides` keeps 0.2.1
+  (a same-version wheel is reinstalled by `reinit`, and its requirements are unchanged).
+- `test_publication_cli.py`'s file-composed case is renamed for what it shows (a runtime
+  composed from the files, handed to the command); its docstring says why no case lets the
+  command compose its own (it would poll the configured site over the network).
+- The mock deal's driver asserts the stepped generation changed. Nits: `__all__` sorted.
 
 ## 14. Bare-metal status and the publish command
 

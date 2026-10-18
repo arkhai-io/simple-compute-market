@@ -507,7 +507,13 @@ async def test_the_projection_step_while_held_polls_and_publication_waits_for_re
     """Stepping the held site-projection poller runs exactly its cycle: it
     polls, sees the site's change, and wakes publication, which stays held and
     publishes only once the loops resume. Spec scenarios "The projection step is
-    run while held" and "The loop is held"."""
+    run while held" and "The loop is held".
+
+    The hold is read from the controller: the pause reports publication at its
+    gate, which its timer reads again under the cycle lock before any cycle, so
+    no cycle starts while the pause stands, and its last outcome is still the
+    first cycle's. Publication's interval is an hour, so only the wake runs the
+    cycle that follows the resume."""
     site = Site(pool("pool-0"))
     cycles = _ObservedCycles()
     runtime = _timed_runtime(str(tmp_path / "storefront.db"), site, cycles)
@@ -515,19 +521,21 @@ async def test_the_projection_step_while_held_polls_and_publication_waits_for_re
 
     async with app.router.lifespan_context(app):
         await cycles.next_cycle()
+        first = runtime.loops.last_outcome(PUBLICATION)
         async with _admin_client(app) as admin:
-            await admin.admin_pause_lifecycle_loops()
+            paused = await admin.admin_pause_lifecycle_loops()
             site.serve(pool("pool-1", member("r1", "pool-1")))
             calls = site.calls
             stepped = await admin.admin_run_lifecycle_cycle("site-projections")
-            held = cycles.completed.empty()
-            still_paused = runtime.loops.is_pause_requested()
+            held = runtime.loops.snapshot()[PUBLICATION]
             await admin.admin_resume_lifecycle_loops()
             resumed = await cycles.next_cycle()
 
+    assert paused["loops"]["publication"] == "paused"
     assert site.calls > calls
     assert stepped["sites"]["site-a"]["resource_pool"]["revision"] == 2
-    assert held and still_paused
+    assert held.state == "paused"
+    assert held.last_outcome is first
     (published,) = _published(resumed)
     assert published["source"]["physical_resource_id"] == "r1"
 

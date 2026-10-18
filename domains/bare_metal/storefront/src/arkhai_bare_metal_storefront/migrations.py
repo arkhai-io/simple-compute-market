@@ -410,9 +410,6 @@ def _refuse_reservations_without_their_peer(conn: sqlite3.Connection) -> None:
         )
 
 
-#: Each site's latest projection generation a publication run accepted. Override
-#: status reads it: publication may run in another process, or before a restart,
-#: so no in-memory record could answer for it.
 def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
     """Abandon threads opened before negotiation moved to the kit runtime, and drop
     the durable trading pause.

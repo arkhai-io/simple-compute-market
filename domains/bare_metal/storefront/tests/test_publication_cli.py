@@ -2,8 +2,11 @@
 
 The command hands the cycle the runtime's one held projection state, loaded
 with one poll first, and every configured registry; it fails closed before
-constructing a cycle when no projection state exists. It composes the runtime
-from the storefront's configuration files, as the server does.
+constructing a cycle when no projection state exists. Every case hands the
+command its runtime: composing one itself, with no runtime given, would poll the
+configured site over the network. One case composes that runtime from the
+configuration files, as the server does, with only the site's transport
+replaced.
 """
 
 from __future__ import annotations
@@ -177,7 +180,7 @@ def test_publication_needs_a_configured_registry(tmp_path):
     assert constructed == []
 
 
-def test_the_command_composes_the_storefront_from_its_configuration_files(
+def test_a_runtime_composed_from_the_configuration_files_is_polled_and_published(
     monkeypatch, tmp_path
 ):
     constructed.clear()

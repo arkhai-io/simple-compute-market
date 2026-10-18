@@ -75,10 +75,11 @@ class PoolOverrideService:
     store; the configured sites and a factory for each one's signed client; the
     contribution per offering mode; the market-neutral settlement-clause
     compiler; the source listings derive from; and the two effects a write has
-    on publication. Either effect may be ``None``: a storefront that caches no
-    projection has nothing to refresh, and one whose publication is
-    operator-invoked has no loop to wake, so a write there takes effect at the
-    next publication run.
+    on publication: refreshing the site's held projection, and waking the
+    publication loop. Either may be ``None`` for a storefront composed without
+    it -- one holding no projection of the site has nothing to refresh, and one
+    with no publication loop nothing to wake -- and a write there takes effect at
+    the next publication cycle.
     """
 
     def __init__(

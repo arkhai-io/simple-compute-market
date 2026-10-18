@@ -93,6 +93,7 @@ class BareMetalComputeDealDriver:
         publication view names its host and physical machine, as the storefront
         checks a scheduled resource against the accepted terms.
         """
+        held_before = self._held_generation()
         self.site_operator.create_pool(
             PoolCreate(
                 id=self.pool_id,
@@ -150,8 +151,17 @@ class BareMetalComputeDealDriver:
         # holds, and the scenario holds that poller: one step of it loads the
         # new supply, which publication and the seller's inventory guard read.
         stepped = advance_storefront(self.storefront_admin_client, "site-projections")
-        state = stepped["sites"][self.site_id]["resource_pool"]["state"]
-        assert state == "loaded", stepped
+        held = stepped["sites"][self.site_id]["resource_pool"]
+        assert held["state"] == "loaded", stepped
+        # The step fetched the generation carrying the new pool and machine,
+        # not merely confirmed the one held before the supply was declared.
+        assert (held["revision"], held["digest"]) != held_before, (held_before, stepped)
+
+    def _held_generation(self) -> tuple[Any, Any]:
+        """The resource-pool generation the storefront holds for the lane's site."""
+        health = self.storefront_admin_client.get_health()
+        held = health.site_projections[self.site_id]["resource_pool"]
+        return held.get("revision"), held.get("digest")
 
     # -- negotiation --------------------------------------------------------
 

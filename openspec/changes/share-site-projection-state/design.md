@@ -124,7 +124,9 @@ async def run(self, *, interval: float, gate, wait) -> None
 ```
 
 Publication reads `values()`, which deliberately includes stale generations; a source check
-reads `view()` and confirms only from a `loaded` generation (D5). An unconfigured site given
+reads `view()` and confirms only from a `loaded` generation (D5). (Bare metal's publication
+reads `view()` per site instead, stale included, for the generation's identity: D6, as
+delivered for bare metal.) An unconfigured site given
 to `view` or `refresh_site` raises the kit's `CapacityBindingError`, as
 `CapacityRuntime.site_client` does; an unknown family raises `ValueError`. `refresh_site`
 never raises for a failed fetch: the cache keeps its last generation as `stale` with its
@@ -338,9 +340,11 @@ VM does, with these choices of its own:
   and step.
 - *The loops stop at shutdown* (a divergence: VM's lifespan leaves its loops running until
   the process exits, and its tests stop them with `reset_for_tests`). Bare metal's stop hook
-  cancels and awaits every timer, so a publication cycle cut off at shutdown unwinds its
-  worker thread before the event loop closes, and an app rebuilt over the same runtime starts
-  its loops afresh. VM could adopt it in its stop hook; not done here, and for the owner.
+  cancels every timer and awaits its task, so no cycle is left running against a runtime its
+  app has uninstalled, a test's lifespan tears down cleanly, and an app started again over the
+  same runtime starts its loops afresh. It waits for the loops' tasks only: a publication
+  cycle's worker thread stops through the kit's cycle driver on cancellation, which nothing
+  here awaits. Whether VM adopts it is an open question below.
 - *Disclosed errors* are bare metal's `BareMetalConfigurationError` and a new
   `BareMetalPublicationError` -- a cycle that cannot be composed, naming what is missing (the
   projection state, a registry, the settlement composition), answered as a 503 lifecycle route
@@ -668,7 +672,14 @@ Tests" separates them (02 F6):
 
 ## Open questions
 
-None. A mechanical check that storefronts read no application settings from their environment
-was decided against in this change and given a change of its own,
+- *Should VM's storefront stop its loops at shutdown, as bare metal's does (D6, as delivered
+  for bare metal)?* VM's stop hook clears the container's lifespan state while a loop may
+  still be mid-cycle, so a cycle can run on against collaborators the lifespan has dropped;
+  the alternative is the kit shell stopping a storefront's loops itself, for every storefront.
+  Raised in Section 13; not prescribed by any task, so no task carries it, and it is the
+  owner's to decide or defer to `kit-owned-storefront-shell`.
+
+Otherwise none. A mechanical check that storefronts read no application settings from their
+environment was decided against in this change and given a change of its own,
 `check-storefront-environment-reads`, which carries the inventory taken in design review
 (02 §8.1).

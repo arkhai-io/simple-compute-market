@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from types import SimpleNamespace
 from importlib.metadata import entry_points
 
 import httpx
@@ -24,7 +23,6 @@ from arkhai_bare_metal_storefront.alkahest_lifecycle import BareMetalAlkahestLif
 from arkhai_bare_metal_storefront.settlement_stages import DeclinedServicing
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
-import arkhai_bare_metal_storefront.server as server_module
 from arkhai_bare_metal_storefront.contribution import (
     BARE_METAL_STOREFRONT_CONTRIBUTION,
 )
@@ -146,33 +144,23 @@ def test_registry_injects_exact_contract_binding_without_publication_source() ->
 
 @pytest.mark.asyncio
 async def test_lifespan_exposes_exact_bare_metal_runtime_without_global_lookup(
-    monkeypatch,
+    tmp_path,
 ) -> None:
-    domain = get_market_domain_contract()
-    runtime = SimpleNamespace(domain=domain)
-    started = []
-
-    stopped = []
-
-    async def start(selected):
-        started.append(selected)
-
-    async def stop(selected):
-        stopped.append(selected)
-
-    monkeypatch.setattr(server_module, "_start_runtime", start)
-    monkeypatch.setattr(server_module, "_stop_runtime", stop)
+    """The lifespan installs the exact runtime it was given, starts its loops on
+    that runtime's own controller, and on shutdown stops them and uninstalls it."""
+    runtime = _direct_runtime(tmp_path, loop_controller_factory=held_loop_controller)
     app = build_bare_metal_storefront_app(
-        registry=_registry(domain),
+        registry=_registry(runtime.domain),
         runtime=runtime,
     )
 
     async with app.router.lifespan_context(app):
         assert app.state.storefront_container is runtime
-        assert app.state.storefront_container.domain is domain
+        assert app.state.storefront_container.domain is runtime.domain
+        started = runtime.loops.registered_loop_names()
     assert app.state.storefront_container is None
-    assert started == [runtime]
-    assert stopped == [runtime]
+    assert started == ["negotiation_watchdog", "publication"]
+    assert runtime.loops.registered_loop_names() == []
 
 
 def test_installed_contribution_exposes_complete_bare_metal_contract() -> None:
