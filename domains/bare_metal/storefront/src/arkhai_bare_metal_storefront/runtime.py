@@ -50,6 +50,7 @@ from .config import (
     ChainSettings,
     identity_credential,
     load_storefront_settings,
+    packaged_settings,
 )
 from .delivery import storefront_introduction_delivery
 from .domain_runtime import get_market_domain_contract
@@ -100,6 +101,14 @@ def _status_check_healthy(name: str, value: str) -> bool:
 
 # The family name VM's health reports a site's resource-pool projection under.
 RESOURCE_POOL_PROJECTION_FAMILY = "resource_pool"
+
+
+def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchdogPolicy:
+    """The negotiation watchdog's timeout and sweep interval, as configured."""
+    return NegotiationWatchdogPolicy(
+        timeout_seconds=settings.negotiation_timeout_seconds,
+        interval_seconds=settings.negotiation_watchdog_interval,
+    )
 
 
 @dataclass(frozen=True)
@@ -174,14 +183,18 @@ class BareMetalStorefrontRuntime:
     settlement_worker: SettlementServicingWorker | None = field(
         default=None, init=False, repr=False
     )
-    settlement_servicing_interval_seconds: float = 30.0
+    # A runtime composed without configuration files, as a test composes one,
+    # takes each interval from the packaged defaults, so they are stated once.
+    settlement_servicing_interval_seconds: float = field(
+        default_factory=lambda: packaged_settings().settlement_servicing_interval_seconds
+    )
     #: How often accepted payment deals are reconciled, while payments are composed.
-    payment_reconciliation_interval_seconds: float = 30.0
+    payment_reconciliation_interval_seconds: float = field(
+        default_factory=lambda: packaged_settings().payment_reconciliation_interval
+    )
     #: When an idle negotiation is abandoned, and how often that is swept for.
     negotiation_watchdog: NegotiationWatchdogPolicy = field(
-        default_factory=lambda: NegotiationWatchdogPolicy(
-            timeout_seconds=1800, interval_seconds=60
-        )
+        default_factory=lambda: _watchdog_policy(packaged_settings())
     )
     obligation_servicing: Mapping[str, ObligationServicing] = field(
         default_factory=dict, init=False, repr=False
@@ -873,8 +886,5 @@ def build_runtime_from_configuration(
         fulfillment_client=fulfillment_client,
         settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,
         payment_reconciliation_interval_seconds=active.payment_reconciliation_interval,
-        negotiation_watchdog=NegotiationWatchdogPolicy(
-            timeout_seconds=active.negotiation_timeout_seconds,
-            interval_seconds=active.negotiation_watchdog_interval,
-        ),
+        negotiation_watchdog=_watchdog_policy(active),
     )

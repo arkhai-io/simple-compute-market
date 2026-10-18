@@ -3050,10 +3050,10 @@ environment read changes in one commit so the lane never runs half-converted.
       Done. `settings_source()` builds the Dynaconf VM's loader builds (defaults file, the
       present files of `storefront_config_files()`, `merge_enabled`, no dotenv), read afresh
       on each call rather than at import, so a process or test reads the files present when
-      it asks. **Decided (not in `design.md`):** the override layer's prefix is
-      `BARE_METAL_STOREFRONT` (separator `__`), the service's own, as
-      `DEPLOYMENT_AND_CONFIG.md` says each service picks its own (VM `STOREFRONT`, API credits
-      `APICREDITS_STOREFRONT`); for 17.9's "Bare-metal role configuration". Typed models:
+      it asks. The override layer's prefix is VM's, `STOREFRONT` (separator `__`).
+      **Corrected (check):** it was first `BARE_METAL_STOREFRONT`, which read the retired
+      variables still named in the chart and the documentation as settings; the owner's rule
+      (follow VM) decided VM's, recorded in `design.md` D14a. Typed models:
       `BareMetalStorefrontSettings` over `StorefrontIdentitySettings` (`principal`,
       `administrators` of `AdministratorSettings`, `service_peers` of `ServicePeerSettings`),
       `RegistrySettings` (`urls`, `authorities` of `RegistryAuthoritySettings`),
@@ -3061,8 +3061,10 @@ environment read changes in one commit so the lane never runs half-converted.
       (`private_key` marked secret and kept out of `repr`), and `ChainSettings`. Section and
       key names are read in any case at each typed level (a principal's `scheme` and
       `identifier` too, which the override layer states in upper case); names inside a table
-      keyed by name keep their spelling; an unknown key inside a typed section is refused and
-      an unknown top-level key ignored, as VM's untyped keys are. `[Settlement]` is lowercased
+      keyed by name keep their spelling; a key the storefront does not read is ignored at
+      every level, as VM's loader ignores one, so an older release starts on a newer
+      configuration (**corrected (check):** typed sections first refused one; the generated
+      values schema refuses a misspelling, Section 16; `design.md` D14a). `[Settlement]` is lowercased
       at every depth, as VM's `settlement_config_mapping` does, and `[Delivery]` keeps its
       spelling, as VM's does. A setting that cannot be read raises
       `BareMetalConfigurationError` naming each key path and reason, never a value.
@@ -3187,13 +3189,14 @@ environment read changes in one commit so the lane never runs half-converted.
       credential and the configuration directory.
       Done. Shared helper `tests/storefront_configuration.py` writes `storefront.json`,
       `storefront.toml`, and the overlay under a temporary `XDG_CONFIG_HOME` and builds a
-      publishable document. Unit, `tests/test_config_loader.py` (13): packaged defaults; each
+      publishable document. Unit, `tests/test_config_loader.py` (13; 14 after the check fixes): packaged defaults; each
       file layering over the one before; the overlay winning (and the wallet key out of
       `repr`); the override layer applying over every file, a principal's `@str` identifier
       included; the credential never in the settings' dump or `repr`, read apart and owning
       the principal; a missing credential named; names in any case, a site ID keeping its
-      spelling; five unreadable settings refused by key (an unknown key, a zero interval, a
-      boolean interval, a bound as text, a malformed principal); administrators across
+      spelling; unreadable settings refused by key (a zero interval, a boolean interval, a
+      bound as text, a malformed principal; an unknown key was a fifth until the check
+      fixes made it ignored); administrators across
       subjects. `test_runtime_environment.py` is deleted; its composition cases move into
       `tests/test_app_composition.py` over the files (composition: the root's builder over
       real SQLite, the chain clients injected through `build_chain_clients` instead of the
@@ -3208,7 +3211,7 @@ environment read changes in one commit so the lane never runs half-converted.
       site, a site with no peer -- each `BareMetalStartupError` naming its problem, no database
       file, no storefront installed and so no loop; every problem named in one refusal
       (composition); and `test_a_storefront_configured_through_files_starts_and_serves`: from
-      the files alone, with `BARE_METAL_STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL=45` injected,
+      the files alone, with `STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL=45` injected,
       the lifespan starts, the override applies, and `StorefrontClient.get_health()` answers
       `ok` (spec "An operator overrides a setting on a development cluster"). **Corrected
       (level):** `test_publication_cycle.py` is the cycle's public API over a real database
@@ -3220,7 +3223,10 @@ environment read changes in one commit so the lane never runs half-converted.
       integration case is in `tests/test_http_publication_rates.py`, through
       `StorefrontClient`: `test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app`
       (the step reports `pool_lease_bound_missing` and publishes nothing; an override stating
-      a maximum then publishes). Its `test_a_bound_conflict_after_the_write_holds_rather_than_fails`
+      a maximum then publishes). Its cycle factory hands the runtime's
+      `default_max_duration_seconds` to the cycle itself, standing in for the production
+      composition; that `build_publication_cycle` hands it over is shown only by
+      `test_publication_cli.py` (the recorded cycle's arguments). Its `test_a_bound_conflict_after_the_write_holds_rather_than_fails`
       changed premise: a configuration change is now a restart, a second app over the same
       database, since an absent maximum holds the pool before any write. Adapted:
       `test_publication_cli.py` (every registry handed to the cycle; no registry refused; the
@@ -3283,15 +3289,35 @@ Section 11 notes:
   section's code; the VM image installs the rebuilt bare-metal contribution unchanged in
   behaviour.
 
+Section 11 check fixes (fresh-context check of `79d04e6..0ec0d54`; two items decided by the
+owner's rule to follow VM, recorded in `design.md` D14a and C9):
+
+- The override prefix is VM's `STOREFRONT`; typed sections ignore unknown keys. Tests (unit):
+  `test_config_loader.py`'s overrides under `STOREFRONT_*`,
+  `test_a_key_the_storefront_does_not_read_is_ignored` (a later release's
+  `source_confirmation_seconds`, VM's `[Wallet].ssh_public_key`, a top-level `agent_id`), and
+  `test_the_retired_variables_are_not_read_as_settings`; the lifespan case in
+  `test_app_composition.py` injects `STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL`.
+- The runtime's interval fields default from `config.packaged_settings()`, which reads the
+  packaged `settings.toml` alone (no file, no override layer), so 1800/60/30/30 are stated once.
+- `pool-override` reports configuration that cannot be read by its keys, apart from a missing
+  identity or credential (`test_pool_override_cli.py::test_configuration_that_cannot_be_read_is_reported_as_such`).
+- `pydantic>=2.7` is declared (imported directly, by `config.py` and modules before it); the
+  locks follow.
+- `design.md` records the committed secrets overlay (C9), clauses compiled at startup, the
+  image's removed database-path variable, and the one-peer-per-site refusal in Section 11
+  (D14a). 17.9 also names `docs/configuration.md` and `docs/attachments/baremetal-dispatch/index.md`.
+
 Section 11 handoff:
 
 - The runtime is composed once, by `build_runtime_from_configuration`, from a
   `BareMetalStorefrontSettings`; consumers read the values the runtime carries, never the
   settings or the environment. Section 13 must add the runtime fields it needs
   (`[capacity].poll_interval`, `publication_interval_seconds`, and the confirmation window)
-  the same way. `CapacitySettings` refuses keys it does not name, so 13.4 adds
-  `source_confirmation_seconds` to it (optional, three poll intervals by default) before 13.7
-  states it in `storefront.dev.toml`, or the lane's storefront refuses to start.
+  the same way: 13.4 adds `source_confirmation_seconds` to `CapacitySettings` (optional,
+  three poll intervals by default). Until a section names a key, the loader ignores it, as
+  VM's does. A runtime built directly takes its intervals from `config.packaged_settings()`,
+  the packaged defaults alone; a new runtime interval should default the same way.
 - 12.1: `settings.service_peer_configs()` is core's `ServicePeerConfigs`; the startup refusal
   already names a site bound to no peer or several. 12.2 replaces the configuration-time
   principal `parse_site_bindings` takes (the peer's first) with the peer's durable provider;
@@ -3301,19 +3327,33 @@ Section 11 handoff:
   `BareMetalStartupError` never reaches a cycle.
 - 14.2: the API-client `publish` signs as `settings.signer(identity_credential())` at
   `settings.base_url`, as `pool-override` now does.
-- Section 16: the chart still passes the retired variables as pod `env` (accepted until then).
-  Under the override layer's prefix `BARE_METAL_STOREFRONT_DB_PATH` would now override
-  `db_path`; the other old names land as top-level keys the storefront ignores. The typed
-  models are what the values-schema generator reads: `WalletSettings.private_key` is marked
-  secret as VM's is; the other sections are public.
+- Section 16: the chart still passes the retired `BARE_METAL_STOREFRONT_*` variables as pod
+  `env` (accepted until then). The override layer reads only `STOREFRONT_*`, so the loader
+  does not read them at all: they neither override a setting nor break loading
+  (`test_config_loader.py::test_the_retired_variables_are_not_read_as_settings`, with
+  `_SETTLEMENT`, `_CHAINS`, and `_DB_PATH` set). Kubernetes injects service-link variables
+  (`<SERVICE>_SERVICE_HOST`, `<SERVICE>_PORT`, `<SERVICE>_PORT_<n>_TCP...`) for every Service in
+  the namespace; one whose name begins `storefront` lands in the override layer, as
+  top-level keys the storefront ignores unless a name ever matches a setting (a `__` in the
+  name would nest). Set `enableServiceLinks: false` on the bare-metal Deployment in 16.2. The
+  typed models are what the values-schema generator reads: `WalletSettings.private_key` is
+  marked secret as VM's is; the other sections are public, and the schema, not startup,
+  refuses a key they do not name.
+- The lane's principals, site, and registry pin are stated in three places --
+  `storefront.dev.toml`, the root `Makefile`'s `e2e-bare-metal-dev-env` constants (which the
+  provisioning service and registry read), and `e2e-tests/config/config-docker.yml` (which the
+  scenarios read) -- as VM's lane states its own; no guard ties them together yet.
 - Dynaconf merges two spellings of one key silently, so the loader cannot refuse them (a
   test for that was tried and dropped); the chart's generated schema refuses them at render.
 - For 17.9: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration", "Per-domain stack
   composition" (the development overlay and the two mounted files), and "Storefront listing
   shapes and pool overrides" (the bare-metal command's identity and URL, the maximum as
   `[pricing].default_max_duration_seconds`, a pool with no bound held) still describe the
-  retired variables, as does `docs/bare-metal-seller-quickstart.md`; the override prefix
-  `BARE_METAL_STOREFRONT` and the committed development files are the destinations' facts.
+  retired variables, as do `docs/bare-metal-seller-quickstart.md`, `docs/configuration.md`
+  ("Bare-metal storefront": the seller chain is `[negotiation].policies`), and
+  `docs/attachments/baremetal-dispatch/index.md` (its startup and settlement text); the
+  override prefix `STOREFRONT` and the committed development files are the destinations'
+  facts.
 - Tests compose the storefront from files through `tests/storefront_configuration.py`;
   `storefront_config_files()` reads nothing under pytest unless `XDG_CONFIG_HOME` points
   away from the home directory, which `write_configuration` does.
@@ -3570,6 +3610,11 @@ documentation only; a part needing code returns the change to implementation.
         bare-metal rows, `site-projections` and `publication` among its loops, and the
         API-credit row); "Chart Render Tests" (the generator in `kit/config`, bare metal's
         drift test and loader check).
+      - `docs/configuration.md`: "Bare-metal storefront" (the seller chain from
+        `[negotiation].policies`, not an environment variable); and
+        `docs/attachments/baremetal-dispatch/index.md`: its startup and settlement text naming
+        `BARE_METAL_STOREFRONT_SETTLEMENT` and the other retired variables (Section 11's
+        handoff).
       - `docs/bare-metal-seller-quickstart.md`: "Configure public bindings", "Start and
         inspect".
       - `openspec/specs/README.md`: no new capability or companion; record that disposition.

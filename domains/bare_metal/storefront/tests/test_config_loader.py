@@ -83,13 +83,13 @@ def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
 
 def test_the_environment_override_layer_applies_over_every_file(monkeypatch, tmp_path):
     write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 2}})
-    monkeypatch.setenv("BARE_METAL_STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
-    monkeypatch.setenv("BARE_METAL_STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
+    monkeypatch.setenv("STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
+    monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
     monkeypatch.setenv(
-        "BARE_METAL_STOREFRONT_IDENTITY__PRINCIPAL__IDENTIFIER",
+        "STOREFRONT_IDENTITY__PRINCIPAL__IDENTIFIER",
         f"@str {SELLER.identity.identifier}",
     )
-    monkeypatch.setenv("BARE_METAL_STOREFRONT_IDENTITY__PRINCIPAL__SCHEME", "eip191")
+    monkeypatch.setenv("STOREFRONT_IDENTITY__PRINCIPAL__SCHEME", "eip191")
 
     settings = load_storefront_settings()
 
@@ -135,8 +135,6 @@ def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     ("document", "named"),
     [
-        pytest.param({"capacity": {"poll_intervall": 3}}, "capacity.poll_intervall",
-                     id="an unknown key in a typed section"),
         pytest.param({"capacity": {"poll_interval": 0}}, "capacity.poll_interval",
                      id="a zero interval"),
         pytest.param({"negotiation_watchdog_interval": True},
@@ -154,6 +152,41 @@ def test_a_setting_that_cannot_be_read_is_refused_by_key(
 
     with pytest.raises(BareMetalConfigurationError, match=named):
         load_storefront_settings()
+
+
+def test_a_key_the_storefront_does_not_read_is_ignored(monkeypatch, tmp_path):
+    """As VM's loader ignores one, so a release still starts on configuration a
+    newer release wrote; the chart's values schema refuses a misspelling."""
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {
+            "capacity": {"poll_interval": 3, "source_confirmation_seconds": 60},
+            "Wallet": {"ssh_public_key": "ssh-ed25519 AAAA test"},
+            "agent_id": "bob",
+        },
+    )
+
+    settings = load_storefront_settings()
+
+    assert settings.capacity.poll_interval == 3
+    assert settings.wallet.address == ""
+
+
+def test_the_retired_variables_are_not_read_as_settings(monkeypatch, tmp_path):
+    """The variables bare metal read before its configuration files share no
+    prefix with the override layer, so one left in a deployment is never read:
+    it neither breaks loading nor overrides a setting."""
+    write_configuration(monkeypatch, tmp_path, {"db_path": "configured.db"})
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_SETTLEMENT", '{"schema_version": 1}')
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_CHAINS", '{"anvil": {}}')
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_DB_PATH", "/elsewhere.db")
+
+    settings = load_storefront_settings()
+
+    assert settings.db_path == "configured.db"
+    assert settings.settlement == {"schema_version": 1, "priority": []}
+    assert settings.chains == {}
 
 
 def test_administrators_are_every_subjects_principals(monkeypatch, tmp_path):

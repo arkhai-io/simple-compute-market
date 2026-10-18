@@ -668,7 +668,7 @@ async def test_a_storefront_configured_through_files_starts_and_serves(
         monkeypatch, tmp_path, publishable_configuration(tmp_path / "storefront.db")
     )
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
-    monkeypatch.setenv("BARE_METAL_STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
+    monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
     app = build_bare_metal_storefront_app(registry=_registry())
 
     async with app.router.lifespan_context(app):

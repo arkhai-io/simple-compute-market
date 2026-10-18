@@ -6,9 +6,11 @@ The storefront reads its settings as every storefront does. The packaged
 own file), ``storefront.json`` (the public document a chart renders), and the
 Secret overlay ``storefront.secrets.toml``, a later file winning on a
 conflicting key. Above them sits the loader's environment override layer,
-``BARE_METAL_STOREFRONT_<KEY>`` with ``__`` between nesting levels (prefix a
-value with ``@str`` to keep one Dynaconf would read as TOML, such as a hex
-identifier, a string). That layer is an operator's escape hatch and is never
+``STOREFRONT_<KEY>`` with ``__`` between nesting levels, the VM storefront's
+prefix: the two storefronts never share a process, so one prefix states one
+override the same way for either (prefix a value with ``@str`` to keep one
+Dynaconf would read as TOML, such as a hex identifier, a string). That layer is
+an operator's escape hatch and is never
 refused: whether a deployment supplies a value through its environment is a
 compliance check of its charts and Compose files, not a decision the storefront
 makes at startup. See docs/development/DEPLOYMENT_AND_CONFIG.md.
@@ -20,12 +22,16 @@ override layer's prefix does not match it.
 Keys are the ones the VM storefront uses for the same concepts. Section and key
 names are read in any case, as Dynaconf reads them; the names inside a table
 keyed by name (sites, service peers, administrators, chains, registry URLs)
-keep their spelling.
+keep their spelling. A key the storefront does not read is ignored, as VM's
+loader ignores one, so a release still starts on configuration a newer release
+wrote; a chart's generated values schema is what refuses a misspelled key.
 """
 
 from __future__ import annotations
 
+import functools
 import os
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any
@@ -49,7 +55,7 @@ from pydantic import (
 )
 
 #: The environment override layer's prefix and its nesting separator.
-ENVVAR_PREFIX = "BARE_METAL_STOREFRONT"
+ENVVAR_PREFIX = "STOREFRONT"
 ENVVAR_SEPARATOR = "__"
 #: The one secret the storefront reads from its environment, outside its settings.
 IDENTITY_CREDENTIAL_ENV = "ARKHAI_IDENTITY_CREDENTIAL"
@@ -109,9 +115,9 @@ def _detached(value: Any) -> Any:
 
 
 class _Section(BaseModel):
-    """A typed section: its own keys read in any case, and no key it does not name."""
+    """A typed section: its own keys read in any case, any other key ignored."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -220,12 +226,8 @@ class BareMetalStorefrontSettings(_Section):
     """Every setting the bare-metal storefront reads.
 
     The packaged ``settings.toml`` supplies each scalar default, so a field with
-    no default here is one the defaults always state. Top-level keys the
-    storefront does not read are left alone, as the loader's own are; inside a
-    typed section an unknown key is refused.
+    no default here is one the defaults always state.
     """
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
 
     base_url: str = Field(min_length=1)
     db_path: str = Field(min_length=1)
@@ -356,6 +358,15 @@ def settings_source() -> Dynaconf:
     )
 
 
+@functools.cache
+def packaged_settings() -> BareMetalStorefrontSettings:
+    """The settings the packaged ``settings.toml`` states, before any file or the
+    override layer: every default in one place, for whatever composes a
+    runtime without reading configuration files."""
+    with _DEFAULTS_FILE.open("rb") as defaults:
+        return _validated(tomllib.load(defaults))
+
+
 def _error_location(location: tuple[Any, ...]) -> str:
     return ".".join(str(part) for part in location) or "configuration"
 
@@ -363,7 +374,11 @@ def _error_location(location: tuple[Any, ...]) -> str:
 def load_storefront_settings(source: Dynaconf | None = None) -> BareMetalStorefrontSettings:
     """Read and validate the storefront's settings, naming every key at fault."""
     active = settings_source() if source is None else source
-    raw = {str(key).lower(): value for key, value in _detached(active.as_dict()).items()}
+    return _validated(_detached(active.as_dict()))
+
+
+def _validated(raw: Mapping[str, Any]) -> BareMetalStorefrontSettings:
+    raw = {str(key).lower(): value for key, value in raw.items()}
     try:
         return BareMetalStorefrontSettings.model_validate(raw)
     except ValidationError as exc:
@@ -401,5 +416,6 @@ __all__ = [
     "WalletSettings",
     "identity_credential",
     "load_storefront_settings",
+    "packaged_settings",
     "settings_source",
 ]

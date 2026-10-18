@@ -4,8 +4,8 @@
 # environment-specific values here.
 #
 # Override via (highest priority first):
-#   1. BARE_METAL_STOREFRONT_* environment variables (separator __), an
-#      operator's escape hatch only
+#   1. STOREFRONT_* environment variables (separator __), an operator's escape
+#      hatch only
 #   2. $XDG_CONFIG_HOME/arkhai/storefront.secrets.toml  (Secret overlay)
 #   3. $XDG_CONFIG_HOME/arkhai/storefront.json          (rendered by a chart)
 #   4. $XDG_CONFIG_HOME/arkhai/storefront.toml          (an operator's own file)

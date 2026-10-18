@@ -339,6 +339,27 @@ Secrets is owed. Accepted scope beyond the original proposal.
   A key with no VM counterpart is named for its concept, never the domain. Rejected: a
   `[bare_metal]` namespace, which the merge would have to unwind; and extracting the
   typed configuration models now, which comes later.
+
+  As delivered (Section 11 and its check, decided by the owner's rule to follow VM unless
+  bare metal is clearly better): the loader is VM's in shape as well as vocabulary. Its
+  environment override layer has VM's prefix, `STOREFRONT_` with `__` between levels: the two
+  storefronts never share a process, so one prefix states an override the same way for
+  either, and the retired variables' own prefix (`BARE_METAL_STOREFRONT_`), still named in the
+  chart and the documentation until Sections 16 and 17, is never read as a setting (rejected:
+  a prefix of bare metal's own, which reinterpreted those variables -- a settlement or chains
+  JSON string broke loading, and the image's database-path variable overrode `db_path`).
+  Typed sections ignore a key they do not name, as VM's loader does, so an older release
+  still starts on configuration a newer one wrote (C4's rollback note depends on that);
+  refusing a misspelled key is the generated values schema's (D14c, Section 16), not
+  startup's (rejected: typed sections refusing unknown keys). The packaged `settings.toml`
+  is the one statement of each default: a runtime composed without configuration files, as
+  a test composes one, takes its intervals from it. The startup refusal (D6) refuses a site
+  bound to no service peer or to several from Section 11, ahead of durable trust, because
+  Section 11's site clients take each site's principal from its configured peer.
+  `[pricing].settlements` compile when the storefront starts, so a clause that cannot be read
+  refuses startup naming the key; an empty list is still not a refusal. The image sets no
+  application setting: its database path is the packaged relative `db_path`, under the
+  image's working directory, the data volume.
 - **D14b. Per-site trust from the site's durable service peer, in both storefronts.** Each
   configured site is bound to exactly one `[Identity.service_peers.<peer>]`; startup refuses a
   site with no peer or more than one. Configuration only seeds the peer: once initialized,
@@ -537,7 +558,9 @@ Secrets is owed. Accepted scope beyond the original proposal.
   It validates no service semantics; the storefront's startup refusal does (D6).
 - **C9. Compose and the lane mount files**, through a committed development
   `storefront.toml` for bare metal and a secrets file; only bare-metal targets produce
-  bare-metal files.
+  bare-metal files. As delivered (Section 11): the secrets overlay is committed, a
+  well-known development wallet key in `dev-env/identities/bare-metal.storefront.secrets.toml`,
+  as VM's `bob.storefront.secrets.toml` is, rather than written by the lane at each run.
 - **C10. Reconciled meanings.** Bare metal holds and reports a pool whose effective maximum
   lease duration, resolved through its override and then
   `[pricing].default_max_duration_seconds`, is absent or not positive; VM reads an absent or

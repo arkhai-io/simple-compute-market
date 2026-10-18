@@ -236,6 +236,7 @@ dependencies = [
     { name = "arkhai-kit-storefront" },
     { name = "dynaconf" },
     { name = "fastapi" },
+    { name = "pydantic" },
     { name = "typer" },
     { name = "uvicorn" },
 ]

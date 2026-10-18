@@ -49,10 +49,17 @@ def _client(explicit_url: str | None) -> Iterator[Any]:
     from market_pool_overrides import SyncPoolOverrideClient
     from storefront_client import SyncStorefrontClient
 
-    from .config import identity_credential, load_storefront_settings
+    from .config import (
+        BareMetalConfigurationError,
+        identity_credential,
+        load_storefront_settings,
+    )
 
     try:
         settings = load_storefront_settings()
+    except BareMetalConfigurationError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    try:
         signer = settings.signer(identity_credential())
     except (KeyError, ValueError) as exc:
         raise typer.BadParameter(

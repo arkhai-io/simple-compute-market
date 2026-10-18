@@ -174,6 +174,19 @@ def test_it_signs_as_the_configured_identity_at_the_configured_url(monkeypatch, 
     assert json.loads(result.output) == {"overrides": []}
 
 
+def test_configuration_that_cannot_be_read_is_reported_as_such(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 0}})
+    monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+
+    result = runner.invoke(
+        app, ["pool-override", "list", "--storefront-url", "http://127.0.0.1:9"]
+    )
+
+    assert result.exit_code != 0
+    assert "capacity.poll_interval" in result.output
+    assert "Identity.principal" not in result.output
+
+
 def test_without_the_storefront_identity_it_refuses_before_connecting(
     monkeypatch, tmp_path
 ):
