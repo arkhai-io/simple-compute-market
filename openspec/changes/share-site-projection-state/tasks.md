@@ -2715,6 +2715,73 @@ Round 05/06 handoff:
   cover it (it derives no listings from site projections). Section 15 renames only its interval
   key.
 
+### Round 08 triage fixes (owner dispositions 2026-10-18)
+
+Review 08 (`reviews/08-implementation.md`, of `8f5d102`) and validation 09 (`reviews/09-validation.md`,
+same commit: pipeline passed in all three lanes; Helm deployment not run, no cluster) were triaged
+together; dispositions in `reviews/08-implementation.triage.md`. The gate for reviews 05/06 passed
+2026-10-18. The owner directed: make these fixes as one commit, run `make test` (with the frozen
+projects), and begin Sections 11–14 with no end-to-end run or further review first.
+
+- [ ] 10.20 (08 F1) **The local release's Alkahest address book is mounted.** The storefront chart
+      gains an optional address-book ConfigMap mount per agent, as the bare-metal chart's
+      `alkahestAddressBook` already does; the local release mounts the development Anvil address
+      book (a chart-carried copy of `kit/alkahest`'s deterministic Anvil file, marked development
+      only), and both `alkahest_address_config_path` and `[Settlement.alkahest].address_config_path`
+      name the mounted path. Extend the `STOREFRONT_PYTHON` render check to derive Bob's release
+      conditions over the local render (not only the startup refusal), keep the chart's assertion
+      that every configured address path is mounted, rename the over-claiming test, correct 10.7's
+      note. Record for 17.9 (`DEPLOYMENT_AND_CONFIG.md`) which keys `arkhai-bob-runtime` must carry
+      for `deploy-local` to sell under Alkahest.
+- [ ] 10.21 (08 F2) **Lease termination per site; `[provisioning.identity]` retired.** VM's
+      `terminate_vm_lease` routes through the per-site fulfillment aggregate by the site that holds
+      the reservation, as bare metal's teardown does (`site_clients.terminate_lease`), verifying
+      against that site's peer; it stays the plumbing `vm-storefront-fulfillment` requires for a
+      future buyer-requested early termination (buyer → storefront → site). `_provisioning_client`
+      and every reader of `[provisioning.identity]` go; the key joins the retired-settings
+      catalogue (stating it refuses startup naming it); the chart's provisioning-principal check
+      moves onto the site's service peer; the lane overlays, chart values, and fixtures drop it;
+      D14b's exception is removed. Test: termination reaches the reservation's own site and its
+      response verifies against that site's peer.
+- [ ] 10.22 (08 F3) **`proposal.md` current.** Amend What Changes and Impact: the `core/storefront`
+      and `core/storefront-client` changes; the removed registry switch's and
+      `[provisioning.identity]`'s startup refusals; `deploy-local` enabling Alkahest and contact
+      exchange with its address book; per-site lease termination; the storefront chart's `agents`
+      map (10.27).
+- [ ] 10.23 (08 F4) **Per-site loop state follows the fan-out.** A per-site capacity-event loop
+      reports the aggregate fan-out's terminal state once it has ended (e.g. per-site names declared
+      as children of the aggregate loop). Kit unit test: a fan-out ending while sites are declared.
+- [ ] 10.24 (08 F5) **Per-site recorders only.** Replace the general `record_cycle` with recorders
+      the controller issues only for names declared through the fan-out, so a loop the controller
+      runs cannot be written to. Kit unit test.
+- [ ] 10.25 (08 F6) **Stale trust never blocks the loop.** On a failed reload after a change,
+      `ServicePeerTrust` holds nothing (`_sites = None`), so every read refuses with 503 from memory;
+      the stale flag and the synchronous retry on reads go; a background reload retries with backoff
+      off the event loop until it succeeds. The reload lock stays, ordering reloads so a slower
+      reload can never install an older snapshot. Correct the `site_authorities` docstring. Test: a
+      read during the outage returns at once without touching SQLite; the trust recovers after the
+      background reload.
+- [ ] 10.26 (08 F8) **Comments.** `scripts/validate_slice.py:64-66` names what the Helm release still
+      lacks (touch only that comment); `test_site_trust.py`'s docstring says the fulfillment client
+      the storefront builds is called directly.
+- [ ] 10.27 (08 F7) **The storefront chart's `agents` is a map keyed by agent name.** Helm merges maps
+      key by key but replaces lists, so every overlay restated Bob's whole agent. Convert
+      `storefront.agents` (umbrella and storefront chart) to `agents: {<name>: {...}}`: templates
+      range over name/value, the generated values schema types map values, and the list shape is
+      refused naming the new shape. Slim `helm/local-values.yaml` and the four fixtures
+      (`eip191-evm-values.yaml`, `payments-ed25519-values.yaml`, `contact-exchange-values.yaml`,
+      `invalid-missing-identity-secret-values.yaml`) to only what they change; update render tests,
+      any scripts or e2e Helm configuration that read the list, and record for 17.9
+      (`DEPLOYMENT_AND_CONFIG.md` "Storefront agents: pass-through configuration") the map shape and
+      the guidance that a chart value overlays change per entry is keyed, not listed. Section 16's
+      bare-metal chart keeps its one-agent-at-top-level shape (C8).
+- [ ] 10.28 (08 F9) **Closeout note placed.** Move 17.10's post-archive citation note into 17.11
+      (after the `archive` command, before the commit).
+- [ ] 10.29 Validation for the round: the affected suites, `make helm-values-schema` committed,
+      `make -C helm test-render` with `STOREFRONT_PYTHON`, `make -k test` plus the three frozen
+      projects, packaging, hygiene, citations, `make check-tasks`, `openspec validate --strict`. No
+      end-to-end run or further review before Sections 11–14 (owner, 2026-10-18).
+
 ## 11. Bare-metal configuration through files
 
 Delivers bare metal on `storefront.toml`, `storefront.json`, and `storefront.secrets.toml`
