@@ -217,6 +217,49 @@ def test_a_fresh_database_passes_the_retired_kind_check(tmp_path) -> None:
         conn.close()
 
 
+def test_a_fresh_database_pins_each_reservation_to_its_sites_peer(tmp_path) -> None:
+    """The selected-site table records the site's service peer beside the
+    audit principal, and its trigger keeps every recorded column unchanged."""
+    path = tmp_path / "storefront.db"
+
+    SQLiteClient(str(path))
+
+    conn = sqlite3.connect(path)
+    try:
+        columns = {
+            str(row[1]): bool(row[3])
+            for row in conn.execute("PRAGMA table_info(bare_metal_selected_site_bindings)")
+        }
+        assert {
+            "site_id": True,
+            "service_peer": True,
+            "authority_scheme": True,
+            "authority_identifier": True,
+        }.items() <= columns.items()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO bare_metal_selected_site_bindings("
+                "capacity_reservation_id, site_id, service_peer, "
+                "authority_scheme, authority_identifier) VALUES (?, ?, ?, ?, ?)",
+                ("reservation-0", "site-a", " ", "eip191", "0x1"),
+            )
+        conn.execute(
+            "INSERT INTO bare_metal_selected_site_bindings("
+            "capacity_reservation_id, site_id, service_peer, "
+            "authority_scheme, authority_identifier) VALUES (?, ?, ?, ?, ?)",
+            ("reservation-1", "site-a", "site-a-peer", "eip191", "0x1"),
+        )
+        for column, value in (("service_peer", "another-peer"), ("authority_identifier", "0x2")):
+            with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+                conn.execute(
+                    f"UPDATE bare_metal_selected_site_bindings SET {column} = ? "
+                    "WHERE capacity_reservation_id = 'reservation-1'",
+                    (value,),
+                )
+    finally:
+        conn.close()
+
+
 async def _legacy_thread(core: CoreSQLiteClient, negotiation_id: str) -> None:
     signer = Ed25519Signer(bytes.fromhex("33" * 32))
     await core.create_negotiation_thread(

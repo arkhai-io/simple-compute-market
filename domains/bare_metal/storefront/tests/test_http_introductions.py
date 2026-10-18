@@ -86,7 +86,7 @@ def _runtime(
         site_bindings=(
             BareMetalSiteBinding(
                 site_id="site-a",
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer="site-a-peer",
                 authority_url="http://site-a",
             ),
         ),

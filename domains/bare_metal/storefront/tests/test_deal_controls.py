@@ -27,7 +27,7 @@ from test_http_settlement import (
     _ProvisioningClient,
 )
 
-from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
+from site_trust import seeded_sites
 
 
 def _client(app, signer, role: str) -> StorefrontClient:
@@ -48,17 +48,15 @@ async def _runtime(tmp_path, *, verifier=None, provisioning=None):
         str(tmp_path / "storefront.db"), verifier or accept
     )
     capacity = _CapacityClient()
+    # The site's callbacks verify against its service peer, seeded as startup
+    # seeds it.
+    bindings, trust = seeded_sites(runtime.db.db_path, {"site-a": SITE_SIGNER.identity})
     runtime = replace(
         runtime,
         capacity_client=capacity,
         fulfillment_client=provisioning or _ProvisioningClient(),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                authority_url="http://site-a",
-                authority_principal=SITE_SIGNER.identity,
-            ),
-        ),
+        site_bindings=bindings,
+        service_peer_trust=trust,
     )
     return runtime, negotiation_id, capacity
 

@@ -10,7 +10,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from core_storefront.auth import AuthError
 from core_storefront.models.system_models import ProjectionFamilyStatus
+from core_storefront.service_peers import ServicePeerTrust
 from market_alkahest import ReleaseModelError, create_alkahest_registration
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_contact_exchange import (
@@ -75,6 +77,7 @@ from .settlement_service import BareMetalSettlementService
 from .settlement_stages import ObligationServicing
 from .site_clients import (
     BareMetalSiteBinding,
+    SiteClientFactories,
     build_trusted_site_clients,
     parse_site_bindings,
 )
@@ -201,6 +204,10 @@ class BareMetalStorefrontRuntime:
     )
     plan_builder: Callable[..., dict[str, Any]] = build_bare_metal_settlement_plan
     site_bindings: tuple[BareMetalSiteBinding, ...] = ()
+    #: Each site's service-peer principals, held in memory: what the site's
+    #: responses and callbacks are verified against, and what an identity
+    #: rotation commits through. None authenticates no site.
+    service_peer_trust: ServicePeerTrust | None = field(default=None, repr=False)
     capacity_client: Any | None = field(default=None, repr=False)
     fulfillment_client: Any | None = field(default=None, repr=False)
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
@@ -627,7 +634,10 @@ class BareMetalStorefrontRuntime:
             "checks": checks,
             "paused": self.trading_pause.paused,
             "principal": self.seller_principal.model_dump(mode="json"),
-            "sites": [binding.diagnostic() for binding in self.site_bindings],
+            "sites": [
+                binding.diagnostic(self.service_peer_trust)
+                for binding in self.site_bindings
+            ],
             "site_projections": await self._site_projections(),
             "disclosures": self._disclosures(),
         }
@@ -744,6 +754,7 @@ def build_runtime_from_configuration(
     credential: str | None = None,
     domain: MarketDomainContract | None = None,
     build_chain_clients: Callable[..., Mapping[str, Any]] = build_alkahest_clients,
+    site_clients: SiteClientFactories = SiteClientFactories(),
 ) -> BareMetalStorefrontRuntime:
     """Compose the runtime from the storefront's configuration files.
 
@@ -752,7 +763,13 @@ def build_runtime_from_configuration(
     until the configuration is known to publish: the startup refusal runs
     before the signer, the settlement composition, or the database.
     ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
-    the chains the storefront settles on.
+    the chains the storefront settles on, and ``site_clients`` each site's
+    clients, the boundary to the site authorities.
+
+    Each configured site's service peer is seeded into the database's durable
+    identity state, which from then on owns the peer's principals: a peer seen
+    for the first time is written from configuration, and one already seeded
+    must still be covered by it, or startup refuses.
     """
     selected_domain = validate_domain_contract(
         domain or get_market_domain_contract(),
@@ -844,12 +861,22 @@ def build_runtime_from_configuration(
         local_listing_principal=principal,
         expected_legacy_sellers=(storefront_url,),
     )
+    service_peer_trust = ServicePeerTrust(db.db_path, active.service_peer_configs())
+    try:
+        service_peer_trust.seed()
+    except AuthError as exc:
+        raise RuntimeError(
+            "bare-metal storefront service peers cannot be seeded into its "
+            f"identity state: {exc.detail}"
+        ) from exc
     try:
         capacity_client, fulfillment_client = build_trusted_site_clients(
             bindings=site_bindings,
             signer=signer,
             db_path=db.db_path,
             placement=active.capacity.placement,
+            trust=service_peer_trust,
+            factories=site_clients,
         )
     except (RuntimeError, TypeError, ValueError) as exc:
         raise RuntimeError(
@@ -882,6 +909,7 @@ def build_runtime_from_configuration(
         chain_clients=chain_clients,
         chain_config_paths=chain_config_paths,
         site_bindings=site_bindings,
+        service_peer_trust=service_peer_trust,
         capacity_client=capacity_client,
         fulfillment_client=fulfillment_client,
         settlement_servicing_interval_seconds=active.settlement_servicing_interval_seconds,

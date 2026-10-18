@@ -81,7 +81,7 @@ async def test_a_buyer_reads_the_release_condition_an_alkahest_listing_advertise
         site_bindings=(
             BareMetalSiteBinding(
                 site_id=SITE,
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer=f"{SITE}-peer",
                 authority_url="http://site-a",
             ),
         ),

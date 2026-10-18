@@ -37,7 +37,6 @@ from storefront_configuration import (
 
 # Development keys; never used on any public network.
 SELLER = Eip191Signer(bytes.fromhex("11" * 32))
-AUTHORITY = Eip191Signer(bytes.fromhex("44" * 32))
 REGISTRY = Eip191Signer(bytes.fromhex("55" * 32))
 
 _TRUST = RegistryAuthorityTrust(
@@ -73,7 +72,7 @@ def _runtime(
         site_bindings=tuple(
             BareMetalSiteBinding(
                 site_id=site_id,
-                authority_principal=AUTHORITY.identity,
+                service_peer=f"{site_id}-peer",
                 authority_url=f"http://{site_id}:8000",
             )
             for site_id in ("site-a", "site-b")

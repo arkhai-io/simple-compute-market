@@ -32,7 +32,10 @@ principals = [
   { scheme = "eip191", identifier = "0x976ea74026e726554db657fa54763abd0c3a0aa9" },
 ]
 
-# The lane's one site authority, Anvil account 0.
+# The lane's one site authority, Anvil account 0: the service peer its one site
+# is bound to. Startup seeds it into the storefront's durable identity state,
+# which then owns its principals: the site's responses and callbacks verify
+# against them, and they rotate through the storefront's identity routes.
 [Identity.service_peers.bare_metal_e2e_site]
 role       = "service"
 site_id    = "bare-metal-e2e"

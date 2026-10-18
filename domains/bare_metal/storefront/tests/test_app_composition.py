@@ -13,6 +13,10 @@ from market_alkahest import ReleaseModelError
 from market_core import DomainCapability
 from core_storefront.domain_plugins import STOREFRONT_CONTRIBUTION_GROUP
 from core_storefront.domain_registry import StorefrontDomainRegistryError
+from core_storefront.identity_authority import (
+    SERVICE_PEER_AUTHORITY,
+    StorefrontIdentityAuthority,
+)
 
 from market_identity import Eip191Signer, TrustedIdentitySet
 from settlement_compositions import alkahest_composition
@@ -50,6 +54,8 @@ from storefront_configuration import (
 
 
 COMPOSITION_SIGNER = Eip191Signer(bytes.fromhex("66" * 32))
+# A second site authority's development key; never used on any public network.
+OTHER_SITE = Eip191Signer(bytes.fromhex("77" * 32))
 
 
 def _registry(domain=None):
@@ -384,9 +390,42 @@ def test_the_runtime_takes_its_principal_and_administrators_from_configuration(
     assert runtime.admin_principals.identities == (ADMIN.identity,)
     assert runtime.storefront_url == "http://seller:8000"
     assert [binding.site_id for binding in runtime.site_bindings] == [SITE_ID]
-    # The site's responses verify against its service peer's principal.
-    assert runtime.site_bindings[0].authority_principal == SITE.identity
     assert runtime.pool_override_service() is not None
+
+
+def test_startup_seeds_each_sites_service_peer_into_durable_identity_state(
+    monkeypatch, tmp_path
+):
+    """Composition: the root's builder over real SQLite. The site is bound to its
+    peer, not a principal, and the peer's principal is what durable state, and
+    so the trust its responses and callbacks verify against, now holds."""
+    runtime = _configured_runtime(monkeypatch, tmp_path)
+
+    assert runtime.site_bindings[0].service_peer == "site_a_authority"
+    assert runtime.service_peer_trust.site_trusted_set(SITE_ID).identities == (
+        SITE.identity,
+    )
+    durable = StorefrontIdentityAuthority(runtime.db.db_path).status(
+        authority=SERVICE_PEER_AUTHORITY, subject="site_a_authority"
+    )
+    assert durable.primary == SITE.identity
+    assert durable.role == "service"
+
+
+def test_configuration_that_no_longer_covers_a_seeded_peer_is_refused(
+    monkeypatch, tmp_path
+):
+    """Composition: a peer already seeded owns its principals, so configuration
+    naming another primary for it refuses startup rather than overwrite them
+    (spec "Startup configuration is stale during rotation")."""
+    _configured_runtime(monkeypatch, tmp_path)
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["Identity"]["service_peers"]["site_a_authority"]["principals"] = [
+        OTHER_SITE.identity.model_dump(mode="json")
+    ]
+
+    with pytest.raises(RuntimeError, match="service peers cannot be seeded"):
+        _configured_runtime(monkeypatch, tmp_path, document)
 
 
 def test_a_credential_that_does_not_own_the_identity_is_refused(monkeypatch, tmp_path):
@@ -611,6 +650,15 @@ def _site_without_peer(document: dict) -> dict:
     return document
 
 
+def _site_with_two_peers(document: dict) -> dict:
+    peers = document["Identity"]["service_peers"]
+    peers["site_a_second"] = {
+        **peers["site_a_authority"],
+        "principals": [OTHER_SITE.identity.model_dump(mode="json")],
+    }
+    return document
+
+
 @pytest.mark.parametrize(
     ("broken", "named"),
     [
@@ -619,8 +667,10 @@ def _site_without_peer(document: dict) -> dict:
                      id="a registry without its pin"),
         pytest.param(_no_mechanism, "no settlement mechanism is enabled", id="no mechanism"),
         pytest.param(_no_site, "no site to publish from", id="no site"),
-        pytest.param(_site_without_peer, "bound to no service peer",
+        pytest.param(_site_without_peer, "site 'site-a' is bound to no service peer",
                      id="a site with no service peer"),
+        pytest.param(_site_with_two_peers, "site 'site-a' is bound to 2 service peers",
+                     id="a site with two service peers"),
     ],
 )
 async def test_a_storefront_that_cannot_publish_refuses_to_start(
@@ -629,7 +679,8 @@ async def test_a_storefront_that_cannot_publish_refuses_to_start(
     """Application startup: the real app and its lifespan, composing from the
     configuration files. Each refusal names its problem, and nothing durable or
     running exists afterwards: no database file, no installed storefront, so no
-    loop. Spec scenario: "A bare-metal storefront has no registry"."""
+    loop. Spec scenarios: "A bare-metal storefront has no registry", "A site has
+    no service peer"."""
     database = tmp_path / "storefront.db"
     write_configuration(monkeypatch, tmp_path, broken(publishable_configuration(database)))
     monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)

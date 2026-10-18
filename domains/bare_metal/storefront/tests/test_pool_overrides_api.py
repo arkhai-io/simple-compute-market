@@ -64,7 +64,7 @@ def _with_sites(runtime, *site_ids: str):
         site_bindings=tuple(
             BareMetalSiteBinding(
                 site_id=site_id,
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer=f"{site_id}-peer",
                 authority_url=f"http://{site_id}",
             )
             for site_id in site_ids

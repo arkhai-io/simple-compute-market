@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Iterable, Mapping
 from typing import Annotated, Any
 from urllib.parse import quote, urlencode
 
@@ -18,6 +20,17 @@ from arkhai_bare_metal.evidence_routes import (
     evidence_resource,
 )
 from core_storefront.auth import AuthError, authenticate_request
+from core_storefront.identity_authority import (
+    IdentityAuthorityError,
+    StorefrontIdentityAuthority,
+)
+from core_storefront.identity_lifecycle import (
+    identity_status_resource,
+    identity_subject_resource,
+    inspect_identity,
+    retire_rotated_identity,
+    rotate_identity,
+)
 from core_storefront.models.listing_models import (
     EvaluateNegotiateRequest,
     EvaluateNegotiateResponse,
@@ -38,6 +51,8 @@ from core_storefront.models.settle_models import RefundSettlementResponse
 from core_storefront.models.system_models import (
     STAGE_EVENT_PAGE_CAP,
     AdminPauseResponse,
+    IdentityRetirementRequest,
+    IdentityStatusResponse,
 )
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -49,7 +64,7 @@ from market_contact_exchange import (
     IntroductionRouteError,
     IntroductionStart,
 )
-from market_identity import EMPTY_BODY, Identity
+from market_identity import EMPTY_BODY, Identity, RotationRequest
 from market_negotiation_runtime import (
     NegotiationStateError,
     NegotiationUnavailableError,
@@ -218,6 +233,42 @@ async def _admin(
         expected_role="admin",
         allowed_principals=runtime.admin_principals.identities,
         body=body,
+    )
+
+
+def _site_authority_principals(
+    request: Request,
+    runtime: BareMetalStorefrontRuntime,
+    *,
+    operation: str,
+    resource: str,
+    site_ids: Iterable[str],
+) -> tuple[Identity, ...]:
+    """The principals that authenticate the named sites' authorities now.
+
+    They are each site's service-peer principals the trust holds, the set that
+    site's responses are verified against too, so a rotation reaches callbacks
+    and responses at once. A site that is not configured, or that the trust
+    cannot answer for, contributes none; while the trust holds nothing at all,
+    the request is refused as unavailable.
+    """
+    bind_response_contract(request, operation=operation, resource=resource)
+    trust = runtime.service_peer_trust
+    if trust is None:
+        raise HTTPException(status_code=503, detail="service-peer trust is not composed")
+    configured = {binding.site_id for binding in runtime.site_bindings}
+    now = int(time.time())
+    principals: set[Identity] = set()
+    for site_id in site_ids:
+        if site_id not in configured:
+            continue
+        try:
+            principals |= trust.site_active_principals(site_id, now=now)
+        except AuthError as exc:
+            if exc.status_code == 503:
+                raise HTTPException(status_code=503, detail=exc.detail) from exc
+    return tuple(
+        sorted(principals, key=lambda principal: (principal.scheme.value, principal.identifier))
     )
 
 
@@ -1044,11 +1095,12 @@ async def health(request: Request) -> BareMetalHealthResponse:
 async def system_status(request: Request) -> BareMetalHealthResponse:
     """The administrator's status, whose readiness a configured site may also read.
 
-    A site's authority reads it under the ``service`` role to check that it can
-    reach and authenticate to this storefront, the same trust its
-    capacity-released callback is authenticated against. It is answered with the
-    readiness checks alone: pool overrides and obligations waiting for an
-    operator are the administrator's.
+    Any configured site's authority reads it under the ``service`` role to
+    check that it can reach and authenticate to this storefront, verified
+    against that site's service-peer principals, the trust its capacity-released
+    callback is authenticated against. It is answered with the readiness checks
+    alone: pool overrides and obligations waiting for an operator are the
+    administrator's.
     """
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
@@ -1059,8 +1111,12 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
             operation="admin_system_status",
             resource="system/status",
             expected_role="service",
-            allowed_principals=tuple(
-                binding.authority_principal for binding in runtime.site_bindings
+            allowed_principals=_site_authority_principals(
+                request,
+                runtime,
+                operation="admin_system_status",
+                resource="system/status",
+                site_ids=[binding.site_id for binding in runtime.site_bindings],
             ),
         )
     else:
@@ -1190,27 +1246,27 @@ async def capacity_released(
     """Record a site's report that a reservation's capacity is free again.
 
     Only the authority of the site the event names may send it, signed as the
-    service that site runs.
+    service that site runs: the request is verified against that site's
+    service-peer principals alone. The site is read from the body before the
+    proof is checked, which is sound because the proof covers the body.
     """
     runtime = _runtime(request)
-    caller = await _principal(
+    operation = "fulfillment_capacity_released"
+    await _principal(
         request=request,
         runtime=runtime,
-        operation="fulfillment_capacity_released",
+        operation=operation,
         resource=body.capacity_reservation_id,
         expected_role="service",
-        allowed_principals=tuple(
-            binding.authority_principal for binding in runtime.site_bindings
+        allowed_principals=_site_authority_principals(
+            request,
+            runtime,
+            operation=operation,
+            resource=body.capacity_reservation_id,
+            site_ids=[body.site_id],
         ),
         body=await _request_body(request),
     )
-    if not any(
-        binding.site_id == body.site_id and binding.authority_principal == caller
-        for binding in runtime.site_bindings
-    ):
-        raise HTTPException(
-            status_code=403, detail="only the named site's authority may report it"
-        )
     try:
         recorded = await capacity_admin_routes(runtime).capacity_released(
             body.model_dump(mode="python", exclude_none=True)
@@ -1218,6 +1274,127 @@ async def capacity_released(
     except CapacityAdminRouteError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     return BareMetalCapacityEventResponse.model_validate(recorded)
+
+
+# -- marketplace identity ------------------------------------------------------
+# A site's service peer rotates through the same two-proof routes, signed
+# operations, and resources every storefront serves, so the canonical
+# administrator client drives them here too. Administrators are configuration,
+# never a durable subject, so only service peers are registered here; a
+# rotation naming another subject is refused as not registered.
+
+
+def _changing_identity_authority(
+    runtime: BareMetalStorefrontRuntime,
+) -> StorefrontIdentityAuthority:
+    """The identity authority a rotation or retirement commits through.
+
+    It is the service-peer trust's, so a change to a site's peer reaches the
+    principals that site's responses and callbacks are verified against as soon
+    as it commits.
+    """
+    trust = runtime.service_peer_trust
+    if trust is None:
+        raise HTTPException(status_code=503, detail="service-peer trust is not composed")
+    return trust.identity_authority()
+
+
+def _identity_subject_resource(authority: str, subject: str) -> str:
+    try:
+        return identity_subject_resource(authority, subject)
+    except IdentityAuthorityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/v1/admin/identity/rotations", response_model=IdentityStatusResponse)
+async def rotate_marketplace_identity(
+    body: RotationRequest, request: Request
+) -> IdentityStatusResponse:
+    """Apply a two-proof rotation of a site's service peer."""
+    runtime = _runtime(request)
+    operator = await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_rotate_identity",
+        resource=_identity_subject_resource(body.intent.authority, body.intent.subject),
+        body=await _request_body(request),
+    )
+    try:
+        return await asyncio.to_thread(
+            rotate_identity,
+            _changing_identity_authority(runtime),
+            request=body,
+            operator=operator,
+            now=int(time.time()),
+        )
+    except IdentityAuthorityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post(
+    "/api/v1/admin/identity/retirements", response_model=IdentityStatusResponse
+)
+async def retire_marketplace_identity(
+    body: IdentityRetirementRequest, request: Request
+) -> IdentityStatusResponse:
+    """Retire the old principal of an applied rotation, ending its overlap."""
+    runtime = _runtime(request)
+    operator = await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_retire_identity",
+        resource=_identity_subject_resource(body.authority, body.subject),
+        body=await _request_body(request),
+    )
+    try:
+        return await asyncio.to_thread(
+            retire_rotated_identity,
+            _changing_identity_authority(runtime),
+            request=body,
+            operator=operator,
+            now=int(time.time()),
+        )
+    except IdentityAuthorityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/api/v1/admin/identity/status", response_model=IdentityStatusResponse)
+async def marketplace_identity_status(request: Request) -> IdentityStatusResponse:
+    """One identity subject's bindings, each judged active or not now.
+
+    The query must carry exactly one ``authority`` and one ``subject``, both
+    bound into the signed resource, so nothing unsigned selects the subject.
+    """
+    runtime = _runtime(request)
+    query = request.query_params
+    if set(query.keys()) != {"authority", "subject"} or any(
+        len(query.getlist(name)) != 1 for name in ("authority", "subject")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="identity status requires exactly one authority and subject",
+        )
+    authority, subject = query["authority"], query["subject"]
+    try:
+        resource = identity_status_resource(authority, subject)
+    except IdentityAuthorityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_identity_status",
+        resource=resource,
+    )
+    try:
+        return await asyncio.to_thread(
+            inspect_identity,
+            StorefrontIdentityAuthority(runtime.db.db_path),
+            authority=authority,
+            subject=subject,
+            now=int(time.time()),
+        )
+    except IdentityAuthorityError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # -- storefront pool overrides ----------------------------------------------

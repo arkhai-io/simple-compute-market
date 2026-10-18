@@ -30,6 +30,7 @@ from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from settlement_compositions import alkahest_composition
+from site_trust import seeded_sites
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -224,8 +225,7 @@ def _sited_runtime(path: str, sites: dict[str, _Site]) -> BareMetalStorefrontRun
         site_bindings=tuple(
             BareMetalSiteBinding(
                 site_id=site_id,
-                # A development identity; never used on any public network.
-                authority_principal=ADMIN_SIGNER.identity,
+                service_peer=f"{site_id}-peer",
                 authority_url=f"http://{site_id}:8000",
             )
             for site_id in sites
@@ -523,21 +523,16 @@ async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_
     assert refused.value.status_code == 404
 
 
+# A development identity; never used on any public network.
 SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 
 
 def _status_runtime(path: str, **changes) -> BareMetalStorefrontRuntime:
+    runtime = _runtime(path)
+    # The site reads status as its service peer, seeded as startup seeds it.
+    bindings, trust = seeded_sites(runtime.db.db_path, {"site-a": SITE_SIGNER.identity})
     return dataclasses.replace(
-        _runtime(path),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                # A development identity; never used on any public network.
-                authority_principal=SITE_SIGNER.identity,
-                authority_url="http://site-a:8000",
-            ),
-        ),
-        **changes,
+        runtime, site_bindings=bindings, service_peer_trust=trust, **changes
     )
 
 

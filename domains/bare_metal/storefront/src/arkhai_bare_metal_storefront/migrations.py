@@ -95,11 +95,19 @@ def _add_operator_state(conn: sqlite3.Connection) -> None:
 
 
 def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
+    """Each capacity reservation's site and the service peer that site is bound to.
+
+    The reservation is pinned to the peer, a stable subject whose principals
+    rotate, so an authorized rotation keeps it bound. ``authority_scheme`` and
+    ``authority_identifier`` record the peer's primary principal when the
+    reservation was made, for audit only.
+    """
     conn.execute(
         """
         CREATE TABLE bare_metal_selected_site_bindings (
           capacity_reservation_id TEXT PRIMARY KEY,
           site_id TEXT NOT NULL,
+          service_peer TEXT NOT NULL,
           authority_scheme TEXT NOT NULL,
           authority_identifier TEXT NOT NULL,
           created_at TEXT NOT NULL
@@ -108,6 +116,7 @@ def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
             DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           CHECK (LENGTH(TRIM(capacity_reservation_id)) > 0),
           CHECK (LENGTH(TRIM(site_id)) > 0),
+          CHECK (LENGTH(TRIM(service_peer)) > 0),
           CHECK (LENGTH(TRIM(authority_scheme)) > 0),
           CHECK (LENGTH(TRIM(authority_identifier)) > 0)
         )
@@ -154,12 +163,13 @@ def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
         """
         CREATE TRIGGER IF NOT EXISTS bare_metal_selected_site_immutable
         BEFORE UPDATE OF
-          capacity_reservation_id, site_id,
+          capacity_reservation_id, site_id, service_peer,
           authority_scheme, authority_identifier
         ON bare_metal_selected_site_bindings
         WHEN NOT (
           OLD.capacity_reservation_id IS NEW.capacity_reservation_id
           AND OLD.site_id IS NEW.site_id
+          AND OLD.service_peer IS NEW.service_peer
           AND OLD.authority_scheme IS NEW.authority_scheme
           AND OLD.authority_identifier IS NEW.authority_identifier
         )

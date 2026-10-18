@@ -75,7 +75,7 @@ async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int
         site_bindings=(
             BareMetalSiteBinding(
                 site_id=SITE,
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer=f"{SITE}-peer",
                 authority_url="http://site-a",
             ),
         ),

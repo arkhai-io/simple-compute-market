@@ -44,7 +44,6 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_registry,
 )
 from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
-from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
@@ -53,6 +52,7 @@ from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from seeded_threads import seed_thread
 from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
+from site_trust import seeded_sites
 from source_sites import SourceSites
 
 
@@ -825,18 +825,17 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         tearing_down = buyer.teardown(negotiation_id)
 
     restarted_capacity = _CapacityClient()
+    restarted_db = SQLiteClient(path, domain=runtime.domain)
+    # The site's callback verifies against its service peer, seeded as startup
+    # seeds it.
+    bindings, trust = seeded_sites(restarted_db.db_path, {"site-a": SITE_SIGNER.identity})
     restarted = replace(
         runtime,
-        db=SQLiteClient(path, domain=runtime.domain),
+        db=restarted_db,
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                authority_url="http://site-a",
-                authority_principal=SITE_SIGNER.identity,
-            ),
-        ),
+        site_bindings=bindings,
+        service_peer_trust=trust,
     )
     with serving(_app(restarted)) as base_url:
         buyer = _fulfillment_client(base_url)

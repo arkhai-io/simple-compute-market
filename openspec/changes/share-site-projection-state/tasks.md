@@ -3366,28 +3366,105 @@ responses and callbacks, and reservations that survive a rotation (D14b;
 `deployment-state` "Independently deployable bare-metal seller role"). Touches bare metal's
 storefront and its development configuration.
 
-- [ ] 12.1 Startup seeds each configured site's service peer into core's durable identity
+- [x] 12.1 Startup seeds each configured site's service peer into core's durable identity
       state through 4.3, refusing a site with no peer or more than one, naming it.
       Administrators stay on configuration.
-- [ ] 12.2 `src/site_clients.py`: `BareMetalSiteBinding` carries the site's peer, not a
+      Done in `runtime.build_runtime_from_configuration`: once the database exists it builds
+      one `ServicePeerTrust` over it and `settings.service_peer_configs()` and calls
+      `seed()`, as VM's root does, so the publication command's composition seeds too; a
+      seeding refusal (a new peer with two principals, configuration that no longer covers
+      the peer's durable principals) raises a `RuntimeError` naming it ("service peers cannot
+      be seeded into its identity state: ..."). The runtime carries it as
+      `service_peer_trust` (None authenticates no site). The one-peer-per-site refusal stays
+      11.5's, before the database. Administrators are untouched (`admin_principals` from
+      configuration). Composition (the root's builder over real SQLite,
+      `tests/test_app_composition.py`):
+      `test_startup_seeds_each_sites_service_peer_into_durable_identity_state` (the binding
+      names the peer, the trust and the durable status hold its principal) and
+      `test_configuration_that_no_longer_covers_a_seeded_peer_is_refused`. Application
+      startup (the real app and lifespan): `test_a_storefront_that_cannot_publish_refuses_to_start`
+      gains "a site with two service peers", and both peer cases now match the site's name.
+- [x] 12.2 `src/site_clients.py`: `BareMetalSiteBinding` carries the site's peer, not a
       principal; `parse_site_bindings` reads the configuration of 11.1;
       `build_trusted_site_clients` gives each site's `SiteCapacityClient` and
       `ComputeProvisioningClient` the provider of that peer's active principals (4.1, 4.2).
-- [ ] 12.3 Callbacks: `src/api.py`'s `capacity_released` and the service-role read of
+      Done. `BareMetalSiteBinding(site_id, service_peer, authority_url)`;
+      `parse_site_bindings(sites, peers)` binds each site to its one peer's ID.
+      `build_trusted_site_clients(..., trust, factories=SiteClientFactories())` gives both of
+      a site's clients `trust.site_authorities(site)`, read at each response from memory.
+      `SiteClientFactories` (capacity, fulfillment; the production clients by default) is the
+      seam a test serves the sites through, as VM's `site_client_factory` and
+      `client_factory` are; `build_runtime_from_configuration(site_clients=)` passes it.
+      **Also changed:** `diagnostic(trust)` reports the site, its peer, and the peer's
+      active principals now (primary first), with the trust's reason and no principals when
+      it cannot answer, so health's and status's `sites` still report canonical authority
+      principals (`deployment-state` "Site configuration is diagnosed"). Floors raised:
+      `arkhai-core-storefront>=0.15.2` (the trust's failed-reload rule),
+      `arkhai-kit-site-client>=0.11.0` and `arkhai-compute-provisioning-client>=0.7.0` (the
+      provider, and `AuthorityTrust`). Composition, the builder over a real SQLite trust with
+      fake site transports, its built clients called directly (`tests/test_site_clients.py`):
+      `test_each_sites_clients_verify_against_its_peers_active_principals` -- the capacity
+      client's projection version and the fulfillment client's lease read verify the
+      current principal only, either during an overlap applied through the trust's identity
+      authority, the replacement only once completed, and the other site's principal
+      neither; with the providers replaced by sets read once at construction (edited, then
+      restored) it fails, as does the application test below.
+- [x] 12.3 Callbacks: `src/api.py`'s `capacity_released` and the service-role read of
       system status verify against the selected site's peer's active principals, the same
       set its responses verify against.
-- [ ] 12.4 Reservations: `bare_metal_selected_site_bindings` pins the site's peer subject;
+      Done through `_site_authority_principals`, which reads `trust.site_active_principals`
+      for the sites named (503 while the trust holds nothing): `capacity_released`
+      authenticates against the site its body names, as VM's callback does (the proof covers
+      the body), so the after-the-fact principal comparison goes; the service-role status
+      read accepts any configured site's peer, bare metal's own choice where VM requires
+      exactly one peer (Section 4 handoff). Application integration through the typed
+      client: `test_deal_controls.py::test_only_the_named_sites_authority_may_report_a_release`
+      (an impostor 403, another site's report 403, an unknown reservation 404) and
+      `test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not`,
+      `test_http_settlement.py`'s release after a restart, and
+      `test_http_system.py::test_a_configured_site_reads_status_as_a_service_and_another_cannot`,
+      all over peers seeded through the new `tests/site_trust.py` (`seeded_sites`).
+- [x] 12.4 Reservations: `bare_metal_selected_site_bindings` pins the site's peer subject;
       the principal it records is an audit record, so `DurableReservationSiteMap` loads
       after an authorized rotation. Written as fresh schema in `src/migrations.py`, with
       no upgrade or backfill, because bare metal has never been deployed outside the
       development cluster; the immutability trigger keeps the binding unchanged.
-- [ ] 12.5 Rotation routes: bare metal serves the identity rotation, completion, status,
+      Done. Migration 0004's table gains `service_peer TEXT NOT NULL` (non-blank), edited in
+      place with its ID kept, and 0007's trigger covers it; `authority_scheme` and
+      `authority_identifier` record the peer's primary when the reservation is made and are
+      never compared. `DurableReservationSiteMap(db_path, bindings, trust)` refuses at load a
+      reservation whose site is unconfigured or now bound to another peer, and records each
+      new reservation against its site's peer, refusing one whose recorded site or peer
+      differs. **Consequence:** a database that applied the earlier 0004 lacks the column, and
+      a storefront started on it fails at composition (`no such column: service_peer`); the
+      lane's volumes are removed with each stack (`down -v`), and the chart deploys nothing
+      until Section 16. Migration test over a fresh real database
+      (`tests/test_migrations.py::test_a_fresh_database_pins_each_reservation_to_its_sites_peer`:
+      the columns, a blank peer refused, the trigger refusing an update of the peer and of the
+      audit principal). Composition (`tests/test_site_clients.py`):
+      `test_a_reservation_stays_bound_to_its_site_across_an_authorized_rotation` and
+      `test_a_reservation_whose_site_is_bound_to_another_peer_refuses_restart`.
+- [x] 12.5 Rotation routes: bare metal serves the identity rotation, completion, status,
       and retirement routes VM serves (`core_storefront.identity_lifecycle`), reached
       through `StorefrontClient`'s `admin_initiate_identity_rotation`,
       `admin_complete_identity_rotation`, and `admin_get_identity_status`.
-- [ ] 12.6 The development `storefront.toml` and the lane's site configuration declare the
+      Done in `src/api.py`: `POST /api/v1/admin/identity/rotations` (`admin_rotate_identity`),
+      `POST /api/v1/admin/identity/retirements` (`admin_retire_identity`, which is the
+      completion: VM serves no separate retirement route), and `GET /api/v1/admin/identity/status`
+      (`admin_identity_status`, exactly one `authority` and `subject` in the query), each the
+      administrator's signed contract over the same resources VM binds, run off the loop.
+      Rotation and retirement commit through `trust.identity_authority()` (503 without a
+      trust); refusals are 409, an unknown subject on status 404, a malformed authority 400.
+      Administrators are configuration and never a durable subject here, so a rotation
+      naming one is refused as not registered. Application integration below (12.7).
+- [x] 12.6 The development `storefront.toml` and the lane's site configuration declare the
       site's service peer.
-- [ ] 12.7 Tests. `tests/test_site_clients.py`:
+      Already so (Section 11): `storefront.dev.toml` binds `bare-metal-e2e` to
+      `[Identity.service_peers.bare_metal_e2e_site]`, Anvil account 0, the principal the root
+      `Makefile` gives the lane's provisioning service and `e2e-tests/config/config-docker.yml`
+      pins as `site_authority`. Only its comment changed, to say startup seeds the peer and its
+      principals then rotate through the identity routes. No e2e scenario names the peer.
+- [x] 12.7 Tests. `tests/test_site_clients.py`:
       `test_selected_site_binding_survives_restart_and_rejects_authority_rotation` becomes a
       restart after an authorized rotation that keeps the reservation bound ("A bare-metal
       storefront restarts after a rotation"); a site with no peer, or two, refuses startup
@@ -3396,9 +3473,98 @@ storefront and its development configuration.
       `capacity_released` callbacks to the replacement once the overlap ends;
       `tests/test_deal_controls.py`'s per-site callback checks pass against peers;
       `tests/test_migrations.py` covers the fresh schema.
-- [ ] 12.8 Validation: `make test-bare-metal`, `make test`. End-to-end (bare-metal lane):
+      Done. `test_site_clients.py` (composition, real SQLite): the renamed restart test --
+      rotation applied and completed through the trust's identity authority, restart with
+      configuration naming the replacement (durable state then requires it: stale
+      configuration refuses, 12.1), the reservation still bound and its audit principal the
+      old one; the rebound-peer refusal; the two peer refusals named at the bindings (the
+      startup refusal is `test_app_composition.py`'s, 12.1); the binding's diagnostic; the
+      verb routing and immutability tests over seeded peers; the built clients (12.2).
+      Application integration, new `tests/test_site_trust.py`: the real app and lifespan
+      composed from the configuration files by `build_runtime_from_configuration`, which
+      seeds the peer, with only the site's transport replaced by `tests/signed_sites.py`'s
+      double: a pool-override write's live check verifies the configured principal and not
+      the replacement; `admin_initiate_identity_rotation`, then both verify and
+      `admin_get_identity_status` shows both active; `admin_complete_identity_rotation`, then
+      only the replacement verifies, with no configuration change or restart; a
+      `capacity_released` callback signed by the retired principal is refused 403 and one by
+      the replacement is applied (`released`; the deal holding the reservation is inserted
+      directly, service-internal setup no API reaches short of a settled deal). With the
+      routes committing through a plain `StorefrontIdentityAuthority` (edited, then restored)
+      it fails. Response verification is observed through the override write because that
+      live check stays live (a non-goal of this change), while health's live version read
+      becomes held state in Section 13. `test_deal_controls.py` passes over peers (12.3);
+      `test_migrations.py` (12.4).
+- [x] 12.8 Validation: `make test-bare-metal`, `make test`. End-to-end (bare-metal lane):
       `e2e_bare_metal_mock_deal` (its release callback), `e2e_bare_metal_publication`,
       `e2e_bare_metal_introduction`.
+      Done. No package version moved. `make lock PROJECTS="domains/bare_metal/storefront
+      e2e-tests"`: bare metal's lock records its three raised floors; `e2e-tests/uv.lock` and
+      VM storefront's lock, which lock the bare-metal storefront as a dependency by name only,
+      needed no change. Bare-metal storefront suite 366 passed (355 before). `make -k test`
+      (also covering Section 11's check fixes, which had not been rerun under it): every
+      suite it ran passed -- core 123 + 134 + 217 + 62, the kits, provisioning service 675 +
+      463, bare metal 134 + 366 + 11 + 40, API-credit storefront 153, e2e unit 38, release
+      tooling 944 -- and it stopped only at the reinit of `kit/policy`,
+      `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch index is refused here, as
+      in 2.6), run frozen: VM storefront with the rebuilt bare-metal wheel reinstalled, unit
+      1071 passed, 1 skipped, integration 446 passed (`test_alkahest` against Anvil included);
+      `kit/policy` 80 passed; VM buyer 202 passed. `make test-e2e-unit` 38 passed. `make
+      check-packaging` (architecture rules included), `make check-comment-hygiene`, `make
+      check-doc-citations CHANGE=share-site-projection-state` (nothing reported), `make
+      check-tasks`, `make check-change-index`, and `openspec validate --strict` pass. Not run:
+      `make -C helm test-render` (no chart or loader input changed); no repository typing
+      target exists; the pipeline was not run (the end-to-end reading is in the notes below).
+
+Section 12 notes:
+
+- End-to-end, read from the lane's files (the pipeline was not run): every bare-metal-lane
+  scenario starts a storefront whose startup seeds `bare_metal_e2e_site` (Anvil account 0,
+  the principal the lane's provisioning service signs with) into its durable identity
+  state, and every site response the storefront verifies -- publication's live projection
+  fetches (`e2e_bare_metal_publication`, `e2e_bare_metal_introduction`), and the mock deal's
+  reservation, commit, scheduling, fulfillment, and lease reads (`e2e_bare_metal_mock_deal`)
+  -- verifies against that peer through the trust, as do the mock deal's capacity-released
+  callback and any status read the site makes as a service; each reservation is recorded
+  against the peer. No scenario rotates the peer: rotation is application-integration
+  evidence only. No VM-lane or API-credit-lane scenario reaches this section's code; the VM
+  image installs the rebuilt bare-metal contribution, whose registration did not change.
+- Restarting after a rotation needs configuration that names the replacement: a seeded
+  peer's durable principals must stay covered (`storefront-publication` "Storefront
+  authorization bindings are durable", "Startup configuration is stale during rotation"), as
+  on VM. The delta scenario "A bare-metal storefront restarts after a rotation" holds under
+  that configuration, which its text leaves implicit; closeout may state it.
+
+Section 12 handoff:
+
+- `runtime.service_peer_trust` is the process's one trust; every site client in
+  `runtime.capacity_client` and `runtime.fulfillment_client` already verifies against it, so
+  Section 13's `SiteProjectionState` over the aggregate inherits per-site rotating trust. A
+  runtime built directly (tests) gets a seeded trust and bindings from `tests/site_trust.py`'s
+  `seeded_sites`; a test that needs real site clients over a signing double uses
+  `tests/signed_sites.py` (`SignedSites(...).factories()`, passed as
+  `build_runtime_from_configuration(site_clients=)` or `build_trusted_site_clients(factories=)`).
+- Health's and status's `sites` entries are now `site_id`, `service_peer`,
+  `authority_principals` (the peer's active ones, primary first), and `trust_error` when the
+  trust cannot answer; 14.1 keeps them beside `lifecycle`.
+- `tests/test_site_trust.py` observes response verification through a pool-override write,
+  whose live check this change keeps; it does not depend on health's live version read,
+  which 13.6 turns into held state.
+- Migration 0004 was edited in place (fresh schema, owner's rule): a bare-metal database that
+  applied the earlier 0004 fails composition on the missing `service_peer` column. 17.9 may
+  name this beside `docs/bare-metal-seller-quickstart.md`'s "Resetting the storefront
+  database".
+- For 17.9: `storefront-publication/architecture.md` "Trusted site routing" and "Role and
+  service-peer identity" (bare metal's site binding names its peer; a reservation pins the
+  peer subject and records the principal for audit; bare metal serves the identity routes;
+  its administrators stay configuration); `ARCHITECTURE.md` "Site authority" ("an exact
+  service-peer principal" becomes the site's service peer and its active principals) and
+  "Local development" ("trusted site-binding configuration"); `DEPLOYMENT_AND_CONFIG.md`
+  "Bare-metal role configuration" (each `[capacity.sites]` entry bound to one
+  `[Identity.service_peers]` peer, seeded at startup, rotated through the identity routes,
+  configuration then naming the replacement); `docs/bare-metal-seller-quickstart.md`.
+- Section 16's chart must carry `[Identity.service_peers]` in `config`; its retiring
+  `siteBindingsSecret` held the principal the binding no longer carries.
 
 ## 13. Bare metal on held projections and a publication loop
 
