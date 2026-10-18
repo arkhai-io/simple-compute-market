@@ -68,6 +68,11 @@ storefront:
         credentialSecret:
           name: payments-bob-marketplace-identity
           key: credential
+      secretEnv:
+        - name: ARKHAI_PAYMENTS_API_KEY
+          secretKeyRef:
+            name: payments-bob-payments-api-key
+            key: api-key
       internalRegistryTrust:
         authority: registry-a
         principals:
