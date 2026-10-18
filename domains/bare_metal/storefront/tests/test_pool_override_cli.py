@@ -25,6 +25,7 @@ from storefront_client import StorefrontClientError
 from typer.testing import CliRunner
 
 from arkhai_bare_metal_storefront import pool_override_cli
+from arkhai_bare_metal_storefront.admin_cli import storefront_url
 from arkhai_bare_metal_storefront.cli import app
 from arkhai_bare_metal_storefront.config import IDENTITY_CREDENTIAL_ENV
 from loopback import serving
@@ -145,12 +146,8 @@ def test_a_storefront_refusal_exits_nonzero_with_its_message(monkeypatch):
 
 
 def test_the_url_is_the_flag_then_the_configured_base_url():
-    assert pool_override_cli.storefront_url("http://other:9", "https://seller.example/") == (
-        "http://other:9"
-    )
-    assert pool_override_cli.storefront_url(None, "https://seller.example/") == (
-        "https://seller.example"
-    )
+    assert storefront_url("http://other:9", "https://seller.example/") == "http://other:9"
+    assert storefront_url(None, "https://seller.example/") == "https://seller.example"
 
 
 def test_it_signs_as_the_configured_identity_at_the_configured_url(monkeypatch, tmp_path):

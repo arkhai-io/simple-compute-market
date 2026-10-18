@@ -1,7 +1,8 @@
 """How one bare-metal publication cycle is composed from a running storefront.
 
-The publication loop's timer and step, and the publication command, compose
-their cycle here, so none can run a different cycle. The held site projections
+The publication loop's timer and its step, which the publication command runs
+through the administrator API, compose their cycle here, so neither can run a
+different cycle. The held site projections
 and every configured registry come from the storefront runtime; terms of sale
 come from its configuration, replaced for one site's pool by the storefront's
 stored override. A cycle that cannot be composed raises
@@ -109,6 +110,7 @@ def build_publication_cycle(
         build_payload=publication_payload_builder(runtime),
         default_max_duration_seconds=runtime.default_max_duration_seconds,
         enter_stage=runtime.loops.enter_stage,
+        derivation=runtime.publication_derivation,
     )
 
 

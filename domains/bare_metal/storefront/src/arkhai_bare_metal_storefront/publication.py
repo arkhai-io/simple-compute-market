@@ -28,6 +28,7 @@ loop for the storefront's own async persistence and the kit publication runtime.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import uuid
@@ -120,6 +121,37 @@ def _no_stage(_stage: str) -> None:
     return None
 
 
+# Each derivation action a site's summary lists, by the summary's name for it.
+_DERIVATION_ACTIONS = {"hold": "holds", "refuse": "refusals", "report": "reports"}
+
+#: One site's derivation summary: its holds, refusals, and reports, each the
+#: cycle report's entry without its action and site.
+SiteDerivation = dict[str, list[dict[str, Any]]]
+
+
+class PublicationDerivation:
+    """The latest publication cycle's derivation, per configured site.
+
+    For each site the cycle read: every hold (a site whose projection is not
+    held or whose generation this domain refuses, and each pool or resource held
+    for its declarations, region, rates, override, or lease bound), every pool
+    refused, and every report, each with its reason. A site that derived cleanly
+    is present with empty lists, so status tells it from a site no cycle has
+    read. Only a cycle records here, once its compose stage has read every site;
+    a preview records nothing, so status describes what publication last did.
+    """
+
+    def __init__(self) -> None:
+        self._latest: dict[str, SiteDerivation] = {}
+
+    def record(self, summary: Mapping[str, SiteDerivation]) -> None:
+        self._latest = copy.deepcopy(dict(summary))
+
+    def latest(self) -> dict[str, SiteDerivation]:
+        """Each site's summary from the latest cycle; empty before any cycle."""
+        return copy.deepcopy(self._latest)
+
+
 def build_bare_metal_publication_selection(
     registry: StorefrontDomainRegistry,
     *,
@@ -180,7 +212,8 @@ class BareMetalPublicationCycle:
     ``site_projections`` is the storefront's one held projection state and
     ``site_ids`` its configured sites. ``enter_stage`` names each stage the
     cycle reaches -- ``compose``, ``run``, ``converge`` -- for the loop
-    controller's record of a failed cycle.
+    controller's record of a failed cycle, and ``derivation`` receives each
+    site's derivation summary once compose has read every site.
     """
 
     def __init__(
@@ -197,6 +230,7 @@ class BareMetalPublicationCycle:
         build_payload: PayloadBuilder,
         default_max_duration_seconds: int | None = None,
         enter_stage: Callable[[str], None] = _no_stage,
+        derivation: PublicationDerivation | None = None,
     ) -> None:
         self._db = sqlite_client
         # A configured bound that is absent or not positive bounds nothing, so
@@ -206,6 +240,7 @@ class BareMetalPublicationCycle:
         self._site_projections = site_projections
         self._site_ids = tuple(site_ids)
         self._enter_stage = enter_stage
+        self._derivation = derivation
         self._storefront_url = storefront_url
         self._seller_principal = seller_principal
         self._payload_builder = build_payload
@@ -255,6 +290,8 @@ class BareMetalPublicationCycle:
         }
         for site_id in sorted(held):
             self._classify_site(site_id, held[site_id])
+        if self._derivation is not None and not dry_run:
+            self._derivation.record(self._site_derivations())
         selection = build_bare_metal_publication_selection(
             self._registry,
             open_keys=self._open_keys,
@@ -280,6 +317,23 @@ class BareMetalPublicationCycle:
         self._enter_stage("converge")
         await converge_registries(self._runtime, self.report)
         return self.report.as_dict()
+
+    def _site_derivations(self) -> dict[str, SiteDerivation]:
+        """Every configured site's holds, refusals, and reports so far."""
+        summary: dict[str, SiteDerivation] = {
+            site_id: {name: [] for name in _DERIVATION_ACTIONS.values()}
+            for site_id in self._site_ids
+        }
+        for item in self.report.actions:
+            name = _DERIVATION_ACTIONS.get(item["action"])
+            site_id = item.get("site_id")
+            site = summary.get(site_id) if isinstance(site_id, str) else None
+            if name is None or site is None:
+                continue
+            site[name].append(
+                {key: value for key, value in item.items() if key not in ("action", "site_id")}
+            )
+        return summary
 
     def _classify_site(self, site_id: str, view: ProjectionCacheView[Any]) -> None:
         """Accept and classify one site's held generation, or hold the site."""
@@ -907,5 +961,7 @@ def _persisted_resource(
 __all__ = [
     "BareMetalPublicationCycle",
     "BareMetalPublicationError",
+    "PublicationDerivation",
+    "SiteDerivation",
     "build_bare_metal_publication_selection",
 ]

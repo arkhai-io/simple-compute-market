@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import functools
+import logging
 
 import httpx
 import pytest
@@ -582,11 +583,14 @@ class _FailingCycle:
         raise ConnectionError("http://site-a.internal:8081 refused the connection")
 
 
-async def test_a_failed_publication_cycle_is_recorded_with_its_stage(tmp_path) -> None:
-    """A cycle that cannot be composed fails in ``compose`` with the
-    storefront's own publication error, whose message is disclosed; one failing
-    on another exception is recorded by type alone, its message (a site URL)
-    kept out. Spec scenario "A cycle fails on an unexpected exception"."""
+async def test_a_failed_publication_cycle_is_reported_in_status_with_its_stage(
+    tmp_path,
+) -> None:
+    """A stepped cycle that cannot be composed fails in ``compose`` with the
+    storefront's own publication error, whose message status discloses; one
+    failing on another exception is reported by type alone, its message (a
+    site URL) kept out. Spec scenarios "A stepped cycle fails" and "A cycle
+    fails on an unexpected exception"."""
     uncomposed = dataclasses.replace(
         _runtime(str(tmp_path / "uncomposed.db")),
         loop_controller_factory=held_loop_controller,
@@ -596,24 +600,155 @@ async def test_a_failed_publication_cycle_is_recorded_with_its_stage(tmp_path) -
         publication_cycle_factory=lambda _runtime: _FailingCycle(),
         loop_controller_factory=held_loop_controller,
     )
-    outcomes = []
+    reported = []
     for runtime in (uncomposed, failing):
         app = _app(runtime)
         async with app.router.lifespan_context(app):
             async with _admin_client(app) as admin:
                 with pytest.raises(StorefrontClientError):
                     await admin.admin_run_lifecycle_cycle("publication")
-            outcomes.append(runtime.loops.last_outcome(PUBLICATION))
+                reported.append((await admin.get_system_status()).lifecycle[PUBLICATION])
 
-    refused, failed = outcomes
-    assert (refused.trigger, refused.completed, refused.stage) == ("step", False, "compose")
-    assert refused.error.to_dict() == {
+    refused, failed = reported
+    assert refused["state"] == "paused"
+    assert refused["last_outcome"]["trigger"] == "step"
+    assert (refused["last_outcome"]["completed"], refused["last_outcome"]["stage"]) == (
+        False,
+        "compose",
+    )
+    assert refused["last_outcome"]["error"] == {
         "type": "BareMetalPublicationError",
         "message": "no registry is configured for publication",
     }
     # The double names no stage of its own, so it fails in the step's compose.
-    assert (failed.completed, failed.stage) == (False, "compose")
-    assert failed.error.to_dict() == {"type": "ConnectionError", "message": None}
+    assert failed["last_outcome"]["stage"] == "compose"
+    assert failed["last_outcome"]["error"] == {"type": "ConnectionError", "message": None}
+    assert "site-a.internal" not in str(failed)
+
+
+class _CycleFailures(logging.Handler):
+    """Sets ``failed`` when the loop controller logs a failed publication cycle:
+    the seam a test waits on instead of the timer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = asyncio.Event()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage().startswith(f"[LIFECYCLE] {PUBLICATION} timer cycle failed"):
+            self.failed.set()
+
+
+async def test_status_reports_a_running_loop_whose_timer_cycles_fail(tmp_path) -> None:
+    """With the loops running and no registry to publish to, publication's
+    timer cycle fails; status reports the loop as running and its last cycle
+    as failed with the error, with no operator step. Spec scenario
+    "Publication fails every cycle"."""
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    failures = _CycleFailures()
+    logger = logging.getLogger("arkhai_bare_metal_storefront.lifecycle_steps")
+    logger.addHandler(failures)
+    app = _app(runtime)
+    try:
+        async with app.router.lifespan_context(app):
+            await asyncio.wait_for(failures.failed.wait(), timeout=5)
+            async with _admin_client(app) as admin:
+                status = await admin.get_system_status()
+    finally:
+        logger.removeHandler(failures)
+
+    publication = status.lifecycle[PUBLICATION]
+    assert publication["state"] == "running"
+    assert publication["last_outcome"]["trigger"] == "timer"
+    assert publication["last_outcome"]["completed"] is False
+    assert publication["last_outcome"]["error"] == {
+        "type": "BareMetalPublicationError",
+        "message": "no registry is configured for publication",
+    }
+    assert status.lifecycle["negotiation_watchdog"]["state"] == "running"
+
+
+def _derivation_runtime(tmp_path, monkeypatch, sites: dict, **changes):
+    """A runtime over ``sites`` publishing under Alkahest to a recorded
+    registry, each cycle composed as production composes it, its loops held."""
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
+    fields = {
+        "seller_evm_address": SELLER_WALLET,
+        "settlement_composition": composition,
+        "publication_clauses": clauses,
+        "default_max_duration_seconds": 3600,
+        "settlement_servicing_interval_seconds": 3600,
+        "registry_configuration": _RecordedRegistries(
+            authorities={REGISTRY_URL: _REGISTRY_TRUST}
+        ),
+    }
+    return dataclasses.replace(
+        _sited_runtime(str(tmp_path / "storefront.db"), sites), **{**fields, **changes}
+    )
+
+
+async def test_status_reports_a_refused_generation_as_loaded_with_the_sites_hold(
+    tmp_path, monkeypatch
+) -> None:
+    """A site whose held generation bare metal refuses is reported loaded in
+    the projection status and, in the latest derivation, held with the refusal
+    as its reason, while a site that derived cleanly holds nothing. Spec
+    scenario "A bare-metal site serves a generation bare metal refuses"."""
+    sites = {
+        "site-a": Site(
+            pool(
+                "pool-vm",
+                member("a1", "pool-vm", view_pool_id="pool-1"),
+                advertisable_modes=("vm",),
+            )
+        ),
+        "site-b": Site(pool("pool-1", member("b1", "pool-1"))),
+    }
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert status.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
+    derivation = status.publication_derivation
+    (hold,) = derivation["site-a"]["holds"]
+    assert hold["reason"] == "site_projection_refused"
+    assert hold["error"]
+    assert derivation["site-b"] == {"holds": [], "refusals": [], "reports": []}
+
+
+async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
+    tmp_path, monkeypatch
+) -> None:
+    """A pool resolving no lease bound is reported held, by its reason, once a
+    cycle has run; a preview records nothing, so before that status reports no
+    derivation. Spec scenario "A bare-metal pool resolves no lease bound"."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(
+        tmp_path, monkeypatch, sites, default_max_duration_seconds=None
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            before = (await admin.get_system_status()).publication_derivation
+            await admin.admin_dry_run_lifecycle_cycle("publication")
+            previewed = (await admin.get_system_status()).publication_derivation
+            await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert before == {} and previewed == {}
+    (hold,) = status.publication_derivation["site-a"]["holds"]
+    assert hold == {"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}
+    assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
+        "negotiation_watchdog": "paused",
+        "publication": "paused",
+        "settlement_servicing": "paused",
+        "site_projection_poller": "paused",
+    }
 
 
 class _NothingDue:

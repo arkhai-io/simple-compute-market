@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .admin_cli import reporting_failures
 from .pool_override_cli import pool_override_app
+from .publication_cli import run_publication_cycle
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(
@@ -54,18 +57,26 @@ def serve_cmd(
 
 
 @app.command("publish")
-def publish_cmd() -> None:
-    """Run one publication cycle from freshly polled trusted-site projections.
+def publish_cmd(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what one publication cycle would do, and do none of it.",
+    ),
+    storefront_url: str | None = typer.Option(
+        None,
+        "--storefront-url",
+        help="Storefront base URL; defaults to the configured base_url.",
+    ),
+) -> None:
+    """Run, or preview, one cycle of the running storefront's publication loop.
 
-    The storefront is composed in this process from the same configuration
-    files the server reads, and its projection state loaded with one poll.
+    The cycle runs in the storefront, through its administrator API, as the
+    loop's timer runs it; the command opens no database.
     """
-
-    import json
-
-    from .publication_cli import run_publication_once
-
-    typer.echo(json.dumps(run_publication_once(), sort_keys=True))
+    with reporting_failures():
+        report = run_publication_cycle(storefront_url, dry_run=dry_run)
+    typer.echo(json.dumps(report, sort_keys=True))
 
 
 @app.command("redeliver-introduction")

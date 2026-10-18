@@ -359,6 +359,44 @@ VM does, with these choices of its own:
 - *The publish command loads its own state* with one poll before its cycle, since it composes
   a runtime in its own process until it becomes an API client (C1).
 
+**As delivered for bare metal (Section 14).** Bare metal's system status reports `lifecycle`
+in VM's shape (the controller's snapshot, each loop's state and last outcome) and
+`publication_derivation`, with these choices of its own:
+
+- *The derivation summary is the cycle report's, per site.* VM's `publication_derivation` names
+  VM's own categories (unresolvable pools, regionless pools, infeasible shapes, ...); bare
+  metal's reasons are its cycle report's, so each configured site maps to `holds`, `refusals`,
+  and `reports`, each entry the report's site-scoped action without its action and site (a
+  reason, the pool or Physical Resource where there is one, and its problems or error). A
+  site that derived cleanly is present with empty lists, so status tells it from a site no
+  cycle has read; before any cycle the section is empty.
+- *Only a cycle records it* (a divergence: VM's dry run derives through the same reconciler,
+  which records its reports). A bare-metal preview records nothing, as it records no outcome,
+  so `publication_derivation` and `lifecycle`'s last outcome describe the same cycle, the one
+  publication last ran. It is recorded once the cycle's compose stage has read every site, so
+  a cycle failing later in `run` or `converge` still reports what it derived.
+- *Both status readers receive them*, as VM's one status response carries them to the
+  administrator and a site's service-role read alike; pool overrides and obligations waiting
+  for an operator stay the administrator's alone.
+
+**C1 as delivered (Section 14).** `bare-metal-storefront publish [--dry-run]
+[--storefront-url]` calls `admin_run_lifecycle_cycle("publication")` or
+`admin_dry_run_lifecycle_cycle` through the canonical `SyncStorefrontClient`, signing as
+`[Identity.principal]` with `ARKHAI_IDENTITY_CREDENTIAL` at `--storefront-url`, else the
+configured `base_url`, through one administrator client it shares with `pool-override`
+(`admin_cli`). It opens no database and loads no projection: the running storefront's cycle
+runs over what its own poller holds. Divergences from VM's `market-storefront publish`: it
+prints the cycle's report as JSON, as every other bare-metal command prints its result and as
+the command printed it before, rather than VM's table, so a script reads it unchanged; and it
+has no `--abort-all`,
+which seller-closes every open listing, an operation no task asks of this change, left to the
+owner. A storefront refusal (a cycle it cannot compose answers 503 naming what is missing)
+exits 1 with its message, as `pool-override` does.
+
+With `publish` no longer composing a runtime, the one command that does is
+`redeliver-introduction`; seeding the service peers at composition (D14b, as delivered for
+bare metal) stays, since that command composes the runtime over the same database.
+
 **Decided with the owner, 2026-10-18 (round 10 triage, 10 F1).** The durations that read
 through the shared type -- every bare-metal interval and timeout its typed settings declare
 (`[capacity].poll_interval`, `publication_interval_seconds`, `source_confirmation_seconds`,

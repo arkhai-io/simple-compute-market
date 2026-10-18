@@ -6,12 +6,9 @@ is its declaration. Region and backing are the site's. The offering mode is
 always named, never defaulted.
 
 Every command calls the storefront's administrator API over the pool-override
-kit's client and never reads the database. It signs as the storefront's own
-marketplace signer, from ``[Identity.principal]`` in the configuration files the
-server reads and ``ARKHAI_IDENTITY_CREDENTIAL``, so that principal must be one of
-``[Identity.administrators]``. It connects to ``--storefront-url``, else the
-configured ``base_url``. A write takes effect at the storefront's next
-publication run.
+kit's client and never reads the database, signing and connecting as
+``admin_cli`` says. An accepted write refreshes the storefront's held projection
+of the site and wakes its publication loop, which publishes under it.
 """
 
 from __future__ import annotations
@@ -23,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import typer
+
+from .admin_cli import reporting_failures, storefront_admin_client
 
 pool_override_app = typer.Typer(no_args_is_help=True)
 
@@ -36,58 +35,18 @@ _POOL = typer.Option(..., "--pool", help="The pool, as its site names it.")
 _MODE = typer.Option(..., "--mode", help="The offering mode, such as bare_metal.")
 
 
-def storefront_url(explicit: str | None, configured: str) -> str:
-    """The flag, else the configured ``base_url``."""
-    return (explicit or configured).rstrip("/")
-
-
 @contextlib.contextmanager
 def _client(explicit_url: str | None) -> Iterator[Any]:
     # Imported here so the CLI's help and its other commands load none of the
-    # client, identity, or configuration stack.
-    from market_identity import TrustedIdentitySet
+    # pool-override client.
     from market_pool_overrides import SyncPoolOverrideClient
-    from storefront_client import SyncStorefrontClient
 
-    from .config import (
-        BareMetalConfigurationError,
-        identity_credential,
-        load_storefront_settings,
-    )
-
-    try:
-        settings = load_storefront_settings()
-    except BareMetalConfigurationError as exc:
-        raise typer.BadParameter(str(exc)) from exc
-    try:
-        signer = settings.signer(identity_credential())
-    except (KeyError, ValueError) as exc:
-        raise typer.BadParameter(
-            "the storefront identity ([Identity.principal]) and a matching "
-            f"ARKHAI_IDENTITY_CREDENTIAL are required: {exc}"
-        ) from exc
-    with SyncStorefrontClient(
-        storefront_url(explicit_url, settings.base_url),
-        signer=signer,
-        caller_role="admin",
-        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
-    ) as core:
+    with storefront_admin_client(explicit_url) as core:
         yield SyncPoolOverrideClient(core)
 
 
 def _emit(value: Any) -> None:
     typer.echo(json.dumps(value.model_dump(mode="json"), indent=2, sort_keys=True))
-
-
-@contextlib.contextmanager
-def _reporting_failures() -> Iterator[None]:
-    from storefront_client import StorefrontClientError
-
-    try:
-        yield
-    except StorefrontClientError as exc:
-        typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
-        raise typer.Exit(code=1) from exc
 
 
 @pool_override_app.command("set")
@@ -111,7 +70,7 @@ def pool_override_set(
         record = json.loads(file.read_text())
     except ValueError as exc:
         raise typer.BadParameter(f"{file} is not JSON: {exc}") from exc
-    with _reporting_failures(), _client(storefront_url_option) as client:
+    with reporting_failures(), _client(storefront_url_option) as client:
         _emit(client.put_pool_override(record))
 
 
@@ -123,7 +82,7 @@ def pool_override_get(
     storefront_url_option: str | None = _STOREFRONT_URL,
 ) -> None:
     """Show one pool's override for one offering mode."""
-    with _reporting_failures(), _client(storefront_url_option) as client:
+    with reporting_failures(), _client(storefront_url_option) as client:
         _emit(client.get_pool_override(site, pool, mode))
 
 
@@ -136,7 +95,7 @@ def pool_override_list(
     """List overrides, optionally narrowed to a site or one site's pool."""
     if pool is not None and site is None:
         raise typer.BadParameter("--pool requires --site")
-    with _reporting_failures(), _client(storefront_url_option) as client:
+    with reporting_failures(), _client(storefront_url_option) as client:
         _emit(client.list_pool_overrides(site_id=site, pool_id=pool))
 
 
@@ -148,8 +107,8 @@ def pool_override_delete(
     storefront_url_option: str | None = _STOREFRONT_URL,
 ) -> None:
     """Delete one pool's override for one offering mode. Idempotent."""
-    with _reporting_failures(), _client(storefront_url_option) as client:
+    with reporting_failures(), _client(storefront_url_option) as client:
         _emit(client.delete_pool_override(site, pool, mode))
 
 
-__all__ = ["pool_override_app", "storefront_url"]
+__all__ = ["pool_override_app"]

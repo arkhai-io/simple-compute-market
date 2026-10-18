@@ -72,6 +72,7 @@ from .pool_overrides import (
     compile_publication_clauses,
     positive_lease_bound,
 )
+from .publication import PublicationDerivation
 from .publication_service import BareMetalRegistryConfiguration
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
@@ -229,6 +230,11 @@ class BareMetalStorefrontRuntime:
     publication_wake: PublicationWake = field(
         default_factory=PublicationWake, repr=False, compare=False
     )
+    #: Each configured site's holds, refusals, and reports from the latest
+    #: publication cycle, which system status reports.
+    publication_derivation: PublicationDerivation = field(
+        default_factory=PublicationDerivation, repr=False, compare=False
+    )
     #: Seconds between the site-projection poller's cycles.
     site_projection_poll_interval_seconds: float = field(
         default_factory=lambda: packaged_settings().capacity.poll_interval
@@ -262,8 +268,8 @@ class BareMetalStorefrontRuntime:
     #: The maximum lease duration a listing publishes unless its pool's override
     #: states one; a pool for which neither is positive is held at publication.
     default_max_duration_seconds: int | None = None
-    # Composes one publication cycle for the publication loop; None composes
-    # it from this runtime as the command does.
+    # Composes one publication cycle for the publication loop's timer and step;
+    # None composes it from this runtime through ``compose_publication_cycle``.
     publication_cycle_factory: Callable[["BareMetalStorefrontRuntime"], Any] | None = (
         field(default=None, repr=False)
     )
@@ -276,9 +282,9 @@ class BareMetalStorefrontRuntime:
     )
     # The process's one loop controller: it holds this storefront's timer loops
     # under one pause, runs each loop's cycles one at a time whether its timer
-    # or an operator's step started one, and records each cycle's outcome. A
-    # cycle racing the publication command in another process is refused by the
-    # durable binding's unique derivation key instead.
+    # or an operator's step started one -- the publication command's included,
+    # which steps the loop through the administrator API -- and records each
+    # cycle's outcome.
     loops: StorefrontLoopController = field(init=False, repr=False, compare=False)
     # Whether this process opens new negotiations; separate from the loops' pause.
     trading_pause: TradingPause = field(
@@ -693,6 +699,12 @@ class BareMetalStorefrontRuntime:
         installed contract wheel. Each check is judged by its own rule, as
         every storefront's status judges it: a strategy or chain list is a
         value, not ``ok``.
+
+        It also reports every lifecycle loop by its controller state with the
+        outcome of its last cycle, timer-run or stepped, and each configured
+        site's holds and their reasons from the latest publication cycle. See
+        openspec/specs/storefront-publication/spec.md, "Operator-visible
+        acceptance and projection state".
         """
         report = await self.health()
         checks = dict(report["checks"])  # type: ignore[arg-type]
@@ -712,6 +724,10 @@ class BareMetalStorefrontRuntime:
             else "degraded"
         )
         report["provisioning_contract_version"] = COMPUTE_PROVISIONING_CONTRACT_VERSION
+        report["lifecycle"] = {
+            name: loop.to_dict() for name, loop in self.loops.snapshot().items()
+        }
+        report["publication_derivation"] = self.publication_derivation.latest()
         return report
 
     def _disclosures(self) -> dict[str, dict[str, object]]:
@@ -868,8 +884,8 @@ def build_runtime_from_configuration(
         expected_legacy_sellers=(storefront_url,),
     )
     # Seeded here, at composition rather than at the server's start, because
-    # the one-shot commands compose the runtime too and must find the site's
-    # trust seeded on a fresh database. One peer at a time, so a refusal names
+    # the one-shot ``redeliver-introduction`` command composes the runtime too
+    # and must find the site's trust seeded on a fresh database. One peer at a time, so a refusal names
     # the peer it concerns.
     peers = active.service_peer_configs()
     for peer_id, peer in peers.items():

@@ -1106,9 +1106,8 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
     Any configured site's authority reads it under the ``service`` role to
     check that it can reach and authenticate to this storefront, verified
     against that site's service-peer principals, the trust its capacity-released
-    callback is authenticated against. It is answered with the readiness checks
-    alone: pool overrides and obligations waiting for an operator are the
-    administrator's.
+    callback is authenticated against. Pool overrides and obligations waiting
+    for an operator are reported to the administrator alone.
     """
     runtime = _runtime(request)
     as_site = request.headers.get("x-market-role") == "service"
@@ -1551,8 +1550,8 @@ async def run_lifecycle_cycle(loop: str, request: Request) -> dict[str, Any]:
 
     It is the cycle the loop's timer runs, whether or not the loops are held,
     and runs after any cycle of that loop already in progress, never alongside
-    it. The publication cycle is composed as the publication command composes
-    its own.
+    it. The publication cycle is the one its timer composes; the
+    ``bare-metal-storefront publish`` command runs it through this route.
     """
     runtime = _runtime(request)
     await _admin(

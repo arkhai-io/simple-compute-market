@@ -4190,23 +4190,143 @@ command (D6, C1; `storefront-publication` "Operator-visible acceptance and proje
 state", "Publication runs as a controllable storefront lifecycle loop"). Touches bare
 metal's storefront.
 
-- [ ] 14.1 `src/models.py`'s `BareMetalHealthResponse` and `src/runtime.py`'s `status()`:
+- [x] 14.1 `src/models.py`'s `BareMetalHealthResponse` and `src/runtime.py`'s `status()`:
       `lifecycle` from the controller's snapshot, and the latest per-site derivation
       summary — each site's holds and their reasons, a refused generation and a pool held
       for missing terms or an unordered or absent lease bound included — as VM's
       `publication_derivation` reports.
-- [ ] 14.2 `src/publication_cli.py` and `src/cli.py`'s `publish`: runs one cycle (or a
+      Done. `BareMetalHealthResponse` gains `lifecycle` (core's `LoopStatus` by loop name,
+      the shape VM's status and the typed client's `HealthResponse.lifecycle` carry) and
+      `publication_derivation`; `status()` fills both, so the administrator and a site's
+      service-role read receive them, as VM's one status response does (pool overrides and
+      obligations waiting for an operator stay the administrator's). Health carries neither.
+      The summary is `publication.PublicationDerivation`, held by the runtime
+      (`runtime.publication_derivation`) and handed to each cycle by
+      `build_publication_cycle` (`derivation=`): once a cycle's compose stage has read every
+      site, it records, per configured site, `holds`, `refusals`, and `reports` -- the cycle
+      report's site-scoped `hold`, `refuse`, and `report` actions without their action and
+      site (`site_projection_unknown`, `site_projection_refused` with its error, each pool or
+      resource's region, declaration, rate, override (`pool_override_terms_conflict` for an
+      unordered pair), and `pool_lease_bound_missing` holds; `pool_unbacked`; the notices). A
+      clean site maps to empty lists; before any cycle the section is `{}`. **Differed:** a
+      preview records nothing (VM's dry run records its reports), so the derivation and the
+      last outcome describe the same cycle; the per-site keys are bare metal's report
+      reasons, not VM's categories. Both in `design.md` D6 ("As delivered for bare metal
+      (Section 14)"). **Also changed:** stale comments that described `publish` composing in
+      its own process (the runtime's controller and cycle-factory comments, the run-cycle
+      route's and `publication_composition`'s docstrings, the seeding comment, which now names
+      `redeliver-introduction` as the one command that composes a runtime) and
+      `pool_override_cli`'s docstring, which still said a write waited for the next run.
+- [x] 14.2 `src/publication_cli.py` and `src/cli.py`'s `publish`: runs one cycle (or a
       preview) through `StorefrontClient.admin_run_lifecycle_cycle` /
       `admin_dry_run_lifecycle_cycle`, signing as the storefront's identity read from the
       configuration files, and opens no database (C1).
-- [ ] 14.3 Tests. Application integration, through the typed client: status reports a
+      Done. `publish [--dry-run] [--storefront-url URL]` calls
+      `publication_cli.run_publication_cycle`, which runs or previews the `publication` route
+      through `SyncStorefrontClient` and prints the report as JSON; a storefront refusal exits
+      1 with its message. The administrator client is the new `admin_cli.py`
+      (`storefront_admin_client`, `reporting_failures`, `storefront_url`), moved out of
+      `pool_override_cli`, which now wraps it: it signs as `settings.signer(identity_credential())`
+      at `--storefront-url`, else `settings.base_url`, and keeps the client, identity, and
+      configuration stack loading inside the function under its existing lazy-load reason
+      (help and the commands that call no storefront load none of it). `run_publication_once`,
+      the in-process composition, and its extra poll are gone. `cli.py` now imports `json`,
+      `reporting_failures`, and `run_publication_cycle` at module level (all light; the
+      command's old local imports went). **Differed (from VM's `market-storefront publish`):**
+      JSON output rather than VM's table, and no `--abort-all`; `design.md` C1 ("as
+      delivered") gives the reasons.
+- [x] 14.3 Tests. Application integration, through the typed client: status reports a
       failing cycle with its stage, a refused generation as loaded with the site's hold
       ("A bare-metal site serves a generation bare metal refuses"), and a held pool's
       reason. `tests/test_publication_cli.py`: the command reaches a running in-process app
       through its client and touches no database ("An operator runs the bare-metal
       publication command", "Publication runs from the command").
-- [ ] 14.4 Validation: `make test-bare-metal`, `make test`. End-to-end (bare-metal lane):
+      Done. Application integration, the real app and its lifespan, status through
+      `StorefrontClient.get_system_status()` (`tests/test_http_system.py`):
+      `test_a_failed_publication_cycle_is_reported_in_status_with_its_stage` (renamed from
+      `..._is_recorded_...`, which read the controller): a stepped cycle that cannot compose is
+      reported `paused`, `step`, failed in `compose` with `BareMetalPublicationError`'s message,
+      and one failing on a `ConnectionError` naming a URL by type only, the URL absent;
+      `test_status_reports_a_running_loop_whose_timer_cycles_fail` (spec "Publication fails
+      every cycle"): loops running, no registry, the timer's first cycle fails and status
+      reports publication `running` with a failed `timer` outcome -- the seam is a logging
+      handler on the controller's failure log, waited on with a bound, no sleep;
+      `test_status_reports_a_refused_generation_as_loaded_with_the_sites_hold`: a site serving
+      a bare-metal view naming another pool is `loaded` in `site_projections` and held
+      `site_projection_refused` with its error, the other site present with empty lists;
+      `test_status_reports_a_held_pools_reason_from_the_latest_cycle_only` (spec "A bare-metal
+      pool resolves no lease bound"): `{}` before any cycle and after a preview, then
+      `{"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}`, and every loop `paused`.
+      These two run the production composition (`compose_publication_cycle` with real Alkahest
+      terms), only the registry's fan-out recorded. With the recording removed both fail; with
+      the preview recording too, the second fails (edited, then restored).
+      `tests/test_publication_cli.py`, rewritten as application integration over the
+      loopback-served app (`loopback.serving`, lifespan, loops held), the command reading its
+      identity and `base_url` from configuration files whose `db_path` must never come to exist
+      (asserted after every invocation): the step's cycle, composed in the storefront by
+      `compose_publication_cycle` with a recording cycle class, is handed the runtime's one
+      held state (both sites loaded by startup, no site called by the step), both sites, both
+      registries (the client factory pins exactly them), the configured bound, the storefront
+      URL, and the derivation record, and runs as a `step` with the loops still held; `--dry-run`
+      previews and records no outcome; no registry and no projection state each exit 1 naming
+      the reason, constructing no cycle; `--storefront-url` overrides the configured URL; a
+      `pool-override set` then `publish` leave the override reported `applied` with no
+      accepted-generation table (spec "Publication runs from the command"); the command's
+      module imports no database layer (an AST check, as VM's); a missing credential is refused
+      before connecting. These replace the in-process composition cases the handoff named.
+      `tests/test_pool_override_cli.py`'s URL test imports `storefront_url` from `admin_cli`.
+      Bare-metal storefront 412 passed (405 before).
+- [x] 14.4 Validation: `make test-bare-metal`, `make test`. End-to-end (bare-metal lane):
       `e2e_bare_metal_publication`; no scenario runs the `publish` command.
+      Done. No package version moved and no dependency changed, so no lock changed (the
+      bare-metal storefront's `arkhai-core-storefront-client>=0.25.0` floor already resolves
+      0.26.0, whose `HealthResponse.lifecycle` the tests read). `make test-bare-metal`: domain
+      134, storefront 412 (405 before), buyer 11, adapter 40 passed. `make -k test`: every
+      suite it ran passed -- core 123 + 134 + 217 (2 skipped) + 62, the kits (config 235,
+      capacity-publication 97, storefront 106, pool-overrides 81, alkahest 296 among them),
+      provisioning service 675 + 463, bare metal as above, API-credit storefront 153, e2e unit
+      38, release tooling 944, the Helm render suites -- and it stopped only at the reinit of
+      `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer` (the PyTorch index is
+      refused here, as in 2.6), run frozen: VM storefront, with the rebuilt bare-metal
+      storefront wheel reinstalled (it installs the contribution for the combined image), unit
+      1087 passed, 1 skipped, integration 447 passed; `kit/policy` 80 passed; VM buyer 202
+      passed. `make check-packaging` (architecture rules included), `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks CHANGE=share-site-projection-state`, and `openspec
+      validate --strict` pass. No repository typing target exists. The pipeline was not run
+      (the end-to-end reading is in the notes below).
+
+Section 14 notes:
+
+- End-to-end, read from the scenarios' code (the pipeline was not run): every bare-metal-lane
+  scenario that reads status (`e2e_bare_metal_mock_deal`, `e2e_bare_metal_publication`'s
+  override statuses) now receives `lifecycle` and `publication_derivation` beside what it
+  reads, and `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`, and
+  `e2e_bare_metal_introduction` step publication, whose cycles record the derivation summary.
+  No scenario reads either new section or runs `publish`: those are application-integration
+  evidence only. No VM-lane or API-credit-lane scenario reaches this section's code; the VM
+  image installs the rebuilt bare-metal contribution, whose registration is unchanged.
+
+Section 14 handoff:
+
+- `runtime.publication_derivation.latest()` is the per-site summary status reports; a new
+  site-scoped `hold`, `refuse`, or `report` action a cycle records reaches it with no other
+  change. VM's `publication_derivation` keeps its own categories; the two storefronts' keys
+  differ by design (`design.md` D6, Section 14).
+- `admin_cli.storefront_admin_client` is the one administrator client both bare-metal commands
+  use; a further command that calls the running storefront takes it.
+- For 17.9: `docs/development/TESTING.md`'s "Bare-metal storefront publication" row ("each pass
+  is operator-invoked", "the same pass the `bare-metal-storefront publish` command runs")
+  becomes part of the bare-metal loop row, the command a client of the `publication` step;
+  `DEPLOYMENT_AND_CONFIG.md` "Per-domain stack composition" and "Storefront listing shapes and
+  pool overrides" (the command calls the running storefront, `--dry-run` previews);
+  `docs/bare-metal-seller-quickstart.md` (around lines 231 and 290, the `publish` round); the
+  permanent spec's scenario "Publication runs from the command" is rewritten by the delta at
+  archive; `storefront-publication/architecture.md` "Autonomous publication" (the command is
+  a client of the loop; status's `lifecycle` and per-site derivation). `design.md` D6 and C1
+  (Section 14) name the decisions.
+- For the owner: whether bare metal's `publish` should gain VM's `--abort-all`, and whether VM's
+  dry run should stop recording derivation reports (bare metal's preview records none).
 
 ## 15. The API-credit storefront's loops, and the controller's one loop form
 
