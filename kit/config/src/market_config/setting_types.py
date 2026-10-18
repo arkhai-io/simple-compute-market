@@ -8,20 +8,16 @@ the type, and a loader reading untyped settings validates through a
 key.
 
 A refusal is raised outside any ``except`` block, so it carries no exception
-context either: a parsing error's message can quote the value it failed on.
+context either: a parsing error keeps the value it failed on.
 """
 
 from __future__ import annotations
 
-import ipaddress
 import math
-import re
-import unicodedata
 from datetime import datetime, timedelta
 from typing import Annotated, Any
-from urllib.parse import urlsplit
 
-from pydantic import PlainValidator, WithJsonSchema
+from pydantic import AnyHttpUrl, PlainValidator, TypeAdapter, ValidationError, WithJsonSchema
 
 #: The longest duration a setting may state: the span from 0001-01-01 to the
 #: Unix epoch, about 1,969 years. A duration is added to or subtracted from an
@@ -82,84 +78,57 @@ PositiveSeconds = Annotated[
     WithJsonSchema({"type": "number", "exclusiveMinimum": 0, "maximum": MAX_SECONDS}),
 ]
 
-#: One DNS label: letters, digits, and hyphens, not starting or ending with one.
-_DNS_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
-
-
-def _is_valid_host(netloc: str, hostname: str) -> bool:
-    """A DNS name, an IPv4 address, or a bracketed IPv6 literal."""
-    if netloc.startswith("["):
-        try:
-            ipaddress.IPv6Address(hostname)
-        except ValueError:
-            return False
-        return True
-    try:
-        ipaddress.IPv4Address(hostname)
-    except ValueError:
-        pass
-    else:
-        return True
-    return len(hostname) <= 253 and all(
-        _DNS_LABEL.fullmatch(label) for label in hostname.split(".")
-    )
-
-
 _NOT_AN_ORIGIN = "must be an HTTP(S) origin"
 
+#: Parses a URL as the WHATWG URL standard does, refusing a scheme other than
+#: ``http`` or ``https``.
+_HTTP_URL: TypeAdapter[AnyHttpUrl] = TypeAdapter(AnyHttpUrl)
 
-def _origin(text: str) -> tuple[str | None, str]:
-    """``text``'s origin and ``""``, or ``None`` and why it is not one."""
-    if any(char.isspace() or unicodedata.category(char).startswith("C") for char in text):
-        # urlsplit drops tabs and newlines silently, so they are refused first.
-        return None, f"{_NOT_AN_ORIGIN} without whitespace or control characters"
+#: A parse refusal's reason by the parser's error type. Its message is not
+#: reused: the error keeps the input it refused.
+_PARSE_REFUSALS = {"url_scheme": f"{_NOT_AN_ORIGIN}: its scheme is http or https"}
+_UNPARSED = f"{_NOT_AN_ORIGIN}: it is not a valid URL"
+
+
+def _parsed(text: str) -> tuple[AnyHttpUrl | None, str]:
+    """``text`` parsed as an HTTP(S) URL and ``""``, or ``None`` and the reason."""
     try:
-        parsed = urlsplit(text)
-    except ValueError:
-        parsed = None
-    if parsed is None:
-        return None, _NOT_AN_ORIGIN
-    if parsed.scheme not in {"http", "https"}:
-        return None, f"{_NOT_AN_ORIGIN}: its scheme is http or https"
-    if parsed.username is not None or parsed.password is not None:
-        return None, f"{_NOT_AN_ORIGIN} without credentials"
-    if parsed.query or parsed.fragment or "?" in text or "#" in text:
-        return None, f"{_NOT_AN_ORIGIN} without a query or fragment"
-    if parsed.path not in {"", "/"}:
-        return None, f"{_NOT_AN_ORIGIN} without a path"
-    hostname = parsed.hostname
-    if not hostname or not _is_valid_host(parsed.netloc, hostname):
-        return None, (
-            f"{_NOT_AN_ORIGIN} naming a host: a DNS name or an IP address, an IPv6 "
-            "address bracketed"
-        )
-    try:
-        port = parsed.port
-    except ValueError:
-        port = 0
-    if port == 0 or parsed.netloc.endswith(":"):
-        return None, f"{_NOT_AN_ORIGIN} with a port, if stated, from 1 to 65535"
-    return f"{parsed.scheme}://{parsed.netloc}", ""
+        return _HTTP_URL.validate_python(text), ""
+    except ValidationError as exc:
+        return None, _PARSE_REFUSALS.get(exc.errors()[0]["type"], _UNPARSED)
 
 
 def site_authority_url(value: Any) -> str:
-    """A site authority's HTTP(S) origin, as ``<scheme>://<host>[:<port>]``.
+    """A site authority's HTTP(S) origin, as the URL standard normalizes it,
+    without a trailing ``/``.
 
-    The origin is all a site's URL may state: an ``http`` or ``https`` scheme
-    (read in any case), a host that is a DNS name or an IP address, and
-    optionally a port from 1 to 65535. Credentials, a query, a fragment, a path
-    other than ``/``, and whitespace or control characters inside the value are
-    refused, because a client joins its own routes to the origin, so a path
-    would become a prefix of every route. Surrounding whitespace and a trailing
-    ``/`` are dropped.
+    The URL is parsed by pydantic's ``AnyHttpUrl``, which follows the WHATWG URL
+    standard: an ``http`` or ``https`` scheme, a host, and a port in range,
+    surrounding whitespace dropped, the scheme and host lowercased, an
+    international host written as punycode, a default port omitted. On top of
+    the parse, the one local rule is that the URL is an origin: credentials, a
+    query, a fragment (a bare ``?`` or ``#`` included), and a path other than
+    ``/`` are refused, because a client joins its own routes to the origin, so a
+    path would become a prefix of every route. The normalized origin is what a
+    storefront hands its site client.
+
+    The parser decides syntax, not existence: a host the standard accepts but no
+    resolver will (``-``, say) is accepted here and fails as unreachable at the
+    first poll.
     """
 
     if not isinstance(value, str):
         raise ValueError("must be a string")
-    origin, reason = _origin(value.strip())
-    if origin is None:
+    url, reason = _parsed(value)
+    if url is None:
         raise ValueError(reason)
-    return origin
+    if url.username is not None or url.password is not None:
+        raise ValueError(f"{_NOT_AN_ORIGIN} without credentials")
+    if url.query is not None or url.fragment is not None:
+        raise ValueError(f"{_NOT_AN_ORIGIN} without a query or fragment")
+    if url.path not in (None, "", "/"):
+        raise ValueError(f"{_NOT_AN_ORIGIN} without a path")
+    return str(url).rstrip("/")
 
 
 #: A site authority's HTTP(S) origin, normalized by :func:`site_authority_url`.

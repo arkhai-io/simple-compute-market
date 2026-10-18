@@ -816,13 +816,22 @@ class BareMetalPublicationCycle:
         if is_open and comparison.outcome == UNCHANGED:
             return {"status": REOPEN_UNCHANGED}
         if self._dry_run:
+            action = "refresh" if is_open else "reopen"
             self.report.record(
-                "refresh" if is_open else "reopen",
+                action,
                 listing_id=listing_id,
                 fields=list(comparison.differing_fields),
                 status="dry_run",
             )
-            return {"status": "dry_run", "listing_id": listing_id}
+            logger.info(
+                "bare-metal listing %s would be %s (dry run): %s",
+                listing_id,
+                "refreshed" if is_open else "reopened",
+                list(comparison.differing_fields),
+            )
+            # The preview changes nothing, so to the driver the listing is
+            # unchanged; any other status it counts as a failed candidate.
+            return {"status": REOPEN_UNCHANGED}
 
         await self._db.update_listing(
             listing_id=listing_id,

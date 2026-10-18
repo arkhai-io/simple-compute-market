@@ -496,11 +496,9 @@ Secrets is owed. Accepted scope beyond the original proposal.
   site's clients join their routes to the URL, so a path became a prefix of every route and
   failed only at the first poll; VM had checked only that a URL was non-empty, and bare metal's
   check, which already refused credentials, a query, and a fragment, accepted a path and a port
-  that is not a number. The rule also refuses whitespace or control characters inside the URL, an
-  empty port and port 0, and a host that is neither a DNS name nor an IP address (an IPv6 one
-  bracketed), and returns the origin as parsed (`<scheme>://<host>[:<port>]`). A refusal names the
-  site's key and carries no URL, in its message or its exception chain. Both shared rules, this one
-  and the duration (D6's round-10 note), are Pydantic annotated types in `kit/config`,
+  that is not a number. A refusal names the site's key and carries no URL, in its message or its
+  exception chain. Both shared rules, this one and the duration (D6's round-10 note), are Pydantic
+  annotated types in `kit/config`,
   `SiteAuthorityUrl` and `PositiveSeconds`, each over a plain function. The origin rule's
   placement rests on one rule shared by both storefronts with no dependency from one domain to
   another; the duration's also lets a values schema generated from a typed model carry its bounds,
@@ -510,6 +508,23 @@ Secrets is owed. Accepted scope beyond the original proposal.
   the pod starts, not at `helm install`; VM's untyped `[capacity]` validates each URL through a
   `TypeAdapter`. Rejected: a local copy of the rule in VM, which drifts; and the types staying in
   the bare-metal storefront for VM to import, a dependency between two domains.
+
+  *An established parser, not our own* (owner, 2026-10-18, a follow-up to the round-10 check).
+  The origin rule parses the URL with pydantic's `AnyHttpUrl`, which follows the WHATWG URL
+  standard through pydantic-core, in place of the hand-written host, port, whitespace, and
+  control-character parsing the round's check had first added. The one local rule is the origin
+  policy on top of the parsed URL: path `/` or empty, no query, no fragment, no username or
+  password; the scheme being `http` or `https` is the parser's. The value handed on is the
+  library's normalized origin without its trailing `/` (scheme and host lowercased, an
+  international host as punycode, a default port omitted), and the storefronts give that value
+  to their site clients. The boundary is parse versus existence: the parser decides syntax, so a
+  host the standard accepts but nothing resolves (`-`, `site-a;x`, `%41`, which it reads as `a`)
+  is accepted and fails as unreachable at the first poll, and port 0, which the standard allows,
+  is accepted. A refusal's reason is built from the parser's error type and fixed text, never its
+  message, which keeps the input. Rejected: our own parser, which every edge case the standard
+  already settles had to be written and tested again. The owner's standing rule: prefer an
+  established parser or validator over writing one, weighed against how heavy the library is to
+  import; pydantic is already a `kit/config` dependency, so here the cost is nil.
 - **D14c. The values-schema generator moves to `kit/config`.** The generic generator
   (field publicizing, secret refusal, sink typing, render, drift check) leaves
   `market_storefront.values_schema`; each storefront keeps only its section list, passes

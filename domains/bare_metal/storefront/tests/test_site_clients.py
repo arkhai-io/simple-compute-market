@@ -150,25 +150,28 @@ def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers)
 @pytest.mark.parametrize(
     ("url", "reason"),
     [
-        pytest.param("https://one.example.test/v1", "without a path", id="a path"),
-        pytest.param("https://one.example.test:bad", "with a port, if stated, from 1 to 65535",
+        pytest.param("https://one.example.test/v1", " without a path", id="a path"),
+        pytest.param("https://one.example.test:bad", ": it is not a valid URL",
                      id="a port that is not a number"),
-        pytest.param("https://one.example.test:", "with a port, if stated, from 1 to 65535",
-                     id="an empty port"),
-        pytest.param("https://one example.test", "without whitespace or control characters",
-                     id="whitespace inside"),
-        pytest.param("https://one.example.test;x",
-                     "naming a host: a DNS name or an IP address, an IPv6 address bracketed",
-                     id="not a host name"),
+        pytest.param("https://one example.test", ": it is not a valid URL",
+                     id="a space in the host"),
+        pytest.param("ftp://one.example.test", ": its scheme is http or https",
+                     id="not HTTP"),
     ],
 )
 def test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site(url, reason) -> None:
     """A path would prefix every route the site's clients join to it, and a
-    port that is not a number fails only when a client is built."""
+    URL that does not parse fails only when a client is built."""
     with pytest.raises(
-        ValueError, match=rf"site 'site-a' authority_url must be an HTTP\(S\) origin {reason}$"
+        ValueError, match=rf"site 'site-a' authority_url must be an HTTP\(S\) origin{reason}$"
     ):
         parse_site_bindings({"site-a": url}, _peers("site-a"))
+
+
+def test_a_site_is_bound_to_its_url_as_the_url_standard_normalizes_it() -> None:
+    """The site's clients are given the normalized origin."""
+    (binding,) = parse_site_bindings({"site-a": "HTTPS://One.Example.Test:443/"}, _peers("site-a"))
+    assert binding.authority_url == "https://one.example.test"
 
 
 def test_a_refused_site_url_carries_no_value_in_its_exception_chain() -> None:

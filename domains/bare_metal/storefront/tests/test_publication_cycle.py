@@ -23,6 +23,7 @@ on both sides, and the publication command's composition test.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from typing import Any
 
@@ -1219,6 +1220,34 @@ async def test_a_dry_run_reports_the_opens_a_pass_would_make_and_writes_nothing(
     assert _row_counts(db) == before
     report = await storefront.run()
     assert len(actions(report, "publish")) == 1
+
+
+async def test_a_dry_run_logs_a_refresh_it_would_make_as_a_preview_not_a_failure(
+    db, caplog
+):
+    """A previewed refresh is logged as what it would do, at info, and the
+    cycle logs no failed candidate."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    await storefront.run()
+    kept = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.terms.max_duration_seconds = 7200
+
+    with caplog.at_level(logging.INFO, logger="arkhai_bare_metal_storefront.publication"):
+        preview = await storefront.run(dry_run=True)
+
+    logged = [
+        record
+        for record in caplog.records
+        if record.name == "arkhai_bare_metal_storefront.publication"
+    ]
+    (refresh,) = actions(preview, "refresh")
+    assert refresh["listing_id"] == kept
+    assert [(record.levelno, record.getMessage()) for record in logged] == [
+        (
+            logging.INFO,
+            f"bare-metal listing {kept} would be refreshed (dry run): {refresh['fields']}",
+        )
+    ]
 
 
 async def test_a_dry_run_reports_closes_and_refreshes_and_applies_neither(db):

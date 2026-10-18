@@ -138,19 +138,16 @@ def test_no_configured_site_is_refused() -> None:
     ("url", "reason"),
     [
         pytest.param("http://home:8081/v1", "without a path", id="a path"),
-        pytest.param("http://home:secret", "with a port, if stated, from 1 to 65535",
+        pytest.param("http://home:secret", "it is not a valid URL",
                      id="a port that is not a number"),
-        pytest.param("http://home:0", "with a port, if stated, from 1 to 65535",
-                     id="port zero"),
-        pytest.param("http://ho me:8081", "without whitespace or control characters",
-                     id="whitespace inside"),
-        pytest.param("http://-:8081", "naming a host", id="not a host name"),
+        pytest.param("http://ho me:8081", "it is not a valid URL", id="a space in the host"),
+        pytest.param("http://[::1:8081", "it is not a valid URL", id="a malformed IPv6 host"),
         pytest.param("https://user:secret@home:8081", "without credentials",
                      id="credentials"),
         pytest.param("http://home:8081?secret=1", "without a query or fragment",
                      id="a query"),
         pytest.param("home:8081", "its scheme is http or https", id="no scheme"),
-        pytest.param("", "its scheme is http or https", id="empty"),
+        pytest.param("", "it is not a valid URL", id="empty"),
     ],
 )
 def test_a_site_url_that_is_not_an_http_origin_is_refused_under_its_key(
@@ -186,6 +183,11 @@ def test_a_site_url_is_read_as_its_origin() -> None:
     assert configured_capacity_sites(source) == {
         "home": "http://home:8081",
         "away": "https://away",
+    }
+    source = _source(capacity={"sites": {"home": "HTTP://Home:8081/", "away": "http://away:80"}})
+    assert configured_capacity_sites(source) == {
+        "home": "http://home:8081",
+        "away": "http://away",
     }
 
 

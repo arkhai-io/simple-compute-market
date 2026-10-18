@@ -535,9 +535,9 @@ A storefront that derives listings from site projections MUST refuse to start, n
 problem, when publishing is impossible for the whole storefront: it has no registry to publish
 to, or a registry without its authority pin; it has no enabled settlement mechanism; or it has
 no configured site, a site not bound to exactly one service peer, or a site whose authority URL
-is not an HTTP(S) origin: an `http` or `https` scheme, a host, and a port only as a number from
-1 to 65535, with no credentials, path, query, or fragment. A refusal names the site and never
-echoes its URL. A storefront that only
+is not an HTTP(S) origin: a URL the WHATWG URL standard parses, with an `http` or `https`
+scheme and no credentials, path, query, or fragment. A refusal names the site and never echoes
+its URL. A storefront that only
 services deals already accepted is not a supported deployment. Settlement clauses and a lease
 bound MAY come from a pool's override or hint instead of the storefront's defaults, so missing
 defaults MUST NOT refuse startup; a pool that resolves no clauses, or no lease bound its domain

@@ -4084,7 +4084,8 @@ Round 10 check fixes (fresh-context check of `fa212f0..3944152`):
   neither a DNS name (labels of letters, digits, and hyphens, not starting or ending with one)
   nor an IP address (IPv6 bracketed), and returns the parsed origin `<scheme>://<netloc>` (so
   `HTTP://` reads as `http://`). The check's cases are kit/config unit cases; bare metal and VM
-  add whitespace, empty-port or port-zero, and bad-host cases.
+  add whitespace, empty-port or port-zero, and bad-host cases. **Superseded (Round 10
+  follow-up, below):** the rule parses with pydantic's `AnyHttpUrl` instead.
 - Refusals carry no value in their exception chain: kit/config's functions, bare metal's
   `_authority_url` and derived-window validator, and VM's `configured_capacity_sites` and
   `_positive_seconds` (through `_validated_setting`, which returns the reason) raise outside the
@@ -4116,10 +4117,47 @@ Round 10 check fixes (fresh-context check of `fa212f0..3944152`):
   --strict` pass. `make test` was not rerun for these fixes (no package outside kit/config and
   the two storefronts changed).
 
+Round 10 follow-up (owner, 2026-10-18, after the check fixes):
+
+- **The site origin parses with pydantic's `AnyHttpUrl`** (`design.md` D14b, "An established
+  parser, not our own"). `site_authority_url` validates through a `TypeAdapter(AnyHttpUrl)` and
+  applies only the origin policy on top: path `/` or empty, query and fragment `None` (a bare `?`
+  or `#` refused), no username or password. It returns `str(url)` without its trailing `/`, so
+  `HTTP://Site-A:8081/` is `http://site-a:8081` and `https://bücher.example` is
+  `https://xn--bcher-kva.example`; bare metal's binding and VM's site map carry that value to the
+  clients. The hand-written host, port, whitespace, and control-character parsing and their tests
+  are gone, and port 0 is accepted. A parse refusal's reason comes from the error type
+  (`url_scheme`, else "it is not a valid URL"), raised outside the handler. Unit
+  (`kit/config/tests/unit/test_setting_types.py`): normalization, IDN, IPv6 and IPv4, a default
+  port dropped; hosts the standard accepts (`-`, `site-a;x`, `%41`) accepted; refused: the origin
+  policy (path, `//`, query and bare `?`, fragment and bare `#`, credentials), a bad or
+  out-of-range port, a space in the host, a malformed IPv6 host, a non-HTTP scheme, empty, no
+  host; the no-echo, no-context tests kept. Bare metal (unit, `tests/test_site_clients.py`): the
+  site-naming cases are a path, a bad port, a space in the host, and a non-HTTP scheme, and a
+  binding carries the normalized origin; VM (unit, `tests/unit/test_startup_refusal.py`): port
+  zero and `http://-` left the refused set, a malformed IPv6 host joined it, and the origin test
+  checks normalization. The storefront-publication delta's clause says "a URL the WHATWG URL
+  standard parses". `kit/config` stays 0.4.0 (unreleased in this change); the wheel was rebuilt.
+- **A dry run logs a previewed refresh as a preview.** A dry run's refresh or reopen of an
+  existing listing returned `{"status": "dry_run"}` to the driver, which counts any status other
+  than unchanged, published, or disabled as a failed candidate, so each was logged as a warning,
+  `bare-metal candidate ... failed: {'status': 'dry_run', ...}`. It now returns unchanged to the
+  driver, since the preview changes nothing, and logs `bare-metal listing <id> would be refreshed
+  (dry run): <fields>` (or reopened) at info; the report's `refresh`/`reopen` action is unchanged.
+  A new publish was never logged as failed (its missing listing ID is not a failure).
+  Unit-level cycle test (`tests/test_publication_cycle.py`, the cycle's public API over a real
+  database): `test_a_dry_run_logs_a_refresh_it_would_make_as_a_preview_not_a_failure`, through
+  `caplog`; against the unfixed code it fails with the reported warning.
+- Evidence: kit/config unit 228 passed; bare-metal storefront 403 passed; VM storefront frozen
+  (rebuilt 0.4.0 kit-config and bare-metal storefront wheels reinstalled) unit 1087 passed, 1
+  skipped, integration 447 passed; `make check-packaging` (locks included), `make check-comment-hygiene`, `make
+  check-doc-citations`, `make check-tasks`, and `openspec validate --strict` pass.
+
 Round 10 handoff:
 
 - `market_config.setting_types` (`kit/config` 0.4.0) holds `PositiveSeconds` / `positive_seconds`
-  and `SiteAuthorityUrl` / `site_authority_url`. A new duration or site URL either storefront
+  and `SiteAuthorityUrl` / `site_authority_url`, the latter pydantic's `AnyHttpUrl` with the
+  origin policy on top, returning the normalized origin a site client is given. A new duration or site URL either storefront
   reads uses them: a typed model declares the type, an untyped VM read goes through a
   `TypeAdapter` and reports `[<key>] <reason>`. Section 16's bare-metal values schema takes the
   duration bounds from the typed models without a copy; the origin is typed as a string there,
@@ -4349,10 +4387,11 @@ documentation only; a part needing code returns the change to implementation.
         epoch) and at least a microsecond, the unstated source-confirmation window (three poll
         intervals) included and refused under `[capacity].poll_interval`; VM's
         `settlement_servicing_interval_seconds` and retention sweep interval are not checked so;
-        and every `[capacity.sites]` URL is an HTTP(S) origin (a DNS-name or IP host, a port from
-        1 to 65535 if stated, no path, credentials, query, fragment, or whitespace), refused when
-        the storefront starts under the site's key, not by the chart's values schema (D6 and
-        D14b's round-10 notes). The normative half is the storefront-publication delta's "A
+        and every `[capacity.sites]` URL is an HTTP(S) origin, parsed by the WHATWG URL standard
+        (pydantic's `AnyHttpUrl`) with no path, credentials, query, or fragment, handed to the
+        site client as its normalized origin, refused when the storefront starts under the
+        site's key, not by the chart's values schema; a host the standard accepts but nothing
+        resolves fails at the first poll (D6 and D14b's round-10 notes). The normative half is the storefront-publication delta's "A
         storefront that cannot publish refuses to start".
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx

@@ -117,15 +117,23 @@ def test_the_duration_schema_states_its_bounds():
         ("http://site-a:8081", "http://site-a:8081"),
         ("https://site.example.test", "https://site.example.test"),
         ("  https://site.example.test/  ", "https://site.example.test"),
-        ("HTTP://site-a", "http://site-a"),
+        ("HTTP://Site-A:8081/", "http://site-a:8081"),
+        ("http://site-a:80", "http://site-a"),
+        ("https://bücher.example", "https://xn--bcher-kva.example"),
         ("http://[::1]:8081", "http://[::1]:8081"),
         ("http://10.0.0.7:8081", "http://10.0.0.7:8081"),
-        ("http://site-a:65535", "http://site-a:65535"),
     ],
 )
-def test_an_origin_is_accepted_without_its_trailing_slash(stated, origin):
+def test_an_origin_is_accepted_as_the_url_standard_normalizes_it(stated, origin):
     assert site_authority_url(stated) == origin
     assert ORIGIN.validate_python(stated) == origin
+
+
+@pytest.mark.parametrize("stated", ["http://-", "http://site-a;x", "http://%41"])
+def test_a_host_the_standard_accepts_is_accepted_whether_or_not_it_exists(stated):
+    """The parser decides syntax, not existence: such a host fails as
+    unreachable at the first poll."""
+    assert site_authority_url(stated).startswith("http://")
 
 
 @pytest.mark.parametrize(
@@ -133,33 +141,22 @@ def test_an_origin_is_accepted_without_its_trailing_slash(stated, origin):
     [
         (8081, "must be a string"),
         (None, "must be a string"),
-        ("", "scheme is http or https"),
+        ("", "not a valid URL"),
+        ("http://", "not a valid URL"),
         ("site-a:8081", "scheme is http or https"),
         ("ftp://site-a", "scheme is http or https"),
-        ("http://", "naming a host"),
-        ("http://:8081", "naming a host"),
-        ("http://si\tte-a", "without whitespace or control characters"),
-        ("http://site\n-a", "without whitespace or control characters"),
-        ("http://site a", "without whitespace or control characters"),
-        ("http://site\x00-a", "without whitespace or control characters"),
-        ("http://site-a;x", "naming a host"),
-        ("http://-:80", "naming a host"),
-        ("http://site-.example", "naming a host"),
-        ("http://%41", "naming a host"),
-        ("http://[not-ipv6]", r"must be an HTTP\(S\) origin$"),
-        ("http://site-a:", "with a port, if stated, from 1 to 65535"),
-        ("http://site-a:0", "with a port, if stated, from 1 to 65535"),
         ("https://user:pass@site.example.test", "without credentials"),
         ("https://token@site.example.test", "without credentials"),
         ("https://site.example.test?x=1", "without a query or fragment"),
         ("https://site.example.test/?", "without a query or fragment"),
         ("https://site.example.test#top", "without a query or fragment"),
+        ("https://site.example.test#", "without a query or fragment"),
         ("https://site.example.test/v1", "without a path"),
         ("https://site.example.test//", "without a path"),
-        ("https://site.example.test:bad", "with a port, if stated, from 1 to 65535"),
-        ("https://site.example.test:70000", "with a port, if stated, from 1 to 65535"),
-        ("http://[::1", r"must be an HTTP\(S\) origin$"),
-        ("https://user:secret\uff20site.example.test", r"must be an HTTP\(S\) origin$"),
+        ("https://site.example.test:bad", "not a valid URL"),
+        ("https://site.example.test:70000", "not a valid URL"),
+        ("http://site a", "not a valid URL"),
+        ("http://[::1", "not a valid URL"),
     ],
 )
 def test_a_url_that_is_not_an_http_origin_is_refused(stated, reason):
@@ -175,6 +172,7 @@ def test_a_url_that_is_not_an_http_origin_is_refused(stated, reason):
         "https://operator:hunter2@site.example.test",
         "https://operator:hunter2\uff20site.example.test",
         "https://hunter2.example.test:hunter2",
+        "http://hunter 2.example.test",
     ],
 )
 def test_an_origin_refusal_carries_no_value_even_in_its_context(stated):
