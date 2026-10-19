@@ -20,7 +20,11 @@
 {{- if $itDigest -}}
   {{- $itImage = printf "%s@%s" $itImageName $itDigest -}}
 {{- end -}}
+{{- $credentialProfile := $tests.credentialProfile | default dict -}}
 {{- $profiles := $tests.activeProfiles | default (include "registry.smokeTestActiveProfiles" .) -}}
+{{- if and $credentialProfile.secretName (not $tests.activeProfiles) -}}
+  {{- $profiles = join "," (compact (list $profiles (required "registry tests.credentialProfile.profile is required with its secretName" $credentialProfile.profile))) -}}
+{{- end -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -46,8 +50,22 @@ spec:
       volumeMounts:
         {{- include "registry.smokeTestConfigVolumeMounts" . | nindent 8 }}
         {{- include "registry.smokeTestSecretVolumeMounts" . | nindent 8 }}
+        {{- if $credentialProfile.secretName }}
+        - name: credential-profile
+          mountPath: /app/config/config-{{ $credentialProfile.profile }}.yml
+          subPath: config-{{ $credentialProfile.profile }}.yml
+          readOnly: true
+        {{- end }}
   volumes:
     - name: test-config
       configMap:
         name: {{ .Release.Name }}-test-config
     {{- include "registry.smokeTestSecretVolume" . | nindent 4 }}
+    {{- if $credentialProfile.secretName }}
+    - name: credential-profile
+      secret:
+        secretName: {{ $credentialProfile.secretName | quote }}
+        items:
+          - key: config-{{ $credentialProfile.profile }}.yml
+            path: config-{{ $credentialProfile.profile }}.yml
+    {{- end }}

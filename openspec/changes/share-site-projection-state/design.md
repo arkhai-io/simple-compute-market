@@ -935,6 +935,24 @@ Secrets is owed. Accepted scope beyond the original proposal.
   two releases. No end-to-end scenario needs release 2 yet; one that does states it on its
   Makefile target and in its suite module.
 
+  After 16.5's run (owner decision (b), 2026-10-19; 16.8): `topology-up` restarts both
+  releases' Deployments after its Helm upgrades -- the registry, then the provisioning
+  services, then the storefronts, each `rollout restart` waited on with `rollout status` --
+  because local images keep bare tags (a commit-hash tag changes when an image does not and
+  can name an image the cluster lacks), so an upgrade leaves each pod template, and its
+  pods' image, unchanged. dev-env is not restarted: a new Anvil has none of the release's
+  contracts. The generated smoke profile carries what its hooks read and the release states:
+  for the internal registry, `registry.authority_id` and `registry.identifier` from
+  `global.registryIdentity` (not for a registry the agent names in `registry.urls`, which is
+  not the release's); `buyer.wallet_address` from the e2e-tests chart's EIP-191 buyer
+  identity; and `seller.wallet_address` from the target agent's `[Wallet].address`.
+  `buyer.marketplace_credential` is a key, so no values carry it: the registry chart's
+  `tests.credentialProfile` mounts a profile file from a pre-existing Secret into the
+  registry smoke pod only, and `helm/local-values.yaml` names
+  `arkhai-registry-smoke-credential`, which `topology-check` requires. The umbrella's global
+  smoke Secret was not used: it mounts into every smoke pod of both releases and replaces the
+  storefront smoke test's selected-agent fallback.
+
 ### Owner principles and where they go
 
 - Storefronts converge on one compute storefront whose loops cover every listing type: a

@@ -8,8 +8,9 @@ LOCAL_VALUES := local-values.yaml
 # Secrets the release's workloads read with the default values, which the chart
 # never creates: they are provisioned out of band. Enabling api-credits-registry
 # adds arkhai-api-credits-registry-identity. The e2e-tests chart's `helm test`
-# hook also reads arkhai-e2e-credentials and arkhai-buyer-profile-credential,
-# which a deploy does not need.
+# hook also reads arkhai-e2e-credentials and arkhai-buyer-profile-credential, and
+# under local-values.yaml the registry's reads arkhai-registry-smoke-credential;
+# a deploy needs none of them.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 
@@ -107,8 +108,17 @@ TOPOLOGY_VALUES  := bare-metal-release-values.yaml
 TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
 	arkhai-bare-metal-provisioning-identity
 # The Secrets $(RELEASE)'s `helm test` reads beyond a deploy's: the e2e-tests
-# chart's deal test credentials and buyer profile credential.
-TOPOLOGY_TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential
+# chart's deal test credentials and buyer profile credential, and the registry
+# smoke test's buyer credential profile (local-values.yaml names it).
+TOPOLOGY_TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential \
+	arkhai-registry-smoke-credential
+# The components (app.kubernetes.io/name) whose Deployments topology-up restarts
+# after its upgrades, in this order: the registry the storefronts publish to,
+# then the provisioning services they read, then the storefronts. dev-env is
+# not among them: restarting it starts a new Anvil chain without the contracts
+# the release deployed. A render test holds this list to the Deployments both
+# releases render.
+TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
 
 # $(TOPOLOGY_VALUES) names both releases' Services by the release names above,
 # so the topology targets refuse a RELEASE or TOPOLOGY_RELEASE given on the
@@ -124,6 +134,13 @@ endef
 ## release 2, each waiting for its workloads to be ready; both under
 ## local-values.yaml, so their volumes are deleted when they are uninstalled.
 ## deploy-local updates the chart's dependencies for both.
+##
+## Then restart both releases' Deployments in $(TOPOLOGY_ROLLOUT_ORDER)'s
+## order, waiting for each rollout. Local images keep their bare tags: a
+## commit-hash tag would change when an image does not, and could name an
+## image the cluster has not loaded. So an upgrade over an installed release
+## leaves each pod template unchanged and its pods on the image they started
+## with, and only a restart rolls a rebuilt image out.
 topology-up:
 	$(TOPOLOGY_NAMES_FIXED)
 	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(LOCAL_SECRETS) $(TOPOLOGY_SECRETS)"
@@ -134,6 +151,19 @@ topology-up:
 		--values $(LOCAL_VALUES) \
 		--values $(TOPOLOGY_VALUES) \
 		--wait
+	@set -e; for component in $(TOPOLOGY_ROLLOUT_ORDER); do \
+		selector="app.kubernetes.io/instance in ($(RELEASE),$(TOPOLOGY_RELEASE)),app.kubernetes.io/name=$$component"; \
+		deployments="$$(kubectl get deployment --namespace $(NAMESPACE) --selector "$$selector" --output name)"; \
+		if [ -z "$$deployments" ]; then \
+			echo "ERROR: no Deployment in namespace $(NAMESPACE) matches $$selector" >&2; exit 1; \
+		fi; \
+		for deployment in $$deployments; do \
+			kubectl rollout restart --namespace $(NAMESPACE) "$$deployment"; \
+		done; \
+		for deployment in $$deployments; do \
+			kubectl rollout status --namespace $(NAMESPACE) "$$deployment" --timeout=10m; \
+		done; \
+	done
 
 ## Uninstall the two-release topology, release 2 first, waiting for each.
 ## Succeeds when neither is installed.
@@ -142,16 +172,22 @@ topology-down:
 	helm uninstall $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
 	@$(MAKE) --no-print-directory undeploy
 
-## Run both releases' helm tests. Release 1's are its contract validation,
-## registry, storefront, and provisioning smoke tests and the e2e-tests chart's
-## deal test, which needs $(TOPOLOGY_TEST_SECRETS). Release 2's are its
-## provisioning smoke test, every case of which skips unless the smoke profile
-## carries provisioning.admin_credential and authority_identifier (a Secret-backed
-## smoke profile, which no values supply), and the bare-metal storefront's /health
-## check, the only one of them that proves release 2 answers. None shows the
-## storefronts trade: the topology's evidence (signed requests admitted,
-## callbacks reaching the bare-metal storefront, projections loaded, a
-## publication on release 1's registry) is gathered against the running releases.
+## Run both releases' helm tests, after checking for the Secrets release 1's
+## tests read beyond a deploy's ($(TOPOLOGY_TEST_SECRETS)). Release 1's: contract
+## validation, which checks the chain's ID (its fixtures also read the buyer's
+## and Bob's wallet addresses, from the generated smoke profile); the
+## registry smoke test, which reads health and publishers through the typed
+## client, pinned to the release's registry signer and authority from that
+## profile and signed as the development buyer from
+## arkhai-registry-smoke-credential; the storefront and provisioning smoke
+## tests, whose signed cases skip without an administrator credential, which
+## no values supply; and the e2e-tests chart's deal test. Release 2's: its
+## provisioning smoke test, which skips the same way, and the bare-metal
+## storefront's /health check, the one that proves release 2 answers. None
+## shows the storefronts trade: the topology's evidence (signed requests
+## admitted, callbacks reaching the bare-metal storefront, projections
+## loaded, a publication on release 1's registry) is gathered against the
+## running releases.
 topology-check:
 	$(TOPOLOGY_NAMES_FIXED)
 	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TOPOLOGY_TEST_SECRETS)"

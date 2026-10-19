@@ -328,7 +328,8 @@ No other mechanism replaces it.
 
 ## Open questions
 
-None open. The 2026-10-14 review's questions, each decided with the maintainer:
+Question 11 is open; the others are decided. The 2026-10-14 review's questions, each
+decided with the maintainer:
 
 1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
    decision".
@@ -353,3 +354,25 @@ None open. The 2026-10-14 review's questions, each decided with the maintainer:
    projections first", which also supersedes the scoped recheck in question 4.
 10. **The resource-pool delta's form.** Raised the same day. Decided: a modification of
     the now-permanent delegate requirement ("Permanent documentation").
+11. **Defects a local Helm deployment exposed.** Raised 2026-10-19 by
+    share-site-projection-state's local Helm run, which deployed bare metal beside Bob as
+    a second release of the umbrella publishing to the first release's registry. Each
+    predates that change and is to be designed here; none is decided:
+    1. A stored resource pool whose provider no registered handler serves makes the
+       provisioning service's pool read fail with an unhandled 500 that carries no
+       response signature, so the typed client reports missing response authentication
+       rather than the pool's problem; and the service's startup does not refuse the
+       row. Whether startup refuses it, the read reports it per pool, or both, is open.
+    2. The VM storefront chart's `wait-for-registry` init container
+       (`helm/charts/storefront/templates/deployment.yaml`) polls the registry's
+       `/health` with a `wget` that has no timeout, so one request hung across a
+       registry restart and the pod never started.
+    3. Stage events record the negotiation id as their `listing_id` when an entry
+       names no listing (the fallback in `core/storefront/src/core_storefront/stage_log.py`),
+       so a stage-event reader cannot tell a listing from a negotiation.
+    4. Helm test pods carry their Deployment's selector labels, so a selector-based
+       `kubectl logs` or `kubectl exec` finds the test pod beside the service's.
+    5. A VM deal Helm test that fails leaves Bob's loops paused: nothing resumes them
+       on failure.
+    6. Bare metal logs its notice that a pool states no region on every publication
+       cycle; VM logs its derivation warnings once per projection generation.

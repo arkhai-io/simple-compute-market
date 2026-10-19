@@ -72,6 +72,15 @@ provisioning:
 registry:
   persistence:
     retainOnUninstall: false
+  # The registry smoke test signs its reads as the release's development buyer.
+  # Its credential is never here: this out-of-band Secret's
+  # config-registry-smoke-secret.yml carries buyer.marketplace_credential, the
+  # key of the e2e-tests chart's buyer (Anvil's deterministic account 1, a
+  # development key never for a public network). `make -C helm topology-check`
+  # requires it.
+  tests:
+    credentialProfile:
+      secretName: arkhai-registry-smoke-credential
 api-credits-registry:
   persistence:
     retainOnUninstall: false

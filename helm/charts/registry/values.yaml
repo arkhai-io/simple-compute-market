@@ -86,6 +86,15 @@ auth:
 # ---------------------------------------------------------------------------
 tests:
   activeProfiles: ""
+  # A pre-existing Secret holding one Dynaconf profile file,
+  # config-<profile>.yml, that the smoke test layers over the generated
+  # profile. The test's signed reads need buyer.marketplace_credential, which
+  # is signing material no values carry. With no secretName the test runs on
+  # the generated profile alone and reports that credential missing; with one,
+  # the pod does not start until the Secret exists.
+  credentialProfile:
+    secretName: ""
+    profile: registry-smoke-secret
 
 # Number of replicas.
 replicaCount: 1

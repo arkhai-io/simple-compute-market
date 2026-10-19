@@ -34,6 +34,15 @@ def _make_variable(name: str) -> str:
     return match.group(1)
 
 
+def _make_words(name: str) -> list[str]:
+    """The words of a ``NAME := a b \\`` assignment in helm/Makefile, continuation
+    lines included."""
+    text = MAKEFILE.read_text().replace("\\\n", " ")
+    match = re.search(rf"^{name}\s*:?=(.*)$", text, re.MULTILINE)
+    assert match, f"{name} not assigned in {MAKEFILE}"
+    return match.group(1).split()
+
+
 RELEASE_ONE = _make_variable("RELEASE")
 RELEASE_TWO = _make_variable("TOPOLOGY_RELEASE")
 OVERLAY = UMBRELLA / _make_variable("TOPOLOGY_VALUES")
@@ -119,6 +128,19 @@ def _service_url(manifest: str, name: str) -> str:
     port = re.search(r"^\s+port: (\d+)$", service, re.MULTILINE)
     assert port, f"Service {name} renders no port"
     return f"http://{name}:{port.group(1)}"
+
+
+def _labelled(manifest: str, kind: str) -> list[tuple[str, str]]:
+    """``(name, app.kubernetes.io/name)`` of every rendered ``kind``."""
+    found = []
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        if f"kind: {kind}" not in lines:
+            continue
+        name = next(line.split(": ", 1)[1] for line in lines if line.startswith("  name: "))
+        component = next(line.split(": ", 1)[1] for line in lines if line.startswith("    app.kubernetes.io/name: "))
+        found.append((name, component))
+    return found
 
 
 def _env(document: str, name: str) -> str:
@@ -234,6 +256,84 @@ def test_release_one_runs_bob_on_its_own_provisioning_service() -> None:
     profile = _smoke_profile(manifest)
     assert profile["seller"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-storefront-bob")
     assert profile["registry"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-registry")
+
+
+def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states() -> None:
+    """The registry smoke test's pins are the identity release 1's registry
+    signs as; contract validation's wallets are the e2e-tests chart's buyer and
+    Bob's `[Wallet].address`; the registry smoke test's buyer credential comes
+    from the Secret `topology-check` requires, layered as its own profile."""
+    manifest = _release_one()
+    profile = _smoke_profile(manifest)
+    registry = _source(manifest, "charts/registry/templates/deployment.yaml")
+    bob = json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
+
+    assert profile["registry"]["authority_id"] == _env(registry, "REGISTRY_AUTHORITY_ID")
+    assert profile["registry"]["identifier"] == _env(registry, "REGISTRY_AUTHORITY_IDENTIFIER")
+    # The e2e-tests chart's buyer, Anvil account 1: a well-known development
+    # address, never for a public network.
+    assert profile["buyer"]["wallet_address"] == "0x70997970c51812dc3a010c7d01b50e0d17dc79c8"
+    assert profile["seller"]["wallet_address"] == bob["Wallet"]["address"]
+    assert "marketplace_credential" not in profile["buyer"]
+
+    smoke = _source(manifest, "charts/registry/templates/tests/registry-environment-test.yaml")
+    secret = re.search(r"secretName: \"([^\"]+)\"", smoke)
+    assert secret and secret.group(1) in _make_words("TOPOLOGY_TEST_SECRETS")
+    assert _env(smoke, "ACTIVE_PROFILES") == "helm,registry-smoke-secret"
+    assert "mountPath: /app/config/config-registry-smoke-secret.yml" in {line.strip() for line in smoke.splitlines()}
+
+
+def test_the_smoke_profile_carries_only_what_the_release_states() -> None:
+    """A wallet is carried only where the release states it, and registry pins
+    only for the release's own registry; the chart defaults mount no credential
+    profile."""
+    defaults = _ok(_render(RELEASE_ONE, (UMBRELLA / "values.yaml",)))
+    profile = _smoke_profile(defaults)
+    assert "wallet_address" not in profile["seller"]
+    assert profile["registry"]["authority_id"] == "registry-a"
+    smoke = _source(defaults, "charts/registry/templates/tests/registry-environment-test.yaml")
+    assert "credential-profile" not in smoke and _env(smoke, "ACTIVE_PROFILES") == "helm"
+
+    # A buyer of another development account flows through; without the
+    # e2e-tests chart there is no development buyer. Anvil account 3: a
+    # well-known development address, never for a public network.
+    other = "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+    buyer = {"e2e-tests": {"buyer": {"identity": {"identifier": other}}}}
+    assert _smoke_profile(_release_one(buyer))["buyer"]["wallet_address"] == other
+    without = _smoke_profile(_release_one({"e2e-tests": {"enabled": False}}))
+    assert "wallet_address" not in without["buyer"]
+
+    # A registry Bob names in registry.urls is not the release's, so the
+    # profile carries its trust but no pins of the release's registry.
+    external = "https://registry.example.com"  # placeholder on a reserved domain
+    trust = {"authority": "registry-a", "principals": [{"scheme": "eip191", "identifier": other}]}
+    elsewhere = {
+        "storefront": {
+            "agents": {
+                "bob": {
+                    "internalRegistryTrust": None,
+                    "config": {"registry": {"urls": [external], "authorities": {external: trust}}},
+                }
+            }
+        }
+    }
+    registry = _smoke_profile(_release_one(elsewhere))["registry"]
+    assert registry["api_url"] == external and registry["authorities"] == {external: trust}
+    assert "authority_id" not in registry and "identifier" not in registry
+
+
+def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
+    """`topology-up`'s restart order names the component of every Deployment
+    either release renders, except dev-env's Anvil, whose restart would start
+    a chain without the release's contracts."""
+    order = _make_words("TOPOLOGY_ROLLOUT_ORDER")
+    deployments = _labelled(_release_one(), "Deployment") + _labelled(_release_two(), "Deployment")
+    components = {component for _, component in deployments}
+
+    assert "dev-env" in components and "dev-env" not in order
+    assert set(order) == components - {"dev-env"}
+    assert len(order) == len(set(order))
+    assert order.index("registry") < order.index("provisioning") < order.index("storefront")
 
 
 def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob() -> None:

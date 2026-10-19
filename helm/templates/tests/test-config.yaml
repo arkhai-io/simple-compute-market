@@ -28,6 +28,17 @@ continue to work.
 {{- $_ := set $generated "provisioning" (dict
   "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
 ) -}}
+{{- /* The release's development buyer, where its e2e-tests chart states one.
+That buyer signs and pays from one EIP-191 account, so the chart's public buyer
+principal is its wallet address, which contract validation reads. Its signing
+material is never here: a smoke test that signs as the buyer reads it from a
+Secret-backed profile. */ -}}
+{{- $buyer := dict -}}
+{{- $e2e := index .Values "e2e-tests" | default dict -}}
+{{- $e2eBuyer := (($e2e.buyer | default dict).identity) | default dict -}}
+{{- if and $e2e.enabled (eq ($e2eBuyer.scheme | default "") "eip191") $e2eBuyer.identifier -}}
+  {{- $_ := set $buyer "wallet_address" $e2eBuyer.identifier -}}
+{{- end -}}
 {{- $bareMetal := index .Values "bare-metal-storefront" | default dict -}}
 {{- if .Values.storefront.enabled -}}
 {{- /* A release running the VM storefront: provisioning calls back one of its
@@ -108,22 +119,38 @@ agent's internalRegistryTrust. */ -}}
   "schema_version" ((and $schemaVersionKey (index $settlementConfig $schemaVersionKey)) | default 1)
   "priority" ((and $priorityKey (index $settlementConfig $priorityKey)) | default list)
 ) -}}
-{{- $_ := set $generated "registry" (dict
+{{- $registryProfile := dict
   "api_url" $registryURL
   "authorities" (dict $registryURL (dict
     "authority" (required "storefront test target registry trust requires an authority" $registryAuthority.authority)
     "principals" (required "storefront test target registry trust requires principals" $registryAuthority.principals)
   ))
-) -}}
-{{- $_ := set $generated $component (dict
+-}}
+{{- /* The registry smoke test pins one registry signer under one authority.
+For the internal registry that is the identity the release's registry signs
+as; a registry the agent names in registry.urls is not the release's, so its
+pins come only from config.values. */ -}}
+{{- if not $targetUrlsKey -}}
+  {{- $releaseRegistry := .Values.global.registryIdentity | default dict -}}
+  {{- $_ := set $registryProfile "authority_id" (required "the internal registry's smoke-test pins require global.registryIdentity.authority" $releaseRegistry.authority) -}}
+  {{- $_ := set $registryProfile "identifier" (required "the internal registry's smoke-test pins require global.registryIdentity.principal.identifier" ($releaseRegistry.principal | default dict).identifier) -}}
+{{- end -}}
+{{- $_ := set $generated "registry" $registryProfile -}}
+{{- $targetProfile := dict
   "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
   "base_url_override" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "base_url") | default "base_url")) | default "")
   "agent_id" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "agent_id") | default "agent_id")) | default "")
-) -}}
+-}}
+{{- /* The target's wallet, which contract validation reads, where its config
+states one. */ -}}
+{{- $targetWallet := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "wallet") | fromJson -}}
+{{- $targetWalletAddress := include "arkhai.storefrontConfigValue" (dict "doc" $targetWallet "name" "address") -}}
+{{- if $targetWalletAddress -}}
+  {{- $_ := set $targetProfile "wallet_address" $targetWalletAddress -}}
+{{- end -}}
+{{- $_ := set $generated $component $targetProfile -}}
 {{- if and (eq (include "arkhai.storefrontConfigValue" (dict "doc" $alkahestConfig "name" "enabled")) "true") $rpc.enabled $rpc.host $rpc.port -}}
-{{- $_ := set $generated "buyer" (dict
-  "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
-) -}}
+{{- $_ := set $buyer "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port)) -}}
 {{- end -}}
 {{- else if and $bareMetal.enabled .Values.provisioning.enabled -}}
 {{- /* A release running the dedicated bare-metal storefront and no VM
@@ -143,6 +170,9 @@ that storefront's signer. No VM agent or registry is the smoke tests' target. */
 {{- if not $bareMetalTrusted -}}
   {{- fail "provisioning storefront principals must include the bare-metal storefront's config.Identity.principal" -}}
 {{- end -}}
+{{- end -}}
+{{- if $buyer -}}
+{{- $_ := set $generated "buyer" $buyer -}}
 {{- end -}}
 {{- $rendered := mergeOverwrite (deepCopy $generated) (deepCopy ($config.values | default dict)) -}}
 apiVersion: v1

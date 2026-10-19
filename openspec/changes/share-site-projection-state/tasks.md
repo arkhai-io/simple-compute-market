@@ -4973,7 +4973,7 @@ storefront's configuration reaches it through its configuration system"; `design
       CHANGE=share-site-projection-state` (nothing reported), `make check-tasks
       CHANGE=share-site-projection-state`, and `openspec validate --strict` pass. No
       repository typing target exists. The pipeline was not run.
-- [ ] 16.5 Tier 3, in a local session with a cluster: deploy the umbrella with the
+- [x] 16.5 Tier 3, in a local session with a cluster: deploy the umbrella with the
       bare-metal storefront enabled from the example values, confirm it starts, reports
       its loops and both projection families in status, and publishes; record the
       evidence or the blocker here. Not runnable in a cloud session.
@@ -5001,6 +5001,42 @@ storefront's configuration reaches it through its configuration system"; `design
       no image can be built and no release installed. Render and loader evidence (16.3,
       16.4) is all this section has; it is not deployment evidence (`TESTING.md` "Chart
       Render Tests"). See the handoff below for what a local deployment will need.
+      **Done.** Run (2026-10-19, owner's local Kubernetes cluster), at `825737c`, clean
+      worktree: `make lock` produced no lockfile change; `make check-packaging` and `make
+      build-dev` passed; `make helm-topology-up` upgraded the existing release 1 and
+      installed release 2, release 2's three Secrets created from Anvil accounts 8 and 9 as
+      the overlay's header names them. Release 1's pods kept their earlier images (unchanged
+      local tags) until its Deployments were restarted by hand — 16.8 makes the target
+      restart them. Evidence, from a probe pod on the e2e-tests image using the typed
+      clients against each service's pinned principal: (admitted) release 2's provisioning
+      service answered every request from the bare-metal storefront with 2xx — both
+      families' version and full reads, capacity reservations, and fulfillment begin,
+      schedule, status, and result — and none with 4xx or 5xx; its status reads
+      `storefront_auth: ok` (`bare-metal-provisioning-status.json`). (status)
+      `resource_pool` and `capacity_bucket` `loaded` for `default` with no `last_error`;
+      `publication`, `site_projection_poller`, `negotiation_watchdog`,
+      `settlement_servicing` `running` with completed timer cycles; site `default` on peer
+      `provisioning_default` under Anvil account 9 (`bare-metal-system-status.json`).
+      (publication) `test_bare_metal_publication` against release 2 and release 1's
+      registry: 11 passed. (deal and callback) the bare-metal mock deal's stages, run as a
+      probe (listed price accepted, development-chain escrow, mock provisioning, lease
+      truncated and released through `check-leases`), passed twice; release 2's provisioning
+      service POSTed `capacity-released` to the bare-metal storefront (200 at both ends) and
+      the storefront recorded the same reservation `released` (`released-lease.json`,
+      `released-fulfillment.json`, `deal-events.json`). (registry) a buyer's compiled query
+      on release 1's registry returned the deal's listing, published under Anvil account 8
+      (`buyer-hardware-query.json`); Bob's listing was open before and after the deal
+      (`bob-listings-before-deal.json`, `bob-listings-after-deal.json`). Not shown or
+      failed: `make helm-topology-check` failed — release 1's retained provisioning database
+      (from an install predating the run) stores its `default` pool under a provider no
+      handler registers, and its registry smoke (3 setup errors) and chain hook (1) read
+      `registry.authority_id`, `registry.identifier`, `buyer.marketplace_credential` and
+      `buyer.wallet_address`, which the generated smoke profile does not carry (unchanged
+      from `dev`); release 2's health test passed and its provisioning smoke cases skipped
+      (4), as did release 1's provisioning (4) and storefront (3) smoke. Bob's listing came
+      from supply the probe declared on release 1, because of the retained pool. The deal
+      was a probe, not the `e2e_bare_metal_mock_deal` marker; `make helm-topology-down` was
+      not run. 16.8 addresses the smoke profile and the image roll.
 - [x] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
@@ -5122,6 +5158,79 @@ storefront's configuration reaches it through its configuration system"; `design
       which checks the release's properties, not an earlier render); `topology-check` also
       requires release 1's e2e-tests Secrets; the topology targets refuse an overridden
       release name. See the round-12 block.
+- [x] 16.8 (16.5's run; owner decision (b), 2026-10-19) The smoke profile carries what the
+      release can derive, and `topology-up` rolls rebuilt images. (a) The generated smoke
+      profile (`helm/templates/tests/test-config.yaml`) carries each key the release's smoke
+      hooks read that its values state: `registry.authority_id` and `registry.identifier`
+      from the release's registry identity, `buyer.wallet_address` from the release's
+      development buyer; `buyer.marketplace_credential` is signing material, so it comes only
+      from a Secret that `topology-check` checks for as it checks the e2e Secrets and that
+      the overlay and 16.5 name. Render-test each derived key; release 1's render changes
+      only by these keys. (b) `topology-up` restarts the topology's Deployments after its
+      Helm upgrades (`kubectl rollout restart`, then `kubectl rollout status`), so rebuilt
+      images under the bare local tags roll; image tagging is unchanged (the owner keeps bare
+      local tags: a commit-hash tag changes when an image does not, and bare tags avoid
+      image-not-found errors); the Makefile says why. (c) Nothing else narrowed;
+      `topology-check`'s comment says what it now proves.
+      Done. **What the hooks read** (`e2e-tests/tests/conftest.py`'s fixtures under
+      `e2e-tests/settings.toml`'s defaults): the registry smoke hook (`pytest -m registry`,
+      `tests/smoke/test_registry_smoke.py`) needs `registry.authority_id`,
+      `registry.identifier`, and `buyer.marketplace_credential`; the chain hook (`pytest -m
+      contracts`, whose one case is `tests/e2e/roles/layers/test_external.py`'s chain-ID
+      check) builds `external_world`, which checksums both `buyer.wallet_address` and
+      `seller.wallet_address` -- so **differed:** the chain hook's next failure after the
+      buyer's address would have been Bob's, and the profile carries `seller.wallet_address`
+      too, from the target agent's `config.Wallet.address` where stated (local-values.yaml
+      states Bob's). **Derivations:** for the internal registry (the target agent states no
+      `registry.urls`), `registry.authority_id` and `registry.identifier` are
+      `global.registryIdentity`'s authority and principal identifier, the identity the
+      registry Deployment signs as (the storefront chart already holds the agent's
+      `internalRegistryTrust` to it); for a registry the agent names in `registry.urls` they
+      are not derived -- that registry is not the release's, and its trust may list several
+      principals where the smoke test pins one -- so they come only from
+      `global.smokeTests.config.values`. `buyer.wallet_address` is the e2e-tests chart's
+      `buyer.identity.identifier` when that chart is enabled and the identity is EIP-191: the
+      development buyer signs and pays from one Anvil account (account 1), and the
+      local overlay states no other buyer. **Not derivable:** `buyer.marketplace_credential`
+      is a key. It travels as `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret
+      mounting" says Helm test pods' secrets do, a profile file (a pod `env` entry would also
+      read a `0x`-prefixed value as a TOML integer): the registry chart's
+      new `tests.credentialProfile` (`secretName`, `profile`, default
+      `registry-smoke-secret`) mounts `config-<profile>.yml` from a pre-existing Secret into
+      the registry smoke pod and appends the profile to its `ACTIVE_PROFILES`; unset (the
+      chart and umbrella defaults) nothing changes. `helm/local-values.yaml` names
+      `arkhai-registry-smoke-credential`, whose `config-registry-smoke-secret.yml` holds
+      `buyer.marketplace_credential` (Anvil account 1's key); `TOPOLOGY_TEST_SECRETS` adds
+      it, so `topology-check` checks it; the overlay's header and `LOCAL_SECRETS`'s comment
+      name it. The umbrella's global smoke Secret (`global.smokeTests.secret`) was not used:
+      enabling it mounts one Secret into every smoke pod of both releases (release 2 layers
+      `local-values.yaml` too) and replaces the storefront smoke test's selected-agent
+      fallback. **Render:** release 1's `test-config` ConfigMap gains exactly
+      `buyer.wallet_address`, `registry.authority_id`, `registry.identifier`, and (under
+      `local-values.yaml`) `seller.wallet_address`; under `local-values.yaml` its registry
+      smoke pod also gains the credential profile's mount, volume, and profile -- the one
+      change beyond the profile's keys, since a Secret reaches a pod only by a mount. Release
+      2's render is byte-identical; the payments, EVM, two-registry, identity-overlap, and
+      contact-exchange fixtures' renders change only by the derived keys. **Restart:**
+      `topology-up` then restarts, in `TOPOLOGY_ROLLOUT_ORDER` (`registry provisioning
+      storefront bare-metal-storefront`), every Deployment of either release whose
+      `app.kubernetes.io/name` is that component, waiting on each `rollout status` (10 min)
+      before the next component, and fails naming the selector if a component matches no
+      Deployment. dev-env is excluded: restarting it starts an Anvil chain without the
+      contracts the release deployed. **Render tests** (`TESTING.md` "Chart Render Tests";
+      `helm/tests/test_release_topology.py`, 11 cases):
+      `test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states` (the
+      pins equal the registry Deployment's `REGISTRY_AUTHORITY_ID` and
+      `REGISTRY_AUTHORITY_IDENTIFIER`, the buyer's wallet Anvil account 1, the seller's
+      Bob's rendered `Wallet.address`, no credential in the profile, the registry smoke pod's
+      Secret one of `TOPOLOGY_TEST_SECRETS` and its profiles `helm,registry-smoke-secret`);
+      `test_the_smoke_profile_carries_only_what_the_release_states` (chart defaults: no
+      seller wallet and no credential mount; another buyer identity flows through; none
+      without the e2e-tests chart; no pins for a `registry.urls` registry); and
+      `test_topology_up_restarts_every_deployment_but_the_chain` (the order names every
+      rendered Deployment's component but dev-env's, once each, registry before provisioning
+      before the storefronts). Against the unchanged `test-config.yaml` the first two fail,
+      and with `bare-metal-storefront` dropped from the order the third does.
 
 Section 16 notes:
 
@@ -5311,6 +5420,47 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
     CHANGE=share-site-projection-state` (nothing reported), `make check-tasks`, and `openspec
     validate --strict` pass.
 
+16.5 run and 16.8 (2026-10-19):
+
+- **16.5, run by the owner** at `825737c` on a local cluster; the evidence is in 16.5's note,
+  by observation file name only. It showed the topology working -- release 2's provisioning
+  admitting every bare-metal storefront request, both projection families loaded, the loops
+  running, a capacity-released callback reaching the storefront, a publication found by a
+  buyer's query on release 1's registry while Bob's listing stayed open -- and three
+  repository gaps: release 1's pods kept their old images until restarted by hand,
+  `topology-check`'s registry smoke and chain hooks read keys the generated smoke profile
+  did not carry, and six pre-existing defects outside this change.
+- **16.8, owner decision (b):** the smoke profile carries what the release states, the
+  registry smoke test's buyer credential comes from a named Secret `topology-check`
+  requires, and `topology-up` restarts the topology's Deployments with tagging unchanged.
+  The one difference from the brief: the chain hook also reads `seller.wallet_address`,
+  which the profile now carries from the target agent's `[Wallet].address`.
+- **The defects go to `unbacked-bare-metal-listings`** (owner direction): its `design.md`
+  open question 11, raised 2026-10-19 by this run, lists them in its own terms -- a stored
+  pool whose provider no handler serves turning provisioning's pool read into an unsigned
+  500 and not refused at startup; the VM storefront chart's `wait-for-registry` `wget` with
+  no timeout; stage events filling `listing_id` with the negotiation id; Helm test pods
+  carrying their Deployment's selector labels; a failed VM deal hook leaving Bob's loops
+  paused; bare metal's regionless-pool notice logged every cycle. Its index row's Notes name
+  the open item; its status and `tasks.md` are unchanged.
+- **Still not shown:** a passing `make helm-topology-check` (the retained provisioning
+  database of 16.5's run is open question 11's first defect; a fresh `make
+  helm-topology-down` then `up` avoids it), the `e2e_bare_metal_mock_deal` marker against
+  the topology, and `make helm-topology-down`. Nothing was installed in this session: there
+  is no cluster here.
+- Evidence: `make -C helm test-render` passed (143 assertions and cases, both loader checks
+  and the 11 topology cases run); `helm lint` of release 1 and release 2's values passes;
+  release 2's render is byte-identical to `825737c`'s and release 1's (with and without
+  `local-values.yaml`) and the fixtures' differ only as 16.8 says; `make -n
+  helm-topology-up helm-topology-check` prints the upgrades, the ordered restart loop, the
+  Secret check with `arkhai-registry-smoke-credential`, and both `helm test`s, and an
+  overridden `RELEASE` is still refused; `make test-e2e-unit` 38 passed (no e2e code
+  changed); `make check-packaging` (architecture rules included), `make
+  check-comment-hygiene`, `make check-doc-citations` for both changes (nothing reported),
+  `make check-tasks` for both changes, `make check-change-index`, and `openspec validate
+  --strict` for both changes pass. No version moved and no lock changed; the registry chart
+  stays 0.1.0 and the umbrella 0.3.0.
+
 ## 17. Closeout
 
 The closeout task of `openspec/README.md#plan-closeout-requirements`, in its order. It edits
@@ -5470,6 +5620,16 @@ documentation only; a part needing code returns the change to implementation.
         service trusts and calls back one storefront). `TESTING.md` "Chart Render Tests": the
         umbrella's Python render tests live in `helm/tests/` and `test-render.sh` runs them
         beside each chart's.
+      - **Amended (16.5's run, 16.8; `design.md` C13):** `DEPLOYMENT_AND_CONFIG.md`'s
+        release-topology subsection (above) also states that `make helm-topology-up` restarts
+        both releases' Deployments after its upgrades, registry then provisioning then
+        storefronts, because local images keep bare tags, and never dev-env's Anvil; and that
+        `topology-check` requires `arkhai-registry-smoke-credential` beside the e2e Secrets.
+        "Kubernetes: ConfigMap and Secret mounting": the umbrella's generated smoke-test
+        profile carries the registry pins (internal registry only), the development buyer's
+        and the target agent's wallet addresses, and the registry chart's
+        `tests.credentialProfile` layers a Secret's profile file into the registry smoke pod
+        for the signing material no values carry.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

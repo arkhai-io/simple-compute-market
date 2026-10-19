@@ -560,7 +560,7 @@ deploy-helm:
 # the bare-metal storefront and its own provisioning service, publishing to
 # release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
 # topology targets say what each installs, needs, and checks.
-helm-topology-up: ## Install the local two-release Helm topology: the umbrella, then the bare-metal seller release on its registry
+helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments onto rebuilt images
 	$(MAKE) -C helm topology-up
 
 helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first
