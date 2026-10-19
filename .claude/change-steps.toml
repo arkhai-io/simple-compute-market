@@ -60,6 +60,8 @@ models = [
   { harness = "codex",  model = "gpt-6-sol",       effort = "high" },
   { harness = "claude", model = "claude-opus-5-5", effort = "high" },
 ]
+allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
+         "Bash(make check-tasks*)"]
 deny = ["Edit"]
 
 [steps.design]
@@ -69,7 +71,8 @@ allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   # Read-only lens vocabulary extraction from intervention ledgers on stdin.
   "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
   "Bash(make -C ../*-proposal check-change-index)",
   "Edit(../*-proposal/openspec/**)",
@@ -83,7 +86,8 @@ models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 resume_from = "design"
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
@@ -94,7 +98,8 @@ skill = "change-triage"
 models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit", "Write", "Task",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
@@ -138,7 +143,8 @@ models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
 allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   "Edit(AGENTS.md)",
-  "Bash(bunx @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)",
   "Bash(git add *)", "Bash(git commit *)",
 ]
