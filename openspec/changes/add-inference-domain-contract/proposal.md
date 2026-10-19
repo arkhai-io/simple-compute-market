@@ -29,14 +29,14 @@ is the place an interpretation gets pinned: API credits leaves the meaning of a
 credit to the seller; inference fixes it, per model, so listings are comparable.
 That difference is a domain, not a field.
 
-**Extracting shared machinery first.** An earlier plan opened with an
-extraction from API credits so a new domain could compose it. The extraction
-boundary cannot be known from one consumer, and the pieces most tempting to
-extract — balances, quantities, consumption rules — are precisely the ones an
-inference market interprets differently. This change therefore defines
-vocabulary only. The follow-on changes in this campaign compose a stack by
-copying, prove one deal, and extract only what two working consumers show to be
-shared.
+**Building the shared machinery here.** This change defines vocabulary only.
+The machinery any API-selling domain needs — issuance, the key authority, the
+gate client, the storefront's issuance composition, the prepaid ledger — is
+`compose-api-family-kit`'s, built as an `api` family vocabulary and kit by
+refactoring API credits onto it; the stack change then composes inference on
+the kit. The pieces an inference market interprets differently — the listing,
+the rate card, the consumption rule — stay domain-owned, and this change names
+them.
 
 ## What Changes
 
@@ -116,9 +116,9 @@ shared.
 - No storefront or buyer executables, gateway, authority service deployment,
   Compose stack, development identities, or end-to-end scenario. Those are
   `compose-inference-domain-stack`.
-- No extraction from API credits and no change to any API-credits behavior,
+- No family vocabulary or kit, and no change to any API-credits behavior,
   wire shape, digest, database row, or distribution. That is
-  `extract-access-issuance-kit`, and it waits until two consumers exist.
+  `compose-api-family-kit`.
 - No admission holds, no post-response settlement, no streaming usage capture,
   no cancellation handling. That is `meter-inference-usage`.
 - No fiat (`arkhai.payments.v1`) option for inference listings, and no
@@ -193,8 +193,8 @@ shared.
   `inference` capability's `spec.md` and `architecture.md`.
 - Charge derivation is a pure function of a usage record and a rate card —
   the `inference` capability's `spec.md`.
-- Why copy-first and extract-after-two-consumers is the sequencing rule for this
-  campaign — the `inference` capability's `architecture.md`, and
+- Why the family kit precedes the stack, and what the withdrawn copy measured
+  — the `inference` capability's `architecture.md`, and
   `docs/development/ROADMAP.md`'s Goal 8 current state.
 
 ## Dependencies and Related Changes
@@ -203,8 +203,8 @@ shared.
   `listing_resource`, `offering_mode`, `listing_cardinality_mode` — was settled
   by [`settle-listing-vocabulary`](../archive/2026-09-15-settle-listing-vocabulary/),
   archived 2026-09-15, so nothing here waits on a rename.
-- [`compose-inference-domain-stack`](../compose-inference-domain-stack/),
-  [`extract-access-issuance-kit`](../extract-access-issuance-kit/),
+- [`compose-api-family-kit`](../compose-api-family-kit/),
+  [`compose-inference-domain-stack`](../compose-inference-domain-stack/),
   [`meter-inference-usage`](../meter-inference-usage/),
   [`package-inference-seller`](../package-inference-seller/), and
   [`qualify-inference-market`](../qualify-inference-market/) follow this change
@@ -215,8 +215,8 @@ shared.
   version-1 inference listings carry the backed value and publish on the
   API-credits quota path, quota being a sales cap rather than capacity.
   Admitting the unbacked value is an inference filter-specification bump;
-  `design.md` records the trigger. Its publication-hook changes mean the stack
-  change copies from current `dev`.
+  `design.md` records the trigger. Its publication-hook changes are in the
+  publication roles the family kit takes from current `dev`.
 - [`publish-indicative-listing-rates`](../publish-indicative-listing-rates/) —
   now design-complete and unblocked; owns the exact-decimal filter value type and declarative filter
   co-requirements the generic registry lacks. Inference does not duplicate that

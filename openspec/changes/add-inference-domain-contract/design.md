@@ -32,8 +32,8 @@ table above treated as pending have merged and been archived:
 Backing is now a declared property of every pool and listing, with promoted
 requirements in `storefront-publication` and `registry-discovery`, and the
 compute registry schema publishes it. `kit/capacity-publication`'s hooks moved
-under that work, so any copy of the API-credits publication roles must be taken
-from current `dev`. `publish-indicative-listing-rates` is design-complete and
+under that work, so the family kit takes the API-credits publication roles from
+current `dev`. `publish-indicative-listing-rates` is design-complete and
 unblocked. The decisions below were corrected in place; none was reversed.
 
 ### What planning settled before this change
@@ -263,8 +263,8 @@ domains is the listing and the consumption, not the purchase.
 
 It is copied into `domains/inference/negotiation/terms.py`, not imported.
 `ARCHITECTURE.md`'s dependency layers forbid a domain importing a sibling, and
-the copy is small. Whether it becomes kit is `extract-access-issuance-kit`'s
-question, answered with two consumers in view.
+the copy is small. `compose-api-family-kit` decides whether the shape moves into
+the `api` family vocabulary; until then each domain carries its own.
 
 ### Usage record and charge derivation are domain-owned deterministic semantics
 
@@ -346,33 +346,34 @@ contracts and names generalizing to API credits as a non-goal; inference is
 non-compute in the same way. Recorded here because the listing shape (no
 `CapacityBinding` to a Resource Pool; a quota resource instead) follows from it.
 
-### Copy first, extract after two consumers
+### The family kit first, the stack on it
 
-The campaign's sequencing rule, stated once: `compose-inference-domain-stack`
-copies the API-credits issuance client, fulfillment orchestration, evidence
-projection, and publication roles into `domains/inference/` with the issuance
-label changed to `inference`; `extract-access-issuance-kit` then moves what both
-copies share into kit and deletes both copies.
+The campaign's sequencing rule, stated once: `compose-api-family-kit` pins the
+API-credits issuance digests and attestation shapes byte-for-byte, builds the
+`api` family vocabulary and kit, and refactors API credits onto it in slices
+proven against the pins; `compose-inference-domain-stack` then composes the
+inference roles on the kit, contributing its listing schema, its publication
+guard, its materialization, and its wiring, and nothing the kit already owns.
 
-The reason is narrow. The issuance *label* is not the difficulty: it appears in
-three places per side, and a regression test that pins the digest bytes for a
-fixed input set proves a parameterization byte-identical with one consumer —
-that pin is the extraction change's first task. What is not knowable from one
-consumer is the boundary inside `fulfillment.py`, where issuance and the quota
-commit are tangled, and how the authority service should be packaged. Those two
-questions are answered by having a second, working consumer in view.
+The earlier rule was the reverse: copy the API-credits issuance client,
+fulfillment orchestration, evidence projection, and role compositions into
+`domains/inference/` with the label changed, prove a deal, and extract what two
+working consumers showed to be shared. Its ground was that the boundary inside
+`fulfillment.py`, where issuance and the quota commit are tangled, and the
+authority's packaging were not knowable from one consumer. The copy was carried
+as far as the storefront and the authority and measured on 2026-10-19: about
+12,500 copied source lines against fewer than 300 new ones, all three new
+modules sitting beside the copy rather than inside it. The boundary question
+has a degenerate answer — the shared part is the whole machinery — so review of
+the plan asked for the family-kit shape compute already uses, and the copied
+pull requests were withdrawn unmerged.
 
-Two rules keep the copy cheap:
+Two parts of the earlier reasoning survive. The issuance label is still not
+the difficulty, and a pin of the digest bytes for a fixed input set still proves
+a parameterization byte-identical; that pin is the kit change's first task. And
+`meter-inference-usage` still mutates the authority once, against the
+kit-composed one, after the stack has proven a deal.
 
-- **Copies are frozen.** No feature work in a copied module until extraction
-  lands. A copy that diverges is no longer a copy, and extraction becomes a
-  reconciliation.
-- **Extraction blocks metering.** `meter-inference-usage` is the change that
-  mutates the authority; it does so against the kit-composed authority, once,
-  after `extract-access-issuance-kit` is accepted. "Sequenced, whichever lands
-  second rebases" was the earlier posture and is withdrawn: if metering landed
-  first, extraction would be separating one copy from one that had diverged in
-  exactly the module it needs to move.
 ### Schema identity and filter specification
 
 Schema identity is `inference`, version 1; filter-specification version 1. The
@@ -397,10 +398,10 @@ usage fields under a version bump, not a reinterpretation.
 
 ## Risks / Trade-offs
 
-- **Transient duplication.** The stack change ships a second copy of the
-  issuance machinery. Mitigated by the extraction change's rule that no
-  domain-local copy survives, and by the API-credits regression suite pinned
-  before extraction.
+- **A sibling domain before its family exists.** This change's copies of the
+  provision-intent shape and the terms module predate the `api` family
+  vocabulary. Mitigated by their size and by `compose-api-family-kit`, which
+  decides what moves into the vocabulary before the stack composes anything.
 - **Integer granularity.** On a fiat-cent asset the finest rate is one cent
   per million tokens; on an 18-decimal asset the integers are large. Neither
   prices anyone out; the overflow guards already exist.
@@ -434,7 +435,7 @@ where a task touches one it is an explicit decision gate.
    filter-specification bump and close-and-republish.
 3. **Whether the inference authority is the same kit-composed service binary as
    API credits deployed twice, or a distinct distribution.** Owned by
-   `extract-access-issuance-kit`; irrelevant to this change's vocabulary.
+   `compose-api-family-kit`; irrelevant to this change's vocabulary.
 4. **Pre-flight token estimation source** (vLLM `/tokenize` versus a local
    tokenizer). Owned by `meter-inference-usage`.
 
