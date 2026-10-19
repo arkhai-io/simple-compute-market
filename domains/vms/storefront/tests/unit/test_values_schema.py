@@ -20,6 +20,7 @@ import tomllib
 import yaml
 from jsonschema import Draft7Validator
 from market_config.values_schema import any_case, stale_files
+from market_delivery import RESERVED_SECTION_KEYS
 from market_storefront import values_schema
 from market_storefront.utils.config import IdentityConfigDeclaration
 
@@ -205,6 +206,19 @@ def test_delivery_keeps_its_own_settings_and_types_shipped_sinks(definition) -> 
         assert _field(delivery, name) is not False
     for sink in ("apprise", "command", "file", "smtp", "webhook"):
         assert _field(delivery, sink)["additionalProperties"] is False
+
+
+def test_delivery_states_the_settings_the_bare_metal_chart_does(definition) -> None:
+    """``[Delivery]``'s own settings are stated by each storefront's generator,
+    the delivery kit naming them only; they must agree. Read from the bare-metal
+    chart's committed definition, which that storefront's own drift test holds to
+    its code, so neither storefront imports the other."""
+    assert set(module._DELIVERY_SETTINGS) == RESERVED_SECTION_KEYS
+    bare_metal = json.loads(
+        (REPO / "helm" / "charts" / "bare-metal-storefront" / "values.schema.json").read_text()
+    )["definitions"][values_schema.DEFINITION]
+    for name in RESERVED_SECTION_KEYS:
+        assert _field(_delivery(definition), name) == _field(_section(bare_metal, "Delivery"), name), name
 
 
 def test_secret_sink_settings_are_refused_however_the_instance_is_named(definition) -> None:

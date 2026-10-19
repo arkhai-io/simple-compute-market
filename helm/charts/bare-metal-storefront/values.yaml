@@ -17,10 +17,14 @@ replicaCount: 1
 #
 # `config` is the storefront's own configuration, in its own key names, and
 # passes through to a ConfigMap as storefront.json, mounted at
-# /etc/arkhai/storefront.json. The chart adds only what this release knows --
-# `port`, always; `base_url`, the Service's URL; and `db_path` under
-# persistence.mountPath -- the last two only where `config` does not state
-# them, and the storefront validates the rest when it starts. `config` is
+# /etc/arkhai/storefront.json. The chart adds only what the release knows --
+# `port`, always; `base_url`, the Service's URL; `db_path` under
+# persistence.mountPath; and in an umbrella release its internal registry (with
+# `internalRegistryTrust`) and a `default` site for its provisioning service --
+# each but the port only where `config` does not state it, and the storefront
+# validates the rest when it starts. In an umbrella release, a site bound to its
+# provisioning service needs a service peer naming global.provisioningIdentity,
+# or the chart refuses the release. `config` is
 # public: the values schema, generated from the storefront's typed settings,
 # refuses a key the storefront does not read and every setting it marks secret,
 # which belongs in the Secret overlay named by `secret`. Write integers above
@@ -63,6 +67,17 @@ alkahestAddressBook:
   configMapName: ""
   key: alkahest_addresses.json
   mountPath: /etc/arkhai/alkahest
+
+# In an umbrella release whose `config` names no registry.urls, the storefront
+# publishes to the release's internal registry, and this is its trust, which the
+# chart writes under that registry's derived URL; it must name
+# global.registryIdentity's authority and principal. Installed alone, the chart
+# has no internal registry and refuses it.
+#
+#   internalRegistryTrust:
+#     authority: registry-a
+#     principals:
+#       - {scheme: eip191, identifier: "0x..."}
 
 # The storefront's configuration, rendered into storefront.json. For example:
 #

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 
 import typer
@@ -44,8 +46,17 @@ def main(
     """Operate the seller-side bare-metal storefront."""
 
 
+@dataclass(frozen=True)
+class ServeProcess:
+    """What ``serve`` runs: given as the command line's context object, it
+    replaces the storefront's HTTP process, which runs when none is given."""
+
+    run: Callable[..., None]
+
+
 @app.command("serve")
 def serve_cmd(
+    context: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", help="Bind interface."),
     port: int | None = typer.Option(
         None, "--port", help="Bind port; defaults to the configured port."
@@ -53,9 +64,13 @@ def serve_cmd(
     root_path: str = typer.Option("", "--root-path", help="ASGI root path."),
 ) -> None:
     """Run the storefront HTTP process."""
-    from .server import run_serve
+    process = context.find_object(ServeProcess)
+    if process is None:
+        # Importing the server composes the application; only serve needs it.
+        from .server import run_serve
 
-    run_serve(host=host, port=port, root_path=root_path)
+        process = ServeProcess(run=run_serve)
+    process.run(host=host, port=port, root_path=root_path)
 
 
 @app.command("publish")

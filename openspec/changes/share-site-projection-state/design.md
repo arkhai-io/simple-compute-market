@@ -831,33 +831,54 @@ Secrets is owed. Accepted scope beyond the original proposal.
     of values to go named it: the storefront chart's agent gained the same mount in round 08
     (10.20), so the agent shape carries it. The schema's closed top level refuses every
     retired value, naming it.
-  - *Derivations: only what this chart's release knows* (a divergence from VM's chart):
-    `port` always, a different stated value refused in any spelling; `base_url`, the
-    Service's URL (`http://<fullname>:<port>`, bare metal's form, no trailing `/`); and
-    `db_path` under `persistence.mountPath`, both only where unstated. No internal registry,
-    provisioning URL, or default site, and so no release-identity checks: the chart installs
-    on its own (its Makefile deploys it alone), with no umbrella globals to derive them from,
-    so `config` states them. A key stated in two spellings is refused at render, as VM's
-    chart refuses one.
+  - *Derivations: what the release knows, as VM's chart derives them* (amended after
+    Section 16's check, following the permanent "A storefront chart passes service
+    configuration through"). Always: `port`, a different stated value refused in any
+    spelling; `base_url`, the Service's URL (`http://<fullname>:<port>`, bare metal's form,
+    no trailing `/`); and `db_path` under `persistence.mountPath`, both only where unstated.
+    In an umbrella release, whose `global.registry`/`global.registryIdentity` and
+    `global.provisioning`/`global.provisioningIdentity` the chart reads: the internal
+    registry's URL as `[registry].urls`, with the operator's chart-level
+    `internalRegistryTrust` written under it (required there, checked against the release's
+    registry identity, refused beside `registry.urls`), and `[capacity.sites]` as
+    `{default: <provisioning URL>}`, each only where `config` states none; every site bound to
+    the release's provisioning service must have a role-`service` peer naming
+    `global.provisioningIdentity`, which the chart checks and never adds (the spec: "the
+    chart MUST NOT add a principal to a trust list"); the umbrella's values state the
+    release's development registry trust and that peer for the bare-metal role, as for Bob.
+    Installed alone, with no globals, only the first three are derived, and
+    `internalRegistryTrust` is refused. A key stated in two spellings is refused at render,
+    as VM's chart refuses one. No `provisioning.service_url`: bare metal reads none.
   - *The port is a setting.* Bare metal reads VM's `port` (packaged default 8000), `serve
     --port` overriding it, and the image's command is `serve`: the deployment-state rule lets
     nothing but the configuration directory and the credential travel outside the
     configuration system, and a `--port` argument would.
   - *Service links are off* (`enableServiceLinks: false`), as Section 11's handoff asked:
     Kubernetes would otherwise inject variables for every Service in the namespace, and a
-    Service named `storefront…` would land in the `STOREFRONT_` override layer.
+    Service named `storefront…` would land in the `STOREFRONT_` override layer. VM's chart
+    adopts it (Section 16's check), its loader reading the same prefix.
   - *The generated definition is the whole document, closed* (a divergence from VM's open
     root, which VM keeps because it reads sections untyped): every setting bare metal reads
     is typed, so the definition is its settings model's, each section's JSON Schema closed
     (`_Section`'s `json_schema_extra`) while the loader still ignores an unknown key (D14a),
     with `[Settlement]` and `[Delivery]` typed by the kits' fragments. No retired keys: bare
     metal had no file configuration before. `[Delivery]`'s own three settings are stated a
-    second time beside VM's, a test holding them equal to the kit's `RESERVED_SECTION_KEYS`;
-    their natural home is `kit/delivery`, which both storefronts pin exactly, so moving them
-    is left until that kit next changes.
+    second time beside VM's. Each storefront's test holds its copy's names to the kit's
+    `RESERVED_SECTION_KEYS` and its fragments equal to the other chart's committed
+    definition, read as a file so neither storefront imports the other; their natural home
+    is `kit/delivery`, which both storefronts pin exactly, so moving them is left until that
+    kit next changes. Consequence for rollback: the closed definition refuses at render a
+    values file stating a key an older chart's schema does not know, so downgrading the
+    chart with a newer values file (`helm upgrade` to the older chart with the newer values,
+    or with `--reuse-values`) fails until the key is removed; `helm rollback`, which
+    restores the older release's own values, is unaffected, and the storefront itself still
+    starts on a newer configuration, its loader ignoring the key.
   - *Tier 2* (Validation tiers) runs the storefront's loader, startup refusal, clause
     compilation, and site binding over the example's rendered document through
-    `BARE_METAL_STOREFRONT_PYTHON`, and the refusal over the chart defaults'.
+    `BARE_METAL_STOREFRONT_PYTHON`, and the refusal over the chart defaults': it shows the
+    rendered configuration is publishable, not that it starts, since the runtime's own
+    composition also needs the signing credential owning the configured principal, the
+    overlay's wallet key, a writable database, and chain clients.
 - **C9. Compose and the lane mount files**, through a committed development
   `storefront.toml` for bare metal and a secrets file; only bare-metal targets produce
   bare-metal files. As delivered (Section 11): the secrets overlay is committed, a

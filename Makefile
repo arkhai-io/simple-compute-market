@@ -739,11 +739,13 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
-# The Helm values schemas carry one definition generated from the storefront's
-# typed configuration models; it keeps secret-marked fields out of an agent's
-# pass-through config. The storefront names the schema files it writes, and the
-# generator runs in the storefront's own environment (make init-storefront),
-# whose unit suite fails when a committed definition is stale.
+# Each storefront chart's values schema carries one definition generated from
+# that storefront's typed configuration models; it keeps secret-marked fields
+# out of the chart's pass-through config. Each storefront names the schema files
+# it writes -- VM's storefront chart and the umbrella's storefront definition, and
+# the bare-metal chart's -- and its generator runs in that storefront's own
+# environment (make init-storefront; make -C domains/bare_metal/storefront init),
+# whose test suite fails when a committed definition is stale.
 helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..

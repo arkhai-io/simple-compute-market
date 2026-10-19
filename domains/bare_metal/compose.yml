@@ -80,6 +80,8 @@ services:
         condition: service_healthy
       bare-metal-provisioning:
         condition: service_healthy
+    # 8000 here and in the healthcheck is the `port` the storefront's
+    # configuration states (storefront.dev.toml in the lane); change them together.
     ports:
       - "${BARE_METAL_STOREFRONT_PORT:-8000}:8000"
     environment:

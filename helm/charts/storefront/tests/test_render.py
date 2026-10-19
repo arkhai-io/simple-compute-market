@@ -181,6 +181,14 @@ def test_default_release_renders_mounts_and_derives_together() -> None:
     assert "alkahest-address-book" not in deployment
 
 
+def test_the_pod_environment_carries_no_service_links() -> None:
+    """Service-link variables named for a Service beginning `storefront` would
+    land in the storefront's STOREFRONT_ override layer."""
+    deployment = _source(_ok(_render()), "deployment.yaml")
+
+    assert "enableServiceLinks: false" in {line.strip() for line in deployment.splitlines()}
+
+
 def test_a_section_the_chart_has_never_heard_of_passes_through_intact() -> None:
     section = {"sinks": {"ops": {"kind": "file", "path": "/var/log/x", "retries": 3, "tags": ["a", "b"]}}, "enabled": True}
     config = _config(_ok(_render(agent=_with_config(Futuristic=section))))

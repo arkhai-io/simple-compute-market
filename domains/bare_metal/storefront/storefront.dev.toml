@@ -10,6 +10,9 @@
 # (dev-env/identities/bare-metal.storefront.secrets.toml).
 
 base_url = "http://bare-metal-storefront:8000"
+# The port `serve` binds: the packaged default, stated because
+# domains/bare_metal/compose.yml's port mapping and healthcheck name it.
+port     = 8000
 
 # Timer-loop intervals, shortened for this stack only. A scenario holds the
 # storefront's loops and advances each one deliberately; shorter intervals

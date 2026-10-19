@@ -97,14 +97,80 @@ Argument: dict with `path` (dotted, for the message) and `value`.
 {{- end -}}
 
 {{/*
+`bare-metal-storefront.foldedMap`: the mapping `doc` holds under `name`, as
+JSON for fromJson, or {} when absent. JSON keeps every value's type through the
+round trip.
+*/}}
+{{- define "bare-metal-storefront.foldedMap" -}}
+{{- $key := include "bare-metal-storefront.foldedKey" . -}}
+{{- $value := dict -}}
+{{- if $key -}}{{- $value = index .doc $key | default dict -}}{{- end -}}
+{{- toJson $value -}}
+{{- end -}}
+
+{{/*
+`bare-metal-storefront.foldedValue`: the scalar `doc` holds under `name`,
+matched in any spelling, as a string, or "" when absent.
+*/}}
+{{- define "bare-metal-storefront.foldedValue" -}}
+{{- $key := include "bare-metal-storefront.foldedKey" . -}}
+{{- if $key -}}{{- index .doc $key | toString -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Whether `principals` (a list of scheme-tagged identities, its keys matched in
+any spelling) includes `principal`. Returns "true" or "".
+*/}}
+{{- define "bare-metal-storefront.includesPrincipal" -}}
+{{- $found := false -}}
+{{- range $candidate := (.principals | default list) -}}
+{{- $scheme := include "bare-metal-storefront.foldedValue" (dict "doc" $candidate "name" "scheme") -}}
+{{- $identifier := include "bare-metal-storefront.foldedValue" (dict "doc" $candidate "name" "identifier") -}}
+{{- if and (eq $scheme $.principal.scheme) (eq $identifier $.principal.identifier) -}}
+{{- $found = true -}}
+{{- end -}}
+{{- end -}}
+{{- if $found -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The umbrella release's internal registry URL, when the release has one: the
+umbrella's `global.registry` and `global.registryIdentity`. Installed alone, the
+chart has neither, and this is "".
+*/}}
+{{- define "bare-metal-storefront.internalRegistryUrl" -}}
+{{- $global := .Values.global | default dict -}}
+{{- if and $global.registry $global.registryIdentity -}}
+{{- $host := default (printf "%s-registry" .Release.Name) $global.registry.host -}}
+{{- printf "http://%s:%d" $host (int $global.registry.port) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The umbrella release's provisioning service URL, when the release has one:
+the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
+*/}}
+{{- define "bare-metal-storefront.internalProvisioningUrl" -}}
+{{- $global := .Values.global | default dict -}}
+{{- if and $global.provisioning $global.provisioningIdentity -}}
+{{- printf "http://%s:%d" $global.provisioning.host (int $global.provisioning.port) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render the public storefront document, `storefront.json`.
 
 `config` is the storefront's own configuration and passes through unchanged:
 the chart supplies no service default and does not validate the service's
-settings, which the storefront does at startup. The chart adds only what this
+settings, which the storefront does at startup. The chart adds only what the
 release knows -- the port its container, probes, and Service share, the
-Service's URL, and the database path under the persistence mount -- and, except
-for the port, only where the configuration does not state it. See
+Service's URL, and the database path under the persistence mount; and, in an
+umbrella release, its internal registry, with the trust stated as
+`internalRegistryTrust` written under its URL, and a `default` site for its
+provisioning service -- and, except for the port, only where the configuration
+does not state it. In an umbrella release it refuses parts that disagree: trust
+that omits the release's registry identity, and a site bound to the release's
+provisioning service whose service peer omits its provisioning principal. See
 openspec/specs/deployment-state/spec.md, "A storefront chart passes service
 configuration through".
 */}}
@@ -127,6 +193,74 @@ configuration through".
 {{- end -}}
 {{- if not (include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "db_path")) -}}
   {{- $_ := set $cfg "db_path" (printf "%s/bare-metal-storefront.db" (trimSuffix "/" .Values.persistence.mountPath)) -}}
+{{- end -}}
+
+{{- /* Registry: the umbrella's internal registry, its trust stated outside config. */ -}}
+{{- $registryKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
+{{- $registry := index $cfg $registryKey | default dict -}}
+{{- $trust := .Values.internalRegistryTrust -}}
+{{- $internalRegistry := include "bare-metal-storefront.internalRegistryUrl" . -}}
+{{- if include "bare-metal-storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
+  {{- if $trust -}}
+    {{- fail "bare-metal storefront states internalRegistryTrust and config registry.urls; internalRegistryTrust applies only to the release's internal registry" -}}
+  {{- end -}}
+{{- else if $internalRegistry -}}
+  {{- if not $trust -}}
+    {{- fail "bare-metal storefront uses the release's internal registry and requires internalRegistryTrust" -}}
+  {{- end -}}
+  {{- $active := .Values.global.registryIdentity -}}
+  {{- if ne ($trust.authority | default "") $active.authority -}}
+    {{- fail (printf "bare-metal storefront internalRegistryTrust.authority %q differs from the release's registry authority %q" ($trust.authority | default "") $active.authority) -}}
+  {{- end -}}
+  {{- if not (include "bare-metal-storefront.includesPrincipal" (dict "principals" $trust.principals "principal" $active.principal)) -}}
+    {{- fail "bare-metal storefront internalRegistryTrust.principals must include the release's registry principal" -}}
+  {{- end -}}
+  {{- $authoritiesKey := include "bare-metal-storefront.foldedKey" (dict "doc" $registry "name" "authorities") | default "authorities" -}}
+  {{- $authorities := index $registry $authoritiesKey | default dict -}}
+  {{- if include "bare-metal-storefront.foldedKey" (dict "doc" $authorities "name" (lower $internalRegistry)) -}}
+    {{- fail (printf "bare-metal storefront states internalRegistryTrust and config registry.authorities[%q]; state one" $internalRegistry) -}}
+  {{- end -}}
+  {{- $_ := set $authorities $internalRegistry (dict "authority" $trust.authority "principals" $trust.principals) -}}
+  {{- $_ := set $registry $authoritiesKey $authorities -}}
+  {{- $_ := set $registry "urls" (list $internalRegistry) -}}
+  {{- $_ := set $cfg $registryKey $registry -}}
+{{- else if $trust -}}
+  {{- fail "bare-metal storefront states internalRegistryTrust, but the release has no internal registry" -}}
+{{- end -}}
+
+{{- /* Sites: a `default` site for the umbrella's provisioning service, and every
+site bound to it trusted through a service peer naming its principal. */ -}}
+{{- $internalProvisioning := include "bare-metal-storefront.internalProvisioningUrl" . -}}
+{{- if $internalProvisioning -}}
+  {{- $capacityKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "capacity") | default "capacity" -}}
+  {{- $capacity := index $cfg $capacityKey | default dict -}}
+  {{- $sitesKey := include "bare-metal-storefront.foldedKey" (dict "doc" $capacity "name" "sites") -}}
+  {{- if not $sitesKey -}}
+    {{- $sitesKey = "sites" -}}
+    {{- $_ := set $capacity $sitesKey (dict "default" $internalProvisioning) -}}
+    {{- $_ := set $cfg $capacityKey $capacity -}}
+  {{- end -}}
+  {{- $active := .Values.global.provisioningIdentity -}}
+  {{- $identity := include "bare-metal-storefront.foldedMap" (dict "doc" $cfg "name" "identity") | fromJson -}}
+  {{- $peers := include "bare-metal-storefront.foldedMap" (dict "doc" $identity "name" "service_peers") | fromJson -}}
+  {{- range $siteID, $siteURL := (index $capacity $sitesKey | default dict) -}}
+    {{- if eq (trimSuffix "/" (toString $siteURL)) $internalProvisioning -}}
+      {{- $trusted := false -}}
+      {{- range $peerID, $peer := $peers -}}
+        {{- $role := include "bare-metal-storefront.foldedValue" (dict "doc" $peer "name" "role") -}}
+        {{- $peerSite := include "bare-metal-storefront.foldedValue" (dict "doc" $peer "name" "site_id") -}}
+        {{- $principalsKey := include "bare-metal-storefront.foldedKey" (dict "doc" $peer "name" "principals") -}}
+        {{- $principals := list -}}
+        {{- if $principalsKey -}}{{- $principals = index $peer $principalsKey -}}{{- end -}}
+        {{- if and (eq $role "service") (eq $peerSite $siteID) (include "bare-metal-storefront.includesPrincipal" (dict "principals" $principals "principal" $active)) -}}
+          {{- $trusted = true -}}
+        {{- end -}}
+      {{- end -}}
+      {{- if not $trusted -}}
+        {{- fail (printf "bare-metal storefront needs an Identity.service_peers entry with role \"service\" for site %s that includes the release's provisioning principal" $siteID) -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 {{- /* JSON, not YAML: Helm's YAML encoder leaves a string bare unless it
 would read back as a 64-bit number, so a 160-bit EVM address is emitted

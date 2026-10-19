@@ -12,6 +12,7 @@ tests assert what Helm then refuses and accepts.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from market_config.values_schema import any_case, stale_files
@@ -105,6 +106,19 @@ def test_delivery_states_the_kits_own_settings_and_types_installed_sinks() -> No
     assert set(values_schema.DELIVERY_SETTINGS) == RESERVED_SECTION_KEYS
     for name in RESERVED_SECTION_KEYS:
         assert _field(delivery, name) is not False
+
+
+def test_delivery_states_the_settings_the_vm_chart_does() -> None:
+    """``[Delivery]``'s own settings are stated by each storefront's generator,
+    the delivery kit naming them only; they must agree. Read from the VM chart's
+    committed definition, which VM's own drift test holds to its code, so
+    neither storefront imports the other."""
+    delivery = _field(values_schema.storefront_config_definition(), "Delivery")
+    vm = json.loads((REPO / "helm" / "charts" / "storefront" / "values.schema.json").read_text())
+    vm_delivery = _field(vm["definitions"]["storefrontServiceConfig"], "Delivery")
+
+    for name in RESERVED_SECTION_KEYS:
+        assert _field(delivery, name) == _field(vm_delivery, name), name
     for sink in ("apprise", "file", "smtp", "webhook"):
         assert _field(delivery, sink)["additionalProperties"] is False
 

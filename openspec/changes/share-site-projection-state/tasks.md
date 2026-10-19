@@ -4895,6 +4895,9 @@ storefront's configuration reaches it through its configuration system"; `design
       the port, Service URL, and database path, not VM's internal registry, provisioning URL,
       and default site, since this chart installs on its own with no umbrella globals; and
       `sitePlacement` goes too (now `config.capacity.placement`).
+      **Corrected (Section 16 check fixes):** in an umbrella release the chart also derives
+      VM's internal registry and `default` provisioning site; only a chart installed alone
+      derives the three above alone.
 - [x] 16.3 `helm/charts/bare-metal-storefront/tests/test_render.py`: production values
       render the ConfigMap, the overlay, and their mounts together, asserted in one helper;
       the pod environment carries only the configuration directory and the credential
@@ -4904,7 +4907,7 @@ storefront's configuration reaches it through its configuration system"; `design
       an interpreter `BARE_METAL_STOREFRONT_PYTHON` names, which `test-render.sh` sets when
       bare metal's environment exists, skipping otherwise.
       Done: chart render tests (`TESTING.md` "Chart Render Tests"; standard library, run by
-      `test-render.sh`), 17 cases. Rendering and mounting:
+      `test-render.sh`), 17 cases (21 after the check fixes). Rendering and mounting:
       `test_production_values_render_mount_and_derive_together` (through one helper,
       `_assert_configuration_files`: the ConfigMap's `storefront.json`, its volume and mount,
       the overlay Secret's volume and mount, and `XDG_CONFIG_HOME` together; the derived port
@@ -5023,10 +5026,10 @@ Section 16 notes:
 
 Section 16 handoff:
 
-- 16.5 (a local session with a cluster): the example values are production-shaped
-  placeholders, so a local release needs its own `bare-metal-storefront` values: `config`
-  naming the release's registry Service and its `global.registryIdentity` pin, the release's
-  provisioning Service as a site with a service peer naming `global.provisioningIdentity`, a
+- 16.5 (a local session with a cluster): enabled in the umbrella, the chart now derives the
+  release's registry (with the umbrella's `internalRegistryTrust`) and its provisioning
+  service as the `default` site (the umbrella's values state that site's peer), so a local
+  overlay states only the storefront's own `[Identity.principal]` and administrators, a
   settlement mechanism (for Alkahest on the dev-env Anvil, `[Wallet].address`,
   `[Chains.anvil]`, the dev-env chart's `<release>-dev-env-alkahest-addresses` ConfigMap
   through `alkahestAddressBook`, both address paths naming the mounted file, and the wallet
@@ -5034,12 +5037,15 @@ Section 16 handoff:
   identity Secret. The provisioning chart trusts one storefront principal
   (`storefrontIdentity`) and calls back one storefront (`storefront.agentName`, Bob), so a
   bare-metal storefront beside Bob on the release's provisioning service may need
-  provisioning values this section did not add; 16.5 will find out. The image now runs
-  `serve` on the configured port; its Docker `HEALTHCHECK` still calls 8000, the default,
-  which Kubernetes ignores.
+  provisioning values this section did not add; 16.5 will find out. The image runs `serve`
+  on the configured port; its Docker `HEALTHCHECK` still calls 8000, the default, which
+  Kubernetes ignores, and the Compose lane's port mapping and healthcheck name 8000 too,
+  which `storefront.dev.toml` now states as `port`.
 - `[Delivery]`'s own settings are stated twice (VM's `_DELIVERY_SETTINGS`, bare metal's
-  `DELIVERY_SETTINGS`), each guarded by its storefront's tests; `kit/delivery`, beside
-  `RESERVED_SECTION_KEYS`, is their home the next time that exactly pinned kit changes.
+  `DELIVERY_SETTINGS`); each storefront's test holds its names to the kit's
+  `RESERVED_SECTION_KEYS` and its fragments equal to the other chart's committed definition.
+  `kit/delivery`, beside `RESERVED_SECTION_KEYS`, is their home the next time that exactly
+  pinned kit changes.
 - For 17.9: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration" (its Helm sentence,
   `sellerEvmAddress`/`chains`/`walletKeySecret`, becomes `config` passed through with the
   overlay Secret, the credential Secret, and the address-book mount) and "Contact-exchange
@@ -5050,6 +5056,62 @@ Section 16 handoff:
   `kit/config`); `docs/bare-metal-seller-quickstart.md` if it gains Helm text; the bare-metal
   `port` setting and `serve --port` override. `design.md` C8, as delivered, names the
   decisions.
+
+Section 16 check fixes (fresh-context check of `b37dea9..9893b44`):
+
+- **Umbrella derivations, as VM's chart** (the permanent "A storefront chart passes service
+  configuration through", scenario "The release knows a value the agent omits"; `design.md`
+  C8, amended). With the umbrella's globals the chart derives, where `config` states none,
+  the internal registry's URL with the chart-level `internalRegistryTrust` written under it
+  and a `default` site for the provisioning service, and refuses parts that disagree: no
+  trust, a trust naming another authority or omitting the release's registry principal, a
+  trust beside `registry.urls`, and a site bound to the provisioning service whose
+  role-`service` peer omits `global.provisioningIdentity` (the chart adds no peer: the spec
+  forbids it adding a principal to a trust list). Installed alone it derives the port, URL,
+  and path only, and refuses `internalRegistryTrust`. The umbrella's `values.yaml` states the
+  bare-metal role's development registry trust and `default` peer, as it does Bob's; the
+  chart's schema types `internalRegistryTrust` as VM's does. Chart render tests:
+  `test_an_umbrella_release_derives_its_registry_and_provisioning_site` (through the shared
+  mount helper), `test_an_umbrella_release_keeps_a_registry_and_sites_the_config_states`,
+  `test_an_umbrella_releases_parts_that_disagree_are_refused` (five refusals by message;
+  with the peer check disabled, edited then restored, it fails), and
+  `test_a_chart_installed_alone_has_no_internal_registry_to_trust`; `test-render.sh`'s
+  umbrella renders with the role enabled pass with the derived values.
+- **VM's storefront chart turns service links off too** (`design.md` C8): its Deployment sets
+  `enableServiceLinks: false`; chart render test `test_the_pod_environment_carries_no_service_links`.
+- **`[Delivery]` copies held equal.** VM's unit test
+  `test_delivery_states_the_settings_the_bare_metal_chart_does` and bare metal's
+  `test_delivery_states_the_settings_the_vm_chart_does` each compare the three settings'
+  fragments, types included, with the other chart's committed definition, read as a file, so
+  neither storefront imports the other (a VM test importing the bare-metal storefront would
+  be a sibling-domain import); VM's also holds its names to `RESERVED_SECTION_KEYS`.
+- **Rollback** (`design.md` C8; 17.9's rollback note, below): the closed definition refuses a
+  newer values file under an older chart at render; `helm rollback` and the storefront's own
+  start are unaffected.
+- The example's chain URL is a placeholder (`https://rpc.example.com`), as its header says.
+- **Tier 2 says what it shows**: the rendered example is publishable, not startable (C8):
+  the runtime's composition also needs the credential owning the configured principal, the
+  overlay's wallet key, a writable database, and chain clients, which a probe would have to
+  fabricate; the test's docstring says so.
+- **`serve` takes its process from the command line's context object**
+  (`cli.ServeProcess`, found with `context.find_object`), the storefront's HTTP process when
+  none is given, so both `serve` tests in `tests/test_package.py` pass a recording process as
+  `obj` rather than patching `server.run_serve`. The server import stays inside the command
+  (composing the application costs every other command its import), with that reason beside it.
+- The root `Makefile`'s comment names both generators, their schema files, and their
+  environments.
+- The lane's `storefront.dev.toml` states `port = 8000`, the value `domains/bare_metal/compose.yml`'s
+  port mapping and healthcheck name, each commented as tied to the other.
+- The retired-values test asserts Helm's `Additional property <key> is not allowed`.
+- Evidence: bare-metal storefront 438 passed (domain 134, buyer 11, adapter 40); VM storefront
+  unit frozen, the rebuilt bare-metal wheel reinstalled, 1101 passed, 1 skipped; `make
+  helm-values-schema` left both generated definitions unchanged (the bare-metal schema's diff
+  is its hand-written `internalRegistryTrust`); `make -C helm test-render` passed, both loader
+  checks run, the bare-metal chart's 21 cases among them; release tooling (Compose render
+  tests included) 944 passed; `make check-packaging` (architecture rules included), `make
+  check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+  (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. `make test`
+  was not rerun in full for these fixes. No version moved and no lock changed.
 
 ## 17. Closeout
 
@@ -5189,6 +5251,11 @@ documentation only; a part needing code returns the change to implementation.
         site's key, not by the chart's values schema; a host the standard accepts but nothing
         resolves fails at the first poll (D6 and D14b's round-10 notes). The normative half is the storefront-publication delta's "A
         storefront that cannot publish refuses to start".
+      - **Amended (Section 16 check fixes):** `DEPLOYMENT_AND_CONFIG.md`'s rollback note
+        gains the bare-metal chart's closed values schema: an older chart refuses at render
+        a newer values file stating a key it does not know (`helm upgrade` to the older chart
+        with the newer values, or `--reuse-values`), while `helm rollback` and the
+        storefront's own start are unaffected.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

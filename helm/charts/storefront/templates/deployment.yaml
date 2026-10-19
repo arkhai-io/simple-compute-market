@@ -56,6 +56,10 @@ spec:
         checksum/config:  {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
         checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") $ | sha256sum }}
     spec:
+      # Kubernetes would otherwise inject variables for every Service in the
+      # namespace, and those for a Service named storefront-... would land in
+      # the storefront's STOREFRONT_ override layer as settings.
+      enableServiceLinks: false
       # fsGroup matches the container's appuser group so the volume's
       # mount root is owned by gid 1000 — without it, SQLite's first
       # write to /var/lib/arkhai fails with permission denied. Applies

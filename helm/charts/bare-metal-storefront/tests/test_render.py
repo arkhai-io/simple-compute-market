@@ -8,7 +8,7 @@ key the overlay sets to ``None``.
 
 Set ``BARE_METAL_STOREFRONT_PYTHON`` to the bare-metal storefront environment's
 interpreter to also load a rendered document with the storefront's own
-configuration loader and startup checks.
+configuration loader and the checks that it could publish under it.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import tomllib
 from pathlib import Path
 
 CHART = Path(__file__).resolve().parents[1]
+UMBRELLA = CHART.parents[1]
 REPO = CHART.parents[2]
 VALUES = CHART / "examples" / "production-values.yaml"
 RELEASE = "rt"
@@ -40,6 +41,20 @@ def _render(overlay: dict | None = None, *, values: Path | None = VALUES) -> sub
         if values is not None:
             command += ["--values", str(values)]
         command += ["--values", handle.name]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _render_umbrella(overlay: dict | None = None) -> subprocess.CompletedProcess[str]:
+    """Render the umbrella with the bare-metal storefront enabled, over its
+    values.yaml, then ``overlay`` of the storefront's values."""
+    values = {"bare-metal-storefront": {"enabled": True, **(overlay or {})}}
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+        json.dump(values, handle)
+        handle.flush()
+        command = [
+            "helm", "template", RELEASE, str(UMBRELLA),
+            "--values", str(UMBRELLA / "values.yaml"), "--values", handle.name,
+        ]
         return subprocess.run(command, check=False, capture_output=True, text=True)
 
 
@@ -61,8 +76,13 @@ def _refused(rendered: subprocess.CompletedProcess[str], *names: str) -> None:
 
 def _source(manifest: str, path: str) -> str:
     """The rendered document whose ``# Source:`` names ``path``."""
-    marker = f"# Source: bare-metal-storefront/templates/{path}"
-    documents = [document for document in manifest.split("\n---\n") if marker in document]
+    # Installed alone or as the umbrella's subchart, whose sources it prefixes.
+    marker = f"bare-metal-storefront/templates/{path}\n"
+    documents = [
+        document
+        for document in manifest.split("\n---\n")
+        if any(line.startswith("# Source: ") and line.endswith(marker.strip()) for line in document.splitlines())
+    ]
     if not documents:
         raise AssertionError(f"{path} not rendered")
     return documents[0]
@@ -225,6 +245,75 @@ def test_an_alkahest_address_book_mounts_read_only_when_named() -> None:
     assert {'name: "alkahest-addresses"', 'path: "alkahest_addresses.json"'} <= _lines(deployment)
 
 
+# --- the umbrella release ---------------------------------------------------
+
+UMBRELLA_REGISTRY = f"http://{RELEASE}-registry:8080"
+UMBRELLA_PROVISIONING = "http://arkhai-node-operator-provisioning:8081"
+# The umbrella's development principals (helm/values.yaml): its registry's and its
+# provisioning service's, never for a public network.
+UMBRELLA_REGISTRY_PRINCIPAL = {"scheme": "eip191", "identifier": "0x90f79bf6eb2c4f870365e785982e1f101e93b906"}
+UMBRELLA_PROVISIONING_PRINCIPAL = {"scheme": "eip191", "identifier": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"}
+
+
+def test_an_umbrella_release_derives_its_registry_and_provisioning_site() -> None:
+    manifest = _ok(_render_umbrella())
+    config = _assert_configuration_files(manifest, overlay=None)
+
+    assert config["registry"] == {
+        "urls": [UMBRELLA_REGISTRY],
+        "authorities": {
+            UMBRELLA_REGISTRY: {"authority": "registry-a", "principals": [UMBRELLA_REGISTRY_PRINCIPAL]}
+        },
+    }
+    assert config["capacity"] == {"sites": {"default": UMBRELLA_PROVISIONING}}
+    peer = config["Identity"]["service_peers"]["provisioning_default"]
+    assert peer == {"role": "service", "site_id": "default", "principals": [UMBRELLA_PROVISIONING_PRINCIPAL]}
+    assert config["base_url"] == f"http://{FULLNAME}:8000"
+    assert config["db_path"] == "/var/lib/arkhai/bare-metal-storefront.db"
+
+
+def test_an_umbrella_release_keeps_a_registry_and_sites_the_config_states() -> None:
+    config = _config(_ok(_render_umbrella({
+        "internalRegistryTrust": None,
+        "config": {
+            "registry": {"urls": ["https://registry.example.com"]},
+            "capacity": {"sites": {"site-a": "https://site-a.example.com"}},
+        },
+    })))
+
+    assert config["registry"] == {"urls": ["https://registry.example.com"]}
+    assert config["capacity"] == {"sites": {"site-a": "https://site-a.example.com"}}
+
+
+def test_an_umbrella_releases_parts_that_disagree_are_refused() -> None:
+    other = {"scheme": "eip191", "identifier": "0x" + "ab" * 20}
+    cases = {
+        "requires internalRegistryTrust": {"internalRegistryTrust": None},
+        "differs from the release's registry authority": {
+            "internalRegistryTrust": {"authority": "registry-b"}
+        },
+        "must include the release's registry principal": {
+            "internalRegistryTrust": {"principals": [other]}
+        },
+        "applies only to the release's internal registry": {
+            "config": {"registry": {"urls": ["https://registry.example.com"]}}
+        },
+        "includes the release's provisioning principal": {
+            "config": {"Identity": {"service_peers": {"provisioning_default": {"principals": [other]}}}}
+        },
+    }
+    for message, overlay in cases.items():
+        _refused(_render_umbrella(overlay), message)
+
+
+def test_a_chart_installed_alone_has_no_internal_registry_to_trust() -> None:
+    trust = {"authority": "registry-a", "principals": [UMBRELLA_REGISTRY_PRINCIPAL]}
+    _refused(
+        _render({"internalRegistryTrust": trust}, values=None),
+        "the release has no internal registry",
+    )
+
+
 # --- release checks --------------------------------------------------------
 
 
@@ -303,7 +392,7 @@ def test_the_retired_values_shape_is_refused_naming_each_key() -> None:
         "service.port": {"service": {"port": 8000}},
     }
     for name, overlay in cases.items():
-        _refused(_render(overlay), name.rsplit(".", 1)[-1])
+        _refused(_render(overlay), f"Additional property {name.rsplit('.', 1)[-1]} is not allowed")
 
 
 def test_the_development_configuration_passes_the_schema() -> None:
@@ -313,7 +402,7 @@ def test_the_development_configuration_passes_the_schema() -> None:
         development = tomllib.load(handle)
     config = _config(_ok(_render({"config": development}, values=None)))
 
-    assert {key: value for key, value in config.items() if key not in ("port", "db_path")} == development
+    assert {key: value for key, value in config.items() if key != "db_path"} == development
 
 
 # --- the storefront's own loader -----------------------------------------
@@ -366,6 +455,10 @@ def _loaded(config: dict, python: str) -> dict:
 
 
 def test_the_rendered_document_loads_with_the_storefront_loader() -> None:
+    """The rendered example is one the storefront could publish under. It shows
+    publishable, not startable: composing the runtime also needs the credential
+    owning the configured principal, the overlay's wallet key, a writable
+    database, and chain clients."""
     python = os.environ.get("BARE_METAL_STOREFRONT_PYTHON")
     if not python:
         print("skip: BARE_METAL_STOREFRONT_PYTHON unset; the storefront loader check did not run")

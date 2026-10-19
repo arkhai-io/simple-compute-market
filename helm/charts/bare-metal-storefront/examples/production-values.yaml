@@ -72,7 +72,7 @@ config:
     address: "0x00000000000000000000000000000000000000aa"
   Chains:
     base_sepolia:
-      rpc_url: https://sepolia.base.org
+      rpc_url: https://rpc.example.com
   pricing:
     settlements:
       - mechanism: alkahest.v1

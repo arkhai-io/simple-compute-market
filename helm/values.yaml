@@ -287,8 +287,27 @@ storefront:
 
 # The dedicated bare-metal storefront is an optional role. The combined
 # compute storefront above already loads the bare-metal domain contribution.
+# Enabled, it publishes to the release's registry and trusts the release's
+# provisioning service as its `default` site, both of which the chart derives into
+# its configuration; the registry trust and the site's service peer below are the
+# release's development principals, as Bob's are. Its own principal, a settlement
+# mechanism, and its secrets are an operator's overlay to state.
 bare-metal-storefront:
   enabled: false
+  internalRegistryTrust:
+    authority: registry-a
+    principals:
+      - scheme: eip191
+        identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  config:
+    Identity:
+      service_peers:
+        provisioning_default:
+          role: service
+          site_id: default
+          principals:
+            - scheme: eip191
+              identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 
 # ---------------------------------------------------------------------------
 # provisioning subchart
