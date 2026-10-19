@@ -448,6 +448,14 @@ its own or another agent's agreement with a finding as a disposition.
 - **THEN** archive cleanup records the waiver as a line of the change's intervention
   ledger and goes on without a validation of `HEAD`
 
+#### Scenario: The owner waives archive cleanup's validation under orchestration
+
+- **WHEN** the next-step computation names validation before archive cleanup and
+  the owner tells the orchestrating session they waive it, judging the paths named
+- **THEN** the owner's word is recorded in the workflow log as a decision directing
+  archive cleanup, the computation names archive cleanup until it has run, and
+  archive cleanup's own check asks the owner and records the waiver in the ledger
+
 #### Scenario: Closeout finds a comment that needs rewriting
 
 - **WHEN** closeout's comment hygiene part finds a comment the change added that

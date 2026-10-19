@@ -188,7 +188,11 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     `kind`, without which the computation could not name one; a directed step
     of any other kind is a confirmed return, so it resolves the returned run,
     which would otherwise wait ahead of the directive. A repeat review the owner
-    asks for outside a triage names no run, since no run waits on it.
+    asks for outside a triage names no run, since no run waits on it; nor does the
+    owner's direction to archive cleanup, by which they waive the validation the
+    computation would name first. Only the owner gives it; archive cleanup's own
+    entry checks still hold, and its validation check asks the owner and records
+    the waiver in the ledger.
     `branch` and `change` record the owner's word that `change` is worked on
     `branch` though the branch is not its own, which each step's branch check
     accepts in place of asking (`branch_decisions`); only the owner gives it.
@@ -224,7 +228,11 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
             raise StepError(f"unknown step {next_step!r}; expected one of {', '.join(STEPS)}")
         if next_step == "review" and kind is None:
             raise StepError("a decision directing a review names its kind")
-        if next_step != "review" and resolves is None:
+        if next_step == "archive-cleanup" and resolves is None:
+            if by != "owner":
+                raise StepError("a decision directing archive cleanup past its validation "
+                                "is the owner's waiver")
+        elif next_step != "review" and resolves is None:
             raise StepError(f"a decision directing {next_step} is a confirmed return and "
                             "names the run it resolves")
         line["next"] = next_step

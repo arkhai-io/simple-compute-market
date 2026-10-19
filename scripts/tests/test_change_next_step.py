@@ -519,6 +519,26 @@ def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Pa
     assert result["step"] == "archive-cleanup"
 
 
+def test_the_owners_waiver_directs_archive_cleanup_past_a_missing_validation(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Advance", reviewed="e" * 40)
+
+    _decide(root, "waive archive cleanup's validation", by="owner",
+            next_step="archive-cleanup")
+    directed = _next(root, changed=FIX)
+    _log(root, "archive-cleanup", QUESTION)
+    asked = _next(root, changed=FIX)
+    _log(root, "archive-cleanup", FINISHED)
+    ran = _next(root, changed=FIX)
+
+    assert directed["step"] == "archive-cleanup" and "waive" in directed["reason"]
+    # Archive cleanup's own check asks, naming the paths, and records the waiver.
+    assert asked["step"] == "owner"
+    # Run once, the direction is spent; validation is the default again.
+    assert ran["step"] == "validate"
+
+
 # The plan's mapping of rounds.
 
 def test_a_two_round_plan_names_the_second_round_only_after_the_first_advanced(

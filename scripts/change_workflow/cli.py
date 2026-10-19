@@ -167,7 +167,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                 print(json.dumps(entry, ensure_ascii=False))
         elif args.command == "watch":
             try:
-                watch(path.parent, echo=lambda line: print(line, flush=True))
+                watch(lambda: log_path(wrapper.root, args.change).parent,
+                      echo=lambda line: print(line, flush=True))
             except KeyboardInterrupt:
                 pass
         elif args.command == "denials":

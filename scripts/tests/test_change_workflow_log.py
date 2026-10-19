@@ -170,6 +170,17 @@ def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
     assert note_orchestrator(log, "d", "r")["by"] == "orchestrator"
 
 
+def test_the_owner_may_direct_archive_cleanup_past_its_validation(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    waiver = note_orchestrator(log, "waive archive cleanup's validation", "the paths judged",
+                               by="owner", next_step="archive-cleanup")
+
+    assert waiver["next"] == "archive-cleanup" and "resolves" not in waiver
+    with pytest.raises(StepError, match="is the owner's waiver"):
+        note_orchestrator(log, "d", "r", next_step="archive-cleanup")
+
+
 @pytest.mark.parametrize("fields,problem", [
     ({"resolves": 9}, "no run has seq 9"),
     ({"reads": 9}, "no run has seq 9"),

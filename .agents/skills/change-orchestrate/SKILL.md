@@ -142,6 +142,12 @@ the owner; leave the status unchanged until confirmation. Record confirmation wi
 Recompute; the directed leaf sets its phase's status. A declined return also needs
 an explicit owner disposition. A repeat review the owner asks for outside a triage
 records `--next review --kind <kind>` with no `resolves`: no run waits on it.
+When the computation names validation, or the owner, before archive cleanup —
+`HEAD` changes a path outside `openspec/` and `docs/` since the closeout review —
+the owner may waive that validation, judging the paths its reason names. Only on
+the owner's word, record `--by owner --next archive-cleanup` with no `resolves`,
+the paths in its reason; archive cleanup's own check then asks the owner and
+writes the waiver to the ledger.
 
 A prerequisite `blocked` outcome halts this workflow. Relay what the owner must
 do; never orchestrate the prerequisite. Design writes its proposal in a separate

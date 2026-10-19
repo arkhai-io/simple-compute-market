@@ -2128,6 +2128,41 @@ now named in 8.9. Declined: leaving 7.3 open for the two gaps above, which need
 decisions this plan does not make and go to the triage as recorded, and for the
 table edits, which the task gives the owner.
 
+Seventh round's triage fixes (review 119, validation 120; the owner's notes 117
+had none), against `5d6472e67`:
+- **119 F1, option a.** The owner's waiver of archive cleanup's validation, under
+  orchestration, is an `orchestrator` line by the owner directing
+  `archive-cleanup` with no `resolves`: `note_orchestrator` now admits that one
+  direction without a resolved run, and only by the owner, where every other
+  non-review direction stays a confirmed return. The computation already follows
+  a directed step ahead of the phase's own routing, so `_closeout`'s validation is
+  passed over until archive cleanup has run, and archive cleanup's own check asks
+  and writes the ledger line. `change-orchestrate` says when to record it; the
+  delta gains a scenario; D14 and the seventh round's decisions say so. Unit
+  (`scripts/tests`): the direction routes past a missing validation, waits on
+  archive cleanup's question, and is spent once it has run
+  (`test_change_next_step.py`); the owner's direction is logged and the
+  orchestrator's refused (`test_change_workflow_log.py`).
+- **119 F2.** `watch` takes a function that finds the change's reviews directory,
+  asked on every poll, and follows the progress file it is showing into the
+  archive from its last line shown; `make change-watch` finds the change by name.
+  Unit: a change archived between two polls is followed, nothing repeated
+  (`test_change_workflow_watch.py`).
+- **7.3, this log's seq 81–82, option a.** A review that cannot resume its Codex
+  reviewer's session stays a failed run, rerun fresh as the orchestrator's
+  recovery decision; the Risk on the Claude review records it. No code change.
+Checks: the focused `scripts/tests` suites (router, watch, log) 170 passed; `make
+test`: passed, every suite (`scripts/tests` 1084, three new). Fresh-context
+compliance check of the diff against `5d6472e67` (a subagent, read-only): no
+comment, import, test-level, or public-repository breach, and each new test fails
+on the code before the diff. Fixed what it found: `validated`'s comment saying
+nothing the owner records clears it, now naming the waiver that routes past it;
+`note_orchestrator`'s docstring scoping the direction to a state it does not check,
+now leaving that to archive cleanup's entry checks; and D7, which said nothing of
+following a run into the archive. All of `scripts/tests` 1084 passed after them.
+`make check-change CHANGE=orchestrate-change-workflow` passed; `make
+check-packaging` not rerun, since no dependency changed.
+
 ## 8. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, in its order.

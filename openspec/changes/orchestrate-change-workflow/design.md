@@ -279,7 +279,10 @@ triage directed is validated before archive cleanup commits and drafts the pull
 request, the check the gate used to be (69 F7). Archive cleanup's entry check holds
 the same condition, and there the owner may waive it, judging the paths named — on a
 branch two changes share, the other change's commit, which the merge carries all the
-same — recorded as a ledger line (103 R5 / R6). A documentation-only correction is
+same — recorded as a ledger line (103 R5 / R6). Under orchestration the owner's
+waiver reaches that check as their word directing archive cleanup, an
+`orchestrator` line that resolves no run, which the computation follows ahead of the
+validation it would name (119 F1). A documentation-only correction is
 covered by the checks triage already runs, and costs no pipeline run (70 F9). A round's
 validation and review start once the owner's notes on the round view are saved.
 These conditions are the computation's; the
@@ -461,7 +464,9 @@ stream to `reviews/transcripts/NN-<step>.jsonl` beside the review transcripts, a
 keeps a short progress file of each tool call and its time. The orchestrator
 answers "how is it going?" from the progress file; the owner follows it in another
 terminal with `make change-watch CHANGE=<change>`, which moves to each new step's
-progress file as it starts. Whenever the orchestrator starts a long-running
+progress file as it starts, and finds the change by name on every poll, so a
+closeout run that archives its change is followed into the archive from the last
+line shown (119 F2). Whenever the orchestrator starts a long-running
 unattended turn — validation, implementation, a review, closeout, or a discussion
 step resumed for a turn that applies fixes or runs the checks — it says so and
 gives that command (55 O2): the harness's task panel shows nothing for a wrapper
@@ -993,6 +998,30 @@ orchestrator's observations (103); the owner had no notes (99).
   signal to gate a merge on).
 - **103 R1, R7, R2** — pilot gaps recorded on task 7.3.
 
+### Decisions at the seventh implementation round's triage
+
+The round of section 7, triaged from review 119 and validation 120; the owner had
+no notes (117).
+
+- **119 F1 (option a)** — under orchestration, the owner's waiver of archive
+  cleanup's validation is their word, recorded as an `orchestrator` line by the
+  owner directing archive cleanup with no run resolved, the paths judged in its
+  reason; the computation names archive cleanup until it has run, ahead of the
+  validation `_closeout` names, and archive cleanup's own check then asks and
+  writes the ledger line; see D14 and the delta's "Phases and owner touchpoints".
+  Validation stays the default. Rejected: the computation reading a ledger waiver
+  (archive cleanup writes it, and the orchestrator writes no ledger, so another
+  step would have to record it first); the computation always asking, validate or
+  waive (an interruption whose usual answer is validate, against D16).
+- **119 F2** — `make change-watch` finds the change by name on every poll and
+  follows the progress file it was showing into the archive; see D7.
+- **7.3, this log's seq 81–82 (option a)** — a review that cannot resume its
+  reviewer's Codex session fails as any run does, and is rerun fresh, the
+  orchestrator's recovery decision on the log; see D11. Rejected: the review
+  starting fresh by itself on Codex's "no rollout found" (a special case keyed to
+  another tool's wording, for one occurrence); revisit if Codex expires reviewer
+  sessions routinely.
+
 ## Risks / Trade-offs
 
 - **Relayed discussions cost a second rendering of every message**, and the relayed
@@ -1035,11 +1064,17 @@ orchestrator's observations (103); the owner had no notes (99).
   of, and closeout followed one another without the owner, as intended. Archive
   cleanup started as a step-table commit landed, a path outside `openspec/` and
   `docs/` that the computation would have sent to validation first, and the step's
-  own check stopped it; a skill's entry check is the second guard.
+  own check stopped it; a skill's entry check is the second guard. The owner who
+  waives that validation directs archive cleanup past it through the orchestrator
+  (119 F1).
 - **A Claude review of Claude's work loses the second model's reading.** The record
   names the reviewer, so the owner can ask for a Codex round when one is available.
   Pilot: the closeout review fell back to Claude when Codex reached its usage
-  limit, and its record and line say so; it raised three findings.
+  limit, and its record and line say so; it raised three findings. A review that
+  could not resume its Codex reviewer's session ("no rollout found", this change's
+  seq 81) stopped as a failed run, not an unavailable model, and the orchestrator
+  reran it fresh, losing that reviewer's context; the decision is on the log
+  (seq 82).
 - **Every turn of a discussion replays its session.** Accepted for one decision per
   turn; D19 measures it. Pilot: a warm turn that presents one decision costs
   cents, one that applies fixes dollars; the one miss measured cleanly cost $1.16

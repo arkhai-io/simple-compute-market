@@ -24,20 +24,27 @@ def newest_progress(reviews: Path) -> Path | None:
     return max(files, key=lambda f: f.stat().st_mtime_ns) if files else None
 
 
-def watch(reviews: Path, echo: Callable[[str], None] = print,
+def watch(locate: Callable[[], Path], echo: Callable[[str], None] = print,
           sleep: Callable[[float], None] = time.sleep, polls: int | None = None,
           backlog: int = 10) -> None:
     """Follow the change's newest progress file, moving to each newer one as a step starts.
 
-    The file being followed when watching begins shows only its last `backlog`
-    lines; a file that appears later is shown from its start, since it is a new
-    run. `polls` bounds the loop for tests; the command runs until interrupted.
+    `locate` names the change's reviews directory, and is asked again on every
+    poll: closeout archives the change while its run is still writing, and the
+    run's files move with the directory, so the file being followed is followed
+    where it now is, from the line shown last. The file being followed when
+    watching begins shows only its last `backlog` lines; a file that appears later
+    is shown from its start, since it is a new run. `polls` bounds the loop for
+    tests; the command runs until interrupted.
     """
     current: Path | None = None
     shown = 0
     polled = 0
     while polls is None or polled < polls:
         polled += 1
+        reviews = locate()
+        if current is not None and current.parent != reviews / TRANSCRIPTS:
+            current = reviews / TRANSCRIPTS / current.name
         newest = newest_progress(reviews)
         if newest is not None and newest != current:
             lines = newest.read_text("utf-8").splitlines()

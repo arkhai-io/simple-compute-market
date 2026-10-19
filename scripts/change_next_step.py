@@ -721,7 +721,8 @@ class Computation:
         confirmed return names the phase's step, which sets the status when it
         runs, and resolves the returned run, which would otherwise wait ahead of
         it; a review asked for again outside a triage names `review` and its kind,
-        and no run.
+        and no run; and the owner's waiver of the validation `_closeout` names
+        directs archive cleanup, and no run, ahead of that validation.
         """
         log = self.state.log
         decision = next((e for e in reversed(log)
@@ -768,6 +769,8 @@ class Computation:
         result = validation_result(record) if record else None
         if result != "passed":
             # Nothing the owner records clears it: a validation that passes does.
+            # Before archive cleanup the owner's waiver routes past it (`directed`)
+            # without clearing it.
             return _owner(f"{why}, and {record.name if record else 'the validation'} of HEAD "
                           f"is {result or 'without a result'}: the owner decides how the "
                           "missing evidence is had, and validation runs again",
