@@ -248,6 +248,15 @@ needed to use the shared refusal is demonstrated by these tests.
   `make test`, packaging, architecture, hygiene, citations, index, task and strict
   OpenSpec checks. Record a fresh-context compliance review against `a3bd6b1d`,
   commit the accepted fixes without pushing, and require fresh deployed validation.
+- [x] 3.12 **23 F1 — interrupted bootstrap.** In `db/database.py`, base legacy
+  bootstrap/backfill on existing pool or host rows, so schema tables left by an
+  interrupted first migration do not claim the default provider. Extend
+  `test_pool_declaration_startup.py` with deterministic SQLite interruptions
+  before versioned migrations and before pool bootstrap, with and without a
+  configured document, plus existing pool/configuration preservation without
+  hosts. Retain legacy-host and identity-migration integration coverage, run
+  focused and aggregate suites, packaging, hygiene and citations, obtain fresh
+  compliance against the recovered base `d1b22e4ce`, and commit for fresh validation.
 
 **Deployed coverage:** no existing pytest marker submits a provider change or
 changed-provider startup document. No new system scenario is owed for these
@@ -413,6 +422,69 @@ their green result is regression evidence, not direct proof of immutability.
   architecture, repository Resource pools, and deployment definition-document/
   migration guidance at closeout. Current operator cutover guidance is already
   in `docs/seller-quickstart.md`; broader architecture promotion is deferred.
+
+**Implementation round 2 — 23 F1:**
+
+- The owner accepted the narrow interruption fix. Bootstrap/backfill now depends
+  on persisted pool or host rows, rather than any schema table. A configured
+  document retains default creation when an interrupted migration has left only
+  schema and migration records. Existing pool state and legacy hosts retain their
+  VM bootstrap/backfill; no-document initialization still creates the VM default.
+- Focused library/service integration against real SQLite passed
+  25 tests across `test_pool_declaration_startup.py`, `test_database.py` and
+  `test_vm_provider_identity_migration.py`. Four new cases interrupt SQL execution
+  before versioned migrations or before pool bootstrap, with and without a
+  configured document, then reopen the database and resume. Mounted-document
+  retries leave no implicit pool and import the actual bare-metal fixture with
+  its digest; no-document retries retain the configured VM playbook. A fifth
+  new case preserves an existing VM pool/configuration without hosts. These five
+  new cases use file-backed SQLite; the existing database suite uses in-memory
+  SQLite. Existing
+  legacy-host backfill and provider-identity preservation suites remain green.
+  The initial new configuration assertion mistakenly read a retired field from
+  the public response; its corrected assertion checks the stored row.
+- Before the session interruption, `make dist-ci`, full `make test` and final
+  `make check-packaging` passed. The fix was stashed without a commit while other
+  workflow work landed. Recovery at `d1b22e4ce` restored only these four fix paths
+  from the inspected pilot stash, leaving the stash intact. Those earlier logs
+  prove only the earlier tree. Current-tree focused integration reran successfully
+  (25 tests); hygiene, citations, task/index checks, whitespace and strict
+  OpenSpec validation passed again. The first compliance attempt ended at a usage
+  limit and produced no review result.
+- No dependency changed. No skill file changed;
+  the affected service exposes no typing target. The ordinary build attempt met
+  the shared-cache filesystem restriction; the same build passed with ordinary
+  escalation. No call was denied. The unrelated change-index edit was committed
+  separately before recovery and is outside this fix.
+- The first current-tree aggregate attempt stopped at five VM storefront unit
+  failures because a contaminated wheelhouse contained higher versions this
+  branch does not build. Reinit installed VM settlement 0.3.0 and Alkahest 0.8.0
+  against source versions 0.2.1 and 0.4.1; their changed signatures/release rules
+  caused the failures. `make dist-clean` followed by `make lock` rebuilt the
+  wheelhouse and regenerated all nine affected locks back to their exact tracked
+  contents. No lock or unrelated source/test edit remains. The clean-wheelhouse
+  `make test` rerun passed every aggregate target: provisioning 662 unit and
+  484 integration tests, VM storefront 1,036 unit and 411 application integration
+  tests, 1,061 tooling tests and Helm render/loader checks. Existing skips remain
+  (two core cases and one VM storefront collection skip). The failed attempt is
+  not counted as a pass. Final `make check-packaging` passed wheel/lock, layout,
+  Python-version and all four architecture checks. Fresh-context compliance
+  against `d1b22e4ce` found one evidence wording overstatement: the focused run
+  combines file-backed and in-memory SQLite cases. Corrected the paragraph above;
+  the reviewer confirmed no outstanding violations or evidence overstatements.
+  No findings were declined; the reviewer did not rerun behavioral suites.
+- No deployed marker directly exercises an interrupted initial migration; these
+  are single-authority database/bootstrap semantics owned by integration tests.
+  Existing VM and bare-metal pool-backed scenarios remain the deployed regression
+  coverage named above. Validation 24 passed ordinary bootstrap on `d3925cdfc`,
+  not this fix; fresh validation is required. The owner chose to advance without
+  another implementation review. No additional owner notes were submitted, and no
+  explicit no-findings statement is inferred. The clarified bootstrap
+  boundary joins the existing closeout promotion destinations in this section.
+  The four-file fix is committed as this round's correction; validation of that
+  commit is next. The inspected pilot stash remains intact. No intervention
+  ledger entry is owed: the owner accepted the proposed fix and recommendation
+  to advance as stated.
 
 ## 4. Remove configuration deletion from handlers and runtime composition
 
@@ -634,6 +706,7 @@ deployed behavior; it confirms the section-specific pipeline markers above.
 | D10; provisional documentation destinations | 5 | Map below; no separate decision gate |
 | General guidance question | 5.3 owner decision | Destination only if owner chooses promotion |
 | 19 V1 / 20 V1; document-created default and canonical VM identity | 3.8–3.11 | 5.9, new default/bootstrap and VM identity spec requirements; resource-pool architecture and deployment guidance |
+| 23 F1; pool/host-row bootstrap boundary and interruption-safe retry | 3.12 | 5.9, default/bootstrap requirement and resource-pool administrative reconciliation; deployment migration guidance |
 
 ## Design promotion record
 
@@ -660,3 +733,4 @@ and final headings, preserving any owner-deferred guidance disposition.
 | Canonical capability documentation index | `openspec/specs/README.md` — existing Resource-pool management row retained; no new capability or companion |
 | General validation-order guidance | Pending owner decision at 5.3; explicitly record promotion destination or no-promotion disposition |
 | 19 V1 / 20 V1: default creation before inventory and canonical VM routing/upgrade | `openspec/specs/resource-pool-management/spec.md`, via archive; its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` definition documents/migrations; `docs/development/ARCHITECTURE.md` Resource pools |
+| 23 F1: schema-only interrupted initialization retains document-created default bootstrap until pool or host state exists | `openspec/specs/resource-pool-management/spec.md` default/bootstrap requirement, via archive; its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` migrations |

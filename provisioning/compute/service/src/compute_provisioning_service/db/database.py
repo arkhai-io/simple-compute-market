@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, Engine, inspect
+from sqlalchemy import create_engine, Engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -38,6 +38,19 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _has_existing_pool_or_host_state(engine: Engine) -> bool:
+    with engine.connect() as connection:
+        tables = set(inspect(connection).get_table_names())
+        return any(
+            connection.execute(text(query)).first() is not None
+            for table, query in (
+                ("resource_pools", "SELECT 1 FROM resource_pools LIMIT 1"),
+                ("hosts", "SELECT 1 FROM hosts LIMIT 1"),
+            )
+            if table in tables
+        )
+
+
 def run_migrations(
     engine: Engine,
     *,
@@ -57,10 +70,10 @@ def run_migrations(
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """
-    # An empty database has no hosts requiring the implicit VM pool. Its
-    # mounted document creates the default atomically with provider config,
-    # after contributed definitions and before inventory is admitted.
-    seed_default_pool = pool_definitions_path is None or bool(inspect(engine).get_table_names())
+    # Pool and host rows require legacy bootstrap/backfill; schema tables alone
+    # may be left by an interrupted first migration. With neither kind of state,
+    # a mounted document creates the default before inventory is admitted.
+    seed_default_pool = pool_definitions_path is None or _has_existing_pool_or_host_state(engine)
 
     # Resource-pool tables must be created before VM's: ansible_pool_configs
     # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK

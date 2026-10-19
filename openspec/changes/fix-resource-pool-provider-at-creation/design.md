@@ -205,6 +205,12 @@ database retains its seeded default and host backfill. With no document, fresh
 bootstrap retains the VM default. An existing provider never changes because a
 document requests it.
 
+Review 23 F1 clarified the bootstrap boundary: existing state means persisted
+pool or host rows, not merely schema tables or migration records. An interrupted
+initial migration can leave those tables before any pool or host exists; its
+retry must still leave default creation to the configured document. The owner
+accepted the state-based detection and deterministic interruption coverage.
+
 The canonical runtime VM provider is `vm.ansible`, alongside
 `bare_metal.ansible`. A versioned migration updates only old VM provider columns
 in pools and fulfillment records. It preserves pool IDs, configuration, host
