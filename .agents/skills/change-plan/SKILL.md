@@ -44,8 +44,12 @@ the session, and every turn ends with an outcome matching
   run's own record. Otherwise go on and end as the step ends: the wrapper records
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. Never do by another tool what a denied call would have
-  done, and never ask about a denial as a question.
+  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
+  does it. A call denied because no rule allows it — the harness reports it as
+  don't ask mode — may be done instead by a tool this step's rules allow for the
+  same work, such as the Edit tool for a shell write or Read or Grep for a shell
+  read; name the substitute in your message. Never ask about a denial as a
+  question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.

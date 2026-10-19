@@ -224,12 +224,16 @@ run records MUST be recorded on the run's outcome, from the run's own record and
 with the harness's reason when it gives one; the harness gives none for a call a
 deny rule refused. A run that cannot go on without a denied tool MUST end
 with a stopped outcome naming the denial, rather than asking a question or working
-around it; a run that goes on MUST do so only by calls its step's rules allow. The
-orchestrating session MUST read each recorded denial from the run's record, never
-from the step's message; classify it by the harness's reason, or its absence, as a
-gap in the table or a forbidden action; check the run's later calls for a
-workaround; propose, for a gap, the narrowest rule that matches the call and say whether it is a one-run
-grant or a tracked change; and record its reading in the workflow log as a
+around it; a run that goes on MUST do so only by calls its step's rules allow. A
+call a deny rule refused MUST NOT be done by another tool; a call denied for want
+of an allow rule MAY be done by a tool the step's rules allow for the same work,
+and the run MUST name that substitute in its message. The orchestrating session
+MUST read each recorded denial from the run's record, never from the step's
+message; classify it by the harness's reason, or its absence, as a gap in the
+table or a forbidden action; check the run's later calls, after a deny-rule
+denial, for a workaround; propose, for a gap, the narrowest rule that matches the
+call and say whether it is a one-run grant or a tracked change; and record its
+reading in the workflow log as a
 decision reading that run, before the next step runs. A run whose outcome still
 waits — a question, a proposed return — MUST be answered or decided after its
 denials are read, and the reading MUST NOT settle that outcome. A denial by a
@@ -249,6 +253,13 @@ the table.
 - **WHEN** an unattended run is denied a command because no allow rule names it
 - **THEN** the orchestrating session proposes the narrowest allow rule matching the
   call, and the owner grants it for the resumed run or commits it to the table
+
+#### Scenario: A step does the work of a call no rule names with a tool its rules allow
+
+- **WHEN** an unattended run's shell write is denied because no allow rule names
+  it, and the run makes the same edit with the Edit tool its step's rules allow
+- **THEN** the run names the substitute in its message, and the orchestrating
+  session reads the denial as a gap, not a workaround
 
 #### Scenario: A question carries denials
 

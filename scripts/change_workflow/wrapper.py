@@ -52,10 +52,15 @@ def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, An
     wrapper writes, its message the reason. Every outcome carries the run's own
     record of its denials, whatever the step said: a step ends `stopped` when it
     cannot go on without a denied tool, and one that went on is logged as it
-    ended, its denials there for the orchestrating session to read.
+    ended, its denials there for the orchestrating session to read. The outcome
+    is checked with those denials in it, since the wrapper sets them whatever the
+    step gave, and an outcome the schema rejects keeps the step's own message
+    ahead of the reason, so what it said to the owner is not lost.
     """
     denials = list(denials)
     outcome = (result or {}).get("structured_output")
+    if isinstance(outcome, dict):
+        outcome = {**outcome, "denials": denials}
     if status != 0:
         detail = (result or {}).get("result")
         reason = f"exit {status}" + (f": {detail}" if isinstance(detail, str) and detail else "")
@@ -67,8 +72,12 @@ def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, An
         reason = "the run ended without an outcome"
     elif problems := outcome_problems(outcome, schema):
         reason = "the run's outcome does not conform to the schema: " + "; ".join(problems)
+        said = outcome.get("message") if isinstance(outcome, dict) else None
+        if isinstance(said, str) and said.strip():
+            return {"outcome": "stopped", "message": f"{said}\n\n{reason}", "reason": reason,
+                    "denials": denials}
     else:
-        return {**outcome, "denials": denials}
+        return outcome
     return {"outcome": "stopped", "message": reason, "reason": reason, "denials": denials}
 
 

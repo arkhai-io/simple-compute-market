@@ -46,8 +46,11 @@ UNATTENDED = (
     "is denied, finish every part of the work that does not depend on it; if the step cannot "
     "complete without that call, end with a `stopped` outcome whose `reason` names that exact "
     "call, and otherwise go on and end as the step ends, since the denial is recorded on the "
-    "outcome whatever it is. One denied call is not a denied tool. Never do by another tool "
-    "what a denied call would have done, and never ask about a denial as a question.")
+    "outcome whatever it is. One denied call is not a denied tool. A call a deny rule refused "
+    "is forbidden: no other tool does it. A call denied because no rule allows it, which the "
+    "harness reports as don't ask mode, may be done instead by a tool your step's rules allow "
+    "for the same work, such as the Edit tool for a shell write or Read or Grep for a shell "
+    "read; name the substitute in your message. Never ask about a denial as a question.")
 
 # The retries a run is given after a network error, on the same model: a network
 # error says nothing of the model's availability, so it never falls to the next.

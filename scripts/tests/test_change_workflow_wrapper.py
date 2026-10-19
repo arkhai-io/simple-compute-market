@@ -91,6 +91,28 @@ def test_a_malformed_outcome_is_logged_stopped(tmp_path: Path) -> None:
     assert line["outcome"] == "stopped"
     assert line["reason"] == ("the run's outcome does not conform to the schema: "
                               "outcome has no next")
+    assert line["message"] == "Done.\n\n" + line["reason"]
+
+
+def test_a_stop_without_denials_is_logged_as_the_step_gave_it(tmp_path: Path) -> None:
+    # The wrapper sets the denials on every outcome, so a step need not give them.
+    recorded = [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": "make lock"}}]
+    stop = {"outcome": "stopped", "message": "Needs make lock.", "reason": "make lock denied"}
+    claude = FakeClaude((event_lines(stop, denials=recorded), 0))
+
+    line = make_wrapper(tmp_path, claude).run("validate", CHANGE)
+
+    assert {key: line[key] for key in (*stop, "denials")} == {**stop, "denials": recorded}
+
+
+def test_a_malformed_stop_keeps_the_steps_message(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines({"outcome": "stopped", "message": "Which option?"}), 0))
+
+    line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
+
+    assert (line["outcome"], line["reason"]) == (
+        "stopped", "the run's outcome does not conform to the schema: outcome has no reason")
+    assert line["message"] == "Which option?\n\n" + line["reason"]
 
 
 def test_denials_are_taken_from_the_stream_not_the_step(tmp_path: Path) -> None:

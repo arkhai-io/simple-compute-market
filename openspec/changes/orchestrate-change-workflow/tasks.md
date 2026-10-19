@@ -1760,6 +1760,48 @@ and both work side by side. Steps' rules for `make check-*` already admit
 Claude reviewer cannot run it, which is as intended, since it would run the
 validator. This session stayed moderate in size; the pilot (7) can start fresh.
 
+Sixth round's triage (review 101, validation 102, orchestrator's observations
+103; base `a7f661e80`). Fixes:
+
+- **101 F1** — `prior_session` orders a kind's records by number, through
+  `records.NUMBERED` as `latest_validation` does, so `101-implementation` is
+  continued after `94-implementation`, not before. Unit: records 94 and 101, each
+  with a session, resume 101's and name it in the prompt.
+- **103 R4** — `run_outcome` checks the step's outcome with the run's denials in
+  it, which the wrapper sets on every outcome, so a `stopped` without `denials`
+  is logged as the step gave it; an outcome the schema rejects keeps the step's
+  own message ahead of the reason. Unit: a stop without denials logged with the
+  run's; a stop without `reason` logged stopped with the step's message; the
+  malformed-outcome test asserts the message too.
+- **103 R3 (option b)** — after a deny-rule denial no other tool does the work;
+  after a `mode` denial a tool the step's rules allow for it may, the step naming
+  it, and the orchestrator reads it as a gap. Reworded in `harness.py`'s
+  `UNATTENDED`, the seven leaf skills' running-unattended sections,
+  `change-orchestrate`'s denial reading, D6a step 2, D12, and the delta's
+  permissions requirement; recorded under the sixth round's decisions.
+- **102 V1** — none here: the e2e-vm failure is in the buyer CLI's assembly, where
+  both buyer domains register `settlement contact`; the fix commit's validation
+  reruns it.
+
+Evidence. Unit (`scripts/tests`, fake runners): the wrapper's and the review's
+suites 104 passed, and with the harness's, the outcome's, the command line's, and
+the computation's 297 passed. `make test`: passed, every suite (`scripts/tests`
+1076: 1073 before and the three new tests). `make check-change
+CHANGE=orchestrate-change-workflow`: passed before and after the compliance
+check's fixes, as did all of `scripts/tests`; `make check-packaging`: passed (no
+dependency changed). No end-to-end scenario covers it
+(contributor tooling). Fresh-context compliance check of the diff against
+`a7f661e80` (a subagent, read-only): each fix as accepted and no more, the new
+tests failing on the old code, no function-local import, no history in comments,
+no private path. Fixed what it found: two unwrapped lines in D12 and the delta's
+requirement; the requirement's workaround check now says it follows a deny-rule
+denial, and a scenario covers a substitute after a `mode` denial; the skills'
+examples read "such as", as the wrapper's prompt does. Declined: rewording D6a step
+1's "the skill's 'never' line enforced", since the deny rules are each skill's
+"never" lines as the step table's header says, not the sentence about other tools;
+counting a whitespace-only message as absent in `run_outcome` stays, since it
+shows the owner nothing.
+
 ## 7. Pilot
 
 Delivers D15's evidence: `fix-resource-pool-provider-at-creation` worked by the
@@ -1796,7 +1838,38 @@ section records what they showed about the orchestrator.
       computed before the run then fails, the `FileNotFoundError` is misreported
       as the CLI being unavailable, and the outcome line recreates an active
       directory. Owed: narrow the unavailable classification to launch failures,
-      and resolve the change's directory after a closeout run.
+      and resolve the change's directory after a closeout run. Also owed (103
+      R1): the transcript stays writable when the change is archived mid-run —
+      `Stream.feed` reopens the transcript by path for every line, so the first
+      line after the move raises — through one handle held for the run or the
+      path re-resolved; a test archives the change during a fake run.
+      Pilot gap (103 R5 / R6, pilot seq 88 and 90): archive cleanup's Validated
+      check tripped on another change's commit on the shared branch, rightly,
+      since the merge carries it; what is missing is a route once the owner
+      judges it harmless. Owed: the check ends "unless the owner waives it,
+      judging the paths named", the waiver a ledger line under the closeout
+      review's record with `"finding": "validated"` and the owner's reason; the
+      archive-cleanup row gains `Edit(openspec/changes/archive/*/interventions.jsonl)`,
+      a table edit the owner commits. The check itself stays.
+      Pilot gap (103 R7, pilot seq 92): archive cleanup's `Write` of
+      `openspec/changes/archive/2026-10-19-fix-resource-pool-provider-at-creation/reviews/pull-request.md`,
+      given as an absolute path, was denied with reason `mode` under
+      `Edit(openspec/changes/**/reviews/pull-request.md)`, while validation's
+      record writes, also absolute paths, are admitted under
+      `Edit(openspec/changes/**/reviews/*-validation.md)`. No directory of the
+      repository is special to the harness; the owner's hypothesis is that
+      absolute and relative paths are matched differently. Owed: find why, and
+      if the rule does not match the path, the narrowest rule that does, a table
+      edit for the owner; 7.2 records the reading.
+      Allow-list gap (103 R2, pilot seq 68): the validator was admitted only
+      through `bunx`, which not every machine has; the `npx --yes` and `npx -y`
+      forms were added to the design, plan, triage, and closeout rows in
+      `c8582c54b`, and `make check-change` falls back to `npx`. Closed.
+      Script gap (103 R4, pilot seq 88): a step's malformed `stopped` was
+      replaced by the wrapper's, losing its message, and `run_outcome` checked
+      the outcome before adding the run's denials, which the schema requires on
+      `stopped` and the wrapper sets anyway. Made at the sixth round's triage;
+      see the note after section 6e.
 - [ ] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
 - [ ] 7.5 From the runs on the revised tooling — the pilot's later steps, this
       change's own remaining rounds — record `make change-cost`'s report, the cache

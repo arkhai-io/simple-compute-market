@@ -166,10 +166,13 @@ can carry them, even one that finished and moved the phase on. Run:
 python3 scripts/run_change_step.py denials <change> <seq>
 ```
 
-Inspect each denial and the later calls it reports. A later call doing the denied
-work by another means is a workaround: do not trust the outcome until the owner
-has seen it. A denied chain retried as separate allowed commands alone does not
-establish a workaround. One denied call is not a denied tool.
+Inspect each denial and the later calls it reports. After a deny-rule denial, a
+later call doing the denied work by another means is a workaround: do not trust
+the outcome until the owner has seen it. After a `mode` denial, the same work done
+by a tool the step's rules allow for it — the Edit tool for a denied shell write,
+Read or Grep for a shell read — is not a workaround; read it as the gap it is. A
+denied chain retried as separate allowed commands alone does not establish a
+workaround. One denied call is not a denied tool.
 
 Classify by the harness's `reason`: `mode` means a missing allow rule, a gap; a
 denial with no `reason` met a deny rule and is forbidden, since the harness

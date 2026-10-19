@@ -36,8 +36,8 @@ from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runn
                                      claude_command, codex_command, resume_command, run_claude,
                                      run_codex, unreachable)
 from change_workflow.log import LOG, log_path, record_outcome
-from change_workflow.records import (TRANSCRIPTS, ChangedSince, changed_since, next_number,
-                                     validation_problem)
+from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
+                                     next_number, validation_problem)
 from change_workflow.steps import HARNESSES, STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream, transcript_denials
 from find_change import ChangeNotFound, change_directory, is_archived
@@ -181,9 +181,14 @@ def tagged_session(marker: str) -> tuple[str, str]:
 
 def prior_session(reviews: Path, kind: str) -> tuple[str, str, str] | None:
     """The reviewer's harness and session, and the record, of the latest published
-    review of `kind`."""
-    records = sorted(reviews.glob(f"[0-9]*-{kind}.md")) if reviews.is_dir() else []
-    for record in reversed(records):
+    review of `kind`.
+
+    Records are ordered by number, not by name: `101-` sorts before `94-` as text.
+    """
+    records = sorted((int(match.group(1)), entry) for entry in
+                     (reviews.glob(f"[0-9]*-{kind}.md") if reviews.is_dir() else [])
+                     if (match := NUMBERED.match(entry.name)))
+    for _, record in reversed(records):
         # The last marker is the record's own; an earlier one may be quoted.
         if sessions := _SESSION_MARKER.findall(record.read_text("utf-8")):
             return (*tagged_session(sessions[-1]), record.stem)

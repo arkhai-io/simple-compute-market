@@ -241,6 +241,21 @@ def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) ->
     assert path.read_text("utf-8").count("<!-- reviewer-session: codex:first -->\n") == 1
 
 
+def test_the_latest_review_is_continued_past_two_digit_numbers(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    for number, session in ((94, "older"), (101, "latest")):
+        (reviews_of(root) / f"{number}-implementation.md").write_text(
+            review_text("implementation") + f"\n<!-- reviewer-session: codex:{session} -->\n",
+            "utf-8")
+    calls: list[list[str]] = []
+
+    run_review(CHANGE, "implementation", root=root,
+               runner=writing(review_text("implementation"), calls=calls), head=lambda _: HEAD)
+
+    assert calls[0][:4] == ["codex", "exec", "resume", "latest"]
+    assert "101-implementation" in calls[0][-1]
+
+
 def test_an_untagged_reviewer_session_is_continued_in_codex(tmp_path: Path) -> None:
     root = repository(tmp_path)
     kind = "design"

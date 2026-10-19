@@ -419,9 +419,12 @@ missing `echo`; X5). The reading, in `change-orchestrate`:
    forbidden action, the skill's "never" line enforced. Any other value goes to
    the owner.
 2. `run_change_step.py denials <change> <seq>` lists each denial with the tool
-   calls the run made after it, from the transcript. A later call that did the
-   denied call's work by another means is a workaround: the run's outcome is not
-   trusted until the owner has seen it.
+   calls the run made after it, from the transcript. After a deny-rule denial, a
+   later call that did the denied call's work by another means is a workaround:
+   the run's outcome is not trusted until the owner has seen it. After a `mode`
+   denial, the same work done by a tool the step's rules allow for it — the Edit
+   tool for a shell write, Read or Grep for a shell read — is not one: the rules
+   already allow that work, and the call is read as a gap (103 R3).
 3. For a gap, the orchestrator proposes the narrowest rule that matches the call —
    `Bash(gh run view *)`, not `Bash(gh *)` — and says which it is: a one-run
    `--allow` on the resume, for a stopped run that needs the call to go on, or a
@@ -558,8 +561,11 @@ its log line `override: true`, and the orchestrating session never sets either
 When a skill runs through the wrapper, every "stop and ask the owner" ends its turn
 with a `question` outcome; a denied call ends it `stopped`, naming that exact
 call, only when the step cannot complete without it, never a question or a
-workaround; a chained command denied because one part lacks a rule is rerun one
-command at a time, since the denial is of the chain and not of its parts; a step
+workaround; a call a deny rule refused is done by no other tool, and one denied
+in `dontAsk` mode for want of a rule may be done by a tool the step's rules allow
+for the same work, the step naming the substitute (103 R3); a chained command
+denied because one part lacks a rule is rerun one command at a time, since the
+denial is of the chain and not of its parts; a step
 finishes every part of its work that does not depend on a denied call, and one
 that can complete goes on and ends as it ends, the denial recorded on its outcome
 for the orchestrator's reading (X3, X5, 28 F1); and its last turn ends with an
@@ -953,6 +959,30 @@ orchestrator's observations (74), and validation 78.
 - **74 R3** — a round line records `HEAD` as the round starts, and the round view's
   default base is that commit; see D9.
 - **74 O3 / R4** — every step may run `make change-cost`; see D6.
+
+### Decisions at the sixth implementation round's triage
+
+The round of section 6e, triaged from review 101, validation 102, and the
+orchestrator's observations (103); the owner had no notes (99).
+
+- **103 R3 (option b)** — what a step may do after a denial follows the denial's
+  reason. A call a deny rule refused is forbidden, and no other tool does it; a
+  call denied in `dontAsk` mode for want of a rule may be done by a tool the
+  step's rules allow for the same work, the step naming the substitute, and the
+  orchestrator reads that as a gap, not a workaround; see D6a, D12. The rules
+  already allow that work, and a row grants an edit only by path. Rejected: every
+  substitute a workaround for the owner (steps stopped or hesitated over an edit
+  their row allows, three times in the pilot); dropping the rule (a deny-rule
+  denial would lose its stated "never").
+- **101 F1** — the review that continues is the latest of its kind by record
+  number, not by name; see D11.
+- **103 R4** — the wrapper checks a step's outcome with the run's denials in it,
+  and a rejected outcome keeps the step's message ahead of the reason; see D3.
+- **102 V1** — the e2e-vm failure is not this change's; the fix commit's
+  validation reruns it, and the owner decides after it whether the buyer CLI's
+  duplicate `settlement contact` registration becomes a change of its own or
+  joins an existing one.
+- **103 R1, R5 / R6, R7, R2** — pilot gaps recorded on task 7.3.
 
 ## Risks / Trade-offs
 
