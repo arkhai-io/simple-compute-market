@@ -19,7 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -944,6 +944,10 @@ change-watch: ## Follow the progress of an OpenSpec change's steps as they run, 
 change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
+
+change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/change_cost.py "$(CHANGE)"
 
 archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null

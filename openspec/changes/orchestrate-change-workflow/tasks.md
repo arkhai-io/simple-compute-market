@@ -1203,24 +1203,86 @@ Delivers D19 (69 F6, 70 F7): each log line's model, cost, gap, and cache hit, an
 `make change-cost`. Touches `scripts/run_change_step.py`, a new
 `scripts/change_cost.py` and its test, and the `Makefile`.
 
-- [ ] 6b.1 The wrapper writes `cost` on every Claude run's line: tokens, turns, and
+- [x] 6b.1 The wrapper writes `cost` on every Claude run's line: tokens, turns, and
       duration summed over the run's `result` events; dollars from the last event
       less the total on the session's last logged run, marked `usd_partial` when
       the previous run had no result or the session's conversation file gained
       turns the wrapper did not run; `gap_s` since the session's last turn of any
       kind; `cache_hit` from the first turn's cache read. A Codex review's line
       records the tokens it reports (D19).
-- [ ] 6b.2 `scripts/change_cost.py` and `make change-cost CHANGE=<change>`: totals
+      Done. `run_cost` sums `usage` tokens (input, output, cache read, cache
+      creation), `num_turns`, and `duration_ms` over the result events of every
+      attempt of the run (a network retry's spent turns included), and takes
+      `usd` as the last `total_cost_usd` less the session's last logged
+      `session_usd`; `measured_before` and `measured_cost` decide `usd_partial`
+      (the session's last line left no `session_usd` — a crash, or a line from
+      before costs — or its conversation file holds more user and assistant turns
+      than that line's `entries`), `gap_s` (from the conversation file's last
+      `timestamp`, else the last line's `at`), and `cache_hit` (the first
+      assistant event's `cache_read_input_tokens` above 0), the last two on
+      resumed runs only. The conversation file is
+      `~/.claude/projects/<root, every non-alphanumeric a dash>/<session>.jsonl`
+      (`conversation_file`, the `Wrapper.conversation` seam), the layout this
+      machine's sessions show. `cost` also keeps `session_usd` and `entries` as
+      the next run's reference, named as such in the module docstring; a run
+      that reached no model, its conversation unchanged, carries `session_usd`
+      forward so the next run is not marked partial. A review's line: a Codex
+      run's `{"tokens": …}`, summed over the attempts its transcript holds; a
+      Claude run measured as a step is, a continued reviewer's `gap_s` from the
+      log alone (its conversation file already holds the run's turns); a stopped
+      review that ran records its cost too.
+- [x] 6b.2 `scripts/change_cost.py` and `make change-cost CHANGE=<change>`: totals
       by step and by round — a line's round is the `round` line in force, lines
       before any are design and planning, lines from the first pre-closeout review
       on are closeout — partial dollars as a range, and the cache misses with
       their gaps (D19, 70 F7).
-- [ ] 6b.3 Verification: unit tests over fake streams — a resumed run's dollars
+      Done, with a third grouping D19 asks for, by cache — session openings,
+      resumed runs that missed, resumed runs that read it — so openings, misses,
+      and warm turns can be told apart. The closeout bucket starts at the first
+      pre-closeout review that finished, not one refused before it ran. Partial
+      dollars show as `$low–$high`, low without the partial runs. The target is
+      added to `.PHONY` with `change-next` and `change-watch`, which replace a
+      stale `next` there.
+- [x] 6b.3 Verification: unit tests over fake streams — a resumed run's dollars
       differenced, its tokens not; two result events summed; a crashed predecessor
       and an unlogged turn marking `usd_partial`; the gap after a takeover; the
       report's buckets and miss list over a fixture log.
       `uv run --no-project --with pytest pytest -q scripts/tests`; `make test`.
       No end-to-end scenario covers it.
+      Unit (`test_run_change_step.py`, fake streams and an injected conversation
+      directory): a fresh run's cost is its session's total; a resumed run's
+      dollars differenced, its tokens its own, its cache hit; two result events
+      summed; a crashed predecessor and turns the wrapper did not run marking
+      `usd_partial`, the second with the gap after the takeover and a cache miss;
+      the gap from the log without a conversation file; a run that reached no
+      model leaving the total as it was; a network retry's turns counted; a Codex
+      review's tokens, a rejected one's too; a Claude review's cost, and a
+      continued Claude reviewer's dollars, gap, and cache hit; `make change-cost`.
+      Unit (`test_change_cost.py`, fixture logs): bucketing by the round in force,
+      a refused pre-closeout review not starting closeout; the totals by step,
+      round, and cache, partial dollars as a range; the miss list; a log without
+      costs; the command. Results: the two suites 259 passed before the
+      fresh-context check, 263 after; `make test` passed, every suite
+      (`scripts/tests` 1005), before its fixes, which touched only
+      `run_change_step.py`, `change_cost.py`, and their tests; `make
+      test-release-tooling` (all of `scripts/tests`) 1009 passed after them.
+      `make check-comment-hygiene`: passed. End-to-end: none, as the preamble
+      says. Not run: `make change-cost` on this change, denied to this session;
+      its lines before this section carry no `cost`, so it would report none.
+
+Section 6b handoff. Fresh-context check of the diff against `1fa58ac5` (a
+subagent, read-only): no guidance breach; fixed what it found — a refused
+pre-closeout review starting the closeout bucket; a stopped review recording no
+cost; a continued Claude reviewer recorded without `gap_s`; a run that reached no
+model marking its successor partial; tokens of retried attempts and of earlier
+Codex attempts dropped; the report not separating openings, misses, and warm turns;
+`session_usd` and `entries` undocumented. Declined: recording a Claude attempt's
+spend when a review falls back from Claude to Codex — the review row puts Codex
+first, so Claude never runs before Codex. Dollars of a fresh run retried after a
+network error are the last attempt's session total only, each attempt being its
+own session; the tokens and turns of all attempts are counted. The cost figures
+are the harness's list prices (`costBasis` in the result's `modelUsage`), not an
+invoice.
 
 ## 6c. Advancing on conditions: `## Next`, rounds from the plan, and the branch decision
 
