@@ -117,9 +117,10 @@ proposal deferred can be built on them.
       closeout requirements (part 6), the legend of `openspec/changes/README.md`
       (`archived`, a dependency landing), and the Purpose paragraph of
       `openspec/specs/change-workflow/spec.md`, which no delta reaches and closeout
-      edits by hand; and, after archive cleanup, the two scenario titles the pinned
-      validator keeps, "A closeout gate is passed" and "A pre-closeout gate is
-      passed".
+      edits by hand; and the two scenario titles the pinned validator keeps in the
+      delta, "A closeout gate is passed" and "A pre-closeout gate is passed",
+      renamed in the permanent spec during closeout, right after the archive
+      merges the delta.
 
 ### Knowledge to promote
 
@@ -146,8 +147,11 @@ proposal deferred can be built on them.
   targets, review records, and index statuses it drives.
 - Related to `parallel-change-workflows`: orchestrating several changes at once
   waits for it. Either may land first.
-- Pilot: `fix-resource-pool-provider-at-creation`, worked through every step by the
-  orchestrator on this change's branch.
+- Pilot: `fix-resource-pool-provider-at-creation`, from `ready for design` through
+  archive cleanup on this change's branch. Its first steps ran on the first
+  tooling, a middle stretch was relayed by hand as Codex tasks outside the wrapper,
+  and its last steps ran on the revised tooling. Only those last steps are evidence
+  of the wrapper.
 
 ## Impact
 

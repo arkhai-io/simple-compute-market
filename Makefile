@@ -954,7 +954,7 @@ change-cost: ## Report what an OpenSpec change's unattended runs cost, by step a
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_cost.py "$(CHANGE)"
 
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
 
