@@ -1809,12 +1809,22 @@ orchestrator from `ready for design` through archive cleanup on this branch. The
 pilot's own design, plan, reviews, and archive belong to that change; this
 section records what they showed about the orchestrator.
 
-- [ ] 7.1 Run `make orchestrate CHANGE=fix-resource-pool-provider-at-creation`
+- [x] 7.1 Run `make orchestrate CHANGE=fix-resource-pool-provider-at-creation`
       through every step to archive cleanup, on whatever tooling is committed when
       the pilot resumes, the owner's branch decision recorded once (D15, 69 F8,
       70 F10). Replanned against the revised design: the per-step branch
       confirmation is replaced by that one decision.
-- [ ] 7.2 Record here the evidence `design.md`'s Pilot section names: every
+      Done before this section's session, by the orchestrating session and the
+      owner: the pilot ran from `ready for design` (pilot log seq 1) to archive
+      cleanup (seq 92, committed as `fd89560b6`), archived on this branch, the
+      branch decision recorded once (seq 58, `by: owner`). Its log reads in
+      three flows, which 7.2 names for each item: the section-6 tooling, seq
+      1–17 and the reviews at seq 23, 43, and 53, whose lines carry no model or
+      cost; Codex tasks relayed by hand, seq 18–62, lines with `engine: codex`
+      and no session, from the moment Claude reached its weekly limit (seq 17);
+      and the revised tooling, seq 63–93, every step's line naming its model and
+      all but seq 73's carrying its cost.
+- [x] 7.2 Record here the evidence `design.md`'s Pilot section names: every
       `stopped` outcome and its denials, every `orchestrator` line and the state
       the script could not classify, the relay's latency in the design
       discussion, whether validation's background fetch survived a question,
@@ -1830,7 +1840,94 @@ section records what they showed about the orchestrator.
       and of the quoted `git diff HEAD '--output=x'`, which the rule's space
       before `--output` may let through if the harness matches the command as
       typed; if it does, the rule drops the space.
-- [ ] 7.3 Each allow-list gap the pilot found is a proposed edit to
+      Done. Seq numbers are the pilot's log unless "this log" says otherwise.
+      - **Deny rules, revised tooling, this section's own run.** `git diff
+        --output=/dev/null HEAD` was refused by `common`'s `Bash(git diff*
+        --output*)`, with the harness's deny-rule message ("Permission to use
+        Bash with command … has been denied."), not the `dontAsk` one; this
+        run's line carries the denial for the orchestrator's reading, without a
+        reason if 74 R2 holds for Bash as for Edit. `git
+        diff HEAD '--output=/dev/null'` then ran: the rule is matched against
+        the command as typed, and ` '--output` is not ` --output`. So the rules
+        drop the space (7.3). A rule matched as typed holds the plain and quoted
+        forms, not a word a shell assembles from quoted pieces: the deny rules
+        stop a step's mistakes, and the step's skill and D12 stop the rest.
+      - **Every stop and its denials.** Section-6 tooling: seq 1, a network
+        error (`EAI_AGAIN`) before any work, and seq 2, its resume, which found
+        no conversation, since a run that never reached the API leaves none —
+        hence 6a.2's retry of the same command; seq 17, Claude's weekly limit,
+        after which the owner moved the steps to Codex by hand (seq 18). Codex
+        relay: seq 35, Codex's usage limit mid-section, continued on the owner's
+        word (seq 36); two more of its limits, in section 4's task and in a
+        triage, are recorded only in the owner's lines that continued them (seq
+        39, 59), since nothing wrote a relayed task's stop. Revised tooling: seq 68, closeout denied `sed -i` on a
+        spec (an edit `Edit(openspec/**)` admits) and the pinned validator
+        through `npx --yes` (a gap, 103 R2), both `mode`; seq 70, the same `sed`
+        denied again, the step refusing the Edit tool as a workaround until the
+        orchestrator's resume named it (seq 71–72); seq 73, no denial, the
+        wrapper's own failure when archival moved `reviews/` (34 R1, 103 R1;
+        7.3); seq 85, triage's `python3` heredoc append to the ledger (`mode`),
+        the step again refusing the Edit tool until resumed (seq 86–87) — seq 70
+        and 85 are 103 R3's evidence; seq 88, archive cleanup's `git -C <path>
+        diff` (`mode`: `Bash(git diff*)` does not match a `-C` prefix; the plain
+        form followed and ran), its stop malformed (103 R4); seq 90, the Edit of
+        the archived ledger for the waiver (`mode`, 103 R5 / R6); seq 92, the
+        `Write` of `reviews/pull-request.md` and a `cd <root> && git add …`, both
+        `mode` (103 R7; the `git add` redone plainly). Runs that went on past a
+        denial: seq 10, design's ledger-lens lookup through `python3 -c`
+        (`mode`; read as a workaround at seq 11, since Grep did the same read
+        after it, and settled by the owner's design-only rule at seq 12 — under
+        103 R3 it would now read as a gap); seq 77, the closeout review on
+        Claude denied `make check-doc-citations`, `make check-comment-hygiene`,
+        and a `diff` with process substitution (`mode`; the first two, with
+        `make check-tasks`, are the review row's since `c8582c54b`). No pilot
+        run met a deny rule. This log shows the same shape at seq 76: the 6a–6d
+        round's implementation tried to edit the index through a `python3`
+        heredoc, a write no rule admits (`mode`), an edit its row allows with
+        the Edit tool.
+      - **Orchestrator lines; what the script could not classify.** No line
+        records an `unclassified` result. The orchestrator decided routing and
+        recovery itself at seq 3 (after the network error), 19, 24, and 30 (the
+        Codex relay), 41 (the first round view's base, the round having no
+        triaged validation to default to — what 74 R3's round commit now
+        records), 57 (an unrelated dirty index edit kept out of the step), 64
+        and 76 (review bases), and 74 (files over the orphan line, 34 R1); its
+        denial readings are seq 11, 69, 72, 78, 86, 89, and 93. In this log,
+        seq 82 is the same kind: Codex could not resume its reviewer session
+        ("no rollout found"), a failed run rather than an unavailable model, so
+        the review was rerun fresh (7.3 leaves it to the triage).
+      - **The relay's latency in the design discussion** (section-6 tooling,
+        seq 5–16; durations from the transcripts' `result` events, since those
+        lines record none): the opening turn 330 s; a turn that presented the
+        next decision 14–25 s; one that recorded a decision or read code 78 s
+        (seq 10) and 119 s (seq 13). The gaps between lines, 99 s to 2.5 hours,
+        are almost all the owner's. These are the step's own times; what
+        relaying adds to them the log does not measure, nor whether relayed
+        text drifted from the step's.
+      - **Validation's background fetch across a question:** not exercised. No
+        validation in either log ended with a question, and since 41 A1 a
+        validation never ends a turn with a background command running.
+      - **`--resume` and a granted rule:** the resumed turn is held to the rules
+        it is given. This log's seq 31 resumed seq 30 with
+        `Edit(…/29-validation.md)` and wrote the record; the pilot's seq 92
+        resumed with `Edit` of the archived ledger and wrote the waiver; and a
+        table edit between runs reached the resumed turn — seq 70 ran the `npx`
+        validator seq 68 had been denied (revised tooling). A grant admits only
+        the calls it matches: this log's seq 21, granted `Bash(cat *)`, was
+        still denied `cat >> …/interventions.jsonl <<'EOF'` (`mode`), a write
+        through a redirect that no rule admitted.
+      - **The schema's `rounds` (6c.1):** Claude Code accepts the schema with
+        the nested `anyOf` and `minItems`, given to every run since 6c, none of
+        which failed on it. No plan has emitted `rounds` yet — the pilot's plan
+        ran in the Codex relay, and this change's plan line predates the
+        mapping, so its round of section 7 is the owner's (this log's seq 122) —
+        and no `round` line `by: plan` has been recorded.
+      - **`## Next`:** a triage with nothing to dispose of recorded `Advance —
+        nothing to dispose of` and the change advanced without the owner (seq
+        66, revised tooling); the Codex relay's seq 62 wrote it after the fix
+        commit, as 6d.3 asks.
+      End-to-end: none, as the preamble says.
+- [x] 7.3 Each allow-list gap the pilot found is a proposed edit to
       `.claude/change-steps.toml`, committed by the owner; each script gap is a
       rule added to `change_next_step.py` with its test; each is noted here.
       Pilot gap (fix-resource-pool-provider-at-creation 34 R1): archival during
@@ -1870,12 +1967,166 @@ section records what they showed about the orchestrator.
       the outcome before adding the run's denials, which the schema requires on
       `stopped` and the wrapper sets anyway. Made at the sixth round's triage;
       see the note after section 6e.
-- [ ] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
-- [ ] 7.5 From the runs on the revised tooling — the pilot's later steps, this
+      Done, for each gap still owed:
+      - **34 R1 and 103 R1, script.** `Stream` holds its transcript and
+        progress file open from its first line until `close`, which the wrapper
+        and the Claude reviewer call when each attempt ends; `openspec archive`
+        renames the change's directory (`fs.rename`, copying only on EPERM or
+        EXDEV), and an open file moves with it. `Wrapper._turn` finds the
+        change's log again after the run, so a closeout run that archived its
+        change logs to the archive and recreates no active directory. A
+        `FileNotFoundError` reads as the harness being unavailable only when it
+        names the program it launched (`harness.missing_program`, as `Popen`
+        raises it); any other missing file is the run's failure, logged `stopped`
+        as "the run did not finish" by the wrapper and "the review did not
+        finish" by either review attempt.
+        The reason now reads "claude is not installed", without the exception.
+        Unit (`scripts/tests`, fake runners): a stream whose directory is renamed
+        between two lines keeps both, with its progress, in the new place
+        (`test_change_workflow_stream.py`); a run whose fake runner renames the
+        change into the archive mid-stream is logged `finished` in the archived
+        log, its whole stream in the archived transcript, no active directory
+        left (`test_change_workflow_wrapper.py`); a missing file that is not the
+        program stops a step run, and a review on either harness, with nothing
+        passed over and no fallback (`test_change_workflow_wrapper.py`,
+        `test_change_workflow_review.py`). The tests of a missing program now
+        raise the error as `Popen` does, naming it (`not_installed`, in the
+        fixtures), and assert the shorter reason.
+      - **103 R5 / R6.** `change-archive-cleanup`'s Validated check asks the
+        owner, naming the paths and commits, and the owner may waive it; the
+        waiver is a ledger line (`"finding": "validated"`, under the closeout
+        review's record name, the owner's reason as the disposition) written
+        with the Edit tool and committed with the index edit; its opening and
+        step 5 say so. The delta's "Phases and owner touchpoints" admits the
+        owner's recorded waiver, with a scenario, and D14 and the sixth round's
+        decisions say so. Under orchestration the computation names validation
+        in that state, since it reads no ledger, so reaching archive cleanup's
+        question takes the owner's word to the orchestrating session. At the
+        pilot's seq 88 it did not: the step-table commit `c8582c54b` landed 13 s
+        after the triage's line (seq 87), as archive cleanup started on the
+        computation's answer — no line records which commit that answer read —
+        and the step's own check caught the `.claude/` path. Left for the
+        triage: whether a waiver needs a route of its own.
+      - **103 R7, reading.** The owner's hypothesis is disproved: the pilot's
+        seq 92 granted `Edit(openspec/changes/archive/2026-10-19-fix-resource-pool-provider-at-creation/interventions.jsonl)`,
+        a relative rule, and it admitted that run's Edit of the same file given
+        as an absolute path. The transcript says no more than `mode`
+        (`decision.source: config`). A trailing `**` spans directories:
+        closeout's `Edit(openspec/**)` admitted its edits of the archived
+        `tasks.md` (pilot transcript 35). What differs is a `**` mid-path: every
+        write admitted under `Edit(openspec/changes/**/reviews/…)` was one
+        directory below `openspec/changes/` (an active change's record), and
+        the denied one two (`archive/<dated>/`). Not confirmed — this step's own
+        row allows `Edit` without a path, so no run here can probe a path rule —
+        but archive cleanup only ever drafts into an archived change, so the
+        narrowest rule names that layout.
+      - **Proposed table edits, for the owner to commit** (`.claude/` is denied
+        to every step): on `[steps.archive-cleanup]`, add
+        `Edit(openspec/changes/archive/*/interventions.jsonl)` (103 R5 / R6) and
+        replace `Edit(openspec/changes/**/reviews/pull-request.md)` with
+        `Edit(openspec/changes/archive/*/reviews/pull-request.md)` (103 R7; the
+        next archive cleanup confirms it); on `[common]`, replace the three
+        `--output` deny rules with `Bash(git diff*--output*)`, `Bash(git
+        show*--output*)`, and `Bash(git log*--output*)` (7.2's probe), which
+        also refuse the harmless `--output-indicator-*` options. D6's table
+        follows them once committed.
+      - **Gaps closed before this section:** the design row's `python3 -c` lens
+        rule (seq 12) and the review row's three checks (seq 78, `c8582c54b`);
+        the denials read as "not table material" (seq 86, 89, 93; this log's
+        seq 120) need none.
+      - **Left for the triage, each needing a decision this plan does not
+        make:** the waiver's route under orchestration (above), and this log's
+        seq 81–82, where Codex could not resume its reviewer session ("no
+        rollout found") and an orchestrator line reran the review fresh — the
+        review could start fresh on that failure itself, at the cost of the
+        reviewer's context. The table edits above are proposals: the owner
+        commits them, as this task says, and until then archive cleanup's
+        waiver line and draft need a one-run grant.
+- [x] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
+      Done: each Risk ends with what the pilot showed — the relay's cost and
+      latency, the gaps and the two rules whose matching surprised, the
+      substitutes that led to 103 R3, the background fetch not exercised and no
+      longer arising, `--resume` applying new rules, advancing without the owner
+      and the entry check that caught archive cleanup's start, the Claude
+      review's fallback, the cost of replayed turns — and a new Risk, a closeout
+      run archiving its change under the wrapper.
+- [x] 7.5 From the runs on the revised tooling — the pilot's later steps, this
       change's own remaining rounds — record `make change-cost`'s report, the cache
       misses and their gaps, every fallback to another model, and every step that
       advanced without the owner; these are D16 to D19's evidence and the data the
       design's two open questions wait on.
+      Done, for every run logged before this section's: later runs are on the
+      log, and `make change-cost` reports them.
+      - **The pilot** (`make change-cost CHANGE=fix-resource-pool-provider-at-creation`;
+        only seq 63–93 carry costs): 19 runs, $12.10–$12.73, 378 turns, 32
+        minutes; by step, closeout $4.35–$4.98 over 4 runs, triage $4.39 over 9,
+        the Claude review $2.60, validation $0.32, archive cleanup $0.45; by
+        cache, 7 session openings $5.85, 11 warm resumes $5.10–$5.72, and one
+        miss, triage seq 81 after a gap of 1 h 10 m, $1.16. The range is
+        closeout's resume after the orphan line (seq 73 had no cost).
+      - **This change** (`make change-cost CHANGE=orchestrate-change-workflow`;
+        the lines that carry costs, seq 80 on): 34 runs, $37.61–$93.28, 746 turns, 1 h 48
+        m; round 6a–6d $12.29–$67.95, round 6e $25.32; by step, implementation
+        $19.11–$74.77 over 2 runs, triage $17.33 over 25, validation $1.17 over
+        4, the Codex reviews 1.5M tokens. By cache: 11 openings $24.50, 22 warm
+        resumes $13.11, and one miss, implementation seq 80 after 10 minutes,
+        $0–$55.66 because the session's previous run (seq 78) stopped at its
+        limit without a total, so its dollars are partial; its 633k-token cache
+        write is the miss itself.
+      - **Fallbacks:** one, the pilot's closeout review (seq 77), Codex at its
+        usage limit, run on Claude Opus 5.5 and named so on its record and line.
+        Steps with one model stopped instead, saying when the limit resets:
+        this log's seq 78 (implementation, Claude's session limit).
+      - **Advancing without the owner:** in the pilot, validation (seq 63), the
+        pre-closeout review (65), its triage, which had nothing to dispose of
+        and advanced (66), closeout (67), the closeout review (77), and archive
+        cleanup (88); in this log, the fix commits' validations (99, 121) and
+        each round's review and validation after the owner's notes. Every other
+        stop was a touchpoint: a design or triage question, a denial to read, a
+        limit, or a round of a change planned without a mapping (seq 104, 122).
+      - **The open questions.** Session openings are the largest measured share
+        in both changes ($5.85 of $12.10; $24.50 of $37.61), but an opening's
+        dollars are its whole run: $19.11 of this change's $24.50 is the 6e
+        implementation's 194 turns of work. The report does not yet separate
+        loading from work, which is what "Loading less per session" waits on.
+        Only two misses were logged,
+        against 33 warm resumes: one after 10 minutes, which an hour's lifetime
+        would have spanned, and one after 1 h 10 m, which it would not. Not yet
+        enough to settle "A longer prompt-cache lifetime".
+
+Section 7 evidence and handoff. Unit (`scripts/tests`, fake runners): the stream,
+wrapper, review, cost, and harness suites 127 passed; all of `scripts/tests` 1080
+passed (1076 before, four new). `make test`: passed, every suite (`scripts/tests`
+1080), before the compliance check's fixes, which added one parametrized case to
+the review suite (62 passed) and touched only documents otherwise; all of
+`scripts/tests` 1081 passed after them, and `make check-change` passed again. `make check-change CHANGE=orchestrate-change-workflow` — comment hygiene,
+agent skills, citations, tasks, index, strict validation — passed; `make
+check-packaging`: passed (no dependency changed). End-to-end: none (contributor
+tooling). Beyond the tasks: `scripts/find_change.py`'s docstring now cites "Phases
+and owner touchpoints", the name the archive gives the requirement it cited (6c's
+handoff), since closeout cannot edit code; like `steps.py`'s citation, it resolves
+once the archive merges the delta. Besides the planned probe, one call of this run
+was denied: a `find / … 2>/dev/null` for the archive command's source, whose
+redirect no rule admits, done instead with Glob, a tool this step's rules allow for
+the same read. For the next session: the owner's table edits of 7.3 are not in
+this commit; once committed, D6's table follows them, and the next archive cleanup
+shows whether `archive/*/` matches where `**` did not. Section 7 is the last
+section before closeout: the round view comes next, then this round's validation
+and review, and after its triage the pre-closeout review.
+Fresh-context compliance check of the diff against `f6c45f357` (a subagent,
+read-only): no layering, packaging, comment, import, test-level, or
+public-repository breach, and each new test fails on the code before the diff.
+Fixed what it found: the Claude reviewer's missing-file path untested (now a
+parametrized case) and the review's message misquoted; and claims in these notes
+and the Risks that overreached — every revised line carrying a cost, seq 88 told
+three ways, a depth reading that ignored closeout's trailing `**`, every gap
+called closed, the relay said not to slow the discussion, a warm turn said to cost
+cents whatever it did, openings read as loading, grants said to apply "every
+time" (this log's seq 21), the relay's limits missing from the stop list, and the
+shortest gap. It also found the contributor guide's archive-cleanup line stale,
+now named in 8.9. Declined: leaving 7.3 open for the two gaps above, which need
+decisions this plan does not make and go to the triage as recorded, and for the
+table edits, which the task gives the owner.
 
 ## 8. Closeout
 
@@ -1936,7 +2187,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the paragraph on `make review` says the review runs on the review row's
         models, Codex then Claude (6a's fresh-context check); its sentence on
         `REVIEW_MODEL` and `REVIEW_EFFORT` as the owner's override was already
-        rewritten at the fifth round's triage (77 F3 / 74 O1).
+        rewritten at the fifth round's triage (77 F3 / 74 O1); and what archive
+        cleanup writes gains the waiver's ledger line (7.3).
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
         from `run_change_review.py` (retired) to `run_change_step.py review` in

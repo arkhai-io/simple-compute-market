@@ -33,8 +33,8 @@ from typing import Any, Callable
 from change_workflow.common import KINDS, ROOT, Clock, Entry, StepError, utc_now
 from change_workflow.cost import review_cost
 from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner,
-                                     claude_command, codex_command, resume_command, run_claude,
-                                     run_codex, unreachable)
+                                     claude_command, codex_command, missing_program,
+                                     resume_command, run_claude, run_codex, unreachable)
 from change_workflow.log import LOG, log_path, record_outcome
 from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
                                      next_number, validation_problem)
@@ -227,7 +227,9 @@ def _codex_attempt(model: Model, prompt: str, continuing: str | None, draft: Pat
     try:
         status = runner(command, log)
     except FileNotFoundError as exc:
-        return None, ("unavailable", f"codex is not installed: {exc}"), None
+        if not missing_program(exc, command):
+            raise
+        return None, ("unavailable", f"{command[0]} is not installed"), None
     said = log.read_bytes()[start:].decode("utf-8", "replace") if log.is_file() else ""
     session = _SESSION_LINE.search(said)
     # Only Codex's own error lines say why it could not run: the rest of its output
@@ -249,7 +251,11 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     try:
         status = runner(command, root, stream.feed)
     except FileNotFoundError as exc:
-        return None, ("unavailable", f"claude is not installed: {exc}"), None
+        if not missing_program(exc, command):
+            raise
+        return None, ("unavailable", f"{command[0]} is not installed"), None
+    finally:
+        stream.close()
     final = (stream.result or {}).get("result")
     if not stream.failure_text(status) and isinstance(final, str):
         draft.write_text(final, "utf-8")

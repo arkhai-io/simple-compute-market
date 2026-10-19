@@ -3,7 +3,9 @@ with, fake harnesses that replay a run, and reviews to publish."""
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -205,8 +207,13 @@ def codex_saying(said: str, status: int = 1):
     return runner
 
 
+def not_installed(program: str) -> FileNotFoundError:
+    """What launching `program` raises when it is not installed: an error naming it."""
+    return FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), program)
+
+
 def codex_missing(command: Sequence[str], log: Path) -> int:
-    raise FileNotFoundError("codex")
+    raise not_installed("codex")
 
 
 # A validated ancestor of HEAD, and where the change's records live.

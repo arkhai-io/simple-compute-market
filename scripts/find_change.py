@@ -15,7 +15,7 @@ could be meant.
 Run as a script, it prints the directory relative to the repository root, or
 names the problem and exits non-zero.
 
-Contract: openspec/specs/change-workflow/spec.md, "Phases and owner gates".
+Contract: openspec/specs/change-workflow/spec.md, "Phases and owner touchpoints".
 """
 
 from __future__ import annotations

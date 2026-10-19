@@ -13,9 +13,9 @@ from change_workflow.review import (ReviewError, claim_record, review_and_log, r
                                     run_review)
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
-                                      claude_review, clock, codex_missing, codex_saying, option,
-                                      option_rules, repository, review_text, reviews_of,
-                                      validation_text, writing)
+                                      claude_review, clock, codex_missing, codex_saying,
+                                      not_installed, option, option_rules, repository,
+                                      review_text, reviews_of, validation_text, writing)
 
 
 def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> None:
@@ -450,7 +450,7 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
 
 
 @pytest.mark.parametrize("codex,why", [
-    (codex_missing, "codex is not installed: codex"),
+    (codex_missing, "codex is not installed"),
     (codex_saying("ERROR: Not logged in. Run codex login."),
      "ERROR: Not logged in. Run codex login."),
     (codex_saying("ERROR: You've hit your usage limit. Try again at 3:05 PM."),
@@ -522,17 +522,43 @@ def test_a_review_with_no_reviewer_available_publishes_nothing(tmp_path: Path) -
     root = repository(tmp_path)
 
     def missing(command, cwd, feed) -> int:
-        raise FileNotFoundError("claude")
+        raise not_installed("claude")
 
     line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=codex_missing,
                           claude=missing, head=lambda _: HEAD, echo=None)
 
     assert line["outcome"] == "stopped"
     assert line["reason"] == ("the reviewer produced no review: no reviewer is available: "
-                              "codex gpt-6-sol: codex is not installed: codex; claude "
-                              "claude-opus-5-5: claude is not installed: claude")
+                              "codex gpt-6-sol: codex is not installed; claude "
+                              "claude-opus-5-5: claude is not installed")
     assert [entry["model"] for entry in line["unavailable"]] == ["gpt-6-sol", "claude-opus-5-5"]
     assert not [p for p in reviews_of(root).iterdir() if p.suffix == ".md"]
+
+
+@pytest.mark.parametrize("lost", ["codex", "claude"])
+def test_a_file_the_reviewer_cannot_find_is_no_unavailability(tmp_path: Path,
+                                                               lost: str) -> None:
+    # Only the program failing to launch says the harness cannot serve its model,
+    # so a reviewer whose run cannot find another file stops the review rather
+    # than falling to the next model.
+    root = repository(tmp_path)
+    claude = claude_review(review_text())
+
+    def codex_lost(command, log) -> int:
+        raise not_installed(str(log))
+
+    def claude_lost(command, cwd, feed) -> int:
+        raise not_installed(str(tmp_path / "gone" / "01-design.log"))
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          runner=codex_lost if lost == "codex" else codex_missing,
+                          claude=claude if lost == "codex" else claude_lost,
+                          head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert line["reason"].startswith("the review did not finish: FileNotFoundError")
+    assert "unavailable" not in line
+    assert claude.commands == []
 
 
 def test_a_failed_claude_reviews_denials_are_on_its_stopped_line(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
                                       FakeClaude, clock, event_lines, failed_run, make_wrapper,
-                                      option, option_rules)
+                                      not_installed, option, option_rules)
 
 
 def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
@@ -277,16 +277,55 @@ def test_a_resume_needs_an_answer(tmp_path: Path) -> None:
 
 def test_a_run_that_cannot_start_is_logged_stopped(tmp_path: Path) -> None:
     def missing(command, cwd, feed) -> int:
-        raise FileNotFoundError("claude")
+        raise not_installed("claude")
 
     line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=missing,
                    head=lambda _: COMMIT, clock=clock, echo=None).run("design", CHANGE)
 
     assert (line["outcome"], line["exit_status"]) == ("stopped", None)
     assert line["reason"] == ("no model of the step is available: claude-opus-5-5: claude is "
-                              "not installed: claude")
-    assert line["unavailable"] == [{**OPUS.entry(),
-                                    "reason": "claude is not installed: claude"}]
+                              "not installed")
+    assert line["unavailable"] == [{**OPUS.entry(), "reason": "claude is not installed"}]
+
+
+def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:
+    # Only the program failing to launch says the harness cannot serve its model.
+    def lost(command, cwd, feed) -> int:
+        raise not_installed(str(tmp_path / "gone" / "01-closeout.jsonl"))
+
+    line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=lost,
+                   head=lambda _: COMMIT, clock=clock, echo=None).run("closeout", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["reason"].startswith("the run did not finish: FileNotFoundError")
+    assert "unavailable" not in line
+
+
+def test_a_run_that_archives_its_change_is_logged_in_the_archive(tmp_path: Path) -> None:
+    # Closeout's last act renames the change's directory into the archive while
+    # the run is still writing its transcript.
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-21-{CHANGE}"
+    lines = event_lines(VALID["finished"], tools=(("Bash", {"command": "openspec archive"}),))
+
+    def archiving(command, cwd, feed) -> int:
+        for line in lines[:2]:
+            feed(line)
+        archived.parent.mkdir(parents=True)
+        (tmp_path / "openspec/changes" / CHANGE).rename(archived)
+        for line in lines[2:]:
+            feed(line)
+        return 0
+
+    line = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=archiving,
+                   head=lambda _: COMMIT, clock=clock, echo=None).run("closeout", CHANGE)
+
+    assert (line["outcome"], line["exit_status"]) == ("finished", 0)
+    assert "unavailable" not in line
+    assert not (tmp_path / "openspec/changes" / CHANGE).exists()
+    assert read_log(archived / "reviews/workflow.jsonl") == [line]
+    transcript = archived / "reviews" / line["transcript"]
+    assert transcript.read_text("utf-8") == "".join(lines)
+    assert "openspec archive" in transcript.with_suffix(".progress").read_text("utf-8")
 
 
 @pytest.mark.parametrize("lines", [
@@ -381,8 +420,8 @@ def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None
     rules = load_steps()["triage"]
     second = Model("claude", "second-model", "low")
 
-    line = wrapper._turn("triage", rules, log_path(tmp_path, CHANGE), "/change-triage x",
-                         (OPUS, second), session=None)
+    line = wrapper._turn("triage", rules, CHANGE, log_path(tmp_path, CHANGE),
+                         "/change-triage x", (OPUS, second), session=None)
 
     assert [option(command, "--model") for command in claude.commands] == [
         "claude-opus-5-5", "second-model"]

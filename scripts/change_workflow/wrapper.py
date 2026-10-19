@@ -30,8 +30,8 @@ from typing import Any, Callable, Sequence
 from change_workflow.common import ORCHESTRATOR, ROOT, Clock, Entry, StepError, utc_now
 from change_workflow.cost import (conversation_file, measured_before, measured_cost,
                                   read_conversation)
-from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, run_claude,
-                                     unreachable)
+from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, missing_program,
+                                     run_claude, unreachable)
 from change_workflow.log import last_run, log_path, read_log, record_outcome
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript
@@ -122,7 +122,7 @@ class Wrapper:
                 session = previous["session"]
                 models = _session_models(previous, rules)
         extra = {"sections": list(sections)} if sections else {}
-        return self._turn(step, rules, log, step_prompt(rules, change, arguments),
+        return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
                           models, session=session, extra=extra)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
@@ -170,11 +170,11 @@ class Wrapper:
         if granted:
             extra["granted"] = list(granted)
         # Framed, so an answer starting with `-` is never read as a flag.
-        return self._turn(step, steps[step], log, f"The owner's answer: {answer}",
+        return self._turn(step, steps[step], change, log, f"The owner's answer: {answer}",
                           _session_models(previous, steps[step]),
                           session=previous["session"], granted=granted, extra=extra)
 
-    def _turn(self, step: str, rules: StepRules, log: Path, prompt: str,
+    def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
@@ -185,11 +185,17 @@ class Wrapper:
         line names the last model tried even when none could run, with
         `unavailable` saying so: a resume of that run continues its session on
         that model, never the next in the row.
+
+        The line goes to the log where the change is when the run ends: closeout
+        archives the change it runs for, moving `reviews/` while the run writes
+        its transcript, and the log found before the run would name a directory
+        the archive has left.
         """
         schema = load_schema(self.schema_path)
         before = self._before(log, session)
         transcript = next_transcript(log.parent, step)
         progress = transcript.with_suffix(".progress")
+        named = transcript.relative_to(log.parent).as_posix()
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
@@ -209,12 +215,17 @@ class Wrapper:
                     status = self.runner(command, self.root, stream.feed)
                     reached = unreachable(stream.failure_text(status))
                 except FileNotFoundError as exc:
-                    reached = ("unavailable", f"{command[0]} is not installed: {exc}")
+                    if missing_program(exc, command):
+                        reached = ("unavailable", f"{command[0]} is not installed")
+                    else:
+                        failure = exc
                 except BaseException as exc:
                     # A run that could not start, or was interrupted, still ends
                     # with a line, so the log never shows its previous outcome as
                     # the latest.
                     failure = exc
+                finally:
+                    stream.close()
                 if reached is None or reached[0] != "network" or attempt == NETWORK_RETRIES:
                     break
             if reached is not None and reached[0] == "unavailable":
@@ -237,11 +248,16 @@ class Wrapper:
                 f"{entry['model']}: {entry['reason']}" for entry in passed_over)
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
                        "denials": stream.denials}
-        extra = {**(extra or {}), **model.entry(), "exit_status": status,
-                 "transcript": transcript.relative_to(log.parent).as_posix()}
+        extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
         extra.update(self._cost(attempts or [stream], session, before))
+        try:
+            log = log_path(self.root, change)
+        except StepError:
+            # A change found under neither name keeps the log the run started
+            # with, so the run still ends with a line.
+            pass
         line = record_outcome(log, step, outcome, session=stream.session or session,
                               commit=self.head(self.root), extra=extra, schema=schema,
                               clock=self.clock)

@@ -94,6 +94,16 @@ def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any] | None,
     return command
 
 
+def missing_program(error: FileNotFoundError, command: Sequence[str]) -> bool:
+    """Whether `error` is `command`'s program failing to launch.
+
+    Launching a program that is not installed raises `FileNotFoundError` naming the
+    program. Any other file a run cannot find, such as its own transcript, is the
+    run's failure and says nothing of whether the harness can serve the model.
+    """
+    return error.filename == command[0]
+
+
 def unreachable(text: str) -> Reached:
     """Whether a failed run's output says its model could not be reached.
 

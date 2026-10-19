@@ -392,8 +392,10 @@ archived change and the permanent documents as archived; the archive is cleaned 
 and the change is `archived`, only once that review's triage records that the
 change advances and, when `HEAD` differs from the commit that review read in a path
 outside `openspec/` and `docs/`, the latest validation passed for `HEAD` or for an
-ancestor it differs from only in records. Closeout MUST
-change documentation only; a closeout part that would need a code change MUST return
+ancestor it differs from only in records, unless the owner waives that validation,
+judging the paths named, and the waiver is recorded in the intervention ledger.
+Closeout MUST change documentation only; a closeout part that would need a code
+change MUST return
 the change to implementation. The steps that follow the archive — the closeout
 review and its triage, validation, the round view, the scoped citation check, and
 archive cleanup — MUST find an archived change by its name; design, planning, and
@@ -437,6 +439,14 @@ its own or another agent's agreement with a finding as a disposition.
 - **WHEN** a closeout review's finding can only be fixed by changing code
 - **THEN** the triage makes no code change and stops for the owner, and any
   correction the owner directs in that session is validated before archive cleanup
+
+#### Scenario: The owner waives archive cleanup's validation
+
+- **WHEN** the only path outside `openspec/` and `docs/` changed since the closeout
+  review's commit is another change's, on a branch the two changes share, and the
+  owner judges it harmless
+- **THEN** archive cleanup records the waiver as a line of the change's intervention
+  ledger and goes on without a validation of `HEAD`
 
 #### Scenario: Closeout finds a comment that needs rewriting
 

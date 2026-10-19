@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from change_workflow_fixtures import (CHANGE, DENIED, VALID, FakeClaude, event_lines,
+from change_workflow.stream import Stream
+from change_workflow_fixtures import (CHANGE, DENIED, VALID, FakeClaude, clock, event_lines,
                                       make_wrapper, two_turn_lines)
 
 
@@ -46,6 +47,24 @@ def test_lines_that_are_not_events_are_kept_but_not_read(tmp_path: Path) -> None
     assert line["outcome"] == "finished"
     transcript = tmp_path / "openspec/changes" / CHANGE / "reviews" / line["transcript"]
     assert transcript.read_text("utf-8").startswith("warning: slow start\n")
+
+
+def test_the_transcript_follows_its_directory_when_it_is_renamed(tmp_path: Path) -> None:
+    # Archiving renames the change's directory while the run is still writing.
+    first, second = event_lines(VALID["finished"], tools=(("Bash", {"command": "ls"}),))[1:3]
+    before, after = tmp_path / "active", tmp_path / "archived"
+    before.mkdir()
+    stream = Stream(before / "01-closeout.jsonl", before / "01-closeout.progress", clock)
+
+    stream.feed(first)
+    before.rename(after)
+    stream.feed(second)
+    stream.close()
+
+    assert (after / "01-closeout.jsonl").read_text("utf-8") == first + second
+    assert (after / "01-closeout.progress").read_text("utf-8") == "09:15:40Z Bash ls\n"
+    assert not before.exists()
+    assert stream.result is not None
 
 
 def test_denials_are_gathered_over_every_turn_with_the_harness_reason(tmp_path: Path) -> None:

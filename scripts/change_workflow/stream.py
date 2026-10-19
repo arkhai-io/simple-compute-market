@@ -7,6 +7,11 @@ as the harness lists it, with the harness's reason for it, gathered over every t
 of the run, since a background task finishing can wake a session for another turn
 after its first `result` event. A line's denials are always this record, never the
 step's own account of them.
+
+Both files stay open from the run's first line to its end. Closeout archives the
+change it runs for, which renames the change's directory, `reviews/` with it, while
+the run is still writing; an open file moves with its directory, where a path
+opened again for each line would name a directory that no longer exists.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 import json
 from datetime import timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TextIO
 
 from change_workflow.common import Clock, utc_now
 
@@ -71,6 +76,21 @@ class Stream:
         self.notices: list[str] = []
         self._denials: dict[str, dict[str, Any]] = {}
         self._reasons: dict[str, str] = {}
+        self._files: dict[Path, TextIO] = {}
+
+    def close(self) -> None:
+        """Close the transcript and the progress file; a later line opens them again."""
+        for file in self._files.values():
+            file.close()
+        self._files.clear()
+
+    def _append(self, path: Path, text: str) -> None:
+        file = self._files.get(path)
+        if file is None:
+            file = self._files[path] = path.open("a", encoding="utf-8")
+        file.write(text)
+        # Flushed per line, so the progress is followed while the run goes on.
+        file.flush()
 
     @property
     def denials(self) -> list[dict[str, Any]]:
@@ -80,8 +100,7 @@ class Stream:
                 for key, denial in self._denials.items()]
 
     def feed(self, line: str) -> None:
-        with self.transcript.open("a", encoding="utf-8") as stream:
-            stream.write(line if line.endswith("\n") else line + "\n")
+        self._append(self.transcript, line if line.endswith("\n") else line + "\n")
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -96,8 +115,7 @@ class Stream:
             if isinstance(item, dict) and item.get("type") == "tool_use":
                 at = self.clock().astimezone(timezone.utc).strftime("%H:%M:%SZ")
                 shown = f"{at} {item.get('name', '?')} {tool_summary(item)}".rstrip()
-                with self.progress.open("a", encoding="utf-8") as stream:
-                    stream.write(shown + "\n")
+                self._append(self.progress, shown + "\n")
                 if self.echo:
                     self.echo(shown)
 

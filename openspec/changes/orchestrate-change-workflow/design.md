@@ -276,7 +276,10 @@ records, whenever `HEAD` differs from the closeout review's reviewed commit in a
 path outside `openspec/` and `docs/` — `.agents/` and `.claude/` counted outside,
 since a skill or table edit changes behaviour — so a code correction a closeout
 triage directed is validated before archive cleanup commits and drafts the pull
-request, the check the gate used to be (69 F7). A documentation-only correction is
+request, the check the gate used to be (69 F7). Archive cleanup's entry check holds
+the same condition, and there the owner may waive it, judging the paths named — on a
+branch two changes share, the other change's commit, which the merge carries all the
+same — recorded as a ledger line (103 R5 / R6). A documentation-only correction is
 covered by the checks triage already runs, and costs no pipeline run (70 F9). A round's
 validation and review start once the owner's notes on the round view are saved.
 These conditions are the computation's; the
@@ -982,7 +985,13 @@ orchestrator's observations (103); the owner had no notes (99).
   validation reruns it, and the owner decides after it whether the buyer CLI's
   duplicate `settlement contact` registration becomes a change of its own or
   joins an existing one.
-- **103 R1, R5 / R6, R7, R2** — pilot gaps recorded on task 7.3.
+- **103 R5 / R6** — archive cleanup's validation check stands, since a merge carries
+  every commit on the branch, and the owner may waive it, judging the paths named;
+  the waiver is a ledger line, `"finding": "validated"` under the closeout review's
+  record; see D14 and the delta's "Phases and owner touchpoints". Rejected:
+  diffing only the change's own commits (a commit message's prefix is too weak a
+  signal to gate a merge on).
+- **103 R1, R7, R2** — pilot gaps recorded on task 7.3.
 
 ## Risks / Trade-offs
 
@@ -990,25 +999,56 @@ orchestrator's observations (103); the owner had no notes (99).
   text could drift from the step's. Accepted for the context it saves; the pilot's
   design discussion measures it. If it is too slow or drifts, discussions move into
   the orchestrator's session (D2's first rejected option), relying on D10 to survive
-  compaction.
+  compaction. Pilot: a relayed design turn took 14–25 s of the step's own time when
+  it presented the next decision, against minutes to hours of the owner's between
+  turns, and a warm triage turn that presented one finding cost $0.06–$0.25 (D19).
+  What relaying adds to the step's time, and whether relayed text drifted, the log
+  does not show.
 - **Allow-lists need upkeep.** The orchestrator proposes each gap with its rule; the
-  pilot's denials seed the table.
+  pilot's denials seed the table. Pilot: confirmed. Five gaps — design's ledger
+  lookup, closeout's validator through `npx`, the Claude reviewer's checks, and
+  archive cleanup's ledger line and draft — each read from the record; the first
+  four closed by a table edit or a one-run grant, the draft written by the
+  orchestrator and its rule proposed. And two rules whose matching the table's text
+  did not predict: a deny rule matched against the command as typed, and a
+  mid-path `**` rule that did not admit an archived path (task 7.3).
 - **A step may work around a denied tool rather than stop.** D12 tells it not to;
-  the transcript shows when one did.
+  the transcript shows when one did. Pilot: one run did the read a `mode` denial
+  had refused with Grep, and two more stopped rather than make an edit their row
+  allowed, reading "no workaround" too widely; hence 103 R3, under which a
+  substitute after a `mode` denial is named and read as a gap. No run worked around
+  a deny rule.
 - **A background command a step started may not survive the step ending its turn.**
   Validation's `make fetch-e2e-logs` runs in the background while the Helm part
   runs; if validation stops to ask the owner, the fetch may end with the process.
   It can be restarted from its `E2E_AFTER_RUN` id, which validation already records;
-  the pilot confirms whether it needs to be.
+  the pilot confirms whether it needs to be. Pilot: not exercised. No validation
+  ended with a question, and since 41 A1 validation never ends a turn with a
+  background command running, so the case no longer arises.
 - **`--resume` with different allow rules** is assumed to apply the new rules to the
-  resumed turn; the pilot confirms it.
+  resumed turn; the pilot confirms it. Pilot: confirmed, for a one-run grant and
+  for a table edit made between the runs.
 - **Advancing without the owner moves work along on conditions alone.** A
   condition the computation gets wrong carries the change a step too far before
   anyone looks; each advance is a line in the log, and the next touchpoint shows it.
+  Pilot: validation, the pre-closeout review, its triage with nothing to dispose
+  of, and closeout followed one another without the owner, as intended. Archive
+  cleanup started as a step-table commit landed, a path outside `openspec/` and
+  `docs/` that the computation would have sent to validation first, and the step's
+  own check stopped it; a skill's entry check is the second guard.
 - **A Claude review of Claude's work loses the second model's reading.** The record
   names the reviewer, so the owner can ask for a Codex round when one is available.
+  Pilot: the closeout review fell back to Claude when Codex reached its usage
+  limit, and its record and line say so; it raised three findings.
 - **Every turn of a discussion replays its session.** Accepted for one decision per
-  turn; D19 measures it.
+  turn; D19 measures it. Pilot: a warm turn that presents one decision costs
+  cents, one that applies fixes dollars; the one miss measured cleanly cost $1.16
+  after 70 minutes (task 7.5).
+- **A closeout run archives the change under the wrapper.** `openspec archive`
+  moves `reviews/` while the run writes its transcript there. The wrapper holds
+  the transcript open across the move and finds the log again after the run (task
+  7.3); a move by copy, which the archive falls back to on another filesystem,
+  would leave the open file behind.
 
 ## Open Questions
 

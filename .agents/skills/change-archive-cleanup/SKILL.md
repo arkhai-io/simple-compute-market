@@ -11,7 +11,8 @@ lands when its index row says `archived`, and this skill writes that. It does wh
 closeout deliberately left until the review agreed — releasing the changes that
 wait on this one — and prepares the change to merge.
 
-Archive cleanup changes the campaign index only. The archived change, its specs, and
+Archive cleanup changes the campaign index only, and the change's ledger when the
+owner waives its validation check (step 1). The archived change, its specs, and
 the permanent documents are as the closeout review read them; a defect found now
 in any of them is not this skill's to fix — stop and tell the owner.
 
@@ -73,8 +74,15 @@ the session, and every turn ends with an outcome matching
   first closeout review read (its `reviewed-commit` marker), names a path outside
   `openspec/` and `docs/` — a correction to code, a skill, or the step table — the
   latest validation record is `passed` and names `HEAD`, or an ancestor `HEAD`
-  differs from only in changes' ledgers and reviews. Otherwise stop: the
-  correction is validated first (`make validate CHANGE=<change>`).
+  differs from only in changes' ledgers and reviews. Otherwise stop and ask the
+  owner, naming the paths and the commits that changed them: the correction is
+  validated first (`make validate CHANGE=<change>`), unless the owner waives the
+  check, judging the paths named — as for another change's commit on a branch two
+  changes share, which the merge carries all the same. Record a waiver as one line
+  of the archived change's `interventions.jsonl` (`"finding": "validated"`, under
+  the closeout review's record name, the owner's reason as the disposition), with
+  the Edit tool, and commit it with the index edit (step 5). The check itself
+  stands: a merge carries every commit on the branch, whichever change wrote it.
 - **Worktree.** It is clean, and `make round-view-closed` passes.
 
 If any check fails, stop and say why.
@@ -123,8 +131,9 @@ the index check is the one that sees this edit.
 
 ## 5. Commit
 
-Commit the index edit as one commit whose message names the change and says its
-archive is cleaned up and which dependents it released. Do not push.
+Commit the index edit, with a waiver's ledger line when step 1 recorded one, as
+one commit whose message names the change and says its archive is cleaned up and
+which dependents it released. Do not push.
 
 ## 6. Draft the merge
 
