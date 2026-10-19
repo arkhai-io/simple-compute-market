@@ -935,23 +935,34 @@ Secrets is owed. Accepted scope beyond the original proposal.
   two releases. No end-to-end scenario needs release 2 yet; one that does states it on its
   Makefile target and in its suite module.
 
-  After 16.5's run (owner decision (b), 2026-10-19; 16.8): `topology-up` restarts both
-  releases' Deployments after its Helm upgrades -- the registry, then the provisioning
-  services, then the storefronts, each `rollout restart` waited on with `rollout status` --
-  because local images keep bare tags (a commit-hash tag changes when an image does not and
-  can name an image the cluster lacks), so an upgrade leaves each pod template, and its
-  pods' image, unchanged. dev-env is not restarted: a new Anvil has none of the release's
-  contracts. The generated smoke profile carries what its hooks read and the release states:
-  for the internal registry, `registry.authority_id` and `registry.identifier` from
-  `global.registryIdentity` (not for a registry the agent names in `registry.urls`, which is
-  not the release's); `buyer.wallet_address` from the e2e-tests chart's EIP-191 buyer
-  identity; and `seller.wallet_address` from the target agent's `[Wallet].address`.
-  `buyer.marketplace_credential` is a key, so no values carry it: the registry chart's
-  `tests.credentialProfile` mounts a profile file from a pre-existing Secret into the
-  registry smoke pod only, and `helm/local-values.yaml` names
-  `arkhai-registry-smoke-credential`, which `topology-check` requires. The umbrella's global
-  smoke Secret was not used: it mounts into every smoke pod of both releases and replaces the
-  storefront smoke test's selected-agent fallback.
+  After 16.5's run (owner decision (b), 2026-10-19; 16.8, as corrected by its check):
+  `topology-up` restarts both releases' Deployments after its Helm upgrades -- the
+  registry, then the provisioning services, then the storefronts, each `rollout restart`
+  waited on with `rollout status` -- because local images keep bare tags (a commit-hash tag
+  changes when an image does not and can name an image the cluster lacks), so an upgrade
+  leaves each pod template, and its pods' image, unchanged. dev-env is not restarted: its
+  Anvil reloads its state file, so the contracts survive, but a restart loses every
+  transaction since start-up (escrows, attestations, balances) that the other services'
+  volumes still refer to; a rebuilt dev-env image therefore does not roll. The generated
+  smoke profile carries what its hooks read and the release states: `registry.authority_id`
+  and `registry.identifier` are what the release's clients trust, `global.registryIdentity`,
+  for the internal registry and an EIP-191 identity only (the smoke test verifies only
+  EIP-191; a registry the agent names in `registry.urls` is not the release's), and the
+  profile refuses a registry chart `identity` that differs from it; `buyer.wallet_address`
+  comes from the e2e-tests chart's EIP-191 buyer identity and `seller.wallet_address` from
+  the target agent's `[Wallet].address`. `buyer.marketplace_credential` is a key, so no
+  values carry it: the registry chart's `tests.credentialProfile` layers a profile file from
+  a pre-existing Secret into the registry smoke pod only, and `helm/local-values.yaml` points
+  it at the e2e-tests chart's `arkhai-e2e-credentials` (`e2e-secret`), which carries the
+  credential for the deal test already -- one Secret, one copy, rather than a second Secret
+  holding the same key. The umbrella's global smoke Secret was not used: it mounts into
+  every smoke pod of both releases and replaces the storefront smoke test's selected-agent
+  fallback. `make helm-topology-secrets` creates or replaces every Secret both releases
+  read, idempotently, deriving each key with `cast` from Foundry's default mnemonic at
+  `helm/Makefile`'s `DEV_ACCOUNT_*` indices (development values only, never for a public
+  network); provisioning's SSH key is the committed mock placeholder,
+  `PROVISIONING_SSH_KEY_FILE`. `check-local-secrets`, run by the topology targets and the
+  single-release `test` and `test-module`, names it when a Secret is missing.
 
 ### Owner principles and where they go
 

@@ -328,8 +328,9 @@ No other mechanism replaces it.
 
 ## Open questions
 
-Question 11 is open; the others are decided. The 2026-10-14 review's questions, each
-decided with the maintainer:
+Questions 1 to 10, the 2026-10-14 review's and two raised the same day, were each decided
+with the maintainer, and those decisions stand. Question 11, raised 2026-10-19, is open
+and is to be designed here.
 
 1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
    decision".

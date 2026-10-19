@@ -39,6 +39,19 @@ Secret-backed profile. */ -}}
 {{- if and $e2e.enabled (eq ($e2eBuyer.scheme | default "") "eip191") $e2eBuyer.identifier -}}
   {{- $_ := set $buyer "wallet_address" $e2eBuyer.identifier -}}
 {{- end -}}
+{{- /* The release's clients trust global.registryIdentity as its registry; the
+registry signs as its own chart's identity. Where the release runs its registry
+and both are stated, they are one identity. */ -}}
+{{- $registryChart := .Values.registry | default dict -}}
+{{- if and $registryChart.enabled $registryChart.identity .Values.global.registryIdentity -}}
+  {{- $signs := $registryChart.identity -}}
+  {{- $trusted := .Values.global.registryIdentity -}}
+  {{- $signsPrincipal := $signs.principal | default dict -}}
+  {{- $trustedPrincipal := $trusted.principal | default dict -}}
+  {{- if or (ne (toString $signs.authority) (toString $trusted.authority)) (ne (toString $signsPrincipal.scheme) (toString $trustedPrincipal.scheme)) (ne (toString $signsPrincipal.identifier) (toString $trustedPrincipal.identifier)) -}}
+    {{- fail "global.registryIdentity, the registry the release's clients trust, must equal registry.identity, the identity its registry signs as (authority, scheme, and identifier)" -}}
+  {{- end -}}
+{{- end -}}
 {{- $bareMetal := index .Values "bare-metal-storefront" | default dict -}}
 {{- if .Values.storefront.enabled -}}
 {{- /* A release running the VM storefront: provisioning calls back one of its
@@ -126,14 +139,17 @@ agent's internalRegistryTrust. */ -}}
     "principals" (required "storefront test target registry trust requires principals" $registryAuthority.principals)
   ))
 -}}
-{{- /* The registry smoke test pins one registry signer under one authority.
-For the internal registry that is the identity the release's registry signs
-as; a registry the agent names in registry.urls is not the release's, so its
-pins come only from config.values. */ -}}
-{{- if not $targetUrlsKey -}}
-  {{- $releaseRegistry := .Values.global.registryIdentity | default dict -}}
+{{- /* The registry smoke test pins one EIP-191 registry signer under one
+authority. For the internal registry those are what the release's clients trust,
+global.registryIdentity, which the registry's own identity matches (checked
+above). It verifies only EIP-191 signatures, so another scheme's identity is not
+pinned; and a registry the agent names in registry.urls is not the release's, so
+its pins come only from config.values. */ -}}
+{{- $releaseRegistry := .Values.global.registryIdentity | default dict -}}
+{{- $releaseRegistryPrincipal := $releaseRegistry.principal | default dict -}}
+{{- if and (not $targetUrlsKey) (eq ($releaseRegistryPrincipal.scheme | default "") "eip191") -}}
   {{- $_ := set $registryProfile "authority_id" (required "the internal registry's smoke-test pins require global.registryIdentity.authority" $releaseRegistry.authority) -}}
-  {{- $_ := set $registryProfile "identifier" (required "the internal registry's smoke-test pins require global.registryIdentity.principal.identifier" ($releaseRegistry.principal | default dict).identifier) -}}
+  {{- $_ := set $registryProfile "identifier" (required "the internal registry's smoke-test pins require global.registryIdentity.principal.identifier" $releaseRegistryPrincipal.identifier) -}}
 {{- end -}}
 {{- $_ := set $generated "registry" $registryProfile -}}
 {{- $targetProfile := dict

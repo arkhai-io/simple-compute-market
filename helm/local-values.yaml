@@ -24,7 +24,10 @@ storefront:
         # Anvil's deterministic account 2, whose key every Anvil instance
         # publishes, and the chain is the release's own Anvil. The key itself
         # is the one value Alkahest needs that the chart never renders: the
-        # agent's Secret overlay, arkhai-bob-runtime, carries it.
+        # agent's Secret overlay, arkhai-bob-runtime, carries it as
+        # storefront.secrets.toml's [Wallet] private_key = "<account 2's key>"
+        # (`make -C helm topology-secrets` creates it, with the smoke test's
+        # config-seller-secret.yml beside it).
         Wallet:
           address: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
         Chains:
@@ -73,14 +76,17 @@ registry:
   persistence:
     retainOnUninstall: false
   # The registry smoke test signs its reads as the release's development buyer.
-  # Its credential is never here: this out-of-band Secret's
-  # config-registry-smoke-secret.yml carries buyer.marketplace_credential, the
-  # key of the e2e-tests chart's buyer (Anvil's deterministic account 1, a
-  # development key never for a public network). `make -C helm topology-check`
-  # requires it.
+  # Its credential is never here: it layers the e2e-tests chart's out-of-band
+  # Secret's config-e2e-secret.yml, whose buyer.marketplace_credential
+  # ("<Anvil account 1's key>", quoted: YAML reads an unquoted 0x-prefixed value
+  # as an integer) the deal test reads too, so one Secret holds the one copy.
+  # `make -C helm topology-secrets` creates that Secret from Anvil's
+  # deterministic development accounts (never for a public network);
+  # `topology-check`, `test`, and `test-module MODULE=registry` require it.
   tests:
     credentialProfile:
-      secretName: arkhai-registry-smoke-credential
+      secretName: arkhai-e2e-credentials
+      profile: e2e-secret
 api-credits-registry:
   persistence:
     retainOnUninstall: false

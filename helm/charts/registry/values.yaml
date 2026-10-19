@@ -85,16 +85,21 @@ auth:
 # global.smokeTests.
 # ---------------------------------------------------------------------------
 tests:
+  # The smoke test's profiles, comma-separated. Empty derives them from
+  # global.smokeTests: its generated profile, then any global smoke Secret's.
   activeProfiles: ""
   # A pre-existing Secret holding one Dynaconf profile file,
-  # config-<profile>.yml, that the smoke test layers over the generated
-  # profile. The test's signed reads need buyer.marketplace_credential, which
-  # is signing material no values carry. With no secretName the test runs on
-  # the generated profile alone and reports that credential missing; with one,
-  # the pod does not start until the Secret exists.
+  # config-<profile>.yml, mounted into the smoke test and appended to its
+  # profiles, whether activeProfiles states them or global.smokeTests derives
+  # them. The test's signed reads need buyer.marketplace_credential, signing
+  # material no values carry; the e2e-tests chart's Secret
+  # (arkhai-e2e-credentials, profile e2e-secret) already carries it in this
+  # form. With no secretName the test runs without it and reports the
+  # credential missing; with one, the pod does not start until the Secret
+  # exists.
   credentialProfile:
     secretName: ""
-    profile: registry-smoke-secret
+    profile: e2e-secret
 
 # Number of replicas.
 replicaCount: 1

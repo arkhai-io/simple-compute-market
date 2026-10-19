@@ -259,10 +259,11 @@ def test_release_one_runs_bob_on_its_own_provisioning_service() -> None:
 
 
 def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states() -> None:
-    """The registry smoke test's pins are the identity release 1's registry
-    signs as; contract validation's wallets are the e2e-tests chart's buyer and
-    Bob's `[Wallet].address`; the registry smoke test's buyer credential comes
-    from the Secret `topology-check` requires, layered as its own profile."""
+    """The registry smoke test's pins are the registry the release's clients
+    trust, which is the identity release 1's registry signs as; contract
+    validation's wallets are the e2e-tests chart's buyer and Bob's
+    `[Wallet].address`; the registry smoke test's buyer credential comes from
+    the e2e-tests chart's Secret, layered as its `e2e-secret` profile."""
     manifest = _release_one()
     profile = _smoke_profile(manifest)
     registry = _source(manifest, "charts/registry/templates/deployment.yaml")
@@ -277,22 +278,42 @@ def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_sta
     assert "marketplace_credential" not in profile["buyer"]
 
     smoke = _source(manifest, "charts/registry/templates/tests/registry-environment-test.yaml")
+    deal = _source(manifest, "charts/e2e-tests/templates/tests/e2e-deal-test.yaml")
     secret = re.search(r"secretName: \"([^\"]+)\"", smoke)
-    assert secret and secret.group(1) in _make_words("TOPOLOGY_TEST_SECRETS")
-    assert _env(smoke, "ACTIVE_PROFILES") == "helm,registry-smoke-secret"
-    assert "mountPath: /app/config/config-registry-smoke-secret.yml" in {line.strip() for line in smoke.splitlines()}
+    assert secret and secret.group(1) == "arkhai-e2e-credentials" in _make_words("TEST_SECRETS")
+    assert f"secretName: {secret.group(1)}" in {line.strip() for line in deal.splitlines()}
+    assert _env(smoke, "ACTIVE_PROFILES") == "helm,e2e-secret"
+    assert "mountPath: /app/config/config-e2e-secret.yml" in {line.strip() for line in smoke.splitlines()}
+
+
+def test_the_registry_smoke_test_appends_its_credential_profile_once() -> None:
+    """The credential profile follows the test's profiles whether the chart
+    states them or global.smokeTests derives them, and is not listed twice."""
+    def profiles(active: str) -> str:
+        overlay = {"registry": {"tests": {"activeProfiles": active}}}
+        smoke = _source(_release_one(overlay), "charts/registry/templates/tests/registry-environment-test.yaml")
+        return _env(smoke, "ACTIVE_PROFILES")
+
+    assert profiles("helm,extra") == "helm,extra,e2e-secret"
+    assert profiles("e2e-secret,helm") == "e2e-secret,helm"
 
 
 def test_the_smoke_profile_carries_only_what_the_release_states() -> None:
     """A wallet is carried only where the release states it, and registry pins
-    only for the release's own registry; the chart defaults mount no credential
-    profile."""
+    only for the release's own EIP-191 registry; the chart defaults mount no
+    credential profile."""
     defaults = _ok(_render(RELEASE_ONE, (UMBRELLA / "values.yaml",)))
     profile = _smoke_profile(defaults)
     assert "wallet_address" not in profile["seller"]
     assert profile["registry"]["authority_id"] == "registry-a"
     smoke = _source(defaults, "charts/registry/templates/tests/registry-environment-test.yaml")
     assert "credential-profile" not in smoke and _env(smoke, "ACTIVE_PROFILES") == "helm"
+
+    # The smoke test verifies only EIP-191 signatures, so an ed25519 registry
+    # identity is not pinned.
+    ed25519 = _ok(_render(RELEASE_ONE, (UMBRELLA / "values.yaml", UMBRELLA / "fixtures/payments-ed25519-values.yaml")))
+    registry = _smoke_profile(ed25519)["registry"]
+    assert registry["authorities"] and "authority_id" not in registry and "identifier" not in registry
 
     # A buyer of another development account flows through; without the
     # e2e-tests chart there is no development buyer. Anvil account 3: a
@@ -322,18 +343,48 @@ def test_the_smoke_profile_carries_only_what_the_release_states() -> None:
     assert "authority_id" not in registry and "identifier" not in registry
 
 
+def test_a_registry_signing_as_another_identity_than_its_clients_trust_is_refused() -> None:
+    """The pins are what the release's clients trust; the registry the release
+    runs must sign as that identity."""
+    # Anvil account 4: a well-known development address, never for a public network.
+    other = {"registry": {"identity": {"principal": {"identifier": "0x15d34aaf54267db7d7c367839aaf71a00a2c6a65"}}}}
+    refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, other)
+
+    assert refused.returncode != 0, "render succeeded"
+    assert "global.registryIdentity, the registry the release's clients trust, must equal registry.identity" in refused.stderr
+    # Release 2 runs no registry, so it is not checked there.
+    _release_two(other)
+
+
 def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
-    """`topology-up`'s restart order names the component of every Deployment
-    either release renders, except dev-env's Anvil, whose restart would start
-    a chain without the release's contracts."""
+    """`topology-up`'s restart order is the component of every Deployment either
+    release renders, in dependency order, except dev-env's: Anvil reloads its
+    state file, so the contracts survive, but a restart loses every transaction
+    since start-up that the other releases' volumes still refer to."""
     order = _make_words("TOPOLOGY_ROLLOUT_ORDER")
     deployments = _labelled(_release_one(), "Deployment") + _labelled(_release_two(), "Deployment")
     components = {component for _, component in deployments}
 
-    assert "dev-env" in components and "dev-env" not in order
-    assert set(order) == components - {"dev-env"}
-    assert len(order) == len(set(order))
-    assert order.index("registry") < order.index("provisioning") < order.index("storefront")
+    assert order == ["registry", "provisioning", "storefront", "bare-metal-storefront"]
+    assert components == {*order, "dev-env"}
+
+
+def _secret_references(manifest: str) -> set[str]:
+    named = re.findall(r'secretName: "?([^"\s]+)"?', manifest)
+    keyed = re.findall(r'secretKeyRef:\n\s+name: "?([^"\s]+)"?', manifest)
+    return {*named, *keyed}
+
+
+def test_topology_secrets_creates_every_secret_both_releases_read() -> None:
+    """`topology-secrets` creates exactly the Secrets the two releases'
+    workloads and Helm tests reference, which are the ones the topology
+    targets check for."""
+    script = (UMBRELLA / "scripts" / "topology-secrets.sh").read_text()
+    created = set(re.findall(r"^(?:credential|apply) (\S+)", script, re.MULTILINE))
+    referenced = _secret_references(_release_one()) | _secret_references(_release_two())
+    checked = {*_make_words("LOCAL_SECRETS"), *_make_words("TOPOLOGY_SECRETS"), *_make_words("TEST_SECRETS")}
+
+    assert created == referenced == checked, (created, referenced, checked)
 
 
 def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob() -> None:

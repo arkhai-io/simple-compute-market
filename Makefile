@@ -19,7 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
-.PHONY: helm-topology-up helm-topology-down helm-topology-check
+.PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: check-agent-skills review design-review design plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
@@ -559,8 +559,12 @@ deploy-helm:
 # per registry. Release 1 is `make -C helm deploy-local`'s release; release 2 is
 # the bare-metal storefront and its own provisioning service, publishing to
 # release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
-# topology targets say what each installs, needs, and checks.
-helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments onto rebuilt images
+# topology targets say what each installs, needs, and checks; helm-topology-secrets
+# creates the Secrets both releases read, from development values only.
+helm-topology-secrets: ## Create every out-of-band Secret the local two-release Helm topology reads, from development values (cast and kubectl)
+	$(MAKE) -C helm topology-secrets
+
+helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments, all but dev-env's, onto rebuilt images
 	$(MAKE) -C helm topology-up
 
 helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first

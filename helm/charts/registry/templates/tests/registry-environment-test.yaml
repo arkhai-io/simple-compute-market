@@ -22,8 +22,11 @@
 {{- end -}}
 {{- $credentialProfile := $tests.credentialProfile | default dict -}}
 {{- $profiles := $tests.activeProfiles | default (include "registry.smokeTestActiveProfiles" .) -}}
-{{- if and $credentialProfile.secretName (not $tests.activeProfiles) -}}
-  {{- $profiles = join "," (compact (list $profiles (required "registry tests.credentialProfile.profile is required with its secretName" $credentialProfile.profile))) -}}
+{{- if $credentialProfile.secretName -}}
+  {{- $credential := required "registry tests.credentialProfile.profile is required with its secretName" $credentialProfile.profile -}}
+  {{- if not (has $credential (splitList "," $profiles)) -}}
+    {{- $profiles = join "," (compact (list $profiles $credential)) -}}
+  {{- end -}}
 {{- end -}}
 apiVersion: v1
 kind: Pod

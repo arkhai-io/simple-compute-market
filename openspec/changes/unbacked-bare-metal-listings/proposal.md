@@ -65,6 +65,15 @@ What is missing is bare metal using that machinery.
   bare-metal listings together and excludes one publishing no rate. Transferred from
   `publish-indicative-listing-rates` (its 7.13), which proved the asking-rate path on
   backed supply.
+- Address six pre-existing defects a local Helm deployment of bare metal beside Bob
+  exposed (raised 2026-10-19; `design.md` open question 11, whose design is not yet
+  decided): a stored resource pool whose provider no registered handler serves makes
+  the provisioning service's pool read fail with an unsigned 500, and startup does not
+  refuse the row; the VM storefront chart's `wait-for-registry` init container polls
+  with no timeout; stage events fill `listing_id` with the negotiation id; Helm test
+  pods carry their Deployment's selector labels; a failed VM deal Helm test leaves Bob's
+  loops paused; and bare metal logs its regionless-pool notice every publication cycle
+  rather than once per projection generation, as VM logs its derivation warnings.
 
 ## Capabilities
 
@@ -106,6 +115,10 @@ None.
 - `e2e-tests/`: shared introduction stages, the new bare-metal scenario, VM's
   introduction scenario, and the bare-metal lane's mail sink and delivery
   configuration.
+- For open question 11's defects, as its design decides: the compute provisioning
+  service's pool read and startup checks, the VM storefront chart's init container and
+  the umbrella's Helm test pod labels, `core/storefront`'s stage log, the e2e-tests
+  chart's deal test, and bare metal's publication logging.
 - No wire or database break: a backed listing's payload and binding are unchanged.
 
 ## Permanent documentation impact

@@ -5001,7 +5001,8 @@ storefront's configuration reaches it through its configuration system"; `design
       no image can be built and no release installed. Render and loader evidence (16.3,
       16.4) is all this section has; it is not deployment evidence (`TESTING.md` "Chart
       Render Tests"). See the handoff below for what a local deployment will need.
-      **Done.** Run (2026-10-19, owner's local Kubernetes cluster), at `825737c`, clean
+      **Done.** The observation files named below are held by the owner, not in the
+      repository. Run (2026-10-19, owner's local Kubernetes cluster), at `825737c`, clean
       worktree: `make lock` produced no lockfile change; `make check-packaging` and `make
       build-dev` passed; `make helm-topology-up` upgraded the existing release 1 and
       installed release 2, release 2's three Secrets created from Anvil accounts 8 and 9 as
@@ -5037,6 +5038,11 @@ storefront's configuration reaches it through its configuration system"; `design
       from supply the probe declared on release 1, because of the retained pool. The deal
       was a probe, not the `e2e_bare_metal_mock_deal` marker; `make helm-topology-down` was
       not run. 16.8 addresses the smoke profile and the image roll.
+      **Amended (16.8's check):** a rerun creates every Secret both releases read with `make
+      helm-topology-secrets` first (development values derived from Foundry's default
+      mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices; `helm/scripts/topology-secrets.sh`
+      says what each holds), then `make helm-topology-up`, which restarts the topology's
+      Deployments but dev-env's, and `make helm-topology-check`.
 - [x] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
@@ -5172,65 +5178,89 @@ storefront's configuration reaches it through its configuration system"; `design
       local tags: a commit-hash tag changes when an image does not, and bare tags avoid
       image-not-found errors); the Makefile says why. (c) Nothing else narrowed;
       `topology-check`'s comment says what it now proves.
-      Done. **What the hooks read** (`e2e-tests/tests/conftest.py`'s fixtures under
-      `e2e-tests/settings.toml`'s defaults): the registry smoke hook (`pytest -m registry`,
-      `tests/smoke/test_registry_smoke.py`) needs `registry.authority_id`,
-      `registry.identifier`, and `buyer.marketplace_credential`; the chain hook (`pytest -m
-      contracts`, whose one case is `tests/e2e/roles/layers/test_external.py`'s chain-ID
-      check) builds `external_world`, which checksums both `buyer.wallet_address` and
-      `seller.wallet_address` -- so **differed:** the chain hook's next failure after the
-      buyer's address would have been Bob's, and the profile carries `seller.wallet_address`
-      too, from the target agent's `config.Wallet.address` where stated (local-values.yaml
-      states Bob's). **Derivations:** for the internal registry (the target agent states no
-      `registry.urls`), `registry.authority_id` and `registry.identifier` are
-      `global.registryIdentity`'s authority and principal identifier, the identity the
-      registry Deployment signs as (the storefront chart already holds the agent's
-      `internalRegistryTrust` to it); for a registry the agent names in `registry.urls` they
-      are not derived -- that registry is not the release's, and its trust may list several
-      principals where the smoke test pins one -- so they come only from
-      `global.smokeTests.config.values`. `buyer.wallet_address` is the e2e-tests chart's
-      `buyer.identity.identifier` when that chart is enabled and the identity is EIP-191: the
-      development buyer signs and pays from one Anvil account (account 1), and the
-      local overlay states no other buyer. **Not derivable:** `buyer.marketplace_credential`
-      is a key. It travels as `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret
-      mounting" says Helm test pods' secrets do, a profile file (a pod `env` entry would also
-      read a `0x`-prefixed value as a TOML integer): the registry chart's
-      new `tests.credentialProfile` (`secretName`, `profile`, default
-      `registry-smoke-secret`) mounts `config-<profile>.yml` from a pre-existing Secret into
-      the registry smoke pod and appends the profile to its `ACTIVE_PROFILES`; unset (the
-      chart and umbrella defaults) nothing changes. `helm/local-values.yaml` names
-      `arkhai-registry-smoke-credential`, whose `config-registry-smoke-secret.yml` holds
-      `buyer.marketplace_credential` (Anvil account 1's key); `TOPOLOGY_TEST_SECRETS` adds
-      it, so `topology-check` checks it; the overlay's header and `LOCAL_SECRETS`'s comment
-      name it. The umbrella's global smoke Secret (`global.smokeTests.secret`) was not used:
-      enabling it mounts one Secret into every smoke pod of both releases (release 2 layers
-      `local-values.yaml` too) and replaces the storefront smoke test's selected-agent
-      fallback. **Render:** release 1's `test-config` ConfigMap gains exactly
+      Done (as corrected by 16.8's check; see "16.5 run and 16.8"). **What the hooks read**
+      (`e2e-tests/tests/conftest.py`'s fixtures under `e2e-tests/settings.toml`'s defaults):
+      the registry smoke hook (`pytest -m registry`, `tests/smoke/test_registry_smoke.py`)
+      needs `registry.authority_id`, `registry.identifier`, and
+      `buyer.marketplace_credential`; the chain hook (`pytest -m contracts`, whose one case
+      is `tests/e2e/roles/layers/test_external.py`'s chain-ID check) builds `external_world`,
+      which checksums both `buyer.wallet_address` and `seller.wallet_address` -- so
+      **differed:** the chain hook's next failure after the buyer's address would have been
+      Bob's, and the profile carries `seller.wallet_address` too, from the target agent's
+      `config.Wallet.address` where stated (local-values.yaml states Bob's).
+      **Derivations:** `registry.authority_id` and `registry.identifier` are what the
+      release's clients trust, `global.registryIdentity`'s authority and principal
+      identifier, carried only for the internal registry (the target agent states no
+      `registry.urls`) and only when that identity is EIP-191, the one scheme the smoke test
+      verifies; the umbrella's smoke profile refuses a release whose registry chart's own
+      `identity` (what the registry signs as) differs from it. A registry the agent names in
+      `registry.urls` is not the release's, and its trust may list several principals where
+      the smoke test pins one, so its pins come only from `global.smokeTests.config.values`.
+      `buyer.wallet_address` is the e2e-tests chart's `buyer.identity.identifier` when that
+      chart is enabled and the identity is EIP-191: the development buyer signs and pays
+      from one Anvil account (account 1), and the local overlay states no other buyer.
+      **Not derivable:** `buyer.marketplace_credential` is a key. It travels as
+      `DEPLOYMENT_AND_CONFIG.md` "Kubernetes: ConfigMap and Secret mounting" says Helm test
+      pods' secrets do, a profile file (a pod `env` entry would also read a `0x`-prefixed
+      value as a TOML integer). The registry chart's new `tests.credentialProfile`
+      (`secretName`, `profile`, default `e2e-secret`) mounts `config-<profile>.yml` from a
+      pre-existing Secret into the registry smoke pod and appends the profile, once, to its
+      `ACTIVE_PROFILES`, whether `tests.activeProfiles` states them or `global.smokeTests`
+      derives them; unset (the chart and umbrella defaults) nothing changes.
+      `helm/local-values.yaml` points it at `arkhai-e2e-credentials` (profile `e2e-secret`),
+      whose `config-e2e-secret.yml` already carries the credential for the deal test: one
+      Secret, one copy. The umbrella's global smoke Secret (`global.smokeTests.secret`) was
+      not used: enabling it mounts one Secret into every smoke pod of both releases (release
+      2 layers `local-values.yaml` too) and replaces the storefront smoke test's
+      selected-agent fallback. **Secrets:** `make helm-topology-secrets` (`helm/Makefile`'s
+      `topology-secrets`, over `helm/scripts/topology-secrets.sh`) creates or replaces,
+      idempotently (`kubectl create secret ... --dry-run=client -o yaml | kubectl apply`),
+      all eleven Secrets both releases read -- `LOCAL_SECRETS`, `TOPOLOGY_SECRETS`, and
+      `TEST_SECRETS` -- deriving every key with `cast wallet private-key` from Foundry's
+      default mnemonic at the `DEV_ACCOUNT_*` indices (0 provisioning, 1 buyer, 2 Bob, 3
+      registry, 5 provisioning administrator, 8 and 9 release 2's storefront and
+      provisioning), each a make variable; provisioning's SSH key is
+      `PROVISIONING_SSH_KEY_FILE`, the committed placeholder the bare-metal Compose lane
+      mounts (mock provisioning opens no connection), and its secrets profile holds an empty
+      `inventory_ini`. `arkhai-bob-runtime` also carries `config-seller-secret.yml`, the
+      storefront smoke test's seller profile. A missing input, tool, or file stops it naming
+      the variable. `check-local-secrets`, which `topology-up`, `topology-check`, `test`,
+      and `test-module` (for `e2e-tests` and `registry`) run first, names the target when a
+      Secret is missing. **Render:** release 1's `test-config` ConfigMap gains exactly
       `buyer.wallet_address`, `registry.authority_id`, `registry.identifier`, and (under
       `local-values.yaml`) `seller.wallet_address`; under `local-values.yaml` its registry
       smoke pod also gains the credential profile's mount, volume, and profile -- the one
       change beyond the profile's keys, since a Secret reaches a pod only by a mount. Release
-      2's render is byte-identical; the payments, EVM, two-registry, identity-overlap, and
-      contact-exchange fixtures' renders change only by the derived keys. **Restart:**
-      `topology-up` then restarts, in `TOPOLOGY_ROLLOUT_ORDER` (`registry provisioning
-      storefront bare-metal-storefront`), every Deployment of either release whose
+      2's render is byte-identical to `825737c`'s; the EVM, two-registry, identity-overlap,
+      and contact-exchange fixtures' renders change only by the derived keys, and the
+      payments fixture's (an ed25519 registry) not at all. **Restart:** `topology-up` then
+      restarts, in `TOPOLOGY_ROLLOUT_ORDER` (`registry provisioning storefront
+      bare-metal-storefront`), every Deployment of either release whose
       `app.kubernetes.io/name` is that component, waiting on each `rollout status` (10 min)
       before the next component, and fails naming the selector if a component matches no
-      Deployment. dev-env is excluded: restarting it starts an Anvil chain without the
-      contracts the release deployed. **Render tests** (`TESTING.md` "Chart Render Tests";
-      `helm/tests/test_release_topology.py`, 11 cases):
+      Deployment. dev-env is excluded: its Anvil reloads its state file, so the contracts
+      survive a restart, but every transaction since start-up -- escrows, attestations,
+      balances -- is lost while the other services' volumes still refer to them; a rebuilt
+      dev-env image therefore does not roll. **Render tests** (`TESTING.md` "Chart Render
+      Tests"; `helm/tests/test_release_topology.py`, 14 cases):
       `test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states` (the
       pins equal the registry Deployment's `REGISTRY_AUTHORITY_ID` and
       `REGISTRY_AUTHORITY_IDENTIFIER`, the buyer's wallet Anvil account 1, the seller's
-      Bob's rendered `Wallet.address`, no credential in the profile, the registry smoke pod's
-      Secret one of `TOPOLOGY_TEST_SECRETS` and its profiles `helm,registry-smoke-secret`);
-      `test_the_smoke_profile_carries_only_what_the_release_states` (chart defaults: no
-      seller wallet and no credential mount; another buyer identity flows through; none
-      without the e2e-tests chart; no pins for a `registry.urls` registry); and
-      `test_topology_up_restarts_every_deployment_but_the_chain` (the order names every
-      rendered Deployment's component but dev-env's, once each, registry before provisioning
-      before the storefronts). Against the unchanged `test-config.yaml` the first two fail,
-      and with `bare-metal-storefront` dropped from the order the third does.
+      Bob's rendered `Wallet.address`, no credential in the profile, the registry smoke pod
+      layering `arkhai-e2e-credentials`, the deal test's Secret, as `helm,e2e-secret`);
+      `test_the_registry_smoke_test_appends_its_credential_profile_once` (after chart-stated
+      profiles, and not twice); `test_the_smoke_profile_carries_only_what_the_release_states`
+      (chart defaults: no seller wallet and no credential mount; no pins for the payments
+      fixture's ed25519 registry; another buyer identity flows through; none without the
+      e2e-tests chart; no pins for a `registry.urls` registry);
+      `test_a_registry_signing_as_another_identity_than_its_clients_trust_is_refused`;
+      `test_topology_up_restarts_every_deployment_but_the_chain` (the order is exactly
+      registry, provisioning, storefront, bare-metal-storefront, and with dev-env the
+      components of every Deployment both releases render); and
+      `test_topology_secrets_creates_every_secret_both_releases_read` (the Secrets the script
+      creates, the Secrets both releases' manifests reference, and the Makefile's three
+      lists are one set). Each fails when its behavior is undone (the derivation, the
+      ed25519 gate, the identity check, the chart-stated append, or a component dropped).
 
 Section 16 notes:
 
@@ -5423,7 +5453,7 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
 16.5 run and 16.8 (2026-10-19):
 
 - **16.5, run by the owner** at `825737c` on a local cluster; the evidence is in 16.5's note,
-  by observation file name only. It showed the topology working -- release 2's provisioning
+  by observation file name only (the owner holds the files; they are not in the repository). It showed the topology working -- release 2's provisioning
   admitting every bare-metal storefront request, both projection families loaded, the loops
   running, a capacity-released callback reaching the storefront, a publication found by a
   buyer's query on release 1's registry while Bob's listing stayed open -- and three
@@ -5448,8 +5478,8 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
   helm-topology-down` then `up` avoids it), the `e2e_bare_metal_mock_deal` marker against
   the topology, and `make helm-topology-down`. Nothing was installed in this session: there
   is no cluster here.
-- Evidence: `make -C helm test-render` passed (143 assertions and cases, both loader checks
-  and the 11 topology cases run); `helm lint` of release 1 and release 2's values passes;
+- Evidence (at `721c008`): `make -C helm test-render` passed (143 assertions and cases, both
+  loader checks and the 11 topology cases run); `helm lint` of release 1 and release 2's values passes;
   release 2's render is byte-identical to `825737c`'s and release 1's (with and without
   `local-values.yaml`) and the fixtures' differ only as 16.8 says; `make -n
   helm-topology-up helm-topology-check` prints the upgrades, the ordered restart loop, the
@@ -5460,6 +5490,41 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
   `make check-tasks` for both changes, `make check-change-index`, and `openspec validate
   --strict` for both changes pass. No version moved and no lock changed; the registry chart
   stays 0.1.0 and the umbrella 0.3.0.
+- **16.8 check fixes** (fresh-context check of `721c008`; the owner's requirement of a
+  Secrets target):
+  - `make helm-topology-secrets` (`helm/Makefile`'s `topology-secrets`, over
+    `helm/scripts/topology-secrets.sh`) creates or replaces every Secret both releases read,
+    from development values derived with `cast` at named `DEV_ACCOUNT_*` indices; the overlay
+    header, `local-values.yaml`, 16.5, 16.8, and C13 say how each value is set. `test` and
+    `test-module` (for `e2e-tests` and `registry`) check the Secrets their tests read, and
+    `check-local-secrets` names the target when one is missing.
+  - The registry smoke test's credential profile is `arkhai-e2e-credentials`' `e2e-secret`
+    (the deal test's, which already carries `buyer.marketplace_credential`); the separate
+    `arkhai-registry-smoke-credential` is gone. `TOPOLOGY_TEST_SECRETS` became
+    `TEST_SECRETS`, used by `test` too.
+  - The dev-env reason is corrected everywhere (Anvil reloads its state, so contracts
+    survive; a restart loses every transaction since start-up that the other services'
+    volumes refer to); the root `helm-topology-up` help names dev-env as the exception.
+  - The registry pins are carried only for an EIP-191 registry identity, are described as
+    what the release's clients trust, and the umbrella's smoke profile refuses a registry
+    chart `identity` differing from `global.registryIdentity`.
+  - The credential profile is appended once after chart-stated `tests.activeProfiles` too.
+  - Every documented Secret value is quoted, with the note that YAML reads an unquoted hex
+    value as an integer; the render test asserts the full restart order.
+  - `unbacked-bare-metal-listings` is `ready for design` (its open question 11), its Notes,
+    `design.md` lead-in, and `proposal.md` scope and impact saying so.
+  - Evidence: `make -C helm test-render` passed (146 assertions and cases, both loader checks
+    and the 14 topology cases run); release 2's render is still byte-identical to
+    `825737c`'s; `topology-secrets.sh`, run with a stand-in `kubectl` that prints what it is
+    given and the real `cast`, wrote all eleven Secrets with the addresses the values pin,
+    and refused an unset `DEV_ACCOUNT_BUYER` and a missing `PROVISIONING_SSH_KEY_FILE`, each
+    named; no cluster was reached. `make -n` of `helm-topology-secrets`, `helm-topology-up`,
+    `helm-topology-check`, `-C helm test`, and `-C helm test-module MODULE=registry` prints
+    the expected commands. `bash -n` of the script passes (no `shellcheck` here); `make
+    test-e2e-unit` 38 passed; `make check-packaging` (architecture rules included), `make
+    check-comment-hygiene`, `make check-doc-citations` and `make check-tasks` for both
+    changes, `make check-change-index`, and `openspec validate --strict` for both changes
+    pass. No version moved and no lock changed.
 
 ## 17. Closeout
 
@@ -5623,13 +5688,18 @@ documentation only; a part needing code returns the change to implementation.
       - **Amended (16.5's run, 16.8; `design.md` C13):** `DEPLOYMENT_AND_CONFIG.md`'s
         release-topology subsection (above) also states that `make helm-topology-up` restarts
         both releases' Deployments after its upgrades, registry then provisioning then
-        storefronts, because local images keep bare tags, and never dev-env's Anvil; and that
-        `topology-check` requires `arkhai-registry-smoke-credential` beside the e2e Secrets.
+        storefronts, because local images keep bare tags, and never dev-env's Anvil (a
+        restart keeps its contracts but loses every transaction since start-up); that `make
+        helm-topology-secrets` creates every Secret both releases read from development
+        values at `helm/Makefile`'s `DEV_ACCOUNT_*` indices, and what each holds; and that
+        `topology-check`, `test`, and `test-module` check the Secrets their tests read.
         "Kubernetes: ConfigMap and Secret mounting": the umbrella's generated smoke-test
         profile carries the registry pins (internal registry only), the development buyer's
         and the target agent's wallet addresses, and the registry chart's
-        `tests.credentialProfile` layers a Secret's profile file into the registry smoke pod
-        for the signing material no values carry.
+        `tests.credentialProfile` layers a Secret's profile file (locally
+        `arkhai-e2e-credentials`' `e2e-secret`) into the registry smoke pod for the signing
+        material no values carry, its values quoted because YAML reads an unquoted
+        `0x`-prefixed value as an integer.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

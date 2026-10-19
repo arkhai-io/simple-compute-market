@@ -6,16 +6,19 @@ NAMESPACE    := default
 VALUES       := values.yaml
 LOCAL_VALUES := local-values.yaml
 # Secrets the release's workloads read with the default values, which the chart
-# never creates: they are provisioned out of band. Enabling api-credits-registry
-# adds arkhai-api-credits-registry-identity. The e2e-tests chart's `helm test`
-# hook also reads arkhai-e2e-credentials and arkhai-buyer-profile-credential, and
-# under local-values.yaml the registry's reads arkhai-registry-smoke-credential;
-# a deploy needs none of them.
+# never creates: they are provisioned out of band (for local development,
+# `make topology-secrets` creates them). Enabling api-credits-registry adds
+# arkhai-api-credits-registry-identity.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
+# The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
+# chart's deal test credentials, which under local-values.yaml the registry smoke
+# test also layers for the buyer's credential, and the buyer CLI's profile
+# credential.
+TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential
 
 .PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
-	topology-up topology-down topology-check
+	topology-up topology-down topology-check topology-secrets
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -80,9 +83,11 @@ check-local-secrets:
 		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing $$secret"; \
 	done; \
 	if [ -n "$$missing" ]; then \
-		echo "ERROR: Secrets missing from namespace $(NAMESPACE):$$missing" >&2; exit 1; \
+		echo "ERROR: Secrets missing from namespace $(NAMESPACE):$$missing" >&2; \
+		echo "For local development, \`make -C helm topology-secrets\` (\`make helm-topology-secrets\`) creates every one from development values." >&2; \
+		exit 1; \
 	fi; \
-	echo "Every out-of-band Secret a deploy needs exists in namespace $(NAMESPACE)."
+	echo "Every out-of-band Secret required here exists in namespace $(NAMESPACE)."
 
 # ---------------------------------------------------------------------------
 # The local two-release topology: several storefronts per registry, each in its
@@ -107,18 +112,32 @@ TOPOLOGY_VALUES  := bare-metal-release-values.yaml
 # each holds.
 TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
 	arkhai-bare-metal-provisioning-identity
-# The Secrets $(RELEASE)'s `helm test` reads beyond a deploy's: the e2e-tests
-# chart's deal test credentials and buyer profile credential, and the registry
-# smoke test's buyer credential profile (local-values.yaml names it).
-TOPOLOGY_TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential \
-	arkhai-registry-smoke-credential
 # The components (app.kubernetes.io/name) whose Deployments topology-up restarts
 # after its upgrades, in this order: the registry the storefronts publish to,
 # then the provisioning services they read, then the storefronts. dev-env is
-# not among them: restarting it starts a new Anvil chain without the contracts
-# the release deployed. A render test holds this list to the Deployments both
-# releases render.
+# not among them: its Anvil reloads its state file, so the contracts survive a
+# restart, but every transaction since start-up -- escrows, attestations,
+# balances -- is lost while the other services' volumes still refer to them. A
+# rebuilt dev-env image therefore does not roll. A render test holds this list
+# to the Deployments both releases render.
 TOPOLOGY_ROLLOUT_ORDER := registry provisioning storefront bare-metal-storefront
+
+# Development values topology-secrets derives every key from, never for a public
+# network: Foundry's published default mnemonic, and the Anvil account index of
+# each principal values.yaml, $(LOCAL_VALUES), and $(TOPOLOGY_VALUES) pin. Change
+# an index only together with the principal those files pin to it.
+DEV_MNEMONIC := test test test test test test test test test test test junk
+DEV_ACCOUNT_PROVISIONING            := 0
+DEV_ACCOUNT_BUYER                   := 1
+DEV_ACCOUNT_BOB                     := 2
+DEV_ACCOUNT_REGISTRY                := 3
+DEV_ACCOUNT_PROVISIONING_ADMIN      := 5
+DEV_ACCOUNT_BARE_METAL_STOREFRONT   := 8
+DEV_ACCOUNT_BARE_METAL_PROVISIONING := 9
+# The SSH key both provisioning services mount. Mock provisioning never opens a
+# connection, so it is the committed placeholder the bare-metal Compose lane
+# mounts; a release provisioning real hosts names its own key file here.
+PROVISIONING_SSH_KEY_FILE := ../dev-env/bare-metal/ssh-key-placeholder
 
 # $(TOPOLOGY_VALUES) names both releases' Services by the release names above,
 # so the topology targets refuse a RELEASE or TOPOLOGY_RELEASE given on the
@@ -165,6 +184,21 @@ topology-up:
 		done; \
 	done
 
+## Create, or replace the contents of, every out-of-band Secret the topology
+## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- from
+## the development values above, idempotently (scripts/topology-secrets.sh says
+## what each holds). Needs cast (Foundry) and kubectl. Development only, never
+## for a public network.
+topology-secrets:
+	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
+	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
+	DEV_ACCOUNT_BOB="$(DEV_ACCOUNT_BOB)" DEV_ACCOUNT_REGISTRY="$(DEV_ACCOUNT_REGISTRY)" \
+	DEV_ACCOUNT_PROVISIONING_ADMIN="$(DEV_ACCOUNT_PROVISIONING_ADMIN)" \
+	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
+	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
+	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \
+		./scripts/topology-secrets.sh
+
 ## Uninstall the two-release topology, release 2 first, waiting for each.
 ## Succeeds when neither is installed.
 topology-down:
@@ -173,15 +207,16 @@ topology-down:
 	@$(MAKE) --no-print-directory undeploy
 
 ## Run both releases' helm tests, after checking for the Secrets release 1's
-## tests read beyond a deploy's ($(TOPOLOGY_TEST_SECRETS)). Release 1's: contract
+## tests read beyond a deploy's ($(TEST_SECRETS)). Release 1's: contract
 ## validation, which checks the chain's ID (its fixtures also read the buyer's
 ## and Bob's wallet addresses, from the generated smoke profile); the
 ## registry smoke test, which reads health and publishers through the typed
 ## client, pinned to the release's registry signer and authority from that
-## profile and signed as the development buyer from
-## arkhai-registry-smoke-credential; the storefront and provisioning smoke
-## tests, whose signed cases skip without an administrator credential, which
-## no values supply; and the e2e-tests chart's deal test. Release 2's: its
+## profile and signed as the development buyer from arkhai-e2e-credentials'
+## e2e-secret profile; the storefront smoke test, signed as Bob from
+## arkhai-bob-runtime's seller profile; the provisioning smoke test, whose
+## signed cases skip without an administrator credential, which its profile
+## does not carry; and the e2e-tests chart's deal test. Release 2's: its
 ## provisioning smoke test, which skips the same way, and the bare-metal
 ## storefront's /health check, the one that proves release 2 answers. None
 ## shows the storefronts trade: the topology's evidence (signed requests
@@ -190,12 +225,14 @@ topology-down:
 ## running releases.
 topology-check:
 	$(TOPOLOGY_NAMES_FIXED)
-	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TOPOLOGY_TEST_SECRETS)"
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)"
 	helm test $(RELEASE) --namespace $(NAMESPACE) --logs
 	helm test $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --logs
 
-## Run helm tests against the deployed release
+## Run helm tests against the deployed release, after checking for the Secrets
+## they read beyond a deploy's ($(TEST_SECRETS)).
 test:
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)"
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs
@@ -216,11 +253,16 @@ TEST_POD_SUFFIX_registry           := smoke-test
 TEST_POD_SUFFIX_storefront         := smoke-test
 TEST_POD_SUFFIX_provisioning       := smoke-test
 TEST_POD_SUFFIX_e2e-tests          := e2e-deal-test
- 
+# The Secrets a module's test reads beyond a deploy's: the deal test's, and the
+# registry smoke test's buyer credential under $(LOCAL_VALUES).
+TEST_MODULE_SECRETS_e2e-tests := $(TEST_SECRETS)
+TEST_MODULE_SECRETS_registry  := arkhai-e2e-credentials
+
 test-module:
 ifndef MODULE
 	$(error MODULE is not set. Usage: make test-module MODULE=<subchart-name>)
 endif
+	$(if $(TEST_MODULE_SECRETS_$(MODULE)),@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_MODULE_SECRETS_$(MODULE))")
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs \

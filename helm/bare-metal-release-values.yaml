@@ -18,18 +18,25 @@
 # account, whose key is published with Foundry's default `test test ... junk`
 # mnemonic, and the settlement asset is a contract the dev chain deploys at a
 # deterministic address; none may be used on a public network. Signing material
-# is never here; it is in out-of-band Secrets the same targets require:
+# is never here; it is in out-of-band Secrets the same targets require, which
+# `make -C helm topology-secrets` (`make helm-topology-secrets`) creates or
+# updates from that mnemonic at helm/Makefile's DEV_ACCOUNT_* indices:
 #   arkhai-bare-metal-storefront-identity   `credential`: Anvil account 8's key
 #   arkhai-bare-metal-storefront-runtime    `storefront.secrets.toml`: [Wallet]
-#                                           private_key, Anvil account 8's key
+#                                           private_key = "<account 8's key>"
 #   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
 # Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
 # provisioning does not read for delivery. `topology-check` also needs release
-# 1's e2e-tests Secrets, arkhai-e2e-credentials and
-# arkhai-buyer-profile-credential, for its deal test, and the registry smoke
-# test's arkhai-registry-smoke-credential, whose `config-registry-smoke-secret.yml`
-# holds `buyer: {marketplace_credential: ...}`, Anvil account 1's key (the
-# e2e-tests chart's buyer; local-values.yaml names the Secret).
+# 1's e2e-tests Secrets: arkhai-buyer-profile-credential (`credential`, Anvil
+# account 1's key) and arkhai-e2e-credentials, whose `config-e2e-secret.yml` the
+# deal test and the registry smoke test layer as their `e2e-secret` profile:
+#   buyer:        marketplace_credential, private_key: "<account 1's key>"
+#   seller:       private_key, admin_credential: "<account 2's key>" (Bob)
+#   provisioning: admin_credential: "<account 5's key>",
+#                 service_credential: "<account 0's key>",
+#                 authority_identifier: "<account 0's address>"
+# Each value is quoted: YAML reads an unquoted 0x-prefixed value as an integer.
+# helm/scripts/topology-secrets.sh writes every Secret release 1 reads too.
 global:
   # Release 1's registry, which the bare-metal chart derives as the storefront's
   # registry; global.registryIdentity, values.yaml's, is that registry's signer,
