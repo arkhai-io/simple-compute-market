@@ -2161,7 +2161,9 @@ nothing the owner records clears it, now naming the waiver that routes past it;
 now leaving that to archive cleanup's entry checks; and D7, which said nothing of
 following a run into the archive. All of `scripts/tests` 1084 passed after them.
 `make check-change CHANGE=orchestrate-change-workflow` passed; `make
-check-packaging` not rerun, since no dependency changed.
+check-packaging` passed on `ca75e897b` at the pre-closeout triage (126 F2), whose
+fix makes `change-triage` run it after every fix round, as `AGENTS.md` and
+`change-implement` require, not only when a dependency changed.
 
 ## 8. Closeout
 
@@ -2237,7 +2239,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       `make check-doc-citations CHANGE=orchestrate-change-workflow`, then
       `openspec validate orchestrate-change-workflow --strict`.
 - [ ] 8.11 Archival: `openspec archive orchestrate-change-workflow -y`, merging the
-      delta into `openspec/specs/change-workflow/spec.md`. After archive cleanup,
-      rename the permanent spec's scenarios "A closeout gate is passed" and "A
-      pre-closeout gate is passed" to say the triage advances, which the pinned
-      validator refused in the delta (D16).
+      delta into `openspec/specs/change-workflow/spec.md`. Right after the archive
+      merges the delta, before the closeout commit and its review, rename the
+      permanent spec's scenarios "A closeout gate is passed" and "A pre-closeout
+      gate is passed" to say the triage advances, which the pinned validator
+      refused in the delta (D16), and check the result with `make check-change
+      CHANGE=orchestrate-change-workflow` (126 F1).

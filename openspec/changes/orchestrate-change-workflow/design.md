@@ -660,7 +660,8 @@ asking left the owner's window idle while their attention was on other work.
 The pinned validator refuses a MODIFIED requirement that renames a scenario, so the
 delta keeps two of "Index transitions"' scenario titles, "A closeout gate is passed"
 and "A pre-closeout gate is passed", with bodies that say the triage advances; once
-archive cleanup has run, the permanent spec's two titles are renamed to match.
+closeout's archive has merged the delta, closeout renames the permanent spec's two
+titles to match, before its review (126 F1).
 
 Rejected: keeping every gate — the owner was asked a question whose answer never
 varied. Renaming the gate a routing question at each review — the same

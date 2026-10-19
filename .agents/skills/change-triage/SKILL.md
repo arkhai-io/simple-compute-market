@@ -347,8 +347,8 @@ whether the round's accepted fixes merit another review round, while still prese
   commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
-  committing (its step 5): `make lock` and `make check-packaging` when a
-  dependency changed, the focused suites, `make test`, `make check-change
+  committing (its step 5): `make lock` when a dependency changed, then `make
+  check-packaging`, the focused suites, `make test`, `make check-change
   CHANGE=<change>` (before closeout its citations check may report only files the
   change's tasks create at closeout; name them, and fix anything else; an active
   change with no spec deltas fails its validation every time, which is expected),
