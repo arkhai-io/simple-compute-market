@@ -4819,12 +4819,46 @@ storefront's configuration reaches it through its configuration system"; `design
 "Validation tiers"). Touches `helm/charts/bare-metal-storefront`, the umbrella, the root
 `Makefile`, bare metal's storefront, and `helm/scripts/test-render.sh`.
 
-- [ ] 16.1 `src/values_schema.py` (new, bare metal): its section list and sinks over
+- [x] 16.1 `src/values_schema.py` (new, bare metal): its section list and sinks over
       `market_config.values_schema`, writing only
       `helm/charts/bare-metal-storefront/values.schema.json`; the root `Makefile`'s
       `helm-values-schema` also runs it. Drift test `tests/test_values_schema.py`, run by
       `make test`.
-- [ ] 16.2 `helm/charts/bare-metal-storefront`: `values.yaml` as one agent's keys at the top
+      Done. `src/values_schema.py`: `DEFINITION` (`storefrontServiceConfig`, the name VM's
+      definition has in its own chart), `ROLE`, `SCHEMA_FILES` (the bare-metal chart's schema
+      alone), `DELIVERY_SETTINGS`, `storefront_config_definition`, and `main` over the kit's.
+      **Differed (shape):** there is no section list. Every setting bare metal reads is typed
+      (Section 11), so the definition is `model_fragment(BareMetalStorefrontSettings)`, the
+      whole document, with its two open mappings typed by the kits' fragments: `[Settlement]`
+      by `settlement_fragment` over `build_bare_metal_settlement_registry()`, `[Delivery]` by
+      `sink_typed_section` over the discovered sinks. It is closed at the root and in every
+      typed section, where VM's root and untyped sections stay open: `_Section` (`config.py`)
+      declares its JSON Schema closed (`json_schema_extra={"additionalProperties": False}`)
+      while the loader still ignores an unknown key (D14a), so the chart, not startup, refuses
+      a misspelling. No retired keys (bare metal had no file configuration before). The
+      durations carry `PositiveSeconds`' bounds; `[Wallet].private_key` is refused.
+      `[Delivery]`'s own three settings are a second copy beside VM's `_DELIVERY_SETTINGS`,
+      guarded by a test against the kit's `RESERVED_SECTION_KEYS`; moving them into
+      `kit/delivery` would bump a kit both storefronts pin exactly (`design.md` C8, as
+      delivered). The root `Makefile`'s `helm-values-schema` gains the bare-metal line, run
+      in bare metal's environment with `--root ../../..`. **Also changed (`design.md` C8):**
+      bare metal reads VM's `port` setting (packaged `port = 8000`; `BareMetalStorefrontSettings.port`,
+      1 to 65535), `serve`'s `--port` defaults to none and `server.serving_port` resolves the
+      configured port unless the option overrides it, and the image's command is `serve`
+      (it passed `--host 0.0.0.0 --port 8000`; the host default is already `0.0.0.0`), so the
+      chart passes the port through `storefront.json` rather than a command argument. Unit
+      (`tests/test_values_schema.py`, 8): the committed schema carries the generated
+      definition (fails against a schema edited stale, then restored); the command checks the
+      one file under `--root`; the document closed to exactly the settings model's fields, and
+      each typed section, a service peer, and a chain closed to theirs; the wallet key refused
+      and the registry carrying no write token; a duration's bounds; `[Settlement]` closed to
+      the three registered mechanisms; `[Delivery]`'s settings equal to the kit's reserved
+      keys and the installed sinks typed and closed; no defaults, references, markers, or
+      required fields. Unit (`tests/test_config_loader.py`): the packaged port.
+      Unit, CLI boundary (`tests/test_package.py`): `serve` with no `--port` hands `run_serve`
+      none, as the existing case's server seam observes it, and `serving_port` reads the
+      configured port from the files unless given one.
+- [x] 16.2 `helm/charts/bare-metal-storefront`: `values.yaml` as one agent's keys at the top
       level (`config` rendered unchanged into `storefront.json` in a ConfigMap, the Secret
       overlay mounted as `storefront.secrets.toml`, the credential Secret, the port the
       container, probes, and Service share, persistence), `XDG_CONFIG_HOME`, and only
@@ -4835,7 +4869,33 @@ storefront's configuration reaches it through its configuration system"; `design
       `ARKHAI_IDENTITY_CREDENTIAL` in the pod environment; `examples/production-values.yaml`
       follows. The umbrella's `bare-metal-storefront` entry keeps deferring to the
       subchart's schema.
-- [ ] 16.3 `helm/charts/bare-metal-storefront/tests/test_render.py`: production values
+      Done (`design.md` C8, as delivered). `values.yaml`: `port` (8000), `service.type`,
+      `identity.credentialSecret`, `secret` (`secretName` of an existing Secret, empty mounting
+      none, and its `configKey`), `alkahestAddressBook`, `config: {}` with a commented example,
+      persistence, and scheduling. `templates/configmap.yaml` (new) renders `storefront.json`
+      from `bare-metal-storefront.configDocument` (`_helpers.tpl`): `config` unchanged, a key in
+      two spellings refused at any depth, `port` always set and a different stated value
+      refused in any spelling, `base_url` the Service URL and `db_path`
+      `<mountPath>/bare-metal-storefront.db` only where unstated, rendered as JSON. The
+      Deployment mounts it and the overlay at `/etc/arkhai/`, sets only `XDG_CONFIG_HOME=/etc`
+      and `ARKHAI_IDENTITY_CREDENTIAL` (a `secretKeyRef`), runs `bare-metal-storefront serve`
+      with no arguments, sets `enableServiceLinks: false` (Section 11's handoff), and rolls on
+      `checksum/config`; the Service and the health-test hook use `port`. `values.schema.json`:
+      a closed top level (every retired value refused, naming it), `config` typed by the
+      generated `storefrontServiceConfig`. `examples/production-values.yaml` states a
+      publishable configuration -- one pinned registry, one site bound to one service peer,
+      Alkahest on `base_sepolia` (whose address book is built in) with the wallet key in the
+      overlay Secret, a clause, and a lease bound -- every principal, address, and URL a
+      placeholder, the Ed25519 ones canonical (the loader check refused `BBB…B`, which is not).
+      Chart 0.3.0 (its values contract changed); the umbrella's dependency pin follows, the
+      umbrella staying 0.3.0, unreleased in this change. The umbrella's `bare-metal-storefront`
+      schema entry is unchanged, open beyond `enabled`. **Differed:** `alkahestAddressBook`
+      stays (the storefront chart's agent gained it in 10.20, after this task was written, and
+      C8 copies that shape); `service.type` stays, a Kubernetes knob only; the derivations are
+      the port, Service URL, and database path, not VM's internal registry, provisioning URL,
+      and default site, since this chart installs on its own with no umbrella globals; and
+      `sitePlacement` goes too (now `config.capacity.placement`).
+- [x] 16.3 `helm/charts/bare-metal-storefront/tests/test_render.py`: production values
       render the ConfigMap, the overlay, and their mounts together, asserted in one helper;
       the pod environment carries only the configuration directory and the credential
       (spec scenario "The chart renders a storefront's environment"); the schema refuses a
@@ -4843,19 +4903,153 @@ storefront's configuration reaches it through its configuration system"; `design
       fail. Tier 2: load one rendered `storefront.json` with bare metal's own loader through
       an interpreter `BARE_METAL_STOREFRONT_PYTHON` names, which `test-render.sh` sets when
       bare metal's environment exists, skipping otherwise.
-- [ ] 16.4 Validation: `make test-bare-metal`, `make helm-values-schema` with no diff,
+      Done: chart render tests (`TESTING.md` "Chart Render Tests"; standard library, run by
+      `test-render.sh`), 17 cases. Rendering and mounting:
+      `test_production_values_render_mount_and_derive_together` (through one helper,
+      `_assert_configuration_files`: the ConfigMap's `storefront.json`, its volume and mount,
+      the overlay Secret's volume and mount, and `XDG_CONFIG_HOME` together; the derived port
+      and database path, the stated URL, and the example's keys, numbers, and strings as
+      written; no Secret rendered, no wait); `test_a_release_naming_no_overlay_mounts_none`
+      (the same helper with the overlay's volume and mount both absent); the chart defaults
+      deriving the Service URL, port, and path; a port of 9100 reaching the document, the
+      container, the Service, and the test hook; stated values kept; the address book mounted
+      read-only only when named. Spec scenario "The chart renders a storefront's environment":
+      `test_the_pod_environment_carries_only_the_configuration_directory_and_the_credential`
+      (exactly the two variables, the credential by reference, service links off, the command
+      `bare-metal-storefront serve` alone, no retired variable); a missing credential Secret
+      refused. Release checks: a different or differently spelled stated port refused, a
+      string port refused by the schema; two spellings refused at the root and nested. Schema:
+      a key the storefront does not read refused naming it at the root, in a typed section, a
+      service peer, a chain, `registry.auth`, and an unregistered mechanism; a secret refused in
+      any spelling (`private_key`, `PRIVATE_KEY`, a webhook's `url`); a typed key accepted in any
+      spelling; a zero and a negative duration refused; each retired value refused naming it
+      (`siteBindingsSecret`, `settlementConfigSecret`, `sellerEvmAddress`, `chains`,
+      `walletKeySecret`, `adminPrincipals`, `publicUrl`, `databasePath`, `sitePlacement`,
+      `identity.principal`, `service.port`); and the end-to-end lane's `storefront.dev.toml`
+      accepted as the whole `config` and rendered unchanged. Broken (edited, then restored):
+      without the ConfigMap's mount the two mount tests fail; with the overlay mounted
+      elsewhere and `enableServiceLinks: false` removed, in one edit, the production test and
+      the environment test fail. Tier 2: `test_the_rendered_document_loads_with_the_storefront_loader`
+      runs, through `BARE_METAL_STOREFRONT_PYTHON`, bare metal's `load_storefront_settings`, its
+      startup refusal (`publication_startup_problems`), `compile_publication_clauses`, and
+      `parse_site_bindings` over the example's rendered `storefront.json` in a temporary
+      `XDG_CONFIG_HOME` (no problem; port, URL, path, principal, and registries as rendered; one
+      clause; `site-a` bound to `site_a_authority`), and over the chart defaults' (refused for
+      no registry, no mechanism, and no site, in that order); the probe's environment drops
+      every `STOREFRONT_` variable, which the loader's override layer would read.
+      `test-render.sh` exports `BARE_METAL_STOREFRONT_PYTHON` when
+      `domains/bare_metal/storefront/.venv/bin/python` exists; without it the case reports a
+      skip.
+- [x] 16.4 Validation: `make test-bare-metal`, `make helm-values-schema` with no diff,
       `make -C helm test-render` with both loader interpreters set, `make
       test-deployment-packaging`, `make test`. End-to-end: none in the pipeline, which
       deploys no chart.
+      Done. No package version moved (`arkhai-bare-metal-storefront` stays 0.16.0, as in
+      Sections 11-15; VM's storefront pins it exactly) and no dependency changed, so no lock
+      changed; `make dist` rebuilt the wheel, which carries `values_schema.py` and the
+      packaged `port`. `make test-bare-metal`: domain 134, storefront 437 (427 before; 8 in
+      `test_values_schema.py`, 2 in `test_package.py`), buyer 11, adapter 40 passed. `make
+      helm-values-schema` rewrote VM's two schemas with no diff and wrote the bare-metal
+      chart's, committed. `make -C helm test-render` (`make test-deployment-packaging`'s
+      Helm half, run by `make test`) passed with both loader interpreters set by
+      `test-render.sh`: the bare-metal chart's 17 render cases, its loader check run, not
+      skipped, VM's chart tests (loader and start-and-derive checks run), and the umbrella's
+      assertions, which render the bare-metal storefront enabled from the subchart's defaults
+      and under the local overlay (its PVC retained by default, deleted locally). `helm lint`
+      of the chart, alone and with the example, passes. `make -k test`: every suite it ran
+      passed -- core 123 + 134 + 217 (2 skipped) + 62, the kits (config 235, alkahest 296,
+      capacity-publication 97, storefront 123 among them), provisioning service 675 + 463, bare
+      metal as above, API-credit storefront 177, e2e unit 38, release tooling 944 (the Compose
+      render tests of the bare-metal stack among them), the Helm render suites -- and it
+      stopped only at the reinit of `kit/policy`, `domains/vms/storefront`, and
+      `domains/vms/buyer` (the PyTorch index is refused here, as in 2.6), run frozen: VM
+      storefront with the rebuilt bare-metal storefront wheel reinstalled, unit 1100 passed, 1
+      skipped (its values-schema drift test among them), integration 448 passed; `kit/policy`
+      80 passed; VM buyer 202 passed. `make check-packaging` (architecture rules included),
+      `make check-comment-hygiene`, `make check-doc-citations
+      CHANGE=share-site-projection-state` (nothing reported), `make check-tasks
+      CHANGE=share-site-projection-state`, and `openspec validate --strict` pass. No
+      repository typing target exists. The pipeline was not run.
 - [ ] 16.5 Tier 3, in a local session with a cluster: deploy the umbrella with the
       bare-metal storefront enabled from the example values, confirm it starts, reports
       its loops and both projection families in status, and publishes; record the
       evidence or the blocker here. Not runnable in a cloud session.
+      **Not run (2026-10-19):** this session has no cluster, `kubectl`, or Docker daemon, so
+      no image can be built and no release installed. Render and loader evidence (16.3,
+      16.4) is all this section has; it is not deployment evidence (`TESTING.md` "Chart
+      Render Tests"). See the handoff below for what a local deployment will need.
 - [ ] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
       network policy blocks that index, so each section that bumps a package one of them
       locks edits that lock by hand, and their suites run in frozen environments.
+      **Not run (2026-10-19):** `download.pytorch.org` is refused by this session's network
+      policy. Section 16 edited no lock. The hand-edited entries the change has accumulated,
+      read as the diff of each lock against the change's base on `dev`, are what a relock
+      should reproduce with no diff:
+      - `domains/vms/storefront/uv.lock` -- the internal packages' versions and wheel names:
+        `arkhai-compute-provisioning-client` 0.6.1 to 0.7.0, `arkhai-core-buyer` 0.4.0 to
+        0.5.0, `arkhai-core-storefront` 0.12.0 to 0.15.2, `arkhai-core-storefront-client`
+        0.25.0 to 0.26.0, `arkhai-kit-alkahest` 0.4.1 to 0.8.0,
+        `arkhai-kit-capacity-publication` 0.7.0 to 0.10.1, `arkhai-kit-config` 0.2.0 to 0.4.0,
+        `arkhai-kit-site-client` 0.10.0 to 0.11.0, `arkhai-kit-storefront` 0.3.1 to 0.8.0,
+        `arkhai-vms-listings` 0.5.0 to 0.6.0, `arkhai-vms-settlement` 0.2.1 to 0.3.0; the
+        project's own specifiers (`arkhai-core-storefront>=0.15.2`,
+        `arkhai-core-storefront-client>=0.26.0`, `arkhai-kit-alkahest>=0.8.0`,
+        `arkhai-kit-capacity-publication==0.10.1`, `arkhai-kit-config>=0.4.0`,
+        `arkhai-kit-storefront==0.8.0`, `arkhai-vms-listings[pools,overrides]>=0.6.0`,
+        `arkhai-vms-settlement>=0.3.0`); and four dependency lines on the
+        `arkhai-bare-metal-storefront` entry (`arkhai-kit-config`, `dynaconf`, `httpx`,
+        `pydantic`), whose 0.16.0 wheel changed content without a version bump.
+      - `domains/vms/buyer/uv.lock` -- `arkhai-core-buyer` 0.4.0 to 0.5.0,
+        `arkhai-kit-alkahest` 0.4.1 to 0.8.0, `arkhai-kit-config` 0.2.0 to 0.4.0,
+        `arkhai-vms-listings` 0.5.0 to 0.6.0, `arkhai-vms-settlement` 0.2.1 to 0.3.0, and the
+        specifiers `arkhai-core-buyer>=0.5.0`, `arkhai-kit-alkahest>=0.7.0`, and
+        `arkhai-vms-settlement>=0.3.0`.
+      - `kit/policy/uv.lock` -- unchanged; it locks none of the bumped packages.
+      Every internal wheel these locks name is unreleased in this change and records no hash,
+      so a relock against the tree's `.dist` should differ, if at all, only in third-party
+      resolution the index now offers; `make check-packaging` passes with the hand edits.
+
+Section 16 notes:
+
+- End-to-end: no pipeline scenario deploys the chart. The bare-metal lane's storefront now
+  starts from the image's `serve` with no `--port` and binds the packaged `port` (8000, which
+  `storefront.dev.toml` does not state), so every bare-metal-lane scenario --
+  `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`, `e2e_bare_metal_introduction` --
+  exercises the configured port at startup and nothing else of this section. No VM-lane or
+  API-credit-lane scenario reaches it; the VM image installs the rebuilt bare-metal
+  contribution, whose registration did not change. The pipeline was not run.
+
+Section 16 handoff:
+
+- 16.5 (a local session with a cluster): the example values are production-shaped
+  placeholders, so a local release needs its own `bare-metal-storefront` values: `config`
+  naming the release's registry Service and its `global.registryIdentity` pin, the release's
+  provisioning Service as a site with a service peer naming `global.provisioningIdentity`, a
+  settlement mechanism (for Alkahest on the dev-env Anvil, `[Wallet].address`,
+  `[Chains.anvil]`, the dev-env chart's `<release>-dev-env-alkahest-addresses` ConfigMap
+  through `alkahestAddressBook`, both address paths naming the mounted file, and the wallet
+  key in an out-of-band overlay Secret named by `secret.secretName`), and an existing
+  identity Secret. The provisioning chart trusts one storefront principal
+  (`storefrontIdentity`) and calls back one storefront (`storefront.agentName`, Bob), so a
+  bare-metal storefront beside Bob on the release's provisioning service may need
+  provisioning values this section did not add; 16.5 will find out. The image now runs
+  `serve` on the configured port; its Docker `HEALTHCHECK` still calls 8000, the default,
+  which Kubernetes ignores.
+- `[Delivery]`'s own settings are stated twice (VM's `_DELIVERY_SETTINGS`, bare metal's
+  `DELIVERY_SETTINGS`), each guarded by its storefront's tests; `kit/delivery`, beside
+  `RESERVED_SECTION_KEYS`, is their home the next time that exactly pinned kit changes.
+- For 17.9: `DEPLOYMENT_AND_CONFIG.md` "Bare-metal role configuration" (its Helm sentence,
+  `sellerEvmAddress`/`chains`/`walletKeySecret`, becomes `config` passed through with the
+  overlay Secret, the credential Secret, and the address-book mount) and "Contact-exchange
+  contacts" (`BARE_METAL_STOREFRONT_SITES`); `ARCHITECTURE.md` "Production and staging" (the
+  chart's "external site-binding Secret" goes: sites are public `config`);
+  `TESTING.md` "Chart Render Tests" (bare metal's drift test, `tests/test_values_schema.py`,
+  and `BARE_METAL_STOREFRONT_PYTHON` loader check beside VM's, and that the generator is
+  `kit/config`); `docs/bare-metal-seller-quickstart.md` if it gains Helm text; the bare-metal
+  `port` setting and `serve --port` override. `design.md` C8, as delivered, names the
+  decisions.
 
 ## 17. Closeout
 

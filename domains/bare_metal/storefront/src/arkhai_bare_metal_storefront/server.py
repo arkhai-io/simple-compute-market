@@ -20,6 +20,7 @@ from market_storefront_kit import (
 )
 
 from .api import router as http_router
+from .config import load_storefront_settings
 from .domain_runtime import get_market_domain_contract
 from .lifecycle_steps import register_bare_metal_loops
 from .response_auth import authenticate_response
@@ -140,11 +141,17 @@ app = build_bare_metal_storefront_app(
 )
 
 
+def serving_port(port: int | None = None) -> int:
+    """The port ``serve`` binds: ``port`` when given, else the configured ``port``."""
+    return port if port is not None else load_storefront_settings().port
+
+
 def run_serve(
     host: str = "0.0.0.0",
-    port: int = 8000,
+    port: int | None = None,
     root_path: str = "",
 ) -> None:
-    """Run the composed application with uvicorn."""
+    """Run the composed application with uvicorn, on the configured port unless
+    ``port`` overrides it."""
     uvicorn = import_module("uvicorn")
-    uvicorn.run(app, host=host, port=port, root_path=root_path)
+    uvicorn.run(app, host=host, port=serving_port(port), root_path=root_path)

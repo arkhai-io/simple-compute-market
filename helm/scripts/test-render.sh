@@ -265,12 +265,17 @@ expect_override_failure \
     "public registry with an acquisition pointer fails render" \
     --set-string 'registry.descriptor.accessAcquisitionPointer=https://registry.example/access'
 # Each chart's own render tests (docs/development/TESTING.md, "Chart Render
-# Tests"), so this one target runs every render check. The storefront chart's
-# tests also load a rendered document with the storefront's own loader when its
-# environment exists (make init-storefront); without it they say so and skip.
+# Tests"), so this one target runs every render check. The storefront and
+# bare-metal storefront charts' tests also load a rendered document with that
+# storefront's own loader when its environment exists (make init-storefront;
+# make -C domains/bare_metal/storefront init); without it they say so and skip.
 STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/vms/storefront/.venv/bin/python"
 if [[ -z "${STOREFRONT_PYTHON:-}" && -x "$STOREFRONT_ENV_PYTHON" ]]; then
     export STOREFRONT_PYTHON="$STOREFRONT_ENV_PYTHON"
+fi
+BARE_METAL_STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/bare_metal/storefront/.venv/bin/python"
+if [[ -z "${BARE_METAL_STOREFRONT_PYTHON:-}" && -x "$BARE_METAL_STOREFRONT_ENV_PYTHON" ]]; then
+    export BARE_METAL_STOREFRONT_PYTHON="$BARE_METAL_STOREFRONT_ENV_PYTHON"
 fi
 for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py; do
     if ! "${PYTHON:-python3}" "$chart_test"; then

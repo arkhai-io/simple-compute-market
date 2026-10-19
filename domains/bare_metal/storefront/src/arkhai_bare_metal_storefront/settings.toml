@@ -18,6 +18,8 @@
 # The storefront's public URL: listings name it as their storefront, and the
 # administrator commands connect to it unless told otherwise.
 base_url = "http://localhost:8000"
+# The port `serve` binds unless its --port option says otherwise.
+port     = 8000
 # Relative to the working directory, which the image sets to its data volume.
 db_path  = "bare-metal-storefront.db"
 

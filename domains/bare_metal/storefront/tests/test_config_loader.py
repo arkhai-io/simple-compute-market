@@ -32,6 +32,7 @@ def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
     settings = load_storefront_settings()
 
     assert settings.base_url == "http://localhost:8000"
+    assert settings.port == 8000
     assert settings.db_path == "bare-metal-storefront.db"
     assert settings.negotiation_timeout_seconds == 1800
     assert settings.negotiation_watchdog_interval == 60

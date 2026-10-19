@@ -29,8 +29,9 @@ RUN apt-get update && \
     chown appuser:appuser /var/lib/arkhai
 
 COPY --from=builder /opt/venv /opt/venv
-# The storefront's settings come from its mounted configuration files; its
-# database defaults to a path under the working directory, the data volume.
+# The storefront's settings come from its mounted configuration files, its
+# port among them; its database defaults to a path under the working
+# directory, the data volume.
 ENV PATH="/opt/venv/bin:$PATH"
 
 USER appuser
@@ -40,4 +41,4 @@ VOLUME ["/var/lib/arkhai"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=5 \
   CMD curl --fail --silent http://127.0.0.1:8000/health || exit 1
 ENTRYPOINT ["bare-metal-storefront"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["serve"]

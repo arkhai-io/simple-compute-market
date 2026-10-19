@@ -47,7 +47,9 @@ def main(
 @app.command("serve")
 def serve_cmd(
     host: str = typer.Option("0.0.0.0", "--host", help="Bind interface."),
-    port: int = typer.Option(8000, "--port", help="Bind port."),
+    port: int | None = typer.Option(
+        None, "--port", help="Bind port; defaults to the configured port."
+    ),
     root_path: str = typer.Option("", "--root-path", help="ASGI root path."),
 ) -> None:
     """Run the storefront HTTP process."""

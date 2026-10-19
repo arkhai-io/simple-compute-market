@@ -821,6 +821,43 @@ Secrets is owed. Accepted scope beyond the original proposal.
   keys at the top level: `config` rendered unchanged into `storefront.json`, the Secret
   overlay, the credential Secret, `XDG_CONFIG_HOME`, and only release-known derivations.
   It validates no service semantics; the storefront's startup refusal does (D6).
+
+  As delivered (Section 16), with these choices of the chart's own:
+  - *Values.* `port`, `service.type`, `identity.credentialSecret`, `secret` (an existing
+    Secret's `secretName` and `configKey`, mounted as `storefront.secrets.toml`; the chart
+    renders none, so the storefront chart's `createSecret` and `registryAuthToken` have no
+    counterpart, bare metal reading no registry write token), `alkahestAddressBook`,
+    `config`, persistence, and scheduling. `alkahestAddressBook` stays although 16.2's list
+    of values to go named it: the storefront chart's agent gained the same mount in round 08
+    (10.20), so the agent shape carries it. The schema's closed top level refuses every
+    retired value, naming it.
+  - *Derivations: only what this chart's release knows* (a divergence from VM's chart):
+    `port` always, a different stated value refused in any spelling; `base_url`, the
+    Service's URL (`http://<fullname>:<port>`, bare metal's form, no trailing `/`); and
+    `db_path` under `persistence.mountPath`, both only where unstated. No internal registry,
+    provisioning URL, or default site, and so no release-identity checks: the chart installs
+    on its own (its Makefile deploys it alone), with no umbrella globals to derive them from,
+    so `config` states them. A key stated in two spellings is refused at render, as VM's
+    chart refuses one.
+  - *The port is a setting.* Bare metal reads VM's `port` (packaged default 8000), `serve
+    --port` overriding it, and the image's command is `serve`: the deployment-state rule lets
+    nothing but the configuration directory and the credential travel outside the
+    configuration system, and a `--port` argument would.
+  - *Service links are off* (`enableServiceLinks: false`), as Section 11's handoff asked:
+    Kubernetes would otherwise inject variables for every Service in the namespace, and a
+    Service named `storefront…` would land in the `STOREFRONT_` override layer.
+  - *The generated definition is the whole document, closed* (a divergence from VM's open
+    root, which VM keeps because it reads sections untyped): every setting bare metal reads
+    is typed, so the definition is its settings model's, each section's JSON Schema closed
+    (`_Section`'s `json_schema_extra`) while the loader still ignores an unknown key (D14a),
+    with `[Settlement]` and `[Delivery]` typed by the kits' fragments. No retired keys: bare
+    metal had no file configuration before. `[Delivery]`'s own three settings are stated a
+    second time beside VM's, a test holding them equal to the kit's `RESERVED_SECTION_KEYS`;
+    their natural home is `kit/delivery`, which both storefronts pin exactly, so moving them
+    is left until that kit next changes.
+  - *Tier 2* (Validation tiers) runs the storefront's loader, startup refusal, clause
+    compilation, and site binding over the example's rendered document through
+    `BARE_METAL_STOREFRONT_PYTHON`, and the refusal over the chart defaults'.
 - **C9. Compose and the lane mount files**, through a committed development
   `storefront.toml` for bare metal and a secrets file; only bare-metal targets produce
   bare-metal files. As delivered (Section 11): the secrets overlay is committed, a

@@ -744,8 +744,9 @@ check-doc-citations: ## Fail if a document cites a path that is absent or tombst
 # pass-through config. The storefront names the schema files it writes, and the
 # generator runs in the storefront's own environment (make init-storefront),
 # whose unit suite fails when a committed definition is stale.
-helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
+helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
+	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)

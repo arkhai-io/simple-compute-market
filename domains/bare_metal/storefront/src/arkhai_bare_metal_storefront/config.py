@@ -105,9 +105,17 @@ def _detached(value: Any) -> Any:
 
 
 class _Section(BaseModel):
-    """A typed section: its own keys read in any case, any other key ignored."""
+    """A typed section: its own keys read in any case, any other key ignored.
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    Its JSON Schema is closed nonetheless. The loader ignores a key it does not
+    read, so a release still starts on configuration a newer one wrote; the
+    chart's values schema, generated from these models, refuses one, so a
+    misspelled key is caught where the configuration is written.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, json_schema_extra={"additionalProperties": False}
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -248,6 +256,7 @@ class BareMetalStorefrontSettings(_Section):
 
     base_url: str = Field(min_length=1)
     db_path: str = Field(min_length=1)
+    port: StrictInt = Field(ge=1, le=65535)
     negotiation_timeout_seconds: PositiveSeconds
     negotiation_watchdog_interval: PositiveSeconds
     settlement_servicing_interval_seconds: PositiveSeconds
