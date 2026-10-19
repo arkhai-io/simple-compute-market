@@ -53,7 +53,7 @@ from apicredits_storefront.lifecycle_steps import (
     api_credit_loop_controller,
     register_api_credit_lifecycle_steps,
 )
-from apicredits_storefront.retired_settings import require_no_retired_settings
+from apicredits_storefront.startup_refusal import require_startable_storefront
 from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
@@ -134,9 +134,10 @@ def _build_alkahest_clients() -> dict[str, Any]:
 def _build_api_credit_services(
     domain: MarketDomainContract,
 ) -> ApiCreditsStorefrontServices:
-    # Before anything is constructed: a renamed setting, or an Alkahest release
-    # model this storefront cannot deliver, stops startup.
-    require_no_retired_settings()
+    # Before anything is constructed: a renamed setting, a capacity
+    # configuration that cannot be read, or an Alkahest release model this
+    # storefront cannot deliver, stops startup.
+    require_startable_storefront()
     require_api_credit_release_model()
     marketplace_signer = resolve_identity_signer()
     resolve_admin_identities()

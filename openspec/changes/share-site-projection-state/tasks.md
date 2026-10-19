@@ -4751,6 +4751,66 @@ Section 15 notes:
   self-gating loops (the fan-out is the one); `DEPLOYMENT_AND_CONFIG.md` the API-credit
   status being the administrator's signed read with `lifecycle`.
 
+Section 15 check fixes (fresh-context check of `983e61c..020220d`; nothing breaking):
+
+- **Floors.** The API-credit storefront declares `arkhai-core-storefront>=0.14.0`, the release
+  that first carries `LoopStatus` and `HealthResponse.lifecycle` (Section 9.4); relocked.
+- **Spec deltas.** A new `api-credits` delta, "API-credit system status is the administrator's
+  signed read" (scenarios: an unsigned read refused; the administrator reads every loop's
+  state), and the `market-composition` delta MODIFIES "Storefront timer loops are held and
+  stepped through one kit controller": a loop registers as a timer loop or a fan-out, a
+  fan-out with its step and children, each child declared when it registers so status lists
+  it before its first cycle, a name refused in the other form, a step registration running
+  no loop, and starting the registered loops the only way a loop's task starts, every
+  fan-out's children named before any task starts (two new scenarios, every existing
+  scenario kept). The proposal's capabilities and 17.9/17.11 name them.
+- **Capacity configuration refuses startup early.** `_capacity_settings` refuses authorities
+  that are not valid principals by key (`[capacity.sites.<site>.expected_authorities] must
+  list one or two valid principals`, raised outside the handler, so no validation error or
+  value rides along), and the new `startup_refusal.py` runs it with the renamed-setting check
+  first in `_build_api_credit_services`, each under its heading ("the storefront cannot read
+  its capacity configuration"), so a malformed site stops startup before the signer,
+  database, or any loop, not in the middle of `_startup_tasks`. `StorefrontStartupError`
+  moved there from `retired_settings.py`. In the kit, `register_fan_out` names its children
+  before registering anything, and `start_loops` names every fan-out's children before
+  starting any task, so a raising `children()` leaves nothing registered or started. Unit
+  (API credits): unreadable authorities refused by key with no context and no database file;
+  no site refused. Unit (kit): both raising cases. `test_alkahest_release_conditions.py`'s
+  configuration gains a readable quota site.
+- **Finite intervals.** `register_loop` refuses a NaN or infinite interval or initial delay
+  as it refuses a non-positive one (kit unit, parametrized). The API-credit watchdog's
+  timeout and interval and the payment-reconciliation interval read through
+  `utils.config.seconds_setting` (`positive_seconds`), refused by key (unit).
+- **Comments and imports.** Startup's comment says the loops start after the credits-service
+  preflight even when `[credits].fail_on_unreachable = false` let it give up;
+  `capacity_client` imports `utils.config` at module level (no cycle);
+  `lifecycle_steps`' docstring cites the permanent "Storefront timer loops are held and
+  stepped through one kit controller".
+- **Seams instead of patches.** `_startup_tasks(domain=, capacity_runtime=None)` passes the
+  runtime the pollers drain to `register_api_credit_loops`; the startup test gives it a held
+  stand-in feed instead of patching `lifecycle_steps.capacity_events_poller_loop`, and now
+  also sees the site's poller paused. `tests/integration/test_lifecycle_status.py` drives the
+  storefront's own application instance from its app factory (every route and middleware),
+  its lifespan not run since composing from configuration needs the credits service and a
+  quota authority, the container wired as the lifespan would wire it: application
+  integration through the typed client, short of the lifespan.
+- **VM's failing-site case** registers only the fan-out, through the new
+  `lifecycle_steps.register_capacity_events_fan_out()` (which `register_vm_loops` calls), so
+  no timer runs unpaused beside it.
+- Evidence: `make -C kit test-storefront` 123 passed (114 before); `make test-apicredits`:
+  storefront 177 passed (172 before), middleware and buyer suites passing; VM storefront frozen,
+  the rebuilt kit-storefront and bare-metal storefront wheels reinstalled: unit 1100 passed, 1
+  skipped, integration 448 passed. `make -k test`: every suite it ran passed (core, the kits,
+  provisioning service 675 + 463, bare metal 134 + 427 + 11 + 40, API-credit storefront 177,
+  e2e unit 38, release tooling 944, the Helm render suites), stopping only at the reinit of the
+  three PyTorch-index projects, run frozen: `kit/policy` 80, VM buyer 202, VM storefront as
+  above. `make lock PROJECTS=domains/apicredits/storefront` (the core floor), `make
+  check-packaging` (architecture rules included), `make check-comment-hygiene`, `make
+  check-doc-citations CHANGE=share-site-projection-state` (nothing reported), `make
+  check-tasks`, and `openspec validate --strict` pass. `arkhai-kit-storefront` stays 0.8.0,
+  unreleased in this change; its wheel was rebuilt and its requirements are unchanged. The
+  pipeline was not run.
+
 ## 16. The bare-metal chart on the storefront chart's agent shape
 
 Delivers the bare-metal chart rendering configuration through unchanged under a generated
@@ -4866,8 +4926,16 @@ documentation only; a part needing code returns the change to implementation.
         inspect".
       - `openspec/specs/README.md`: no new capability or companion; record that disposition.
       - The `spec.md` files the deltas cover (`storefront-publication`,
-        `market-composition`, `deployment-state`, `negotiation-protocol`) are written by the
-        archive in 17.11; the record names them.
+        `market-composition`, `deployment-state`, `negotiation-protocol`, and `api-credits`)
+        are written by the archive in 17.11; the record names them.
+      - **Amended (Section 15 and its check):** `openspec/specs/api-credits/spec.md` -- "API-credit
+        system status is the administrator's signed read" (from the `api-credits` delta);
+        `openspec/specs/market-composition/spec.md` -- "Storefront timer loops are held and
+        stepped through one kit controller", modified for the two registration forms (from
+        its delta); `docs/development/DEPLOYMENT_AND_CONFIG.md` -- the API-credit storefront's
+        `settlement_servicing_interval_seconds`, its startup refusals (renamed setting,
+        unreadable capacity configuration), and its status as the administrator's signed read
+        with `lifecycle`; the other Section 15 destinations are in its notes.
       - **Amended (round 05/06, 10.17):** `DEPLOYMENT_AND_CONFIG.md` "Storefront agents:
         pass-through configuration" -- the storefront's one retired-key catalogue beside the
         chart's own retired values block (C4's two homes), `enable_registry_discovery` removed
@@ -4931,7 +4999,7 @@ documentation only; a part needing code returns the change to implementation.
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.
 - [ ] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
-      -y`, merging the four deltas; the index row links the archive.
+      -y`, merging the five deltas (`api-credits` added in Section 15's check); the index row links the archive.
       **Amended (round 05/06, 05 F11; moved here from 17.10 in round 08, 08 F9):** after the
       `archive` command and before the commit, confirm that the requirement
       `domains/vms/storefront/src/market_storefront/startup_refusal.py`'s docstring cites, "A

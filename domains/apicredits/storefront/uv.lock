@@ -197,7 +197,7 @@ requires-dist = [
     { name = "arkhai-apicredits-domain", specifier = ">=0.6.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
-    { name = "arkhai-core-storefront", specifier = ">=0.11.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.14.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },

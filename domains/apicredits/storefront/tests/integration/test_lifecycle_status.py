@@ -1,12 +1,14 @@
 """System status reports every lifecycle loop and its last cycle's outcome.
 
-Driven through the canonical storefront client against the storefront's system
-and lifecycle routers, with this storefront's response signing and
-administrator authentication, on an application the test assembles over a real
-SQLite database. The loops are the storefront's own registrations, started as
-startup starts them, over collaborators injected through the container: a
-settlement servicing worker over a repository the test controls, and a capacity
-runtime standing in for the quota authority's feeds.
+Driven through the canonical storefront client against the storefront's own
+application instance, built by its app factory with every route and its
+response signing and administrator authentication, over a real SQLite
+database. The application's lifespan is not run, since composing the
+storefront from configuration needs the credits service and a quota authority;
+the test wires the container the lifespan would and starts the loops through
+the storefront's own registrations, as startup does, over a settlement
+servicing worker whose repository the test controls and a capacity runtime
+standing in for the quota authority's feeds.
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ import asyncio
 
 import httpx
 import pytest
-from fastapi import FastAPI
 from market_capacity_publication import SiteEventCycle
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementServicingWorker
@@ -23,10 +24,8 @@ from storefront_client import StorefrontClient
 from storefront_client.client import StorefrontClientError
 
 import apicredits_storefront.container as container
-from apicredits_storefront.controllers.lifecycle_controller import (
-    router as lifecycle_router,
-)
-from apicredits_storefront.controllers.system_controller import router as system_router
+import apicredits_storefront.server as server
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.lifecycle_steps import (
     CAPACITY_EVENTS_POLLER,
     NEGOTIATION_WATCHDOG,
@@ -37,7 +36,6 @@ from apicredits_storefront.lifecycle_steps import (
     register_api_credit_loops,
 )
 from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.services.system_service import SystemService
 from tests._settings_overrides import settings_overrides
 
@@ -123,10 +121,11 @@ async def storefront(db, monkeypatch):
             register_api_credit_loops(loops, capacity_runtime=site)
         loops.start_loops()
 
-    app = FastAPI()
-    app.middleware("http")(authenticate_response)
-    app.include_router(system_router)
-    app.include_router(lifecycle_router)
+    app = server.build_api_credits_storefront_app(
+        registry=server.build_api_credits_storefront_registry(
+            domain=get_market_domain_contract()
+        )
+    )
     try:
         yield app, loops, obligations, start
     finally:

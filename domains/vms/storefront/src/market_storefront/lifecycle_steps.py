@@ -264,6 +264,20 @@ def _capacity_site_names() -> tuple[str, ...]:
     return tuple(capacity_site_loop_name(site) for site in sites)
 
 
+def register_capacity_events_fan_out() -> None:
+    """Register the capacity-event pollers' fan-out over its step, each
+    configured site's poller declared as its child; `register_vm_loops`
+    registers it beside the timers."""
+    register_fan_out(
+        CAPACITY_EVENTS_POLLER,
+        route="capacity-events",
+        step=capacity_events_step,
+        preview=capacity_events_preview,
+        run=capacity_events_fan_out,
+        children=_capacity_site_names,
+    )
+
+
 def register_vm_loops(
     *, retention_interval_seconds: float | None = None
 ) -> dict[str, float]:
@@ -290,14 +304,7 @@ def register_vm_loops(
         PUBLICATION: publication_interval_seconds(),
     }
     # Each site's poller waits the poll interval between its cycles.
-    register_fan_out(
-        CAPACITY_EVENTS_POLLER,
-        route="capacity-events",
-        step=capacity_events_step,
-        preview=capacity_events_preview,
-        run=capacity_events_fan_out,
-        children=_capacity_site_names,
-    )
+    register_capacity_events_fan_out()
     intervals[CAPACITY_EVENTS_POLLER] = intervals[SITE_PROJECTION_POLLER]
     register_loop(
         NEGOTIATION_WATCHDOG,

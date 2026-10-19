@@ -100,7 +100,10 @@ buyer-chosen arbiter unchecked.
   confirms only when every family it reads is confirmed within the source-confirmation window; site responses and callbacks share the
   durable rotating trust set; Alkahest listings advertise their release conditions.
 - `market-composition`: per-site projection state is kit-owned and per process; a loop
-  records each cycle's outcome with the controller.
+  records each cycle's outcome with the controller; a loop registers as a timer loop or a
+  fan-out, and starting the registered loops is the only way a loop's task starts.
+- `api-credits`: the API-credit storefront's system status is the administrator's signed read
+  and reports every lifecycle loop.
 - `deployment-state`: the bare-metal seller role is configured through mounted files; a
   storefront's configuration reaches it through its configuration system, and only
   meta-configuration and the signing credential travel outside it.

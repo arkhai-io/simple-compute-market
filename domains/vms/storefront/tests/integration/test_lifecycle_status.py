@@ -173,8 +173,8 @@ async def test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop(wo
     lifecycle_logger = logging.getLogger(lifecycle.__name__)
     lifecycle_logger.addHandler(seen)
     try:
-        # Startup's registration: the fan-out starts with the timers.
-        lifecycle_steps.register_vm_loops()
+        # The fan-out alone, as startup registers it; no timer runs beside it.
+        lifecycle_steps.register_capacity_events_fan_out()
         lifecycle.start_loops()
         await asyncio.wait_for(seen.seen.wait(), timeout=1)
     finally:

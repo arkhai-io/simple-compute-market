@@ -15,6 +15,8 @@ from market_capacity_publication import (
 from market_identity import Identity, TrustedIdentitySet
 from market_storefront_kit import StorefrontLoopController
 
+from apicredits_storefront.utils import config
+
 SQLiteClientFactory = Callable[[], Any]
 
 
@@ -25,7 +27,11 @@ class CapacitySite:
 
 
 def _capacity_settings() -> tuple[dict[str, CapacitySite], str]:
-    from apicredits_storefront.utils import config
+    """Each configured site's URL and trusted authorities, and the placement.
+
+    A site that cannot be read is refused by its key, naming no configured
+    value, so the storefront's startup refusal reports it.
+    """
     placement = str(config.settings.get("capacity.placement", "") or "fill_first").strip()
     raw_sites = config.settings.get("capacity.sites")
     if not raw_sites or not hasattr(raw_sites, "items"):
@@ -39,12 +45,20 @@ def _capacity_settings() -> tuple[dict[str, CapacitySite], str]:
         identities = raw_authorities.get("identities")
         if not site_id or not url or not isinstance(identities, (list, tuple)):
             raise RuntimeError(f"capacity site {site_id!r} is incomplete")
-        sites[site_id] = CapacitySite(
-            url,
-            TrustedIdentitySet(
+        try:
+            trusted = TrustedIdentitySet(
                 identities=tuple(Identity.model_validate(value) for value in identities)
-            ),
-        )
+            )
+        except (TypeError, ValueError):
+            trusted = None
+        if trusted is None:
+            # Raised outside the handler: a validation error keeps the value it
+            # refused.
+            raise RuntimeError(
+                f"[capacity.sites.{site_id}.expected_authorities] must list one or two "
+                "valid principals"
+            )
+        sites[site_id] = CapacitySite(url, trusted)
     return sites, placement
 
 
@@ -56,7 +70,6 @@ def configured_site_ids() -> tuple[str, ...]:
 def capacity_poll_interval() -> float:
     """Seconds between each site's capacity-event poller cycles:
     `[capacity].poll_interval`, five unless stated."""
-    from apicredits_storefront.utils import config
     return float(config.settings.get("capacity.poll_interval", 5) or 5)
 
 

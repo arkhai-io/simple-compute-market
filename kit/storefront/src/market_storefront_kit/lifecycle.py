@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import math
 import os
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -317,10 +318,12 @@ class StorefrontLoopController:
         after the timer starts, with the gate read throughout the delay.
         """
 
-        if interval_seconds <= 0:
-            raise ValueError(f"loop {name!r} needs a positive interval")
-        if initial_delay_seconds < 0:
-            raise ValueError(f"loop {name!r} cannot have a negative initial delay")
+        if not math.isfinite(interval_seconds) or interval_seconds <= 0:
+            raise ValueError(f"loop {name!r} needs a positive, finite interval")
+        if not math.isfinite(initial_delay_seconds) or initial_delay_seconds < 0:
+            raise ValueError(
+                f"loop {name!r} needs a finite initial delay that is not negative"
+            )
         if name in self._fan_outs:
             raise ValueError(f"loop {name!r} is registered as a fan-out")
         self._refuse_running(name)
@@ -360,20 +363,21 @@ class StorefrontLoopController:
         if name in self._loops:
             raise ValueError(f"loop {name!r} is registered as a timer loop")
         self._refuse_running(name)
+        # Named first, so a `children` that raises registers nothing.
+        named = tuple(children())
         self.register_step(name, route=route, step=step, preview=preview)
-        fan_out = _RegisteredFanOut(name=name, run=run, children=children)
-        self._fan_outs[name] = fan_out
-        self._declare_children(fan_out)
+        self._fan_outs[name] = _RegisteredFanOut(name=name, run=run, children=children)
+        self._declare_children(name, named)
 
     def _refuse_running(self, name: str) -> None:
         handle = self._handles.get(name)
         if handle is not None and not handle.done():
             raise ValueError(f"loop {name!r} is already running")
 
-    def _declare_children(self, fan_out: _RegisteredFanOut) -> None:
-        for child in fan_out.children():
-            if self._declared.get(child) != fan_out.name:
-                self.declare(child, parent=fan_out.name)
+    def _declare_children(self, parent: str, children: Iterable[str]) -> None:
+        for child in children:
+            if self._declared.get(child) != parent:
+                self.declare(child, parent=parent)
 
     def start_loops(self, *, task_logger: Any = None) -> dict[str, asyncio.Task[Any]]:
         """Start every registered loop that has no task, by loop name.
@@ -386,6 +390,13 @@ class StorefrontLoopController:
         after which this starts every registered loop afresh.
         """
 
+        # Every fan-out's children are named before any task starts, so one
+        # whose `children` raises leaves nothing started rather than some loops.
+        fan_outs = [
+            (fan_out, tuple(fan_out.children()))
+            for name, fan_out in self._fan_outs.items()
+            if name not in self._handles
+        ]
         started: dict[str, asyncio.Task[Any]] = {}
         for name, loop in self._loops.items():
             if name in self._handles:
@@ -394,12 +405,10 @@ class StorefrontLoopController:
                 StorefrontBackgroundTask(name=name, task_factory=partial(self._timer, loop)),
                 task_logger=task_logger,
             )
-        for name, fan_out in self._fan_outs.items():
-            if name in self._handles:
-                continue
-            self._declare_children(fan_out)
-            started[name] = self._start_task(
-                StorefrontBackgroundTask(name=name, task_factory=fan_out.run),
+        for fan_out, children in fan_outs:
+            self._declare_children(fan_out.name, children)
+            started[fan_out.name] = self._start_task(
+                StorefrontBackgroundTask(name=fan_out.name, task_factory=fan_out.run),
                 task_logger=task_logger,
             )
         return started

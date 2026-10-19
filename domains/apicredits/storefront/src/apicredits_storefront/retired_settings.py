@@ -1,10 +1,10 @@
 """Settings the storefront no longer reads, and what an operator states instead.
 
-A renamed setting refuses startup, naming the key that replaced it: running at a
-default the operator did not choose would change the storefront's behaviour
-silently, where a refusal says what to change. No values schema is generated
-from this storefront's settings, so the refusal at startup is where a renamed
-key is caught.
+A renamed setting refuses startup (`startup_refusal`), naming the key that
+replaced it: running at a default the operator did not choose would change the
+storefront's behaviour silently, where a refusal says what to change. No values
+schema is generated from this storefront's settings, so the refusal at startup
+is where a renamed key is caught.
 """
 
 from __future__ import annotations
@@ -23,10 +23,6 @@ RENAMED_SETTINGS: Mapping[str, str] = {
 }
 
 
-class StorefrontStartupError(RuntimeError):
-    """The storefront's configuration states a setting it no longer reads."""
-
-
 def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
     """Name each renamed setting the configuration still states, in any
     spelling, with the key that replaced it."""
@@ -39,19 +35,8 @@ def retired_setting_problems(source: Dynaconf | None = None) -> list[str]:
     ]
 
 
-def require_no_retired_settings(source: Dynaconf | None = None) -> None:
-    """Refuse to start, naming each problem, when the configuration states a
-    renamed setting."""
-
-    problems = retired_setting_problems(source)
-    if problems:
-        raise StorefrontStartupError(f"{RETIRED_SETTINGS_HEADING}: " + "; ".join(problems))
-
-
 __all__ = [
     "RENAMED_SETTINGS",
     "RETIRED_SETTINGS_HEADING",
-    "StorefrontStartupError",
-    "require_no_retired_settings",
     "retired_setting_problems",
 ]

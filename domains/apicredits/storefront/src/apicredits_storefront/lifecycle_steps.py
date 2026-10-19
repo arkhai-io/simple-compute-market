@@ -12,9 +12,9 @@ capacity-event pollers are a fan-out, the exception in shape: the kit runs
 them one cycle per site inside the aggregate loop's task, serializes each
 site's cycle with that site's step itself, and reports each site's timer
 cycles under the site's own name, declared as the aggregate loop's child. See
-openspec/specs/market-composition/spec.md, "A loop records each cycle's outcome
-with the controller". Steps resolve their collaborators from the container when
-they run.
+openspec/specs/market-composition/spec.md, "Storefront timer loops are held and
+stepped through one kit controller". Steps resolve their collaborators from the
+container when they run.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ from apicredits_storefront.services.capacity_client import (
     capacity_poll_interval,
     configured_site_ids,
 )
-from apicredits_storefront.utils.config import settings, settlement_servicing_interval
+from apicredits_storefront.utils.config import seconds_setting, settlement_servicing_interval
 
 logger = logging.getLogger(__name__)
 
@@ -116,17 +116,18 @@ def capacity_site_cycle_recorder(
 
 
 def negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    """The watchdog's timeout and interval, as configured."""
+    """The watchdog's timeout and interval, as configured, each refused by its
+    key unless it is a usable number of seconds."""
     return NegotiationWatchdogPolicy(
-        timeout_seconds=float(settings.negotiation_timeout_seconds),
-        interval_seconds=float(settings.negotiation_watchdog_interval),
+        timeout_seconds=seconds_setting("negotiation_timeout_seconds", 1800),
+        interval_seconds=seconds_setting("negotiation_watchdog_interval", 60),
         log_loop_start=False,
         log_cutoff=False,
     )
 
 
 def _payment_reconciliation_interval() -> float:
-    return float(settings.get("payment_reconciliation_interval", 30))
+    return seconds_setting("payment_reconciliation_interval", 30)
 
 
 def _sqlite_client() -> Any:

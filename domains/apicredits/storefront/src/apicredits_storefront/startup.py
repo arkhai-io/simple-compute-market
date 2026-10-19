@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from market_core import MarketDomainContract
@@ -62,8 +63,14 @@ async def _preflight_credits_service() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
-async def _startup_tasks(*, domain: MarketDomainContract) -> None:
-    """Initialize background tasks for the exact app-selected domain."""
+async def _startup_tasks(
+    *, domain: MarketDomainContract, capacity_runtime: Any | None = None
+) -> None:
+    """Initialize background tasks for the exact app-selected domain.
+
+    ``capacity_runtime`` is the runtime the capacity-event pollers drain, the
+    one the storefront's configuration composes unless given.
+    """
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
 
@@ -111,9 +118,11 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     await _seed_demo_listing()
 
     # Every loop starts here, after the escrow backfill the servicing sweep
-    # depends on and once the credits service answers: each sweep's timer and
-    # the capacity-event pollers' fan-out, which `start_loops` starts together.
-    intervals = register_api_credit_loops(loops)
+    # depends on and the credits-service preflight: each sweep's timer and the
+    # capacity-event pollers' fan-out, which `start_loops` starts together.
+    # With `[credits].fail_on_unreachable = false` the preflight may have given
+    # up on an unreachable credits service, and the loops start all the same.
+    intervals = register_api_credit_loops(loops, capacity_runtime=capacity_runtime)
     loops.start_loops(task_logger=logger)
     for name, interval in intervals.items():
         logger.info("[STARTUP] %s loop started (interval=%ss)", name, interval)

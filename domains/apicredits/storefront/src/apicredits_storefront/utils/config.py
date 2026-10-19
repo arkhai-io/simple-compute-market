@@ -315,12 +315,14 @@ def credits_expected_authorities() -> TrustedIdentitySet | None:
         ) from exc
 
 
-def _seconds_setting(source: Dynaconf, key: str, default: float) -> float:
-    """A duration setting, refused by key unless it is a positive, finite
-    number of seconds that can be applied to an instant."""
+def seconds_setting(key: str, default: float, source: Dynaconf | None = None) -> float:
+    """A duration setting, ``default`` unless stated, refused by key unless it
+    is a positive, finite number of seconds that can be applied to an
+    instant."""
 
+    active = settings if source is None else source
     try:
-        return positive_seconds(source.get(key, default))
+        return positive_seconds(active.get(key, default))
     except ValueError as exc:
         reason = str(exc)
     # Raised outside the handler, so the refusal carries no exception context.
@@ -331,11 +333,7 @@ def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     """Seconds between the settlement servicing sweeps:
     `settlement_servicing_interval_seconds`, thirty unless stated."""
 
-    return _seconds_setting(
-        settings if source is None else source,
-        "settlement_servicing_interval_seconds",
-        30,
-    )
+    return seconds_setting("settlement_servicing_interval_seconds", 30, source)
 
 
 AGENT_ID: str = _validate_agent_id(settings.get("agent_id", ""))

@@ -100,6 +100,18 @@ def storefront(tmp_path, monkeypatch):
         },
         wallet={"address": SELLER_WALLET, "private_key": ""},
         db_path=str(db_path),
+        # A quota site the startup refusal can read; its runtime is the test's.
+        capacity={
+            "placement": "fill_first",
+            "sites": {
+                "quota-site": {
+                    "url": "http://quota-site.invalid:8082",
+                    "expected_authorities": {
+                        "identities": [ADMIN_SIGNER.identity.model_dump(mode="json")]
+                    },
+                }
+            },
+        },
     ), patch.dict(storefront_config.CHAINS, {"anvil": ANVIL}, clear=True):
         yield db_path
 

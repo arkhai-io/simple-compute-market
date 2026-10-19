@@ -1407,3 +1407,54 @@ class TestAFanOutRegistersAndStartsWithTheTimers:
 
         with pytest.raises(ValueError, match="already running"):
             self._fan_out(controller)
+
+    async def test_a_fan_out_whose_children_cannot_be_named_starts_nothing(self, controller):
+        """`start_loops` names every fan-out's children before starting any
+        task, so a configuration it cannot read leaves no loop half started."""
+        sites = {"names": ("events:east",)}
+
+        async def _run() -> None:
+            await asyncio.Event().wait()
+
+        def _children():
+            if sites["names"] is None:
+                raise RuntimeError("[capacity.sites] cannot be read")
+            return sites["names"]
+
+        controller.register_fan_out(
+            "events", route="events", step=_no_step, run=_run, children=_children
+        )
+        controller.register_loop("alpha", step=_no_step, interval_seconds=_FOREVER)
+        controller.clear_loops()
+        sites["names"] = None
+
+        with pytest.raises(RuntimeError, match="cannot be read"):
+            controller.start_loops()
+
+        assert controller.registered_loop_names() == []
+
+    def test_a_fan_out_whose_children_cannot_be_named_registers_nothing(self, controller):
+        def _children():
+            raise RuntimeError("[capacity.sites] cannot be read")
+
+        with pytest.raises(RuntimeError):
+            controller.register_fan_out(
+                "events", route="events", step=_no_step, run=_no_step, children=_children
+            )
+
+        assert controller.step_routes() == {}
+        assert controller.start_loops() == {}
+
+
+class TestATimerLoopNeedsAUsableInterval:
+    @pytest.mark.parametrize("interval", [0, -1, float("nan"), float("inf")])
+    def test_an_unusable_interval_is_refused(self, controller, interval):
+        with pytest.raises(ValueError, match="positive, finite interval"):
+            controller.register_loop("alpha", step=_no_step, interval_seconds=interval)
+
+    @pytest.mark.parametrize("delay", [-1, float("nan"), float("inf")])
+    def test_an_unusable_initial_delay_is_refused(self, controller, delay):
+        with pytest.raises(ValueError, match="finite initial delay"):
+            controller.register_loop(
+                "alpha", step=_no_step, interval_seconds=1, initial_delay_seconds=delay
+            )

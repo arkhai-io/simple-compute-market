@@ -78,3 +78,87 @@ MUST remain distinguishable from a running loop whose last cycle failed.
   errors, with a message naming a site URL
 - **THEN** the recorded outcome names the failing stage and the exception's type, and not its
   message
+
+## MODIFIED Requirements
+
+### Requirement: Storefront timer loops are held and stepped through one kit controller
+
+Each storefront process MUST hold exactly one kit-owned loop controller and MUST
+register with it every timer-driven loop the process runs. A domain MUST NOT
+implement its own pause flag, gate, or loop-state reporting. A loop whose tasks are
+created by a kit runtime the storefront composes, such as a per-site fan-out, MUST be
+declared to the controller by name so that a pause waits for it.
+
+A registration MUST bind the loop's name to the step that runs exactly one cycle of
+it, and MAY bind a read-only preview of that cycle. The step MUST invoke the same
+operation the loop's timer invokes, so a manual cycle cannot exercise behaviour the
+timer does not. A loop MUST register in one of two forms: a timer loop, whose timer
+the controller runs over its step, or a fan-out, whose task a composed kit runtime
+owns and which runs independent per-child cycles, each child under its own declared
+name. A fan-out MUST register with its step and the names of its children, and each
+child MUST be declared as the fan-out's child when it registers, so status lists every
+child before its first cycle; a child the fan-out's task reaches later MUST be declared
+then. A name registered in one form MUST be refused in the other. A storefront MAY
+register a loop's step before the loop itself, so every step is invocable from the
+moment the storefront serves, but a step registration runs no loop. Starting the
+registered loops MUST be the only way a loop's task starts, and it MUST start every
+registered timer and fan-out together; it MUST name every fan-out's children before
+starting any task, so a fan-out whose children cannot be named leaves no loop started.
+
+One pause MUST hold every registered loop at a cycle boundary without cancelling it:
+a cycle either completes or never starts, and loop-local state survives the pause.
+While held, every registered step MUST remain invocable. Resuming MUST return every
+held loop to work. Holding loops MUST NOT affect whether the storefront accepts new
+negotiations, which is a separate control.
+
+A loop body MUST read its gate when it starts, so a pause is observable from the
+moment the loop runs, and MUST read its gate immediately before doing any work. It
+MUST wait out its interval through the controller, which returns early when a pause
+is requested. A pause requested at any point in a loop's interval MUST therefore be
+observed before that loop's next cycle's work, independently of the interval's
+length.
+
+The loop pause MUST be process-local. A restarted storefront MUST resume its loops.
+
+#### Scenario: Every storefront loop is held by one pause
+
+- **WHEN** an operator pauses the lifecycle loops of a storefront
+- **THEN** every timer-driven loop that storefront runs, including loops created by a
+  composed kit runtime, stops at its next cycle boundary
+- **AND** the storefront continues to accept new negotiations
+
+#### Scenario: A held loop is stepped
+
+- **WHEN** the loops are held and an operator runs one cycle of a registered loop
+- **THEN** exactly the operation the loop's timer invokes runs once and its result is
+  returned
+- **AND** the loops remain held
+
+#### Scenario: A pause arrives during a long interval
+
+- **WHEN** a loop with a long interval is waiting between cycles and a pause is
+  requested
+- **THEN** the loop reaches its gate without waiting out the interval and performs no
+  further work until resumed or stepped
+
+#### Scenario: A fan-out's children are listed before their first cycle
+
+- **WHEN** a storefront registers its capacity-event fan-out for its configured sites
+- **THEN** status lists each site's poller before the fan-out starts, and starting the
+  storefront's loops starts the fan-out's task with the timers
+
+#### Scenario: A name is registered in both forms
+
+- **WHEN** a loop name registered as a timer loop is registered as a fan-out, or the
+  reverse
+- **THEN** the second registration is refused and the first stands
+
+#### Scenario: An unregistered loop is stepped
+
+- **WHEN** an operator runs one cycle of a name no loop registered
+- **THEN** the request is refused as not found and no work runs
+
+#### Scenario: A storefront restarts while paused
+
+- **WHEN** a storefront whose loops were held restarts
+- **THEN** its loops run on their timers until an operator pauses them again
