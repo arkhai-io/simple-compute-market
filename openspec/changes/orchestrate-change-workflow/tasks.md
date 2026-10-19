@@ -1635,7 +1635,19 @@ for it, so the owner is asked for its round (D13). Touches `scripts/`, a new
       package.
 - [ ] 6e.2 The tests move with the modules they test, unchanged in what they
       assert; a test changed in substance means the move changed behaviour.
-- [ ] 6e.3 Verification: the moved suites (unit, `scripts/tests`, fake runners;
+- [ ] 6e.3 One target for a step's closing checks, added on the owner's word after the
+      fifth round: `make check-change CHANGE=<change>` runs
+      `check-comment-hygiene`, `check-agent-skills`, `check-doc-citations
+      CHANGE=`, `check-tasks CHANGE=`, `check-change-index`, and the pinned
+      `openspec validate <change> --strict`, printing only failures and one pass
+      line; `change-implement`, `change-triage`, `change-plan`, `change-design`,
+      and `change-closeout` name it in place of their separate check lists, and
+      each of those steps' rows already allows `Bash(make check-*)`. Each tool call
+      replays the session's context — the fifth round's fix turn took 182 turns
+      and 21.5M cache-read tokens, about 118k per turn — so six checks as six
+      calls cost six replays (D19's data). Verification: a test that the target
+      fails when any one check fails and passes when all pass.
+- [ ] 6e.4 Verification: the moved suites (unit, `scripts/tests`, fake runners;
       `test_round_view.py` at repository level, real Git), each passing with no
       assertion changed; `make test`; `make check-comment-hygiene`; `make
       check-doc-citations CHANGE=orchestrate-change-workflow`, since the change's
