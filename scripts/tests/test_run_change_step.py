@@ -111,6 +111,69 @@ def test_a_schema_keyword_the_check_cannot_enforce_fails_loudly() -> None:
         step.outcome_problems(VALID["finished"], schema)
 
 
+def test_a_plans_outcome_may_carry_the_rounds_its_cadence_maps(tmp_path: Path) -> None:
+    planned = {**VALID["finished"], "rounds": [[[1, 2]], [[3], ["6a"]]]}
+
+    line = step.record_outcome(_log(tmp_path), "plan", planned, session="s", commit=COMMIT,
+                               clock=_clock)
+
+    assert step.outcome_problems(planned) == []
+    assert line["rounds"] == [[[1, 2]], [[3], ["6a"]]]
+
+
+@pytest.mark.parametrize("rounds,problem", [
+    ([], "fewer than 1"), ([[]], "fewer than 1"), ([[[]]], "fewer than 1"),
+    ([[[True]]], "none of its allowed forms"), ([[[""]]], "none of its allowed forms"),
+    ([[1, 2]], "not of type array"),
+])
+def test_a_malformed_mapping_of_rounds_is_rejected(rounds, problem: str) -> None:
+    problems = step.outcome_problems({**VALID["finished"], "rounds": rounds})
+
+    assert any(problem in found for found in problems), problems
+
+
+def test_the_owners_branch_decision_is_recorded_and_found(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    log = _log(tmp_path)
+    step.note_orchestrator(log, "runs here", "its own evidence", by="owner",
+                           branch="feat/x", change=CHANGE, clock=_clock)
+    step.note_orchestrator(log, "rerun", "renewed", clock=_clock)
+
+    assert step.main(["log", CHANGE, "--branch", "feat/x"], root=tmp_path) == 0
+    shown = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [(entry["seq"], entry["change"]) for entry in shown] == [(1, CHANGE)]
+    assert step.branch_decisions(step.read_log(log), "feat/x", "another-change") == []
+    assert step.branch_decisions(step.read_log(log), "feat/y") == []
+
+
+def test_the_command_line_records_a_branch_decision(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _log(tmp_path)
+
+    # The change defaults to the one whose log holds the line, where steps look.
+    assert step.main(["note", CHANGE, "orchestrator", "--by", "owner", "--branch", "feat/x",
+                      "--decision", "runs here", "--reason", "pilot"],
+                     root=tmp_path) == 0
+    capsys.readouterr()
+    assert step.main(["log", CHANGE, "--branch", "feat/x"], root=tmp_path) == 0
+    shown = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    assert [(entry["branch"], entry["change"]) for entry in shown] == [("feat/x", CHANGE)]
+
+
+@pytest.mark.parametrize("fields,problem", [
+    ({"branch": "feat/x"}, "both the branch and the change"),
+    ({"change": CHANGE}, "both the branch and the change"),
+    ({"branch": "feat/x", "change": CHANGE, "by": "orchestrator"}, "the owner's"),
+])
+def test_a_branch_decision_names_both_and_is_the_owners(tmp_path: Path, fields: dict,
+                                                        problem: str) -> None:
+    fields = {"by": "owner", **fields}
+
+    with pytest.raises(step.StepError, match=problem):
+        step.note_orchestrator(_log(tmp_path), "runs here", "pilot", **fields)
+
+
 def test_an_outcome_is_logged_with_its_run(tmp_path: Path) -> None:
     log = _log(tmp_path)
 

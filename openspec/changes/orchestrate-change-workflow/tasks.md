@@ -1291,15 +1291,27 @@ recorded branch decision (69 F1, F2, F7; 70 F1, F5, F9). Touches
 `.agents/change-outcome.schema.json`, `scripts/change_next_step.py`,
 `scripts/run_change_step.py`, and their tests.
 
-- [ ] 6c.1 The outcome schema: a `finished` plan outcome may carry `rounds`, a list
+- [x] 6c.1 The outcome schema: a `finished` plan outcome may carry `rounds`, a list
       of rounds, each a list of sessions, each a list of section ids (D13). The
       wrapper logs it on the plan's line.
-- [ ] 6c.2 `## Next`: the computation reads a review's triage file's `## Next`
+      Done: `rounds`, three nested arrays of at least one item, each id an integer
+      or a non-empty string (`anyOf`, nested, which `harness_schema` keeps: only a
+      top-level combinator is refused). The wrapper's validator gains `anyOf` and
+      `minItems`; the outcome's fields are logged as they are, so the plan's line
+      carries it. Not confirmed against Claude Code: that `--json-schema` accepts a
+      nested `anyOf` and `minItems` — the first unattended plan run shows it.
+- [x] 6c.2 `## Next`: the computation reads a review's triage file's `## Next`
       token, `Advance` or `Another round`; a review triage file without one is a
       triage in progress; validation and owner-notes triage files are not routed
       on; a legacy `## Gate` beginning `Passed` reads as `Advance`, any other goes
       to the owner (D16, 69 F2).
-- [ ] 6c.3 The advance conditions (D14): a design triage's `Advance` names
+      Done: `Record.next_token` reads the bare `## Next` heading (`## Next:
+      Advance` on one line too, `## Next round` not), any other first words going
+      to the owner (`not_advancing`). Two reviews triaged together may carry the
+      token in one file only: `governing` takes the latest review, or, while its
+      triage has no `## Next`, an earlier review whose triage file was written
+      after the latest was published; an earlier round's review never governs.
+- [x] 6c.3 The advance conditions (D14): a design triage's `Advance` names
       planning; an implementation round's names validation of the fix commit, then
       the next planned round or, after the last, the pre-closeout review, only on a
       `passed` validation naming the round's final commit, an `inconclusive` one
@@ -1309,15 +1321,40 @@ recorded branch decision (69 F1, F2, F7; 70 F1, F5, F9). Touches
       outside `openspec/` and `docs/` (`.agents/` and `.claude/` outside); `Another
       round` names the review of the same kind, after the fix commit's validation
       for implementation and pre-closeout. The gate rules these replace are removed.
-- [ ] 6c.4 Rounds (D13, 70 F1): the governing plan line is the latest `finished`
+      Done. `validated` names validation when the latest record describes another
+      commit (an ancestor differing only in records clears it, as before) and the
+      owner when it describes `HEAD` without `passed`, `inconclusive` included;
+      `validation_problem` gains `require_passed` and the wrapper module
+      `latest_validation` and `validation_result` for it. Another round
+      (`another_round`) validates only a fix committed since the reviewed commit
+      (`fixed_since`, kept), so with no fix the review runs again whatever the
+      validation said. A round's untriaged validation that passed or was
+      inconclusive opens no triage on its own (`needs_no_triage`), though a
+      triage opened for the round's other records lists it. Closeout measures
+      "a path outside `openspec/` and `docs/`" from the first closeout review's
+      reviewed commit, the archive, so a code fix an earlier closeout round
+      committed is validated even when the latest review read it. A plan that
+      finished but left the change `in planning` goes to the owner. The pending
+      reading's closeout steps include validation.
+- [x] 6c.4 Rounds (D13, 70 F1): the governing plan line is the latest `finished`
       plan line; the next round is the first of its `rounds` with a section
       `tasks.md` shows incomplete; the computation's result names that round's
       sessions for the orchestrator to record `by: plan` as it starts. With no
       `rounds`, or an incomplete section in no planned round, it names the owner.
-- [ ] 6c.5 The branch decision (D15, 70 F4): `note … orchestrator` accepts `--branch`
+      Done: `next_round` returns `{"step": "round", "sections": <sessions>, "by":
+      "plan"}`; the owner is named when the latest plan line has no `rounds` or
+      the first open section is in no planned round, the delta's wording (a later
+      unmapped section does not hold a mapped round). A closeout section a plan
+      maps is left out of the round, and a recorded round naming one is not held
+      open by it.
+- [x] 6c.5 The branch decision (D15, 70 F4): `note … orchestrator` accepts `--branch`
       and `--change`, recorded on the line; `run_change_step.py log` can filter for
       it, so a branch check can find the line naming the checked-out branch.
-- [ ] 6c.6 Verification: unit tests in `scripts/tests/test_change_next_step.py` over
+      Done: `note_orchestrator(branch=, change=)` requires both and `by: owner`;
+      the command's `--change` defaults to the log's own change, where steps
+      look; `log <change> --branch <branch>` prints only the owner's decisions
+      naming that branch and change (`branch_decisions`).
+- [x] 6c.6 Verification: unit tests in `scripts/tests/test_change_next_step.py` over
       fixture changes — each delta scenario added by the revision: a triage
       without `## Next`; a legacy `Passed` gate; an implementation round advancing
       through validation; an inconclusive validation; a closeout correction
@@ -1328,6 +1365,50 @@ recorded branch decision (69 F1, F2, F7; 70 F1, F5, F9). Touches
       fields. `uv run --no-project --with pytest pytest -q scripts/tests`;
       `make test`; `make check-tasks CHANGE=orchestrate-change-workflow`. No
       end-to-end scenario covers it.
+      Unit (`test_change_next_step.py`, fixture changes; `test_run_change_step.py`):
+      each scenario the task names — a triage without `## Next` (design, closeout);
+      a legacy `Passed` gate and a legacy gate not passed (design, pre-closeout,
+      closeout); a design triage's three tokens; a token on the heading line; an
+      implementation round advancing through its fix commit's validation to the
+      next planned round, and the last to the pre-closeout review; an
+      inconclusive validation, with and without a round; a pre-closeout `Advance`
+      validated then closeout; a closeout correction awaiting validation (an
+      `.agents/` path) and a documentation one not; another round with a fix
+      (implementation, pre-closeout) and without one (an inconclusive
+      validation not holding it); a closeout round's code fix validated before
+      cleanup; a two-round plan whose second round is named only after the first
+      advanced; an amended plan; a first open section unmapped and a later one
+      not holding a mapped round; a closeout section mapped; `## Next round`
+      not read as `## Next`; two reviews triaged together; an earlier round's
+      token not deciding a triage in progress — and the schema's `rounds` and
+      their refusals, and the branch decision recorded, found, defaulted, and
+      refused. Results: the focused suites 381 passed before the fresh-context
+      check, 389 after; `make test` passed every suite but `scripts/tests` before
+      the check's fixes, whose one failure was a test the fixes rewrote, the edit
+      landing during the run; `make test-release-tooling` (all of `scripts/tests`)
+      1047 passed after them. `make check-comment-hygiene`, `make check-tasks`,
+      `make check-packaging`: passed. By hand,
+      `python3 scripts/change_next_step.py` on this change: the owner, for this
+      session's own stopped run at seq 76, which this resumed run supersedes; on
+      the pilot: its triage's question at seq 55. End-to-end: none.
+
+Section 6c handoff. Fresh-context check of the diff against `615cbf43` (a
+subagent, read-only): no guidance breach; fixed what it found — a closeout round's
+code fix reaching archive cleanup unvalidated; `## Next round` read as `## Next`;
+two reviews triaged together stuck in progress; another round with no fix held by
+a validation that did not pass; an unmapped later section holding a mapped round;
+a mapped closeout section looping; an inconclusive validation with no round
+re-validating forever; a docstring's gate wording and wrapping; a misfiled branch
+decision (now defaulted to the log's change); `last_entries` unused by `main`;
+unused test constants and a duplicate test. Declined: a decision line that
+accepts an inconclusive validation — a passing validation is what clears it, and
+the owner result says so. `scripts/check_change_index.py`'s docstring, which
+spoke of triage "at a phase-closing gate", now speaks of a phase-closing review's
+triage that advances. Left for the next triage: `scripts/find_change.py`'s
+docstring cites the requirement "Phases and owner gates", which the archive
+renames "Phases and owner touchpoints"; it resolves until then, and it is code,
+which closeout does not edit, so it is reworded in implementation, by the round
+after this one, or at the triage.
 
 ## 6d. The skills: touchpoints, relaying without judging, and the cadence
 

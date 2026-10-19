@@ -105,7 +105,6 @@ def _round(root: Path, sections, after: int | None = None) -> None:
 # What HEAD changed since a reviewed commit: a fix in code, unless a test says otherwise.
 FIX = ["scripts/change_next_step.py"]
 RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
-ARCHIVED_RECORDS_ONLY = [f"openspec/changes/archive/2026-10-20-{CHANGE}/interventions.jsonl"]
 
 
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX) -> dict:
@@ -163,27 +162,28 @@ def test_a_task_under_another_sections_heading_is_not_routed_on(tmp_path: Path) 
     assert "3.1 sits under `## 2. Second`" in result["reason"]
 
 
-def test_a_design_gate_not_passed_returns_to_design(tmp_path: Path) -> None:
+def test_a_legacy_design_gate_not_passed_goes_to_the_owner(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
     _log(root, "design", FINISHED)
     _record(root, f"01-{KIND}.md", triage="Not passed: F1 needs another round.")
     _log(root, "triage", FINISHED)
 
-    assert _next(root)["step"] == "design"
+    assert _next(root)["step"] == "owner"
 
 
 def test_ready_for_planning_runs_planning(tmp_path: Path) -> None:
     assert _next(_repository(tmp_path, "ready for planning"))["step"] == "plan"
 
 
-def test_a_written_plan_waits_for_the_owners_acceptance(tmp_path: Path) -> None:
+def test_a_plan_that_finished_without_setting_its_status_goes_to_the_owner(
+        tmp_path: Path) -> None:
     root = _repository(tmp_path, "in planning")
     _log(root, "plan", FINISHED)
 
     result = _next(root)
 
-    assert (result["step"], result["resume"]) == ("owner", "plan")
-    assert "accepts it" in result["reason"]
+    assert result["step"] == "owner" and "left the change in planning" in result["reason"]
+    assert "resume" not in result
 
 
 def test_planning_in_progress_continues(tmp_path: Path) -> None:
@@ -318,46 +318,356 @@ def _failed_pre_closeout(tmp_path: Path, *, reviewed: str, validated: str = HEAD
     return root
 
 
-def test_a_pre_closeout_gate_not_passed_waits_for_the_owner(tmp_path: Path) -> None:
+def test_a_legacy_pre_closeout_gate_not_passed_goes_to_the_owner(tmp_path: Path) -> None:
     root = _failed_pre_closeout(tmp_path, reviewed=HEAD)
 
     result = _next(root)
 
-    assert result["step"] == "owner" and "03-pre-closeout.md" in result["reason"]
+    assert result["step"] == "owner" and "03-pre-closeout" in result["reason"]
 
 
-# A failed gate is answered by a fix: once HEAD moved past the reviewed commit in
-# more than changes' records, the review of the same kind runs again.
+def _next_section(token: str) -> str:
+    return f"# Triage\n\n### F1 — x\n\n## Next\n\n{token}\n"
 
-def test_a_fix_after_a_failed_pre_closeout_gate_is_validated_then_reviewed_again(
-        tmp_path: Path) -> None:
-    root = _failed_pre_closeout(tmp_path, reviewed="e" * 40, validated="e" * 40)
+
+def _triaged(root: Path, name: str, next_words: str, reviewed: str | None = None) -> None:
+    """A review record whose triage file ends with `## Next`."""
+    _record(root, name, reviewed=reviewed)
+    (_reviews(root) / name.replace(".md", ".triage.md")).write_text(
+        _next_section(next_words), "utf-8")
+
+
+# Another round runs the review of the same kind again: for pre-closeout, once
+# the fix commit is validated; with no fix, on the same commit.
+
+def test_another_pre_closeout_round_is_validated_then_reviewed_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2, 3]])
+    _check(root, ALL_WORK_DONE)
+    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Not a gate.")
+    _triaged(root, "02-implementation.md", "Advance")
+    _triaged(root, "03-pre-closeout.md", "Another round — F2 changes the interface.",
+             reviewed="e" * 40)
 
     unvalidated = _next(root)
-    _record(root, "04-validation.md", text=_validation(HEAD), triage="Not a gate.")
+    _record(root, "04-validation.md", text=_validation(HEAD))
     validated = _next(root)
 
     assert unvalidated["step"] == "validate" and "not HEAD" in unvalidated["reason"]
     assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
-    assert "03-pre-closeout.md" in validated["reason"]
+    assert "another round" in validated["reason"]
 
 
-def test_a_records_only_change_after_a_failed_gate_is_not_a_fix(tmp_path: Path) -> None:
-    root = _failed_pre_closeout(tmp_path, reviewed="e" * 40)
+def test_another_round_with_no_fix_reviews_the_same_commit_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2, 3]])
+    _check(root, ALL_WORK_DONE)
+    _record(root, "01-validation.md", text=_validation(), triage="Not a gate.")
+    _triaged(root, "02-implementation.md", "Another round", reviewed=HEAD)
 
-    assert _next(root, changed=RECORDS_ONLY)["step"] == "owner"
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "implementation")
 
 
-def test_a_fix_after_a_failed_closeout_gate_is_reviewed_again(tmp_path: Path) -> None:
+def test_another_closeout_round_is_reviewed_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Another round", reviewed="e" * 40)
+
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "closeout")
+
+
+def test_a_legacy_closeout_gate_not_passed_goes_to_the_owner(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in closeout", archived=True)
     _record(root, "05-closeout.md", triage="Not passed.", reviewed="e" * 40)
 
-    fixed = _next(root)
-    # A closeout triage commits the archived change's ledger; that is not a fix.
-    unchanged = _next(root, changed=ARCHIVED_RECORDS_ONLY)
+    assert _next(root)["step"] == "owner"
 
-    assert (fixed["step"], fixed["kind"]) == ("review", "closeout")
-    assert unchanged["step"] == "owner"
+
+# `## Next`: the token alone routes; a triage file without it is in progress.
+
+@pytest.mark.parametrize("status,name", [("in design", f"01-{KIND}.md"),
+                                         ("in closeout", "05-closeout.md")])
+def test_a_triage_without_next_is_in_progress(tmp_path: Path, status: str, name: str) -> None:
+    root = _repository(tmp_path, status, archived=status == "in closeout")
+    _record(root, name)
+    (_reviews(root) / name.replace(".md", ".triage.md")).write_text(
+        "# Triage\n\n### F1 — x\n\n- **Owner disposition:** accepted\n", "utf-8")
+
+    result = _next(root)
+
+    assert result["step"] == "triage" and "in progress" in result["reason"]
+
+
+@pytest.mark.parametrize("words,step_name", [
+    ("Advance — the owner: \"advance.\"", "plan"),
+    ("Another round — D3 changed.", "review"),
+    ("Passed, I think", "owner"),
+])
+def test_a_design_triage_routes_on_its_next_token(tmp_path: Path, words: str,
+                                                   step_name: str) -> None:
+    root = _repository(tmp_path, "in design")
+    _log(root, "design", FINISHED)
+    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                        commit=HEAD, extra={"kind": "design", "record": f"01-{KIND}.md"})
+    _triaged(root, f"01-{KIND}.md", words)
+    _log(root, "triage", FINISHED)
+
+    assert _next(root)["step"] == step_name
+
+
+def test_a_next_token_on_the_heading_line_is_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md")
+    (_reviews(root) / f"01-{KIND}.triage.md").write_text("# Triage\n\n## Next: Advance\n",
+                                                          "utf-8")
+
+    assert _next(root)["step"] == "plan"
+
+
+def test_a_legacy_passed_gate_reads_as_advance(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md", triage="Passed — Advance. The owner: \"advance.\"")
+
+    assert _next(root)["step"] == "plan"
+
+
+# An implementation round advances on a passing validation of its fix commit.
+
+PLAN = {"outcome": "finished", "message": "Planned.", "next": "implementation",
+        "rounds": [[[2]], [[3]]]}
+
+
+def _advanced_round(root: Path, validated: str = HEAD, result: str = "passed") -> None:
+    _log(root, "plan", PLAN)
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "02-implementation.md", "Advance", reviewed="e" * 40)
+    if validated:
+        _record(root, "03-validation.md", text=_validation(validated, result))
+
+
+def test_an_advancing_round_validates_its_fix_commit_then_starts_the_next_planned_round(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _advanced_round(root, validated="")
+
+    unvalidated = _next(root)
+    _record(root, "03-validation.md", text=_validation(HEAD))
+    validated = _next(root)
+
+    assert unvalidated["step"] == "validate"
+    assert validated == {"step": "round", "sections": [[3]], "by": "plan",
+                         "reason": validated["reason"]}
+
+
+def test_an_inconclusive_validation_of_the_fix_commit_goes_to_the_owner(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _advanced_round(root, result="inconclusive")
+
+    result = _next(root)
+
+    assert (result["step"], result["validation"]) == ("owner", "inconclusive")
+
+
+def test_the_last_planned_round_advancing_goes_to_the_pre_closeout_review(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _advanced_round(root)
+    _check(root, ALL_WORK_DONE)
+
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "pre-closeout")
+
+
+def test_a_pre_closeout_triage_that_advances_goes_to_closeout_once_head_is_validated(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation", tasks=ALL_WORK_DONE)
+    _triaged(root, "03-pre-closeout.md", "Advance", reviewed=HEAD)
+
+    unvalidated = _next(root)
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    validated = _next(root)
+
+    assert unvalidated["step"] == "validate"
+    assert validated["step"] == "closeout"
+
+
+# A closeout triage that advances: archive cleanup, after a validation when a
+# correction changed more than documentation.
+
+def test_a_closeout_correction_awaits_validation(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Advance", reviewed="e" * 40)
+
+    unvalidated = _next(root, changed=[".agents/skills/change-triage/SKILL.md"])
+    _record(root, "06-validation.md", text=_validation(HEAD))
+    validated = _next(root, changed=FIX)
+
+    assert unvalidated["step"] == "validate" and ".agents/" in unvalidated["reason"]
+    assert validated["step"] == "archive-cleanup"
+
+
+def test_a_documentation_correction_at_closeout_needs_no_validation(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Advance", reviewed="e" * 40)
+
+    result = _next(root, changed=["docs/agents/change-workflow.md",
+                                  "openspec/specs/change-workflow/spec.md"])
+
+    assert result["step"] == "archive-cleanup"
+
+
+# The plan's mapping of rounds.
+
+def test_a_two_round_plan_names_the_second_round_only_after_the_first_advanced(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", PLAN)
+
+    first = _next(root)
+    _round(root, [[2]])
+    implementing = _next(root)
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    viewing = _next(root)
+
+    assert (first["step"], first["sections"], first["by"]) == ("round", [[2]], "plan")
+    assert (implementing["step"], implementing["sections"]) == ("implement", [2])
+    assert viewing["step"] == "round-view"
+
+
+def test_an_amended_plan_governs_the_rounds_it_maps(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _log(root, "plan", PLAN)
+    _log(root, "plan", {**PLAN, "rounds": [[[2], [3]]]})
+
+    result = _next(root)
+
+    assert (result["step"], result["sections"]) == ("round", [[2], [3]])
+
+
+@pytest.mark.parametrize("plan", [FINISHED, {**PLAN, "rounds": [[[3]]]}])
+def test_a_first_open_section_no_planned_round_names_goes_to_the_owner(
+        tmp_path: Path, plan: dict) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", plan)
+
+    result = _next(root)
+
+    assert (result["step"], result["round"]) == ("owner", ["2", "3"])
+    assert "agree the next implementation round" in result["reason"]
+
+
+def test_a_later_unmapped_section_does_not_hold_the_next_planned_round(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", {**PLAN, "rounds": [[[2]]]})
+
+    assert (_next(root)["step"], _next(root)["sections"]) == ("round", [[2]])
+
+
+def test_a_closeout_section_a_plan_maps_is_left_out_of_its_round(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", {**PLAN, "rounds": [[[2], [3, 4]]]})
+
+    planned = _next(root)
+    _round(root, [[2], [3, 4]])
+    _check(root, ALL_WORK_DONE)
+    recorded = _next(root)
+
+    assert planned["sections"] == [[2], [3]]
+    # A round recorded with the closeout section is not held open by it.
+    assert recorded["step"] == "round-view"
+
+
+# `## Next` belongs to the bare heading, and to the review triaged with the round's.
+
+def test_a_next_round_heading_is_not_next(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md")
+    (_reviews(root) / f"01-{KIND}.triage.md").write_text(
+        "# Triage\n\n## Next round\n\nRe-review D3.\n\n## Gate\n\nPassed.\n", "utf-8")
+
+    assert _next(root)["step"] == "plan"
+
+
+def test_two_reviews_triaged_together_follow_the_one_with_next(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _log(root, "plan", PLAN)
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation(), triage="Evidence.")
+    _record(root, "02-implementation.md")
+    _record(root, "03-implementation-external.md")
+    # Triaged together, after both were published: the token is in one file only.
+    (_reviews(root) / "03-implementation-external.triage.md").write_text(
+        "# Triage\n\nEvidence for the round triaged in 02.\n", "utf-8")
+    (_reviews(root) / "02-implementation.triage.md").write_text(_next_section("Advance"),
+                                                                 "utf-8")
+
+    assert _next(root)["step"] == "round"
+
+
+def test_an_earlier_rounds_token_does_not_decide_a_triage_in_progress(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation(), triage="Evidence.")
+    _triaged(root, "02-implementation.md", "Another round", reviewed=HEAD)
+    _record(root, "03-implementation.md", reviewed=HEAD)
+    (_reviews(root) / "03-implementation.triage.md").write_text("# Triage\n", "utf-8")
+
+    result = _next(root)
+
+    assert result["step"] == "triage" and "in progress" in result["reason"]
+
+
+# Another round runs the review again, validating only a fix committed since.
+
+def test_another_implementation_round_with_a_fix_is_validated_first(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "02-implementation.md", "Another round", reviewed="e" * 40)
+
+    unvalidated = _next(root)
+    _record(root, "03-validation.md", text=_validation(HEAD))
+    validated = _next(root)
+
+    assert unvalidated["step"] == "validate"
+    assert (validated["step"], validated["kind"]) == ("review", "implementation")
+
+
+def test_another_round_with_no_fix_runs_whatever_the_validation_said(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "01-validation.md", text=_validation(HEAD, "inconclusive"),
+            triage="Evidence.")
+    _triaged(root, "02-implementation.md", "Another round", reviewed=HEAD)
+
+    assert (_next(root)["step"], _next(root)["kind"]) == ("review", "implementation")
+
+
+def test_a_code_fix_from_an_earlier_closeout_round_is_validated_before_cleanup(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in closeout", archived=True)
+    _triaged(root, "05-closeout.md", "Another round", reviewed="a" * 40)
+    # The latest review read the fix commit, HEAD: only the archive commit shows it.
+    _triaged(root, "07-closeout.md", "Advance", reviewed=HEAD)
+
+    assert _next(root)["step"] == "validate"
+
+
+def test_with_no_round_an_inconclusive_validation_goes_to_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _check(root, ALL_WORK_DONE)
+    _record(root, "01-validation.md", text=_validation(HEAD, "inconclusive"))
+
+    result = _next(root)
+
+    assert (result["step"], result["validation"]) == ("owner", "inconclusive")
 
 
 def test_the_owner_may_direct_a_repeat_review_with_no_fix(tmp_path: Path) -> None:
@@ -403,13 +713,6 @@ def test_a_passed_closeout_gate_goes_to_archive_cleanup(tmp_path: Path) -> None:
     _record(root, "05-closeout.md", triage="Passed (\"Yes, pass it.\").")
 
     assert _next(root)["step"] == "archive-cleanup"
-
-
-def test_a_closeout_gate_not_passed_waits_for_the_owner(tmp_path: Path) -> None:
-    root = _repository(tmp_path, "in closeout", archived=True)
-    _record(root, "05-closeout.md", triage="Not passed.")
-
-    assert _next(root)["step"] == "owner"
 
 
 def test_an_archived_change_is_done(tmp_path: Path) -> None:

@@ -166,7 +166,7 @@ def schema_problems(value: Any, schema: dict[str, Any], path: str = "outcome") -
     """
     unknown = set(schema) - _ANNOTATIONS - {
         "type", "properties", "required", "additionalProperties", "enum", "const",
-        "minLength", "items", "allOf", "if", "then"}
+        "minLength", "minItems", "items", "allOf", "anyOf", "if", "then"}
     if unknown:
         raise StepError(f"the outcome schema uses {', '.join(sorted(unknown))}, "
                         "which this check does not enforce")
@@ -182,6 +182,10 @@ def schema_problems(value: Any, schema: dict[str, Any], path: str = "outcome") -
         problems.append(f"{path} is {value!r}, not one of {', '.join(map(str, schema['enum']))}")
     if "minLength" in schema and isinstance(value, str) and len(value) < schema["minLength"]:
         problems.append(f"{path} is shorter than {schema['minLength']}")
+    if "minItems" in schema and isinstance(value, list) and len(value) < schema["minItems"]:
+        problems.append(f"{path} has fewer than {schema['minItems']} items")
+    if "anyOf" in schema and all(schema_problems(value, part, path) for part in schema["anyOf"]):
+        problems.append(f"{path} matches none of its allowed forms")
     if isinstance(value, list) and "items" in schema:
         for index, item in enumerate(value):
             problems += schema_problems(item, schema["items"], f"{path}[{index}]")
@@ -345,6 +349,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
                       resolves: int | None = None, reads: int | None = None,
                       next_step: str | None = None, kind: str | None = None,
+                      branch: str | None = None, change: str | None = None,
                       clock: Clock = _utc_now) -> Entry:
     """Record a decision: the orchestrating session's own routing or recovery, or
     the owner's, relayed by it.
@@ -363,8 +368,11 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     computation names until that step has run. A directed review takes its
     `kind`, without which the computation could not name one; a directed step
     of any other kind is a confirmed return, so it resolves the returned run,
-    which would otherwise wait ahead of the directive. A repeat review after a
-    failed gate names no run: a failed gate is a state of the triage file.
+    which would otherwise wait ahead of the directive. A repeat review the owner
+    asks for outside a triage names no run, since no run waits on it.
+    `branch` and `change` record the owner's word that `change` is worked on
+    `branch` though the branch is not its own, which each step's branch check
+    accepts in place of asking (`branch_decisions`); only the owner gives it.
     """
     if not decision or not reason:
         raise StepError("an orchestrator line names its decision and its reason")
@@ -372,6 +380,12 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
         raise StepError("an orchestrator line names who decided")
     line: Entry = {"step": ORCHESTRATOR, "outcome": ORCHESTRATOR, "by": by,
                    "decision": decision, "reason": reason}
+    if branch is not None or change is not None:
+        if not branch or not change:
+            raise StepError("a branch decision names both the branch and the change")
+        if by != "owner":
+            raise StepError("a branch decision is the owner's")
+        line.update(branch=branch, change=change)
     runs = {entry["seq"]: entry for entry in read_log(path) if entry.get("step") in STEPS}
     if resolves is not None:
         if resolves not in runs:
@@ -402,6 +416,16 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
             raise StepError(f"unknown review kind {kind!r}; expected one of {', '.join(KINDS)}")
         line["kind"] = kind
     return append_entry(path, line, clock)
+
+
+def branch_decisions(entries: Sequence[Entry], branch: str,
+                     change: str | None = None) -> list[Entry]:
+    """The owner's decisions that a change is worked on `branch`, and of `change`
+    when one is named."""
+    return [entry for entry in entries
+            if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
+            and entry.get("branch") == branch
+            and (change is None or entry.get("change") == change)]
 
 
 @dataclass(frozen=True)
@@ -1321,19 +1345,34 @@ _RECORD = re.compile(
     rf"^{re.escape(str(CHANGES))}/(?:archive/)?(?!archive/)[^/]+/(interventions\.jsonl$|reviews/)")
 
 
+def latest_validation(reviews: Path) -> Path | None:
+    """The change's latest validation record, if it has one."""
+    records = [(int(match.group(1)), entry) for entry in
+               (reviews.glob("[0-9]*-validation.md") if reviews.is_dir() else [])
+               if (match := _NUMBERED.match(entry.name))]
+    return max(records)[1] if records else None
+
+
+def validation_result(record: Path) -> str | None:
+    """The result a validation record states, lower-cased: `passed`, `failed`,
+    `inconclusive`; None when it states none."""
+    result = _VALIDATION_RESULT.search(record.read_text("utf-8"))
+    return result.group(1).lower() if result else None
+
+
 def validation_problem(reviews: Path, head: str, root: Path | None = None,
-                       changed_since: ChangedSince = _changed_since) -> str | None:
+                       changed_since: ChangedSince = _changed_since,
+                       require_passed: bool = True) -> str | None:
     """Why the latest validation record does not clear `head` for closeout, if it does not.
 
     A validation of an ancestor clears `head` when the two commits differ only in
     changes' records; without `root` to compare them in, only `head` itself does.
+    Without `require_passed`, a record of the right commit clears it whatever its
+    result, for a caller that reads the result itself.
     """
-    records = [(int(match.group(1)), entry) for entry in
-               (reviews.glob("[0-9]*-validation.md") if reviews.is_dir() else [])
-               if (match := _NUMBERED.match(entry.name))]
-    if not records:
+    record = latest_validation(reviews)
+    if record is None:
         return "the change has no validation record"
-    record = max(records)[1]
     text = record.read_text("utf-8")
     commit = _VALIDATION_COMMIT.search(text)
     result = _VALIDATION_RESULT.search(text)
@@ -1347,7 +1386,7 @@ def validation_problem(reviews: Path, head: str, root: Path | None = None,
         if others := [path for path in changed if not _RECORD.match(path)]:
             return (f"{record.name} validates {validated[:12]}, and HEAD {head[:12]} also "
                     f"changes {', '.join(others[:3])}" + (" …" if len(others) > 3 else ""))
-    if not result or result.group(1).lower() != "passed":
+    if require_passed and (not result or result.group(1).lower() != "passed"):
         return f"{record.name}'s result is {result.group(1) if result else 'missing'}, not passed"
     return None
 
@@ -1869,6 +1908,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     log = commands.add_parser("log", help="print the last lines of the change's workflow log")
     log.add_argument("change")
     log.add_argument("--last", type=int, default=10)
+    log.add_argument("--branch", default=None,
+                     help="only the owner's decisions that the change is worked on this "
+                          "branch")
     watch_ = commands.add_parser(
         "watch", help="follow the progress of the change's steps as they run")
     watch_.add_argument("change")
@@ -1898,6 +1940,12 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     decision.add_argument("--next", dest="next_step", default=None,
                           help="the step the decision directs next")
     decision.add_argument("--kind", default=None, help="the review kind when --next is review")
+    decision.add_argument("--branch", default=None,
+                          help="with --change, the owner's word that the change is worked on "
+                               "this branch")
+    decision.add_argument("--change", dest="decided_change", default=None,
+                          help="the change the branch decision is for; the log's own by "
+                               "default")
     args = parser.parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
@@ -1926,7 +1974,12 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "log":
-            for entry in last_entries(path, args.last):
+            if args.branch:
+                found = branch_decisions(read_log(path), args.branch, args.change)
+                entries = found[-args.last:] if args.last > 0 else []
+            else:
+                entries = last_entries(path, args.last)
+            for entry in entries:
                 print(json.dumps(entry, ensure_ascii=False))
         elif args.command == "watch":
             try:
@@ -1945,7 +1998,12 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         else:
             line = note_orchestrator(path, args.decision, args.reason, by=args.by,
                                      resolves=args.resolves, reads=args.reads,
-                                     next_step=args.next_step, kind=args.kind)
+                                     next_step=args.next_step, kind=args.kind,
+                                     branch=args.branch,
+                                     # A branch decision is about the change whose
+                                     # log holds it, which is where steps look.
+                                     change=args.decided_change
+                                     or (args.change if args.branch else None))
             print(json.dumps(line, ensure_ascii=False))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
