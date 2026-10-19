@@ -961,8 +961,10 @@ Secrets is owed. Accepted scope beyond the original proposal.
   read, idempotently, deriving each key with `cast` from Foundry's default mnemonic at
   `helm/Makefile`'s `DEV_ACCOUNT_*` indices (development values only, never for a public
   network); provisioning's SSH key is the committed mock placeholder,
-  `PROVISIONING_SSH_KEY_FILE`. `check-local-secrets`, run by the topology targets and the
-  single-release `test` and `test-module`, names it when a Secret is missing.
+  `PROVISIONING_SSH_KEY_FILE`. It also creates, if absent, the deal test's buyer-profile
+  volume (`arkhai-buyer-profiles`), which no chart creates. `check-local-secrets`, run by
+  the topology targets and the single-release `test` and `test-module`, names it when a
+  Secret or that volume is missing.
 
 ### Owner principles and where they go
 

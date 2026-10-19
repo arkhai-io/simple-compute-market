@@ -560,8 +560,9 @@ deploy-helm:
 # the bare-metal storefront and its own provisioning service, publishing to
 # release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
 # topology targets say what each installs, needs, and checks; helm-topology-secrets
-# creates the Secrets both releases read, from development values only.
-helm-topology-secrets: ## Create every out-of-band Secret the local two-release Helm topology reads, from development values (cast and kubectl)
+# creates the Secrets both releases read and the deal test's buyer-profile volume,
+# from development values only.
+helm-topology-secrets: ## Create the local two-release Helm topology's Secrets and the buyer-profile volume, from development values (cast and kubectl)
 	$(MAKE) -C helm topology-secrets
 
 helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments, all but dev-env's, onto rebuilt images

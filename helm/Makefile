@@ -16,6 +16,13 @@ LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime
 # test also layers for the buyer's credential, and the buyer CLI's profile
 # credential.
 TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential
+# The PersistentVolumeClaims the release's `helm test` mounts and no chart
+# creates: the deal test's buyer profile store (the e2e-tests chart's
+# buyer.profileStore.existingClaim; a render test holds the two equal), and the
+# size topology-secrets requests for it, enough for a development buyer's
+# profile file.
+TEST_VOLUMES := arkhai-buyer-profiles
+TEST_VOLUME_SIZE := 100Mi
 
 .PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
 	topology-up topology-down topology-check topology-secrets
@@ -76,18 +83,22 @@ deploy-local:
 undeploy:
 	helm uninstall $(RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
 
-## Fail, naming each one, unless every out-of-band Secret a deploy needs exists.
+## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS and
+## every PersistentVolumeClaim in LOCAL_VOLUMES (none unless given) exists.
 check-local-secrets:
 	@missing=""; \
 	for secret in $(LOCAL_SECRETS); do \
-		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing $$secret"; \
+		kubectl get secret --namespace $(NAMESPACE) "$$secret" >/dev/null 2>&1 || missing="$$missing Secret/$$secret"; \
+	done; \
+	for claim in $(LOCAL_VOLUMES); do \
+		kubectl get pvc --namespace $(NAMESPACE) "$$claim" >/dev/null 2>&1 || missing="$$missing PersistentVolumeClaim/$$claim"; \
 	done; \
 	if [ -n "$$missing" ]; then \
-		echo "ERROR: Secrets missing from namespace $(NAMESPACE):$$missing" >&2; \
+		echo "ERROR: missing from namespace $(NAMESPACE):$$missing" >&2; \
 		echo "For local development, \`make -C helm topology-secrets\` (\`make helm-topology-secrets\`) creates every one from development values." >&2; \
 		exit 1; \
 	fi; \
-	echo "Every out-of-band Secret required here exists in namespace $(NAMESPACE)."
+	echo "Every out-of-band Secret and volume required here exists in namespace $(NAMESPACE)."
 
 # ---------------------------------------------------------------------------
 # The local two-release topology: several storefronts per registry, each in its
@@ -186,9 +197,10 @@ topology-up:
 
 ## Create, or replace the contents of, every out-of-band Secret the topology
 ## reads -- $(LOCAL_SECRETS), $(TOPOLOGY_SECRETS), and $(TEST_SECRETS) -- from
-## the development values above, idempotently (scripts/topology-secrets.sh says
-## what each holds). Needs cast (Foundry) and kubectl. Development only, never
-## for a public network.
+## the development values above, and the buyer-profile volume the deal test
+## mounts ($(TEST_VOLUMES), created if absent), idempotently
+## (scripts/topology-secrets.sh says what each holds). Needs cast (Foundry) and
+## kubectl. Development only, never for a public network.
 topology-secrets:
 	NAMESPACE="$(NAMESPACE)" DEV_MNEMONIC="$(DEV_MNEMONIC)" \
 	DEV_ACCOUNT_PROVISIONING="$(DEV_ACCOUNT_PROVISIONING)" DEV_ACCOUNT_BUYER="$(DEV_ACCOUNT_BUYER)" \
@@ -197,6 +209,7 @@ topology-secrets:
 	DEV_ACCOUNT_BARE_METAL_STOREFRONT="$(DEV_ACCOUNT_BARE_METAL_STOREFRONT)" \
 	DEV_ACCOUNT_BARE_METAL_PROVISIONING="$(DEV_ACCOUNT_BARE_METAL_PROVISIONING)" \
 	PROVISIONING_SSH_KEY_FILE="$(PROVISIONING_SSH_KEY_FILE)" \
+	TEST_VOLUMES="$(TEST_VOLUMES)" TEST_VOLUME_SIZE="$(TEST_VOLUME_SIZE)" \
 		./scripts/topology-secrets.sh
 
 ## Uninstall the two-release topology, release 2 first, waiting for each.
@@ -207,8 +220,8 @@ topology-down:
 	@$(MAKE) --no-print-directory undeploy
 
 ## Run both releases' helm tests, after checking for the Secrets release 1's
-## tests read beyond a deploy's ($(TEST_SECRETS)). Release 1's: contract
-## validation, which checks the chain's ID (its fixtures also read the buyer's
+## tests read beyond a deploy's ($(TEST_SECRETS)) and the deal test's volume
+## ($(TEST_VOLUMES)). Release 1's: contract validation, which checks the chain's ID (its fixtures also read the buyer's
 ## and Bob's wallet addresses, from the generated smoke profile); the
 ## registry smoke test, which reads health and publishers through the typed
 ## client, pinned to the release's registry signer and authority from that
@@ -225,14 +238,14 @@ topology-down:
 ## running releases.
 topology-check:
 	$(TOPOLOGY_NAMES_FIXED)
-	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)"
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)" LOCAL_VOLUMES="$(TEST_VOLUMES)"
 	helm test $(RELEASE) --namespace $(NAMESPACE) --logs
 	helm test $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --logs
 
 ## Run helm tests against the deployed release, after checking for the Secrets
-## they read beyond a deploy's ($(TEST_SECRETS)).
+## and volume they read beyond a deploy's ($(TEST_SECRETS), $(TEST_VOLUMES)).
 test:
-	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)"
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_SECRETS)" LOCAL_VOLUMES="$(TEST_VOLUMES)"
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs
@@ -257,12 +270,13 @@ TEST_POD_SUFFIX_e2e-tests          := e2e-deal-test
 # registry smoke test's buyer credential under $(LOCAL_VALUES).
 TEST_MODULE_SECRETS_e2e-tests := $(TEST_SECRETS)
 TEST_MODULE_SECRETS_registry  := arkhai-e2e-credentials
+TEST_MODULE_VOLUMES_e2e-tests := $(TEST_VOLUMES)
 
 test-module:
 ifndef MODULE
 	$(error MODULE is not set. Usage: make test-module MODULE=<subchart-name>)
 endif
-	$(if $(TEST_MODULE_SECRETS_$(MODULE)),@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_MODULE_SECRETS_$(MODULE))")
+	$(if $(TEST_MODULE_SECRETS_$(MODULE)),@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TEST_MODULE_SECRETS_$(MODULE))" LOCAL_VOLUMES="$(TEST_MODULE_VOLUMES_$(MODULE))")
 	helm test $(RELEASE) \
 		--namespace $(NAMESPACE) \
 		--logs \

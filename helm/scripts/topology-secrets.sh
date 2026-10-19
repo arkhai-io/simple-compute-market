@@ -24,6 +24,12 @@
 #   DEV_ACCOUNT_BARE_METAL_PROVISIONING release 2's provisioning signer (9)
 #   PROVISIONING_SSH_KEY_FILE          the file both provisioning services mount
 #                                      as their SSH key
+#   TEST_VOLUMES                       the PersistentVolumeClaims release 1's deal
+#                                      test mounts (its buyer profile store)
+#   TEST_VOLUME_SIZE                   the storage each requests
+#
+# A claim that already exists is left as it is: its size and access mode are
+# immutable once bound, and its contents are the buyer's profiles.
 set -euo pipefail
 
 require() {
@@ -38,7 +44,7 @@ require() {
 
 require NAMESPACE DEV_MNEMONIC DEV_ACCOUNT_PROVISIONING DEV_ACCOUNT_BUYER DEV_ACCOUNT_BOB \
     DEV_ACCOUNT_REGISTRY DEV_ACCOUNT_PROVISIONING_ADMIN DEV_ACCOUNT_BARE_METAL_STOREFRONT \
-    DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE
+    DEV_ACCOUNT_BARE_METAL_PROVISIONING PROVISIONING_SSH_KEY_FILE TEST_VOLUMES TEST_VOLUME_SIZE
 
 for tool in cast kubectl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -144,3 +150,25 @@ EOF
 apply arkhai-bare-metal-storefront-runtime "storefront.secrets.toml=$work/bare-metal.storefront.secrets.toml"
 echo "  arkhai-bare-metal-storefront-runtime: [Wallet].private_key, Anvil account $DEV_ACCOUNT_BARE_METAL_STOREFRONT"
 credential arkhai-bare-metal-provisioning-identity "$DEV_ACCOUNT_BARE_METAL_PROVISIONING"
+
+# Release 1's deal test's buyer profile store, a volume no chart creates. The
+# cluster's default storage class provisions it.
+for claim in $TEST_VOLUMES; do
+    if kubectl get pvc "$claim" --namespace "$NAMESPACE" >/dev/null 2>&1; then
+        echo "  PersistentVolumeClaim $claim: exists, left as it is"
+        continue
+    fi
+    kubectl apply --namespace "$NAMESPACE" --filename - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: $claim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: $TEST_VOLUME_SIZE
+EOF
+    echo "  PersistentVolumeClaim $claim: $TEST_VOLUME_SIZE, ReadWriteOnce"
+done

@@ -5041,8 +5041,9 @@ storefront's configuration reaches it through its configuration system"; `design
       **Amended (16.8's check):** a rerun creates every Secret both releases read with `make
       helm-topology-secrets` first (development values derived from Foundry's default
       mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices; `helm/scripts/topology-secrets.sh`
-      says what each holds), then `make helm-topology-up`, which restarts the topology's
-      Deployments but dev-env's, and `make helm-topology-check`.
+      says what each holds; it also creates, if absent, the deal test's buyer-profile volume
+      `arkhai-buyer-profiles`, which no chart creates), then `make helm-topology-up`, which
+      restarts the topology's Deployments but dev-env's, and `make helm-topology-check`.
 - [x] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
@@ -5223,10 +5224,16 @@ storefront's configuration reaches it through its configuration system"; `design
       `PROVISIONING_SSH_KEY_FILE`, the committed placeholder the bare-metal Compose lane
       mounts (mock provisioning opens no connection), and its secrets profile holds an empty
       `inventory_ini`. `arkhai-bob-runtime` also carries `config-seller-secret.yml`, the
-      storefront smoke test's seller profile. A missing input, tool, or file stops it naming
-      the variable. `check-local-secrets`, which `topology-up`, `topology-check`, `test`,
-      and `test-module` (for `e2e-tests` and `registry`) run first, names the target when a
-      Secret is missing. **Render:** release 1's `test-config` ConfigMap gains exactly
+      storefront smoke test's seller profile. It also creates, if absent, the deal test's
+      buyer-profile volume, the PersistentVolumeClaim `TEST_VOLUMES` names
+      (`arkhai-buyer-profiles`, the e2e-tests chart's `buyer.profileStore.existingClaim`,
+      which no chart creates): `TEST_VOLUME_SIZE` (100Mi), ReadWriteOnce, the default storage
+      class; an existing claim is left as it is, since a bound claim's size and access mode
+      are fixed and it holds the buyer's profiles. A missing input, tool, or file stops it
+      naming the variable. `check-local-secrets`, which `topology-up`, `topology-check`,
+      `test`, and `test-module` (for `e2e-tests` and `registry`) run first, also checks the
+      claims in `LOCAL_VOLUMES` (`topology-check`, `test`, and `test-module MODULE=e2e-tests`
+      pass `TEST_VOLUMES`) and names the target when a Secret or claim is missing. **Render:** release 1's `test-config` ConfigMap gains exactly
       `buyer.wallet_address`, `registry.authority_id`, `registry.identifier`, and (under
       `local-values.yaml`) `seller.wallet_address`; under `local-values.yaml` its registry
       smoke pod also gains the credential profile's mount, volume, and profile -- the one
@@ -5242,7 +5249,7 @@ storefront's configuration reaches it through its configuration system"; `design
       survive a restart, but every transaction since start-up -- escrows, attestations,
       balances -- is lost while the other services' volumes still refer to them; a rebuilt
       dev-env image therefore does not roll. **Render tests** (`TESTING.md` "Chart Render
-      Tests"; `helm/tests/test_release_topology.py`, 14 cases):
+      Tests"; `helm/tests/test_release_topology.py`, 15 cases):
       `test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_states` (the
       pins equal the registry Deployment's `REGISTRY_AUTHORITY_ID` and
       `REGISTRY_AUTHORITY_IDENTIFIER`, the buyer's wallet Anvil account 1, the seller's
@@ -5259,7 +5266,8 @@ storefront's configuration reaches it through its configuration system"; `design
       components of every Deployment both releases render); and
       `test_topology_secrets_creates_every_secret_both_releases_read` (the Secrets the script
       creates, the Secrets both releases' manifests reference, and the Makefile's three
-      lists are one set). Each fails when its behavior is undone (the derivation, the
+      lists are one set); `test_topology_secrets_creates_the_volume_the_deal_test_mounts`
+      (the claim `TEST_VOLUMES` names is the one release 1's deal test mounts). Each fails when its behavior is undone (the derivation, the
       ed25519 gate, the identity check, the chart-stated append, or a component dropped).
 
 Section 16 notes:
@@ -5525,6 +5533,14 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
     check-comment-hygiene`, `make check-doc-citations` and `make check-tasks` for both
     changes, `make check-change-index`, and `openspec validate --strict` for both changes
     pass. No version moved and no lock changed.
+- **The buyer-profile volume** (the coordinator's follow-up): `topology-secrets` also creates,
+  if absent, the deal test's `arkhai-buyer-profiles` PersistentVolumeClaim, which no chart
+  creates; `check-local-secrets` takes `LOCAL_VOLUMES` and names a missing claim and the
+  target; render test `test_topology_secrets_creates_the_volume_the_deal_test_mounts`.
+  Evidence: `make -C helm test-render` passed (147 assertions and cases, the 15 topology
+  cases among them); the script, run with the stand-in `kubectl`, applied the claim after
+  the eleven Secrets; `make -n` of the topology targets, `test`, and `test-module` prints
+  the volume check; `make check-tasks` and `make check-comment-hygiene` pass.
 
 ## 17. Closeout
 
@@ -5691,8 +5707,9 @@ documentation only; a part needing code returns the change to implementation.
         storefronts, because local images keep bare tags, and never dev-env's Anvil (a
         restart keeps its contracts but loses every transaction since start-up); that `make
         helm-topology-secrets` creates every Secret both releases read from development
-        values at `helm/Makefile`'s `DEV_ACCOUNT_*` indices, and what each holds; and that
-        `topology-check`, `test`, and `test-module` check the Secrets their tests read.
+        values at `helm/Makefile`'s `DEV_ACCOUNT_*` indices, and what each holds, and the deal
+        test's `arkhai-buyer-profiles` volume; and that `topology-check`, `test`, and
+        `test-module` check the Secrets and volume their tests read.
         "Kubernetes: ConfigMap and Secret mounting": the umbrella's generated smoke-test
         profile carries the registry pins (internal registry only), the development buyer's
         and the target agent's wallet addresses, and the registry chart's

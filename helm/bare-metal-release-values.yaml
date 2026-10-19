@@ -36,7 +36,11 @@
 #                 service_credential: "<account 0's key>",
 #                 authority_identifier: "<account 0's address>"
 # Each value is quoted: YAML reads an unquoted 0x-prefixed value as an integer.
-# helm/scripts/topology-secrets.sh writes every Secret release 1 reads too.
+# helm/scripts/topology-secrets.sh writes every Secret release 1 reads too, and
+# creates, if absent, the deal test's buyer-profile volume, the
+# PersistentVolumeClaim arkhai-buyer-profiles (100Mi, ReadWriteOnce, the default
+# storage class; helm/Makefile's TEST_VOLUMES and TEST_VOLUME_SIZE), which no
+# chart creates and `topology-check` also requires.
 global:
   # Release 1's registry, which the bare-metal chart derives as the storefront's
   # registry; global.registryIdentity, values.yaml's, is that registry's signer,

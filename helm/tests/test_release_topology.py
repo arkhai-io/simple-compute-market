@@ -387,6 +387,18 @@ def test_topology_secrets_creates_every_secret_both_releases_read() -> None:
     assert created == referenced == checked, (created, referenced, checked)
 
 
+def test_topology_secrets_creates_the_volume_the_deal_test_mounts() -> None:
+    """The claim `topology-secrets` creates, and `topology-check` checks for, is
+    the one release 1's deal test mounts; release 2 runs no deal test."""
+    deal = _source(_release_one(), "charts/e2e-tests/templates/tests/e2e-deal-test.yaml")
+    mounted = set(re.findall(r'claimName: "?([^"\s]+)"?', deal))
+    script = (UMBRELLA / "scripts" / "topology-secrets.sh").read_text()
+
+    assert mounted == set(_make_words("TEST_VOLUMES")) == {"arkhai-buyer-profiles"}
+    assert "for claim in $TEST_VOLUMES; do" in script
+    assert not any("/charts/e2e-tests/" in source for source in _sources(_release_two()))
+
+
 def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob() -> None:
     # The bare-metal storefront's principal, Anvil account 8: a well-known
     # development address, never for a public network.
