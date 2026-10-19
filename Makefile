@@ -891,9 +891,11 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
 REVIEW_BASE ?= dev
-REVIEW_MODEL ?= gpt-6-sol
-REVIEW_EFFORT ?= high
-review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1] [UNVALIDATED=1])
+# The review's models are the review row's in .claude/change-steps.toml. Unset by
+# default; given, they replace that row's Codex entry for one run.
+REVIEW_MODEL ?=
+REVIEW_EFFORT ?=
+review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<codex model>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@python3 scripts/run_change_step.py review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 # With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
@@ -907,9 +909,11 @@ design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<cha
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
 
-orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change (CHANGE=<change>)
+# The orchestrating session relays and routes rather than judging, so it needs a
+# large context for a change's relayed turns, not a high effort.
+orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on Opus 5.5 at medium effort (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@claude "/change-orchestrate $(CHANGE)"
+	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
 plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null

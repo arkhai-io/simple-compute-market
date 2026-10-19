@@ -440,12 +440,62 @@ def _rules(command: list[str], flag: str) -> list[str]:
     return command[start:end]
 
 
-def test_the_step_table_names_each_claude_step() -> None:
+def test_the_step_table_names_each_step() -> None:
     steps = step.load_steps()
 
-    assert set(steps) == set(step.STEPS) - {"review"}
+    assert set(steps) == set(step.STEPS)
     assert all(rules.skill == f"change-{name}" for name, rules in steps.items())
     assert steps["plan"].resume_from == "design"
+
+
+OPUS = step.Model("claude", "claude-opus-5-5", "high")
+SONNET = step.Model("claude", "claude-sonnet-5-5", "medium")
+
+
+def test_each_step_runs_on_the_models_its_work_needs() -> None:
+    """Design, triage, implementation, and closeout on Opus at high effort; validation
+    and archive cleanup on Sonnet at medium; the review on Codex, then Claude."""
+    models = {name: rules.models for name, rules in step.load_steps().items()}
+
+    assert models == {"design": (OPUS,), "plan": (OPUS,), "triage": (OPUS,),
+                      "implement": (OPUS,), "closeout": (OPUS,), "validate": (SONNET,),
+                      "archive-cleanup": (SONNET,),
+                      "review": (step.Model("codex", "gpt-6-sol", "high"), OPUS)}
+
+
+def test_a_review_on_claude_only_reads() -> None:
+    rules = step.load_steps()["review"]
+    record = f"openspec/changes/{CHANGE}/reviews/09-implementation.md"
+
+    assert _allows(rules, "git diff dev...HEAD") and _allows(rules, "cat AGENTS.md")
+    assert not any(_allows_edit(rules, tool, record) for tool in ("Edit", "Write"))
+    assert not _allows(rules, "git commit -m x") and not _allows(rules, "make lock")
+
+
+MODELS = 'models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]\n'
+
+
+@pytest.mark.parametrize("models,problem", [
+    ("", "needs a skill and models"),
+    ("models = []\n", "a list of one or more models"),
+    ('models = [{ harness = "claude", model = "claude-fable-5-1" }]\n', "never runs on"),
+    ('models = [{ harness = "claude", model = "astra-2" }]\n', "never runs on"),
+    ('models = [{ harness = "claude", model = "claude-opus-5-5" }, '
+     '{ harness = "claude", model = "claude-sonnet-5-5" }]\n', "two models of one vendor"),
+    ('models = [{ harness = "claude", effort = "high" }]\n', "without a model"),
+    ('models = [{ harness = "codex", model = "gpt-6-sol" }]\n', "Codex runs only the review"),
+    ('models = [{ harness = "gemini", model = "g" }]\n', "harness 'gemini'"),
+    ('models = [{ harness = "claude", model = "m", speed = "fast" }]\n', "a key other than"),
+])
+def test_a_row_naming_models_the_policy_forbids_is_refused(
+        tmp_path: Path, models: str, problem: str) -> None:
+    table = tmp_path / "steps.toml"
+    table.write_text(f'[steps.triage]\nskill = "change-triage"\n{models}', "utf-8")
+
+    with pytest.raises(step.StepError, match=problem) as refused:
+        step.load_steps(table)
+
+    assert "triage row" in str(refused.value)
 
 
 def _allows(rules, command: str) -> bool:
@@ -584,7 +634,8 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
     rules = step.load_steps()["design"]
     assert command[:3] == ["claude", "-p", f"/change-design {CHANGE}"]
     assert _option(command, "--permission-mode") == "dontAsk"
-    assert _option(command, "--model") == "claude-opus-5-5"
+    assert (_option(command, "--model"), _option(command, "--effort")) == (
+        "claude-opus-5-5", "high")
     assert _option(command, "--setting-sources") == "project"
     assert _option(command, "--output-format") == "stream-json"
     assert "--verbose" in command
@@ -605,6 +656,9 @@ def test_each_outcome_is_logged_with_its_session_and_commit(tmp_path: Path, kind
     assert {key: line[key] for key in expected} == expected
     assert (line["step"], line["session"], line["commit"], line["exit_status"]) == (
         "triage", SESSION, COMMIT, 0)
+    assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
+                                                               "high")
+    assert "unavailable" not in line
     assert step.read_log(step.log_path(tmp_path, CHANGE)) == [line]
 
 
@@ -897,7 +951,148 @@ def test_a_run_that_cannot_start_is_logged_stopped(tmp_path: Path) -> None:
                         head=lambda _: COMMIT, clock=_clock, echo=None).run("design", CHANGE)
 
     assert (line["outcome"], line["exit_status"]) == ("stopped", None)
-    assert line["reason"] == "the run did not finish: FileNotFoundError: claude"
+    assert line["reason"] == ("no model of the step is available: claude-opus-5-5: claude is "
+                              "not installed: claude")
+    assert line["unavailable"] == [{**OPUS.entry(),
+                                    "reason": "claude is not installed: claude"}]
+
+
+LIMIT = "You've hit your session limit · resets 11:20pm (Europe/Paris)"
+NETWORK = "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)"
+
+
+def _failed(said: str) -> list[str]:
+    """A run Claude Code ended with an error result saying `said`."""
+    return [json.dumps({"type": "system", "subtype": "init", "session_id": SESSION}) + "\n",
+            json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                        "session_id": SESSION, "result": said,
+                        "permission_denials": []}) + "\n"]
+
+
+@pytest.mark.parametrize("lines", [
+    _failed(LIMIT), _failed("Not logged in · Please run /login"), ["Invalid API key\n"],
+])
+def test_a_steps_only_model_unavailable_stops_it_saying_why(tmp_path: Path, lines) -> None:
+    claude = FakeClaude((lines, 1))
+
+    line = _wrapper(tmp_path, claude).run("triage", CHANGE)
+
+    assert len(claude.commands) == 1
+    assert line["outcome"] == "stopped"
+    assert line["reason"].startswith("no model of the step is available: claude-opus-5-5: ")
+    assert line["unavailable"][0]["model"] == "claude-opus-5-5"
+
+
+def test_a_usage_limit_names_when_it_resets(tmp_path: Path) -> None:
+    line = _wrapper(tmp_path, FakeClaude((_failed(LIMIT), 1))).run("validate", CHANGE)
+
+    assert line["reason"] == f"no model of the step is available: claude-sonnet-5-5: {LIMIT}"
+    assert (line["model"], line["effort"]) == ("claude-sonnet-5-5", "medium")
+
+
+def test_a_network_error_is_retried_twice_on_the_same_model_then_stops(tmp_path: Path) -> None:
+    claude = FakeClaude(*[(_failed(NETWORK), 1)] * 3)
+
+    line = _wrapper(tmp_path, claude).run("design", CHANGE)
+
+    assert len(claude.commands) == 3
+    assert all(_option(command, "--model") == "claude-opus-5-5" for command in claude.commands)
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == f"claude-opus-5-5 could not be reached after 3 attempts: {NETWORK}"
+    assert "unavailable" not in line
+
+
+def test_a_network_error_then_a_run_logs_the_run(tmp_path: Path) -> None:
+    claude = FakeClaude((_failed(NETWORK), 1), (_event_lines(VALID["finished"]), 0))
+
+    line = _wrapper(tmp_path, claude).run("design", CHANGE)
+
+    assert claude.commands[0] == claude.commands[1]
+    assert (line["outcome"], line["exit_status"]) == ("finished", 0)
+    transcript = step.log_path(tmp_path, CHANGE).parent / line["transcript"]
+    assert "EAI_AGAIN" in transcript.read_text("utf-8")
+
+
+def test_an_ordinary_failure_is_not_read_as_an_unavailable_model(tmp_path: Path) -> None:
+    claude = FakeClaude((_failed("the hook refused the edit"), 1))
+
+    line = _wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert len(claude.commands) == 1
+    assert line["reason"] == "exit 1: the hook refused the edit"
+    assert "unavailable" not in line
+
+
+def test_a_resume_runs_on_the_model_the_waiting_run_used(tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["finished"], session="t-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    log = step.log_path(tmp_path, CHANGE)
+    asked = step.record_outcome(log, "triage", VALID["question"], session="t-1", commit=COMMIT,
+                                extra={"harness": "claude", "model": "claude-sonnet-5-5",
+                                       "effort": "low"})
+
+    line = wrapper.resume(CHANGE, asked["seq"], "accept")
+
+    assert (_option(claude.commands[0], "--model"), _option(claude.commands[0], "--effort")) == (
+        "claude-sonnet-5-5", "low")
+    assert (line["model"], line["effort"]) == ("claude-sonnet-5-5", "low")
+
+
+def test_a_resume_whose_model_is_unavailable_stops_and_tries_no_other(tmp_path: Path) -> None:
+    claude = FakeClaude((_failed(LIMIT), 1))
+    wrapper = _wrapper(tmp_path, claude)
+    asked = step.record_outcome(step.log_path(tmp_path, CHANGE), "triage", VALID["question"],
+                                session="t-1", commit=COMMIT,
+                                extra={"harness": "claude", "model": "claude-sonnet-5-5"})
+
+    line = wrapper.resume(CHANGE, asked["seq"], "accept")
+
+    # Neither the row's first model nor any other is tried in its place.
+    assert [_option(command, "--model") for command in claude.commands] == ["claude-sonnet-5-5"]
+    assert (line["outcome"], line["model"]) == ("stopped", "claude-sonnet-5-5")
+    assert LIMIT in line["reason"]
+
+
+def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None:
+    """The step loader allows one Claude model per row today, so the fallback between
+    Claude entries is proven on the wrapper's turn with the models given directly."""
+    claude = FakeClaude((_failed(LIMIT), 1), (_event_lines(VALID["finished"]), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    rules = step.load_steps()["triage"]
+    second = step.Model("claude", "second-model", "low")
+
+    line = wrapper._turn("triage", rules, step.log_path(tmp_path, CHANGE), "/change-triage x",
+                         (OPUS, second), session=None)
+
+    assert [_option(command, "--model") for command in claude.commands] == [
+        "claude-opus-5-5", "second-model"]
+    assert (line["outcome"], line["model"], line["effort"]) == ("finished", "second-model", "low")
+    assert line["unavailable"] == [{**OPUS.entry(), "reason": LIMIT}]
+
+
+def test_planning_resumes_design_on_the_model_design_ran_on(tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    step.record_outcome(step.log_path(tmp_path, CHANGE), "design", VALID["finished"],
+                        session="d-1", commit=COMMIT,
+                        extra={"harness": "claude", "model": "claude-opus-5-0", "effort": "max"})
+
+    wrapper.run("plan", CHANGE)
+
+    assert _option(claude.commands[0], "--resume") == "d-1"
+    assert _option(claude.commands[0], "--model") == "claude-opus-5-0"
+
+
+def test_a_session_from_before_models_were_recorded_resumes_on_the_steps_first(
+        tmp_path: Path) -> None:
+    claude = FakeClaude((_event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = _wrapper(tmp_path, claude)
+    step.record_outcome(step.log_path(tmp_path, CHANGE), "design", VALID["question"],
+                        session="d-1", commit=COMMIT)
+
+    wrapper.run("plan", CHANGE)
+
+    assert _option(claude.commands[0], "--model") == "claude-opus-5-5"
 
 
 def test_an_interrupted_run_is_logged_stopped_and_the_interrupt_kept(tmp_path: Path) -> None:
@@ -958,12 +1153,13 @@ def test_no_step_may_edit_its_own_permissions() -> None:
 
 
 @pytest.mark.parametrize("table,problem", [
-    ('[steps.design]\nskill = "change-design"\ndeny = "Bash(git push*)"\n', "list of rules"),
-    ('[steps.design]\nskill = "change-design"\nallowed = []\n', "takes only"),
-    ('[steps.deploy]\nskill = "change-deploy"\n', "unknown step"),
+    (f'[steps.design]\nskill = "change-design"\n{MODELS}deny = "Bash(git push*)"\n',
+     "list of rules"),
+    (f'[steps.design]\nskill = "change-design"\n{MODELS}allowed = []\n', "takes only"),
+    (f'[steps.deploy]\nskill = "change-deploy"\n{MODELS}', "unknown step"),
     ('[commons]\nallow = []\n', "unknown tables"),
     ('[common]\nskill = "x"\n', "common row takes only"),
-    ('[steps.plan]\nskill = "change-plan"\nresume_from = "design"\n', "has no row"),
+    (f'[steps.plan]\nskill = "change-plan"\n{MODELS}resume_from = "design"\n', "has no row"),
 ])
 def test_a_malformed_step_table_is_refused(tmp_path: Path, table: str, problem: str) -> None:
     path = tmp_path / "steps.toml"
@@ -1133,7 +1329,9 @@ def test_a_review_is_published_and_its_transcript_kept_apart(tmp_path: Path) -> 
     path = step.run_review(CHANGE, kind, root=root, runner=_writing(_review()), head=lambda _: HEAD)
 
     assert path == _reviews(root) / f"01-{kind}.md"
-    assert path.read_text("utf-8") == (_review().rstrip("\n") + "\n\n<!-- reviewer-session: s-1 -->\n"
+    assert path.read_text("utf-8") == (_review().rstrip("\n") + "\n\n"
+                                       "<!-- reviewer-session: codex:s-1 -->\n"
+                                       "<!-- reviewer: codex gpt-6-sol high -->\n"
                                        f"<!-- reviewed-commit: {HEAD} -->\n")
     assert (_reviews(root) / "transcripts" / "01-design.log").is_file()
     assert sorted(p.name for p in _reviews(root).iterdir()) == [path.name, "transcripts"]
@@ -1170,8 +1368,27 @@ def test_design_review_names_no_base(tmp_path: Path) -> None:
     step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls), head=lambda _: HEAD)
 
     assert "Base:" not in calls[0][-1]
-    assert "--model" not in calls[0]
-    assert "--config" not in calls[0]
+
+
+def test_a_review_runs_on_the_review_rows_codex_entry(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls),
+                    head=lambda _: HEAD)
+
+    assert calls[0][calls[0].index("--model") + 1] == "gpt-6-sol"
+    assert calls[0][calls[0].index("--config") + 1] == 'model_reasoning_effort="high"'
+
+
+def test_a_given_model_overrides_only_the_codex_entry() -> None:
+    rules = step.load_steps()["review"]
+
+    assert step.review_models(rules, "gpt-6.1-sol") == (
+        step.Model("codex", "gpt-6.1-sol", "high"), OPUS)
+    assert step.review_models(rules, effort="low") == (step.Model("codex", "gpt-6-sol", "low"),
+                                                       OPUS)
+    assert step.review_models(rules) == rules.models
 
 
 def test_a_review_with_no_findings_is_accepted(tmp_path: Path) -> None:
@@ -1258,7 +1475,20 @@ def test_a_later_review_continues_the_last_reviewer_read_only(tmp_path: Path) ->
     assert command[command.index("--config") + 1] == 'sandbox_mode="read-only"'
     assert "01-design" in command[-1] and "triage records" in command[-1]
     assert path.stem == "02-design"
-    assert path.read_text("utf-8").count("<!-- reviewer-session: first -->\n") == 1
+    assert path.read_text("utf-8").count("<!-- reviewer-session: codex:first -->\n") == 1
+
+
+def test_an_untagged_reviewer_session_is_continued_in_codex(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+    (_reviews(root) / f"01-{kind}.md").write_text(
+        _review() + "\n<!-- reviewer-session: old -->\n", "utf-8")
+    calls: list[list[str]] = []
+
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls),
+                    head=lambda _: HEAD)
+
+    assert calls[0][:4] == ["codex", "exec", "resume", "old"]
 
 
 def test_fresh_starts_a_new_reviewer(tmp_path: Path) -> None:
@@ -1647,8 +1877,19 @@ def test_unattended_planning_may_start_fresh_and_validation_take_every_scenario(
 
 def test_make_review_runs_the_wrappers_review() -> None:
     assert _make_n("review", "CHANGE=X", "KIND=design") == [
+        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev"    ']
+
+
+def test_make_review_passes_a_codex_model_for_one_run() -> None:
+    assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_MODEL=gpt-6.1-sol",
+                   "REVIEW_EFFORT=low") == [
         'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
-        '--model "gpt-6-sol" --effort "high"  ']
+        '--model "gpt-6.1-sol" --effort "low"  ']
+
+
+def test_make_orchestrate_opens_the_session_on_opus_at_medium_effort() -> None:
+    assert _make_n("orchestrate", "CHANGE=X") == [
+        'claude --model claude-opus-5-5 --effort medium "/change-orchestrate X"']
 
 
 # A review's outcome in the workflow log.
@@ -1664,8 +1905,157 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
 
     assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "review",
                     "session": "codex:codex-1", "commit": HEAD, "kind": "design",
-                    "record": f"01-{kind}.md", "outcome": "finished", "next": "triage",
+                    "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
+                    "effort": "high", "outcome": "finished", "next": "triage",
                     "message": f"01-{kind}.md written; triage is next"}
+
+
+def _claude_review(text: str, session: str = "c-1", denials: list | None = None) -> FakeClaude:
+    """Claude Code ending a review run with `text` as its final message."""
+    events = [{"type": "system", "subtype": "init", "session_id": session},
+              {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
+               "result": text, "permission_denials": denials or []}]
+    return FakeClaude(([json.dumps(event) + "\n" for event in events], 0))
+
+
+def _codex_saying(said: str, status: int = 1):
+    def runner(command: Sequence[str], log: Path) -> int:
+        with log.open("a", encoding="utf-8") as stream:
+            stream.write(f"OpenAI Codex v0.157.0\n{said}\n")
+        return status
+    return runner
+
+
+def _codex_missing(command: Sequence[str], log: Path) -> int:
+    raise FileNotFoundError("codex")
+
+
+@pytest.mark.parametrize("codex,why", [
+    (_codex_missing, "codex is not installed: codex"),
+    (_codex_saying("ERROR: Not logged in. Run codex login."), "ERROR: Not logged in. Run codex login."),
+    (_codex_saying("ERROR: You've hit your usage limit. Try again at 3:05 PM."),
+     "ERROR: You've hit your usage limit. Try again at 3:05 PM."),
+])
+def test_a_review_falls_back_to_claude_when_codex_is_unavailable(
+        tmp_path: Path, codex, why: str) -> None:
+    root = _repository(tmp_path)
+    claude = _claude_review(_review("implementation"))
+
+    line = step.review_and_log(CHANGE, "implementation", root=root, clock=_clock, runner=codex,
+                               claude=claude, head=lambda _: HEAD, echo=None)
+
+    command = claude.commands[0]
+    assert command[:3] == ["claude", "-p", ("Use the change-review skill. Review kind: "
+                                            f"implementation. Change: {CHANGE}. Base: dev.")]
+    assert "--json-schema" not in command
+    assert (_option(command, "--model"), _option(command, "--effort")) == ("claude-opus-5-5",
+                                                                           "high")
+    assert _rules(command, "--allowedTools") == list(step.load_steps()["review"].allow)
+    assert "Edit" in _rules(command, "--disallowedTools")
+    record = _reviews(root) / "01-implementation.md"
+    text = record.read_text("utf-8")
+    assert "<!-- reviewer-session: claude:c-1 -->" in text
+    assert "<!-- reviewer: claude claude-opus-5-5 high -->" in text
+    assert f"<!-- reviewer-unavailable: codex gpt-6-sol: {why} -->" in text
+    assert (line["outcome"], line["record"], line["session"]) == (
+        "finished", "01-implementation.md", "claude:c-1")
+    assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
+                                                               "high")
+    assert line["unavailable"] == [{"harness": "codex", "model": "gpt-6-sol", "reason": why}]
+    assert line["transcript"] == "transcripts/01-implementation.log"
+    assert line["denials"] == []
+    assert "codex gpt-6-sol being unavailable" in line["message"]
+
+
+def test_a_claude_reviews_denials_are_recorded_from_its_transcript(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    denied = [{"tool_name": "Edit", "tool_use_id": "t1",
+               "tool_input": {"file_path": "scripts/x.py"}}]
+    claude = _claude_review(_review(), denials=denied)
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=_codex_missing,
+                               claude=claude, head=lambda _: HEAD, echo=None)
+
+    assert line["denials"] == denied
+
+
+def test_a_claude_review_continues_only_a_claude_reviewer(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    step.run_review(CHANGE, "design", root=root, runner=_codex_missing,
+                    claude=_claude_review(_review(), session="c-1"), head=lambda _: HEAD,
+                    echo=None)
+    again = _claude_review(_review(), session="c-1")
+
+    step.run_review(CHANGE, "design", root=root, runner=_codex_missing, claude=again,
+                    head=lambda _: HEAD, echo=None)
+    calls: list[list[str]] = []
+    step.run_review(CHANGE, "design", root=root, runner=_writing(_review(), calls=calls),
+                    head=lambda _: HEAD)
+
+    assert _option(again.commands[0], "--resume") == "c-1"
+    assert "01-design" in again.commands[0][2]
+    # Codex is available again, and starts fresh rather than resuming Claude's session.
+    assert calls[0][:3] == ["codex", "exec", "--sandbox"]
+
+
+def test_a_review_with_no_reviewer_available_publishes_nothing(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    def missing(command, cwd, feed) -> int:
+        raise FileNotFoundError("claude")
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=_codex_missing,
+                               claude=missing, head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == ("the reviewer produced no review: no reviewer is available: "
+                              "codex gpt-6-sol: codex is not installed: codex; claude "
+                              "claude-opus-5-5: claude is not installed: claude")
+    assert [entry["model"] for entry in line["unavailable"]] == ["gpt-6-sol", "claude-opus-5-5"]
+    assert not [p for p in _reviews(root).iterdir() if p.suffix == ".md"]
+
+
+def test_a_failed_claude_reviews_denials_are_on_its_stopped_line(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    denied = [{"tool_name": "Edit", "tool_use_id": "t1", "tool_input": {}}]
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=_codex_missing,
+                               claude=_claude_review("not a review", denials=denied),
+                               head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert (line["denials"], line["transcript"]) == (denied, "transcripts/01-design.log")
+    assert line["unavailable"][0]["harness"] == "codex"
+
+
+def test_a_reviewers_output_mentioning_a_limit_is_not_read_as_codex_unavailable(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    claude = FakeClaude()
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock,
+                               runner=_codex_saying("exec\ncat scripts/x.py\n"
+                                                    "# a usage limit, a connection error"),
+                               claude=claude, head=lambda _: HEAD, echo=None)
+
+    assert claude.commands == []
+    assert line["reason"].startswith("the reviewer produced no review: the reviewer exited 1")
+
+
+def test_a_reviews_network_error_is_retried_and_never_falls_back(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    calls: list[list[str]] = []
+
+    def unreachable(command: Sequence[str], log: Path) -> int:
+        calls.append(list(command))
+        return _codex_saying("ERROR: stream error: connection error; retrying")(command, log)
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=unreachable,
+                               claude=FakeClaude(), head=lambda _: HEAD, echo=None)
+
+    assert len(calls) == 3
+    assert line["outcome"] == "stopped"
+    assert "gpt-6-sol could not be reached after 3 attempts" in line["reason"]
 
 
 def test_a_failed_review_beside_an_earlier_record_is_logged_stopped(tmp_path: Path) -> None:
@@ -1733,14 +2123,14 @@ def test_a_review_quoting_an_earlier_records_markers_is_logged_with_its_own(
 def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path) -> None:
     root = _repository(tmp_path)
 
-    def missing(command, log: Path) -> int:
-        raise FileNotFoundError("codex")
+    def broken(command, log: Path) -> int:
+        raise PermissionError("codex")
 
-    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=missing,
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, runner=broken,
                                head=lambda _: HEAD)
 
     assert (line["outcome"], line["commit"]) == ("stopped", HEAD)
-    assert line["reason"] == "the review did not finish: FileNotFoundError: codex"
+    assert line["reason"] == "the review did not finish: PermissionError: codex"
 
 
 def test_planning_starts_fresh_only_for_fresh_1() -> None:

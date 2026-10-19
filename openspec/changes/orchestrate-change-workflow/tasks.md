@@ -1061,7 +1061,7 @@ from Codex to Claude. Touches `.claude/change-steps.toml`,
 `Makefile`'s `review` and `orchestrate` targets. Planned after section 6 against the
 design revised after it (design reviews 69 and 70).
 
-- [ ] 6a.1 `.claude/change-steps.toml`: every row gains `models`, D18's policy — Opus
+- [x] 6a.1 `.claude/change-steps.toml`: every row gains `models`, D18's policy — Opus
       5.5 high for design, triage, implement, and closeout (planning resumes
       design's session and its model); Sonnet 5.5 medium for validate and archive
       cleanup; a `[steps.review]` row, `skill = "change-review"`, models
@@ -1070,7 +1070,23 @@ design revised after it (design reviews 69 and 70).
       `load_steps` accepts `models`, requires it, and refuses a row naming a Fable
       or Astra model, two models of one vendor, an entry without a model, or a
       Codex entry on any row but the review (D18).
-- [ ] 6a.2 The wrapper runs a step's first available entry, passing `--model` and
+      Done. The table edit was the orchestrator's, on the owner's word: the step
+      table sits under `common`'s `Edit(.claude/**)` deny, which holds this step
+      too, so the implementing session's edits of it were denied and it wrote the
+      edit out for the owner instead. The edited table has `models` in every row as
+      D18 gives them and a `[steps.review]` row (Codex `gpt-6-sol` high, then
+      Claude `claude-opus-5-5` high, `deny = ["Edit"]`, no allow of its own, so
+      `common`'s reading rules alone). It differs from the proposed one: no header
+      paragraph on `models`, plan's comment unchanged, the review row denying only
+      `Edit` (the same in effect under `dontAsk`, since nothing else it would deny
+      is allowed), and the review row placed between design's comment and
+      `[steps.design]`, so that comment now heads the review row — the owner's to
+      tidy, since no step may edit the table. `Model` and `StepRules.models`;
+      `load_steps` requires `models` and refuses, naming the row, an empty list, an
+      entry without a model or with another key, an unknown harness, a Fable or
+      Astra model, two entries of one harness (one vendor), and a Codex entry off
+      the review row.
+- [x] 6a.2 The wrapper runs a step's first available entry, passing `--model` and
       `--effort` to `claude -p`, and records `model` and `effort` on the line. An
       entry is unavailable when its program is missing, it is not signed in, or it
       reports a usage limit; the wrapper then tries the next. This replaces the
@@ -1080,7 +1096,27 @@ design revised after it (design reviews 69 and 70).
       retried twice, then the run ends `stopped` with no fallback. A resume runs
       only on the model the waiting run used, and ends `stopped` with the reset
       time when it is unavailable (D18, 69 F4).
-- [ ] 6a.3 The review through the table: `run_change_step.py review` takes its
+      Done. `STEP_MODEL` is gone; `claude_command` takes the model and passes
+      `--model` and `--effort` (Claude Code's `--effort` checked in `claude --help`),
+      and takes an optional schema and system prompt. `Wrapper._turn` runs the
+      models in order, a fresh `Stream` per attempt into one transcript;
+      `unreachable` reads a failed run's result and its non-event output: "hit your
+      … limit", "usage limit", "not logged in", "please run /login", "invalid api
+      key", or a missing program (`FileNotFoundError`) is unavailable and falls to
+      the next model, named under `unavailable` with what it said (a limit's reset
+      time with it); a network error ("Can't reach the API server", `EAI_AGAIN`,
+      "connection error", …) is retried twice with the same command, then stops the
+      run, no fallback; all unavailable stops it, "no model of the step is
+      available: …". The patterns are this change's own and the pilot's transcripts'
+      (this log's seq 21, the pilot's seq 1 and 17). The line records `harness`,
+      `model`, and `effort` — the last model tried even when none ran, with
+      `unavailable` saying so, since a resume of that run continues its session on
+      that model. `resume`, and planning resuming design, run on the waiting line's
+      model (a line from before models were recorded: the row's first). `run` and
+      `resume` refuse the review, which runs through `review`. A network retry
+      reruns the same command: a fresh run that failed reaching the API left no
+      conversation to resume (the pilot's seq 1 and 3).
+- [x] 6a.3 The review through the table: `run_change_step.py review` takes its
       models from `[steps.review]`; `REVIEW_MODEL` and `REVIEW_EFFORT` are unset by
       default in the `Makefile` and, when given, override the Codex entry for one
       run. A review on Claude runs `change-review` with the review row's rules and
@@ -1090,15 +1126,76 @@ design revised after it (design reviews 69 and 70).
       untagged marker is Codex; a review continues the previous reviewer only on
       the same harness, else starts fresh. The record and the line name the
       reviewer's harness and model (D11, 70 F6).
-- [ ] 6a.4 `make orchestrate` opens the orchestrating session on Opus 5.5 at medium
+      Done. `run_review` reads `[steps.review]`; `review_models` replaces only the
+      Codex entry with `--model`/`--effort`. Each model is tried in order: Codex
+      through the existing runner, its transcript now appended so one log holds
+      every attempt, its unavailability read from its own `ERROR` lines only, since
+      the rest of its output holds the files the reviewer read; Claude through
+      `claude -p` with the review row's rules, no schema, `REVIEW_UNATTENDED`
+      appended, its `result` written as the draft and checked as Codex's is. The
+      record ends with `reviewer-session: <harness>:<id>`, `reviewer: <harness>
+      <model> <effort>`, one `reviewer-unavailable` per model passed over, and
+      `reviewed-commit`; `tagged_session` reads an untagged marker as Codex.
+      `review_outcome` reads the reviewer back from the markers; a Claude review's
+      line also carries `transcript` and `denials` (`transcript_denials`, sharing
+      `Stream.take`), so the computation holds it for the denial reading like any
+      run; a stopped review's line carries the models passed over and a Claude
+      attempt's denials and transcript, through `ReviewError.record`. `Makefile`:
+      `REVIEW_MODEL`/`REVIEW_EFFORT` unset by default, the `review` help text.
+- [x] 6a.4 `make orchestrate` opens the orchestrating session on Opus 5.5 at medium
       effort (D17).
-- [ ] 6a.5 Verification: unit tests in `scripts/tests/test_run_change_step.py` with
+      Done: `claude --model claude-opus-5-5 --effort medium "/change-orchestrate
+      <change>"`.
+- [x] 6a.5 Verification: unit tests in `scripts/tests/test_run_change_step.py` with
       the injected runner — the loader's refusals; entry selection and fallback on
       each unavailability signal; two network retries then `stopped`; resume
       refused on another model; a Claude review without the schema, published and
       tagged; an untagged marker resumed on Codex; `REVIEW_MODEL` overriding only
       the Codex entry. `uv run --no-project --with pytest pytest -q scripts/tests`;
       `make test`. No end-to-end scenario covers it (contributor tooling).
+      Unit (`test_run_change_step.py`, fake runners): the policy as the table gives
+      it; the review row only reads; each loader refusal naming the row; each Claude
+      unavailability signal stopping a one-model step; the reset time on the line;
+      fallback from an unavailable model to the next, on the wrapper's turn with two
+      Claude models given directly, since the loader admits one Claude model per
+      row and a step's fallback is otherwise unreachable today; two network
+      retries then `stopped`, and a retry that runs; an ordinary failure not read
+      as unavailability; resume and planning on the waiting line's model, a line
+      from before models on the row's first, a resume whose model (not the row's
+      first) is at its limit trying that model alone; the Codex entry and its
+      override; Codex missing, not signed in, or at its limit falling back to
+      Claude, published and tagged, no schema, the review row's rules; a Claude
+      review's denials, on a published line and a stopped one; a reviewer's output
+      quoting "usage limit" not read as Codex unavailable; a Claude reviewer
+      continued only by Claude; no reviewer available, naming each model; a
+      review's network error retried, no fallback; an untagged marker resumed in
+      Codex; `make review` with and without the override; `make orchestrate`.
+      Results: `test_run_change_step.py` 242 passed against the edited table, then
+      245 after the fresh-context fixes; `make test` passed, every suite
+      (`scripts/tests` 988), before those fixes, which touched only
+      `run_change_step.py` and its test; `make test-release-tooling` (all of
+      `scripts/tests`) 991 passed after them. `make check-packaging`,
+      `make check-comment-hygiene` (after three test strings were built from a
+      variable), `make check-tasks`: passed. End-to-end: none, as the preamble says.
+
+Section 6a evidence and handoff. The implementing session first stopped here: the
+table edit was denied to it, and it wrote the edit out as
+`reviews/proposed-change-steps.toml` with `reviews/test_with_proposed_table.py`, a
+scaffold running this test module against it (242 passed). Both files are still in
+the change's untracked `reviews/`, its `rm` of them denied; the owner may delete
+them. Fresh-context check of the diff against `20095e00` (a subagent, read-only):
+no layering, comment, test-level, or packaging breach; fixed what it found — a
+Codex failure read as unavailable from file contents in its output (now its
+`ERROR` lines only), a stopped review's line missing the models passed over and a
+Claude attempt's denials, the step fallback untested and the "tries no other" test
+proving nothing (both rewritten, above), a docstring's wrapping, a test's name,
+and this note, stale once the table landed; it also found `docs/agents/
+change-workflow.md`'s `make review` paragraph (Codex only, `REVIEW_MODEL`
+choosing the reviewer) now wrong, added to 8.9. Declined: omitting the model from
+a line where none ran (a resume continues on it, as 6a.2 says); the table's
+placement and wording (the owner's, above). Until 6d.6, `change-review`'s
+"Running unattended" still says reviews run in Codex, which a Claude reviewer
+reads beside `REVIEW_UNATTENDED`.
 
 ## 6b. Every run records its cost
 
@@ -1295,7 +1392,10 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         cadence in a design, following a running step, answering and taking over a
         step, maintaining `.claude/change-steps.toml`'s rules and models, reading
         the cost report, and sourcing the completion script (6.4);
-        "The review directory" gains `workflow.jsonl` and the step transcripts.
+        "The review directory" gains `workflow.jsonl` and the step transcripts;
+        the paragraph on `make review` says the review runs on the review row's
+        models, Codex then Claude, and that `REVIEW_MODEL` and `REVIEW_EFFORT`
+        replace only the Codex entry for one run (6a's fresh-context check).
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
         from `run_change_review.py` (retired) to `run_change_step.py review` in
