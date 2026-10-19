@@ -1,9 +1,10 @@
-"""A seller's close and an operator's resume of one bare-metal listing.
+"""A seller's close, and an operator's pause and resume, of one bare-metal listing.
 
 Both act through the capacity-publication kit's publication runtime over the
 listing's durable binding, as a publication cycle does, so the close a seller
 makes is the one every later write keeps: no reconciliation reopens it, and a
-publication cycle skips its listing. Resume clears the listing's pause and
+publication cycle skips its listing. A pause leaves the listing open and
+published while new negotiations on it are refused. Resume clears the pause and
 re-lists it: a listing its seller closed is reopened locally and at every
 registry, and an open one is republished. A listing reconciliation closed is
 not the seller's to re-list; it reopens when its source supports it again. See
@@ -12,6 +13,7 @@ openspec/specs/storefront-publication/spec.md, "A seller's close is durable".
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 from market_capacity_publication import BoundListing, PublicationRuntime
@@ -46,14 +48,42 @@ def _publication(runtime: BareMetalStorefrontRuntime) -> PublicationRuntime[dict
 async def close_listing_as_seller(
     runtime: BareMetalStorefrontRuntime, listing_id: str
 ) -> dict[str, Any]:
-    """Close the listing as its seller, locally and then at every registry."""
-    binding = await bare_metal_listing_binding(runtime.db, listing_id)
-    if binding is None:
-        raise ListingControlError(404, "listing not found")
-    result = await _publication(runtime).close(
-        BoundListing(listing_id, binding), closed_by="seller"
-    )
+    """Close the listing as its seller, locally and then at every registry.
+
+    A database that cannot be written, a lock another writer holds past the
+    busy timeout among them, answers 503 for the seller to retry; a close is
+    idempotent, so a retry after one that did complete keeps the seller's close.
+    """
+    try:
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise ListingControlError(404, "listing not found")
+        result = await _publication(runtime).close(
+            BoundListing(listing_id, binding), closed_by="seller"
+        )
+    except sqlite3.OperationalError as exc:
+        raise ListingControlError(
+            503,
+            {
+                "error": "listing_close_incomplete",
+                "hint": "The listing is unchanged; retry the close.",
+            },
+        ) from exc
     return {"status": result.get("status", "closed"), "listing_id": listing_id}
+
+
+async def pause_listing(
+    runtime: BareMetalStorefrontRuntime, listing_id: str
+) -> dict[str, Any]:
+    """Pause the listing: it stays published, and new negotiations on it are refused."""
+    if await runtime.db.load_listing(listing_id=listing_id) is None:
+        raise ListingControlError(404, "listing not found")
+    await runtime.db.set_listing_paused(listing_id=listing_id, paused=True)
+    return {
+        "listing_id": listing_id,
+        "paused": True,
+        "message": "Listing paused. New negotiations will receive 503.",
+    }
 
 
 async def resume_listing(
@@ -93,4 +123,9 @@ async def resume_listing(
     }
 
 
-__all__ = ["ListingControlError", "close_listing_as_seller", "resume_listing"]
+__all__ = [
+    "ListingControlError",
+    "close_listing_as_seller",
+    "pause_listing",
+    "resume_listing",
+]

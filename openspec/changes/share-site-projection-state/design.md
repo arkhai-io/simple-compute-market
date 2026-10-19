@@ -420,7 +420,21 @@ authentication bare metal's other seller and administrator routes use; and the t
 `close_listing`, `resume_listing`, and `list_listings`. The only new bare-metal code is the
 route glue (`listing_controls.py`) and a seller-role CLI client beside the administrator one.
 The permanent "A seller's close is durable" already states the behaviour, so the delta is
-unchanged. `-a` is VM's short form of
+unchanged. As VM's, a close the database cannot take (a lock another writer holds past the busy
+timeout) answers 503 `listing_close_incomplete`, "The listing is unchanged; retry the close";
+VM's resume has no such answer, so neither has bare metal's. Bare metal also serves VM's
+`POST /api/v1/listings/{listing_id}/pause` (administrator, `admin_pause_listing`), over core's
+`set_listing_paused`, so resume has a pause to clear: a paused listing stays open and
+published, its negotiations refused, and a publication cycle neither clears the pause nor
+sends it again (the pause is no publication input in either storefront).
+
+Known limitations, shared with VM: resume loads the listing and then publishes it outside the
+publication loop's cycle lock, so a cycle refreshing the same listing in between can leave a
+registry holding the older payload until the source changes again, since registry
+convergence compares publication status, not payload; and the close's
+`listing_close_incomplete` says "unchanged" for any `OperationalError`, including one from
+recording the registries' answers after the local close committed, where a retry, which is
+idempotent, keeps the seller's close. `-a` is VM's short form of
 `--storefront-url`, adopted by both bare-metal commands. A storefront refusal (a cycle it
 cannot compose answers 503 naming what is missing) exits 1 with its message, as
 `pool-override` does; and a request no storefront answers exits 1 naming the origin it was

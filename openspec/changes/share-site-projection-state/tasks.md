@@ -4474,6 +4474,44 @@ recorded in `design.md` D6, C1, and D14b):
       End-to-end: no scenario closes or resumes a bare-metal listing or runs `publish`; these
       are application-integration evidence only.
 
+Section 14 seller-controls check fixes (fresh-context check of `ae9478c`; follow VM):
+
+- **The close refuses an unwritable database as retryable**, as VM's controller does: a
+  `sqlite3.OperationalError` reaching `close_listing_as_seller` answers 503
+  `listing_close_incomplete` ("The listing is unchanged; retry the close."). VM's resume has no
+  such answer, so bare metal's has none. Test (the close called directly over the running
+  app's runtime and real database, since an exclusive lock also stops the route's request
+  authentication, whose replay reservation writes):
+  `test_a_close_the_database_cannot_take_is_refused_as_retryable` -- under `BEGIN EXCLUSIVE`
+  from another connection the close is refused 503 and the listing stays open; it fails with
+  the catch removed (edited, then restored).
+- **VM's per-listing pause.** `POST /api/v1/listings/{listing_id}/pause` (administrator,
+  `admin_pause_listing`, core's `PauseListingResponse`), `listing_controls.pause_listing` over
+  core's `set_listing_paused`; 404 for an unknown listing. **Premise corrected:** a pause does
+  not withdraw a listing in either storefront -- it stays open and published, and only new
+  negotiations are refused -- so "a cycle doesn't republish it" holds because a cycle sends an
+  unchanged listing nothing, not because it skips paused ones.
+  `test_a_paused_listing_stays_paused_through_a_cycle_until_resumed`: paused, a cycle publishes
+  and refreshes nothing, the listing stays open and paused and the registry saw only its first
+  publish; resume clears the pause and republishes.
+- **More resume and close cases:** `test_resuming_an_open_listing_republishes_it` (a second
+  publish at the registry, still open);
+  `test_a_seller_closing_a_listing_reconciliation_closed_records_the_seller` (reconciliation
+  closes it, the seller's close then records `seller`, and the source returning does not
+  reopen it).
+- `design.md` C1 records the pause, the 503, and two known limitations shared with VM:
+  resume publishes outside the publication loop's cycle lock, so a cycle refreshing the same
+  listing in between can leave a registry with the older payload until the source changes
+  again (convergence compares status, not payload); and the 503 says "unchanged" even for an
+  `OperationalError` after the local close committed, where the idempotent retry keeps the
+  seller's close.
+- Evidence: `make test-bare-metal`: domain 134, storefront 427 (423 before), buyer 11, adapter
+  40 passed. No shared package, dependency, or lock changed; the VM storefront, which installs
+  the bare-metal contribution, was not rerun for these route additions, which its tests do not
+  reach. `make check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+  CHANGE=share-site-projection-state` (nothing reported), `make check-tasks`, and `openspec
+  validate --strict` pass.
+
 ## 15. The API-credit storefront's loops, and the controller's one loop form
 
 Delivers P1 and P2: the API-credit storefront's loops on `run_cycle` and its interval key

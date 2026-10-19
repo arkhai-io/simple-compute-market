@@ -100,7 +100,12 @@ from market_capacity_publication import CapacityAdminRouteError
 from market_settlement_runtime import MAX_WAIT_SECONDS, SettlementAdminRouteError
 from .deal_controls import capacity_admin_routes, settlement_admin_routes
 from .fulfillment_service import BareMetalFulfillmentError
-from .listing_controls import ListingControlError, close_listing_as_seller, resume_listing
+from .listing_controls import (
+    ListingControlError,
+    close_listing_as_seller,
+    pause_listing,
+    resume_listing,
+)
 from .models import (
     BareMetalAccessDeliveryResponse,
     BareMetalCapacityEventResponse,
@@ -484,6 +489,24 @@ async def close_listing(listing_id: str, request: Request) -> CloseListingRespon
         return CloseListingResponse.model_validate(
             await close_listing_as_seller(runtime, listing_id)
         )
+    except ListingControlError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api/v1/listings/{listing_id}/pause", response_model=PauseListingResponse)
+async def pause_listing_route(listing_id: str, request: Request) -> PauseListingResponse:
+    """Pause a listing, an administrator's operation: it stays published, and new
+    negotiations on it are refused until it is resumed."""
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_pause_listing",
+        resource=listing_id,
+        body=await _request_body(request),
+    )
+    try:
+        return PauseListingResponse.model_validate(await pause_listing(runtime, listing_id))
     except ListingControlError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
