@@ -1,6 +1,6 @@
 ---
 name: change-plan
-description: Write or amend the implementation plan — tasks.md — for an OpenSpec change whose design has passed its review, its sections coherent, verifiable slices, and ending with the closeout task. Use when a change is `ready for planning` or `in planning` in openspec/changes/README.md, or when the owner says "plan <change>" or "proceed to planning", typically continuing the design session.
+description: Write or amend the implementation plan — tasks.md — for an OpenSpec change whose design review's triage advanced it, its sections coherent, verifiable slices ordered by the design's implementation cadence, ending with the closeout task, and report the cadence's mapping onto the sections. Asks the owner nothing. Use when a change is `ready for planning` or `in planning` in openspec/changes/README.md, or when the owner says "plan <change>" or "proceed to planning", typically continuing the design session.
 ---
 
 # Planning an OpenSpec change
@@ -15,8 +15,12 @@ that context makes a better plan. But the plan is read by implementation session
 that start fresh and see only the files. Everything the plan relies on must be in
 the change's files before a task depends on it.
 
-Planning has three outcomes: the owner accepts the plan, the owner redirects it, or
-planning returns the change to design.
+Planning asks the owner nothing: the owner reviews the design, not the plan, and
+the order of the plan's sections is the design's implementation cadence. It has two
+outcomes: the plan is written, its sections ordered by that cadence, and the
+change is ready for implementation; or planning finds a decision the design does
+not make, or a cadence its sections cannot be cut to, and returns the change to
+design.
 
 ## Running unattended
 
@@ -45,23 +49,21 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **Every reply is a turn.** This step is a discussion: each reply to the owner
-  ends its turn with an outcome, the reply in full as its `message` — `question`
-  while you wait for the owner's answer or disposition. The orchestrating session
-  shows the owner every message and resumes this session with each reply.
-- **The end is an outcome.** Presenting the plan (section 6) is a `question`
-  awaiting the owner's acceptance. Once the owner accepts and the status is set
-  (section 7), end with `finished`, `next` naming the agreement of the first
-  implementation round.
+- **The end is an outcome.** Once the plan is written and checked, its report
+  (section 6) written, and the status set (section 7), end with `finished`, its
+  `message` the report, `next` naming the first round's implementation, and
+  `rounds` the cadence's mapping onto the sections (section 7). Planning asks no
+  question.
 - **A return to design is proposed, not made.** When planning exposes a design
-  question (section 3), end with `returned`, `return_to` `design`, and `evidence`
+  question (section 3), or finds no cadence it can cut its sections to (section 4),
+  end with `returned`, `return_to` `design`, and `evidence`
   naming where you recorded what planning found; leave the status as it is. The
   owner confirms the return, and the design step then sets the status.
 
 ## 1. Check that planning may start
 
 Read the evidence from the files, even if this session held the design discussion:
-the session's memory of a gate can be out of date, and reviews and triage may have
+the session's memory of a triage can be out of date, and reviews and triage may have
 happened elsewhere. Read the change's row in `openspec/changes/README.md` — status,
 `Depends on`, notes — and the change's latest design review and its triage in
 `reviews/`. Then confirm:
@@ -69,13 +71,15 @@ happened elsewhere. Read the change's row in `openspec/changes/README.md` — st
 - The change's status is `ready for planning` or `in planning`, or the owner has
   confirmed implementation's return of the change to planning, in which case set
   it to `in planning`.
-- The latest design review's triage records its gate as passed, or the owner's
-  waiver of that review is recorded (section 3).
+- The latest design review's triage file has a `## Next` beginning `Advance` — a
+  file from before `## Next`, ending with a `## Gate` beginning `Passed`, reads the
+  same — or the owner's waiver of that review is recorded (section 3).
 - No dependency in the row's `Depends on` gates `design` or `planning` and is
   unlanded. A dependency gating implementation does not stop planning; the plan
   notes it.
 
-If any of these fails, stop and tell the owner why.
+If any of these fails, stop and tell the owner why — unattended, end `stopped`
+with the reason, since planning asks no question.
 
 Set the change's `Status` to `in planning`.
 
@@ -113,7 +117,7 @@ plan on an answer the design review did not cover.
    `design.md`.
 3. Ask the owner whether the change needs another design review for it, or whether
    they waive the review. A waiver is the owner's call. Record it in the latest
-   design triage's gate and as a ledger entry with `"review": "plan"`, the decision
+   design triage's `## Next` and as a ledger entry with `"review": "plan"`, the decision
    as `finding`, lens `readiness`, basis `judgement`, and a null severity, stating
    what was waived and why.
 4. With the review passed or waived, set the status to `ready for planning` and
@@ -135,10 +139,10 @@ design.
 - names the files and packages it touches;
 - is a coherent slice that can be verified, sized by what it changes and what
   proves it: a section that crosses several package layers, or whose tasks one
-  verification point cannot prove together, is split. The plan says nothing of
-  sessions or rounds: how many sections a session implements, and how many are
-  reviewed together, the owner decides before implementation starts, whether or
-  not a coding harness implements them;
+  verification point cannot prove together, is split. `tasks.md` says nothing of
+  sessions or rounds: the design's implementation cadence settles them, and
+  planning reports its mapping onto the sections in its outcome (section 7),
+  never in the plan, which is agnostic of whether a coding harness implements it;
 - ends at a verification point — the focused suites that prove it, each named with
   its level as `docs/development/TESTING.md` defines them (unit, library
   integration, application integration through the typed client, system), at the
@@ -151,10 +155,16 @@ design.
   owed. Validation runs the Helm checks and the pipeline on every commit; it reads
   this list to report whether the pipeline's result is evidence for the section.
 
-**Order by real dependencies.** Lower layers before the layers composing them —
-foundation kit before kit before domain before composition root — and focused
-behavioral verification before documentation work, per the task rules in
-`openspec/config.yaml`.
+**Order by real dependencies, then by the cadence.** Lower layers before the layers
+composing them — foundation kit before kit before domain before composition root —
+and focused behavioral verification before documentation work, per the task rules
+in `openspec/config.yaml`. Within that, number the sections in the order of the
+implementation cadence `design.md` records, each round's sections before the
+next round's, so each round is a run of consecutive sections. When the sections
+cannot be cut that way — a round's work depends on a later round's — the design
+must decide: planning returns the change to design (section 3). A design from
+before the cadence was a design decision records none: plan without a mapping,
+and say so in the report; the owner is asked for each round as it starts.
 
 **Every task is traceable.** Each names what it answers to — a design decision, a
 delta requirement, or a repository obligation such as the verification, packaging,
@@ -194,28 +204,43 @@ Before presenting it:
 - `make check-tasks CHANGE=<change>` passes: every numbered task sits under its
   own section's heading, which is how every later step reads the plan.
 
-## 6. Present the plan
+## 6. Report the plan
 
-Do not paste `tasks.md`. Show:
+Do not paste `tasks.md`, and ask nothing: the report is for the owner to read, not
+to accept. Show:
 
 - each section in one line: what it delivers, the decisions it implements, its
   verification, and anything that makes it large or risky;
 - the decision-to-section map, so the owner can see nothing was dropped;
+- the rounds and sessions of the cadence, by section;
 - what you recorded into `design.md` in step 3;
 - the permanent destinations you settled or moved;
 - dependencies that gate implementation.
 
-The owner accepts the plan or redirects it. When the owner changes or reverses a
-recommendation of yours — a split, an order, a destination — append a line to the
-change's `interventions.jsonl` with `"review": "plan"`, the affected section as
-`finding` (`§3`), lens `scope` or `architecture`, basis `judgement`, and a null
-severity, and say that you did.
+Run interactively, the owner may still redirect the plan as they read it. A change
+to the order of the sections, or to the rounds they fall in, is a change to the
+cadence, which is the design's: it returns the change to design (section 3). When
+the owner changes or reverses another recommendation of yours — a split, a
+destination — append a line to the change's `interventions.jsonl` with
+`"review": "plan"`, the affected section as `finding` (`§3`), lens `scope` or
+`architecture`, basis `judgement`, and a null severity, and say that you did.
 
 ## 7. Hand off
 
-When the owner accepts the plan, set the change's `Status` to
-`ready for implementation`. Planning has no review gate of its own: its sizing and
-closeout are examined by the first implementation review.
+When the plan is written and checked, set the change's `Status` to
+`ready for implementation` yourself. Planning has no review of its own: its sizing
+and closeout are examined by the first implementation review.
 
-Implementation starts in a new session with `change-implement`, in rounds of
-sections the owner agrees before it starts.
+Map the cadence onto the sections: a list of rounds, each a list of the sessions
+that implement it, each a list of section ids in order —
+`[[[1, 2]], [[3], [4]]]` is a round of sections 1 and 2 in one session, then a
+round of 3 and 4 in a session each. Name every section before the closeout
+section. Run unattended, it is the `rounds` of your `finished` outcome, which the
+wrapper logs on the plan's line, where the next-step computation reads it.
+Interactively, give it in the report: with no plan line carrying it, the
+orchestrating session asks the owner for each round as it starts. An amended plan
+maps only its sections not yet complete, leaving the rounds already recorded as
+they are.
+
+Implementation starts in a new session with `change-implement`, round by round as
+the mapping gives them.

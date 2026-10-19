@@ -262,6 +262,15 @@ When every decision is settled, and before writing anything:
   that can close out on its own is preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
   for promotion to `ARCHITECTURE.md`.
+- **Settle the implementation cadence** with the owner, as a decision like any
+  other: how many rounds implement the work, what each round covers before its
+  review, and how many sessions implement each — in terms of the work, since the
+  plan's sections do not exist yet ("one round, one session"; "round 1: the
+  contract changes; round 2: the handlers and the migration"). The order of the
+  work can bear on the design, and nothing about it is asked once the owner has
+  moved on: planning orders its sections by it and maps it onto them. Recommend a
+  cadence from the work's natural slices and its risk; a small change is usually
+  one round of everything before closeout.
 
 Present these results and resolve what they raise before recording.
 
@@ -271,7 +280,8 @@ Only when the owner says the design is settled:
 
 - Record each decision in `design.md` under `## Decisions`, with its rationale
   and the alternatives rejected and why. Describe the design as it will be,
-  not the conversation that produced it.
+  not the conversation that produced it. Record the implementation cadence there
+  too, in terms of the work, as the change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
   prescribes its answer (`openspec/README.md#open-questions-and-prescribed-tasks`).
@@ -286,10 +296,12 @@ Only when the owner says the design is settled:
   defect.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
-after the design review's gate is passed.
+once the design review's triage records that the change advances.
 
 ## 7. Hand off to design review
 
 The design phase ends with a design review, not with this skill. Tell the owner
-the design is ready for review and leave the status `in design`; triage of that
-review moves the change to `ready for planning` once the owner passes its gate.
+the design is ready for review and leave the status `in design`. Its triage records
+under `## Next` whether the change advances or another design review runs; when it
+advances, the triage sets `ready for planning`, and planning follows without
+another question to the owner.

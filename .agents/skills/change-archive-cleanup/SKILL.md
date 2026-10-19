@@ -1,12 +1,12 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once the owner has passed its closeout review's gate — release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, and draft the merge commit message and pull request description. Use when a closeout gate has passed and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, and draft the merge commit message and pull request description. Use when a closeout triage records `Advance` and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
 
 Closeout archived the change and committed it; the closeout review read the archive,
-and the owner passed its gate in triage. The change has not landed yet: a change
+and its triage recorded that the change advances. The change has not landed yet: a change
 lands when its index row says `archived`, and this skill writes that. It does what
 closeout deliberately left until the review agreed — releasing the changes that
 wait on this one — and prepares the change to merge.
@@ -51,16 +51,26 @@ the session, and every turn ends with an outcome matching
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does
   not carry this change's latest commits, or its name belongs to another change,
-  stop and ask the owner.
+  stop and ask the owner — unless the change's log holds the owner's decision
+  that it runs on this branch: run `git branch --show-current`, then
+  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  it prints is that decision, and the branch is accepted.
 - **Archived.** `python3 scripts/find_change.py --archived <change>` prints a
   directory under `openspec/changes/archive/`. Read every file of the change from
   there.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
   row already `archived` means cleanup ran: say so and stop.
-- **Gate.** Every numbered closeout review in the change's `reviews/` —
+- **Advance.** Every numbered closeout review in the change's `reviews/` —
   `NN-closeout.md`, `NN-closeout-external.md` — has a triage file beside it, and
-  the latest one's `## Gate` records the owner passing it. Otherwise stop: passing
-  that gate is the owner's, in triage.
+  the latest one's `## Next` begins `Advance` — a file from before `## Next`, ending
+  with a `## Gate` beginning `Passed`, reads the same. Otherwise stop: whether the
+  change advances is recorded in triage.
+- **Validated.** When `git diff --name-only <commit> HEAD`, from the commit the
+  first closeout review read (its `reviewed-commit` marker), names a path outside
+  `openspec/` and `docs/` — a correction to code, a skill, or the step table — the
+  latest validation record is `passed` and names `HEAD`, or an ancestor `HEAD`
+  differs from only in changes' ledgers and reviews. Otherwise stop: the
+  correction is validated first (`make validate CHANGE=<change>`).
 - **Worktree.** It is clean, and `make round-view-closed` passes.
 
 If any check fails, stop and say why.

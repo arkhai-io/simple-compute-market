@@ -1417,28 +1417,61 @@ F4). Touches `.agents/skills/` (`change-design`, `change-plan`, `change-triage`,
 `change-closeout`, `change-archive-cleanup`, `change-implement`, `change-validate`,
 `change-review`, `change-orchestrate`).
 
-- [ ] 6d.1 `change-design`: the discussion settles the implementation cadence and
+- [x] 6d.1 `change-design`: the discussion settles the implementation cadence and
       records it in `design.md` in terms of the work; its handoff describes the
       advance, not a gate (D13, D16).
-- [ ] 6d.2 `change-plan`: asks nothing; orders sections by the design's cadence and
+      Done: a bullet of section 5 (settled with the owner like any decision,
+      recommended from the work's slices and risk), a line of section 6 recording
+      it, and section 7's handoff naming `## Next`.
+- [x] 6d.2 `change-plan`: asks nothing; orders sections by the design's cadence and
       reports the mapping as `rounds` in its outcome, never in `tasks.md`; a plan
       that cannot cut the work that way, or needs any decision, ends `returned` to
       design; its hand-off sets `ready for implementation` itself (D8, D13, G1a).
-- [ ] 6d.3 `change-triage`: ends with `## Next` in place of the gate, with the token
+      Done: the description, opening, and "Running unattended" (no question, its
+      discussion bullet removed, `finished` carrying `rounds`, a failed entry check
+      `stopped`); the entry check reads the design triage's `## Next`; sections
+      ordered by the cadence, a cadence the sections cannot be cut to returned to
+      design, and a design recording none — one from before the cadence was a
+      decision — planned without a mapping, so the owner is asked per round
+      (D13); section 6 a report, not a presentation, an interactive redirection
+      of the order or rounds being the design's; section 7 sets the status and
+      gives the mapping's form.
+- [x] 6d.3 `change-triage`: ends with `## Next` in place of the gate, with the token
       first; asks, once every finding and owner-notes point is disposed and before
       any fix, whether another round is merited, recommending from what the fixes
       will change; records `Advance` itself only with nothing to dispose of; the
       evidence files' closing line names the review's triage file (D16).
-- [ ] 6d.4 `change-closeout` and `change-archive-cleanup`: their entry checks read
+      Done: the template's `## Next`, written last, after the fix commit, so the
+      computation never routes past uncommitted fixes, and the same in each
+      review's triage file when two are triaged together; section 5 asks step 6's
+      question first; section 6, "Advance, or another round", the recommendation
+      from what the fixes change, `Advance — nothing to dispose of` with nothing
+      to dispose of, what the computation does with each token, and the status
+      table keyed to an advancing triage. Beyond the task: the orchestrating
+      session's `NN-orchestrator.md` record is an input triaged like the owner's
+      notes; a lone re-validation is triaged only for its `V<n>`, asks for no
+      notes, and names the earlier review's triage; an unattended closeout
+      triage's code fix is a `question`, not a return to implementation, since
+      the change is archived and implementation refuses it.
+- [x] 6d.4 `change-closeout` and `change-archive-cleanup`: their entry checks read
       the latest pre-closeout or closeout triage's `## Next` beginning `Advance`,
       a legacy `Passed` gate read the same (70 F4).
-- [ ] 6d.5 The branch checks of `change-implement`, `change-triage`,
+      Done, and wording elsewhere in both from gates to advancing. Closeout also
+      accepts a row still `in implementation` whose pre-closeout triage advanced
+      before its fix commit was validated, once that validation passed, since the
+      triage could not set `ready for closeout` then. Archive cleanup also checks
+      the validation the computation requires of a correction outside
+      `openspec/` and `docs/` since the archive, for a run started by hand.
+- [x] 6d.5 The branch checks of `change-implement`, `change-triage`,
       `change-validate`, `change-closeout`, and `change-archive-cleanup` accept a
       branch that is not the change's own when the change's log holds the owner's
       branch decision naming the checked-out branch (D15, 70 F4).
-- [ ] 6d.6 `change-review`: its "Running unattended" covers Claude as well as
+      Done: each runs `git branch --show-current`, then `python3
+      scripts/run_change_step.py log <change> --branch <that branch>`, one
+      command per call, both allowed to every step by `common`.
+- [x] 6d.6 `change-review`: its "Running unattended" covers Claude as well as
       Codex, its final message the review either way (D11).
-- [ ] 6d.7 `change-orchestrate`: relays each message as written and forms no view of
+- [x] 6d.7 `change-orchestrate`: relays each message as written and forms no view of
       a finding or design question, reading only the computation and its inputs,
       the log, and the denials report; records each planned round `by: plan` as it
       starts, asking the owner only for a change with no mapping; drops the round
@@ -1446,11 +1479,54 @@ F4). Touches `.agents/skills/` (`change-design`, `change-plan`, `change-triage`,
       long-running turn; reports a fallback to another model and a run's cost when
       it reports the run; writes its own observations of the tooling as a numbered
       record for the next triage (D7, D13, D16, D17, D18, D19).
-- [ ] 6d.8 Verification: `make check-agent-skills`; a fresh-context read of each
+      Done: the description and opening (relays and routes, what it reads, what
+      it adds to a message); the branch decision and how steps find it; the
+      `round` step recorded `by: plan`; model, fallback, and cost reported from
+      the line; a fresh planning session only on the owner's asking; the relay
+      without a position or a gate; the owner asked for a round only when the
+      computation names them; "Report what only you see", `NN-orchestrator.md`.
+      Also `change-implement`'s opening and report name the cadence and
+      `## Next`.
+- [x] 6d.8 Verification: `make check-agent-skills`; a fresh-context read of each
       changed skill against D8, D12, D13, D15, D16, D17 and the delta's
       "Phases and owner touchpoints", "Discussion steps stay conversations with
       the owner", and "An orchestrating session advances one change"; `make test`.
       No end-to-end scenario covers it.
+      `make check-agent-skills`, `make check-doc-citations`, `make
+      check-comment-hygiene`: passed. Fresh-context read (a subagent, read-only,
+      the diff against `615cbf43` with the 6c scripts as the behaviour
+      described): no leftover gate, plan acceptance, round agreement with a
+      mapping, or orchestrator view of a finding; no history or bad citation; the
+      branch check's commands allowed by `common`. Fixed what it found: planning's
+      discussion bullet and a failed entry check read as questions; a design with
+      no cadence returned to design, where D13 asks the owner per round; an
+      interactive plan's mapping no step reads; an unattended plan redirected
+      after it finished; archive cleanup missing the closeout correction's
+      validation; an unattended closeout triage returning an archived change to
+      implementation; validation's `next` always naming triage; the
+      orchestrator's record unknown to triage; a lone re-validation's closing
+      line and notes; `## Next` written before the fix commit; a closeout
+      triage's "stop" read as a question; a progress file read as a transcript.
+      Declined: limiting the orchestrator's start to its skill and the
+      computation's contract — `AGENTS.md` and its documents are repository
+      rules, not a change's documents or a finding, which D17 bars.
+      `make test`: passed, every suite (`scripts/tests` 1047), after the read's
+      fixes. `make check-tasks`, `make check-change-index`: passed. End-to-end:
+      none, as the preamble says.
+
+Section 6d handoff. The skills are only text: none of their new paths has run
+unattended yet. The first runs on this tooling show whether planning ends
+`finished` with `rounds` that `--json-schema` accepts (6c.1's open point), whether
+a triage writes `## Next` last and alike in two review files, and whether the
+orchestrator records a `round` line `by: plan` from the computation's result. The
+two scaffolding files 6a left in this change's `reviews/`
+(`proposed-change-steps.toml`, `test_with_proposed_table.py`) stay for the
+orchestrating session to remove. `make change-cost` is not yet allowed to steps
+and was not run; this change's lines before 6b carry no `cost`. Still owed
+outside this round: `scripts/find_change.py`'s citation of "Phases and owner
+gates" (6c's handoff), and the table's placement of the review row under
+design's comment (6a.1), the owner's to tidy. The session grew large across four
+sections and their checks; the next round should start fresh.
 
 ## 7. Pilot
 

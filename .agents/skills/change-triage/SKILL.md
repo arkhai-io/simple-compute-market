@@ -1,6 +1,6 @@
 ---
 name: change-triage
-description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, carry accepted outcomes into the change, and ask whether the review's gate is passed. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
+description: Triage a review of an OpenSpec change with the repository owner — check every finding against the files, state your own position on each, present all of them, record the owner's dispositions and the ledger, ask whether the accepted fixes merit another review round, carry accepted outcomes into the change, and record in `## Next` whether the change advances. For an implementation round, triage the reviews, the validation record, and the owner's own notes together, then fix what the owner accepts and commit it. Use after a review lands in a change's reviews/ directory, when the owner pastes a review or notes, when the owner says "triage the review of <change>", or when `make triage` invokes you.
 ---
 
 # Triaging a review
@@ -25,8 +25,10 @@ are inputs (step 1); you fix what the owner accepts, in this session, and commit
 It is an implementation round when any untriaged record is an implementation
 review, a validation record, or the owner's notes, or when `make triage` opened the
 session for a change `in implementation`. Before anything else, check as
-`change-implement` does: the checked-out branch carries the change, and the
-worktree is clean, and `make round-view-closed` passes — while the owner reads the
+`change-implement` does: the checked-out branch carries the change, or the change's
+log holds the owner's decision that it runs on this branch
+(`python3 scripts/run_change_step.py log <change> --branch <branch>` prints it),
+and the worktree is clean, and `make round-view-closed` passes — while the owner reads the
 round (`make round-view`), the branch points at its base, and a fix committed then
 would squash the round into it; ask the owner to run `make round-done` first.
 Record `HEAD`: it is the base the fixes are made against.
@@ -62,13 +64,14 @@ the session, and every turn ends with an outcome matching
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
-- **The end is an outcome.** Each finding you present (step 3) and the gate
-  (step 6) is a `question`. When the dispositions are recorded, the accepted
-  fixes committed, and the gate answered, end with `finished`, `next` naming what
-  the gate's answer leads to. At a closeout triage, a finding whose fix needs code
-  ends with `returned`, `return_to` `implementation`, and `evidence` naming the
-  triage file: a correction is designed, implemented, and validated through those
-  steps, which an unattended triage may not run.
+- **The end is an outcome.** Each finding you present (step 3) and the question
+  whether another round is merited (step 6) is a `question`. When the dispositions
+  are recorded, the accepted fixes committed, and `## Next` written, end with
+  `finished`, `next` naming what `## Next` leads to. A triage with nothing to
+  dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
+  finding whose fix needs code is a `question` naming the correction it needs
+  (step 5): the change is archived, so no step takes it back to implementation,
+  and the owner directs the correction.
 
 ## 1. Find the review and load the context
 
@@ -120,9 +123,11 @@ For an implementation round, also take:
   reason as the disposition). Without a waiver, stop: the reviewed commit is
   validated, or the validated commit reviewed, before the round is triaged.
   A validation record alone — the re-validation of an earlier round's fix commit —
-  is a round of its own: a `passed` record with no `V<n>` needs only its triage
-  file saying it confirms that commit; any `V<n>` is triaged like any finding, with
-  the owner's notes asked for as usual.
+  is triaged only for its `V<n>` failures, each like any finding; a `passed` or
+  `inconclusive` one is not routed to triage at all. No round view preceded it, so
+  no owner's notes are asked for. Its triage file ends "Evidence for the round
+  triaged in `<NN-review>.triage.md`.", naming the earlier round's review, and the
+  `## Next` that review's triage recorded still stands.
 - **The owner's notes.** Ask for them if the owner has not pasted them. The owner
   reads the round before validation and review, with `make round-view
   CHANGE=<change>`, which shows it as uncommitted changes in the checkout until
@@ -134,6 +139,11 @@ For an implementation round, also take:
   own position. A point the owner raised is advice, like any other; where the
   files contradict it, say so with the evidence. Note each point no review raised
   — it is the clearest sign of a check the guidance is missing.
+- **The orchestrating session's observations**, when it wrote any: a numbered
+  record `NN-orchestrator.md` of the workflow tooling's misbehaviour across steps.
+  Label its points `R1`, `R2`, … and triage each as you do the owner's notes; its
+  ledger lines name the record (`NN-orchestrator`), and its triage file ends with
+  the evidence line below.
 
 Each issue has exactly one label for its whole life: its finding ID, or the joined
 IDs of merged duplicates (`03 F2 / 04 F4a`). Carry that label into the design
@@ -229,8 +239,8 @@ positions.
 
 A finding is disposed of only when the owner states a disposition for its label.
 A question about it, a discussion of another finding, or moving on disposes of
-nothing; never infer acceptance from silence. Before asking about the gate, name
-any finding still without a disposition and ask about it. The owner may answer
+nothing; never infer acceptance from silence. Before asking whether another round
+is merited, name any finding still without a disposition and ask about it. The owner may answer
 several at once or say to batch the rest; never propose it.
 
 Order the findings so that each comes after any decision that could change its
@@ -262,14 +272,21 @@ record and the owner's notes included — in this form:
 - **Owner disposition:** <what the owner decided, in their terms>
 - **Result:** <what was done: the edit made, the decision sent to design, the task added, the fix made>
 
-## Gate
+## Next
 
-<Whether the owner passed the review's gate, in their words, and any condition.>
+<Advance | Another round> — <the owner's words, and any condition>
 ```
 
-Only reviews are gates. The triage file of a validation record or of the owner's
-notes ends instead with `## Gate` reading "Not a gate: evidence for the round
-triaged in `<NN-review>.triage.md`."
+`## Next` is the triage's last edit, written once step 6 is answered and the
+accepted fixes are committed (step 5): `scripts/change_next_step.py` routes the
+change on its first words alone, one of two fixed tokens, `Advance` or `Another
+round`, and reads a review's triage file without `## Next` as a triage still in
+progress, so the change does not move on while its fixes are uncommitted. When two
+reviews are triaged together, write the same `## Next` in each review's triage
+file. Only a review's triage file has `## Next`. The triage file of a validation
+record, of the owner's notes, or of the orchestrating session's observations ends
+instead with the line "Evidence for the round triaged in
+`<NN-review>.triage.md`.", and is not routed on.
 
 Append a line to the change's tracked `interventions.jsonl` only for a disposition
 by which the owner corrects course: deciding otherwise than you proposed — another
@@ -282,8 +299,8 @@ the shape `design.md` and the `change-workflow` delta define:
 {"review": "03-design", "finding": "F2", "section": null, "lens": "consistency", "basis": "evidence", "severity": "blocking", "agent_position": "agree: <reason>", "owner_disposition": "<what the owner decided>", "summary": "<one line>"}
 ```
 
-`review` names the record (`NN-<kind>`, `NN-<kind>-external`, `NN-validation`, or
-`NN-implementation-owner`); `section` is the
+`review` names the record (`NN-<kind>`, `NN-<kind>-external`, `NN-validation`,
+`NN-implementation-owner`, or `NN-orchestrator`); `section` is the
 `tasks.md` section or `null`. A review finding is always logged under its own
 review record, even when it was settled as a design decision;
 `"review": "design"` is only for a redirection of a decision no review raised. When
@@ -296,6 +313,10 @@ The ledger is often a new, untracked file whose changes do not show in a diff, s
 the owner cannot otherwise see that it was written.
 
 ## 5. Carry out the accepted outcomes
+
+Ask step 6's question first: once every finding and every point of the owner's
+notes has a disposition, and before any outcome is carried out, the owner decides
+whether the round's accepted fixes merit another review round, while still present.
 
 - **edit:** make it, and record it in the finding's `Result`.
 - **decision:** settled with the owner when it was presented, in the same session, as
@@ -310,7 +331,7 @@ the owner cannot otherwise see that it was written.
   the owner what needs to change and why, and wait. The owner decides whether a
   correction is needed and directs it in this session — typically a short design,
   plan, and implementation of it, then `make validate CHANGE=<change>`, which finds
-  the archived change, before the gate is asked about. Once it is validated, suggest
+  the archived change, before archive cleanup. Once it is validated, suggest
   a review of the fix's diff — an external one, or `make review KIND=implementation`
   — and say why; whether to have it is the owner's call, and nothing requires it.
 - **fix:** once every finding has a disposition, make the accepted fixes, as
@@ -334,48 +355,54 @@ the owner cannot otherwise see that it was written.
   naming the change and the round: the fixes, the change documents the dispositions
   edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
   The triage records stay in `reviews/`, which is untracked. Do not push: the fix commit is
-  validated next (`make validate CHANGE=<change>`), which pushes it. Say whether
-  the fixes also need another review round; the owner decides.
+  validated next (`make validate CHANGE=<change>`), which pushes it.
 
 Then validate and report the result: `openspec validate <change> --strict` for an
 active change, or, for an archived one — a closeout triage — `openspec validate
 --specs --strict`, since its deltas are merged and the permanent specifications are
 what its fixes touched. `python3 scripts/find_change.py <change>` says which.
 
-## 6. The gate
+## 6. Advance, or another round
 
-Every review is a gate, and only the owner passes it. Ask explicitly whether the
-gate is passed, and record the answer in the triage file. Triage being finished is
-not the gate passing: while an accepted `blocking` finding's fix has not landed, or
-a decision it raised is still open, the change stays in its phase, and the owner
-decides whether the fix needs another review round.
+A review is not a gate: the change advances on what the triage records, and the
+owner is asked only what needs their judgement. Once every finding and every point
+of the owner's notes has a disposition, and before any fix is made, ask the owner
+whether the accepted fixes merit another review round of the same kind.
+Recommend, from what the fixes will change: another round when the dispositions
+changed a central decision — the representation, an authority boundary, an
+interface's operations, or the change's scope — so the reviews just triaged no
+longer describe the change, naming the decisions that changed; advancing when the
+fixes are corrections the reviewer would only confirm. Record the answer under
+`## Next` (step 4) once the fixes are committed: `Advance`, or `Another round`,
+followed by the owner's words.
 
-When the owner passes a phase-closing gate, set the change's `Status` in
-`openspec/changes/README.md`, and rewrite the row's `Notes` in the same edit so
-nothing in it still describes the phase being left — a row whose notes contradict
-its status misleads every agent that reads the index — then run
+A triage with no finding to present and no point of the owner's notes to dispose of
+asks nothing: write `## Next` as `Advance — nothing to dispose of`, and finish.
+
+What follows is the computation's, from that token
+(`scripts/change_next_step.py`): after a design review, planning; after an
+implementation round, validation of the fix commit, then the next planned round or
+the pre-closeout review, once that validation passed; after a pre-closeout review,
+closeout once validation of `HEAD` passed; after a closeout review, archive
+cleanup, after a validation of `HEAD` when a path outside `openspec/` and `docs/`
+changed since the commit it reviewed. `Another round` leads to the review of the
+same kind again, after the fix commit's validation for an implementation or
+pre-closeout review.
+
+When the triage of a phase-closing review records `Advance`, set the change's
+`Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same
+edit so nothing in it still describes the phase being left — a row whose notes
+contradict its status misleads every agent that reads the index — then run
 `make check-change-index`:
 
-| Review | Status when its gate passes |
+| Review | Status when its triage advances |
 |---|---|
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
 
-A closeout gate passing ends triage. Do not release dependents, set the row to
-`archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
-session. Tell the owner the next step is `make archive-cleanup CHANGE=<change>`,
-and stop.
-
-When the gate does not pass, leave the status, and say what must happen before the
-next review. Under orchestration, a fix committed after a failed pre-closeout or
-closeout gate leads to the next review of the same kind on its own, once a
-pre-closeout fix is validated (`scripts/change_next_step.py` compares `HEAD` with
-the review's reviewed commit); a repeat review with no fix is the owner's decision,
-which the orchestrating session records.
-
-When the dispositions changed a central decision — the representation, an authority
-boundary, an interface's operations, or the change's scope — the reviews just
-triaged no longer describe the design. Recommend another review round of the same
-kind before the gate is passed, and say which decisions changed.
+A closeout triage that advances ends triage. Do not release dependents, set the row
+to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
+session. Tell the owner archive cleanup is next, and end — unattended, `finished`. With `Another round`,
+leave the status, and say what the next review of the same kind reads.
