@@ -39,8 +39,9 @@ proposal deferred can be built on them.
   of the owner's turns, with each message shown in the top-level session. Planning
   asks nothing; a plan that needs a decision returns to design.
 - How many sessions implement the work, and how much each round covers, is settled
-  in the design discussion as the change's implementation cadence. The plan stays
-  agnostic of sessions: `change-plan` and `change-implement` stop sizing and
+  in the design discussion as the change's implementation cadence; planning reports
+  how the cadence maps onto the sections in its outcome, not in `tasks.md`. The plan
+  stays agnostic of sessions: `change-plan` and `change-implement` stop sizing and
   stopping by "one section per session".
 - A design blocked on a prerequisite shapes the prerequisite's requirements and
   initial proposal, which land on dev first, records the dependency, and halts. The
@@ -95,11 +96,13 @@ proposal deferred can be built on them.
 ### Modified Capabilities
 
 - `change-workflow`: an orchestrating session advances one change through its
-  steps, each run through one wrapper as its leaf skill, holding design, triage,
-  and planning as conversations with the owner, and bringing every gate and
-  question to the owner; every run ends with a structured outcome naming what comes
-  next, including a return to design or a prerequisite change; implementation
-  sections are no longer bound one to a session.
+  steps, each run through one wrapper as its leaf skill on its step's ordered
+  models, holding design and triage as conversations with the owner while planning
+  asks nothing; the owner is interrupted only for judgement, and every other step
+  advances on conditions the computation checks; every run ends with a structured
+  outcome, with its cost, naming what comes next, including a return to design or a
+  prerequisite change; implementation sections are no longer bound one to a
+  session, their cadence settled in the design.
 
 ## Permanent documentation impact
 
@@ -148,7 +151,10 @@ proposal deferred can be built on them.
 
 `.agents/skills/` (a new `change-orchestrate` skill; how every leaf skill asks and
 reports when run unattended; `change-plan`'s and `change-implement`'s section
-sizing; `change-design`'s prerequisite path), the workflow `make` targets and a new
+sizing and `change-plan`'s round mapping; `change-design`'s prerequisite path and
+cadence; `change-triage`'s `## Next`; `change-closeout`'s and
+`change-archive-cleanup`'s entry checks reading it; the branch checks accepting the
+pilot's recorded branch decision; `change-review` on Claude), the workflow `make` targets and a new
 `make orchestrate`, new scripts (`scripts/run_change_step.py`, absorbing
 `run_change_review.py` (retired); `scripts/change_next_step.py`;
 `scripts/check_comment_hygiene.py`, a port of the Makefile's check) with their

@@ -32,7 +32,8 @@ only the change it was started for.
 
 #### Scenario: A review's triage has nothing for the owner
 
-- **WHEN** a review and the validation beside it raised no finding
+- **WHEN** a review and the validation beside it raised no finding, and the
+  owner's notes raise no point to dispose of
 - **THEN** the triage records that the change advances, and the orchestrating
   session runs the next step without asking the owner
 
@@ -132,7 +133,9 @@ change a status; and MUST record what it decided in the workflow log. A review's
 MUST record, in its triage file's `## Next`, whether the change advances or another
 review round runs, beginning with the token `Advance` or `Another round`; the
 computation MUST route on that token alone, and MUST treat a triage file without it
-as a triage in progress.
+as a triage in progress. An implementation or pre-closeout round MUST advance only
+on a `passed` validation naming its final commit; an `inconclusive` validation MUST
+be brought to the owner.
 
 #### Scenario: Reviews await triage
 
@@ -167,8 +170,20 @@ as a triage in progress.
 #### Scenario: A closeout correction awaits validation
 
 - **WHEN** a closeout review's triage records `Advance` and its correction changed
-  more than records since the reviewed commit
+  a path outside `openspec/` and `docs/` since the reviewed commit
 - **THEN** the computation names validation of `HEAD` before archive cleanup
+
+#### Scenario: A documentation correction at closeout
+
+- **WHEN** a closeout review's triage records `Advance` and its correction changed
+  only paths under `openspec/` and `docs/`
+- **THEN** the computation names archive cleanup without a validation
+
+#### Scenario: A round's validation is inconclusive
+
+- **WHEN** an implementation round's triage records `Advance` and the fix commit's
+  validation is `inconclusive`
+- **THEN** the computation names the owner, not the next round
 
 #### Scenario: An implementation round advances
 
@@ -314,8 +329,8 @@ turns, duration, and input, output, cache-read, and cache-write tokens of that r
 alone, over all its turns; for a Codex review, the tokens it reports. Where a run's
 own dollars cannot be told from its session's earlier turns — a crashed run before
 it, or turns the wrapper did not run — the line MUST mark its dollars as partial. A resumed
-run MUST also record the time since its session's previous run and whether its
-first turn read the prompt cache. The cost of a change's runs MUST be reportable by
+run MUST also record the time since its session's last turn of any kind and whether
+its first turn read the prompt cache. The cost of a change's runs MUST be reportable by
 step and by round, with the cache misses and their gaps listed.
 
 #### Scenario: A discussion turn is resumed after a long gap
@@ -345,15 +360,17 @@ triaged and its triage file records that the change advances. The repository own
 MUST be consulted for the design discussion's questions, for their notes on each
 implementation round before its triage, for the disposition of every finding, and
 for whether the dispositions merit another review round, which triage MUST ask
-once every finding is disposed and before any fix is made; a triage whose review
-and validation raised no finding MAY record that the change advances without the
-owner. Every other transition MUST proceed without waiting for the owner, unless a
+once every finding is disposed and before any fix is made; a triage with no
+finding and no point of the owner's notes to dispose of MAY record that the change
+advances without the owner. Every other transition MUST proceed without waiting for the owner, unless a
 step raises a question only the owner can answer.
 Closeout MUST archive the change, merging its specification deltas into the
 permanent specifications, before its closeout review, and that review MUST read the
 archived change and the permanent documents as archived; the archive is cleaned up,
 and the change is `archived`, only once that review's triage records that the
-change advances. Closeout MUST
+change advances and, when `HEAD` differs from the commit that review read in a path
+outside `openspec/` and `docs/`, the latest validation passed for `HEAD` or for an
+ancestor it differs from only in records. Closeout MUST
 change documentation only; a closeout part that would need a code change MUST return
 the change to implementation. The steps that follow the archive — the closeout
 review and its triage, validation, the round view, the scoped citation check, and
@@ -577,14 +594,17 @@ where the owner overrides it.
 
 Each `tasks.md` section MUST be a coherent slice that can be verified, sized by what
 it changes and what proves it, and MUST end at a verification point. The plan MUST
-NOT prescribe how sections are distributed across agent sessions or review rounds.
+NOT prescribe in `tasks.md` how sections are distributed across agent sessions or
+review rounds.
 A session implementing sections MUST begin with no prior conversation and read the
 repository guidance documents, the change, and its sections; how many sessions
 implement the work, and how much each round covers before it is reviewed, MUST be
 settled in the design discussion as the change's implementation cadence, the
-plan's sections ordered by it, and the plan MUST map the cadence onto its sections
-as the sessions and rounds that implement them. Each round MUST be recorded as it
-starts, from that mapping. Each section MUST still be checked, handed off, and
+plan's sections ordered by it, and planning's outcome MUST carry the mapping of the
+cadence onto the sections, as the sessions and rounds that implement them. Each
+round MUST be recorded as it starts, from the latest plan's mapping, as its first
+round with a section not yet complete; a change with no mapping for its next
+incomplete section MUST ask the owner, once per round. Each section MUST still be checked, handed off, and
 committed on its own. Anything a later session needs MUST be recorded in the change's
 files before each section is committed. Before a section is committed, its diff MUST
 be checked against the repository guidance by an agent whose context contains no

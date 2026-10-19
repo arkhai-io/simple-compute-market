@@ -1,7 +1,9 @@
 Sections are ordered by what each builds on: the outcome and the log every run
 writes; the wrapper that runs a Claude Code step; reviews and the `make` targets
 through the wrapper; the next-step computation; the leaf skills' unattended
-reporting; the orchestrator; the pilot; closeout. Every script is tested in
+reporting; the orchestrator; then, planned against the design revised after section
+6, the ordered models, cost recording, advancing on conditions, and the skills'
+touchpoints (6a–6d); the pilot; closeout. Every script is tested in
 `scripts/tests/` with an injected command runner, at unit level, except where a
 real Git repository is the lowest level that proves the behaviour. No end-to-end
 scenario in `e2e-tests/` covers this change and none is owed: it is contributor
@@ -1050,6 +1052,163 @@ No pilot run, live notification, or discussion resume is claimed here. The
 pilot must confirm those behaviours and collect the evidence 7.2 names; all
 permanent-documentation promotion remains at 8.9.
 
+## 6a. Ordered models per step and the review on either harness
+
+Delivers D18 and D11's fallback (69 F4, 70 F6): each step runs on its row's ordered
+models, never Fable or Astra, with no same-vendor fallback, and the review falls back
+from Codex to Claude. Touches `.claude/change-steps.toml`,
+`scripts/run_change_step.py`, `scripts/tests/test_run_change_step.py`, and the
+`Makefile`'s `review` and `orchestrate` targets. Planned after section 6 against the
+design revised after it (design reviews 69 and 70).
+
+- [ ] 6a.1 `.claude/change-steps.toml`: every row gains `models`, D18's policy — Opus
+      5.5 high for design, triage, implement, and closeout (planning resumes
+      design's session and its model); Sonnet 5.5 medium for validate and archive
+      cleanup; a `[steps.review]` row, `skill = "change-review"`, models
+      `codex gpt-6-sol high` then `claude claude-opus-5-5 high`, its Claude entry
+      held read-only (reading, read-only Git, the common read utilities, no edit).
+      `load_steps` accepts `models`, requires it, and refuses a row naming a Fable
+      or Astra model, two models of one vendor, an entry without a model, or a
+      Codex entry on any row but the review (D18).
+- [ ] 6a.2 The wrapper runs a step's first available entry, passing `--model` and
+      `--effort` to `claude -p`, and records `model` and `effort` on the line. An
+      entry is unavailable when its program is missing, it is not signed in, or it
+      reports a usage limit; the wrapper then tries the next. A network error is
+      retried twice, then the run ends `stopped` with no fallback. A resume runs
+      only on the model the waiting run used, and ends `stopped` with the reset
+      time when it is unavailable (D18, 69 F4).
+- [ ] 6a.3 The review through the table: `run_change_step.py review` takes its
+      models from `[steps.review]`; `REVIEW_MODEL` and `REVIEW_EFFORT` are unset by
+      default in the `Makefile` and, when given, override the Codex entry for one
+      run. A review on Claude runs `change-review` with the review row's rules and
+      no `--json-schema`; its final text passes the same record check and is
+      published as Codex's is, its outcome derived the same way. The
+      `reviewer-session` marker carries its harness, `codex:` or `claude:`; an
+      untagged marker is Codex; a review continues the previous reviewer only on
+      the same harness, else starts fresh. The record and the line name the
+      reviewer's harness and model (D11, 70 F6).
+- [ ] 6a.4 `make orchestrate` opens the orchestrating session on Opus 5.5 at medium
+      effort (D17).
+- [ ] 6a.5 Verification: unit tests in `scripts/tests/test_run_change_step.py` with
+      the injected runner — the loader's refusals; entry selection and fallback on
+      each unavailability signal; two network retries then `stopped`; resume
+      refused on another model; a Claude review without the schema, published and
+      tagged; an untagged marker resumed on Codex; `REVIEW_MODEL` overriding only
+      the Codex entry. `uv run --no-project --with pytest pytest -q scripts/tests`;
+      `make test`. No end-to-end scenario covers it (contributor tooling).
+
+## 6b. Every run records its cost
+
+Delivers D19 (69 F6, 70 F7): each log line's model, cost, gap, and cache hit, and
+`make change-cost`. Touches `scripts/run_change_step.py`, a new
+`scripts/change_cost.py` and its test, and the `Makefile`.
+
+- [ ] 6b.1 The wrapper writes `cost` on every Claude run's line: tokens, turns, and
+      duration summed over the run's `result` events; dollars from the last event
+      less the total on the session's last logged run, marked `usd_partial` when
+      the previous run had no result or the session's conversation file gained
+      turns the wrapper did not run; `gap_s` since the session's last turn of any
+      kind; `cache_hit` from the first turn's cache read. A Codex review's line
+      records the tokens it reports (D19).
+- [ ] 6b.2 `scripts/change_cost.py` and `make change-cost CHANGE=<change>`: totals
+      by step and by round — a line's round is the `round` line in force, lines
+      before any are design and planning, lines from the first pre-closeout review
+      on are closeout — partial dollars as a range, and the cache misses with
+      their gaps (D19, 70 F7).
+- [ ] 6b.3 Verification: unit tests over fake streams — a resumed run's dollars
+      differenced, its tokens not; two result events summed; a crashed predecessor
+      and an unlogged turn marking `usd_partial`; the gap after a takeover; the
+      report's buckets and miss list over a fixture log.
+      `uv run --no-project --with pytest pytest -q scripts/tests`; `make test`.
+      No end-to-end scenario covers it.
+
+## 6c. Advancing on conditions: `## Next`, rounds from the plan, and the branch decision
+
+Delivers D16's routing, D14's advance conditions, D13's round mapping, and D15's
+recorded branch decision (69 F1, F2, F7; 70 F1, F5, F9). Touches
+`.agents/change-outcome.schema.json`, `scripts/change_next_step.py`,
+`scripts/run_change_step.py`, and their tests.
+
+- [ ] 6c.1 The outcome schema: a `finished` plan outcome may carry `rounds`, a list
+      of rounds, each a list of sessions, each a list of section ids (D13). The
+      wrapper logs it on the plan's line.
+- [ ] 6c.2 `## Next`: the computation reads a review's triage file's `## Next`
+      token, `Advance` or `Another round`; a review triage file without one is a
+      triage in progress; validation and owner-notes triage files are not routed
+      on; a legacy `## Gate` beginning `Passed` reads as `Advance`, any other goes
+      to the owner (D16, 69 F2).
+- [ ] 6c.3 The advance conditions (D14): a design triage's `Advance` names
+      planning; an implementation round's names validation of the fix commit, then
+      the next planned round or, after the last, the pre-closeout review, only on a
+      `passed` validation naming the round's final commit, an `inconclusive` one
+      naming the owner; a pre-closeout triage's names closeout once validation of
+      `HEAD` passed; a closeout triage's names archive cleanup, after a passed
+      validation of `HEAD` when `HEAD` differs from the reviewed commit in a path
+      outside `openspec/` and `docs/` (`.agents/` and `.claude/` outside); `Another
+      round` names the review of the same kind, after the fix commit's validation
+      for implementation and pre-closeout. The gate rules these replace are removed.
+- [ ] 6c.4 Rounds (D13, 70 F1): the governing plan line is the latest `finished`
+      plan line; the next round is the first of its `rounds` with a section
+      `tasks.md` shows incomplete; the computation's result names that round's
+      sessions for the orchestrator to record `by: plan` as it starts. With no
+      `rounds`, or an incomplete section in no planned round, it names the owner.
+- [ ] 6c.5 The branch decision (D15, 70 F4): `note … orchestrator` accepts `--branch`
+      and `--change`, recorded on the line; `run_change_step.py log` can filter for
+      it, so a branch check can find the line naming the checked-out branch.
+- [ ] 6c.6 Verification: unit tests in `scripts/tests/test_change_next_step.py` over
+      fixture changes — each delta scenario added by the revision: a triage
+      without `## Next`; a legacy `Passed` gate; an implementation round advancing
+      through validation; an inconclusive validation; a closeout correction
+      awaiting validation and a documentation correction not; another round with
+      and without a fix; a two-round plan mapped and its second round named only
+      after the first advanced; an amended plan; no mapping naming the owner — and
+      in `test_run_change_step.py`, the schema's `rounds` and the note's branch
+      fields. `uv run --no-project --with pytest pytest -q scripts/tests`;
+      `make test`; `make check-tasks CHANGE=orchestrate-change-workflow`. No
+      end-to-end scenario covers it.
+
+## 6d. The skills: touchpoints, relaying without judging, and the cadence
+
+Delivers D12's skill changes for D8, D13, D15, D16, and D17 (69 F3, F5; 70 F2, F3,
+F4). Touches `.agents/skills/` (`change-design`, `change-plan`, `change-triage`,
+`change-closeout`, `change-archive-cleanup`, `change-implement`, `change-validate`,
+`change-review`, `change-orchestrate`).
+
+- [ ] 6d.1 `change-design`: the discussion settles the implementation cadence and
+      records it in `design.md` in terms of the work; its handoff describes the
+      advance, not a gate (D13, D16).
+- [ ] 6d.2 `change-plan`: asks nothing; orders sections by the design's cadence and
+      reports the mapping as `rounds` in its outcome, never in `tasks.md`; a plan
+      that cannot cut the work that way, or needs any decision, ends `returned` to
+      design; its hand-off sets `ready for implementation` itself (D8, D13, G1a).
+- [ ] 6d.3 `change-triage`: ends with `## Next` in place of the gate, with the token
+      first; asks, once every finding and owner-notes point is disposed and before
+      any fix, whether another round is merited, recommending from what the fixes
+      will change; records `Advance` itself only with nothing to dispose of; the
+      evidence files' closing line names the review's triage file (D16).
+- [ ] 6d.4 `change-closeout` and `change-archive-cleanup`: their entry checks read
+      the latest pre-closeout or closeout triage's `## Next` beginning `Advance`,
+      a legacy `Passed` gate read the same (70 F4).
+- [ ] 6d.5 The branch checks of `change-implement`, `change-triage`,
+      `change-validate`, `change-closeout`, and `change-archive-cleanup` accept a
+      branch that is not the change's own when the change's log holds the owner's
+      branch decision naming the checked-out branch (D15, 70 F4).
+- [ ] 6d.6 `change-review`: its "Running unattended" covers Claude as well as
+      Codex, its final message the review either way (D11).
+- [ ] 6d.7 `change-orchestrate`: relays each message as written and forms no view of
+      a finding or design question, reading only the computation and its inputs,
+      the log, and the denials report; records each planned round `by: plan` as it
+      starts, asking the owner only for a change with no mapping; drops the round
+      discussion and the gate relay; gives `make change-watch` for each
+      long-running turn; reports a fallback to another model and a run's cost when
+      it reports the run; writes its own observations of the tooling as a numbered
+      record for the next triage (D7, D13, D16, D17, D18, D19).
+- [ ] 6d.8 Verification: `make check-agent-skills`; a fresh-context read of each
+      changed skill against D8, D12, D13, D15, D16, D17 and the delta's
+      "Phases and owner touchpoints", "Discussion steps stay conversations with
+      the owner", and "An orchestrating session advances one change"; `make test`.
+      No end-to-end scenario covers it.
+
 ## 7. Pilot
 
 Delivers D15's evidence: `fix-resource-pool-provider-at-creation` worked by the
@@ -1058,19 +1217,27 @@ pilot's own design, plan, reviews, and archive belong to that change; this
 section records what they showed about the orchestrator.
 
 - [ ] 7.1 Run `make orchestrate CHANGE=fix-resource-pool-provider-at-creation`
-      through every step to archive cleanup, the owner confirming each entry
-      check's branch mismatch.
+      through every step to archive cleanup, on whatever tooling is committed when
+      the pilot resumes, the owner's branch decision recorded once (D15, 69 F8,
+      70 F10). Replanned against the revised design: the per-step branch
+      confirmation is replaced by that one decision.
 - [ ] 7.2 Record here the evidence `design.md`'s Pilot section names: every
       `stopped` outcome and its denials, every `orchestrator` line and the state
       the script could not classify, the relay's latency in the design
       discussion, whether validation's background fetch survived a question,
       whether `--resume` applied a granted rule, and the `reason` value a denial
       by a deny rule records (D6a reads any value but `mode` as not a gap until
-      it is known).
+      it is known); for each item, which flow produced it — the hand-relayed Codex
+      tasks, the section-6 tooling, or the revised tooling (69 F8).
 - [ ] 7.3 Each allow-list gap the pilot found is a proposed edit to
       `.claude/change-steps.toml`, committed by the owner; each script gap is a
       rule added to `change_next_step.py` with its test; each is noted here.
 - [ ] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
+- [ ] 7.5 From the runs on the revised tooling — the pilot's later steps, this
+      change's own remaining rounds — record `make change-cost`'s report, the cache
+      misses and their gaps, every fallback to another model, and every step that
+      advanced without the owner; these are D16 to D19's evidence and the data the
+      design's two open questions wait on.
 
 ## 8. Closeout
 
@@ -1081,7 +1248,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       change to implementation.
 - [ ] 8.2 Import placement — confirm: no function-local import added in
       `scripts/run_change_step.py`, `scripts/change_next_step.py`, or their tests.
-- [ ] 8.3 Documentation compliance: re-check D1–D15, D5a, and D13 against
+- [ ] 8.3 Documentation compliance: re-check D1–D19, D5a, and D6a against
       `openspec/README.md`'s placement rules.
 - [ ] 8.4 Narrative compression of sections 1–7's notes.
 - [ ] 8.5 Roadmap currency: record that no goal in `docs/development/ROADMAP.md`
@@ -1107,14 +1274,24 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         is code, with the model as backstop" (D14, D10, D9's recovery),
         "Restrictions bind unattended runs only" (D6, D12), and "A prerequisite is
         proposed from dev and halts its dependent" (D5, D5a: one change per branch,
-        the proposal landing on dev first); update "Current limits" with one change
-        at a time and gates never passed by the orchestrator.
+        the proposal landing on dev first); add "The owner is interrupted only for
+        judgement" (D16: touchpoints replace gates; the cadence a design decision,
+        D13), "The orchestrator relays and routes" (D17), "Models are policy, with
+        no same-vendor fallback" (D18: never Fable or Astra), and "Every run records
+        its cost" (D19); update "Current limits" with one change at a time and leaf
+        steps on Claude Code only.
+      - `openspec/README.md` closeout requirements, part 6, the legend of
+        `openspec/changes/README.md` (`archived`, a dependency landing), and the
+        Purpose paragraph of `openspec/specs/change-workflow/spec.md` — reworded
+        from gates to the triage's `## Next`; the Purpose paragraph by hand, since
+        no delta reaches it (69 F11).
       - `docs/agents/change-workflow.md` — the "Skills" table gains
         `change-orchestrate`, `make plan`, `UNATTENDED=1`, `make change-next`,
-        `make change-watch`, and `make check-tasks`; a new "Orchestrating
-        a change" section: starting and resuming, agreeing a round, following a
-        running step, answering and taking over a step, maintaining
-        `.claude/change-steps.toml`, and sourcing the completion script (6.4);
+        `make change-watch`, `make check-tasks`, and `make change-cost`; a new
+        "Orchestrating a change" section: starting and resuming, stating the
+        cadence in a design, following a running step, answering and taking over a
+        step, maintaining `.claude/change-steps.toml`'s rules and models, reading
+        the cost report, and sourcing the completion script (6.4);
         "The review directory" gains `workflow.jsonl` and the step transcripts.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
@@ -1127,4 +1304,7 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       `make check-doc-citations CHANGE=orchestrate-change-workflow`, then
       `openspec validate orchestrate-change-workflow --strict`.
 - [ ] 8.11 Archival: `openspec archive orchestrate-change-workflow -y`, merging the
-      delta into `openspec/specs/change-workflow/spec.md`.
+      delta into `openspec/specs/change-workflow/spec.md`. After archive cleanup,
+      rename the permanent spec's scenarios "A closeout gate is passed" and "A
+      pre-closeout gate is passed" to say the triage advances, which the pinned
+      validator refused in the delta (D16).

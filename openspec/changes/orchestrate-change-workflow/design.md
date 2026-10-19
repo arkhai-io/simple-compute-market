@@ -191,7 +191,15 @@ list is routing, not interpretation (D17). A `round` line's `after` is the highe
 record number when it is written, so each round's `after` is taken once the
 previous round's records exist, and the round's records are those above it (69
 F1). Every round recorded at once would leave the latest taken for the current one
-and all sharing one `after`. A change designed before the
+and all sharing one `after`. The governing plan line is the latest `finished` plan
+line, and the next round is the first of its `rounds` with a section `tasks.md`
+does not show complete; an amended plan maps only its incomplete sections, leaving
+earlier rounds as recorded. When the latest plan line has no `rounds`, or an
+incomplete section is in no planned round — a change planned before the mapping
+existed, a section a triage appended — the computation names the owner, asked once
+per round, the answer recorded `by: owner` as that round starts (70 F1). The mapping
+lives only in the log, like the rest of what orchestration depends on; a checkout
+without the log is asked. A change designed before the
 cadence was a design decision, with no cadence and no `round` line, is asked about
 once, before implementation, and its answer is recorded `by: owner`. A round
 agreed before the orchestrator existed — this change's own first five sections —
@@ -211,6 +219,15 @@ about them. The orchestrator agreeing each round with the owner before
 implementation — a question asked after the owner's attention has gone to other
 work, and the pilot's agreed round of four sections was recorded as three
 sessions on the skill's own advice about long sessions.
+
+#### The revision's implementation cadence
+
+The sections the revision after section 6 adds — ordered models, cost recording,
+advancing on conditions, and the skills' touchpoints — are implemented as one round
+in one session, in that order, then validated and reviewed together: they build on
+one another, and the skills describe what the scripts before them built. Settled
+with the owner at planning, which found the revision's design had no cadence of its
+own; the owner waived another design review for it.
 
 ### D14 — A script computes the next step; the orchestrator is its backstop
 
@@ -252,10 +269,12 @@ validation of the fix commit, then the next round or the pre-closeout review aft
 an implementation round; closeout once the latest validation of `HEAD` passed after
 a pre-closeout review; and archive cleanup after a closeout review, once the
 latest validation passed for `HEAD`, or for an ancestor `HEAD` differs from only in
-records, whenever `HEAD` differs from the closeout review's reviewed commit in more
-than records — a correction a closeout triage directed is validated before archive
-cleanup commits and drafts the pull request, the check the gate used to be (69
-F7). A round's
+records, whenever `HEAD` differs from the closeout review's reviewed commit in a
+path outside `openspec/` and `docs/` — `.agents/` and `.claude/` counted outside,
+since a skill or table edit changes behaviour — so a code correction a closeout
+triage directed is validated before archive cleanup commits and drafts the pull
+request, the check the gate used to be (69 F7). A documentation-only correction is
+covered by the checks triage already runs, and costs no pipeline run (70 F9). A round's
 validation and review start once the owner's notes on the round view are saved.
 These conditions are the computation's; the
 orchestrator runs that step and never routes on its own reading. The transitions
@@ -510,9 +529,10 @@ with no edit. A review on Claude runs without the outcome schema: its final text
 the review, checked and published as Codex's is, and its outcome derived the same
 way. The record's `reviewer-session` carries its harness, `codex:<id>` or
 `claude:<id>`, and a review continues the previous reviewer's session only on the
-same harness, otherwise starting fresh. The table is the policy; `REVIEW_MODEL` and
-`REVIEW_EFFORT` are unset by default and, when given, override it for one run (69
-F4).
+same harness, otherwise starting fresh; an untagged marker, written before the tag
+existed, is a Codex session. The table is the policy; `REVIEW_MODEL` and
+`REVIEW_EFFORT` are unset by default and, when given, override the Codex entry for
+one run, their values being Codex models (69 F4, 70 F6).
 
 ### D12 — The skills change how they ask and report, not what they check
 
@@ -537,6 +557,14 @@ unchanged. Beyond that:
   cadence, and a plan needing a decision ends `returned` to design (D8, D16).
 - `change-triage` ends with `## Next` in place of the gate, asking at the end of the
   dispositions, before any fix, whether another round is merited (D16).
+- `change-closeout`'s and `change-archive-cleanup`'s entry checks read the latest
+  pre-closeout or closeout triage's `## Next` beginning `Advance`, a legacy `## Gate`
+  beginning `Passed` read the same, and `change-design`'s handoff describes the
+  advance rather than a gate (70 F4).
+- The branch checks of `change-implement`, `change-triage`, `change-validate`,
+  `change-closeout`, and `change-archive-cleanup` accept a branch that is not the
+  change's own when the change's log holds an `orchestrator` line `by: owner` with
+  `branch` naming the checked-out branch and `change` naming the change (D15).
 - `change-review`'s "Running unattended" covers a review on Claude as on Codex,
   its final message the review either way (D11).
 - `change-orchestrate` relays and routes without judging findings (D17), records
@@ -548,8 +576,9 @@ unchanged. Beyond that:
 `fix-resource-pool-provider-at-creation` is worked through every step by the
 orchestrator on this change's branch, once the orchestrator's sections are
 committed. The owner's word that the pilot runs on this branch is one recorded
-decision, an `orchestrator` line `by: owner`, which each step's branch check accepts
-for the pilot rather than stopping at every step (69 F8, D16).
+decision, an `orchestrator` line `by: owner` carrying `"branch":
+"feat/orchestrate-change-workflow"` and the pilot's `change`, which each step's
+branch check accepts rather than stopping at every step (69 F8, 70 F4, D16).
 Both changes archive here and land as one pull request. This is a deliberate
 exception to one change per branch: the pilot is this change's own end-to-end
 evidence, and its lessons reach this change's triage and closeout directly.
@@ -571,8 +600,9 @@ every other:
    change, and the owner decides while still present;
 4. the interrupts no rule can settle: an environmental remedy validation proposes,
    a denial that needs a rule or was forbidden (D6a), a proposed return, a step that
-   stopped, a design `blocked` on a prerequisite, and D5a's release of a landed
-   prerequisite on the owner's word.
+   stopped, a design `blocked` on a prerequisite, D5a's release of a landed
+   prerequisite on the owner's word, a round of a change with no planned mapping
+   (D13), and the one recorded decision that the pilot runs on this branch (D15).
 
 Reviews are no longer gates. A review's triage file ends with `## Next`, whose
 first words are a fixed token, `Advance` or `Another round`, followed by the owner's
@@ -648,13 +678,13 @@ policy:
 |---|---|
 | design (and planning, resuming its session), triage, implement, closeout | Claude Opus 5.5, high |
 | validate, archive cleanup | Claude Sonnet 5.5, medium |
-| review | Codex, high; then Claude Opus 5.5, high |
+| review | Codex `gpt-6-sol`, high; then Claude Opus 5.5, high |
 
 ```toml
 [steps.review]
 skill = "change-review"
 models = [
-  { harness = "codex",  effort = "high" },
+  { harness = "codex",  model = "gpt-6-sol",       effort = "high" },
   { harness = "claude", model = "claude-opus-5-5", effort = "high" },
 ]
 
@@ -692,7 +722,8 @@ Claude run, the dollars, turns, duration, and input, output, cache-read, and
 cache-write tokens; for a Codex review, the tokens it reports. The fields differ in
 kind, as the pilot's transcripts show: a resumed session's `total_cost_usd` is its
 running total, while its token counts are the run's own. Tokens, turns, and
-duration are recorded as reported; the dollars are the run's total less the total
+duration are summed over the run's `result` events (D3); the dollars are taken from
+the last, and are the run's total less the total
 on the session's last logged run, and the line is marked `usd_partial` when
 something intervened — the previous run crashed without a result, or the session's
 own conversation file gained turns the wrapper did not run, as when the owner took
@@ -701,12 +732,13 @@ last turn of any kind and whether its first turn hit the prompt cache.
 
 ```jsonl
 {"seq":74,"step":"triage","outcome":"question","session":"057b…","model":"claude-opus-5-5","effort":"high","gap_s":412,"cache_hit":true,"cost":{"usd":0.31,"turns":2,"duration_s":17.5,"input":2,"output":972,"cache_read":249533,"cache_write":1211},"message":"…","denials":[]}
-{"seq":75,"step":"review","outcome":"finished","session":"codex:01a1…","kind":"implementation","model":"codex","cost":{"tokens":403900},"record":"52-implementation.md"}
+{"seq":75,"step":"review","outcome":"finished","session":"codex:01a1…","kind":"implementation","model":"gpt-6-sol","cost":{"tokens":403900},"record":"52-implementation.md"}
 ```
 
 `make change-cost CHANGE=<change>` totals the lines by step and by round — a
-line's round is the `round` line in force when it was written, and lines before any
-are design and planning — shows partial dollars as a range, and lists
+line's round is the `round` line in force when it was written, lines before any are
+design and planning, and lines from the first pre-closeout review on are closeout
+(70 F7) — shows partial dollars as a range, and lists
 the cache misses with their gaps, so the cost of session openings, of misses, and
 of warm turns can be told apart. The orchestrator's own session is not a wrapper
 run and is not recorded.
@@ -838,6 +870,26 @@ environment, each under its decision's label:
 - **69 F10, F11** — stale statements corrected; the permanent documents stating
   the gate model are in the proposal's impact.
 
+### Decisions at the second design review's triage (70)
+
+- **70 F1** — the next planned round is the first in the latest plan's `rounds` with
+  an incomplete section; an amended plan maps only incomplete sections; with no
+  mapping, the owner is asked once per round; no tracked copy of the mapping; see
+  D13.
+- **70 F2, F3, F5** — delta wording: `tasks.md` holds no distribution while
+  planning's outcome carries it; advancing alone needs no owner-notes point either;
+  the validation and inconclusive rules in requirement text.
+- **70 F4** — closeout's and archive cleanup's entry checks read `## Next`; branch
+  checks accept a recorded `branch` decision; see D12, D15.
+- **70 F6** — the Codex entry pinned to `gpt-6-sol`; untagged markers are Codex;
+  `REVIEW_MODEL` overrides the Codex entry only; see D11, D18.
+- **70 F7** — tokens summed over a run's result events; a closeout bucket; the gap
+  from the session's last turn; see D19.
+- **70 F8** — the capability line and D16's interrupts.
+- **70 F9** — closeout validation only when a path outside `openspec/` and `docs/`
+  changed; see D14.
+- **70 F10** — the pilot resumes on whatever tooling is committed then; see Pilot.
+
 ## Risks / Trade-offs
 
 - **Relayed discussions cost a second rendering of every message**, and the relayed
@@ -876,17 +928,20 @@ environment, each under its decision's label:
 
 ## Pilot
 
-The pilot's lines from seq 19 to its round-2 triage ran as Codex tasks relayed by
-hand, outside the wrapper — no session, denials record, or cost — while Claude was
-at its usage limit; they are evidence about limits and a cross-harness relay, not
-about the wrapper. The owner continues the pilot outside this session to its next
-workflow stage, then resumes it from the orchestrating session, and section 7
-records which of its evidence came from which flow (69 F8).
-
 `fix-resource-pool-provider-at-creation`, from `ready for design` through archive
 cleanup, on this change's branch (D15). The pilot records, for this change's
 triage: every `stopped` outcome and its denials, every `orchestrator` line and the
 transition the script could not classify, the relay's latency on the design
-discussion, whether validation's background fetch survived a question, and, from
-its remaining rounds, the cost of each step, session opening, and cache miss
-(D19).
+discussion, and whether validation's background fetch survived a question.
+
+The pilot's lines from seq 19 to its round-2 triage ran as Codex tasks relayed by
+hand, outside the wrapper — no session, denials record, or cost — while Claude was
+at its usage limit; they are evidence about limits and a cross-harness relay, not
+about the wrapper. The owner continues the pilot outside this session to its next
+workflow stage, then resumes it from the orchestrating session on whatever tooling
+is committed then: the section-6 tooling, if the revision's sections are not yet
+implemented, or the revised tooling if they are (69 F8, 70 F10). Section 7 records
+which of its evidence came from which flow. Evidence for D16 to D19 — advancing
+without gates, the relay without judgement, models and fallback, and cost — comes
+from whatever runs on the revised tooling: the pilot's later steps if it is still
+open, this change's own remaining rounds, and the next change orchestrated.
