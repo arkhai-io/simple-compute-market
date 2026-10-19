@@ -83,6 +83,7 @@ from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = ROOT / ".agents" / "change-outcome.schema.json"
 STEP_TABLE = ROOT / ".claude" / "change-steps.toml"
+STEP_MODEL = "claude-opus-5-5"
 CHANGES = Path("openspec/changes")
 LOG = "workflow.jsonl"
 TRANSCRIPTS = "transcripts"
@@ -474,7 +475,10 @@ def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any], *,
     take a prompt placed after them as one more rule. Only the project's settings
     are loaded, not the owner's user or local settings with their allow rules.
     """
-    command = ["claude", "-p", prompt, "--permission-mode", "dontAsk",
+    # Every step runs on a named model rather than the account's default, which may
+    # be one the workflow never uses.
+    command = ["claude", "-p", prompt, "--model", STEP_MODEL,
+               "--permission-mode", "dontAsk",
                "--setting-sources", "project",
                "--output-format", "stream-json", "--verbose",
                "--json-schema", json.dumps(harness_schema(schema)),

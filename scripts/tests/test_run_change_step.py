@@ -584,6 +584,7 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
     rules = step.load_steps()["design"]
     assert command[:3] == ["claude", "-p", f"/change-design {CHANGE}"]
     assert _option(command, "--permission-mode") == "dontAsk"
+    assert _option(command, "--model") == "claude-opus-5-5"
     assert _option(command, "--setting-sources") == "project"
     assert _option(command, "--output-format") == "stream-json"
     assert "--verbose" in command

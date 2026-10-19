@@ -1073,7 +1073,10 @@ design revised after it (design reviews 69 and 70).
 - [ ] 6a.2 The wrapper runs a step's first available entry, passing `--model` and
       `--effort` to `claude -p`, and records `model` and `effort` on the line. An
       entry is unavailable when its program is missing, it is not signed in, or it
-      reports a usage limit; the wrapper then tries the next. A network error is
+      reports a usage limit; the wrapper then tries the next. This replaces the
+      fixed `STEP_MODEL` (`claude-opus-5-5`) the orchestrator added to
+      `claude_command` before this round, on the owner's word, so the round itself
+      would not run on the account's default model. A network error is
       retried twice, then the run ends `stopped` with no fallback. A resume runs
       only on the model the waiting run used, and ends `stopped` with the reset
       time when it is unavailable (D18, 69 F4).
