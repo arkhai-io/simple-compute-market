@@ -6,27 +6,28 @@ loop requirements in openspec/specs/market-composition/spec.md. This module
 names the VM storefront's loops and binds one controller for the process, so
 the loop bodies, startup, and admin routes share it through stable names.
 
-A loop body consults `gate` once per cycle, before any work, and waits between
+A loop consults `gate` once per cycle, before any work, and waits between
 cycles through `idle`, so a pause holds it at a cycle boundary without
 cancelling it. Every loop but the capacity-event pollers is registered with
 `register_loop` and has no body of its own: the controller's timer gates, runs
 the loop's step through the one cycle boundary an operator's step also takes,
-and waits. The capacity-event pollers fan out one cycle per site inside the
-capacity-publication kit inside the aggregate loop's task, which takes
-`capacity_site_gate(site)` and `idle`, serializes each site's cycle with that
-site's step itself, and reports each cycle to `capacity_site_cycle_recorder(site)`
-for its outcome. Each site's name is declared as the aggregate loop's child, so
-it reports the aggregate's end once the fan-out has ended.
+and waits. The capacity-event pollers are registered with `register_fan_out`:
+they fan out one cycle per site inside the capacity-publication kit inside the
+aggregate loop's task, which takes `capacity_site_gate(site)` and `idle`,
+serializes each site's cycle with that site's step itself, and reports each
+cycle to `capacity_site_cycle_recorder(site)` for its outcome. Each site's name
+is declared as the aggregate loop's child, so status lists it before its first
+cycle and it reports the aggregate's end once the fan-out has ended.
+`start_loops` starts both forms.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.domain_registry import (
     StorefrontDomainBindingError,
     StorefrontDomainRegistryError,
@@ -111,15 +112,6 @@ def trading_pause() -> TradingPause:
     return _TRADING_PAUSE
 
 
-def start_registered_loop(
-    task: StorefrontBackgroundTask,
-    *,
-    task_logger: Any = None,
-) -> asyncio.Task[Any]:
-    """Start one background loop under the controller."""
-    return _CONTROLLER.start_loop(task, task_logger=task_logger or logger)
-
-
 def register_step(
     name: str,
     *,
@@ -158,8 +150,27 @@ def register_loop(
     )
 
 
+def register_fan_out(
+    name: str,
+    *,
+    route: str,
+    step: LoopStep,
+    run: Callable[[], Awaitable[Any]],
+    children: Callable[[], Iterable[str]],
+    preview: LoopStep | None = None,
+) -> None:
+    """Register a loop whose task fans out into per-child cycles.
+
+    `run` makes the task; `children` names the children, declared as this
+    loop's children now and when it starts; `start_loops` starts the task.
+    """
+    _CONTROLLER.register_fan_out(
+        name, route=route, step=step, run=run, children=children, preview=preview
+    )
+
+
 def start_loops() -> dict[str, asyncio.Task[Any]]:
-    """Start the timer of every registered loop not yet started."""
+    """Start every registered loop not yet started: each timer and fan-out."""
     return _CONTROLLER.start_loops(task_logger=logger)
 
 
@@ -263,12 +274,12 @@ __all__ = [
     "loop_gate",
     "loop_states",
     "loops_check",
+    "register_fan_out",
     "register_loop",
     "register_step",
     "registered_loop_names",
     "reset_for_tests",
     "snapshot",
     "start_loops",
-    "start_registered_loop",
     "starting_loop_names",
 ]

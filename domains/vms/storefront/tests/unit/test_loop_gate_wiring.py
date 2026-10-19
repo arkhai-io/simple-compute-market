@@ -29,9 +29,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 import market_storefront.container as container
 from market_storefront import lifecycle
+from market_storefront import lifecycle_steps
 from market_storefront import startup
 from market_storefront.services.publication_loop import wake_publication_loop
 from tests._settings_overrides import settings_overrides
@@ -45,8 +45,8 @@ _LONG_INTERVAL = 3600
 #: reported paused once that bound expires fails here rather than passing late.
 _PROMPTLY = 1.0
 
-#: The loops startup registers on the controller while contact exchange is not
-#: composed: every loop but the capacity-event pollers.
+#: The timer loops startup registers on the controller while contact exchange
+#: is not composed: every loop but the capacity-event pollers' fan-out.
 _TIMED_LOOPS = {
     lifecycle.NEGOTIATION_WATCHDOG,
     lifecycle.SETTLEMENT_SERVICING,
@@ -96,6 +96,18 @@ class _Cycles:
         self.started.set()
         return ()
 
+    #: The sites the capacity-event fan-out polls; none unless a case names some.
+    sites: tuple[str, ...] = ()
+
+    async def poll_events(self, *, interval_seconds, paused=None, wait=None, record=None):
+        """The capacity-event fan-out: each site gates and waits as the kit's
+        pollers do, and stays at its gate once held. It never returns."""
+        gates = [paused(site) for site in self.sites]
+        while True:
+            if any([gate() for gate in gates]):
+                await asyncio.Event().wait()
+            await wait(_LONG_INTERVAL)
+
 
 @pytest.fixture
 def collaborators(monkeypatch):
@@ -122,15 +134,21 @@ def collaborators(monkeypatch):
 
 @asynccontextmanager
 async def _registered(coro_factory, name: str):
-    """Run a self-gating loop body under the name startup registers it as.
+    """Run a fan-out's task under the name startup registers it as, with the
+    step its route runs, as `register_vm_loops` does.
 
     Cancellation is how the loop ends in this test, never how a pause works:
     these loops are not cancelled in production. It is only the test's way of
     reclaiming a coroutine designed never to return.
     """
-    task = lifecycle.start_registered_loop(
-        StorefrontBackgroundTask(name=name, task_factory=coro_factory)
+    lifecycle.register_fan_out(
+        name,
+        route="capacity-events",
+        step=lifecycle_steps.capacity_events_step,
+        run=coro_factory,
+        children=lambda: (),
     )
+    task = lifecycle.start_loops()[name]
     try:
         yield task
     finally:
@@ -143,29 +161,36 @@ async def _paused_promptly() -> dict[str, str]:
 
 
 class TestStartupRegistersEveryLoopOnTheController:
-    def test_the_capacity_pollers_are_the_one_self_gating_loop(self):
-        """The constant is the contract between the registration and the gate
-        the kit's per-site fan-out reads; every other loop has no body here."""
+    def test_startup_starts_no_loop_body_of_its_own(self):
+        """Every loop, the capacity pollers' fan-out included, is registered on
+        the controller and started by `start_loops`; startup starts no task."""
         source = open(startup.__file__).read()
-        assert "name=CAPACITY_EVENTS_POLLER" in source
-        assert "start_registered_loop(" in source
-        assert source.count("StorefrontBackgroundTask(") == 1, (
-            "startup starts a loop body of its own besides the capacity pollers"
-        )
+        assert "StorefrontBackgroundTask" not in source
+        assert "start_loops()" in source
 
     async def test_startup_registers_and_starts_every_loop(
         self, long_intervals, collaborators
     ):
         """Held from the start, so no loop runs a cycle here."""
         lifecycle.controller().request_pause(True)
-        startup._start_lifecycle_loops()
+        collaborators.publication.sites = ("default",)
+        # A development site URL on a reserved domain; nothing is called there.
+        with settings_overrides(**{"capacity.sites": {"default": "http://site.invalid:8081"}}):
+            startup._start_lifecycle_loops()
         await asyncio.wait_for(lifecycle.await_quiescence(), timeout=_PROMPTLY)
 
-        assert set(lifecycle.registered_loop_names()) == _TIMED_LOOPS
+        assert set(lifecycle.registered_loop_names()) == {
+            *_TIMED_LOOPS,
+            lifecycle.CAPACITY_EVENTS_POLLER,
+        }
         snapshot = lifecycle.snapshot()
         assert {name: snapshot[name].state for name in _TIMED_LOOPS} == dict.fromkeys(
             _TIMED_LOOPS, "paused"
         )
+        # The fan-out's task is started with the timers, and each configured
+        # site's poller is declared before its first cycle.
+        assert snapshot[lifecycle.CAPACITY_EVENTS_POLLER].state == "paused"
+        assert lifecycle.capacity_site_loop_name("default") in snapshot
         assert all(snapshot[name].last_outcome is None for name in _TIMED_LOOPS)
         assert collaborators.site.snapshots == {"resource_pool": 0, "capacity_bucket": 0}
 
@@ -354,6 +379,22 @@ class TestIntroductionRetention:
 
         assert set(lifecycle.registered_loop_names()) == {
             *_TIMED_LOOPS,
+            lifecycle.CAPACITY_EVENTS_POLLER,
             lifecycle.INTRODUCTION_RETENTION,
         }
         assert lifecycle.loop_states()[lifecycle.INTRODUCTION_RETENTION] == "paused"
+
+    async def test_an_unusable_sweep_interval_refuses_startup_by_its_key(
+        self, long_intervals, collaborators, monkeypatch
+    ):
+        """Checked before any loop registers, so none starts."""
+        retention = SimpleNamespace(policy=SimpleNamespace(sweep_interval_seconds=10**11))
+        monkeypatch.setattr(
+            container,
+            "resolved_contact_exchange",
+            SimpleNamespace(retention=lambda: retention),
+        )
+        with pytest.raises(ValueError, match="retention_sweep_interval_seconds"):
+            startup._start_lifecycle_loops()
+
+        assert lifecycle.registered_loop_names() == []

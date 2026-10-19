@@ -727,7 +727,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-storefront"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -738,7 +738,7 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
-    { path = "arkhai_kit_storefront-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_kit_storefront-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]

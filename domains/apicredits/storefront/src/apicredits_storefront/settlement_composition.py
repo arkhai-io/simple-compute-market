@@ -333,9 +333,7 @@ def build_api_credit_settlement_composition(
         runtime,
         repository,
         worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=float(
-            storefront_config.settings.get("claims_sweep_interval", 30)
-        ),
+        interval_seconds=storefront_config.settlement_servicing_interval(),
     )
     composition = ApiCreditsSettlementComposition(
         domain=domain,

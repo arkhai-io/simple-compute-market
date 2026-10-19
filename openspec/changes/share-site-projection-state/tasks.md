@@ -4518,21 +4518,238 @@ Delivers P1 and P2: the API-credit storefront's loops on `run_cycle` and its int
 renamed, then the kit's old loop forms removed (D6, C4). Touches the API-credit storefront
 and `kit/storefront`.
 
-- [ ] 15.1 `src/startup.py` and `src/lifecycle_steps.py`: `negotiation_watchdog`,
+- [x] 15.1 `src/startup.py` and `src/lifecycle_steps.py`: `negotiation_watchdog`,
       `settlement_servicing`, and `payment_reconciliation` register with `register_loop`;
       the per-site capacity-event pollers keep the per-site lock of 3.4.
-- [ ] 15.2 `src/settings.toml`, `src/startup.py`, `src/settlement_composition.py`:
+      Done, on VM's and bare metal's pattern: `register_api_credit_lifecycle_steps` (steps,
+      when the services start, unchanged) and the new `register_api_credit_loops` (timers over
+      the same steps, when the startup tasks run), each sweep's first cycle due one interval
+      after its timer starts, as its kit runner made it; payment reconciliation only while
+      Arkhai payments is composed. `_startup_tasks` registers them after the escrow backfill
+      and calls `start_loops()` once, logging each loop with its interval; it no longer starts
+      `run_negotiation_watchdog`, `SettlementServicingWorker.run`, or
+      `run_payment_reconciliation`. The watchdog's policy moved from `startup` into
+      `lifecycle_steps` (`negotiation_watchdog_policy`), as VM's did, so the step's local
+      import of `startup` goes, and its "marked N stale" log moved into the step. The
+      controller is `api_credit_loop_controller()`, with `DISCLOSED_CYCLE_ERRORS` -- VM's four
+      kit and core capacity and registration errors; the API-credit storefront has no
+      configuration or publication error of its own. **Also, following VM (market-composition
+      "A loop records each cycle's outcome with the controller"):** each site's capacity-event
+      poller is declared as the aggregate loop's child (`capacity_site_gate`, where it was
+      declared with no parent) and records each timer cycle through the controller's
+      `cycle_recorder` (`capacity_site_cycle_recorder`), as VM's do since round 08;
+      `capacity_events_poller_loop` takes an optional `runtime`, the seam the tests use. The
+      capacity-event aggregate is still started with `start_loop` (see 15.3).
+      **Amended (15.3 resolved):** `register_api_credit_loops(loops, *, capacity_runtime=None)`
+      also registers the capacity-event aggregate with `register_fan_out` (its step and
+      preview, `capacity_events_poller_loop` as `run`, each configured site's poller name as
+      `children`), and `_startup_tasks` registers and starts every loop together, after the
+      credits-service preflight and the demo-listing seed, where the capacity poller already
+      started; the sweeps' timers therefore start there too, their first cycles still one
+      interval later (`design.md` D6, "the controller's loop forms").
+- [x] 15.2 `src/settings.toml`, `src/startup.py`, `src/settlement_composition.py`:
       `settlement_servicing_interval_seconds` replaces `claims_sweep_interval`, which
       refuses startup naming its replacement.
-- [ ] 15.3 `kit/storefront/src/market_storefront_kit/lifecycle.py`: remove `start_loop` and
+      Done. `settings.toml` ships `settlement_servicing_interval_seconds = 30`, commented as
+      VM's; `utils.config.settlement_servicing_interval()` is the one reader (the worker in
+      `settlement_composition.py` and the timer in `lifecycle_steps.py`), validated through
+      `kit/config`'s `positive_seconds` and refused by key (`[settlement_servicing_interval_seconds]
+      <reason>`, raised outside the handler) -- the owner's rule that a new duration uses
+      `market_config.setting_types`; the storefront's `arkhai-kit-config` floor is now
+      `>=0.4.0`. **Divergence (for the owner):** VM reads the same key with a bare `float`
+      (D6's round-10 note left it unconverted); if VM should adopt the check, it is a one-line
+      change in VM's `utils/config.py`. **Resolved (owner, 2026-10-19):** VM adopts it, and its
+      retention sweep interval too (`design.md` D6's round-10 note): VM's
+      `settlement_servicing_interval()` refuses by `[settlement_servicing_interval_seconds]`,
+      and `startup._start_lifecycle_loops` reads the composed retention policy's interval
+      through the new `utils.config.introduction_retention_sweep_interval`, refused by
+      `[Settlement.contact.retention_sweep_interval_seconds]` before any loop registers. Unit
+      (VM, `tests/unit/test_config_loader.py`: 0, -1, text, a boolean, 1e11, and 1e-7 refused by
+      key with no exception context, and the retention interval's refusals and reading;
+      `tests/unit/test_loop_gate_wiring.py`: a 1e11 retention interval refuses startup by its
+      key with no loop registered). The new `retired_settings.py` holds `RENAMED_SETTINGS`
+      and `require_no_retired_settings`, which `_build_api_credit_services` calls first, before
+      the signer, database, or worker, raising `StorefrontStartupError` with VM's heading and
+      text ("the storefront states retired settings: claims_sweep_interval was renamed
+      settlement_servicing_interval_seconds; state settlement_servicing_interval_seconds
+      instead"); the old key is never read. No API-credit chart exists, so this refusal is the
+      only guard (C4). Unit (`tests/unit/test_server_composition.py`): the refusal in two
+      spellings with no signer resolved and no database file created, no refusal without the
+      key, the interval read from its key and not the old one, and 0, -1, text, a boolean, and
+      1e11 refused by key with no exception context.
+- [x] 15.3 `kit/storefront/src/market_storefront_kit/lifecycle.py`: remove `start_loop` and
       the step-only `register_step` once no caller remains; bump the version.
-- [ ] 15.4 Tests. The API-credit storefront's lifecycle and startup suites: the registered
+      **Stopped (plan premise wrong; for the owner).** Callers remain of both, by the design
+      Sections 9 and 13 delivered, so "once no caller remains" never holds, and removing either
+      needs a decision `design.md` does not make:
+      - `start_loop` starts the capacity-event aggregate loop, the fan-out D6 keeps as "the one
+        exception in shape", in VM (`lifecycle.start_registered_loop`, called by
+        `startup._start_capacity_events_poller`) and in the API-credit storefront
+        (`startup._startup_tasks`). Nothing else starts that task. Every other production
+        loop is on `register_loop`. Test callers: `kit/storefront/tests/unit/test_lifecycle_controller.py`
+        (many, testing gating and states over synthetic self-gating bodies),
+        `test_negotiation_watchdog.py`, `test_lifecycle_routes.py`; VM's
+        `tests/unit/test_loop_gate_wiring.py`; API credits' `tests/unit/test_lifecycle_routes.py`.
+      - `register_step` registers a loop's step apart from its timer: VM at import
+        (`lifecycle.register_step` in `lifecycle_steps.register_vm_lifecycle_steps`, so every
+        lifecycle route can run a step) and bare metal when its runtime is built
+        (`lifecycle_steps.register_bare_metal_lifecycle_steps`), each registering timers later,
+        at startup, with intervals and a fresh publication wake only startup has (Sections 9
+        and 13, "registration split"); the API-credit storefront the same way (15.1). The
+        capacity-event aggregate's step is registered only this way, since its loop is the
+        fan-out. No production loop is step-only any longer (bare metal's timerless publication
+        was the one, until Section 13).
+      Options: (a) keep `register_step` as the step half of a loop's registration (it runs no
+      loop), and replace `start_loop` with a fan-out-only form -- e.g. `start_fan_out(name,
+      task_factory)` with no step parameters, documented for a loop whose cycles run in
+      declared children -- used by the two capacity-event aggregates; kit tests of gating move
+      to it or to `register_loop`; small, touches the kit, VM's `lifecycle.py`/`startup.py`,
+      and API credits' `startup.py`. (b) as (a), but the fan-out registers like a timer
+      (`register_fan_out(name, *, route, step, preview, run)`, started by `start_loops`), so
+      both forms register and start one way; larger, since VM's and API credits' startup
+      change shape. (c) remove `register_step` too, making VM and bare metal register each
+      loop once with its interval (VM's at startup, so its routes find no step before startup
+      runs; bare metal's in the runtime, its publication wake renewed elsewhere); larger
+      still, reworking Sections 9 and 13's registration. (d) defer 15.3, recording the two
+      forms as what the controller keeps. Recommended: (a) -- it removes the general
+      self-gating form D6 retires while keeping the fan-out D6 names, and leaves the
+      registration split VM and bare metal chose.
+      **Resolved by the owner (2026-10-19): (b)**, recorded in `design.md` D6 ("the
+      controller's loop forms") with (a), (c), and (d) rejected. Done. The controller gains
+      `register_fan_out(name, *, route, step, preview=None, run, children)`: it registers the
+      step half through `register_step`, records the fan-out, and declares each name
+      `children()` returns as its child (parent `name`) at once, and again when it starts, so
+      status lists every site's poller before its first cycle; a child the task gates later
+      still declares itself on use. A name registered as a timer loop is refused as a fan-out
+      and the reverse, and a running fan-out cannot register again (as `register_loop` refuses
+      a running loop). `start_loops` starts every registered fan-out's `run` task beside the
+      timers (one with a handle is skipped, an ended one stays ended); `clear_loops` and
+      `stop_loops` cover fan-outs, `keep_registrations=False` forgetting them too, and
+      `snapshot` reports them through their handles, steps, and declared children. `start_loop`
+      is gone, and so is VM's `lifecycle.start_registered_loop`; `register_step` stays as the
+      step half of a registration, its docstring saying so. VM: `lifecycle.register_fan_out`
+      wraps the controller's; `lifecycle_steps.register_vm_loops` registers the aggregate as a
+      fan-out (`capacity_events_fan_out`, over the container's database, and each configured
+      `[capacity.sites]` site's poller name), and startup's `capacity_events_poller` step is
+      gone, so the aggregate starts in `lifecycle_loops` with every other loop, immediately
+      after the first projection load where it used to start (no step ran between them). API
+      credits: 15.1's amendment. `arkhai-kit-storefront` 0.8.0 (an incompatible removal); the
+      three storefronts' exact pins move to `==0.8.0`; `make lock` relocked `kit/storefront`,
+      the API-credit and bare-metal storefronts, and `e2e-tests`; VM storefront's lock was
+      edited by hand with the three substitutions uv wrote into bare metal's (version, wheel
+      name, root specifier); neither `kit/policy` nor VM buyer locks the kit (16.6 relocks VM
+      storefront).
+- [x] 15.4 Tests. The API-credit storefront's lifecycle and startup suites: the registered
       loop set, the retired key's refusal. `kit/storefront/tests/unit/test_lifecycle_controller.py`:
       the removed forms' tests go.
-- [ ] 15.5 Refresh the locks. Validation: `make test-apicredits`, `make -C kit
+      Done (see the notes below for the API-credit cases). Kit (unit,
+      `test_lifecycle_controller.py`): the synthetic self-gating bodies the gating, state, and
+      fan-out-children tests drive now start as fan-outs with no children through a test helper
+      (`_start_body`), since a fan-out is the one form whose task is not the controller's
+      timer; `start_loop`'s own coverage goes with it. Eight new cases: a fan-out's children
+      listed `starting` before its first cycle; `start_loops` starting it beside a timer, a
+      pause then holding both and its children; its route running its step through one
+      recorded cycle; an ended fan-out staying ended until `clear_loops`, then restarting with
+      its children declared again; a reset forgetting it; the two cross-form refusals; a
+      running fan-out refused. `test_lifecycle_routes.py` starts its synthetic loop as a
+      fan-out; `test_negotiation_watchdog.py`'s long-interval case runs the kit runner as a
+      task under a declared name. VM (unit, `test_loop_gate_wiring.py`): startup registers and
+      starts the fan-out with the five timers, each configured site's poller declared before
+      its first cycle; the capacity-poller cases register their stand-in fan-out through
+      `lifecycle.register_fan_out`; the source check now asserts startup starts no task of its
+      own. VM (application integration, `tests/integration/test_lifecycle_status.py`): the
+      failing-site case starts the loops through `register_vm_loops`, and the held case
+      reports the aggregate and its site paused with no outcome.
+- [x] 15.5 Refresh the locks. Validation: `make test-apicredits`, `make -C kit
       test-storefront`, `make test-storefront`, `make test-bare-metal`,
       `make check-architecture`, `make check-packaging`, `make test`. End-to-end
       (API-credit lane): `e2e_credits_deal`, `e2e_credits_payment_deal`.
+      Done. Locks as 15.2 and 15.3 say (`make lock` for `kit/storefront`, the API-credit and
+      bare-metal storefronts, and `e2e-tests`; VM storefront's hand-edited; 16.6 relocks it).
+      `make -C kit test-storefront` (in `make test`): 114 passed (106 before). `make
+      test-apicredits`: storefront 172 passed (153 before), middleware and buyer suites
+      passing. `make test-bare-metal`: domain 134, storefront 427, buyer 11, adapter 40 passed.
+      `make test-storefront` cannot reinit here (the PyTorch index is refused, as in 2.6), so VM
+      storefront ran frozen with the rebuilt kit-storefront and bare-metal storefront wheels
+      reinstalled (`UV_FROZEN=1 make test-unit test-integration`): unit 1100 passed, 1 skipped
+      (1089 before), integration 448 passed. `make -k test`: every suite it ran passed (core
+      123 + 134 + 217 (2 skipped) + 62, the kits, provisioning service 675 + 463, bare metal as
+      above, API-credit storefront 172, e2e unit 38, release tooling 944, the Helm render
+      suites), stopping only at the reinit of `kit/policy`, `domains/vms/storefront`, and
+      `domains/vms/buyer`, run frozen: `kit/policy` 80 passed, VM buyer 202 passed, VM
+      storefront as above. `make check-packaging` (architecture rules included), `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. No
+      repository typing target exists. The pipeline was not run.
+      **End-to-end, read from the lanes' files (the pipeline was not run):** every API-credit
+      lane storefront starts its sweeps on the controller's timer and its capacity-event
+      fan-out through `start_loops`, all after the credits-service preflight, on the packaged
+      30 s servicing interval under its new key; `e2e_credits_deal` and
+      `e2e_credits_payment_deal` hold and step no loop, and read no status, so they exercise the
+      timers through the servicing sweeps and the fan-out through capacity events. Every
+      VM-lane scenario starts its storefront's capacity-event fan-out with the other loops,
+      after the first projection load as before; no scenario reads the API-credit status. The
+      bare-metal lane takes the kit bump unchanged in behaviour.
+- [x] 15.6 (owner, 2026-10-19) API-credit system status reports `lifecycle`, in VM's and bare
+      metal's shape (core's `LoopStatus` over the controller's snapshot, keyed by loop name).
+      Done. `controllers/system_controller.py`'s status route fills `lifecycle` from the
+      container's controller (none before the services start). **Also changed (for the
+      typed client to read it):** the status route answered unauthenticated and unsigned, so
+      `StorefrontClient.get_system_status()` refused its answer; it is now the
+      administrator's signed read (`admin_system_status`, `system/status`), as VM's and bare
+      metal's are (`design.md` D6, "API-credit status reports `lifecycle`"). Nothing in the
+      repository read it unauthenticated; `/health` is unchanged. Application integration
+      (`tests/integration/test_lifecycle_status.py`, new, through `StorefrontClient` over the
+      system and lifecycle routers, the storefront's own loop registrations started over
+      container collaborators and a stand-in quota feed): every loop and the site's poller
+      reported paused with no outcome when held from the start; a stepped servicing cycle
+      failing on a `ConnectionError` naming a URL reported failed in `run` by type, the URL
+      absent from status; a site's failing feed reported under its own loop, the aggregate
+      recording none; an unsigned read refused 401 (rejection path, status only).
+
+Section 15 notes:
+
+- 15.4's API-credit cases. Unit (`tests/unit/test_server_composition.py`, parametrized with and without payments):
+  startup, held from the start, registers each sweep's timer over the step its route runs
+  and starts it, no cycle running, the capacity aggregate the one loop body of its own.
+  Component (`tests/unit/test_lifecycle_routes.py`, the lifecycle router through
+  `StorefrontClient` over the storefront's own registrations, its fixture rewritten from
+  self-started kit runners to `register_api_credit_lifecycle_steps`,
+  `register_api_credit_loops`, and the production `capacity_events_poller_loop` over a
+  stand-in runtime): the pause holds every loop and both sites, and a held step records a
+  `step` outcome; the servicing timer runs its step and records a `timer` outcome, the
+  watchdog not yet due; a stepped cycle failing on a `ConnectionError` naming a URL answers
+  500 and is recorded failed in `run` by type only (spec "A stepped cycle fails", "A cycle
+  fails on an unexpected exception"); one site's failing feed and another's succeeding are
+  each recorded under the site's name, the aggregate recording none (spec "One site's
+  capacity-event feed fails"); and once the aggregate's task ends both sites report it
+  `cancelled`. With the sites declared without their parent (edited, then restored) four
+  of the eight fail (before the fan-out form; the fixture now registers the fan-out through
+  `register_api_credit_loops(capacity_runtime=)` and starts it with `start_loops`, and a new
+  case shows both sites' pollers listed `starting` once the fan-out registers, before it
+  starts).
+- End-to-end, read from the lane's files (the pipeline was not run): the API-credit lane's
+  storefront (`storefront.credits.toml`) states no servicing interval, so it starts on the
+  packaged 30 s under the new key, and runs its watchdog, servicing, and payment loops on the
+  controller's timer; `e2e_credits_deal` and `e2e_credits_payment_deal` hold no loop and
+  step none, so they exercise the timers only by the servicing timer's sweeps.
+- For 17.9: `docs/development/TESTING.md`'s API-credit row stays right (same loops and
+  routes); `DEPLOYMENT_AND_CONFIG.md` gains the API-credit storefront's
+  `settlement_servicing_interval_seconds` and its refusal beside VM's.
+- For the owner: the API-credit storefront's stop hook, like VM's, does not stop its loops
+  (`design.md`'s open question). Its status now reports `lifecycle` (15.6).
+- Handoff: a storefront registers each loop as a timer (`register_loop`) or a fan-out
+  (`register_fan_out`), and `start_loops()` starts both; there is no other way to start a
+  loop. A test that needs a self-gating body runs it as a fan-out with no children (the kit
+  tests' `_start_body`) or as a task under a declared name. The API-credit storefront's
+  `register_api_credit_loops(capacity_runtime=)` and VM's `register_vm_loops` are the
+  registrations; VM's fan-out reads the container's database when it starts.
+- For 17.9 (Section 15): `ARCHITECTURE.md` "Operator lifecycle controls" (every loop
+  registers with the controller as a timer loop or a fan-out, and `start_loops` starts both;
+  a fan-out's children are declared up front); `market-composition/architecture.md`
+  "Storefront composition kit" (the two registration forms); `TESTING.md`'s "Traps" text on
+  self-gating loops (the fan-out is the one); `DEPLOYMENT_AND_CONFIG.md` the API-credit
+  status being the administrator's signed read with `lifecycle`.
 
 ## 16. The bare-metal chart on the storefront chart's agent shape
 

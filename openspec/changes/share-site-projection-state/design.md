@@ -460,10 +460,54 @@ poll intervals, is checked as well and refused by the interval's key, since an i
 ceiling can derive a window above it: bare metal refuses it when its `[capacity]` section loads,
 VM when its startup reads the window. The rule is `kit/config`'s shared `PositiveSeconds`
 (D14b's round-10 note says why it lives there). VM's `settlement_servicing_interval_seconds` and
-its retention sweep interval are read without it; converting them is not part of this decision.
-Rejected: having the kit's `freshly_confirmed` treat an unrepresentable window as unconfirmed,
+its retention sweep interval were read without it, which this decision left; Section 15 converts
+them (owner, 2026-10-19), each refused by its key (`[settlement_servicing_interval_seconds]`,
+`[Settlement.contact.retention_sweep_interval_seconds]`), as the API-credit storefront reads its
+renamed `settlement_servicing_interval_seconds`. Rejected: having the kit's `freshly_confirmed` treat an unrepresentable window as unconfirmed,
 which would turn a configuration mistake into a retryable refusal of every round and need a kit
 bump.
+
+**Decided with the owner, 2026-10-19 (Section 15, the controller's loop forms).** Section 15's
+plan removed the kit's `start_loop` and the step-only `register_step` "once no caller remains",
+but both kept callers by design: `start_loop` was the only way to start the capacity-event
+aggregate, the fan-out this decision keeps as the one exception in shape (VM and the API-credit
+storefront), and `register_step` registers each loop's step before its timer, which VM (at
+import), bare metal (when its runtime is built), and the API-credit storefront (when its
+services start) do so every lifecycle route can run a step from the moment it is served. The
+controller now has two registration forms and one start:
+
+- `register_loop(name, *, step, interval_seconds, ...)`, a timer loop, as before;
+- `register_fan_out(name, *, route, step, preview=None, run, children)`, a loop whose task (`run`)
+  a kit runtime owns and which runs independent cycles in declared children. It registers the
+  step half as `register_loop` does, and declares each name `children()` returns as the loop's
+  child, with this loop as parent, when it registers and again when it starts, so status lists
+  every site's poller before its first cycle; a child the task gates later still declares itself
+  on use. A name registered as one form is refused as the other, and a running fan-out cannot be
+  registered again, as `register_loop` refuses a running loop;
+- `start_loops()` starts every registered timer and fan-out that has no task; an ended one keeps
+  its handle and stays ended, `clear_loops` covers both, and `keep_registrations=False` forgets
+  both.
+
+`start_loop` (and VM's `start_registered_loop` wrapper) is gone. `register_step` stays as the step
+half of a registration and runs no loop. VM and the API-credit storefront register their
+capacity-event aggregate with `register_fan_out` beside their other loops and no longer start it
+in a startup step of its own, so its start moved: VM's from just after the first projection load
+to the last startup step with every other loop (no other step runs between them), and the
+API-credit storefront's every loop, the sweeps included, to after the credits-service preflight
+and the demo-listing seed, where the capacity poller already started (the sweeps' first cycles
+are due one interval after their timers start, so only their timers moved). `arkhai-kit-storefront`
+0.8.0. Rejected: (a) a fan-out-only `start_fan_out(name, task_factory)` beside `register_step`,
+which keeps a second way to start a loop outside registration; (c) removing `register_step` too,
+so each storefront registers a loop once with its interval, which would leave VM's routes no step
+before startup and rework the registration split Sections 9 and 13 chose; (d) deferring the
+removal and keeping `start_loop`.
+
+**API-credit status reports `lifecycle`** (owner, 2026-10-19, Section 15). The API-credit
+storefront's system status carries `lifecycle` in VM's and bare metal's shape (core's `LoopStatus`
+over the controller's snapshot, keyed by loop name), and becomes the administrator's signed read,
+as VM's and bare metal's are: before, it answered unauthenticated and unsigned, so the canonical
+client could not read it, and it carries the storefront's principal and every loop's state.
+Nothing in the repository read it unauthenticated (the lane's health checks use `/health`).
 
 ### D14. Bare-metal configuration follows the VM storefront's conventions
 

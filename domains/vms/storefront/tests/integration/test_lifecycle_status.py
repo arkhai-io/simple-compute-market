@@ -139,6 +139,8 @@ async def test_every_loop_is_reported_with_its_state(world):
         lifecycle.FULFILLMENT_RESUME,
         lifecycle.SITE_PROJECTION_POLLER,
         lifecycle.PUBLICATION,
+        lifecycle.CAPACITY_EVENTS_POLLER,
+        lifecycle.capacity_site_loop_name(SITE),
     ):
         assert loops[name]["state"] == "paused", name
         assert loops[name]["last_outcome"] is None, name
@@ -171,7 +173,9 @@ async def test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop(wo
     lifecycle_logger = logging.getLogger(lifecycle.__name__)
     lifecycle_logger.addHandler(seen)
     try:
-        startup._start_capacity_events_poller(world.db)
+        # Startup's registration: the fan-out starts with the timers.
+        lifecycle_steps.register_vm_loops()
+        lifecycle.start_loops()
         await asyncio.wait_for(seen.seen.wait(), timeout=1)
     finally:
         lifecycle_logger.removeHandler(seen)

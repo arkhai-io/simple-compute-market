@@ -242,6 +242,27 @@ def test_the_retired_servicing_interval_is_not_read_as_the_interval(spelling):
     assert agent_config.settlement_servicing_interval(source) == 30.0
 
 
+@pytest.mark.parametrize("value", [0, -1, "soon", True, 1e11, 1e-7])
+def test_an_unusable_servicing_interval_is_refused_by_its_key(value):
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", value)
+    with pytest.raises(ValueError, match=r"^\[settlement_servicing_interval_seconds\] ") as refused:
+        agent_config.settlement_servicing_interval(source)
+    assert refused.value.__context__ is None
+
+
+@pytest.mark.parametrize("value", [0, -1, 1e11])
+def test_an_unusable_retention_sweep_interval_is_refused_by_its_key(value):
+    with pytest.raises(
+        ValueError, match=r"^\[Settlement\.contact\.retention_sweep_interval_seconds\] "
+    ):
+        agent_config.introduction_retention_sweep_interval(value)
+
+
+def test_a_retention_sweep_interval_is_read_as_seconds():
+    assert agent_config.introduction_retention_sweep_interval(3600) == 3600.0
+
+
 # ---------------------------------------------------------------------------
 # Composites — AGENT_ID, AGENT_NAME, BASE_URL_OVERRIDE are computed once at
 # module load. get_agent_id() supports per-call override.

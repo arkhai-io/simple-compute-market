@@ -4,25 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from functools import partial
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 from core_storefront.escrow_identity import backfill_escrow_obligation_records
-from core_storefront.stage_log import stage_event
-from market_arkhai_payments import run_payment_reconciliation
 from market_core import MarketDomainContract
-from market_storefront_kit import (
-    NegotiationWatchdogPolicy,
-    run_negotiation_watchdog,
-)
 
-from apicredits_storefront.lifecycle_steps import (
-    CAPACITY_EVENTS_POLLER,
-    NEGOTIATION_WATCHDOG,
-    PAYMENT_RECONCILIATION,
-    SETTLEMENT_SERVICING,
-    payment_reconciliation_service,
-)
+from apicredits_storefront.lifecycle_steps import register_api_credit_loops
 from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
@@ -76,15 +62,6 @@ async def _preflight_credits_service() -> None:
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
-def _negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
-    return NegotiationWatchdogPolicy(
-        timeout_seconds=float(settings.negotiation_timeout_seconds),
-        interval_seconds=float(settings.negotiation_watchdog_interval),
-        log_loop_start=False,
-        log_cutoff=False,
-    )
-
-
 async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     """Initialize background tasks for the exact app-selected domain."""
     from market_policy.identity import Identity
@@ -111,27 +88,6 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
     loops = _container.resolved_loop_controller
     if loops is None:
         raise RuntimeError("loop controller is not initialized")
-    watchdog_policy = _negotiation_watchdog_policy()
-    loops.start_loop(
-        StorefrontBackgroundTask(
-            name=NEGOTIATION_WATCHDOG,
-            task_factory=partial(
-                run_negotiation_watchdog,
-                _container.resolved_sqlite_client,
-                watchdog_policy,
-                emit_stage_event=stage_event,
-                logger=logger,
-                paused=loops.loop_gate(NEGOTIATION_WATCHDOG),
-                wait=loops.idle,
-            ),
-        ),
-        task_logger=logger,
-    )
-    logger.info(
-        "[STARTUP] Negotiation watchdog started (interval=%ds, timeout=%ds)",
-        watchdog_policy.interval_seconds,
-        watchdog_policy.timeout_seconds,
-    )
 
     settlement_runtime = _container.resolved_settlement_runtime
     marketplace_signer = _container.resolved_marketplace_signer
@@ -147,57 +103,20 @@ async def _startup_tasks(*, domain: MarketDomainContract) -> None:
                 backfilled,
             )
 
-    settlement_worker = _container.resolved_settlement_worker
-    if settlement_worker is None:
+    if _container.resolved_settlement_worker is None:
         raise RuntimeError("settlement servicing worker is not initialized")
-    loops.start_loop(
-        StorefrontBackgroundTask(
-            name=SETTLEMENT_SERVICING,
-            task_factory=partial(
-                settlement_worker.run,
-                paused=loops.loop_gate(SETTLEMENT_SERVICING),
-                wait=loops.idle,
-            ),
-        ),
-        task_logger=logger,
-    )
-    logger.info(
-        "[STARTUP] Settlement servicing worker started (interval=%ss)",
-        settings.get("claims_sweep_interval", 30),
-    )
-
-    if payment_reconciliation_service() is not None:
-        loops.start_loop(
-            StorefrontBackgroundTask(
-                name=PAYMENT_RECONCILIATION,
-                task_factory=partial(
-                    run_payment_reconciliation,
-                    lambda: payment_reconciliation_service().reconcile_once(),
-                    interval_seconds=float(settings.get("payment_reconciliation_interval", 30)),
-                    logger=logger,
-                    paused=loops.loop_gate(PAYMENT_RECONCILIATION),
-                    wait=loops.idle,
-                ),
-            ),
-            task_logger=logger,
-        )
 
     await _preflight_credits_service()
 
     await _seed_demo_listing()
 
-    from apicredits_storefront.services.capacity_client import (
-        capacity_events_poller_loop,
-    )
-
-    loops.start_loop(
-        StorefrontBackgroundTask(
-            name=CAPACITY_EVENTS_POLLER,
-            task_factory=partial(capacity_events_poller_loop, loops),
-        ),
-        task_logger=logger,
-    )
-    logger.info("[STARTUP] Quota capacity event poller started")
+    # Every loop starts here, after the escrow backfill the servicing sweep
+    # depends on and once the credits service answers: each sweep's timer and
+    # the capacity-event pollers' fan-out, which `start_loops` starts together.
+    intervals = register_api_credit_loops(loops)
+    loops.start_loops(task_logger=logger)
+    for name, interval in intervals.items():
+        logger.info("[STARTUP] %s loop started (interval=%ss)", name, interval)
 
 
 def _capacity_authority_site():

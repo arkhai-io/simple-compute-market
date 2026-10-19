@@ -210,10 +210,24 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
 
 def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
     """Seconds between the settlement servicing sweeps:
-    `settlement_servicing_interval_seconds`."""
+    `settlement_servicing_interval_seconds`, thirty unless stated, refused by
+    key unless it is a positive, finite number of seconds that can be applied
+    to an instant."""
 
     active = settings if source is None else source
-    return float(active.get("settlement_servicing_interval_seconds", 30))
+    return _positive_seconds(
+        active.get("settlement_servicing_interval_seconds", 30),
+        key="settlement_servicing_interval_seconds",
+    )
+
+
+def introduction_retention_sweep_interval(seconds: Any) -> float:
+    """The introduction retention sweep's interval,
+    `[Settlement.contact].retention_sweep_interval_seconds`, refused by key
+    unless it is a positive, finite number of seconds that can be applied to an
+    instant."""
+
+    return _positive_seconds(seconds, key="Settlement.contact.retention_sweep_interval_seconds")
 
 
 _POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)

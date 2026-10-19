@@ -48,6 +48,18 @@ def _capacity_settings() -> tuple[dict[str, CapacitySite], str]:
     return sites, placement
 
 
+def configured_site_ids() -> tuple[str, ...]:
+    """The configured capacity sites' IDs, in configuration order."""
+    return tuple(_capacity_settings()[0])
+
+
+def capacity_poll_interval() -> float:
+    """Seconds between each site's capacity-event poller cycles:
+    `[capacity].poll_interval`, five unless stated."""
+    from apicredits_storefront.utils import config
+    return float(config.settings.get("capacity.poll_interval", 5) or 5)
+
+
 _CONSUMING = frozenset({"reserved", "committed", "lease_truncated"})
 _MIXED = frozenset({"capacity_changed"})
 
@@ -102,25 +114,32 @@ def build_capacity_client(sqlite_client_factory: SQLiteClientFactory) -> Aggrega
     return build_capacity_runtime(sqlite_client_factory).client()
 
 
-async def capacity_events_poller_loop(loops: StorefrontLoopController) -> None:
+async def capacity_events_poller_loop(
+    loops: StorefrontLoopController, *, runtime: CapacityRuntime | None = None
+) -> None:
     """Tail every quota authority's capacity-event feed under the loop controller.
 
     The aggregate name is what the advance route addresses; each site's poller
-    gates under its own declared name, since the kit owns the fan-out.
+    gates under its own name, declared as the aggregate loop's child since the
+    kit owns the fan-out, and each site's timer cycles record their outcomes
+    under that name. ``runtime`` is the capacity runtime the pollers drain, the
+    one the storefront's configuration composes unless given.
     """
     # Imported when the loop starts: the steps module imports this one for the
     # capacity runtime its step drains.
     from apicredits_storefront.lifecycle_steps import (
         CAPACITY_EVENTS_POLLER,
-        capacity_site_loop_name,
+        capacity_site_cycle_recorder,
+        capacity_site_gate,
     )
-    from apicredits_storefront.utils import config
     from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-    interval = float(config.settings.get("capacity.poll_interval", 5) or 5)
-    runtime = build_capacity_runtime(get_sqlite_client)
+    interval = capacity_poll_interval()
+    if runtime is None:
+        runtime = build_capacity_runtime(get_sqlite_client)
     await run_capacity_event_pollers(
         functools.partial(runtime.poll_events, interval_seconds=interval),
         gate=loops.loop_gate(CAPACITY_EVENTS_POLLER),
-        site_gate=lambda site: loops.declare(capacity_site_loop_name(site)),
+        site_gate=functools.partial(capacity_site_gate, loops),
         wait=loops.idle,
+        record_site_cycle=functools.partial(capacity_site_cycle_recorder, loops),
     )

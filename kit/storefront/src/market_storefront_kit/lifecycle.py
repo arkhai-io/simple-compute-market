@@ -20,11 +20,19 @@ task running it.
 
 Each loop's work is also reachable as one step, registered beside the loop
 under a route name, so an operator advances a held loop by running exactly the
-operation its timer runs. A loop registered with its interval is run by the
-controller's own timer, which calls that step through `run_cycle`, the one
-operation a cycle runs through: it holds the loop's lock, so a timer cycle and
-an operator's step never run concurrently, and it records each cycle's outcome
-for status. These contracts are the storefront loop requirements in
+operation its timer runs. A loop registers in one of two forms, and
+`start_loops` starts both:
+
+- a timer loop (`register_loop`), run by the controller's own timer, which
+  calls the loop's step through `run_cycle`, the one operation a cycle runs
+  through: it holds the loop's lock, so a timer cycle and an operator's step
+  never run concurrently, and it records each cycle's outcome for status;
+- a fan-out (`register_fan_out`), whose task a kit runtime owns and which runs
+  independent cycles in declared children, such as one capacity-event poller
+  per site: each child gates under its own name, serializes its cycle with its
+  own step itself, and records each timer cycle through `cycle_recorder`.
+
+These contracts are the storefront loop requirements in
 openspec/specs/market-composition/spec.md.
 
 One controller belongs to one storefront process. The pause is process-local:
@@ -38,7 +46,7 @@ import asyncio
 import contextvars
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -183,6 +191,13 @@ class _RegisteredLoop:
     wake: asyncio.Event | None
 
 
+@dataclass(frozen=True, slots=True)
+class _RegisteredFanOut:
+    name: str
+    run: Callable[[], Awaitable[Any]]
+    children: Callable[[], Iterable[str]]
+
+
 class _CycleInProgress:
     """The stage of one running cycle, set by its step through `enter_stage`."""
 
@@ -250,6 +265,8 @@ class StorefrontLoopController:
         self._steps: dict[str, _RegisteredStep] = {}
         #: Loops whose timer this controller runs, by loop name.
         self._loops: dict[str, _RegisteredLoop] = {}
+        #: Fan-outs whose task this controller starts, by loop name.
+        self._fan_outs: dict[str, _RegisteredFanOut] = {}
         #: One lock per loop name, held for the whole of every cycle that loop
         #: runs, whether its timer or a step started it.
         self._cycle_locks: dict[str, asyncio.Lock] = {}
@@ -267,25 +284,6 @@ class StorefrontLoopController:
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
-
-    def start_loop(
-        self,
-        task: StorefrontBackgroundTask,
-        *,
-        route: str | None = None,
-        step: LoopStep | None = None,
-        preview: LoopStep | None = None,
-        task_logger: Any = None,
-    ) -> asyncio.Task[Any]:
-        """Start one self-gating timer loop, keep its handle, and register its step.
-
-        The loop body gates and waits for itself, so its timer cycles do not run
-        through `run_cycle`; a loop registered with `register_loop` does.
-        """
-
-        if step is not None:
-            self.register_step(task.name, route=route or task.name, step=step, preview=preview)
-        return self._start_task(task, task_logger=task_logger)
 
     def _start_task(
         self, task: StorefrontBackgroundTask, *, task_logger: Any = None
@@ -323,9 +321,9 @@ class StorefrontLoopController:
             raise ValueError(f"loop {name!r} needs a positive interval")
         if initial_delay_seconds < 0:
             raise ValueError(f"loop {name!r} cannot have a negative initial delay")
-        handle = self._handles.get(name)
-        if handle is not None and not handle.done():
-            raise ValueError(f"loop {name!r} is already running")
+        if name in self._fan_outs:
+            raise ValueError(f"loop {name!r} is registered as a fan-out")
+        self._refuse_running(name)
         route = route or name
         self.register_step(name, route=route, step=step, preview=preview)
         self._loops[name] = _RegisteredLoop(
@@ -336,13 +334,56 @@ class StorefrontLoopController:
             wake=wake,
         )
 
-    def start_loops(self, *, task_logger: Any = None) -> dict[str, asyncio.Task[Any]]:
-        """Start the timer of every registered loop that has none, by loop name.
+    def register_fan_out(
+        self,
+        name: str,
+        *,
+        route: str,
+        step: LoopStep,
+        run: Callable[[], Awaitable[Any]],
+        children: Callable[[], Iterable[str]],
+        preview: LoopStep | None = None,
+    ) -> None:
+        """Register a loop that fans out into independent per-child cycles.
 
-        A loop whose timer ended keeps its handle, and so stays ended: nothing
-        restarts a loop, so a status surface sees it `exited` rather than
-        running again with no record of why it stopped. `clear_loops` drops
-        every handle, after which this starts every registered loop afresh.
+        `run` makes the loop's task, which a kit runtime owns: it runs every
+        child's cycles, each child gating under its own name, serializing its
+        cycle with its own step, and recording each timer cycle through
+        `cycle_recorder`; the loop's own task gates under `name` and runs no
+        cycle. `step` is what the loop's route runs, every child's cycle once.
+        `children` names the children: each is declared with this loop as its
+        parent when the loop registers and again when it starts, so status
+        lists every child before its first cycle, and a child the task gates
+        later is declared then. `start_loops` starts the task.
+        """
+
+        if name in self._loops:
+            raise ValueError(f"loop {name!r} is registered as a timer loop")
+        self._refuse_running(name)
+        self.register_step(name, route=route, step=step, preview=preview)
+        fan_out = _RegisteredFanOut(name=name, run=run, children=children)
+        self._fan_outs[name] = fan_out
+        self._declare_children(fan_out)
+
+    def _refuse_running(self, name: str) -> None:
+        handle = self._handles.get(name)
+        if handle is not None and not handle.done():
+            raise ValueError(f"loop {name!r} is already running")
+
+    def _declare_children(self, fan_out: _RegisteredFanOut) -> None:
+        for child in fan_out.children():
+            if self._declared.get(child) != fan_out.name:
+                self.declare(child, parent=fan_out.name)
+
+    def start_loops(self, *, task_logger: Any = None) -> dict[str, asyncio.Task[Any]]:
+        """Start every registered loop that has no task, by loop name.
+
+        A timer loop's task is the controller's timer over its step; a
+        fan-out's is its own `run`, its children declared first. A loop whose
+        task ended keeps its handle, and so stays ended: nothing restarts a
+        loop, so a status surface sees it `exited` rather than running again
+        with no record of why it stopped. `clear_loops` drops every handle,
+        after which this starts every registered loop afresh.
         """
 
         started: dict[str, asyncio.Task[Any]] = {}
@@ -351,6 +392,14 @@ class StorefrontLoopController:
                 continue
             started[name] = self._start_task(
                 StorefrontBackgroundTask(name=name, task_factory=partial(self._timer, loop)),
+                task_logger=task_logger,
+            )
+        for name, fan_out in self._fan_outs.items():
+            if name in self._handles:
+                continue
+            self._declare_children(fan_out)
+            started[name] = self._start_task(
+                StorefrontBackgroundTask(name=name, task_factory=fan_out.run),
                 task_logger=task_logger,
             )
         return started
@@ -365,9 +414,12 @@ class StorefrontLoopController:
     ) -> None:
         """Bind the operation one cycle of loop `name` runs to a route name.
 
-        A loop with no timer registers a step alone. Registering the step with
-        the loop, rather than in a route table, is what keeps the step and the
-        timer calling the same operation.
+        The step half of a loop's registration: `register_loop` and
+        `register_fan_out` register it too, and a storefront that registers
+        its loops' steps before it knows their intervals -- so every route can
+        run a step from the moment it is served -- registers them here first.
+        Registering the step with the loop, rather than in a route table, is
+        what keeps the step and the timer calling the same operation.
         """
 
         existing = self._steps.get(route)
@@ -875,11 +927,11 @@ class StorefrontLoopController:
         its loops down and starts them again within one interpreter -- an
         application rebuilt in place -- uses this so stale handles and outcomes
         do not report for loops that no longer exist; `start_loops` starts the
-        registered loops' timers again. With `keep_registrations=False` the
-        loops registered with `register_loop` are forgotten too, their steps
-        staying registered, so a later `start_loops` starts only what is
-        registered again: a test's reset, which must not leave one test's loops
-        for the next to start.
+        registered loops again. With `keep_registrations=False` the loops
+        registered with `register_loop` and `register_fan_out` are forgotten
+        too, their steps staying registered, so a later `start_loops` starts
+        only what is registered again: a test's reset, which must not leave one
+        test's loops for the next to start.
         """
 
         for handle in self._handles.values():
@@ -887,6 +939,7 @@ class StorefrontLoopController:
                 handle.cancel()
         if not keep_registrations:
             self._loops.clear()
+            self._fan_outs.clear()
         self._generation += 1
         self._handles.clear()
         self._outcomes.clear()

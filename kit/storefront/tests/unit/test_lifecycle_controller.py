@@ -29,7 +29,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 from market_storefront_kit import (
     CycleOutcome,
     LoopNotFound,
@@ -40,6 +39,27 @@ from market_storefront_kit import (
 #: A wait no test should ever see expire; a loop parked in it is woken only by a
 #: tick or a pause request.
 _FOREVER = 3600.0
+
+
+async def _no_step():
+    return {}
+
+
+def _start_body(controller, name, body, *, route=None, step=None, children=()):
+    """Start a self-gating loop body as a fan-out whose task it is.
+
+    A fan-out is the one form whose task is not the controller's timer, so a
+    synthetic body that gates and waits for itself runs as one, here with no
+    children unless a case names some.
+    """
+    controller.register_fan_out(
+        name,
+        route=route or name,
+        step=step or _no_step,
+        run=body,
+        children=lambda: children,
+    )
+    return controller.start_loops()[name]
 
 
 @pytest.fixture
@@ -79,9 +99,7 @@ class _Loop:
             self.tick.clear()
 
     def start(self, **kwargs) -> "_Loop":
-        self.controller.start_loop(
-            StorefrontBackgroundTask(name=self.name, task_factory=self.body), **kwargs
-        )
+        _start_body(self.controller, self.name, self.body, **kwargs)
         return self
 
     async def first_cycle(self) -> None:
@@ -230,7 +248,7 @@ class TestAScheduledLoopIsNotYetRunning:
             entered.set()
             await asyncio.Event().wait()
 
-        controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_never_gates))
+        _start_body(controller, "alpha", _never_gates)
         await asyncio.wait_for(entered.wait(), timeout=1)
 
         controller.request_pause(True)
@@ -261,7 +279,7 @@ class TestALoopThatEnds:
         async def _exits() -> None:
             return None
 
-        controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_exits))
+        _start_body(controller, "alpha", _exits)
         await _ended(controller, "alpha")
 
         assert controller.failed_loop_names() == ["alpha"]
@@ -277,7 +295,7 @@ class TestALoopThatEnds:
         async def _raises() -> None:
             raise RuntimeError("loop failed")
 
-        controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_raises))
+        _start_body(controller, "alpha", _raises)
         await _ended(controller, "alpha")
 
         assert controller.states() == {"alpha": "exited"}
@@ -297,7 +315,7 @@ class TestAFanOutsChildrenFollowItsEnd:
             declared.set()
             raise RuntimeError("fan-out failed")
 
-        controller.start_loop(StorefrontBackgroundTask(name="events", task_factory=_fan_out))
+        _start_body(controller, "events", _fan_out)
         await asyncio.wait_for(declared.wait(), timeout=1)
         await _ended(controller, "events")
 
@@ -315,7 +333,7 @@ class TestAFanOutsChildrenFollowItsEnd:
         async def _fan_out() -> None:
             controller.declare("events:east", parent="events")()
 
-        controller.start_loop(StorefrontBackgroundTask(name="events", task_factory=_fan_out))
+        _start_body(controller, "events", _fan_out)
         await _ended(controller, "events")
 
         states = await asyncio.wait_for(controller.pause(), timeout=1)
@@ -330,9 +348,7 @@ class TestAFanOutsChildrenFollowItsEnd:
             started.set()
             await asyncio.Event().wait()
 
-        handle = controller.start_loop(
-            StorefrontBackgroundTask(name="events", task_factory=_fan_out)
-        )
+        handle = _start_body(controller, "events", _fan_out)
         await asyncio.wait_for(started.wait(), timeout=1)
         assert controller.states()["events:east"] == "running"
         handle.cancel()
@@ -374,7 +390,7 @@ class TestLoopStateReporting:
         async def _exits() -> None:
             return None
 
-        controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_exits))
+        _start_body(controller, "alpha", _exits)
         await _ended(controller, "alpha")
         await controller.pause()
 
@@ -402,7 +418,7 @@ class TestPauseDoesNotClaimQuiescenceItCannotSee:
                 entered.set()
                 await release.wait()
 
-        controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_slow_loop))
+        _start_body(controller, "alpha", _slow_loop)
         await asyncio.wait_for(entered.wait(), timeout=1)
 
         # The cycle is in flight and cannot come back until released, so the
@@ -1205,7 +1221,7 @@ class TestSnapshot:
         async def _exits() -> None:
             return None
 
-        controller.start_loop(StorefrontBackgroundTask(name="ended", task_factory=_exits))
+        _start_body(controller, "ended", _exits)
         await _ended(controller, "ended")
 
         snapshot = controller.snapshot()
@@ -1291,3 +1307,103 @@ class TestSnapshot:
 
         assert handle.done()
         assert set(controller.start_loops()) == {"alpha"}
+
+
+class TestAFanOutRegistersAndStartsWithTheTimers:
+    """A fan-out registers its step and children beside the timer loops, and
+    `start_loops` starts its task with theirs."""
+
+    @staticmethod
+    def _fan_out(controller, *, children=("events:east", "events:west")):
+        started = asyncio.Event()
+
+        async def _run() -> None:
+            gates = [controller.declare(child, parent="events") for child in children]
+            started.set()
+            while True:
+                for gate in [controller.loop_gate("events"), *gates]:
+                    gate()
+                await controller.idle(_FOREVER)
+
+        async def _step():
+            return {"loop": "events"}
+
+        controller.register_fan_out(
+            "events", route="events", step=_step, run=_run, children=lambda: children
+        )
+        return started
+
+    async def test_its_children_are_listed_before_its_first_cycle(self, controller):
+        self._fan_out(controller)
+
+        assert controller.states() == {"events:east": "starting", "events:west": "starting"}
+        assert set(controller.snapshot()) == {"events", "events:east", "events:west"}
+
+    async def test_start_loops_starts_it_beside_the_timers(self, controller):
+        started = self._fan_out(controller)
+        timer = _CountingStep()
+        controller.register_loop("alpha", step=timer, interval_seconds=_FOREVER)
+
+        handles = controller.start_loops()
+        await asyncio.wait_for(started.wait(), timeout=1)
+        states = await asyncio.wait_for(controller.pause(), timeout=1)
+
+        assert set(handles) == {"alpha", "events"}
+        assert states == {
+            "alpha": "paused",
+            "events": "paused",
+            "events:east": "paused",
+            "events:west": "paused",
+        }
+
+    async def test_its_route_runs_its_step_through_one_recorded_cycle(self, controller):
+        self._fan_out(controller)
+
+        assert await controller.run_cycle("events") == {"loop": "events"}
+        assert controller.last_outcome("events").trigger == "step"
+
+    async def test_an_ended_fan_out_stays_ended_until_its_loops_are_cleared(self, controller):
+        runs = 0
+
+        async def _exits() -> None:
+            nonlocal runs
+            runs += 1
+
+        handle = _start_body(controller, "events", _exits, children=("events:east",))
+        await asyncio.gather(handle, return_exceptions=True)
+
+        assert controller.start_loops() == {}
+        assert controller.states()["events:east"] == "exited"
+
+        controller.clear_loops()
+        assert controller.states() == {}
+        restarted = controller.start_loops()
+        await asyncio.gather(restarted["events"], return_exceptions=True)
+        assert runs == 2
+        assert controller.states()["events:east"] == "exited", (
+            "a restarted fan-out declares its children again"
+        )
+
+    async def test_a_reset_forgets_it(self, controller):
+        self._fan_out(controller)
+        controller.clear_loops(keep_registrations=False)
+
+        assert controller.start_loops() == {}
+
+    def test_a_timer_loops_name_is_refused(self, controller):
+        controller.register_loop("events", step=_no_step, interval_seconds=_FOREVER)
+        with pytest.raises(ValueError, match="registered as a timer loop"):
+            self._fan_out(controller)
+
+    def test_a_timer_loop_cannot_take_a_fan_outs_name(self, controller):
+        self._fan_out(controller)
+        with pytest.raises(ValueError, match="registered as a fan-out"):
+            controller.register_loop("events", step=_no_step, interval_seconds=_FOREVER)
+
+    async def test_a_running_fan_out_is_refused(self, controller):
+        started = self._fan_out(controller)
+        controller.start_loops()
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        with pytest.raises(ValueError, match="already running"):
+            self._fan_out(controller)

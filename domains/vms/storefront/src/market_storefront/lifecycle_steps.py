@@ -12,8 +12,9 @@ the server does, so every lifecycle route can run one. Startup registers each
 loop's timer over its step with `register_vm_loops` and then starts the timers:
 the controller's timer gates, runs the step through the one cycle boundary an
 operator's step takes, and waits. The capacity-event pollers are the one
-exception: their per-site fan-out lives in the capacity-publication kit, which
-serializes each site's cycle with that site's step itself.
+exception in shape: their per-site fan-out lives in the capacity-publication kit, which
+serializes each site's cycle with that site's step itself; startup registers
+their aggregate as a fan-out beside the timers, and starts it with them.
 """
 
 from __future__ import annotations
@@ -41,6 +42,8 @@ from market_storefront.lifecycle import (
     PUBLICATION,
     SETTLEMENT_SERVICING,
     SITE_PROJECTION_POLLER,
+    capacity_site_loop_name,
+    register_fan_out,
     register_loop,
     register_step,
 )
@@ -52,8 +55,12 @@ from market_storefront.services.publication_loop import (
     publication_interval_seconds,
     run_publication_cycle_once,
 )
-from market_storefront.services.capacity_client import site_projection_status
+from market_storefront.services.capacity_client import (
+    capacity_events_poller_loop,
+    site_projection_status,
+)
 from market_storefront.utils.config import (
+    configured_capacity_sites,
     settings,
     settlement_servicing_interval,
     site_projection_poll_interval,
@@ -238,10 +245,30 @@ def register_vm_lifecycle_steps() -> None:
     )
 
 
+async def capacity_events_fan_out() -> None:
+    """The capacity-event aggregate loop's task: every site's poller."""
+    await capacity_events_poller_loop(_container.resolved_sqlite_client)
+
+
+def _capacity_site_names() -> tuple[str, ...]:
+    """Each configured site's capacity-event poller name, declared up front.
+
+    A storefront configured with no site refuses to start before any loop
+    registers, so none here only means the fan-out declares its sites as it
+    reaches them.
+    """
+    try:
+        sites = configured_capacity_sites()
+    except RuntimeError:
+        return ()
+    return tuple(capacity_site_loop_name(site) for site in sites)
+
+
 def register_vm_loops(
     *, retention_interval_seconds: float | None = None
 ) -> dict[str, float]:
-    """Register each loop's timer over its step, with its configured interval.
+    """Register each loop's timer over its step, with its configured interval,
+    and the capacity-event pollers' fan-out.
 
     Intervals are read when this runs, so startup registers what the running
     configuration states. Publication, the site-projection poller, and
@@ -262,6 +289,16 @@ def register_vm_loops(
         SITE_PROJECTION_POLLER: site_projection_poll_interval(),
         PUBLICATION: publication_interval_seconds(),
     }
+    # Each site's poller waits the poll interval between its cycles.
+    register_fan_out(
+        CAPACITY_EVENTS_POLLER,
+        route="capacity-events",
+        step=capacity_events_step,
+        preview=capacity_events_preview,
+        run=capacity_events_fan_out,
+        children=_capacity_site_names,
+    )
+    intervals[CAPACITY_EVENTS_POLLER] = intervals[SITE_PROJECTION_POLLER]
     register_loop(
         NEGOTIATION_WATCHDOG,
         route="negotiation-watchdog",

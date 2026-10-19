@@ -49,7 +49,11 @@ from apicredits_storefront.services.fulfillment_service import (
 )
 from apicredits_storefront.services.listing_service import ListingService
 from apicredits_storefront.services.system_service import SystemService
-from apicredits_storefront.lifecycle_steps import register_api_credit_lifecycle_steps
+from apicredits_storefront.lifecycle_steps import (
+    api_credit_loop_controller,
+    register_api_credit_lifecycle_steps,
+)
+from apicredits_storefront.retired_settings import require_no_retired_settings
 from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
@@ -68,9 +72,6 @@ from apicredits_storefront.utils.config import (
     settlement_config_mapping,
 )
 from apicredits_storefront.utils.sqlite_client import get_sqlite_client
-from market_storefront_kit import (
-    StorefrontLoopController,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -133,8 +134,9 @@ def _build_alkahest_clients() -> dict[str, Any]:
 def _build_api_credit_services(
     domain: MarketDomainContract,
 ) -> ApiCreditsStorefrontServices:
-    # Before anything is constructed: an Alkahest release model this storefront
-    # cannot deliver stops startup.
+    # Before anything is constructed: a renamed setting, or an Alkahest release
+    # model this storefront cannot deliver, stops startup.
+    require_no_retired_settings()
     require_api_credit_release_model()
     marketplace_signer = resolve_identity_signer()
     resolve_admin_identities()
@@ -248,7 +250,7 @@ async def _start_api_credit_services(
     _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service
-    loops = StorefrontLoopController(logger=logger)
+    loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
     _container.resolved_loop_controller = loops
     logger.info("[STARTUP] Singletons initialized")

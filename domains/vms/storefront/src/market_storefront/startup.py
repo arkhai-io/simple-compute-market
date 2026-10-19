@@ -14,16 +14,11 @@ from market_storefront.services.publication_terms import (
     configured_family_rate_problems,
     retired_pricing_configuration_keys,
 )
-from market_storefront.lifecycle import (
-    CAPACITY_EVENTS_POLLER,
-    start_loops,
-    start_registered_loop,
-)
+from market_storefront.lifecycle import start_loops
 from market_storefront.lifecycle_steps import register_vm_loops
 from typing import Any
 
 from core_storefront.app_startup import (
-    StorefrontBackgroundTask,
     StorefrontStartupStep,
     run_storefront_startup_steps,
 )
@@ -32,6 +27,7 @@ from market_core import MarketDomainContract
 import market_storefront.container as _container
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
+    introduction_retention_sweep_interval,
     settings,
     site_projection_poll_interval,
     source_confirmation_seconds,
@@ -210,37 +206,25 @@ async def _backfill_escrow_identity(sqlite_client: Any) -> None:
         )
 
 
-def _start_capacity_events_poller(sqlite_client: Any) -> None:
-    # Tail every authority's capacity-event feed after provisioning preflight.
-    from market_storefront.services.capacity_client import capacity_events_poller_loop
-
-    start_registered_loop(
-        StorefrontBackgroundTask(
-            name=CAPACITY_EVENTS_POLLER,
-            task_factory=partial(capacity_events_poller_loop, sqlite_client),
-        ),
-        task_logger=logger,
-    )
-
-
 async def _load_site_projections() -> None:
     """The first load: one cycle of the poller, before its timer starts."""
     await _container.site_projections().poll_once()
 
 
 def _start_lifecycle_loops() -> None:
-    """Register every loop's timer under the running configuration and start them.
+    """Register every loop under the running configuration and start them all.
 
     After the first projection load, so neither the poller nor publication
     runs its first cycle over projections nothing has loaded, and after
-    settlement preflight and the escrow backfill the servicing sweep depends
-    on. Introduction retention runs only while contact exchange is composed.
+    settlement preflight, the escrow backfill the servicing sweep depends on,
+    and provisioning preflight, which the capacity-event pollers' feeds need.
+    Introduction retention runs only while contact exchange is composed.
     """
     composition = _container.resolved_contact_exchange
     retention = composition.retention() if composition is not None else None
     intervals = register_vm_loops(
         retention_interval_seconds=(
-            float(retention.policy.sweep_interval_seconds)
+            introduction_retention_sweep_interval(retention.policy.sweep_interval_seconds)
             if retention is not None
             else None
         )
@@ -329,10 +313,6 @@ async def _startup_tasks(*, registry: Any, domain: MarketDomainContract) -> None
                 "load_site_projections",
                 _load_site_projections,
                 error_message="[STARTUP] Site projection load failed: %s",
-            ),
-            StorefrontStartupStep(
-                "capacity_events_poller",
-                partial(_start_capacity_events_poller, sqlite_client),
             ),
             StorefrontStartupStep("lifecycle_loops", _start_lifecycle_loops),
         ),

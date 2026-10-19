@@ -27,7 +27,7 @@ dependencies = [
     "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-arkhai-payments==0.2.0",
     "arkhai-kit-settlement-runtime>=0.4.0",
-    "arkhai-kit-storefront==0.7.0",
+    "arkhai-kit-storefront==0.8.0",
     "dynaconf>=3.0.0",
     "fastapi~=0.115.8",
     "httpx>=0.27",
