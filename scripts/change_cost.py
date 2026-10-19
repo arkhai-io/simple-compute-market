@@ -29,8 +29,8 @@ from typing import Any, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from run_change_step import (ORCHESTRATOR, ROOT, STEPS, StepError, log_path,  # noqa: E402
-                             read_log)
+from change_workflow.common import ORCHESTRATOR, ROOT, STEPS, StepError  # noqa: E402
+from change_workflow.log import log_path, read_log  # noqa: E402
 
 BEFORE_ROUNDS = "design and planning"
 CLOSEOUT = "closeout"

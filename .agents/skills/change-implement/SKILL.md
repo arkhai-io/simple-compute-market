@@ -163,13 +163,14 @@ Run each of these, and fix what it reports:
 - `make test`, whatever the section touched: a change to a shared package, a
   dependency, or a lock reaches projects no focused suite covers, and the full
   suite is cheap beside a review round spent finding that;
-- `make check-comment-hygiene`;
-- `make check-doc-citations CHANGE=<change>`. Before closeout it may report only
-  the permanent documents the change's tasks create at closeout — the promotion
-  destinations its plan names; list those in the report and fix anything else.
-  At closeout the check passes with nothing reported;
-- `make check-agent-skills` if the section touched `.agents/`, `.claude/`, or
-  `.codex/`.
+- `make check-change CHANGE=<change>`: comment hygiene, the agent skills, the
+  change's documentation citations and task list, the change index, and the
+  pinned strict OpenSpec validation, in one call that prints only what fails.
+  Before closeout its citations check may report only the permanent documents the
+  change's tasks create at closeout — the promotion destinations its plan names;
+  list those in the report and fix anything else. A change with no spec deltas
+  fails the validation every time, since the validator rejects a change with
+  none; say so in the report and take that one failure as expected.
 
 Then have the section's diff checked in a fresh context. Start a subagent that has
 seen none of this session, and give it only: the change name, the section, the

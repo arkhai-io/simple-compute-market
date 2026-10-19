@@ -290,10 +290,10 @@ Only when the owner says the design is settled:
   naming the permanent destination of every material decision.
 - Amend the delta specs in `specs/` so every accepted behavior is a requirement
   with at least one WHEN/THEN scenario.
-- Run `openspec validate <change> --strict` and
-  `make check-doc-citations CHANGE=<change>`, and report the results. A
-  citation of a file the change itself will create is expected; any other is a
-  defect.
+- Run `make check-change CHANGE=<change>`, which runs the strict OpenSpec
+  validation and the change's citations check among the repository's closing
+  checks, and report the result. A citation of a file the change itself will
+  create is expected; any other is a defect.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
 once the design review's triage records that the change advances.

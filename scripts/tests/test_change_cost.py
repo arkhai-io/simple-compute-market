@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow.log import log_path, note_round, read_log, record_outcome
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 
 
@@ -23,7 +25,6 @@ def _load(name: str):
 
 
 cost = _load("change_cost")
-step = sys.modules["run_change_step"]
 
 CHANGE = "shape-bounds"
 COMMIT = "7f3c6e90"
@@ -36,7 +37,7 @@ def _clock() -> datetime:
 
 def _log(tmp_path: Path) -> Path:
     (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True)
-    return step.log_path(tmp_path, CHANGE)
+    return log_path(tmp_path, CHANGE)
 
 
 def _run(log: Path, name: str, usd: float | None = None, *, partial: bool = False,
@@ -49,8 +50,8 @@ def _run(log: Path, name: str, usd: float | None = None, *, partial: bool = Fals
         spent["usd_partial"] = True
     if tokens is not None:
         spent = {"tokens": tokens}
-    step.record_outcome(log, name, FINISHED, session="s", commit=COMMIT,
-                        extra={"cost": spent, **extra}, clock=_clock)
+    record_outcome(log, name, FINISHED, session="s", commit=COMMIT,
+                   extra={"cost": spent, **extra}, clock=_clock)
 
 
 def _fixture(tmp_path: Path) -> Path:
@@ -58,10 +59,10 @@ def _fixture(tmp_path: Path) -> Path:
     _run(log, "design", 6.0)
     _run(log, "design", 0.5, gap_s=7200, cache_hit=False)
     _run(log, "review", tokens=400_000, kind="design")
-    step.note_round(log, [[1, 2]], "plan", after=3, clock=_clock)
+    note_round(log, [[1, 2]], "plan", after=3, clock=_clock)
     _run(log, "implement", 9.0)
     _run(log, "triage", 2.0, partial=True)
-    step.note_round(log, [[3]], "plan", after=8, clock=_clock)
+    note_round(log, [[3]], "plan", after=8, clock=_clock)
     _run(log, "implement", 4.0)
     _run(log, "review", tokens=300_000, kind="pre-closeout")
     _run(log, "closeout", 3.0)
@@ -88,7 +89,7 @@ def test_lines_are_bucketed_by_the_round_in_force() -> None:
 
 def test_the_report_totals_by_step_and_round_with_partial_dollars_as_a_range(
         tmp_path: Path) -> None:
-    lines = cost.report(step.read_log(_fixture(tmp_path)))
+    lines = cost.report(read_log(_fixture(tmp_path)))
 
     def row(name: str, section: str) -> str:
         start = lines.index(section)
@@ -108,7 +109,7 @@ def test_the_report_totals_by_step_and_round_with_partial_dollars_as_a_range(
 
 
 def test_the_cache_misses_are_listed_with_their_gaps(tmp_path: Path) -> None:
-    lines = cost.report(step.read_log(_fixture(tmp_path)))
+    lines = cost.report(read_log(_fixture(tmp_path)))
 
     misses = lines[lines.index("Cache misses:") + 1:]
     assert len(misses) == 1
@@ -118,9 +119,9 @@ def test_the_cache_misses_are_listed_with_their_gaps(tmp_path: Path) -> None:
 
 def test_a_log_without_costs_reports_no_misses(tmp_path: Path) -> None:
     log = _log(tmp_path)
-    step.record_outcome(log, "design", FINISHED, session="s", commit=COMMIT, clock=_clock)
+    record_outcome(log, "design", FINISHED, session="s", commit=COMMIT, clock=_clock)
 
-    lines = cost.report(step.read_log(log))
+    lines = cost.report(read_log(log))
 
     assert lines[-1] == "  none recorded"
 

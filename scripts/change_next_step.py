@@ -51,9 +51,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from round_view import RoundError, View, open_view  # noqa: E402
-from run_change_step import (ORCHESTRATOR, ChangedSince, StepError,  # noqa: E402
-                             _changed_since, _RECORD as _RECORD_PATH, latest_validation,
-                             log_path, read_log, validation_problem, validation_result)
+from change_workflow.common import ORCHESTRATOR, StepError  # noqa: E402
+from change_workflow.log import log_path, read_log  # noqa: E402
+from change_workflow.records import (RECORD_PATH, ChangedSince, changed_since,  # noqa: E402
+                                     latest_validation, validation_problem, validation_result)
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("design", "planning", "implementation", "closeout")
@@ -350,7 +351,7 @@ class Computation:
                  head: Callable[[Path], str | None] = _git_head,
                  view: Callable[[Path], View | None] = _open_view,
                  uncommitted: Callable[[Path, Path], bool] | None = None,
-                 changed_since: ChangedSince = _changed_since) -> None:
+                 changed_since: ChangedSince = changed_since) -> None:
         self.root = root
         self.state = State(change)
         self._head = head
@@ -783,7 +784,7 @@ class Computation:
         if changed is None:
             # Not an ancestor: HEAD is not the reviewed commit, however it moved.
             return True
-        return any(not _RECORD_PATH.match(path) for path in changed)
+        return any(not RECORD_PATH.match(path) for path in changed)
 
     def changed_outside_documentation(self, review: Record) -> str | None:
         """A path outside `openspec/` and `docs/` that `HEAD` changes since the commit

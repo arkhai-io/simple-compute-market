@@ -1621,7 +1621,7 @@ for it, so the owner is asked for its round (D13). Touches `scripts/`, a new
 `scripts/change_workflow/`, `scripts/change_next_step.py`, `scripts/change_cost.py`,
 `scripts/round_view.py`, and `scripts/tests/`.
 
-- [ ] 6e.1 `scripts/change_workflow/`, standard library only, one module per
+- [x] 6e.1 `scripts/change_workflow/`, standard library only, one module per
       concern: the outcome schema check; the workflow log, its `note` lines, and
       branch decisions; the step table, its models, and their policy; the event
       stream, transcripts, and denials; the Claude and Codex harness runs and
@@ -1633,9 +1633,48 @@ for it, so the owner is asked for its round (D13). Touches `scripts/`, a new
       scripts/run_change_step.py log*)`), and the skills are unchanged;
       `change_next_step.py`, `change_cost.py`, and `round_view.py` import from the
       package.
-- [ ] 6e.2 The tests move with the modules they test, unchanged in what they
+      Done: `common` (the root, steps, kinds, `StepError`, the clock), `outcome`,
+      `log` (with `last_run`), `records` (the numbered records, the validation
+      record and `validation_problem`, `git_head` and `changed_since`, shared by
+      the wrapper, the review, and the computation), `steps`, `stream`,
+      `harness` (both commands, both runners, Codex's `Progress`, `unreachable`),
+      `cost`, `wrapper`, `review`, `watch` (with the denials report), and `cli`;
+      the package docstring lists them. The old module's docstring is shared out
+      among `log`, `wrapper`, `review`, `stream`, `cost`, and `outcome`;
+      `steps`, `records`, `harness`, `watch`, and `cli` have docstrings written
+      for them, `steps`' citing the delta's permissions requirement as the step
+      table already does. The definitions moved as they were, apart from three
+      structural edits: `cli.main` is split into `_parser()` and `main`, its
+      description a constant equal to the old docstring's first line;
+      `unreachable`'s return type is the `Reached` alias; and names one module
+      now takes from another are public (`utc_now`, `run_claude`, `run_codex`,
+      `git_head`, `changed_since`, `NUMBERED`, `tool_summary`, `call_summary`,
+      and `_RECORD` renamed `RECORD_PATH`). The imports follow the order
+      `common` ← `outcome`, `records`, `steps`, `stream` ← `log`, `harness`,
+      `watch` ← `cost` ← `wrapper`, `review` ← `cli`, with no cycle; `log` and
+      `review` also import the script module `find_change`, which resolves
+      because `scripts/` is on the path whenever the package is.
+      `run_change_step.py` is the entry point alone, its `main` the `cli`'s.
+- [x] 6e.2 The tests move with the modules they test, unchanged in what they
       assert; a test changed in substance means the move changed behaviour.
-- [ ] 6e.3 One target for a step's closing checks, added on the owner's word after the
+      Done: the 182 tests of `test_run_change_step.py` are now
+      `test_change_workflow_<module>.py` for `outcome` (11), `log` (24), `steps`
+      (17), `stream` (4), `harness` (3), `wrapper` (35), `records` (3), `review`
+      (45), `cost` (12), and `watch` (4), and the command line's and the `make`
+      targets' 24 stay in `test_run_change_step.py`, beside 6e.3's new `make -n`
+      test; 182 before, 182 after.
+      Their shared helpers and constants are `scripts/tests/change_workflow_fixtures.py`,
+      renamed public (`log_file`, `make_wrapper`, `event_lines`, `review_text`,
+      …); `scripts/tests/conftest.py` puts `scripts/` on the path, so tests import
+      the package by name. Only references changed: `step.X` became the name
+      imported from its module, and a helper's name its public one; no assertion,
+      fixture value, or test body otherwise. The compliance check counted 382
+      `assert` lines before and after, and the same `pytest.raises` and
+      `parametrize` lines. `test_change_next_step.py` and
+      `test_change_cost.py` import the log's writers from the package instead of
+      `sys.modules["run_change_step"]`, and `change_directory` from
+      `find_change`.
+- [x] 6e.3 One target for a step's closing checks, added on the owner's word after the
       fifth round: `make check-change CHANGE=<change>` runs
       `check-comment-hygiene`, `check-agent-skills`, `check-doc-citations
       CHANGE=`, `check-tasks CHANGE=`, `check-change-index`, and the pinned
@@ -1647,13 +1686,79 @@ for it, so the owner is asked for its round (D13). Touches `scripts/`, a new
       and 21.5M cache-read tokens, about 118k per turn — so six checks as six
       calls cost six replays (D19's data). Verification: a test that the target
       fails when any one check fails and passes when all pass.
-- [ ] 6e.4 Verification: the moved suites (unit, `scripts/tests`, fake runners;
+      Done: `scripts/check_change.py`, the target's one line. Every check runs
+      whatever the others report; a failing one prints its name, command, and
+      output, and a last line counts the failures; all passing prints one line.
+      The validator is `@fission-ai/openspec@1.14.0` through `bunx` where it is
+      installed, else `npx --yes`, since `bunx` is not on every machine; an
+      archived change is validated with `--specs --strict`, as closeout and a
+      closeout triage validated it. The five skills name it: implementation's
+      and triage's checks before committing, planning's plan check, design's
+      documents check, and closeout's checks against the promoted state and
+      after the archive; their other single checks (closeout's comment-hygiene
+      confirmation, its index edit, packaging's `check-agent-skills`) are
+      steps of their own and stay. A change with no spec deltas fails the
+      validation every time; implementation, triage, and closeout say to take
+      that failure as expected. Unit (`test_check_change.py`, a fake runner):
+      all six passing print one line naming each, and the runner is given their
+      six commands in order; each one failing alone fails, shows only its own
+      output, and every check still runs; `npx` without `bunx`; an archived
+      change found as archived and validated with `--specs`; an unknown change
+      refused before any check; the usage error. `make -n check-change` (in
+      `test_run_change_step.py`) shows only that the target's recipe is the
+      script, so the target's exit status is the script's by make's own rule,
+      not by a test. By hand: `make check-change` on this change and on the
+      archived pilot, each one pass line.
+- [x] 6e.4 Verification: the moved suites (unit, `scripts/tests`, fake runners;
       `test_round_view.py` at repository level, real Git), each passing with no
       assertion changed; `make test`; `make check-comment-hygiene`; `make
       check-doc-citations CHANGE=orchestrate-change-workflow`, since the change's
       documents cite `scripts/run_change_step.py`; the entry point's commands run
       as before (`python3 scripts/run_change_step.py log <change>`). No end-to-end
       scenario covers it (contributor tooling).
+      Unit, `uv run --no-project --with pytest`: the moved suites with
+      `test_change_next_step.py`, `test_change_cost.py`, and `test_round_view.py`
+      (repository level, real Git) 435 passed, the count the four files they came
+      from passed at the fifth round; the computation's, the round view's, and the
+      cost suite each pass alone too, so none relies on another file's imports.
+      `test_check_change.py` and `test_run_change_step.py` 47 passed. `make test`:
+      passed, every suite (`scripts/tests` 1073: 1061 at the fifth round and this
+      section's 12 new tests). `make check-change
+      CHANGE=orchestrate-change-workflow` — comment hygiene, agent skills,
+      citations, tasks, index, strict validation — passed. By hand, `python3
+      scripts/run_change_step.py log orchestrate-change-workflow --last 1` printed
+      the round line, and `python3 scripts/change_next_step.py
+      orchestrate-change-workflow` named section 6e, both through the package.
+      `make test` ran before the compliance check's fixes, which touched only two
+      skills, `check_change.py`'s docstring, its test, a fixture comment, and the
+      change's documents; after them, all of `scripts/tests` 1073 passed, `make
+      check-change` passed, and `make check-packaging` passed (no dependency
+      changed; run as `AGENTS.md` asks before a commit). End-to-end: none, as the
+      preamble says.
+
+Section 6e handoff. Fresh-context compliance check of the diff against
+`fd89560b6` (a subagent, read-only, which diffed each moved definition and each
+split test against the originals): no behaviour change, no assertion changed, no
+function-local import, no history in comments. Fixed what it found: implementation
+and triage now run the strict validation through `make check-change`, so both say
+a change with no spec deltas fails it every time and that failure is expected
+(implementation's "passes at closeout" line, which contradicted closeout, is
+gone); `check_change.py`'s docstring said `--specs` checks only the archive's
+merges; how `run_checks` finds a change archived was untested (now tested); a
+fixture comment had lost "in Codex"; 8.9 did not plan the spec's Evidence list
+naming the package and `check_change.py` (added); 6e.3's decision was not in
+`design.md` (added under the fifth round's decisions); and the notes above
+overstated the docstrings' provenance, the moved code's sameness, the
+dependency order, and what 6e.3's tests show (corrected). Declined: dropping
+`steps.py`'s citation of the delta's "Unattended runs are held to their step's
+permissions" — the step table cites the same requirement, and it resolves once
+the archive merges the delta, as the package's own citation does. For the next
+session: tests now import scripts by name through `scripts/tests/conftest.py`,
+which a new script's test may do too; the older tests still load modules by file,
+and both work side by side. Steps' rules for `make check-*` already admit
+`make check-change`; the review row admits only its three named checks, so a
+Claude reviewer cannot run it, which is as intended, since it would run the
+validator. This session stayed moderate in size; the pilot (7) can start fresh.
 
 ## 7. Pilot
 
@@ -1748,7 +1853,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         no delta reaches it (69 F11).
       - `docs/agents/change-workflow.md` — the "Skills" table gains
         `change-orchestrate`, `make plan`, `UNATTENDED=1`, `make change-next`,
-        `make change-watch`, `make check-tasks`, and `make change-cost`; a new
+        `make change-watch`, `make check-tasks`, `make check-change` (6e.3), and
+        `make change-cost`; a new
         "Orchestrating a change" section: starting and resuming, stating the
         cadence in a design, following a running step, answering and taking over a
         step, maintaining `.claude/change-steps.toml`'s rules and models, reading
@@ -1761,7 +1867,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
         from `run_change_review.py` (retired) to `run_change_step.py review` in
-        section 3, when the script was deleted; record it here.
+        section 3, when the script was deleted; record it here. It also gains
+        `scripts/change_workflow/`, the package behind that entry point, and
+        `make check-change` (`scripts/check_change.py`) (6e).
       - `openspec/specs/README.md` and `docs/development/ARCHITECTURE.md` — no
         change: no new capability or companion, and the workflow is contributor
         process.

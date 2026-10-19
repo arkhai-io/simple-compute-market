@@ -935,6 +935,12 @@ orchestrator's observations (74), and validation 78.
   point, as section 6e, implemented after the pilot resumes. Rejected: in the fix
   commit (it would bury the fixes in a move); a follow-up change (closeout would
   describe a layout about to change).
+- **After the fifth round, on the owner's word** — one target for a step's
+  closing checks, `make check-change CHANGE=<change>`, running comment hygiene,
+  the agent skills, the change's citations and task list, the change index, and
+  the pinned strict validation, printing only failures and one pass line; the
+  skills that ran them one by one name it. Every tool call replays the session's
+  context, so six checks as six calls cost six replays (D19). Part of section 6e.
 - **74 O4 / O5 (option a)** — validation and the review keep waiting for `make
   round-done`; running them while the owner reads is recorded as an open question
   in `parallel-change-workflows`' proposal, which meets the same problem. Rejected

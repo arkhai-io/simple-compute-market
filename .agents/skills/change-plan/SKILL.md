@@ -204,11 +204,11 @@ Before presenting it:
   (`openspec/README.md#open-questions-and-prescribed-tasks`);
 - every section has a verification point, its covering end-to-end scenarios or a
   statement that none covers it, and a size its verification point can prove;
-- `openspec validate <change> --strict` passes, and
-  `make check-doc-citations CHANGE=<change>` reports only files the change will
-  create;
-- `make check-tasks CHANGE=<change>` passes: every numbered task sits under its
-  own section's heading, which is how every later step reads the plan.
+- `make check-change CHANGE=<change>` reports no failure but its citations
+  check's, which may name only files the change will create. Among its checks,
+  the strict OpenSpec validation passes, and the task-list check holds every
+  numbered task under its own section's heading, which is how every later step
+  reads the plan.
 
 ## 6. Report the plan
 

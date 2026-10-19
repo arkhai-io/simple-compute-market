@@ -10,6 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from change_workflow.log import log_path, note_orchestrator, note_round, record_outcome
+from find_change import change_directory
+
 SCRIPTS = Path(__file__).resolve().parents[1]
 
 
@@ -24,7 +27,6 @@ def _load(name: str):
 
 
 nxt = _load("change_next_step")
-step = sys.modules["run_change_step"]
 rounds = sys.modules["round_view"]
 
 CHANGE = "shape-bounds"
@@ -72,7 +74,7 @@ def _repository(tmp_path: Path, status: str, *, depends_on: str = "—", tasks: 
 
 
 def _reviews(root: Path) -> Path:
-    return step.change_directory(root, CHANGE) / "reviews"
+    return change_directory(root, CHANGE) / "reviews"
 
 
 def _record(root: Path, name: str, *, triage: str | None = None, text: str = "x",
@@ -90,16 +92,16 @@ def _validation(commit: str = HEAD, result: str = "passed") -> str:
 
 
 def _log(root: Path, step_name: str, outcome: dict, **extra) -> dict:
-    return step.record_outcome(step.log_path(root, CHANGE), step_name, outcome, session="s",
-                               commit=HEAD, extra=extra or None)
+    return record_outcome(log_path(root, CHANGE), step_name, outcome, session="s",
+                          commit=HEAD, extra=extra or None)
 
 
 def _decide(root: Path, decision: str = "decided", **fields) -> dict:
-    return step.note_orchestrator(step.log_path(root, CHANGE), decision, "a reason", **fields)
+    return note_orchestrator(log_path(root, CHANGE), decision, "a reason", **fields)
 
 
 def _round(root: Path, sections, after: int | None = None) -> None:
-    step.note_round(step.log_path(root, CHANGE), sections, "owner", after)
+    note_round(log_path(root, CHANGE), sections, "owner", after)
 
 
 # What HEAD changed since a reviewed commit: a fix in code, unless a test says otherwise.
@@ -113,7 +115,7 @@ def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = 
 
 
 def _check(root: Path, tasks: str) -> None:
-    (step.change_directory(root, CHANGE) / nxt.TASKS_FILE).write_text(tasks, "utf-8")
+    (change_directory(root, CHANGE) / nxt.TASKS_FILE).write_text(tasks, "utf-8")
 
 
 ALL_WORK_DONE = TASKS.replace("- [ ] 2.1", "- [x] 2.1").replace("- [ ] 3.1", "- [x] 3.1")
@@ -406,8 +408,8 @@ def test_a_design_triage_routes_on_its_next_token(tmp_path: Path, words: str,
                                                    step_name: str) -> None:
     root = _repository(tmp_path, "in design")
     _log(root, "design", FINISHED)
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "design", "record": f"01-{KIND}.md"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "design", "record": f"01-{KIND}.md"})
     _triaged(root, f"01-{KIND}.md", words)
     _log(root, "triage", FINISHED)
 
@@ -693,8 +695,8 @@ def test_the_owner_may_direct_a_repeat_review_with_no_fix(tmp_path: Path) -> Non
     _decide(root, "review again", by="owner", next_step="review", kind="pre-closeout")
 
     directed = _next(root)
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "pre-closeout", "record": "04-pre-closeout.md"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "pre-closeout", "record": "04-pre-closeout.md"})
     _record(root, "04-pre-closeout.md", reviewed=HEAD)
     after = _next(root)
 
@@ -939,8 +941,8 @@ def test_a_validation_question_waits_beside_a_finished_review(tmp_path: Path) ->
     _implemented_round(root)
     _record(root, "02-implementation-owner.md")
     _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy"})
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "implementation"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "implementation"})
 
     result = _next(root)
 
@@ -953,8 +955,8 @@ def test_a_stopped_run_waits_until_a_decision_resolves_it(tmp_path: Path) -> Non
     _implemented_round(root)
     _record(root, "02-implementation-owner.md")
     _record(root, "03-validation.md", text=_validation())
-    run = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
-                              commit=HEAD, extra={"kind": "implementation"})
+    run = record_outcome(log_path(root, CHANGE), "review", STOPPED, session=None,
+                         commit=HEAD, extra={"kind": "implementation"})
 
     stopped = _next(root)
     _decide(root, "rerun the review")
@@ -973,8 +975,8 @@ def test_a_decision_about_one_run_leaves_another_steps_question_waiting(
     _implemented_round(root)
     _record(root, "02-implementation-owner.md")
     _log(root, "validate", {**QUESTION, "awaiting": "environmental remedy"})
-    review = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
-                                 commit=HEAD, extra={"kind": "implementation"})
+    review = record_outcome(log_path(root, CHANGE), "review", STOPPED, session=None,
+                            commit=HEAD, extra={"kind": "implementation"})
     _decide(root, "rerun the review", resolves=review["seq"])
 
     result = _next(root)
@@ -1075,8 +1077,8 @@ def test_a_stopped_run_is_not_cleared_by_its_reading_alone(tmp_path: Path) -> No
     _implemented_round(root)
     _record(root, "02-implementation-owner.md")
     _record(root, "03-validation.md", text=_validation())
-    run = step.record_outcome(step.log_path(root, CHANGE), "review", STOPPED, session=None,
-                              commit=HEAD, extra={"kind": "implementation"})
+    run = record_outcome(log_path(root, CHANGE), "review", STOPPED, session=None,
+                         commit=HEAD, extra={"kind": "implementation"})
 
     _decide(root, "gap: proposed Bash(cat *)", reads=run["seq"])
     read = _next(root)
@@ -1171,8 +1173,8 @@ def test_a_blocked_step_other_than_design_waits_for_the_owner(tmp_path: Path) ->
 
 def test_a_design_reviews_stopped_run_does_not_hold_implementation(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    step.record_outcome(step.log_path(root, CHANGE), "review", CRASHED, session=None,
-                        commit=HEAD, extra={"kind": "design"})
+    record_outcome(log_path(root, CHANGE), "review", CRASHED, session=None,
+                   commit=HEAD, extra={"kind": "design"})
     _round(root, [[2]])
 
     assert _next(root)["step"] == "implement"
@@ -1180,8 +1182,8 @@ def test_a_design_reviews_stopped_run_does_not_hold_implementation(tmp_path: Pat
 
 def test_a_design_triages_stopped_run_does_not_hold_implementation(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "design"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "design"})
     _log(root, "triage", CRASHED)
     _round(root, [[2]])
 
@@ -1193,8 +1195,8 @@ def test_a_design_triages_stopped_run_does_not_hold_implementation(tmp_path: Pat
 
 def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path) -> None:
     root = _repository(tmp_path, "ready for planning")
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "design"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "design"})
     run = _log(root, "triage", {**FINISHED, "denials": [{"tool_name": "Bash"}]})
 
     unread = _next(root)
@@ -1210,8 +1212,8 @@ def test_a_design_triages_denials_are_read_before_planning_starts(tmp_path: Path
 def test_a_pre_closeout_triages_denials_are_read_before_closeout_starts(
         tmp_path: Path) -> None:
     root = _repository(tmp_path, "ready for closeout")
-    step.record_outcome(step.log_path(root, CHANGE), "review", FINISHED, session="codex:x",
-                        commit=HEAD, extra={"kind": "pre-closeout"})
+    record_outcome(log_path(root, CHANGE), "review", FINISHED, session="codex:x",
+                   commit=HEAD, extra={"kind": "pre-closeout"})
     run = _log(root, "triage", {**FINISHED, "denials": [{"tool_name": "Bash"}]})
 
     unread = _next(root)

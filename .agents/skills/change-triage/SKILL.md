@@ -344,12 +344,13 @@ whether the round's accepted fixes merit another review round, while still prese
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
   committing (its step 5): `make lock` and `make check-packaging` when a
-  dependency changed, the focused suites, `make test`, `make check-comment-hygiene`,
-  `make check-doc-citations CHANGE=<change>` (before closeout it may report only
-  files the change's tasks create at closeout; name them, and fix anything else),
-  `make check-agent-skills` when the
-  diff touches `.agents/`, `.claude/`, or `.codex/`, and a fresh-context compliance
-  check of the diff against the `HEAD` recorded at the start. In the fix's task
+  dependency changed, the focused suites, `make test`, `make check-change
+  CHANGE=<change>` (before closeout its citations check may report only files the
+  change's tasks create at closeout; name them, and fix anything else; an active
+  change with no spec deltas fails its validation every time, which is expected),
+  and a
+  fresh-context compliance check of the diff against the `HEAD` recorded at the
+  start. In the fix's task
   note, record each check as `change-implement` records a section's evidence: each
   suite with its level as `TESTING.md` defines them and its result, `make test`'s
   result, and what the fresh-context check found and what was fixed or declined —
@@ -360,10 +361,10 @@ whether the round's accepted fixes merit another review round, while still prese
   The triage records stay in `reviews/`, which is untracked. Do not push: the fix commit is
   validated next (`make validate CHANGE=<change>`), which pushes it.
 
-Then validate and report the result: `openspec validate <change> --strict` for an
-active change, or, for an archived one — a closeout triage — `openspec validate
---specs --strict`, since its deltas are merged and the permanent specifications are
-what its fixes touched. `python3 scripts/find_change.py <change>` says which.
+Then run `make check-change CHANGE=<change>` and report the result. It validates
+an active change with `openspec validate <change> --strict`, and an archived one —
+a closeout triage — with `openspec validate --specs --strict`, since its deltas are
+merged and the permanent specifications are what its fixes touched.
 
 ## 6. Advance, or another round
 

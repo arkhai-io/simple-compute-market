@@ -172,11 +172,12 @@ cover is written by the archive, not by hand; the record names it all the same.
 **Checks against the promoted state.** Now that every document the change cites
 exists:
 
-- `make check-doc-citations CHANGE=<change>` must report nothing; fix the
-  documents until it does.
-- `openspec validate <change> --strict`, with the validator `openspec/README.md`
-  pins. A change with no spec deltas cannot pass it — the validator rejects a change
-  with none — so record on the citations task that it has none, and skip it.
+- `make check-change CHANGE=<change>` must report nothing failing: its citations
+  check finds every document the change cites, so fix the documents until it
+  does, and it runs `openspec validate <change> --strict` with the validator
+  `openspec/README.md` pins. A change with no spec deltas cannot pass that
+  validation — the validator rejects a change with none — so record on the
+  citations task that it has none, and take that one failure as expected.
 
 **Archive** — the last change to the change's files. Check every other closeout
 part is checked first.
@@ -198,8 +199,9 @@ part is checked first.
 4. Point the change's row in `openspec/changes/README.md` at the directory
    `python3 scripts/find_change.py <change>` now prints, and update any other link
    to the change's directory in the index.
-5. Run `openspec validate --specs --strict` with the pinned validator, and
-   `make check-change-index`.
+5. Run `make check-change CHANGE=<change>`, which for an archived change runs
+   `openspec validate --specs --strict` with the pinned validator, and checks the
+   change index among the rest.
 
 If the archive fails, nothing has moved: fix what it reports, or, when the fix is
 not closeout's to make, stop and tell the owner.

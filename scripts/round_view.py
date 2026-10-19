@@ -53,7 +53,8 @@ from typing import Callable, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from find_change import ChangeNotFound, change_directory  # noqa: E402
-from run_change_step import LOG, StepError, read_log  # noqa: E402
+from change_workflow.common import StepError  # noqa: E402
+from change_workflow.log import LOG, read_log  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = "round-view.json"
