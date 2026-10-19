@@ -41,7 +41,8 @@ owner; discussions stay live conversations with the owner. Where the change stan
 is computed from files, so any session can pick it up.
 
 **Non-Goals.** See the proposal: one change at a time, no choice of work across
-changes, no gate removed, no shareable logs, and no change to what a step checks.
+changes, none of the owner's judgement removed, no shareable logs, no change to what
+a step checks, and no step run on another harness than its own.
 
 ## Decisions
 
@@ -82,8 +83,14 @@ step makes ends its turn with an outcome whose `message` the orchestrator shows 
 owner; the owner's answer resumes the step. The step's loading — the guidance
 documents, specifications, code, and reviews — stays in its own session, out of
 the orchestrator's. The orchestrator reads every message to know what to do next,
-so relaying costs a second rendering of each message; that is the price of keeping
-the loading out of the top-level session. When relaying gets in the way, the owner
+and shows it as written (D17). What a relayed turn costs is the step's own: every
+turn of a session, attended or not, replays the whole conversation from the prompt
+cache, which is cheap while the cache is warm and costs a full rewrite of the
+context when it has expired. The pilot's design discussion showed warm turns well
+under a dollar, and a session's opening and each cache miss each near six dollars
+on the model it ran on (D19). A discussion step keeps one decision or finding per
+turn: batched turns gave thinner answers, and an earlier decision can change a
+later question. When relaying gets in the way, the owner
 resumes the step directly with `claude --resume <id>` between turns and hands back;
 the orchestrator re-reads the files.
 
@@ -137,8 +144,8 @@ not recovered — the step rerun fresh, fixed first, or abandoned — is settled
 (52 F1). A directed review names its
 `kind`, without which the computation could name no review; a directed step of
 any other kind is a confirmed return and resolves the returned run, which would
-otherwise wait ahead of the directive; a repeat review after a failed gate names
-no run, a failed gate being a state of the triage file, not of a run (28 F3).
+otherwise wait ahead of the directive; a repeat review the owner directs outside
+a triage names no run, waiting on no run (28 F3).
 
 ```jsonl
 {"seq":12,"at":"2026-10-21T09:15:40Z","step":"orchestrator","outcome":"round","sections":[[0]],"by":"owner","after":3}
@@ -162,12 +169,22 @@ Rejected: the final answer only, kept in the orchestrator's context — a restar
 loses session ids and round agreements. The step writing its own outcome file — a
 crashed or refused run writes nothing.
 
-### D13 — The owner agrees each implementation round before it starts
+### D13 — The implementation cadence is settled in the design
 
-How many sections a session implements, and how many make a round before the round
-view, validation, review, and triage, is decided by the owner with the orchestrator
-before implementation, and recorded as a `round` line, whose `after` is the highest
-record number before the round, so the round's records are those above it. A round
+How many sessions implement the work, and how much of it each round covers before
+the round view, validation, review, and triage, is a decision of the design
+discussion, recorded in `design.md` as the change's implementation cadence, in
+terms of the work rather than section numbers, which do not exist yet — for
+example "one round, one session", or "round 1: the contract changes; round 2: the
+handlers and the migration". The order of implementation can bear on the design,
+and settling the cadence there means nothing about it is asked once the owner has
+moved on (G1b). Planning numbers the sections in that order; a plan whose sections
+cannot be cut that way needs a decision and returns to design. After planning, the
+orchestrator records each round as a `round` line, `by: owner`, since the owner
+agreed it in design; a `round` line's `after` is the highest record number before
+the round, so the round's records are those above it. A change designed before the
+cadence was a design decision, with no cadence and no `round` line, is asked about
+once, before implementation. A round
 agreed before the orchestrator existed — this change's own first five sections —
 is recorded after the fact with `--after` naming that number (X1); without a round
 line the computation can only ask for a round, and the records of the one that
@@ -181,12 +198,15 @@ advice in `change-implement`, for the owner to weigh.
 
 Rejected: round breaks written into `tasks.md` at planning, alone or as a default
 the owner overrides — that puts session logistics into a plan that should not know
-about them.
+about them. The orchestrator agreeing each round with the owner before
+implementation — a question asked after the owner's attention has gone to other
+work, and the pilot's agreed round of four sections was recorded as three
+sessions on the skill's own advice about long sessions.
 
 ### D14 — A script computes the next step; the orchestrator is its backstop
 
 `scripts/change_next_step.py <change>` reads the change's index row and status, its
-`Depends on`, `reviews/` and their triage gates, `tasks.md`, the log, and the open
+`Depends on`, `reviews/` and their triage files' `## Next`, `tasks.md`, the log, and the open
 round view's state that `scripts/round_view.py` keeps in Git, and prints the next
 step as data — for example
 `{"step":"triage","reason":"05-validation.md and 06-implementation.md have no triage"}`
@@ -202,7 +222,7 @@ the results that wait for the owner:
   release (D5a);
 - a step's latest run went on past a denied tool: `owner`, carrying the denials,
   until a decision line reads that run (D6a), whatever phase the change is in
-  now — the run may be the one that moved it on, a triage passing a design gate
+  now — the run may be the one that moved it on, a design triage advancing
   sets the next phase's status in the same run (39 F2) — while a question,
   return, or block waits only in the phase it was raised in; its question or
   return then waits as below;
@@ -211,10 +231,19 @@ the results that wait for the owner:
   (D3); a decision that names `next` routes to that step until it has run, which
   is how a confirmed return reaches the phase's step (04 F1) and a repeat review
   the owner asked for reaches the reviewer;
-- a pre-closeout or closeout review whose gate did not pass: `owner`, until `HEAD`
-  differs from the review's reviewed commit in more than changes' records — a fix
-  accepted at triage and committed — when the review of the same kind runs again,
-  a pre-closeout one once the fix is validated (04 F2). The
+- a review whose triage recorded another round: the review of the same kind
+  again once `HEAD` differs from the reviewed commit in more than changes' records
+  — the round's accepted fixes committed — a pre-closeout or implementation one
+  once that commit is validated; with no fix committed, the review runs again on
+  the same commit (04 F2, G1).
+
+Everything else advances without the owner (D16). A triage that recorded `advance`
+moves the change to its phase's next step: planning after a design review;
+validation of the fix commit, then the next round or the pre-closeout review after
+an implementation round; closeout once the latest validation of `HEAD` passed after
+a pre-closeout review; and archive cleanup after a closeout review. A round's
+validation and review start once the owner's notes on the round view are saved.
+These conditions are the computation's; the
 orchestrator runs that step and never routes on its own reading. The transitions
 are already fixed by each skill's entry check and handoff; in code they are
 testable under `scripts/tests`, and the owner can run the same command by hand,
@@ -230,8 +259,8 @@ When the script fails — an error, a state it cannot classify, files and log th
 disagree — the orchestrator receives its output and the inputs it read, works out
 what happened, and either decides, when the matter is routing or recovery (a step
 that died before writing an outcome, a status set by hand), or raises it with the
-owner, when the answer would pass a gate, settle a design question, or change a
-status. Either way it records an `orchestrator` line with what it decided and why;
+owner, when the answer would decide a finding, settle a design question, or change
+a status. Either way it records an `orchestrator` line with what it decided and why;
 those lines are the evidence for what the script should learn next.
 
 Rejected: routing by the skill alone — only as reliable as the model's reading on a
@@ -324,6 +353,9 @@ command runs as written, with no shell redirect of its output: a redirect is a
 write no rule admits, and the harness keeps the output in a file the `tail`
 reads (54 A1).
 
+Each row also names the models its step runs on, in priority order, with each
+one's effort, and the wrapper runs the first that is available (D18).
+
 The allow-lists turn each skill's "never" lines into rules the harness enforces:
 validation's "never changes the commit" stops being an instruction only. A run that
 cannot go on without a denied tool ends `stopped` with its reason; one that can —
@@ -395,9 +427,13 @@ Rejected: outcomes only — "is it stuck?" can only be answered by waiting.
 ### D8 — Planning resumes the design session; closeout and archive cleanup are delegated
 
 Planning resumes the design step's session, after the design review and its triage,
-since `change-plan` is better written with the design's context; it reads the gate
-from the files as its entry check requires, and is a discussion step. When the
-design session has grown large, the orchestrator offers a fresh one. Planning has no
+since `change-plan` is better written with the design's context; it reads the design
+triage's `## Next`
+from the files as its entry check requires. It asks nothing of the owner: the owner
+reviews the design, not the plan, and the order of the plan's sections is settled
+in the design (D13). A plan that needs a decision the design does not make ends
+`returned` to design. When the design session has grown large, the orchestrator
+starts a fresh planning session instead. Planning has no
 `make` target today, since it has run in the design session by hand; it gains
 `make plan CHANGE=<change>`, opening `/change-plan <change>` interactively, so that
 like every step it has a target whose unattended form (D1) runs it, resuming the
@@ -446,6 +482,14 @@ record, `finished`, naming that record and the reviewed commit, and triage is ne
 otherwise `stopped`, with the runner's reason. An earlier review file never counts.
 Codex needs no output schema for this.
 
+When Codex is unavailable — not installed, not signed in, or out of quota — the
+review falls back to `change-review` on Claude, through the wrapper, as the review
+row's ordered models say (D18). The record and the log line name the reviewer's
+harness and model, and the orchestrator says so when it reports the review. A
+review on a second model is preferred, since it reads the work with another
+model's eye; a review on Claude is better than none, and halting on a missing
+reviewer only costs the owner time (G6a, the practice of the first cloud run).
+
 ### D12 — The skills change how they ask and report, not what they check
 
 When a skill runs through the wrapper, every "stop and ask the owner" ends its turn
@@ -463,7 +507,15 @@ unchanged. Beyond that:
   session, and drops "one section per session" from its handoff (D13).
 - `change-implement` implements the sections it was given, drops §8's question,
   and keeps the warning about a growing session as advice (D13).
-- `change-design` gains the blocked-on-prerequisite path (D5, D5a).
+- `change-design` gains the blocked-on-prerequisite path (D5, D5a), and settles
+  the implementation cadence before it is recorded (D13).
+- `change-plan` asks nothing of the owner: it orders its sections by the design's
+  cadence, and a plan needing a decision ends `returned` to design (D8, D16).
+- `change-triage` ends with `## Next` in place of the gate, asking at the end of the
+  dispositions, before any fix, whether another round is merited (D16).
+- `change-orchestrate` relays and routes without judging findings (D17), records
+  the design's rounds after planning (D13), and reports fallbacks and cost
+  (D18, D19).
 
 ### D15 — The pilot runs on this change's branch
 
@@ -478,11 +530,132 @@ Rejected: landing the orchestrator first and piloting afterwards — the orchest
 would close out with no evidence it works. A pilot branch stacked on this one — a
 second branch to keep current, for a small pilot.
 
-### Never passing a gate
+### D16 — The owner is interrupted only for judgement
 
-The orchestrator passes no gate and answers no design question; every gate and
-question reaches the owner. Practice may show some gates safe to soften; that is a
-later decision, made on the pilot's evidence.
+A change stops for the owner at four kinds of moment, and advances on its own at
+every other:
+
+1. the design discussion's questions;
+2. the owner's notes on a round, read through the round view, before its triage;
+3. the triage discussion: each finding's disposition, and, at the end of the
+   dispositions and before any fix is made, whether the round's accepted fixes
+   merit another review round — triage recommends, from what the fixes will
+   change, and the owner decides while still present;
+4. the interrupts no rule can settle: an environmental remedy validation proposes,
+   a denial that needs a rule or was forbidden (D6a), a proposed return, and a
+   step that stopped.
+
+Reviews are no longer gates. A triage file ends with `## Next`, recording
+`advance` or `another round` in the owner's words where it recorded a gate, and the
+computation reads it as it read the gate (D14). A triage whose reviews and
+validation raised no finding at all records `advance` itself. Pre-closeout and
+closeout triage are discussions like any other: with findings they stop for the
+owner, without them they advance. The owner's own look at the pull request on
+GitHub before merging is outside the workflow. The orchestrator answers no design
+question and decides no finding; it advances only on conditions the computation
+checks, and the conditions replace the gates, whose answer was always yes and whose
+asking left the owner's window idle while their attention was on other work.
+
+Rejected: keeping every gate — the owner was asked a question whose answer never
+varied. Renaming the gate a routing question at each review — the same
+interruption under another name; the benefit is in not stopping. Keeping
+pre-closeout and closeout as gates — neither has ever been refused, and both
+still stop for the owner whenever their triage has a finding.
+
+### D17 — The orchestrator relays and routes; it does not judge
+
+The orchestrating session starts steps, shows each step's message to the owner as
+written, sends the owner's reply back as written, and reads what routing needs: the
+computation, each log line's outcome, `awaiting`, `next`, model, and cost, and each
+denial through the `denials` report (D6a). It reads no code, reviews, or change
+documents to form a view of a finding, and adds nothing to a step's message but a
+routing note — "validation and review are starting" — and the `make change-watch`
+line (D7). It runs on Opus 5.5 at medium effort, passed by `make orchestrate`: it
+needs a large context for a change's relayed turns, not the effort of judging them.
+
+What only the orchestrator sees is still reported. Misbehaviour of the wrapper or
+the computation that shows across steps — an answer delivered to the wrong session,
+a denial missing from a line, a table rule several steps trip — the orchestrator
+writes as the change's next numbered record, marked as its own observations, for
+the next triage; never as commentary on a step's finding.
+
+Rejected: the orchestrator stating its own position on each finding — it read again
+what the step had read, which cost tokens and blurred whose recommendation the owner
+was weighing, though its conclusions were sometimes better. Relaying with no
+observations of its own — the wrapper and computation defects found in this
+change's rounds (X1–X5, 45 R1) came from the orchestrator alone.
+
+### D18 — Each step runs on an ordered list of models
+
+Each row of `.claude/change-steps.toml` names its step's models in priority order,
+each with its harness and effort; the wrapper runs the first available, falling to
+the next on a usage limit, a missing sign-in, or a missing harness — a network
+error is retried, not a fallback — and the log line names the entry that ran. The
+policy:
+
+| Step | Models, in order |
+|---|---|
+| design (and planning, resuming its session), triage, implement, closeout | Claude Opus 5.5, high |
+| validate, archive cleanup | Claude Sonnet 5.5, medium |
+| review | Codex, high; then Claude Opus 5.5, high |
+
+```toml
+[steps.review]
+models = [
+  { harness = "codex",  effort = "high" },
+  { harness = "claude", model = "claude-opus-5-5", effort = "high" },
+]
+
+[steps.validate]
+skill = "change-validate"
+models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+```
+
+Design and triage need Opus at high effort: earlier tests found it caught more
+problems and explained its decisions better. Implementation and closeout stay
+there until the cost data (D19) shows otherwise, since their cost is judged to come
+from replayed context and the orchestrator's reading, not the model. Validation
+runs commands and reads their logs, and archive cleanup edits a row and drafts a
+pull request; Sonnet at medium suits both.
+
+The table loader refuses a row naming Fable or Astra, which are never used, and a
+row listing two models of one vendor: an outage or a usage limit takes both down,
+so a second model of the same vendor is no fallback. Codex appears only where its
+sandbox can hold the step to its limits, which today is the review alone: a
+`workspace-write` sandbox cannot refuse a commit or a relock. A step whose one
+model is unavailable ends `stopped` with the reason and the time the limit resets,
+and waits.
+
+Rejected: an unset model, inheriting the default — the pilot's steps ran on the
+most expensive model without anyone choosing it. Claude models falling back to one
+another. Codex as a fallback for any step — without D6's table and denials record,
+a Codex step would be held to its skill's words only; running leaf steps on Codex
+with those guarantees is later work, alongside parallel workflows and shared
+artifacts.
+
+### D19 — Every run records its cost
+
+Each log line carries the model and effort that ran and a `cost` object: for a
+Claude run, the dollars, turns, duration, and input, output, cache-read, and
+cache-write tokens, summed over the run's turns and taken as the difference from the
+session's previous total, since a resumed run's reported total is the session's
+running total; for a Codex review, the tokens it reports. A resumed run also
+records the gap since its session's previous run and whether its first turn hit the
+prompt cache.
+
+```jsonl
+{"seq":74,"step":"triage","outcome":"question","session":"057b…","model":"claude-opus-5-5","effort":"high","gap_s":412,"cache_hit":true,"cost":{"usd":0.31,"turns":2,"duration_s":17.5,"input":2,"output":972,"cache_read":249533,"cache_write":1211},"message":"…","denials":[]}
+{"seq":75,"step":"review","outcome":"finished","session":"codex:01a1…","kind":"implementation","model":"codex","cost":{"tokens":403900},"record":"52-implementation.md"}
+```
+
+`make change-cost CHANGE=<change>` totals the lines by step and by round, and lists
+the cache misses with their gaps, so the cost of session openings, of misses, and
+of warm turns can be told apart. The orchestrator's own session is not a wrapper
+run and is not recorded.
+
+Rejected: a report parsing the transcripts on demand — Codex logs and Claude
+transcripts differ, and every report would reparse them. Nothing — the account's
+console shows totals, not which step or turn spent them.
 
 ### Decisions at the first implementation round's triage
 
@@ -569,6 +742,24 @@ Beside the amendments above, each under its finding's label:
 - **54 A1** — the background fetch runs with no shell redirect; see D6 and
   `change-validate` section 2.
 
+### Decisions at the design revision after section 6
+
+Made after section 6, from the pilot's first rounds and a run on Claude's cloud
+environment, each under its decision's label:
+
+- **G1** — the owner is interrupted only for judgement; reviews are no longer
+  gates; triage records `## Next`; see D14, D16. **G1a** — planning asks nothing,
+  and a plan needing a decision returns to design; see D8. **G1b** — the
+  implementation cadence is a design decision; see D13. **G1c** — a round with no
+  finding advances. **G1d** — the Codex closeout review stays; the owner's look at
+  the pull request is outside the workflow.
+- **G2** — the orchestrator relays and routes, and raises only its own
+  observations; see D17.
+- **G3, G7** — every run records its cost, its gap, and its cache hit;
+  discussion turns stay one per decision; see D2, D19.
+- **G4, G6** — each step's models in priority order, never Fable or Astra, no
+  same-vendor fallback, the review falling back to Claude; see D11, D18.
+
 ## Risks / Trade-offs
 
 - **Relayed discussions cost a second rendering of every message**, and the relayed
@@ -587,10 +778,23 @@ Beside the amendments above, each under its finding's label:
   the pilot confirms whether it needs to be.
 - **`--resume` with different allow rules** is assumed to apply the new rules to the
   resumed turn; the pilot confirms it.
+- **Advancing without the owner moves work along on conditions alone.** A
+  condition the computation gets wrong carries the change a step too far before
+  anyone looks; each advance is a line in the log, and the next touchpoint shows it.
+- **A Claude review of Claude's work loses the second model's reading.** The record
+  names the reviewer, so the owner can ask for a Codex round when one is available.
+- **Every turn of a discussion replays its session.** Accepted for one decision per
+  turn; D19 measures it.
 
 ## Open Questions
 
-None.
+- **Loading less per session.** Each step loads every guidance document `AGENTS.md`
+  lists, whatever the skill needs. Loading per skill would lower every turn's replay
+  but changes how `AGENTS.md` lists the guidance. Revisit when D19's data shows
+  session openings and replay dominate the cost.
+- **A longer prompt-cache lifetime for discussion steps.** It costs more to write
+  and survives slower replies. Revisit when D19's record of cache misses and their
+  gaps shows how often a longer lifetime would have hit.
 
 ## Pilot
 
@@ -598,4 +802,6 @@ None.
 cleanup, on this change's branch (D15). The pilot records, for this change's
 triage: every `stopped` outcome and its denials, every `orchestrator` line and the
 transition the script could not classify, the relay's latency on the design
-discussion, and whether validation's background fetch survived a question.
+discussion, whether validation's background fetch survived a question, and, from
+its remaining rounds, the cost of each step, session opening, and cache miss
+(D19).

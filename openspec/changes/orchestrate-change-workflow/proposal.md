@@ -35,19 +35,34 @@ proposal deferred can be built on them.
   `reviews/workflow.jsonl`: finished, and the next step; a question for the owner,
   the answer resuming the same session; a proposed return to an earlier phase; blocked
   on a prerequisite; or stopped, with its reason and any tools it was denied.
-- Design, triage, and planning are discussions: the same headless sessions, resumed
-  for each of the owner's turns, with each message shown in the top-level session.
-- How many sections a session implements, and how many make a round, is agreed
-  with the owner before implementation. The plan stays agnostic of sessions:
-  `change-plan` and `change-implement` stop sizing and stopping by "one section
-  per session".
+- Design and triage are discussions: the same headless sessions, resumed for each
+  of the owner's turns, with each message shown in the top-level session. Planning
+  asks nothing; a plan that needs a decision returns to design.
+- How many sessions implement the work, and how much each round covers, is settled
+  in the design discussion as the change's implementation cadence. The plan stays
+  agnostic of sessions: `change-plan` and `change-implement` stop sizing and
+  stopping by "one section per session".
 - A design blocked on a prerequisite shapes the prerequisite's requirements and
   initial proposal, which land on dev first, records the dependency, and halts. The
   owner starts the prerequisite's workflow; the original restarts, releasing the
   dependency on the owner's word, once the prerequisite is merged.
 - The orchestrator opens and closes the round view, notifies the owner when a step
   needs them, and records each step's event stream as a transcript.
-- The orchestrator never passes a gate and never answers a design question.
+- The owner is interrupted only for judgement: design questions, their notes on a
+  round, the triage discussion — where another review round is decided, before
+  fixes — and what no rule can settle. Reviews are no longer gates: a triage records
+  whether the change advances or another round runs, and every other transition
+  advances on conditions the next-step computation checks.
+- The orchestrator relays and routes: it shows each step's message as written,
+  forms no view of a finding, and reports only its own observations of the
+  workflow's tooling.
+- Each step runs on an ordered list of models with their effort, in the step table:
+  Opus 5.5 at high effort for design, triage, implementation, and closeout; Sonnet
+  5.5 at medium for validation and archive cleanup; the review on Codex, falling
+  back to Claude when Codex is unavailable. Fable and Astra are never used, and no
+  step falls back to another model of the same vendor.
+- Every run records its cost, its gap since the session's previous run, and whether
+  it hit the prompt cache; `make change-cost` reports them by step and round.
 - Bash completion of change names and review kinds on the workflow's `make`
   targets, as a script the owner sources.
 - Piloted on `fix-resource-pool-provider-at-creation`, from `ready for design`
@@ -60,7 +75,15 @@ proposal deferred can be built on them.
   lands, orchestrating several changes is a follow-up.
 - **Choosing what to work on next across changes.** Campaign priority and scheduling
   from the index stay with the owner, including starting a prerequisite's workflow.
-- **Removing human gates.** Every review stops for the owner, as now.
+- **Removing the owner's judgement.** Every design question, finding, and decision
+  on another review round stops for the owner; only gates whose answer never varied
+  go.
+- **Running leaf steps on another harness.** A step other than the review runs on
+  Claude Code under the step table; running steps on Codex with the table's
+  guarantees is later work, alongside `parallel-change-workflows` and shared
+  artifacts.
+- **Loading less guidance per step.** Measured first; see the design's open
+  questions.
 - **Shareable session logs.** Publishing step transcripts and reviews where the
   owner's team can read them is separate work; this change keeps `reviews/` and
   transcripts where they are.
@@ -96,10 +119,14 @@ proposal deferred can be built on them.
   code with the model as backstop, the permission model, the prerequisite flow, and
   the principles the owner stated (a plan is agnostic of sessions and harnesses;
   one change per branch, a prerequisite's proposal landing on dev first; routing is
-  deterministic; restrictions apply only to unattended runs) —
+  deterministic; restrictions apply only to unattended runs; the owner is
+  interrupted only for judgement; the orchestrator relays and routes and does not
+  judge; implementation cadence is a design decision; Fable and Astra are never
+  used; a model of the same vendor is no fallback) —
   `openspec/specs/change-workflow/architecture.md`.
-- How to start and resume an orchestrated change, agree a round, and maintain the
-  allow-lists — `docs/agents/change-workflow.md`.
+- How to start and resume an orchestrated change, state the implementation cadence
+  in a design, maintain the allow-lists and each step's models, and read
+  `make change-cost` — `docs/agents/change-workflow.md`.
 
 ## Dependencies and Related Changes
 
@@ -119,7 +146,8 @@ sizing; `change-design`'s prerequisite path), the workflow `make` targets and a 
 `run_change_review.py` (retired); `scripts/change_next_step.py`;
 `scripts/check_comment_hygiene.py`, a port of the Makefile's check) with their
 tests, the outcome schema (`.agents/change-outcome.schema.json`) and the step
-permission table (`.claude/change-steps.toml`),
+table (`.claude/change-steps.toml`), with each step's permissions and ordered models,
+a new `make change-cost`,
 the `change-workflow` specification and architecture companion,
 `docs/agents/change-workflow.md`, and `AGENTS.md`. No service code changes, beyond
 the pilot change's own.
