@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from compute_provisioning import (
     ExecutorAdapterBundle,
@@ -70,9 +72,6 @@ class FakePoolConfigHandler:
         return self.read_config(db, pool_id)
 
     def replace_config(self, unit_of_work, pool_id, config):
-        return None
-
-    def delete_config(self, unit_of_work, pool_id):
         return None
 
 
@@ -190,6 +189,57 @@ def test_handler_identity_must_match_provider_identity():
                     },
                 )
             ],
+            host_requirement=ANSIBLE_NEEDS_HOST,
+            job_executors=JobExecutorTable(),
+        )
+
+
+def test_a_handler_with_the_non_destructive_hooks_composes():
+    handler = FakePoolConfigHandler("ansible")
+    composed = compose_adapter_bundles(
+        [ExecutorAdapterBundle(
+            name="vm",
+            executors=(contribution("vm", "create"),),
+            fulfillment_providers={"ansible": FakeProvider()},
+            pool_config_handlers={"ansible": handler},
+        )],
+        host_requirement=ANSIBLE_NEEDS_HOST,
+        job_executors=JobExecutorTable(),
+    )
+
+    assert composed.pool_config_handlers["ansible"] is handler
+
+
+@pytest.mark.parametrize(
+    "hook",
+    ["validate_config", "validate_config_problems", "read_config", "replace_config"],
+)
+@pytest.mark.parametrize("invalid", ["missing", "non-callable"])
+def test_a_handler_missing_a_callable_required_hook_is_refused(hook, invalid):
+    valid = FakePoolConfigHandler("ansible")
+    attributes = {
+        name: getattr(valid, name)
+        for name in (
+            "provider", "validate_config", "validate_config_problems",
+            "read_config", "read_config_for_execution", "replace_config",
+        )
+        if name != hook
+    }
+    if invalid == "non-callable":
+        attributes[hook] = None
+    handler = SimpleNamespace(**attributes)
+
+    with pytest.raises(
+        ValueError,
+        match=f"pool config handler 'ansible' in bundle 'vm' is missing callable hooks: {hook}$",
+    ):
+        compose_adapter_bundles(
+            [ExecutorAdapterBundle(
+                name="vm",
+                executors=(contribution("vm", "create"),),
+                fulfillment_providers={"ansible": FakeProvider()},
+                pool_config_handlers={"ansible": handler},
+            )],
             host_requirement=ANSIBLE_NEEDS_HOST,
             job_executors=JobExecutorTable(),
         )

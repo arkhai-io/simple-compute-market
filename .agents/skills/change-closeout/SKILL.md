@@ -1,6 +1,6 @@
 ---
 name: change-closeout
-description: Close out an OpenSpec change whose pre-closeout gate has passed — work through the eleven parts of its closeout task in order, confirming the code checks and reporting every judgement made, promote its durable knowledge, check its citations, archive it last so its spec deltas merge into openspec/specs, and commit, so the closeout review reads the archived change. Use when a change is `ready for closeout` or `in closeout` in openspec/changes/README.md, or when the owner says "close out <change>".
+description: Close out an OpenSpec change whose pre-closeout review's triage advanced it — work through the eleven parts of its closeout task in order, confirming the code checks and reporting every judgement made, promote its durable knowledge, check its citations, archive it last so its spec deltas merge into openspec/specs, and commit, so the closeout review reads the archived change. Use when a change is `ready for closeout` or `in closeout` in openspec/changes/README.md, or when the owner says "close out <change>".
 ---
 
 # Closing out an OpenSpec change
@@ -13,8 +13,8 @@ this change as its last `tasks.md` section — and ends by archiving the change:
 the change under `openspec/changes/archive/`. Archival is the last step, so the
 closeout review that follows reads the change, and the specifications, as they will
 land. Archive cleanup (`change-archive-cleanup`) — releasing dependents and
-drafting the pull request — follows that review's gate and is not
-closeout's.
+drafting the pull request — follows once that review's triage advances the change,
+and is not closeout's.
 
 Closeout is one session, and it changes documentation only: the change's own
 files, the permanent documents, and the index. The code was last reviewed at
@@ -45,8 +45,12 @@ the session, and every turn ends with an outcome matching
   run's own record. Otherwise go on and end as the step ends: the wrapper records
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. Never do by another tool what a denied call would have
-  done, and never ask about a denial as a question.
+  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
+  does it. A call denied because no rule allows it — the harness reports it as
+  don't ask mode — may be done instead by a tool this step's rules allow for the
+  same work, such as the Edit tool for a shell write or Read or Grep for a shell
+  read; name the substitute in your message. Never ask about a denial as a
+  question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -61,12 +65,20 @@ the session, and every turn ends with an outcome matching
 
 - **Branch.** The checked-out branch is the one this change is worked on. If it does
   not carry this change's latest commits, or its name belongs to another change,
-  stop and ask the owner.
+  stop and ask the owner — unless the change's log holds the owner's decision
+  that it runs on this branch: run `git branch --show-current`, then
+  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  it prints is that decision, and the branch is accepted.
 - **Status.** The change's row in `openspec/changes/README.md` is `ready for
   closeout`, or `in closeout` when an earlier closeout session stopped. The
-  pre-closeout gate is recorded as passed in the triage file of the latest
-  pre-closeout review in the change's `reviews/`. If either is missing, stop: the
-  change is not ready, and passing that gate is the owner's, in triage.
+  triage file of the latest pre-closeout review in the change's `reviews/` has a
+  `## Next` beginning `Advance` — a file from before `## Next`, ending with a
+  `## Gate` beginning `Passed`, reads the same. A row still `in implementation`
+  with that triage is accepted when the latest validation record is `passed` and
+  names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and
+  reviews: the triage advanced before its fix commit was validated, so it could
+  not set `ready for closeout`. If either is missing, stop: the change is not
+  ready, and whether it advances is recorded in triage.
 - **Where it stopped.** Find the change with `python3 scripts/find_change.py
   <change>`. When it prints a directory under `openspec/changes/archive/` while the
   row says `in closeout`, an earlier session archived it and stopped: if the
@@ -129,7 +141,8 @@ list its parts in another order; work in this order, and note it on the section.
 - **Campaign index currency.** Update the change's row and its campaign's
   dependency graph. Leave every other row's `Depends on` and status as they are:
   the change lands, and its dependents are released, only at archive cleanup after
-  the closeout gate (`openspec/README.md#plan-closeout-requirements` part 6). The
+  the closeout review's triage advances it
+  (`openspec/README.md#plan-closeout-requirements` part 6). The
   status stays `in closeout`: archive cleanup writes `archived`. Run
   `make check-change-index` after the edit.
 - **Packaging.** Run `make check-packaging`, then `make check-architecture-change
@@ -163,11 +176,12 @@ cover is written by the archive, not by hand; the record names it all the same.
 **Checks against the promoted state.** Now that every document the change cites
 exists:
 
-- `make check-doc-citations CHANGE=<change>` must report nothing; fix the
-  documents until it does.
-- `openspec validate <change> --strict`, with the validator `openspec/README.md`
-  pins. A change with no spec deltas cannot pass it — the validator rejects a change
-  with none — so record on the citations task that it has none, and skip it.
+- `make check-change CHANGE=<change>` must report nothing failing: its citations
+  check finds every document the change cites, so fix the documents until it
+  does, and it runs `openspec validate <change> --strict` with the validator
+  `openspec/README.md` pins. A change with no spec deltas cannot pass that
+  validation — the validator rejects a change with none — so record on the
+  citations task that it has none, and take that one failure as expected.
 
 **Archive** — the last change to the change's files. Check every other closeout
 part is checked first.
@@ -189,8 +203,9 @@ part is checked first.
 4. Point the change's row in `openspec/changes/README.md` at the directory
    `python3 scripts/find_change.py <change>` now prints, and update any other link
    to the change's directory in the index.
-5. Run `openspec validate --specs --strict` with the pinned validator, and
-   `make check-change-index`.
+5. Run `make check-change CHANGE=<change>`, which for an archived change runs
+   `openspec validate --specs --strict` with the pinned validator, and checks the
+   change index among the rest.
 
 If the archive fails, nothing has moved: fix what it reports, or, when the fix is
 not closeout's to make, stop and tell the owner.
@@ -215,5 +230,5 @@ Tell the owner:
 - anything that stopped closeout for a code edit, and the fix round recommended;
 - what comes next: the closeout review (`make review CHANGE=<change>
   KIND=closeout`), which reads the archived change, then its triage in a fresh
-  session (`make triage CHANGE=<change>`); the gate passing is followed by archive
-  cleanup in another (`make archive-cleanup CHANGE=<change>`).
+  session (`make triage CHANGE=<change>`); a triage that advances the change is
+  followed by archive cleanup in another (`make archive-cleanup CHANGE=<change>`).

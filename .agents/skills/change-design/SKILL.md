@@ -36,8 +36,12 @@ the session, and every turn ends with an outcome matching
   run's own record. Otherwise go on and end as the step ends: the wrapper records
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. Never do by another tool what a denied call would have
-  done, and never ask about a denial as a question.
+  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
+  does it. A call denied because no rule allows it — the harness reports it as
+  don't ask mode — may be done instead by a tool this step's rules allow for the
+  same work, such as the Edit tool for a shell write or Read or Grep for a shell
+  read; name the substitute in your message. Never ask about a denial as a
+  question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -262,6 +266,15 @@ When every decision is settled, and before writing anything:
   that can close out on its own is preferred to one waiting on another.
 - **List the principles the owner stated** that no permanent document records,
   for promotion to `ARCHITECTURE.md`.
+- **Settle the implementation cadence** with the owner, as a decision like any
+  other: how many rounds implement the work, what each round covers before its
+  review, and how many sessions implement each — in terms of the work, since the
+  plan's sections do not exist yet ("one round, one session"; "round 1: the
+  contract changes; round 2: the handlers and the migration"). The order of the
+  work can bear on the design, and nothing about it is asked once the owner has
+  moved on: planning orders its sections by it and maps it onto them. Recommend a
+  cadence from the work's natural slices and its risk; a small change is usually
+  one round of everything before closeout.
 
 Present these results and resolve what they raise before recording.
 
@@ -271,7 +284,8 @@ Only when the owner says the design is settled:
 
 - Record each decision in `design.md` under `## Decisions`, with its rationale
   and the alternatives rejected and why. Describe the design as it will be,
-  not the conversation that produced it.
+  not the conversation that produced it. Record the implementation cadence there
+  too, in terms of the work, as the change's implementation cadence.
 - Keep under `## Open Questions` only what is genuinely deferred, each with what
   would trigger revisiting it. A question may not stay open while a task
   prescribes its answer (`openspec/README.md#open-questions-and-prescribed-tasks`).
@@ -280,16 +294,18 @@ Only when the owner says the design is settled:
   naming the permanent destination of every material decision.
 - Amend the delta specs in `specs/` so every accepted behavior is a requirement
   with at least one WHEN/THEN scenario.
-- Run `openspec validate <change> --strict` and
-  `make check-doc-citations CHANGE=<change>`, and report the results. A
-  citation of a file the change itself will create is expected; any other is a
-  defect.
+- Run `make check-change CHANGE=<change>`, which runs the strict OpenSpec
+  validation and the change's citations check among the repository's closing
+  checks, and report the result. A citation of a file the change itself will
+  create is expected; any other is a defect.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
-after the design review's gate is passed.
+once the design review's triage records that the change advances.
 
 ## 7. Hand off to design review
 
 The design phase ends with a design review, not with this skill. Tell the owner
-the design is ready for review and leave the status `in design`; triage of that
-review moves the change to `ready for planning` once the owner passes its gate.
+the design is ready for review and leave the status `in design`. Its triage records
+under `## Next` whether the change advances or another design review runs; when it
+advances, the triage sets `ready for planning`, and planning follows without
+another question to the owner.

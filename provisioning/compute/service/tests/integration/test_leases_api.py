@@ -91,7 +91,7 @@ def _aggregate(
                 scheduling_requirements={"resource_kind": "vm"},
                 settlement_resource_id="kvm1",
                 pool_id="default",
-                provider="ansible",
+                provider="vm.ansible",
                 resource_host_id="kvm1",
                 resource_attributes={},
                 prepared_teardown_operation={

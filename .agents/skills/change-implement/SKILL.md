@@ -7,12 +7,13 @@ description: Implement the sections of an OpenSpec change's tasks.md a session i
 
 The section is the unit of work: each is implemented, checked, handed off, and
 committed on its own. A session implements the sections it was given, in order:
-the owner decides, before implementation starts, how many sections a session
-implements and how many are reviewed together. Compliance with the repository's
-guidance degrades as a session grows and collapses after it compacts, which is the
-owner's to weigh in giving a session several sections; say so when a session grows
-large. Either way, everything the next session needs goes back into the change's
-files before a section is committed.
+how many sections a session implements and how many are reviewed together is the
+change's implementation cadence, settled in its design and mapped onto the
+sections by its plan. Compliance with the repository's guidance degrades as a
+session grows and collapses after it compacts, which is the owner's to weigh in
+settling the cadence; say so when a session grows large. Either way, everything
+the next session needs goes back into the change's files before a section is
+committed.
 
 ## Running unattended
 
@@ -36,8 +37,12 @@ the session, and every turn ends with an outcome matching
   run's own record. Otherwise go on and end as the step ends: the wrapper records
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. Never do by another tool what a denied call would have
-  done, and never ask about a denial as a question.
+  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
+  does it. A call denied because no rule allows it — the harness reports it as
+  don't ask mode — may be done instead by a tool this step's rules allow for the
+  same work, such as the Edit tool for a shell write or Read or Grep for a shell
+  read; name the substitute in your message. Never ask about a denial as a
+  question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
@@ -55,13 +60,17 @@ the session, and every turn ends with an outcome matching
 - **Branch.** The checked-out branch is the one this change is worked on. Several
   changes are often in flight in one checkout; if the branch does not carry this
   change's latest planning commits, or its name belongs to another change, stop and
-  ask the owner.
+  ask the owner — unless the change's log holds the owner's decision that it runs
+  on this branch: run `git branch --show-current`, then
+  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  it prints is that decision, and the branch is accepted.
 - **Status.** The change's row in `openspec/changes/README.md` is
   `ready for implementation` or `in implementation`, and no dependency in its
   `Depends on` gates implementation while unlanded. A change `in closeout` whose
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
-  section's. `make round-view-closed` passes: while the owner reads a round
+  section's, or the edit under `.claude/` that a task of this section gives the
+  orchestrator (section 3). `make round-view-closed` passes: while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
 - **Task list.** `make check-tasks CHANGE=<change>` passes. A task numbered for
@@ -99,6 +108,9 @@ Work through the section's tasks in order. For each:
 
 - Make the change the task and its cited decision call for, and no more. Work that
   belongs to a later section stays there.
+- A task the plan gives the orchestrator — an edit under `.claude/`, which every
+  step is denied — is never attempted: check that its edit is in the worktree and
+  commit it with the section. When it is missing, stop and name the edit.
 - Prove it at the lowest test level that can (`TESTING.md`), through the seams and
   injected dependencies the code already offers rather than brute-force patching.
 - Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.
@@ -155,13 +167,14 @@ Run each of these, and fix what it reports:
 - `make test`, whatever the section touched: a change to a shared package, a
   dependency, or a lock reaches projects no focused suite covers, and the full
   suite is cheap beside a review round spent finding that;
-- `make check-comment-hygiene`;
-- `make check-doc-citations CHANGE=<change>`. Before closeout it may report only
-  the permanent documents the change's tasks create at closeout — the promotion
-  destinations its plan names; list those in the report and fix anything else.
-  At closeout the check passes with nothing reported;
-- `make check-agent-skills` if the section touched `.agents/`, `.claude/`, or
-  `.codex/`.
+- `make check-change CHANGE=<change>`: comment hygiene, the agent skills, the
+  change's documentation citations and task list, the change index, and the
+  pinned strict OpenSpec validation, in one call that prints only what fails.
+  Before closeout its citations check may report only the permanent documents the
+  change's tasks create at closeout — the promotion destinations its plan names;
+  list those in the report and fix anything else. A change with no spec deltas
+  fails the validation every time, since the validator rejects a change with
+  none; say so in the report and take that one failure as expected.
 
 Then have the section's diff checked in a fresh context. Start a subagent that has
 seen none of this session, and give it only: the change name, the section, the
@@ -214,5 +227,6 @@ When the session stops, tell the owner, for each section implemented:
   then validation (`make validate CHANGE=<change>`) and one implementation review
   (`make review CHANGE=<change> KIND=implementation`), run side by side; then the
   round triaged in a fresh session
-  (`make triage CHANGE=<change>`), which fixes what the owner accepts; then the
-  next section.
+  (`make triage CHANGE=<change>`), which fixes what the owner accepts and records
+  whether the change advances; then, once the fix commit is validated, the next
+  round.

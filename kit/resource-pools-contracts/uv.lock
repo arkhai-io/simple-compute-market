@@ -36,6 +36,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-capability-admissibility" },
+    { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 
@@ -47,6 +48,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
+    { name = "arkhai-kit-capability-shape", specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.7" },
 ]
 

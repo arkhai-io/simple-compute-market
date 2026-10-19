@@ -19,8 +19,11 @@ else depends on the reflog. A view whose branch is already at the round's commit
 or past it — left by hand, a run interrupted before its reset, a fix committed
 after returning — is closed without moving the branch.
 
-The base is the commit named by the latest triaged validation record — where
-the previous round ended — unless one is given.
+The base is the commit the change's latest `round` line recorded as the round
+started, unless one is given. A round line naming no commit — one recorded after
+the fact, with `--after` — falls back to the commit named by the latest triaged
+validation record, where the previous round ended, which is the round's start
+only when nothing landed on the branch between rounds.
 
 While a view is open the branch does not point at the round's commit, so every
 step that describes a commit — review, validation, triage, implementation —
@@ -50,6 +53,8 @@ from typing import Callable, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from find_change import ChangeNotFound, change_directory  # noqa: E402
+from change_workflow.common import StepError  # noqa: E402
+from change_workflow.log import LOG, read_log  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = "round-view.json"
@@ -92,6 +97,20 @@ def _git(root: Path, *args: str) -> str:
 def _git_path(root: Path, name: str) -> Path:
     path = Path(_git(root, "rev-parse", "--git-path", name))
     return path if path.is_absolute() else root / path
+
+
+def round_base(reviews: Path) -> str | None:
+    """The commit the latest recorded round started at, when its line names one.
+
+    A round recorded after the fact names none, and an earlier round's commit is
+    never taken for it.
+    """
+    try:
+        rounds = [entry for entry in read_log(reviews / LOG) if entry.get("outcome") == "round"]
+    except StepError as exc:
+        raise RoundError(str(exc)) from exc
+    commit = rounds[-1].get("commit") if rounds else None
+    return commit if isinstance(commit, str) and commit else None
 
 
 def triaged_base(reviews: Path) -> str | None:
@@ -137,10 +156,10 @@ def start(root: Path, change: str, base: str | None = None, e2e: bool = True,
     except ChangeNotFound as exc:
         raise RoundError(str(exc)) from exc
     if base is None:
-        base = triaged_base(reviews)
+        base = round_base(reviews) or triaged_base(reviews)
         if base is None:
-            raise RoundError("no triaged validation record names the previous round's "
-                             "commit; give the base explicitly (BASE=<commit>)")
+            raise RoundError("neither the latest round line nor a triaged validation record "
+                             "names the round's base; give it explicitly (BASE=<commit>)")
     branch = _git(root, "branch", "--show-current")
     if not branch:
         raise RoundError("HEAD is detached; check out the change's branch")

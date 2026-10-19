@@ -27,7 +27,10 @@ from compute_provisioning.release import (
     FulfillmentServiceTeardownPort,
 )
 from compute_provisioning_service.db.database import run_migrations
-from compute_provisioning_service.db.migrations import _apply_legacy_vm_lease_backfill
+from compute_provisioning_service.db.migrations import (
+    _apply_legacy_vm_lease_backfill,
+    _migrate_vm_provider_identity,
+)
 from market_fulfillment import (
     FulfillmentOrchestrator,
     ProviderRegistry,
@@ -127,6 +130,7 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
     # The real migration entrypoint -- not a hand-constructed SettlementRecord.
     with engine.begin() as connection:
         _apply_legacy_vm_lease_backfill(connection)
+    _migrate_vm_provider_identity(engine)
 
     session_factory = sessionmaker(bind=engine)
     with session_factory() as db:
@@ -144,7 +148,7 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
         provider_registry=ProviderRegistry({
             # No job authority: a backfilled teardown is dispatched as
             # persisted, and preparing nothing reads no create job.
-            "ansible": JobFulfillmentProvider(
+            "vm.ansible": JobFulfillmentProvider(
                 plan=VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys),
                 submission=None,
                 jobs=None,

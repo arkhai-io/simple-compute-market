@@ -1,4 +1,4 @@
-"""Pool write models refuse invalid advertisement and backing declarations.
+"""Pool write models refuse malformed declarations and domain-neutral hints.
 
 The models are the first place a typed client meets the rule, so a write
 lacking or misdeclaring either tag cannot even be constructed.
@@ -25,6 +25,9 @@ _INVALID = [
         id="backing-absent",
     ),
     pytest.param({**_VALID, "capacity_backing": "yes"}, "capacity_backing", id="bad-backing"),
+    pytest.param(
+        {**_VALID, "deliverable_modes": []}, "advertisable_modes", id="backed-narrowed",
+    ),
     pytest.param(
         {**_VALID, "advertisable_modes": ["vm", "bare_metal"]},
         "advertisable_modes",
@@ -84,3 +87,89 @@ def test_patch_keeps_policy_tags_optional():
 
 def test_patch_leaving_policy_tags_alone_needs_no_declarations():
     assert PoolUpdate(label="renamed").policy_tags is None
+
+
+# Hints remain structural: the models know no provider registry or domain schema.
+_HINT_INVALID = [
+    *[pytest.param({"max_reservation_hold_seconds": value}, "max_reservation_hold_seconds", id=f"hold-{value!r}")
+      for value in (-1, 1.5, "60", False, None)],
+    *[pytest.param({"sla": value}, "sla", id=f"sla-{value!r}")
+      for value in (-1, "99.9", False, None)],
+    *[pytest.param({"listing_shapes": value}, "listing_shapes", id=f"shapes-{index}")
+      for index, value in enumerate((
+          None, [], {"": []}, {"vm": []}, {"vm": "shape"},
+          {"vm": [{}]}, {"vm": [{"gpu": 1}]},
+          {"vm": [{"gpu": {"count": {"offer": 1, "min": 4, "max": 2}}}]},
+          {"vm": [{"gpu": {"count": {"offer": 1, "step": 2}}}]},
+          {"vm": [
+              {"gpu": {"count": {"offer": 1, "max": 4}}},
+              {"gpu": {"count": {"offer": 1, "max": 8}}},
+          ]},
+      ))],
+    *[pytest.param({"asking_rates": value}, "asking_rates", id=f"asking-{index}")
+      for index, value in enumerate((None, [], {"vm": None}, {"vm": [{}]}))],
+    *[pytest.param({"asking_rates": {"vm": [{
+          "shape": {"future_family": {"quantity": 1}},
+          "amount": "2", "asset": "usd", "period": "hour", **invalid,
+      }]}}, "asking_rates", id=f"asking-entry-{index}")
+      for index, invalid in enumerate((
+          {"shape": {}}, {"shape": {"gpu": 1}}, {"amount": 2},
+          {"amount": "0"}, {"amount": "1e3"}, {"asset": " usd"},
+          {"period": "Hour"}, {"extra": True},
+      ))],
+    *[pytest.param({"pricing": {"future_family": {"rates": value}}}, "pricing", id=f"pricing-{index}")
+      for index, value in enumerate((
+          None, "rate", [{}], [None],
+          [{"asset": "usd", "rate": 2, "per": "hour"}],
+          [{"asset": "usd", "rate": "0", "per": "hour"}],
+          [{"asset": " usd", "rate": "2", "per": "hour"}],
+          [{"asset": "usd", "rate": "2", "per": "Hour"}],
+          [{"asset": "usd", "rate": "2", "per": "hour"}] * 2,
+      ))],
+]
+
+_HINT_VALID = [
+    pytest.param({"max_reservation_hold_seconds": 0}, id="zero-hold"),
+    pytest.param({"max_reservation_hold_seconds": 120}, id="integer-hold"),
+    pytest.param({"sla": 0}, id="zero-sla"),
+    pytest.param({"sla": 99.9}, id="fractional-sla"),
+    pytest.param({"sla": 1234}, id="domain-owned-sla-ceiling"),
+    pytest.param({"listing_shapes": {"future_mode": [
+        {"future_family": {"unknown_field": {"offer": 1, "max": 4}}},
+    ]}}, id="domain-owned-shape-vocabulary"),
+    pytest.param({"listing_shapes": {"vm": [{"gpu": {"count": 1}}] * 2}}, id="identical-shapes"),
+    pytest.param({"asking_rates": {"future_mode": []}}, id="withheld-asking-rates"),
+    pytest.param({"asking_rates": {"future_mode": [{
+        "shape": {"future_family": {"unknown_field": 1}},
+        "amount": "2.10", "asset": "future-asset", "period": "month",
+    }]}}, id="domain-owned-asking-vocabulary"),
+    pytest.param({"pricing": {"future_family": {"rates": [
+        {"asset": "future-asset", "rate": "0.05", "per": "month"},
+    ]}}}, id="domain-owned-pricing-vocabulary"),
+    pytest.param({"pricing": {"future_family": {"future_key": {"rates": []}}}}, id="empty-nested-rates"),
+    pytest.param({"pricing": "domain-owned-value"}, id="pricing-outside-rate-lists"),
+    pytest.param({"opaque_future_hint": {"nested": [None, False, "value"]}}, id="opaque-unknown-tag"),
+]
+
+
+@pytest.mark.parametrize("build", [_create, _replace, _update])
+@pytest.mark.parametrize(("hint", "named"), _HINT_INVALID)
+def test_malformed_hints_refuse_typed_construction(build, hint, named):
+    with pytest.raises(ValidationError, match=named):
+        build({**_VALID, **hint})
+
+
+@pytest.mark.parametrize("build", [_create, _replace, _update])
+@pytest.mark.parametrize("hint", _HINT_VALID)
+def test_structural_hints_and_opaque_domain_values_construct_verbatim(build, hint):
+    tags = {**_VALID, **hint}
+    assert build(tags).policy_tags == tags
+
+
+def test_all_hint_problems_are_reported_together():
+    with pytest.raises(ValidationError) as refused:
+        _create({**_VALID, "max_reservation_hold_seconds": -1, "sla": -1,
+                 "listing_shapes": None, "asking_rates": None,
+                 "pricing": {"memory": {"rates": "invalid"}}})
+    for tag in ("max_reservation_hold_seconds", "sla", "listing_shapes", "asking_rates", "pricing"):
+        assert tag in str(refused.value)

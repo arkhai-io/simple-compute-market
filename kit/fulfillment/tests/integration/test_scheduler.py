@@ -1,0 +1,1056 @@
+"""Library integration tests for deterministic settlement scheduling in SQLite."""
+
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from threading import Event, Lock
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from market_fulfillment import (
+    CapacityReservationExpiredError,
+    FulfillmentBase,
+    MissingResourceKindError,
+    NoEligibleSettlementResourceError,
+    PhysicalSettlementRequest,
+    PhysicalSettlementScheduler,
+    SettlementEntityNotFoundError,
+    SettlementRequestMismatchError,
+    SqlAlchemySchedulingTransaction,
+    SqlAlchemySchedulingUnitOfWork,
+)
+from market_resource_pools import ResourcePoolService
+from market_resource_pools_contracts import PoolCreate, PoolUpdate
+from market_resource_pools.db import Base as PoolsBase, DEFAULT_POOL_ID
+from market_site.db import Base as SiteBase, CapacityBucket
+from market_fulfillment.settlement_repository import SettlementRepository
+from market_site.ledger import CapacityLedgerService
+
+
+class _Handler:
+    provider = "ansible"
+    def validate_config(self, config): return dict(config)
+    def validate_config_problems(self, config): return dict(config), ()
+    def read_config(self, db, pool_id): return {}
+
+    def read_config_for_execution(self, db, pool_id):
+        # No secrets in this fake, so both reads agree. Implemented anyway: the
+        # split is part of the protocol, and a fake that provides only half of
+        # it would let a caller reach the wrong read without the suite noticing.
+        return self.read_config(db, pool_id)
+    def replace_config(self, db, pool_id, config): pass
+
+
+@pytest.fixture
+def services():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    # This test suite's claims are VM-flavored ("gpu_count"); opt into
+    # that alias explicitly the same way the VM composition root does
+    # (kit/site's own default is domain-neutral -- see ledger.py).
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory, default_resource_kind="compute.gpu"
+    )
+    return pools, ledger, scheduler
+
+
+def _pool(pools, pool_id: str, enabled: bool = True):
+    pools.create_pool(PoolCreate(
+        id=pool_id,
+        label=pool_id,
+        provider="ansible",
+        enabled=enabled,
+        policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
+        provider_config={},
+    ))
+
+
+def _resource(ledger, resource_id: str, pool_id: str, *, units: int = 4, enabled=True):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=units,
+        enabled=enabled,
+        pool_id=pool_id,
+    )
+
+
+def _reserve(ledger, agreement="agreement-1", **deal):
+    ref = {"agreement_id": agreement, "market": "vms", **deal}
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref=ref)
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def _request(capacity_reservation_id: str, **kwargs):
+    return PhysicalSettlementRequest(
+        capacity_reservation_id=capacity_reservation_id,
+        market="vms",
+        **kwargs,
+    )
+
+
+def test_unknown_reservation_is_rejected(services):
+    _, _, scheduler = services
+    with pytest.raises(SettlementEntityNotFoundError):
+        scheduler.schedule_resource(_request("missing"))
+
+
+def test_expired_reservation_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"agreement_id": "agreement-1", "market": "vms"},
+    ttl_seconds=-1,)
+    with pytest.raises((CapacityReservationExpiredError, SettlementRequestMismatchError)):
+        scheduler.schedule_resource(_request(result["capacity_reservation_id"]))
+
+
+def test_withdrawn_pool_mode_blocks_scheduling_after_reservation(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    reservation_id = _reserve(ledger)
+
+    pools.update_pool(
+        "pool-a",
+        PoolUpdate(policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "deliverable_modes": []}),
+    )
+
+    with pytest.raises(NoEligibleSettlementResourceError, match="no eligible"):
+        scheduler.schedule_resource(_request(reservation_id))
+
+
+def test_retry_is_idempotent_and_does_not_rerun_policy(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a")
+    _resource(ledger, "b1", "pool-b")
+    capacity_reservation_id = _reserve(ledger)
+    first = scheduler.schedule_resource(_request(capacity_reservation_id))
+    second = scheduler.schedule_resource(_request(capacity_reservation_id))
+    assert first == second
+
+
+def test_reservation_can_schedule_its_own_exclusive_resource(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    ledger.register_resource(
+        resource_id="exclusive-host",
+        resource_type="compute.gpu",
+        total_units=1,
+        pool_id="pool-a",
+        attributes={
+            "physical_host_id": "host-a",
+            "allocation_mode": "exclusive",
+        },
+    )
+    capacity_reservation_id = _reserve(ledger)
+
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    assert resource.settlement_resource_id == "exclusive-host"
+
+
+def test_round_robin_is_deterministic_across_pools(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 4)]
+    selected = [
+        scheduler.schedule_resource(_request(rid)).pool_id
+        for rid in ids
+    ]
+    assert selected == ["pool-a", "pool-b", "pool-a"]
+
+
+def test_round_robin_is_deterministic_within_pool(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=10)
+    _resource(ledger, "r2", "pool-a", units=10)
+    ids = [_reserve(ledger, agreement=f"agreement-{i}") for i in range(1, 3)]
+    selected = [
+        scheduler.schedule_resource(_request(rid)).settlement_resource_id
+        for rid in ids
+    ]
+    assert selected == ["r1", "r2"]
+
+
+def test_explicit_resource_bypasses_policy_not_eligibility(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    pools.disable_pool("pool-a")
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.schedule_resource(_request(capacity_reservation_id, resource_id="r1"))
+
+
+def test_resource_without_pool_is_not_schedulable(services):
+    pools, ledger, scheduler = services
+    _pool(pools, DEFAULT_POOL_ID)
+    ledger.register_resource(resource_id="orphan", total_units=4, attributes={}, pool_id="default")
+    # A legacy row stored with no pool; registration can no longer write one.
+
+    with ledger._session_factory() as db:
+        db.query(CapacityBucket).filter_by(backing_resource_id="orphan").one().pool_id = None
+        db.commit()
+    capacity_reservation_id = _reserve(ledger)
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.schedule_resource(_request(capacity_reservation_id))
+
+
+def test_disabling_pool_does_not_depend_on_existing_assignment(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    scheduler.schedule_resource(_request(capacity_reservation_id))
+    disabled = pools.disable_pool("pool-a")
+    assert disabled.enabled is False
+
+
+def test_missing_resource_kind_raises_when_no_default_configured(services):
+    pools, ledger, _ = services
+    scheduler = PhysicalSettlementScheduler(pools, ledger, session_factory=ledger._session_factory)  # no default_resource_kind
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    with pytest.raises(MissingResourceKindError):
+        scheduler.schedule_resource(_request(capacity_reservation_id))
+
+
+# ----------------------------------------------------------------------
+# multidimensional eligibility
+# ----------------------------------------------------------------------
+
+def _resource_with_capacity(ledger, resource_id: str, pool_id: str, *, capacity: dict, enabled=True):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=capacity.get("gpu_count", 1),
+        enabled=enabled,
+        pool_id=pool_id,
+        capacity=capacity,
+    )
+
+
+def _reserve_with_dimensions(ledger, dimensions: dict, agreement="agreement-1", **deal):
+    ref = {"agreement_id": agreement, "market": "vms", "requirements": {"dimensions": dimensions}, **deal}
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref=ref)
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def test_scheduler_excludes_candidate_that_fits_gpu_but_not_memory(services):
+    """Two resources have enough GPU; only one also has enough RAM. The
+    scheduler's own eligibility scan (independent of which resource the
+    ledger's admission happened to reserve against) must still exclude
+    the RAM-short one, not just prove *some* resource exists."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "roomy", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 1000},
+    )
+    _resource_with_capacity(
+        ledger, "ram-short", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 16, "disk_gb": 1000},
+    )
+    dims = {"gpu_count": 1, "ram_gb": 64}
+    capacity_reservation_id = _reserve_with_dimensions(ledger, dims)
+    # Pinning the RAM-short resource explicitly must fail eligibility,
+    # checked before any assignment memoizes a different resource.
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.schedule_resource(_request(
+            capacity_reservation_id, requirements={"dimensions": dims}, resource_id="ram-short",
+        ))
+    resource = scheduler.schedule_resource(
+        _request(capacity_reservation_id, requirements={"dimensions": dims})
+    )
+    assert resource.settlement_resource_id == "roomy"
+
+
+def test_scheduler_selects_candidate_that_fits_every_dimension(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a",
+        capacity={"gpu_count": 8, "vcpu_count": 32, "ram_gb": 256, "disk_gb": 1000},
+    )
+    dims = {"gpu_count": 2, "vcpu_count": 8, "ram_gb": 64, "disk_gb": 200}
+    capacity_reservation_id = _reserve_with_dimensions(ledger, dims)
+    resource = scheduler.schedule_resource(
+        _request(capacity_reservation_id, requirements={"dimensions": dims})
+    )
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduler_still_schedules_legacy_gpu_only_requests(services):
+    """GPU-only reservations schedule without unrelated dimensions."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=10)
+    capacity_reservation_id = _reserve(ledger)
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduler_credit_back_covers_full_capacity_legacy_reservation(services):
+    """A legacy reservation reserving *all* of a resource's capacity must
+    still be schedulable: the eligibility scan credits the reservation's
+    own held quantity back before checking fit, and that credit-back must
+    not silently become a no-op for an reservation whose claim never
+    mentioned "dimensions", but locking the invariant in with a test at
+    the layer that actually depends on it)."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=4)
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"gpu_count": 4}}, deal_ref={
+        "agreement_id": "agreement-1", "market": "vms",
+    })
+    assert result is not None
+    resource = scheduler.schedule_resource(_request(result["capacity_reservation_id"]))
+    assert resource.settlement_resource_id == "r1"
+
+
+# ----------------------------------------------------------------------
+# exceeds-reservation rejection
+# ----------------------------------------------------------------------
+
+def _reserve_multi(ledger, dimensions: dict, agreement="agreement-1"):
+    """Reserve specific multidimensional capacity without a deal_ref
+    requirements mirror, so _require_valid_reservation's separate
+    requirements-match check (an exact-equality check against whatever
+    the reservation declares) doesn't itself reject a deliberately
+    *different*, narrower schedule-time request before the exceeds-check
+    below ever runs."""
+    result = ledger.reserve(claim={"offering_mode": "vm", **{"dimensions": dimensions}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def test_schedule_request_narrower_than_reservation_is_permitted(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4, "ram_gb": 128})
+    resource = scheduler.schedule_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": {"gpu_count": 2, "ram_gb": 64}},
+    ))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_scheduled_dimensions_reflect_narrowed_request_not_full_reservation(services):
+    """Providers receive scheduled dimensions, including a narrower request.
+
+    The reservation bounds the request; it does not replace the shape that
+    scheduling actually selected. See `openspec/specs/site-capacity/spec.md`'s
+    "Committed dimensions remain authoritative through scheduling" requirement.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    committed_dimensions = {"gpu_count": 4, "ram_gb": 128}
+    capacity_reservation_id = _reserve_multi(ledger, committed_dimensions)
+    narrowed_dimensions = {"gpu_count": 2, "ram_gb": 64}
+
+    resource = scheduler.schedule_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": narrowed_dimensions},
+    ))
+
+    observed = {key: str(value) for key, value in resource.dimensions.items()}
+    assert observed == {key: str(value) for key, value in narrowed_dimensions.items()}
+    assert observed != {key: str(value) for key, value in committed_dimensions.items()}
+
+
+def test_schedule_request_equal_to_reservation_is_permitted(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(ledger, "r1", "pool-a", capacity={"gpu_count": 8})
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4})
+    resource = scheduler.schedule_resource(_request(
+        capacity_reservation_id, requirements={"dimensions": {"gpu_count": 4}},
+    ))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_schedule_request_exceeding_a_governed_dimension_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "ram_gb": 256},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4, "ram_gb": 128})
+    with pytest.raises(SettlementRequestMismatchError):
+        scheduler.schedule_resource(_request(
+            capacity_reservation_id,
+            requirements={"dimensions": {"gpu_count": 6, "ram_gb": 64}},
+        ))
+
+
+def test_schedule_request_adding_an_ungoverned_dimension_is_not_rejected(services):
+    """A dimension the reservation never mentions isn't governed by it, so
+    introducing one in the schedule request isn't an "exceeds" violation
+    -- it's a separate eligibility question, decided by whether some
+    resource actually has that dimension available."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource_with_capacity(
+        ledger, "r1", "pool-a", capacity={"gpu_count": 8, "vcpu_count": 32},
+    )
+    capacity_reservation_id = _reserve_multi(ledger, {"gpu_count": 4})
+    resource = scheduler.schedule_resource(_request(
+        capacity_reservation_id,
+        requirements={"dimensions": {"gpu_count": 2, "vcpu_count": 8}},
+    ))
+    assert resource.settlement_resource_id == "r1"
+
+
+# ----------------------------------------------------------------------
+# durable round-robin cursor
+# ----------------------------------------------------------------------
+
+def test_cursor_persists_across_a_fresh_scheduler_instance(services):
+    """Database-backed fairness survives rebuilding the scheduler instance."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    first_id = _reserve(ledger, agreement="agreement-1")
+    first = scheduler.schedule_resource(_request(first_id))
+    assert first.pool_id == "pool-a"
+
+    fresh_scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+    )
+    second_id = _reserve(ledger, agreement="agreement-2")
+    second = fresh_scheduler.schedule_resource(_request(second_id))
+    assert second.pool_id == "pool-b"
+
+
+def test_stale_persisted_cursor_recovers_deterministically(services):
+    """A cursor may outlive pools or resources that previously participated.
+
+    Scheduling must treat those identifiers as stale history, resume from the
+    first sorted eligible pool/resource, and durably replace the active cursor
+    position without requiring eager pruning of unrelated historical entries.
+    """
+
+    pools, ledger, _ = services
+    _pool(pools, "pool-a", enabled=False)
+    _pool(pools, "pool-b")
+    _pool(pools, "pool-c")
+    _resource(ledger, "b1", "pool-b", units=10)
+    _resource(ledger, "c1", "pool-c", units=10)
+
+    repository = SettlementRepository()
+    with ledger._session_factory() as db:
+        repository.save_cursor_in_session(
+            db,
+            "compute.gpu",
+            last_pool_id="deleted-pool",
+            last_resource_by_pool={
+                "pool-b": "deleted-resource",
+                "deleted-pool": "other-deleted-resource",
+            },
+        )
+        db.commit()
+
+    fresh_scheduler = PhysicalSettlementScheduler(
+        pools,
+        ledger,
+        session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+    )
+    reservation_id = _reserve(ledger, agreement="stale-cursor")
+    selected = fresh_scheduler.schedule_resource(_request(reservation_id))
+
+    assert selected.pool_id == "pool-b"
+    assert selected.settlement_resource_id == "b1"
+
+    with ledger._session_factory() as db:
+        cursor = repository.get_cursor_in_session(db, "compute.gpu")
+        assert cursor is not None
+        assert cursor.last_pool_id == "pool-b"
+        assert cursor.last_resource_by_pool["pool-b"] == "b1"
+
+
+def test_cursor_is_isolated_per_resource_kind(services):
+    """Two resource kinds scheduling concurrently must not perturb each
+    other's round-robin position -- a buyer negotiates for one
+    resource_kind per reservation, so fairness is scoped that way too."""
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "gpu-a1", "pool-a", units=10)
+    _resource(ledger, "gpu-b1", "pool-b", units=10)
+    ledger.register_resource(
+        resource_id="bm-a1", resource_type="bare_metal", total_units=10, pool_id="pool-a",
+    )
+    ledger.register_resource(
+        resource_id="bm-b1", resource_type="bare_metal", total_units=10, pool_id="pool-b",
+    )
+
+    def _reserve_kind(resource_type: str, agreement: str) -> str:
+        result = ledger.reserve(claim={"offering_mode": "vm", **{"resource_type": resource_type, "gpu_count": 1}}, deal_ref={"agreement_id": agreement, "market": "vms"},)
+        assert result is not None
+        return result["capacity_reservation_id"]
+
+    def _request_kind(capacity_reservation_id: str, resource_kind: str) -> PhysicalSettlementRequest:
+        return PhysicalSettlementRequest(
+            capacity_reservation_id=capacity_reservation_id,
+            market="vms",
+            requirements={"resource_kind": resource_kind},
+        )
+
+    gpu_1 = scheduler.schedule_resource(
+        _request_kind(_reserve_kind("compute.gpu", "gpu-1"), "compute.gpu")
+    )
+    bm_1 = scheduler.schedule_resource(
+        _request_kind(_reserve_kind("bare_metal", "bm-1"), "bare_metal")
+    )
+    gpu_2 = scheduler.schedule_resource(
+        _request_kind(_reserve_kind("compute.gpu", "gpu-2"), "compute.gpu")
+    )
+    bm_2 = scheduler.schedule_resource(
+        _request_kind(_reserve_kind("bare_metal", "bm-2"), "bare_metal")
+    )
+    # Each kind still alternates pool-a/pool-b on its own, independent of
+    # how many scheduling calls the other kind made in between.
+    assert [gpu_1.pool_id, gpu_2.pool_id] == ["pool-a", "pool-b"]
+    assert [bm_1.pool_id, bm_2.pool_id] == ["pool-a", "pool-b"]
+
+
+def test_explicit_resource_does_not_advance_or_consume_cursor(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    explicit_id = _reserve(ledger, agreement="agreement-explicit")
+    scheduler.schedule_resource(_request(explicit_id, resource_id="a1"))
+
+    automatic_id = _reserve(ledger, agreement="agreement-automatic")
+    automatic = scheduler.schedule_resource(_request(automatic_id))
+    # The cursor never moved past its starting point: the first automatic
+    # selection still lands on the first sorted pool, exactly as if the
+    # explicit call had never happened.
+    assert automatic.pool_id == "pool-a"
+
+
+def test_conflicting_schedule_retry_is_rejected(services):
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a")
+    capacity_reservation_id = _reserve(ledger)
+    scheduler.schedule_resource(_request(capacity_reservation_id))
+    with pytest.raises(SettlementRequestMismatchError):
+        scheduler.schedule_resource(
+            _request(capacity_reservation_id, resource_id="does-not-exist")
+        )
+
+
+def test_failed_schedule_leaves_no_partial_cursor_or_settlement_state(services):
+    """A failure after the cursor is written but before the settlement
+    record commits must roll back both together -- proving
+    ``schedule_resource``'s one-transaction guarantee rather than assuming
+    it from the code structure alone."""
+
+    class _ExplodingRepository(SettlementRepository):
+        def schedule(self, *args, **kwargs):
+            raise RuntimeError("simulated failure after cursor write")
+
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _resource(ledger, "r1", "pool-a", units=10)
+    capacity_reservation_id = _reserve(ledger)
+
+    failing_scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=ledger._session_factory,
+        default_resource_kind="compute.gpu",
+        repository=_ExplodingRepository(),
+    )
+    with pytest.raises(RuntimeError):
+        failing_scheduler.schedule_resource(_request(capacity_reservation_id))
+
+    # Nothing committed: a plain scheduler, sharing the same database,
+    # sees a clean starting cursor and can still schedule this reservation
+    # from scratch.
+    resource = scheduler.schedule_resource(_request(capacity_reservation_id))
+    assert resource.settlement_resource_id == "r1"
+
+
+def test_independent_sessions_serialize_cursor_updates_deterministically(tmp_path):
+    """A controlled transaction barrier proves SQLite writer serialization
+    without relying on an uncontrolled race or elapsed-time ordering."""
+
+
+    database = tmp_path / "scheduling.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    first_id = _reserve(ledger, agreement="concurrent-1")
+    second_id = _reserve(ledger, agreement="concurrent-2")
+
+    cursor_written = Event()
+    allow_first_commit = Event()
+    second_transaction_attempted = Event()
+    second_transaction_opened = Event()
+    ordinal_lock = Lock()
+    next_ordinal = 0
+
+    class PausingTransaction(SqlAlchemySchedulingTransaction):
+        def __init__(self, *args, **kwargs):
+            nonlocal next_ordinal
+            super().__init__(*args, **kwargs)
+            with ordinal_lock:
+                next_ordinal += 1
+                self.ordinal = next_ordinal
+            if self.ordinal == 2:
+                second_transaction_opened.set()
+
+        def save_cursor(self, *args, **kwargs):
+            result = super().save_cursor(*args, **kwargs)
+            if self.ordinal == 1:
+                # Force the cursor mutation to SQL before exposing the barrier.
+                # This makes the held SQLite writer slot observable rather than
+                # relying on SQLAlchemy's deferred flush behavior.
+                self.db.flush()
+                cursor_written.set()
+                assert allow_first_commit.wait(timeout=5)
+            return result
+
+    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
+        def transaction(self):
+            # The first call is already paused when the second scheduling call
+            # starts, so this event identifies the second transaction attempt.
+            if cursor_written.is_set():
+                second_transaction_attempted.set()
+            return super().transaction()
+
+    uow = ObservedUnitOfWork(
+        factory, pools, ledger, transaction_type=PausingTransaction
+    )
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory,
+        default_resource_kind="compute.gpu", unit_of_work=uow,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(scheduler.schedule_resource, _request(first_id))
+        assert cursor_written.wait(timeout=5)
+        second_future = executor.submit(scheduler.schedule_resource, _request(second_id))
+        assert second_transaction_attempted.wait(timeout=5)
+        assert not second_transaction_opened.is_set()
+        allow_first_commit.set()
+        first = first_future.result(timeout=5)
+        second = second_future.result(timeout=5)
+
+    assert second_transaction_opened.is_set()
+    assert [first.pool_id, second.pool_id] == ["pool-a", "pool-b"]
+
+
+def test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer(tmp_path):
+    """A controlled failure after transaction A's writes but before commit
+    must roll back cleanly: A leaves no settlement, capacity rebind, or
+    cursor advance, and B -- once allowed to proceed -- receives the
+    original first fairness turn against a still-usable database."""
+
+
+    database = tmp_path / "scheduling_rollback.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "a1", "pool-a", units=10)
+    _resource(ledger, "b1", "pool-b", units=10)
+    first_id = _reserve(ledger, agreement="rollback-1")
+    second_id = _reserve(ledger, agreement="rollback-2")
+
+    writes_done = Event()
+    allow_first_failure = Event()
+    second_transaction_attempted = Event()
+    second_transaction_opened = Event()
+    ordinal_lock = Lock()
+    next_ordinal = 0
+
+    class FailingTransaction(SqlAlchemySchedulingTransaction):
+        def __init__(self, *args, **kwargs):
+            nonlocal next_ordinal
+            super().__init__(*args, **kwargs)
+            with ordinal_lock:
+                next_ordinal += 1
+                self.ordinal = next_ordinal
+            if self.ordinal == 2:
+                second_transaction_opened.set()
+
+        def schedule_assignment(self, **kwargs):
+            result = super().schedule_assignment(**kwargs)
+            if self.ordinal == 1:
+                self.db.flush()
+                writes_done.set()
+                assert allow_first_failure.wait(timeout=5)
+                raise RuntimeError("controlled failure after writes, before commit")
+            return result
+
+    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
+        def transaction(self):
+            if writes_done.is_set():
+                second_transaction_attempted.set()
+            return super().transaction()
+
+    uow = ObservedUnitOfWork(
+        factory, pools, ledger, transaction_type=FailingTransaction
+    )
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory,
+        default_resource_kind="compute.gpu", unit_of_work=uow,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(scheduler.schedule_resource, _request(first_id))
+        assert writes_done.wait(timeout=5)
+        second_future = executor.submit(scheduler.schedule_resource, _request(second_id))
+        assert second_transaction_attempted.wait(timeout=5)
+        assert not second_transaction_opened.is_set()
+        allow_first_failure.set()
+        with pytest.raises(RuntimeError):
+            first_future.result(timeout=5)
+        second = second_future.result(timeout=5)
+
+    assert second_transaction_opened.is_set()
+    # B received the original first fairness turn -- A's settlement row and
+    # cursor advance never became visible -- and the database is still usable.
+    assert second.pool_id == "pool-a"
+    with factory() as db:
+        repo = SettlementRepository()
+        assert repo.get(db, first_id) is None
+
+
+def test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cursors(tmp_path):
+    """Two `resource_kind` cursor rows are independent state: alternating
+    scheduling calls for different kinds, each its own independent-session
+    write transaction, must not perturb one another's round-robin cursor.
+    SQLite allows only one writer at a time, so these transactions
+    serialize rather than truly overlap -- this proves independent-session
+    serialization correctly isolates per-kind cursor state, not portable
+    row locking or a process-level multi-replica proof."""
+
+    database = tmp_path / "scheduling_interleaved.db"
+    engine = create_engine(
+        f"sqlite:///{database}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = CapacityLedgerService(factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count")
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "gpu-a", "pool-a", units=10)
+    _resource(ledger, "gpu-b", "pool-b", units=10)
+    ledger.register_resource(
+        resource_id="cpu-a", resource_type="compute.cpu",
+        total_units=10, enabled=True, pool_id="pool-a",
+    )
+    ledger.register_resource(
+        resource_id="cpu-b", resource_type="compute.cpu",
+        total_units=10, enabled=True, pool_id="pool-b",
+    )
+
+    gpu_ids = [_reserve(ledger, agreement=f"gpu-{i}") for i in range(1, 4)]
+    cpu_ids = [
+        _reserve(ledger, agreement=f"cpu-{i}", resource_kind="compute.cpu")
+        for i in range(1, 3)
+    ]
+
+    scheduler = PhysicalSettlementScheduler(
+        pools, ledger, session_factory=factory, default_resource_kind="compute.gpu",
+    )
+
+    # Alternate kinds across independent-session (thread pool) calls so each
+    # transaction opens, runs, and commits/releases the SQLite writer lock
+    # before the next one -- an interleaved call sequence at the API level,
+    # serialized at the storage layer as SQLite requires.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        gpu_1 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[0])).result(timeout=5)
+        cpu_1 = executor.submit(scheduler.schedule_resource, _request(cpu_ids[0])).result(timeout=5)
+        gpu_2 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[1])).result(timeout=5)
+        cpu_2 = executor.submit(scheduler.schedule_resource, _request(cpu_ids[1])).result(timeout=5)
+        gpu_3 = executor.submit(scheduler.schedule_resource, _request(gpu_ids[2])).result(timeout=5)
+
+    # Each kind's own round-robin turn order is unaffected by the other
+    # kind's calls interleaved in between.
+    assert [gpu_1.pool_id, gpu_2.pool_id, gpu_3.pool_id] == ["pool-a", "pool-b", "pool-a"]
+    assert [cpu_1.pool_id, cpu_2.pool_id] == ["pool-a", "pool-b"]
+
+    with factory() as db:
+
+        repo = SettlementRepository()
+        gpu_row = repo.get_cursor_in_session(db, "compute.gpu")
+        cpu_row = repo.get_cursor_in_session(db, "compute.cpu")
+        assert gpu_row.last_pool_id == "pool-a"
+        assert cpu_row.last_pool_id == "pool-b"
+
+
+# ---------------------------------------------------------------------------
+# Categorical constraints survive admission
+#
+# Round-robin placement is deliberate: a site admin may back a deal with any
+# resource that satisfies it, and spreading load across pools is the point.
+# Placement remains bounded by both the admitted dimensions and categorical
+# constraints, so room alone cannot authorize a different GPU model.
+# ---------------------------------------------------------------------------
+
+
+def _reserve_claiming(ledger, claim, agreement="agreement-1"):
+    result = ledger.reserve(
+        claim={"offering_mode": "vm", "gpu_count": 1, **claim},
+        deal_ref={"agreement_id": agreement, "market": "vms"},
+    )
+    assert result is not None
+    return result["capacity_reservation_id"]
+
+
+def _attributed_resource(ledger, resource_id, pool_id, *, units=4, **attributes):
+    ledger.register_resource(
+        resource_id=resource_id,
+        resource_type="compute.gpu",
+        total_units=units,
+        pool_id=pool_id,
+        attributes=dict(attributes),
+    )
+
+
+def test_categorical_claim_excludes_a_resource_the_deal_was_not_admitted_against(
+    services,
+):
+    """A deal sold as one GPU model does not settle on another.
+
+    Both candidates have room and both pools deliver the mode; the admitted
+    model constraint excludes the other model before the cursor chooses.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080", units=10)
+    _attributed_resource(ledger, "b1", "pool-b", gpu_model="H200", units=10)
+
+    # Walk the shared cursor onto pool-a so the *next* unconstrained placement
+    # is pool-b. Without this the fresh cursor picks pool-a first and the
+    # assertion below passes whether or not the claim is enforced.
+    control = scheduler.schedule_resource(_request(_reserve(ledger, agreement="warm")))
+    assert control.settlement_resource_id == "a1"
+
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+    resource = scheduler.schedule_resource(_request(reservation_id))
+
+    assert resource.settlement_resource_id == "a1"
+
+
+def test_a_resource_pinned_claim_is_not_reassigned_by_the_cursor(services):
+    """A listing that named its resource keeps it through scheduling.
+
+    The pin needs no separate mechanism: `resource_feasibility_view`
+    normalizes `resource_id` into the attribute mapping claims are matched
+    against, so a resource-specific claim is carried and enforced as an
+    ordinary categorical constraint.
+
+    The warm-up placement is what makes this a real test: it leaves the
+    shared cursor on `pool-a`, so the next unpinned deal would land in
+    `pool-b`. The pin has to beat the cursor, not agree with it.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _attributed_resource(ledger, "a1", "pool-a", units=10)
+    _attributed_resource(ledger, "b1", "pool-b", units=10)
+    # One warm-up, not two: the cursor must end up pointing at pool-a so an
+    # unpinned deal would be placed in pool-b. An even number would return it
+    # to pool-a and the pin would be indistinguishable from the cursor.
+    control = scheduler.schedule_resource(_request(_reserve(ledger, agreement="warm")))
+    assert control.settlement_resource_id == "a1"
+
+    pinned = _reserve_claiming(ledger, {"resource_id": "a1"}, agreement="pinned")
+    resource = scheduler.schedule_resource(_request(pinned))
+
+    assert resource.settlement_resource_id == "a1"
+
+
+def test_scheduling_a_categorical_claim_with_no_match_is_refused_not_reassigned(
+    services,
+):
+    """Nothing satisfies the claim, so nothing is placed.
+
+    The failure mode worth pinning: a claim whose categorical constraint no
+    resource meets must not fall back to whatever had capacity.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080")
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+    # Re-register the only resource as a different model after admission.
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="H200")
+
+    with pytest.raises(NoEligibleSettlementResourceError):
+        scheduler.schedule_resource(_request(reservation_id))
+
+
+def test_a_request_may_narrow_the_claim_but_not_contradict_it(services):
+    """Same precedence rule the dimensions below it already follow.
+
+    A caller adding a constraint the reservation does not govern is narrowing
+    and allowed; a caller restating one with a different value is relaxing what
+    admission accepted and is refused.
+    """
+    pools, ledger, scheduler = services
+    _pool(pools, "pool-a")
+    _attributed_resource(ledger, "a1", "pool-a", gpu_model="RTX 5080", region="us-west")
+    reservation_id = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"})
+
+    narrowed = scheduler.schedule_resource(
+        _request(reservation_id, requirements={"attributes": {"region": "us-west"}})
+    )
+    assert narrowed.settlement_resource_id == "a1"
+
+    other = _reserve_claiming(ledger, {"gpu_model": "RTX 5080"}, agreement="other")
+    with pytest.raises(SettlementRequestMismatchError, match="contradict"):
+        scheduler.schedule_resource(
+            _request(other, requirements={"attributes": {"gpu_model": "H200"}})
+        )
+
+
+def test_a_settlement_assignment_racing_a_pool_move_never_survives_on_the_moved_resource(
+    tmp_path,
+):
+    """Independent sessions on a file-backed database. A pool move of `dest`
+    is paused after checking `dest` for live obligations while the scheduler
+    reassigns a held reservation onto `dest`. The move's check must still be
+    true when it commits, so the assignment may not commit inside that
+    window: it either commits after the move, against `dest` in its new pool,
+    or not at all. Assigning onto a resource after it has moved is not what
+    the rule forbids; moving a resource that holds a live obligation is."""
+
+
+    checked, release = Event(), Event()
+    move_committed = Event()
+    assignment_attempted, assignment_opened = Event(), Event()
+
+    class PausingLedger(CapacityLedgerService):
+        def _refuse_reassignment_under_obligation(self, db, bucket, new_pool_id):
+            super()._refuse_reassignment_under_obligation(db, bucket, new_pool_id)
+            checked.set()
+            assert release.wait(timeout=10), "test never released the pool move"
+
+    class ObservedTransaction(SqlAlchemySchedulingTransaction):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            assignment_opened.set()
+            assert move_committed.is_set(), "assignment opened before the move committed"
+
+    class ObservedUnitOfWork(SqlAlchemySchedulingUnitOfWork):
+        def transaction(self):
+            assignment_attempted.set()
+            return super().transaction()
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'scheduling.db'}",
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+    PoolsBase.metadata.create_all(bind=engine)
+    SiteBase.metadata.create_all(bind=engine)
+    FulfillmentBase.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    pools = ResourcePoolService(factory, {"ansible": _Handler()})
+    ledger = PausingLedger(
+        factory, unit_claim_keys=("units", "gpu_count"), mirror_dimension="gpu_count"
+    )
+    _pool(pools, "pool-a")
+    _pool(pools, "pool-b")
+    _resource(ledger, "src", "pool-a", units=4)
+    _resource(ledger, "dest", "pool-a", units=4)
+    reservation_id = _reserve(ledger, agreement="race")
+    assert ledger.get_reservation_backing_resource_id(reservation_id) == "src"
+
+    def move():
+        with ledger.serialized(), factory() as db:
+            ledger.register_resource_in_session(
+                db, resource_id="dest", pool_id="pool-b", total_units=4
+            )
+            db.commit()
+            # Record the durable boundary before releasing serialization.
+            move_committed.set()
+
+    def assign():
+        with ObservedUnitOfWork(
+            factory, pools, ledger, transaction_type=ObservedTransaction,
+        ).transaction() as tx:
+            tx.rebind_capacity(
+                capacity_reservation_id=reservation_id, settlement_resource_id="dest"
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        mover = executor.submit(move)
+        try:
+            assert checked.wait(timeout=10), "the pool move never reached its check"
+            assigner = executor.submit(assign)
+            assert assignment_attempted.wait(timeout=10), "assignment never attempted its transaction"
+            assert not assignment_opened.is_set()
+        finally:
+            release.set()
+        mover.result(timeout=10)
+        assigner.result(timeout=10)
+
+    assert assignment_opened.is_set()
+    dest = next(row for row in ledger.list_resources() if row["resource_id"] == "dest")
+    assert dest["pool_id"] == "pool-b"
+    assert ledger.get_reservation_backing_resource_id(reservation_id) == "dest"
+    with factory() as db:
+        assert ledger.backing_pool_id_in_session(db, reservation_id) == "pool-b"

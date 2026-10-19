@@ -487,7 +487,7 @@ def _initialize_test_database(engine):
         session.add(ResourcePool(
             id=DEFAULT_POOL_ID,
             label="Default Pool",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={
                 "deliverable_modes": ["bare_metal", "vm"],
                 "advertisable_modes": ["bare_metal", "vm"],
@@ -689,7 +689,7 @@ async def client_and_queue(
     from market_resource_pools import ResourcePoolService
     from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
     resource_pool_service_handlers = {
-        "ansible": AnsiblePoolConfigHandler(settings=mock_settings),
+        "vm.ansible": AnsiblePoolConfigHandler(settings=mock_settings),
         "bare_metal.ansible": BareMetalPoolConfigHandler(),
     }
     resource_pool_service = ResourcePoolService(
@@ -787,7 +787,7 @@ async def client_and_queue(
         [
             build_vm_adapter_bundle(
                 fulfillment_provider=ansible_fulfillment_provider,
-                pool_config_handler=resource_pool_service_handlers["ansible"],
+                pool_config_handler=resource_pool_service_handlers["vm.ansible"],
                 job_executor=vm_executor,
             ),
             build_bare_metal_adapter_bundle(

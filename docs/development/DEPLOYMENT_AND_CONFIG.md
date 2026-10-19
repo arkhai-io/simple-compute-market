@@ -421,6 +421,25 @@ relay), then host inventory, then capacity (whose declarations name a pool and
 may name a host). A capacity document naming a pool other than `default` needs
 that pool supplied beside it on a first boot.
 
+On a first boot with a pool document configured, the document creates the
+`default` pool: migration seeds none, so `default` takes the provider and
+configuration the document declares, before any host is admitted. A bare-metal
+site therefore declares `default` as `bare_metal.ansible`, and a VM site as
+`vm.ansible`. A configured document that is missing or invalid fails startup;
+the service does not fall back to a VM default. A first boot is judged by
+whether any pool or host is stored, so a migration interrupted before it stored
+either still leaves `default` to the document when it is retried. With no pool
+document configured, migration seeds a VM `default` from the configured
+playbook. A database that already holds pools or hosts keeps its `default`.
+
+A pool's provider is fixed at creation. A changed pool document that names a
+different provider for an existing pool is refused whole: validate-only reports
+`provider_immutable` at that entry's `provider` path with no diff, import
+applies none of the document's entries or disablements, and at startup the
+service fails naming the entry and records no digest, so it retries on the next
+start. Moving a pool's inventory to another provider means declaring a second
+pool with that provider and reassigning the members to it.
+
 Every pool entry must declare `advertisable_modes` and `capacity_backing` in its
 `policy_tags`; nothing defaults either. A changed pool document with an entry
 lacking them is refused and nothing from it is applied. After the pool import,
@@ -579,6 +598,14 @@ deployment topology:
 
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
+
+The VM provider is named `vm.ansible`. A provisioning database with pools or
+fulfillment records under the historical name `ansible` is migrated to the
+canonical name, and only the provider column changes: pool IDs, configuration,
+host membership, lifecycle state, job identity and accepted operation envelopes
+keep their values. The service has no alias for the historical name, so a pool
+document or API caller still naming `ansible` must be updated to `vm.ansible`;
+`docs/seller-quickstart.md` describes the operator's side.
 
 A frozen storefront table is never dropped. Fresh databases stop creating
 it, existing databases keep it as it is, and no code writes to it. A

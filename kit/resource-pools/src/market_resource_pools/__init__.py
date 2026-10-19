@@ -4,19 +4,22 @@ The pool wire models and declaration vocabulary are
 ``market_resource_pools_contracts``; this package is the authority over them.
 """
 
+from market_resource_pools_contracts.asking_rates import (
+    ASKING_RATES_POLICY_TAG,
+    asking_rate_entry_problems,
+    validate_asking_rates,
+)
+
 from .asking_rates import (
     ACCEPTED_ASKING_RATE_PERIODS,
     ASKING_RATE_SOURCE_HINT,
     ASKING_RATE_SOURCE_NONE,
     ASKING_RATE_SOURCE_OVERRIDE,
-    ASKING_RATES_POLICY_TAG,
     AskingRate,
     AskingRateResolution,
     NOT_STATED,
-    asking_rate_entry_problems,
     raw_asking_rates,
     resolve_asking_rates,
-    validate_asking_rates,
 )
 from .db import DEFAULT_POOL_ID, ResourcePool
 from .host_requirement import HostRequirement, pool_needs_host

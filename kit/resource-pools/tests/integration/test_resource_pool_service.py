@@ -32,10 +32,10 @@ from market_resource_pools import (
     PoolNotFoundError,
     PoolValidationError,
     ResourcePoolService,
+    PoolConfigValidationProblem,
 )
-from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolUpdate
+from market_resource_pools_contracts import PoolCreate, PoolReplace, PoolResponse, PoolUpdate
 from market_resource_pools.db import Base, ResourcePool
-from pydantic import ValidationError
 from sqlalchemy.orm import sessionmaker
 
 
@@ -82,8 +82,6 @@ class _AnsibleLikePoolConfigHandler:
         return normalized
 
     def validate_config_problems(self, config):
-        from market_resource_pools import PoolConfigValidationProblem
-
         problems: list[PoolConfigValidationProblem] = []
         for field in sorted(set(config) - self._FIELDS):
             problems.append(
@@ -138,10 +136,6 @@ class _AnsibleLikePoolConfigHandler:
         if not hasattr(self, "_configs"):
             self._configs: dict[str, dict] = {}
         self._configs[pool_id] = dict(config)
-
-    def delete_config(self, db, pool_id: str) -> None:
-        if hasattr(self, "_configs"):
-            self._configs.pop(pool_id, None)
 
 
 @pytest.fixture
@@ -578,7 +572,6 @@ pools:
         diff = svc.import_pools(one_pool_yaml)
         assert "equinix-us-west" in diff.disabled
 
-
     def test_invalid_entry_rejects_entire_document(self, svc):
         mixed_yaml = """
 pools:
@@ -846,23 +839,8 @@ pools:
         assert response.diff is not None
 
 
-class TestHoldPreferenceValidationOnIndividualPoolWrites:
-    """The bulk YAML path (above) and these individual CRUD endpoints must
-    reject the same invalid values -- an operator must not be able to
-    bypass validation by choosing one surface over the other."""
-
-    def test_create_pool_with_negative_hold_raises(self, svc):
-        with pytest.raises(PoolValidationError):
-            svc.create_pool(
-                PoolCreate(
-                    id="hetzner-eu",
-                    label="Hetzner EU",
-                    provider="ansible",
-                    policy_tags=_declared({"max_reservation_hold_seconds": -1}),
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert svc.list_pools() == []
+class TestValidPolicyHintsOnIndividualPoolWrites:
+    """Valid advisory hints round-trip through real pool persistence."""
 
     def test_create_pool_with_valid_hold_succeeds(self, svc):
         pool = svc.create_pool(
@@ -875,49 +853,6 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
             )
         )
         assert pool.policy_tags == _declared({"max_reservation_hold_seconds": 60})
-
-    def test_replace_pool_with_invalid_hold_raises_and_does_not_change_stored_metadata(
-        self, svc,
-    ):
-        svc.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags=_declared({"max_reservation_hold_seconds": 60}),
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        with pytest.raises(PoolValidationError):
-            svc.replace_pool(
-                "hetzner-eu",
-                PoolReplace(
-                    label="Hetzner EU",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags=_declared({"max_reservation_hold_seconds": "soon"}),
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert svc.get_pool("hetzner-eu").policy_tags == _declared({
-            "max_reservation_hold_seconds": 60,
-        })
-
-    def test_update_pool_with_invalid_hold_raises(self, svc):
-        svc.create_pool(
-            PoolCreate(
-                id="hetzner-eu",
-                label="Hetzner EU",
-                provider="ansible",
-                policy_tags=_declared(),
-                provider_config=_ANSIBLE_CONFIG,
-            )
-        )
-        with pytest.raises(PoolValidationError):
-            svc.update_pool(
-                "hetzner-eu",
-                PoolUpdate(policy_tags=_declared({"max_reservation_hold_seconds": -30})),
-            )
 
     def test_update_pool_omitting_policy_tags_skips_hold_validation(self, svc):
         """update_pool's policy_tags is optional -- omitting it entirely
@@ -934,19 +869,6 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
         pool = svc.update_pool("hetzner-eu", PoolUpdate(label="Renamed"))
         assert pool.label == "Renamed"
 
-    def test_create_pool_with_negative_sla_raises(self, svc):
-        with pytest.raises(PoolValidationError):
-            svc.create_pool(
-                PoolCreate(
-                    id="hetzner-eu",
-                    label="Hetzner EU",
-                    provider="ansible",
-                    policy_tags=_declared({"sla": -1}),
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert svc.list_pools() == []
-
     def test_create_pool_with_valid_sla_succeeds(self, svc):
         pool = svc.create_pool(
             PoolCreate(
@@ -959,27 +881,10 @@ class TestHoldPreferenceValidationOnIndividualPoolWrites:
         )
         assert pool.policy_tags == _declared({"sla": 99.9})
 
-    def test_create_pool_rejects_invalid_hold_and_sla_together(self, svc):
-        """Both problems surface, not just the first one found."""
-        with pytest.raises(PoolValidationError) as exc_info:
-            svc.create_pool(
-                PoolCreate(
-                    id="hetzner-eu",
-                    label="Hetzner EU",
-                    provider="ansible",
-                    policy_tags=_declared({"max_reservation_hold_seconds": -1, "sla": -1}),
-                    provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        assert "max_reservation_hold_seconds" in str(exc_info.value)
-        assert "sla" in str(exc_info.value)
 
+class TestListingShapesPersistenceAndDocuments:
+    """Shapes persist verbatim and raw documents retain structured refusals."""
 
-class TestListingShapesValidationOnEveryWriteSurface:
-    """A malformed `listing_shapes` is refused identically on create, replace,
-    patch, and bulk import, and nothing is stored."""
-
-    MALFORMED = {"listing_shapes": {"vm": []}}
     VALID = {"listing_shapes": {"vm": [{"gpu": {"count": 1, "model": "H100"}}]}}
 
     def _create(self, svc, tags):
@@ -993,35 +898,8 @@ class TestListingShapesValidationOnEveryWriteSurface:
             )
         )
 
-    def test_create_refuses_and_stores_nothing(self, svc):
-        with pytest.raises(PoolValidationError) as refused:
-            self._create(svc, self.MALFORMED)
-        assert "listing_shapes" in str(refused.value)
-        assert svc.list_pools() == []
-
     def test_create_accepts_well_formed_shapes(self, svc):
         assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
-
-    def test_replace_refuses_and_keeps_stored_metadata(self, svc):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.replace_pool(
-                "shaped",
-                PoolReplace(
-                    label="Shaped",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags=_declared({"listing_shapes": {"vm": [{"gpu": 1}]}}),
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
-
-    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.update_pool("shaped", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
-        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
 
     def test_bulk_import_refuses_with_path_and_code(self, svc):
         response = svc.validate_pools("""
@@ -1044,24 +922,12 @@ pools:
         assert refused and refused[0].path.endswith(".policy_tags.listing_shapes")
 
 
-class TestListingShapeConstraintsOnEveryWriteSurface:
-    """A malformed constraint and a base shape stated twice with different
-    constraints are refused alike on create, replace, patch, and bulk import,
-    and nothing is stored; a constrained list is kept verbatim."""
+class TestListingShapeConstraintsPersistenceAndDocuments:
+    """Constrained shapes persist verbatim; malformed documents carry paths."""
 
     VALID = {"listing_shapes": {"vm": [
         {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}, "memory": {"gib": {"max": 512}}},
     ]}}
-    REFUSED = {
-        "malformed_constraint": {"listing_shapes": {"vm": [
-            {"gpu": {"model": "H100", "count": {"offer": 1, "min": 4, "max": 2}}},
-        ]}},
-        "conflicting_duplicate": {"listing_shapes": {"vm": [
-            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
-            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
-        ]}},
-    }
-    CASES = pytest.mark.parametrize("case", sorted(REFUSED))
 
     def _create(self, svc, tags):
         return svc.create_pool(
@@ -1076,36 +942,6 @@ class TestListingShapeConstraintsOnEveryWriteSurface:
 
     def test_create_keeps_a_constrained_list_verbatim(self, svc):
         assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
-
-    @CASES
-    def test_create_refuses_and_stores_nothing(self, svc, case):
-        with pytest.raises(PoolValidationError) as refused:
-            self._create(svc, self.REFUSED[case])
-        assert "listing_shapes.vm[" in str(refused.value)
-        assert svc.list_pools() == []
-
-    @CASES
-    def test_replace_refuses_and_keeps_stored_metadata(self, svc, case):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.replace_pool(
-                "shaped",
-                PoolReplace(
-                    label="Shaped",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags=_declared(self.REFUSED[case]),
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
-
-    @CASES
-    def test_patch_refuses_and_keeps_stored_metadata(self, svc, case):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.update_pool("shaped", PoolUpdate(policy_tags=_declared(self.REFUSED[case])))
-        assert svc.get_pool("shaped").policy_tags == _declared(self.VALID)
 
     def test_bulk_import_refuses_a_conflicting_duplicate_naming_both_entries(self, svc):
         response = svc.validate_pools("""
@@ -1152,13 +988,9 @@ pools:
         assert [p.code for p in response.problems] == ["invalid_listing_shapes"]
 
 
-class TestAskingRatesValidationOnEveryWriteSurface:
-    """A malformed `asking_rates` is refused identically on create, replace,
-    patch, and bulk import, nothing is stored, and a valid one is kept
-    verbatim."""
+class TestAskingRatesPersistenceAndDocuments:
+    """Asking rates persist verbatim and documents report structural problems."""
 
-    MALFORMED = {"asking_rates": {"vm": [{"shape": {"gpu": {"count": 1}}, "amount": "1e3",
-                                          "asset": "usd", "period": "hour"}]}}
     VALID = {"asking_rates": {"vm": [{"shape": {"gpu": {"count": 1, "model": "H100"}},
                                       "amount": "2.10", "asset": "usd", "period": "hour"}]}}
 
@@ -1173,35 +1005,8 @@ class TestAskingRatesValidationOnEveryWriteSurface:
             )
         )
 
-    def test_create_refuses_and_stores_nothing(self, svc):
-        with pytest.raises(PoolValidationError) as refused:
-            self._create(svc, self.MALFORMED)
-        assert "asking_rates" in str(refused.value)
-        assert svc.list_pools() == []
-
     def test_create_keeps_a_valid_declaration_verbatim(self, svc):
         assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
-
-    def test_replace_refuses_and_keeps_stored_metadata(self, svc):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.replace_pool(
-                "priced",
-                PoolReplace(
-                    label="Priced",
-                    provider="ansible",
-                    enabled=True,
-                    policy_tags=_declared({"asking_rates": {"vm": "2.10"}}),
-                    provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
-
-    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.update_pool("priced", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
-        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
 
     def test_bulk_import_refuses_with_path_and_code(self, svc):
         response = svc.validate_pools("""
@@ -1225,13 +1030,9 @@ pools:
         assert refused and refused[0].path.endswith(".policy_tags.asking_rates")
 
 
-class TestPricingRatesValidationOnEveryWriteSurface:
-    """A malformed `pricing` rate list is refused on create, patch, and bulk
-    import, nothing is stored, and a valid one is kept verbatim."""
+class TestPricingRatesPersistenceAndDocuments:
+    """Pricing persists verbatim and raw documents retain structured refusals."""
 
-    MALFORMED = {"pricing": {"memory": {"rates": [
-        {"asset": "usd", "rate": 0.05, "per": "hour"},
-    ]}}}
     VALID = {"pricing": {
         "gpu": {"H100": {"rates": [{"asset": "usd", "rate": "2", "per": "hour"}]}},
         "memory": {"rates": [{"asset": "usd", "rate": "0.05", "per": "hour"}]},
@@ -1248,20 +1049,8 @@ class TestPricingRatesValidationOnEveryWriteSurface:
             )
         )
 
-    def test_create_refuses_and_stores_nothing(self, svc):
-        with pytest.raises(PoolValidationError) as refused:
-            self._create(svc, self.MALFORMED)
-        assert "pricing.memory.rates[0].rate" in str(refused.value)
-        assert svc.list_pools() == []
-
     def test_create_keeps_a_valid_declaration_verbatim(self, svc):
         assert self._create(svc, self.VALID).policy_tags == _declared(self.VALID)
-
-    def test_patch_refuses_and_keeps_stored_metadata(self, svc):
-        self._create(svc, self.VALID)
-        with pytest.raises(PoolValidationError):
-            svc.update_pool("priced", PoolUpdate(policy_tags=_declared(self.MALFORMED)))
-        assert svc.get_pool("priced").policy_tags == _declared(self.VALID)
 
     def test_bulk_import_refuses_with_path_and_code(self, svc):
         response = svc.validate_pools("""
@@ -1287,11 +1076,42 @@ pools:
         assert "appears more than once" in refused[0].message
 
 
+def test_malformed_document_hints_accumulate_and_import_changes_nothing(svc):
+    for pool_id in ("default", "survivor"):
+        svc.create_pool(PoolCreate(
+            id=pool_id, label=pool_id, provider="ansible",
+            policy_tags=_declared(), provider_config=_ANSIBLE_CONFIG,
+        ))
+    before = svc.export_pools_yaml()
+    document = yaml.safe_dump({"pools": [{
+        "id": "default", "label": "Changed", "provider": "ansible",
+        "policy_tags": _declared({
+            "max_reservation_hold_seconds": -1, "sla": -1,
+            "listing_shapes": {"vm": []}, "asking_rates": None,
+            "pricing": {"memory": {"rates": "invalid"}},
+        }),
+        "provider_config": {**_ANSIBLE_CONFIG, "playbook_path": "other.yaml"},
+    }]})
+    result = svc.validate_pools(document)
+    assert result.valid is False
+    assert result.diff is None
+    assert {(p.path, p.code) for p in result.problems} == {
+        ("pools[0].policy_tags.max_reservation_hold_seconds", "invalid_hold_preference"),
+        ("pools[0].policy_tags.sla", "invalid_sla_preference"),
+        ("pools[0].policy_tags.listing_shapes", "invalid_listing_shapes"),
+        ("pools[0].policy_tags.asking_rates", "invalid_asking_rates"),
+        ("pools[0].policy_tags.pricing", "invalid_pricing_rates"),
+    }
+    assert svc.export_pools_yaml() == before
+    with pytest.raises(PoolValidationError, match=r"pools\[0\]\.policy_tags"):
+        svc.import_pools(document)
+    assert svc.export_pools_yaml() == before
+
+
 class _StubPoolConfigHandler:
     def __init__(self, provider: str) -> None:
         self.provider = provider
         self.configs: dict[str, dict] = {}
-        self.deleted: list[str] = []
         self.replaced: list[str] = []
 
     def validate_config(self, config):
@@ -1313,44 +1133,194 @@ class _StubPoolConfigHandler:
         self.replaced.append(pool_id)
         self.configs[pool_id] = dict(config)
 
-    def delete_config(self, db, pool_id: str):
-        self.deleted.append(pool_id)
-        self.configs.pop(pool_id, None)
+
+@pytest.fixture
+def recorded_pools(session_factory):
+    handlers = {provider: _StubPoolConfigHandler(provider) for provider in ("old", "new")}
+    service = ResourcePoolService(session_factory=session_factory, handlers=handlers)
+    for pool_id in ("default", "existing", "omitted"):
+        service.create_pool(PoolCreate(
+            id=pool_id, label=pool_id, provider="old", policy_tags=_declared({"region": "eu"}),
+            provider_config={"setting": pool_id},
+        ))
+    return service, handlers
 
 
-def test_replace_provider_cleans_up_old_provider_config(session_factory):
-    old_handler = _StubPoolConfigHandler("old")
-    new_handler = _StubPoolConfigHandler("new")
-    service = ResourcePoolService(
-        session_factory=session_factory,
-        handlers={"old": old_handler, "new": new_handler},
-    )
-    service.create_pool(
-        PoolCreate(
-            id="switchable",
-            label="Switchable",
-            provider="old",
-            policy_tags=_declared(),
-            provider_config={"old_setting": True},
-        )
-    )
+def _pool_snapshot(service):
+    return [PoolResponse.model_validate(pool) for pool in service.list_pools()]
 
-    replaced = service.replace_pool(
-        "switchable",
-        PoolReplace(
-            label="Switched",
-            provider="new",
-            enabled=True,
-            policy_tags=_declared(),
-            provider_config={"new_setting": True},
-        ),
+
+@pytest.mark.parametrize("operation", ["replace", "patch"])
+def test_provider_change_refuses_before_any_metadata_or_config_write(recorded_pools, operation):
+    service, handlers = recorded_pools
+    before = _pool_snapshot(service)
+    writes = {provider: list(handler.replaced) for provider, handler in handlers.items()}
+    data = dict(
+        label="Changed", provider="new", enabled=False,
+        policy_tags=_declared({"region": "us"}), provider_config={"new_setting": True},
     )
 
-    assert replaced.provider == "new"
-    assert old_handler.deleted == ["switchable"]
-    assert "switchable" not in old_handler.configs
-    assert new_handler.replaced == ["switchable"]
-    assert new_handler.configs["switchable"] == {"new_setting": True}
+    with pytest.raises(PoolValidationError) as refused:
+        if operation == "replace":
+            service.replace_pool("existing", PoolReplace(**data))
+        else:
+            service.update_pool("existing", PoolUpdate(**data))
+
+    assert str(refused.value) == (
+        "provider of pool 'existing' is fixed at creation as 'old' and cannot become 'new'; "
+        "declare a second pool with the intended provider and migrate its members instead"
+    )
+    assert _pool_snapshot(service) == before
+    for provider, handler in handlers.items():
+        assert handler.replaced == writes[provider]
+    assert handlers["old"].configs["existing"] == {"setting": "existing"}
+    assert handlers["new"].configs == {}
+
+
+def test_equal_provider_patch_and_omitted_tags_do_not_write_config(recorded_pools):
+    service, handlers = recorded_pools
+    before = PoolResponse.model_validate(service.get_pool("existing"))
+    writes = list(handlers["old"].replaced)
+
+    unchanged = service.update_pool("existing", PoolUpdate(provider="old"))
+    assert PoolResponse.model_validate(unchanged) == before
+    renamed = service.update_pool("existing", PoolUpdate(label="Renamed"))
+    assert renamed.label == "Renamed"
+    assert renamed.provider == before.provider
+    assert renamed.policy_tags == before.policy_tags
+    assert renamed.provider_config == before.provider_config
+    assert handlers["old"].replaced == writes
+
+
+def test_same_provider_config_replace_and_patch_remain_editable(recorded_pools):
+    service, handlers = recorded_pools
+    replaced = service.replace_pool("existing", PoolReplace(
+        label="Replaced", provider="old", enabled=False, policy_tags=_declared(),
+        provider_config={"setting": "replacement"},
+    ))
+    assert replaced.provider_config == {"setting": "replacement"}
+    patched = service.update_pool("existing", PoolUpdate(
+        provider="old", provider_config={"setting": "patch"},
+    ))
+    assert patched.provider == "old"
+    assert patched.enabled is False
+    assert patched.provider_config == {"setting": "patch"}
+    assert handlers["new"].replaced == []
+
+
+def _provider_change_document(service):
+    document = yaml.safe_load(service.export_pools_yaml())
+    # A valid new entry precedes the immutable-field change and an existing
+    # entry is omitted, so refusal must prevent creation and disablement too.
+    document["pools"] = [
+        document["pools"][0],
+        {"id": "fresh", "label": "Fresh", "provider": "new",
+         "policy_tags": _declared(), "provider_config": {"setting": "new"}},
+        {**document["pools"][1], "label": "Changed", "provider": "new",
+         "policy_tags": _declared({"capacity_backing": "unbacked"}),
+         "provider_config": {"setting": "changed"}},
+    ]
+    document["pools"][0]["label"] = "Changed default"
+    return yaml.safe_dump(document)
+
+
+def test_documents_report_both_immutable_fields_and_apply_nothing(recorded_pools, session_factory):
+    service, handlers = recorded_pools
+    before = _pool_snapshot(service)
+    exported = service.export_pools_yaml()
+    writes = {provider: list(handler.replaced) for provider, handler in handlers.items()}
+    document = _provider_change_document(service)
+
+    result = service.validate_pools(document)
+    assert result.valid is False
+    assert result.diff is None
+    assert [(p.path, p.code) for p in result.problems] == [
+        ("pools[2].provider", "provider_immutable"),
+        ("pools[2].policy_tags.capacity_backing", "capacity_backing_immutable"),
+    ]
+    for validate_only in (False, True):
+        with pytest.raises(PoolValidationError, match=r"pools\[2\]\.provider:"):
+            service.import_pools(document, validate_only=validate_only)
+    with pytest.raises(PoolValidationError, match=r"pools\[2\]\.policy_tags.capacity_backing:"):
+        with session_factory() as db, db.begin():
+            service.import_pools_in_session(db, document)
+    assert _pool_snapshot(service) == before
+    assert service.export_pools_yaml() == exported
+    for provider, handler in handlers.items():
+        assert handler.replaced == writes[provider]
+    assert handlers["new"].configs == {}
+
+
+def test_new_document_entry_may_declare_a_different_provider(recorded_pools):
+    service, _ = recorded_pools
+    document = yaml.safe_load(service.export_pools_yaml())
+    document["pools"].append({
+        "id": "second", "label": "Second", "provider": "new",
+        "policy_tags": _declared(), "provider_config": {"setting": "new"},
+    })
+    result = service.validate_pools(yaml.safe_dump(document))
+    assert result.valid is True
+    assert result.diff.created == ["second"]
+    diff = service.import_pools(yaml.safe_dump(document))
+    assert diff.created == ["second"]
+    assert service.get_pool("second").provider == "new"
+
+
+def test_document_request_problems_precede_all_stored_comparisons(recorded_pools):
+    service, _ = recorded_pools
+    before = _pool_snapshot(service)
+    document = yaml.safe_load(_provider_change_document(service))
+    document["pools"][1]["label"] = ""
+    response = service.validate_pools(yaml.safe_dump(document))
+    assert response.diff is None
+    assert [(p.path, p.code) for p in response.problems] == [("pools[1].label", "required_field")]
+    with pytest.raises(PoolValidationError, match=r"pools\[1\]\.label:"):
+        service.import_pools(yaml.safe_dump(document))
+    assert _pool_snapshot(service) == before
+
+
+@pytest.mark.parametrize("operation", ["replace", "patch", "document"])
+def test_provider_configuration_validation_precedes_provider_comparison(session_factory, operation):
+    service = ResourcePoolService(session_factory, {
+        "ansible": _AnsibleLikePoolConfigHandler(), "old": _StubPoolConfigHandler("old"),
+    })
+    service.create_pool(PoolCreate(
+        id="default", label="Default", provider="old", policy_tags=_declared(), provider_config={},
+    ))
+    before = _pool_snapshot(service)
+    data = dict(label="Changed", provider="ansible", enabled=False,
+                policy_tags=_declared(), provider_config={})
+    if operation == "document":
+        document = yaml.safe_dump({"pools": [{"id": "default", **data}]})
+        response = service.validate_pools(document)
+        assert response.valid is False
+        assert response.diff is None
+        assert {p.code for p in response.problems} == {"required_field"}
+        with pytest.raises(PoolValidationError, match="playbook_path"):
+            service.import_pools(document)
+    else:
+        with pytest.raises(PoolValidationError, match="playbook_path"):
+            if operation == "replace":
+                service.replace_pool("default", PoolReplace(**data))
+            else:
+                service.update_pool("default", PoolUpdate(**data))
+    assert _pool_snapshot(service) == before
+
+
+@pytest.mark.parametrize("operation", ["replace", "patch", "document"])
+def test_unknown_provider_keeps_its_existing_refusal(recorded_pools, operation):
+    service, _ = recorded_pools
+    before = _pool_snapshot(service)
+    data = dict(label="Changed", provider="unknown", enabled=False,
+                policy_tags=_declared(), provider_config={})
+    with pytest.raises(PoolValidationError, match="no pool config handler registered"):
+        if operation == "replace":
+            service.replace_pool("existing", PoolReplace(**data))
+        elif operation == "patch":
+            service.update_pool("existing", PoolUpdate(**data))
+        else:
+            service.import_pools(yaml.safe_dump({"pools": [{"id": "default", **data}]}))
+    assert _pool_snapshot(service) == before
 
 
 # ---------------------------------------------------------------------------
@@ -1408,9 +1378,8 @@ def _replace_with(tags):
     )
 
 
-class TestDeclarationsOnEveryWritePath:
-    """The model refuses what a typed client builds; the service refuses what
-    reaches it without that validation. Both paths must agree."""
+class TestDeclarationsOnDocumentsAndPersistence:
+    """Raw documents report declaration problems without changing persisted pools."""
 
     @pytest.mark.parametrize(
         ("tags", "named"),
@@ -1434,47 +1403,19 @@ class TestDeclarationsOnEveryWritePath:
             ),
         ],
     )
-    def test_create_replace_patch_and_document_refuse_alike(self, svc, tags, named):
+    def test_document_refuses_invalid_declarations_without_mutation(self, svc, tags, named):
         _create_backed_vm(svc, "existing")
-
-        # Built without validation, as a caller bypassing the model would.
-        with pytest.raises(PoolValidationError, match=named):
-            svc.create_pool(
-                PoolCreate.model_construct(
-                    id="fresh", label="F", provider="ansible", enabled=True,
-                    policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
-                )
-            )
-        with pytest.raises(PoolValidationError, match=named):
-            svc.replace_pool(
-                "existing",
-                PoolReplace.model_construct(
-                    label="Pool", provider="ansible", enabled=True,
-                    policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
-                ),
-            )
-        with pytest.raises(PoolValidationError, match=named):
-            svc.update_pool(
-                "existing",
-                PoolUpdate.model_construct(
-                    label=None, provider=None, enabled=None,
-                    policy_tags=tags, provider_config=None,
-                ),
-            )
-        with pytest.raises(ValidationError):
-            PoolReplace(
-                label="Pool", provider="ansible", enabled=True, policy_tags=tags,
-            )
-
-        assert svc.get_pool("fresh") is None
-        assert svc.get_pool("existing").policy_tags == _BACKED_VM
-
+        before = svc.export_pools_yaml()
         document = yaml.safe_load(_DOC_BACKED_VM)
         document["pools"][0]["policy_tags"] = tags
-        response = svc.validate_pools(yaml.safe_dump(document))
+        yaml_text = yaml.safe_dump(document)
+        response = svc.validate_pools(yaml_text)
         assert response.valid is False
         assert response.diff is None
         assert any(named in problem.message for problem in response.problems)
+        with pytest.raises(PoolValidationError, match=named):
+            svc.import_pools(yaml_text)
+        assert svc.export_pools_yaml() == before
 
     def test_unbacked_pool_advertises_with_nothing_delivered(self, svc):
         tags = {
