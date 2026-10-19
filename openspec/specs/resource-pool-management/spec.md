@@ -666,19 +666,27 @@ value is.
 
 ### Requirement: The default pool is created with its intended provider
 
+A provisioning database is empty when it stores no pool and no host, whatever
+schema tables or migration records it holds.
 On an empty provisioning database with a configured pool definition document,
 schema initialization MUST leave default-pool creation to ordinary atomic
 startup document import. Contributed definitions MUST be imported before pools,
 and host inventory MUST follow pools. Without a configured document, schema
 initialization MUST retain the VM bootstrap.
-Existing databases MUST retain default-pool identity and host backfill; a mounted
-document MUST NOT change an existing pool's provider.
+A database storing a pool or a host MUST retain default-pool identity and host
+backfill; a mounted document MUST NOT change an existing pool's provider.
 
 #### Scenario: A fresh bare-metal site declares its default
 
 - **WHEN** a fresh provisioning database starts with a valid document declaring `default` as `bare_metal.ansible`
 - **THEN** import creates that pool with its declared configuration and records the digest atomically before admitting inventory
 - **AND** no implicit VM default is created, including on repeated migration before first startup
+
+#### Scenario: An interrupted first migration is retried
+
+- **WHEN** a first migration with a configured pool document stopped after creating schema tables but before storing any pool or host, and migration runs again
+- **THEN** the database is still empty and no implicit VM default is created
+- **AND** startup import creates `default` from the document
 
 #### Scenario: A fresh site has no pool document
 

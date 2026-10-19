@@ -494,9 +494,8 @@ explicit owner question, not a prescribed edit.
   thin distributions, and the owner's validation-order paragraph),
   `DEPLOYMENT_AND_CONFIG.md`, `TESTING.md`, and the spec's Evidence section. The
   capability index needs no change. The `site-capacity` projection's
-  provider-kind example now reads `"vm.ansible"`. That edit was made with the
-  Edit tool on the owner's recovery authorization, after the in-place `sed` had
-  been denied. The promotion record lists every location.
+  provider-kind example now reads `"vm.ansible"`. The promotion record lists
+  every location.
 - [x] 5.10 **Documentation citations.** After promotion run
   `make check-doc-citations CHANGE=fix-resource-pool-provider-at-creation`, resolve
   every absent/tombstone citation and validate the change with pinned OpenSpec
@@ -569,13 +568,14 @@ and final headings, preserving any owner-deferred guidance disposition.
 | Canonical capability documentation index | `openspec/specs/README.md` — existing Resource-pool management row retained; no new capability or companion |
 | General validation-order guidance | Owner chose promotion at 5.3 (option B): `docs/development/ARCHITECTURE.md#route-contracts-and-their-http-binding`, the paragraph beginning "A request is checked in the order of what it takes to judge it" |
 | 19 V1 / 20 V1: default creation before inventory and canonical VM routing/upgrade | `openspec/specs/resource-pool-management/spec.md`, via archive; its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` definition documents/migrations; `docs/development/ARCHITECTURE.md` Resource pools |
-| 23 F1: schema-only interrupted initialization retains document-created default bootstrap until pool or host state exists | `openspec/specs/resource-pool-management/spec.md` default/bootstrap requirement, via archive; its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` migrations |
+| 23 F1: schema-only interrupted initialization retains document-created default bootstrap until pool or host state exists | `openspec/specs/resource-pool-management/spec.md` default/bootstrap requirement, hand-edited after archive (closeout review 36 F1); its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` migrations |
 
 ### Locations written at closeout
 
 | Accepted knowledge | Permanent location |
 |---|---|
 | Eight added requirements (D1–D9, D11, D2/F1, default bootstrap, VM identity) | `openspec/specs/resource-pool-management/spec.md`, written by the archive: `#requirement-the-default-pool-is-created-with-its-intended-provider`, `#requirement-vm-provider-identity-is-namespaced`, `#requirement-a-pools-provider-is-fixed-at-creation`, `#requirement-shared-validation-of-pool-immutability`, `#requirement-documents-report-immutable-providers-atomically`, `#requirement-typed-pool-models-validate-policy-hints`, `#requirement-provider-validation-remains-service-owned`, `#requirement-configuration-handlers-follow-the-non-destructive-lifecycle` |
+| 23 F1 empty-database criterion (no pool or host row) and the interrupted-migration retry scenario | `openspec/specs/resource-pool-management/spec.md#requirement-the-default-pool-is-created-with-its-intended-provider`, hand-edited after archive (closeout review 36 F1) |
 | Evidence | `openspec/specs/resource-pool-management/spec.md#evidence`, edited by hand: contracts model/asking-rate paths, provider refusal, pure comparison, composition, identity migration, startup and API coverage |
 | D1/D2/D4/D7 and VM identity rationale | `openspec/specs/resource-pool-management/architecture.md#provider-configuration` |
 | D9 separate member guards | `openspec/specs/resource-pool-management/architecture.md#membership-and-draining` |

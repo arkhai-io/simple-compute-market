@@ -1686,6 +1686,12 @@ section records what they showed about the orchestrator.
 - [ ] 7.3 Each allow-list gap the pilot found is a proposed edit to
       `.claude/change-steps.toml`, committed by the owner; each script gap is a
       rule added to `change_next_step.py` with its test; each is noted here.
+      Pilot gap (fix-resource-pool-provider-at-creation 34 R1): archival during
+      a closeout run moves `reviews/` under the wrapper; the transcript path
+      computed before the run then fails, the `FileNotFoundError` is misreported
+      as the CLI being unavailable, and the outcome line recreates an active
+      directory. Owed: narrow the unavailable classification to launch failures,
+      and resolve the change's directory after a closeout run.
 - [ ] 7.4 Update `design.md`'s Risks with what the pilot confirmed or disproved.
 - [ ] 7.5 From the runs on the revised tooling — the pilot's later steps, this
       change's own remaining rounds — record `make change-cost`'s report, the cache
