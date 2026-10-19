@@ -52,9 +52,9 @@ from storefront_configuration import (
     publishable_configuration,
     write_configuration,
 )
-from test_http_system import _app, _runtime as _http_runtime
+from test_http_system import _app, _derivation_runtime, _runtime as _http_runtime
 from test_pool_overrides_api import _with_sites
-from test_publication_cycle import SELLER_WALLET, alkahest_publication
+from test_publication_cycle import SELLER_WALLET, Site, alkahest_publication, member, pool
 
 # A development key; never used on any public network.
 REGISTRY = Eip191Signer(bytes.fromhex("55" * 32))
@@ -271,6 +271,42 @@ def test_a_storefront_nothing_answers_for_is_reported_without_a_traceback(
     assert result.exit_code == 1
     assert "no storefront answered at http://127.0.0.1:9 (ConnectError)" in result.output
     assert "Traceback" not in result.output
+
+
+def test_abort_all_closes_every_open_listing_as_its_seller(monkeypatch, tmp_path):
+    """Two listings a real cycle published, through the command, are closed by
+    ``--abort-all`` as their seller, and the next cycle leaves them closed."""
+    site = Site(pool("pool-1", member("r1", "pool-1"), member("r2", "pool-1")))
+    runtime = dataclasses.replace(
+        _derivation_runtime(tmp_path, monkeypatch, {"site-a": site}),
+        admin_principals=TrustedIdentitySet(identities=(SELLER.identity,)),
+    )
+    with serving(_app(runtime)) as base_url:
+        with _configured_for(monkeypatch, tmp_path, base_url):
+            published = runner.invoke(cli, ["publish"])
+            aborted = runner.invoke(cli, ["publish", "--abort-all"])
+            again = runner.invoke(cli, ["publish"])
+        with SyncStorefrontClient(base_url) as public:
+            still_open = public.list_listings(status="open").listings
+            closed = public.list_listings(status="closed").listings
+
+    assert published.exit_code == 0, published.output
+    assert json.loads(published.output)["counts"]["publish"] == 2
+    assert aborted.exit_code == 0, aborted.output
+    assert sorted(json.loads(aborted.output)["closed"]) == sorted(
+        listing.listing_id for listing in closed
+    )
+    assert again.exit_code == 0, again.output
+    assert json.loads(again.output)["counts"].get("publish") is None
+    assert still_open == []
+    assert {listing.extra["closed_by"] for listing in closed} == {"seller"}
+
+
+def test_abort_all_is_not_previewed(monkeypatch, tmp_path):
+    result = runner.invoke(cli, ["publish", "--abort-all", "--dry-run"])
+
+    assert result.exit_code != 0
+    assert "--abort-all cannot be combined with --dry-run" in result.output
 
 
 _LOADED_BY_PUBLISH = """

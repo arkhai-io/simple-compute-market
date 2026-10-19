@@ -43,7 +43,8 @@ holds and their reasons, including a site whose projection generation its domain
 
 #### Scenario: Publication fails every cycle
 
-- **WHEN** each publication cycle fails, for example because a registry cannot be reached
+- **WHEN** each publication cycle fails, for example because the storefront's database is
+  unavailable
 - **THEN** system status reports the publication loop as running and its last cycle as
   failed with the error, without waiting for an operator to read the logs
 

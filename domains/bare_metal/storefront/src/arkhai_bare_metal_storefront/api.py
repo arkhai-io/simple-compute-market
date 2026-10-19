@@ -32,10 +32,12 @@ from core_storefront.identity_lifecycle import (
     rotate_identity,
 )
 from core_storefront.models.listing_models import (
+    CloseListingResponse,
     EvaluateNegotiateRequest,
     EvaluateNegotiateResponse,
     ListingListResponse,
     ListingResponse,
+    PauseListingResponse,
 )
 from core_storefront.models.negotiation_models import (
     ForceAcceptRequest,
@@ -98,6 +100,7 @@ from market_capacity_publication import CapacityAdminRouteError
 from market_settlement_runtime import MAX_WAIT_SECONDS, SettlementAdminRouteError
 from .deal_controls import capacity_admin_routes, settlement_admin_routes
 from .fulfillment_service import BareMetalFulfillmentError
+from .listing_controls import ListingControlError, close_listing_as_seller, resume_listing
 from .models import (
     BareMetalAccessDeliveryResponse,
     BareMetalCapacityEventResponse,
@@ -465,6 +468,45 @@ async def get_listing(listing_id: str, request: Request) -> ListingResponse:
     if row is None:
         raise HTTPException(status_code=404, detail="listing not found")
     return ListingResponse.model_validate(_listing_response(runtime, row))
+
+
+@router.post("/api/v1/listings/{listing_id}/close", response_model=CloseListingResponse)
+async def close_listing(listing_id: str, request: Request) -> CloseListingResponse:
+    """Close a listing as its seller: durably, so no reconciliation reopens it."""
+    runtime = _runtime(request)
+    await _seller(
+        request=request,
+        runtime=runtime,
+        operation="close_listing",
+        resource=listing_id,
+    )
+    try:
+        return CloseListingResponse.model_validate(
+            await close_listing_as_seller(runtime, listing_id)
+        )
+    except ListingControlError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/api/v1/listings/{listing_id}/resume", response_model=PauseListingResponse)
+async def resume_listing_route(listing_id: str, request: Request) -> PauseListingResponse:
+    """Clear a listing's pause and re-list it; an administrator's operation.
+
+    A listing its seller closed is reopened; one reconciliation closed is
+    refused with a conflict naming why, since its source does not support it.
+    """
+    runtime = _runtime(request)
+    await _admin(
+        request=request,
+        runtime=runtime,
+        operation="admin_resume_listing",
+        resource=listing_id,
+        body=await _request_body(request),
+    )
+    try:
+        return PauseListingResponse.model_validate(await resume_listing(runtime, listing_id))
+    except ListingControlError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 def _negotiation_error(exc: Exception) -> HTTPException:

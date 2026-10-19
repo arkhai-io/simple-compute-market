@@ -9,7 +9,7 @@ import typer
 
 from .admin_cli import reporting_failures
 from .pool_override_cli import pool_override_app
-from .publication_cli import run_publication_cycle
+from .publication_cli import close_all_open_listings, run_publication_cycle
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(
@@ -63,6 +63,14 @@ def publish_cmd(
         "--dry-run",
         help="Report what one publication cycle would do, and do none of it.",
     ),
+    abort_all: bool = typer.Option(
+        False,
+        "--abort-all",
+        help=(
+            "Close every open listing as the seller. Reconciliation does not "
+            "reopen a listing its seller closed; resume one to re-list it."
+        ),
+    ),
     storefront_url: str | None = typer.Option(
         None,
         "--storefront-url",
@@ -73,10 +81,16 @@ def publish_cmd(
     """Run, or preview, one cycle of the running storefront's publication loop.
 
     The cycle runs in the storefront, through its administrator API, as the
-    loop's timer runs it; the command opens no database.
+    loop's timer runs it; the command opens no database. ``--abort-all``
+    instead closes every open listing as its seller.
     """
+    if abort_all and dry_run:
+        raise typer.BadParameter("--abort-all cannot be combined with --dry-run")
     with reporting_failures():
-        report = run_publication_cycle(storefront_url, dry_run=dry_run)
+        if abort_all:
+            report: dict[str, object] = {"closed": close_all_open_listings(storefront_url)}
+        else:
+            report = run_publication_cycle(storefront_url, dry_run=dry_run)
     typer.echo(json.dumps(report, sort_keys=True))
 
 

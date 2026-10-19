@@ -404,10 +404,23 @@ configured `base_url`, through one administrator client it shares with `pool-ove
 runs over what its own poller holds. Divergences from VM's `market-storefront publish`: it
 prints the cycle's report as JSON, as every other bare-metal command prints its result and as
 the command printed it before, rather than VM's table, so a script reads it unchanged; and it
-has no `--abort-all`, which seller-closes every open listing: the owner decided bare metal
-adopts it (2026-10-18), but bare metal serves no seller close route for it to call (VM's
-`POST /api/v1/listings/{listing_id}/close`, nor the resume route a seller re-lists with), so
-it waits on the owner's decision about those routes. `-a` is VM's short form of
+has `--abort-all` too, which seller-closes every open listing (decided with the owner,
+2026-10-18 and 2026-10-19), with VM's semantics: through the storefront's seller close route,
+and refused beside `--dry-run`, its output the closed listings' IDs as JSON. Bare metal gains
+VM's two routes for it: `POST /api/v1/listings/{listing_id}/close`, seller-authenticated
+(`close_listing`), and `POST /api/v1/listings/{listing_id}/resume`, administrator-authenticated
+(`admin_resume_listing`), which clears the listing's pause and reopens a listing its seller
+closed, republishes an open one, and refuses one reconciliation closed with a 409
+`listing_closed_by_reconciliation`, as VM's does. Both are built from existing parts: the
+capacity-publication kit's `PublicationRuntime.close(..., closed_by="seller")`, `reopen(...,
+reopened_by="seller")`, and `publish`, over bare metal's existing `build_publication_runtime`,
+`bare_metal_listing_binding`, and `bare_metal_publication_candidate`; core's
+`CloseListingResponse` and `PauseListingResponse` and `set_listing_paused`; the route
+authentication bare metal's other seller and administrator routes use; and the typed client's
+`close_listing`, `resume_listing`, and `list_listings`. The only new bare-metal code is the
+route glue (`listing_controls.py`) and a seller-role CLI client beside the administrator one.
+The permanent "A seller's close is durable" already states the behaviour, so the delta is
+unchanged. `-a` is VM's short form of
 `--storefront-url`, adopted by both bare-metal commands. A storefront refusal (a cycle it
 cannot compose answers 503 naming what is missing) exits 1 with its message, as
 `pool-override` does; and a request no storefront answers exits 1 naming the origin it was

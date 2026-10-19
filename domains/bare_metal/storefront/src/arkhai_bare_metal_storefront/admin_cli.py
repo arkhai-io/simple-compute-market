@@ -4,8 +4,9 @@ A command that operates the running storefront calls its administrator API
 through the canonical storefront client and never reads or writes the
 storefront's database. It signs as the storefront's own marketplace signer,
 from ``[Identity.principal]`` in the configuration files the server reads and
-``ARKHAI_IDENTITY_CREDENTIAL``, so that principal must be one of
-``[Identity.administrators]``. It connects to ``--storefront-url``, else the
+``ARKHAI_IDENTITY_CREDENTIAL``: as its administrator, so that principal must be
+one of ``[Identity.administrators]``, or as its seller, for a seller's own
+routes. It connects to ``--storefront-url``, else the
 configured ``base_url``.
 """
 
@@ -24,8 +25,8 @@ def storefront_url(explicit: str | None, configured: str) -> str:
 
 
 @contextlib.contextmanager
-def storefront_admin_client(explicit_url: str | None) -> Iterator[Any]:
-    """The storefront client, signing as the storefront's administrator.
+def _storefront_client(explicit_url: str | None, *, role: str) -> Iterator[Any]:
+    """The storefront client signing as the storefront itself, in ``role``.
 
     Configuration that cannot be read, and a missing identity or credential,
     are refused as bad parameters before anything is sent.
@@ -55,10 +56,20 @@ def storefront_admin_client(explicit_url: str | None) -> Iterator[Any]:
     with SyncStorefrontClient(
         storefront_url(explicit_url, settings.base_url),
         signer=signer,
-        caller_role="admin",
+        caller_role=role,
         expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
     ) as client:
         yield client
+
+
+def storefront_admin_client(explicit_url: str | None) -> contextlib.AbstractContextManager[Any]:
+    """The storefront client, signing as the storefront's administrator."""
+    return _storefront_client(explicit_url, role="admin")
+
+
+def storefront_seller_client(explicit_url: str | None) -> contextlib.AbstractContextManager[Any]:
+    """The storefront client, signing as the storefront's seller, for a seller's own routes."""
+    return _storefront_client(explicit_url, role="seller")
 
 
 def _origin(exc: Any) -> str:
@@ -96,4 +107,9 @@ def reporting_failures() -> Iterator[None]:
         raise typer.Exit(code=1) from exc
 
 
-__all__ = ["reporting_failures", "storefront_admin_client", "storefront_url"]
+__all__ = [
+    "reporting_failures",
+    "storefront_admin_client",
+    "storefront_seller_client",
+    "storefront_url",
+]

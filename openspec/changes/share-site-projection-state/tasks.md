@@ -4366,7 +4366,8 @@ recorded in `design.md` D6, C1, and D14b):
   the failed timer outcome and no derivation. **Found:** an unreachable registry does not fail
   a cycle -- the cycle records `fail` for the publish and converges later (probed) -- so the
   spec scenario's example ("because a registry cannot be reached") is not a failing cycle for
-  bare metal; for the owner or 17.9. The test waits through an injected seam:
+  bare metal; for the owner or 17.9. **Resolved (owner, 2026-10-19):** the delta's example is
+  now the storefront's database being unavailable. The test waits through an injected seam:
   `bare_metal_loop_controller` takes a `logger` in place of the module's, and the test's
   handler sets an event on the controller's failure record, bounded (30 s; the lock's busy
   timeout is 5 s).
@@ -4405,7 +4406,7 @@ recorded in `design.md` D6, C1, and D14b):
   after a cycle reporting a regionless pool, the pool gains its region; a preview reports no
   hold while status still reports the pool, and the next cycle clears it; it fails with the
   preview recording (edited, then restored). VM storefront requires `>=0.6.0`.
-- **Not done (A, blocked):** `--abort-all` seller-closes each open listing
+- **Not done (A, blocked; done in 14.5-14.7 below):** `--abort-all` seller-closes each open listing
   (`StorefrontClient.close_listing`, `POST /api/v1/listings/{listing_id}/close`, seller role),
   which bare metal does not serve, nor the resume a seller re-lists with; the permanent
   spec's "A seller's close is durable" already says a seller MUST be able to reopen what they
@@ -4429,6 +4430,49 @@ recorded in `design.md` D6, C1, and D14b):
   was not run; end-to-end, every bare-metal-lane scenario's storefront now seeds its peer at
   start (as before, only later), and no scenario runs `publish`, previews VM publication and
   then reads status, or reaches a pool with no clause.
+
+- [x] 14.5 (owner, 2026-10-19) Seller close and administrator resume routes in bare metal,
+      composed from existing kit and core parts, with VM's contracts:
+      `POST /api/v1/listings/{listing_id}/close` (seller role, `close_listing`) and
+      `POST /api/v1/listings/{listing_id}/resume` (administrator, `admin_resume_listing`).
+      Done. `src/listing_controls.py`: `close_listing_as_seller` closes through the kit
+      `PublicationRuntime.close(BoundListing(...), closed_by="seller")` over the listing's
+      durable binding (404 without one), locally then at every configured registry;
+      `resume_listing` clears the listing's pause and reopens a seller-closed listing
+      (`reopen(..., reopened_by="seller")`) or republishes an open one (`publish`), from
+      `bare_metal_publication_candidate`, and refuses a listing reconciliation closed with 409
+      `listing_closed_by_reconciliation`, as VM's route does; 503 with no registry configured.
+      `src/api.py` binds both behind the existing `_seller` and `_admin` authentication, with
+      core's `CloseListingResponse` and `PauseListingResponse`. `design.md` C1 names what each
+      is built from. The spec delta is unchanged: the permanent "A seller's close is durable"
+      already requires both behaviours.
+- [x] 14.6 `publish --abort-all`, as VM's: closes every open listing as its seller, paging
+      `list_listings(status="open")` and calling `close_listing` through a seller-role client
+      (`admin_cli.storefront_seller_client`, beside the administrator client), prints
+      `{"closed": [...]}`, and is refused beside `--dry-run`.
+      Done (`publication_cli.close_all_open_listings`, `cli.py`).
+- [x] 14.7 Tests and validation. Application integration through the typed client, the real
+      app and lifespan over a real database, listings published by a stepped production
+      cycle to a recorded registry (`tests/test_listing_controls.py`, new): a seller's close is
+      recorded `closed_by` `seller`, survives the next publication cycle (`skip`
+      `closed_by_seller`), and an administrator's resume reopens it (`published`; the registry
+      saw publish, closed, publish, open); a listing reconciliation closed is refused 409 and
+      stays closed; a signed caller who is not the seller is refused 403, and an unsigned
+      request 401 (rejection path, status only); an unknown listing is 404. Through the command
+      over the loopback-served app (`tests/test_publication_cli.py`): `publish` publishes two
+      listings, `publish --abort-all` closes both as their seller (its output lists exactly the
+      closed listings), and the next `publish` publishes nothing; `--abort-all --dry-run` is
+      refused. The delta's "Publication fails every cycle" example is now the storefront's
+      database being unavailable (owner, 2026-10-19), which the status test reproduces.
+      Evidence: `make test-bare-metal`: domain 134, storefront 423 (417 before), buyer 11,
+      adapter 40 passed; VM storefront frozen, the rebuilt bare-metal storefront wheel
+      reinstalled (it installs the contribution), unit 1089 passed, 1 skipped, integration 448
+      passed. No shared package changed and no dependency or lock moved, so `make -k test` was
+      not rerun (it last passed at the check fixes). `make check-packaging`, `make
+      check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+      (nothing reported), `make check-tasks`, and `openspec validate --strict` pass.
+      End-to-end: no scenario closes or resumes a bare-metal listing or runs `publish`; these
+      are application-integration evidence only.
 
 ## 15. The API-credit storefront's loops, and the controller's one loop form
 
