@@ -995,14 +995,193 @@ Tests" separates them (02 F6):
   schema-generated configuration can render and still fail the loader;
 - deployment and runtime debugging need a cluster, and run in a local session.
 
+## Implementation findings
+
+Rationale recorded in `tasks.md`'s notes as the sections were implemented, moved here when
+closeout compressed those notes. Each is current behaviour; the permanent destinations are
+in the design-promotion record.
+
+- **The projection primitive (Section 2).** `ProjectionCache` distinguishes a *poll* (`poll_once`,
+  unforced `refresh()`, `refresh_after_topology_error`), which joins an operation in flight and
+  returns its view, from a *forced refresh*, which waits for it and then fetches (D2). A joined
+  poll whose operation is cancelled polls for itself, unless its own task is being cancelled
+  too, when it re-raises. Unforced `refresh()` no longer re-enters the cache's lock; it
+  deadlocked on a remote identity change before. The tests synchronize on events the fake
+  client sets and gates it parks on; the one point no fake can observe -- a caller parked on
+  the lock or joined to a running operation -- is reached through one documented yield rather
+  than a production hook. `SiteProjectionState` refuses a client that is not an
+  `AggregateCapacityClient`, since only an aggregate names its sites. Its first `run(...)`
+  loop was removed once the controller's timer ran the poller (Section 8): nothing called it,
+  and it read its gate once and could then wait on a family's lock, the gap Section 3 closed.
+  `poll_once` compares every site's resource-pool identity before and after its cycle, so a
+  `refresh_site` landing mid-cycle can wake publication once more than the change alone would;
+  a wake only makes publication run sooner, so this is accepted.
+- **The loop controller (Section 3).** `register_loop` registers and `start_loops()` starts,
+  because VM registers its steps at import and bare metal in its runtime's constructor, where
+  no event loop runs yet. `initial_delay_seconds` (an interval for the sweeps -- watchdog,
+  servicing, payment reconciliation, retention -- whose kit runners made the first cycle due
+  one interval after start; none for publication and the poller) keeps their cadence. The
+  timer re-reads its gate under the cycle lock immediately before the step, so a timer that
+  queued behind an operator's step does not start a cycle a pause requested meanwhile holds,
+  and clears its wake only when the cycle runs, so a wake a held timer did not act on still
+  runs the loop promptly once resumed (D4). The step names its stage through
+  `controller.enter_stage`, which finds its cycle through a context variable `run_cycle` sets,
+  so a step keeps its no-argument shape and a kit cycle driver can take the operation as an
+  injected callable; outside a cycle it records nothing. An outcome records its `trigger`
+  (`timer` or `step`). A step cancelled while it waits for the running cycle records a
+  cancelled outcome naming no stage, since an operator's request is an invocation even when
+  it never reached its step; a timer that queued and was cancelled records nothing, having not
+  passed its re-read gate. A failure before a step could start is logged with its traceback
+  and the timer carries on. The constructor's seams are `disclosed_errors`, `clock`, and
+  `cycle_lock_factory`; `stop_loops` and `clear_loops` take `keep_registrations`, and
+  `register_loop` refuses a non-positive, NaN, or infinite interval or delay. Bare metal's
+  runtime takes a `loop_controller_factory` rather than a controller, so a runtime copied with
+  `dataclasses.replace` builds and registers into its own controller exactly once.
+- **Per-site capacity-event cursors (Section 3).** Each `SiteEventCursor` carries a lock the
+  site's poller and the `capacity-events` step for that site take; the poller re-reads its
+  gate under it, as the controller's timer does, and the preview takes none. The cursor table
+  is module-global and a contended lock binds to the first event loop that waits on it, so a
+  test contending one site's cursor on two event loops resets the table between them
+  (`reset_site_event_cursors()`); production runs one event loop.
+- **The publication driver never strands its worker thread (Section 9).**
+  `PublicationCycleDriver` tracks the coroutines its callbacks hand to the event loop and, when
+  the awaiting cycle is cancelled, cancels them, so the waiting callback and every later one
+  fail at once with `PublicationCycleStopped` and the runner's thread unwinds. Before, a
+  cancelled cycle left the thread blocked on a closed loop and interpreter exit hung joining
+  it, in tests and at production shutdown alike.
+- **Service-peer trust (Sections 4, 10).** `core_storefront.service_peers` holds the
+  resolution both compute storefronts share: seeding configured peers, refusing a site bound
+  to no peer or several, and `ServicePeerTrust`. A site client's provider is read
+  synchronously on the event loop for every response, so it reads memory only (04 F4): the
+  trust holds each site's durable peer status, replaced whole per load under a lock, and
+  reloads after every change committed through its identity authority. VM's capacity runtime
+  is cached across compositions by configuration key, so its site clients carry late-bound
+  providers (`_LateServicePeerTrust`, and `_LateSiteProjections` for the reconciler's
+  projections) that read whichever trust or state the composition root last bound; nothing
+  bound fails each response closed, and the cache key carries no principals. The callback
+  middleware reads the trust from the container, with no thread and no SQLite.
+- **Release conditions in the API-credit storefront (Section 6).** The plan named VM and bare
+  metal only, though D14d covers every domain composing Alkahest; the API-credit storefront
+  composes it with `escrow_shape_guard` among its default policies, so Section 7's fail-closed
+  rules would otherwise have refused its every Alkahest deal. Its composition holds the seller
+  wallet from `[wallet].address`, because the mechanism resources carry no wallet and adding
+  one would change Alkahest's readiness inputs, and a caller-supplied escrow on a chain the
+  storefront does not configure is now refused rather than published unsettleable. The
+  publish-from-quota route gained a typed client (`ApiCreditListingClient`), so its test is
+  application integration through a canonical client.
+- **No Alkahest deal is accepted without its plan (Section 7, 04 F1 and F2).** An exact
+  selection of a mechanism the composed registry builds no accepted obligation for is accepted
+  without a plan only when its seller entry declares `settles_from_agreement` (Arkhai
+  payments); any other, Alkahest among them, is refused with
+  `settlement_selection_requires_plan` before anything is recorded, so a new builder-less entry
+  fails closed. The owner's "refusing exact selection on all three storefronts" was carried out
+  as refusing the planless acceptance, not VM's exact Alkahest selection: every VM Alkahest
+  opening carries a selection and VM accepts it only with its authorized plan, so refusing it
+  would end VM's Alkahest deals. Accepted escrow artifacts fail closed in `kit/alkahest` on any
+  plan-materialization failure, as `SettlementPlanMaterializationError`
+  (`settlement_plan_unmaterializable`), beside `ReleaseConditionError`'s reasons, and every
+  storefront refuses the round with 409; VM had answered such a deal 500, and the API-credit
+  storefront had accepted it planless. The API-credit storefront's non-accepting rounds take
+  `authorized_escrow_proposal_at_amount` (the proposal authorized against the listing, no plan).
+  The recipient condition legacy verification expects is built privately in
+  `escrow_verification`, so no public kit function encodes a condition a listing does not
+  authorize.
+- **VM's composition of the state (Section 8).** The root builds the state over the capacity
+  runtime's aggregate after the runtime and before every consumer; consumers take it through
+  their constructors or builders, the admin controller through `Depends`, and the lifecycle
+  steps and publication cycle from the container. A failure policy's capacity release never
+  fails once the site released the reservation: with no state its reopen is skipped, and a
+  site the state does not hold is reopened from what is held, each logged. An override write
+  refreshes both of the site's families. In tests the state holds what a site served at its
+  last poll, as in production, so the publication suites step `site-projections` before a
+  publication cycle, and a held state never forgets a site, so "a site with no projection" is a
+  restart (a second app over the same database).
+- **VM's loops on the controller (Section 9).** Timers register at startup rather than at
+  import, because retention's interval exists only while contact exchange is composed and each
+  start needs a fresh publication wake (an `asyncio.Event` binds to the loop that first waits on
+  it). The fulfillment-resume step is now the timer's cycle (resume, then payment
+  reconciliation; the step had skipped the second). Every loop but the capacity pollers starts
+  after provisioning preflight and the first projection load. VM defines no configuration or
+  publication error of its own, so its disclosed types are the kit's and core's capacity and
+  domain-binding errors; `ConfigResolutionError` is not among them, its text being able to
+  carry a pydantic input value. A source check reads a listing's families from its durable
+  binding: one bound to a Physical Resource is exact and reads the resource-pool family
+  alone; any other is fungible and reads both, a bucket family holding no generation refusing
+  (D4). Startup refuses an unusable confirmation window or poll interval, by key, before any
+  loop starts. The intermittent `test_payment_settlement` failure (about 2 runs in 11) was a
+  race in the test -- the coordinator starts delivery as a task and awaits a read before
+  answering -- fixed by holding delivery at the harness's existing gate; no production code
+  changed.
+- **VM's startup refusal and seams (Section 10).** The refusal runs before the database,
+  signer, or any collaborator, so no database file and no loop exist when it refuses. A test
+  empties a Dynaconf section by replacing it at its root, since a dotted override leaves an
+  empty table the refusal counts as stated. The site-trust test is router-level application
+  integration, labelled so, because the lifespan's provisioning preflight and first poll need a
+  reachable provisioning service. `server.VmCompositionSeams` (peer configuration, trust,
+  startup refusal) replaced the composition test's module patches. `terminate_vm_lease` takes
+  the site from the caller, as every record-bound VM fulfillment call does, rather than from the
+  in-memory reservation cache, and takes the fulfillment client so tests reach the fake site
+  transports through its factory seam.
+- **Bare metal's loader (Section 11).** `settings_source()` reads the files present when it is
+  called, not at import. Section and key names read in any case at each typed level; names
+  inside a table keyed by name keep their spelling; `[Settlement]` is lowercased at every depth
+  and `[Delivery]` keeps its spelling, as VM's loader treats them. A setting that cannot be
+  read raises `BareMetalConfigurationError` naming each key path and reason, raised outside the
+  validation handler so no value (a wallet key among them) rides in the exception chain.
+  Dynaconf merges two spellings of one key silently, so the loader cannot refuse them; the
+  chart's generated schema does. The runtime carries every value its consumers read, defaulting
+  from `config.packaged_settings()` (the packaged file alone), so no consumer reads settings or
+  the environment.
+- **Bare metal's publication cycle (Sections 13, 14).** A bare-metal registry that cannot be
+  reached does not fail a cycle -- the cycle records the publish as failed and converges later --
+  so the spec scenario "Publication fails every cycle" takes the storefront's database being
+  unavailable as its example (owner, 2026-10-19). A dry run's refresh or reopen returns
+  unchanged to the cycle driver, which counts any other status as a failed candidate, and is
+  logged at info as a preview.
+- **API-credit startup (Section 15, round 12).** The renamed interval, the capacity sites'
+  authorities, and the capacity poll interval are read before the signer, database, or any
+  loop, each refused by key under its own heading, so a malformed site or interval stops
+  startup early rather than in the middle of the startup tasks. `register_fan_out` names its
+  children before registering anything, and `start_loops` names every fan-out's children
+  before starting any task.
+
 ## Open questions
 
 - *Should VM's storefront stop its loops at shutdown, as bare metal's does (D6, as delivered
   for bare metal)?* VM's stop hook clears the container's lifespan state while a loop may
   still be mid-cycle, so a cycle can run on against collaborators the lifespan has dropped;
   the alternative is the kit shell stopping a storefront's loops itself, for every storefront.
-  Raised in Section 13; not prescribed by any task, so no task carries it, and it is the
-  owner's to decide or defer to `kit-owned-storefront-shell`.
+  The API-credit storefront's stop hook leaves its loops running too. Raised in Section 13;
+  not prescribed by any task, so no task carries it, and it is the owner's to decide or defer
+  to `kit-owned-storefront-shell`.
+
+Raised during implementation for the owner and left undecided; no task prescribes any of them:
+
+- *Oracle-gated configuration at startup (Section 6).* A storefront whose `oracle_gated` model
+  names no trusted oracle, or names the seller wallet as its oracle, starts and then refuses
+  every Alkahest candidate; these could be startup refusals, as an undeliverable release model
+  is.
+- *An empty seller wallet (Sections 6, 7).* It still derives and publishes a recipient
+  condition with no recipient, which every deal refuses as `release_condition_unreadable`,
+  rather than refusing at startup or publication (D14d).
+- *An unpinned proposal's token (Section 7).* A proposal with the zero escrow address may name
+  any token; the shape guard skips it and authorization does not read it. Pre-existing and
+  outside correction 9.
+- *Re-authorization against the listing as it is now (Section 7).* Seller verification, bare
+  metal's acceptance, and the API-credit settle path re-materialize against the listing as
+  stored when they run, so a listing whose conditions changed after acceptance fails them
+  closed; VM's refund reads the accepted plan instead.
+- *Resumed buyer runs (Section 7).* A resumed run holding only an accepted proposal refuses
+  (`escrow_release_condition_missing`), while one holding the seller's accepted escrow terms
+  creates the escrow from them unchecked; recording the listing's conditions in the run-log
+  would let both be checked.
+- *Buyer-side checking of the seller's terms (Section 7).* Only the VM buyer's selection path
+  checks a seller's accepted escrow terms against the listing (`validate_selected_escrow_plan`);
+  the core orchestration creates the escrow unchecked for the API-credit buyer and VM's proposal
+  path. Checking every path needs a domain hook, since `core/buyer` cannot import `kit/alkahest`.
+- *Version bumps for changed code (Section 7).* `kit/policy` and the storefronts changed code
+  without a version bump; `kit/negotiation-runtime`'s exact pin of `kit/policy` is why it kept
+  0.4.0.
 
 Otherwise none. A mechanical check that storefronts read no application settings from their
 environment was decided against in this change and given a change of its own,

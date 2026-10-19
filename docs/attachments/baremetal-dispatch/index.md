@@ -20,9 +20,9 @@ The reproducible first-use surface is:
 cd domains/bare_metal/storefront && uv run --no-sync pytest tests/test_http_settlement.py tests/test_http_introductions.py -q
 ```
 
-This opens the controlled settlement → selected-site delivery/result/restart/teardown and authenticated contact-reveal paths. Each invocation creates fresh temporary databases and cleans them up. Do not reuse an existing storefront database: the introducing evidence and lifecycle migrations changed in place, and startup refuses old receipt-only evidence or escrow-named lifecycle schemas with an explicit reset error. For an operator deployment, select a new owned `BARE_METAL_STOREFRONT_DB_PATH` and republish/re-negotiate; there is no adoption/copy/drop migration.
+This opens the controlled settlement → selected-site delivery/result/restart/teardown and authenticated contact-reveal paths. Each invocation creates fresh temporary databases and cleans them up. Do not reuse an existing storefront database: the introducing evidence and lifecycle migrations changed in place, and startup refuses old receipt-only evidence or escrow-named lifecycle schemas with an explicit reset error. For an operator deployment, select a new owned `db_path` in the storefront's configuration and republish/re-negotiate; there is no adoption/copy/drop migration.
 
-Environment startup now requires explicit `BARE_METAL_STOREFRONT_SETTLEMENT`. Alkahest's entry alone requests EVM/chain resources; payment and contact do not inherit that requirement. Existing site and identity configuration still applies. No inherited deployment selector was reused or seeded.
+Startup requires an explicit `[Settlement]` root in the storefront's configuration files, with a mechanism enabled. Alkahest's entry alone requests EVM/chain resources (`[Wallet]`, `[Chains]`); payment and contact do not inherit that requirement. Existing site and identity configuration still applies. No inherited deployment selector was reused or seeded.
 
 ## Observed boundaries
 

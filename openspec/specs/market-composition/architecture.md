@@ -141,6 +141,8 @@ assumed home for a convention consumed by non-escrow mechanisms.
 
 Composition roots register installed settlement mechanisms explicitly. Each registration contributes its canonical ID, typed configuration, role applicability, preflight, client factory, listing-option builder, buyer compatibility, and optional command group. Core roles consume only ordered registrations and common readiness; they neither branch on mechanism IDs nor import concrete configuration models.
 
+A domain's seller stage for a mechanism may also declare what the domain can deliver under it. Each domain's Alkahest seller stage declares the release models it can deliver — VM all three, bare metal `recipient` and `oracle_gated`, API credits `recipient` — and its composition refuses a configured model the domain does not declare, enabled or not, before it opens a database. A stage's `settles_from_agreement` likewise says whether a deal under its mechanism settles from the accepted Agreement alone; an exact selection of a mechanism whose registration builds no accepted obligation is accepted without a plan only when it does.
+
 Registration controls construction, not lifecycle ownership. A composition injects the marketplace signer, wallet, chains, or other shared resources only into mechanisms that declare them, then composes only the lifecycle the selected mechanism uses. An Arkhai-payment-only VM composition starts without EVM resources. Its mandate and receipt feed the existing selected-site fulfillment stage, not the obligation journal.
 
 ## Frozen storefront registry and executable ownership
@@ -195,6 +197,52 @@ backing)` whose mode is declared by the selected Resource Pool and matches the
 public offer, and whose `backing` is the delegate its pool's declared label
 selects. Commit, release, fulfillment, and restart use the recorded site and
 never default a mode or fan out to another authority.
+
+The capacity kit also owns per-site projection state, `SiteProjectionState`:
+for every site the storefront's aggregate capacity client names, the
+resource-pool and capacity-bucket projections, their poller, a per-site
+refresh, the poller's cycle on demand, the drift check a topology-sensitive
+refusal triggers, and a per-site, per-family status. The composition root
+builds exactly one instance per process over its aggregate, with the
+publication wake as its resource-pool change callback, and injects it into
+every consumer. It is an instance rather than module state for the same reason
+the loop controller is: two ways to reach the state would leave tests patching
+a module, and a domain facade over a kit registry would be a second way. The
+state is built once and never replaced; every refresh updates it in place, so
+refreshing every site during an outage keeps an unreachable site's last
+generation as stale rather than turning the site unknown. It runs one
+operation at a time on a site's family, its version check included, in core's
+`ProjectionCache`, so every user of the primitive is serialized: a poll
+arriving during another joins it, a refresh-and-reconcile waits for it and then
+fetches, and a failed operation never replaces a confirmation that completed
+after it began. `freshly_confirmed` is the rule a listing-source check applies
+in every domain: a `loaded` generation confirmed within the storefront's window.
+The state is domain-neutral; a domain checks a generation's trust when it reads
+it.
+
+The kit loop controller is the one place a storefront loop's cycle runs.
+`run_cycle(name)` takes that loop's lock, runs its step, and records exactly
+one terminal outcome in a `finally`, whether its timer or an operator's step ran
+it; the timer the controller starts is a gate, `run_cycle`, and wait over the
+same operation, so the two never run concurrently, and a held loop runs no timer
+cycle, so a step taken while held never waits. A loop registers in one of two
+forms: `register_loop`, a timer loop with its interval, or `register_fan_out`, a
+loop whose task a kit runtime owns and which runs independent cycles in declared
+children — the per-site capacity-event pollers, each serialized under its site's
+cursor lock. A fan-out's children are declared as its children when it
+registers and again when it starts, so status lists every site's poller before
+its first cycle, a child reports its parent's `exited` or `cancelled` once the
+parent's task has ended, and the controller issues a cycle recorder only to a
+declared child, never to a loop whose cycles it runs. `register_step` registers
+a loop's step apart from its timer, so every lifecycle route can run a step
+before startup registers timers, and `start_loops()` is the only start, for
+timers and fan-outs together. A recorded error carries its exception's type,
+and its message only when the exception is one of the storefront's disclosed
+configuration or publication errors, so no value an unexpected exception's text
+holds reaches status; the full exception stays in the log. A preview records
+nothing, and an exited or cancelled loop stays distinct from a running one
+whose last cycle failed. The controller's snapshot is what every storefront's
+system status reports as `lifecycle`.
 
 Every capacity effect — reserve, commit, release, lease truncation — passes
 one guarded boundary, `CapacityEffects`, composed over any aggregate capacity
