@@ -95,8 +95,8 @@ asset). The tasks remain as the record; no open gate remains in this change.
       (`kind: inference.v1`, `version: 1`, payload `{quantity ≥ 1, key: {mode,
       key_id?}}`) and `make_inference_provision_terms`, copied from the
       API-credits module with the kind changed. State in the module docstring
-      that the shape is shared by design and that kit ownership is decided by
-      `extract-access-issuance-kit`.
+      that the shape is shared by design and that family ownership is decided by
+      `compose-api-family-kit`.
 - [ ] 3.2 `domains/inference/schema.py`: `InferenceMessage`, `InferenceTerms`,
       `InferenceMaterialization` (adds the pinned `rate_card`), `InferenceReceipt`,
       `InferenceResult`, each `extra="forbid"`, each carrying `kind:

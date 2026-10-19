@@ -384,20 +384,24 @@ request; inference must reserve a worst-case charge, run the request, and settle
 from measured usage, because the cost is unknown until the response is complete
 and a single request can exceed a key's balance.
 
-The campaign therefore proceeds in a fixed order: define the vocabulary; compose
-a stack by copying the API-credits roles and prove one deal at a flat charge per
-request; extract what two working consumers show to be shared, with the
-API-credits digests pinned byte-for-byte first; replace the flat charge with
-hold-then-settle metering; package the seller path thinly; qualify the market.
-Extraction is deliberately not first, because its boundary is not knowable from
-one consumer. See [`openspec/changes/README.md`](../../openspec/changes/README.md)
+The campaign therefore proceeds in a fixed order: define the vocabulary; build
+an `api` family vocabulary and kit by refactoring API credits onto it, with the
+API-credits digests pinned byte-for-byte first; compose the inference roles on
+the kit and prove one deal at a flat charge per request; replace the flat charge
+with hold-then-settle metering; package the seller path thinly; qualify the
+market. An earlier order copied the API-credits roles into inference first and
+extracted afterwards, because the shared boundary was thought unknowable from
+one consumer; the copy was carried as far as the storefront and the authority,
+measured at about 12,500 copied source lines against fewer than 300 new ones,
+and withdrawn unmerged on 2026-10-19 in favour of the family-kit shape compute
+already uses. See [`openspec/changes/README.md`](../../openspec/changes/README.md)
 for readiness.
 
 | Open gap | Owned by |
 |---|---|
 | No inference vocabulary: domain identity, model-card listing, rate card, provision intent, usage record and charge derivation, usage evidence, registry filter specification | [`add-inference-domain-contract`](../../openspec/changes/add-inference-domain-contract/) |
+| API credits has no family: issuance, the key authority, the gate client, and the storefront's issuance composition are namespaced to it, and the authority mirrors the digest function, so a second API-selling domain can only copy them | [`compose-api-family-kit`](../../openspec/changes/compose-api-family-kit/) |
 | No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
-| Bearer-credential issuance and evidence are namespaced to API credits and will be duplicated by the inference stack; the authority mirrors the digest function | [`extract-access-issuance-kit`](../../openspec/changes/extract-access-issuance-kit/) |
 | No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
 | Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
 | No multi-seller, concurrency, cancellation, lifecycle, late-usage, buyer-profile, or cross-language evidence; the per-domain deal path is not release-qualified | [`qualify-inference-market`](../../openspec/changes/qualify-inference-market/) |

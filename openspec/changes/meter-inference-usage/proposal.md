@@ -69,9 +69,9 @@ reserve-then-settle, and the place to do it is the authority, not the gate.
 
 ## Dependencies and Related Changes
 
-- **Depends on** `compose-inference-domain-stack` for a working stack and on
-  `extract-access-issuance-kit` being accepted: the authority this change
-  mutates is the kit-composed one, and it is mutated once.
+- **Depends on** `compose-inference-domain-stack` for a working stack: its
+  authority is composed on `compose-api-family-kit`'s kit, so the authority
+  this change mutates is the kit-composed one, and it is mutated once.
 - `add-inference-domain-contract` owns the charge derivation this enforces;
   any change to the formula is a delta there, not here.
 
