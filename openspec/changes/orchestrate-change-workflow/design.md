@@ -194,10 +194,13 @@ F1). Every round recorded at once would leave the latest taken for the current o
 and all sharing one `after`. The governing plan line is the latest `finished` plan
 line, and the next round is the first of its `rounds` with a section `tasks.md`
 does not show complete; an amended plan maps only its incomplete sections, leaving
-earlier rounds as recorded. When the latest plan line has no `rounds`, or an
-incomplete section is in no planned round — a change planned before the mapping
-existed, a section a triage appended — the computation names the owner, asked once
-per round, the answer recorded `by: owner` as that round starts (70 F1). The mapping
+earlier rounds as recorded. The computation holds the mapping to that: a complete
+section in the next round is left out of it, as the closeout section is, and a
+round naming a section `tasks.md` lacks goes to the owner before it is recorded,
+since a round line naming it could not be classified (77 F2). When the latest
+plan line has no `rounds`, or an incomplete section is in no planned round — a
+change planned before the mapping existed, a section a triage appended — the
+computation names the owner, asked once per round, the answer recorded `by: owner` as that round starts (70 F1). The mapping
 lives only in the log, like the rest of what orchestration depends on; a checkout
 without the log is asked. A change designed before the
 cadence was a design decision, with no cadence and no `round` line, is asked about
@@ -375,7 +378,11 @@ writing actions), since a chained command runs only when every command in it is
 allowed and the first round's validation and triage stopped on chains of exactly
 those (07 A1); `make round-view-closed` is matched with a trailing variable (X4);
 and every step may run the next-step computation, so a step can see where the
-change stands. No row admits a shell loop: `bash -c` cannot be allowed without
+change stands, and `make change-cost`, the read-only cost report (74 O3). The
+read-only Git commands are held read-only by deny rules on the diff family's
+`--output`, which writes its output to a file: `git diff`, `git show`, and `git
+log` are allowed only without it, since git accepts no abbreviation of the option
+(77 F1). No row admits a shell loop: `bash -c` cannot be allowed without
 allowing any command (29 A2). A step waits on a background command inside one
 Bash call, with a blocking read-only `tail -f … | grep -m1` on the line the
 command prints when it ends, repeated when the call times out, and never by
@@ -404,11 +411,13 @@ record is the harness's and names the call, the message is the model's and
 generalizes (the first round's steps reported "Bash is not allowed" for a chain
 missing `echo`; X5). The reading, in `change-orchestrate`:
 
-1. Each recorded denial carries the harness's reason. `mode` — no allow rule under
-   `dontAsk` — is a gap in the table. A deny-rule match is a forbidden action, the
-   skill's "never" line enforced; its value is unverified until the pilot records
-   one, and until then any value but `mode` is read as not a gap. An unknown value
-   goes to the owner.
+1. A recorded denial carries the harness's reason when the harness gave one.
+   `mode` — no allow rule under `dontAsk` — is a gap in the table. A denial with no
+   reason met a deny rule: the harness reports a reason only for a decision of the
+   permission mode, as the round of sections 6a–6d showed, its eight deny-rule
+   denials carrying none beside a `mode` denial in the same run (74 R2). That is a
+   forbidden action, the skill's "never" line enforced. Any other value goes to
+   the owner.
 2. `run_change_step.py denials <change> <seq>` lists each denial with the tool
    calls the run made after it, from the transcript. A later call that did the
    denied call's work by another means is a workaround: the run's outcome is not
@@ -479,9 +488,13 @@ Archive cleanup drafts the pull request; the owner creates it.
 
 After a round's sections are committed, the orchestrator runs `make round-view` in
 its own session, under the owner's permissions, which pushes the round and
-dispatches the pipeline. It waits for the owner's word. When the owner gives notes
-on the round, the orchestrator saves them verbatim as the change's next numbered
-record, `reviews/NN-implementation-owner.md`, which triage already takes as the
+dispatches the pipeline. The view's base is the commit the round's `round` line
+recorded as `HEAD` when the round started, so commits landing between rounds — a
+design revision, another change's sections on a shared branch — are not shown as
+the round's; a round line naming none, one recorded after the fact, falls back to
+the latest triaged validation's commit (74 R3). It waits for the owner's word.
+When the owner gives notes on the round, the orchestrator saves them verbatim as
+the change's next numbered record, `reviews/NN-implementation-owner.md`, which triage already takes as the
 owner's findings, so a restart cannot lose them. It then runs `make round-done`, and
 starts validation and the implementation review side by side, validation adopting
 the running pipeline through `make round-e2e-baseline`. This is
@@ -524,15 +537,21 @@ model's eye; a review on Claude is better than none, and halting on a missing
 reviewer only costs the owner time (G6a, the practice of the first cloud run).
 
 The review has a row in the step table, `skill = "change-review"`, whose Claude
-entry is held read-only: reading, read-only Git, and the common read utilities,
-with no edit. A review on Claude runs without the outcome schema: its final text is
-the review, checked and published as Codex's is, and its outcome derived the same
-way. The record's `reviewer-session` carries its harness, `codex:<id>` or
+entry is held read-only: reading, read-only Git with the diff family's `--output`
+denied (D6, 77 F1), and the common read utilities, with no edit. A review on
+Claude runs without the outcome schema: its final text is the review, checked and
+published as Codex's is, and its outcome derived the same way. The record's `reviewer-session` carries its harness, `codex:<id>` or
 `claude:<id>`, and a review continues the previous reviewer's session only on the
 same harness, otherwise starting fresh; an untagged marker, written before the tag
-existed, is a Codex session. The table is the policy; `REVIEW_MODEL` and
-`REVIEW_EFFORT` are unset by default and, when given, override the Codex entry for
-one run, their values being Codex models (69 F4, 70 F6).
+existed, is a Codex session. The table is the workflow's policy. `REVIEW_MODEL`
+and `REVIEW_EFFORT` are unset by default and are the owner's choice for a review
+run by hand, outside that policy on purpose, a forbidden model included:
+`REVIEW_MODEL` replaces the review's models with the one named, its harness read
+from its name — a `claude-` model on Claude, any other on Codex — with no fallback,
+and its effort the one given or the table's for that harness; `REVIEW_EFFORT` alone
+replaces every entry's effort. The record carries a `reviewer-override` marker and
+its log line `override: true`, and the orchestrating session never sets either
+(77 F3, 74 O1; earlier 69 F4, 70 F6).
 
 ### D12 — The skills change how they ask and report, not what they check
 
@@ -700,10 +719,11 @@ from replayed context and the orchestrator's reading, not the model. Validation
 runs commands and reads their logs, and archive cleanup edits a row and drafts a
 pull request; Sonnet at medium suits both.
 
-The table loader refuses a row naming Fable or Astra, which are never used, and a
-row listing two models of one vendor: an outage or a usage limit takes both down,
-so a second model of the same vendor is no fallback. Codex appears only where its
-sandbox can hold the step to its limits, which today is the review alone: a
+The table loader refuses a row naming Fable or Astra, which the workflow never
+chooses — only the owner's own override of a review run by hand may name them
+(D11) — and a row listing two models of one vendor: an outage or a usage limit
+takes both down, so a second model of the same vendor is no fallback. Codex
+appears only where its sandbox can hold the step to its limits, which today is the review alone: a
 `workspace-write` sandbox cannot refuse a commit or a relock. A step whose one
 model is unavailable ends `stopped` with the reason and the time the limit resets,
 and waits.
@@ -882,13 +902,51 @@ environment, each under its decision's label:
 - **70 F4** — closeout's and archive cleanup's entry checks read `## Next`; branch
   checks accept a recorded `branch` decision; see D12, D15.
 - **70 F6** — the Codex entry pinned to `gpt-6-sol`; untagged markers are Codex;
-  `REVIEW_MODEL` overrides the Codex entry only; see D11, D18.
+  `REVIEW_MODEL` overrides the Codex entry only (superseded by 77 F3, below); see
+  D11, D18.
 - **70 F7** — tokens summed over a run's result events; a closeout bucket; the gap
   from the session's last turn; see D19.
 - **70 F8** — the capability line and D16's interrupts.
 - **70 F9** — closeout validation only when a path outside `openspec/` and `docs/`
   changed; see D14.
 - **70 F10** — the pilot resumes on whatever tooling is committed then; see Pilot.
+
+### Decisions at the fifth implementation round's triage
+
+The round of sections 6a–6d, triaged from review 77, the owner's notes and the
+orchestrator's observations (74), and validation 78.
+
+- **77 F1 (option a)** — `common` denies the diff family's `--output` on `git
+  diff`, `git show`, and `git log`; see D6, D11. Rejected: a process sandbox for
+  the Claude reviewer (unverified on the owner's machine, and a worktree lacks the
+  ignored `reviews/` the reviewer reads); rewording D11 to admit the shell route.
+- **77 F3 / 74 O1 (option a)** — `REVIEW_MODEL` and `REVIEW_EFFORT` stay, as the
+  owner's whole-entry override of a review run by hand, deliberately outside the
+  table's policy and marked on the record and its line; see D11, D18. Rejected:
+  deleting them (the owner wants to choose any model, Fable and Astra included,
+  for a review run by hand); an environment variable for every wrapper step (an
+  orchestrating session started from the same shell would inherit it); a flag on
+  the script alone.
+- **77 F2** — a planned round naming a section the task list lacks goes to the
+  owner before it is recorded; a complete section is left out of its round; see
+  D13 and `next_round`.
+- **74 O2 (option 2)** — `scripts/run_change_step.py` is split into a
+  standard-library package, `scripts/change_workflow/`, behind the same entry
+  point, as section 6e, implemented after the pilot resumes. Rejected: in the fix
+  commit (it would bury the fixes in a move); a follow-up change (closeout would
+  describe a layout about to change).
+- **74 O4 / O5 (option a)** — validation and the review keep waiting for `make
+  round-done`; running them while the owner reads is recorded as an open question
+  in `parallel-change-workflows`' proposal, which meets the same problem. Rejected
+  here: a worktree for validation and review, which changes the assumption both
+  rest on, that the checkout is the commit.
+- **74 R1** — a task editing `.claude/` is the orchestrator's, made on the owner's
+  word before its section's session starts and committed by the session;
+  `change-plan`, `change-orchestrate`, and `change-implement` say so.
+- **74 R2** — a denial with no reason met a deny rule; see D6a.
+- **74 R3** — a round line records `HEAD` as the round starts, and the round view's
+  default base is that commit; see D9.
+- **74 O3 / R4** — every step may run `make change-cost`; see D6.
 
 ## Risks / Trade-offs
 

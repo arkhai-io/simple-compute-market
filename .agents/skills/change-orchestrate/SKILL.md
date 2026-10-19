@@ -65,7 +65,9 @@ For `design`, `plan`, `implement`, `triage`, `validate`, `closeout`, or
 implementation `sections` as `SECTIONS=<comma-separated-ids>`; each session
 implements its sections in order, committing each separately. For `review`, run
 `make review CHANGE=<change> KIND=<computed-kind>`: the review runs on its row's
-models, Codex first and Claude when Codex is unavailable. For
+models, Codex first and Claude when Codex is unavailable. Never set
+`REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's choice for a review run by
+hand, outside the row's policy. For
 `validate-and-review`, start validation with `UNATTENDED=1` and the review with its
 computed `KIND` side by side. Wait for both outcomes before triage and keep their
 waiting runs distinct. Never advance with a process still running or bypass a
@@ -170,8 +172,9 @@ has seen it. A denied chain retried as separate allowed commands alone does not
 establish a workaround. One denied call is not a denied tool.
 
 Classify by the harness's `reason`: `mode` means a missing allow rule, a gap; a
-deny-rule match is forbidden. Until its value is verified, any value other than
-`mode` is not a gap; take an unknown value to the owner. Never grant a deny-rule
+denial with no `reason` met a deny rule and is forbidden, since the harness
+reports a reason only for a decision of the permission mode. Take any other
+value to the owner. Never grant a deny-rule
 denial: an allow cannot override it. For a gap propose the narrowest matching
 rule, distinguishing a one-run `--allow` on a stopped run's resume from a routine
 tracked edit in `.claude/change-steps.toml` for the owner to commit. Never widen
@@ -206,7 +209,13 @@ python3 scripts/run_change_step.py note <change> round --sections '1,2;3' --by o
 
 For a round recorded after the fact add `--after <highest-record-before-round>`;
 do not count that round's own records as preceding it. Recompute and run its
-sessions without another question about them.
+sessions without another question about them. A round noted as it starts records
+`HEAD` on its line, and `make round-view` shows the round against that commit.
+
+No step may edit `.claude/`, so a task the plan gives you — an edit of the step
+table or the project's Claude Code settings — is yours: before starting the
+session whose sections hold it, show the owner the edit, and on their word make
+it, uncommitted, for that session to commit with its section.
 
 For `round-view`, run `make round-view CHANGE=<change>` in this session: it
 pushes and dispatches the pipeline, then shows the committed round as uncommitted

@@ -579,6 +579,24 @@ def test_a_closeout_section_a_plan_maps_is_left_out_of_its_round(tmp_path: Path)
     assert recorded["step"] == "round-view"
 
 
+def test_a_planned_round_naming_a_section_the_task_list_lacks_goes_to_the_owner(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", {**PLAN, "rounds": [[[2, 9]], [[3]]]})
+
+    result = _next(root)
+
+    assert (result["step"], result["round"]) == ("owner", ["2", "3"])
+    assert "task list lacks: 9" in result["reason"] and "sections" not in result
+
+
+def test_a_complete_section_a_plan_maps_is_left_out_of_its_round(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for implementation")
+    _log(root, "plan", {**PLAN, "rounds": [[[1], [1, 2], [3]]]})
+
+    assert _next(root)["sections"] == [[2], [3]]
+
+
 # `## Next` belongs to the bare heading, and to the review triaged with the round's.
 
 def test_a_next_round_heading_is_not_next(tmp_path: Path) -> None:

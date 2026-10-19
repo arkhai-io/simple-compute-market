@@ -57,7 +57,11 @@ carrying a lens, a basis, a severity, and evidence — and only then publishes i
 under the next number. A review continues the previous reviewer's session of the
 same kind, so a second design review knows what the first asked; `FRESH=1` starts
 a new one. `REVIEW_BASE` is the branch the diff is taken against (`dev` by default),
-and `REVIEW_MODEL` and `REVIEW_EFFORT` pick the reviewer. A pre-closeout review
+and `REVIEW_MODEL` and `REVIEW_EFFORT` are the owner's choice of reviewer for one
+run, outside the step table's policy: `REVIEW_MODEL` replaces the review's models
+with the one named, a `claude-` model running on Claude and any other on Codex,
+with no fallback, and the record and its log line mark the run as an override.
+The orchestrating session never sets them. A pre-closeout review
 refuses until the latest validation passed and names `HEAD`, or an ancestor that
 differs only in the change's ledger and reviews; `UNVALIDATED=1` overrides that.
 `make design-review CHANGE=<change>` is shorthand for `KIND=design`.

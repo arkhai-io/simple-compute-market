@@ -60,8 +60,9 @@ proposal deferred can be built on them.
 - Each step runs on an ordered list of models with their effort, in the step table:
   Opus 5.5 at high effort for design, triage, implementation, and closeout; Sonnet
   5.5 at medium for validation and archive cleanup; the review on Codex, falling
-  back to Claude when Codex is unavailable. Fable and Astra are never used, and no
-  step falls back to another model of the same vendor.
+  back to Claude when Codex is unavailable. The workflow never chooses Fable or
+  Astra, and no step falls back to another model of the same vendor; the owner may
+  choose any model for a review run by hand, and the record says so.
 - Every run records its cost, its gap since the session's previous run, and whether
   it hit the prompt cache; `make change-cost` reports them by step and round.
 - Bash completion of change names and review kinds on the workflow's `make`
@@ -131,8 +132,9 @@ proposal deferred can be built on them.
   one change per branch, a prerequisite's proposal landing on dev first; routing is
   deterministic; restrictions apply only to unattended runs; the owner is
   interrupted only for judgement; the orchestrator relays and routes and does not
-  judge; implementation cadence is a design decision; Fable and Astra are never
-  used; a model of the same vendor is no fallback) —
+  judge; implementation cadence is a design decision; the workflow never chooses
+  Fable or Astra, though the owner may for a review run by hand; a model of the
+  same vendor is no fallback) —
   `openspec/specs/change-workflow/architecture.md`.
 - How to start and resume an orchestrated change, state the implementation cadence
   in a design, maintain the allow-lists and each step's models, and read

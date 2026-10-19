@@ -524,10 +524,13 @@ class Computation:
         show complete. A change planned before plans carried a mapping, or whose
         first open section no planned round names — one a triage appended — is the
         owner's to distribute, once per round. A closeout section a plan maps is
-        left out of the round: closeout implements it.
+        left out of the round, since closeout implements it, and so is a section
+        already complete. A round naming a section the task list lacks goes to the
+        owner before anything is recorded: the mapping no longer describes the plan,
+        and a round line naming it would leave the round unclassifiable.
         """
         open_ids = [s.id for s in work if not s.complete]
-        closeout = {s.id for s in self.state.sections if s.closeout}
+        by_id = {s.id: s for s in self.state.sections}
         plan = next((e for e in reversed(self.state.log)
                      if e.get("step") == "plan" and e.get("outcome") == "finished"), None)
         planned = plan.get("rounds") if plan else None
@@ -538,8 +541,13 @@ class Computation:
                               f"for section {open_ids[0]}", round=open_ids)
             for round_ in planned:
                 if any(str(s) in open_ids for session in round_ for s in session):
+                    if unknown := [str(s) for session in round_ for s in session
+                                   if str(s) not in by_id]:
+                        return _owner("agree the next implementation round: the plan's round "
+                                      "names sections the task list lacks: "
+                                      + ", ".join(unknown), round=open_ids)
                     sessions = [kept for session in round_
-                                if (kept := [s for s in session if str(s) not in closeout])]
+                                if (kept := [s for s in session if str(s) in open_ids])]
                     return {"step": "round", "sections": sessions, "by": "plan",
                             "reason": f"the plan's next round (seq {plan['seq']}): record "
                                       "it as it starts, then implement it"}

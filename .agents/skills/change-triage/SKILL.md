@@ -337,7 +337,10 @@ whether the round's accepted fixes merit another review round, while still prese
 - **fix:** once every finding has a disposition, make the accepted fixes, as
   `change-implement` makes a section's changes: the change and the decision it
   rests on, and no more; at the lowest test level that proves it; comments
-  describing the current system. Record each in the task notes of the section it
+  describing the current system. Every step is denied edits under `.claude/`, so
+  an accepted fix there — the step table, the project's Claude Code settings — is
+  made by the orchestrating session or the owner, on the owner's word, and you
+  commit it with the round's fixes. Record each in the task notes of the section it
   concerns, naming the finding; a fix that concerns no section goes in a note
   under the last implemented section. Then run `change-implement`'s checks before
   committing (its step 5): `make lock` and `make check-packaging` when a

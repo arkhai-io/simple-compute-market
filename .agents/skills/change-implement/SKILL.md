@@ -65,7 +65,8 @@ the session, and every turn ends with an outcome matching
   `Depends on` gates implementation while unlanded. A change `in closeout` whose
   return to implementation the owner has confirmed is set `in implementation`.
 - **Worktree.** It is clean, or holds only changes the owner confirms are this
-  section's. `make round-view-closed` passes: while the owner reads a round
+  section's, or the edit under `.claude/` that a task of this section gives the
+  orchestrator (section 3). `make round-view-closed` passes: while the owner reads a round
   (`make round-view`), the branch points at the round's base and its changes are
   uncommitted, so committing a section then would squash the round into it.
 - **Task list.** `make check-tasks CHANGE=<change>` passes. A task numbered for
@@ -103,6 +104,9 @@ Work through the section's tasks in order. For each:
 
 - Make the change the task and its cited decision call for, and no more. Work that
   belongs to a later section stays there.
+- A task the plan gives the orchestrator — an edit under `.claude/`, which every
+  step is denied — is never attempted: check that its edit is in the worktree and
+  commit it with the section. When it is missing, stop and name the edit.
 - Prove it at the lowest test level that can (`TESTING.md`), through the seams and
   injected dependencies the code already offers rather than brute-force patching.
 - Respect the dependency layers in `ARCHITECTURE.md`; `TYPE_CHECKING` imports count.

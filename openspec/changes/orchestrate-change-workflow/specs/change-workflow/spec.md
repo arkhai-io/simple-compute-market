@@ -221,13 +221,14 @@ to design.
 An unattended run MUST be limited to the tools its step's permission table allows,
 and MUST NOT be granted a push other than validation's guarded push. Every denial a
 run records MUST be recorded on the run's outcome, from the run's own record and
-with the harness's reason. A run that cannot go on without a denied tool MUST end
+with the harness's reason when it gives one; the harness gives none for a call a
+deny rule refused. A run that cannot go on without a denied tool MUST end
 with a stopped outcome naming the denial, rather than asking a question or working
 around it; a run that goes on MUST do so only by calls its step's rules allow. The
 orchestrating session MUST read each recorded denial from the run's record, never
-from the step's message; classify it by the harness's reason as a gap in the table
-or a forbidden action; check the run's later calls for a workaround; propose, for
-a gap, the narrowest rule that matches the call and say whether it is a one-run
+from the step's message; classify it by the harness's reason, or its absence, as a
+gap in the table or a forbidden action; check the run's later calls for a
+workaround; propose, for a gap, the narrowest rule that matches the call and say whether it is a one-run
 grant or a tracked change; and record its reading in the workflow log as a
 decision reading that run, before the next step runs. A run whose outcome still
 waits — a question, a proposed return — MUST be answered or decided after its
@@ -303,7 +304,17 @@ all unavailable MUST end stopped, naming the reason; a network error MUST be ret
 and MUST NOT cause a fallback. A waiting run MUST be resumed only on the model it ran
 on. A review run on a model other than its row's first MUST name its reviewer's
 harness and model in its record, and a review MUST continue a previous reviewer's
-session only on the same harness.
+session only on the same harness. The owner MAY name, for one review run by hand,
+any model, outside the table's policy, or an effort for its models; a model named
+MUST then be the run's only one, with no fallback, and the record and its log line
+MUST mark the run as an override.
+The orchestrating session MUST NOT name one.
+
+#### Scenario: The owner reviews on a model the table forbids
+
+- **WHEN** the owner runs a review by hand naming a Fable model
+- **THEN** the review runs on that model alone, and its record and log line mark it
+  as the owner's override
 
 #### Scenario: Codex is unavailable for a review
 

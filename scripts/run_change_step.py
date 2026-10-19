@@ -322,7 +322,7 @@ def _section_ids(sessions: Any) -> bool:
 
 
 def note_round(path: Path, sections: Any, by: str, after: int | None = None,
-               clock: Clock = _utc_now) -> Entry:
+               clock: Clock = _utc_now, commit: str | None = None) -> Entry:
     """Record the implementation round the owner agreed: its sessions, each a list
     of the sections that session implements, in order.
 
@@ -330,7 +330,9 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     before the round, so the round's own records — the owner's notes, its
     validation and review, their triage — are those numbered above it. It is read
     from `reviews/` when the round is agreed before it starts, and given for a
-    round recorded after the fact, whose records already exist.
+    round recorded after the fact, whose records already exist. `commit` is `HEAD`
+    as the round starts, the base its round view shows the round against: commits
+    landing between rounds, a design revision among them, are not the round's.
     """
     if not _section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
@@ -343,7 +345,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     return append_entry(path, {"step": ORCHESTRATOR, "outcome": "round",
                                "sections": sections, "by": by,
                                "after": next_number(path.parent) - 1 if after is None
-                               else after}, clock)
+                               else after, **({"commit": commit} if commit else {})}, clock)
 
 
 def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHESTRATOR,
@@ -620,8 +622,9 @@ class Stream:
     wake the session for another turn, so the last result is the run's end but
     its `permission_denials` are only its own turn's; the denials are gathered
     from every result, keyed by the call, and each takes the reason the harness
-    gave in its `permission_denied` event, which says whether the call lacked an
-    allow rule or met a deny rule.
+    gave in its `permission_denied` event. The harness emits that event only for a
+    decision of the permission mode, `mode` for a call no allow rule matched; a
+    call that met a deny rule has none, so its denial carries no reason.
     """
 
     def __init__(self, transcript: Path, progress: Path, clock: Clock = _utc_now,
@@ -644,7 +647,8 @@ class Stream:
 
     @property
     def denials(self) -> list[dict[str, Any]]:
-        """Every denial the run recorded, in order, each with the harness's reason."""
+        """Every denial the run recorded, in order, each with the harness's reason
+        when it gave one."""
         return [{**denial, **({"reason": self._reasons[key]} if key in self._reasons else {})}
                 for key, denial in self._denials.items()]
 
@@ -1273,6 +1277,8 @@ _SESSION_LINE = re.compile(r"^session id: (\S+)\s*$", re.M)
 _SESSION_MARKER = re.compile(r"<!-- reviewer-session: (\S+) -->")
 _REVIEWER = re.compile(r"<!-- reviewer: (\S+) (\S+)(?: (\S+))? -->")
 _UNAVAILABLE_MARKER = re.compile(r"<!-- reviewer-unavailable: (\S+) (\S+): (.*?) -->")
+# The reviewer was the owner's choice for the run, not the review row's.
+OVERRIDE_MARKER = "<!-- reviewer-override: owner -->"
 REVIEWED_COMMIT = "<!-- reviewed-commit: {} -->"
 _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 _VALIDATION_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{7,40})\b", re.M)
@@ -1483,13 +1489,24 @@ REVIEW_UNATTENDED = (
 
 def review_models(rules: StepRules, model: str | None = None,
                   effort: str | None = None) -> tuple[Model, ...]:
-    """The review's models in order, the Codex entry overridden for one run.
+    """The review's models in order, or the owner's own choice for one run.
 
-    The step table is the policy; a model or effort given for one run names a
-    Codex model, so it replaces the Codex entry's and leaves the others alone.
+    The step table is the workflow's policy, and the loader holds it to that. A
+    model given for one run is the owner's choice for a review run by hand and is
+    outside that policy on purpose, a forbidden model included: it replaces the
+    whole list, with no fallback, since the owner chose it, and its harness is read
+    from its name, a `claude-` model on Claude and any other on Codex. Its effort
+    is the one given, else the table's for that harness. An effort given alone
+    replaces every entry's. The orchestrating session gives neither, and the record
+    says when either was given.
     """
-    return tuple(Model(entry.harness, model or entry.model, effort or entry.effort)
-                 if entry.harness == "codex" else entry for entry in rules.models)
+    if model:
+        harness = "claude" if model.startswith("claude-") else "codex"
+        table = next((entry.effort for entry in rules.models if entry.harness == harness), None)
+        return (Model(harness, model, effort or table),)
+    if effort:
+        return tuple(Model(entry.harness, entry.model, effort) for entry in rules.models)
+    return rules.models
 
 
 def _options(output: Path, model: str | None, effort: str | None) -> list[str]:
@@ -1745,6 +1762,8 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     markers = [f"<!-- reviewer-session: {ran.harness}:{session} -->"] if session else []
     markers.append(f"<!-- reviewer: {ran.harness} {ran.model}"
                    + (f" {ran.effort}" if ran.effort else "") + " -->")
+    if model or effort:
+        markers.append(OVERRIDE_MARKER)
     markers += [f"<!-- reviewer-unavailable: {entry['harness']} {entry['model']}: "
                 f"{_marker_text(entry['reason'])} -->" for entry in passed_over]
     markers.append(REVIEWED_COMMIT.format(reviewed))
@@ -1774,6 +1793,8 @@ def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
     if reviewers:
         harness, model, effort = reviewers[-1]
         extra = Model(harness, model, effort or None).entry()
+    if OVERRIDE_MARKER in closing.splitlines():
+        extra["override"] = True
     if passed_over := [{"harness": harness, "model": model, "reason": reason}
                        for harness, model, reason in _UNAVAILABLE_MARKER.findall(closing)]:
         extra["unavailable"] = passed_over
@@ -1801,13 +1822,15 @@ def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = 
     log = log_path(root, change)
     head = options.get("head", _reviewed_head)
     started = clock()
+    # The owner's choice of reviewer marks every line of the run, however it ends.
+    override: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
 
     def stopped(reason: str, record: Entry | None = None) -> Entry:
         try:
             commit = head(root)
         except ReviewError:
             commit = None
-        record = dict(record or {})
+        record = {**(record or {}), **override}
         denials = record.pop("denials", [])
         return record_outcome(log, "review", {"outcome": "stopped", "message": reason,
                                               "reason": reason, "denials": denials},
@@ -1898,9 +1921,12 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     review.add_argument("--kind", required=True, choices=KINDS)
     review.add_argument("--base", default=DEFAULT_BASE)
     review.add_argument("--model", default=None,
-                        help="a Codex model replacing the review row's Codex entry for this run")
+                        help="the owner's choice of reviewer for this run, outside the review "
+                             "row's policy: a claude- model runs on Claude, any other on Codex, "
+                             "with no fallback")
     review.add_argument("--effort", default=None,
-                        help="an effort replacing the review row's Codex entry's for this run")
+                        help="the owner's choice of effort for this run: the given model's, or "
+                             "every entry's of the review row")
     review.add_argument("--fresh", action="store_true",
                         help="start a new reviewer session instead of continuing the last one")
     review.add_argument("--unvalidated", action="store_true",
@@ -1993,7 +2019,9 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             for shown in denial_report(path.parent, entry):
                 print(shown)
         elif args.kind == "round":
-            line = note_round(path, parse_sections(args.sections), args.by, args.after)
+            # A round recorded after the fact started at a commit no longer HEAD.
+            line = note_round(path, parse_sections(args.sections), args.by, args.after,
+                              commit=None if args.after is not None else _git_head(root))
             print(json.dumps(line, ensure_ascii=False))
         else:
             line = note_orchestrator(path, args.decision, args.reason, by=args.by,

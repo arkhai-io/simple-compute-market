@@ -1197,6 +1197,28 @@ placement and wording (the owner's, above). Until 6d.6, `change-review`'s
 "Running unattended" still says reviews run in Codex, which a Claude reviewer
 reads beside `REVIEW_UNATTENDED`.
 
+Fixes at the fifth round's triage (review 77, the owner's notes 74). **77 F1:**
+`common` denies `Bash(git diff* --output*)`, `Bash(git show* --output*)`, and
+`Bash(git log* --output*)`, since the diff family writes its output to a file
+with `--output` and the prefix rules allowed it (the triage session ran `git diff
+--output=/dev/null` undenied); the table edit was the orchestrator's, committed
+with the fix. D6 and D11 say so. **77 F3 / 74 O1:** `REVIEW_MODEL` and
+`REVIEW_EFFORT` are the owner's override for a review run by hand, outside the
+table's policy on purpose: `review_models` returns the named model alone, its
+harness read from its name (`claude-` on Claude, any other on Codex), its effort
+the one given or the table's for that harness, with no fallback; an effort alone
+replaces every entry's. The record gains `<!-- reviewer-override: owner -->` and
+the line `override: true`, a stopped line too; `change-orchestrate` never sets
+either; the `Makefile` comment and help, the `review` subcommand's help,
+`docs/agents/change-workflow.md`, D11, D18, the proposal, and the delta's "ordered
+models" requirement with a scenario say so. Verification (unit,
+`test_run_change_step.py`, fake runners): the owner's model replacing the row for
+both harnesses and an effort alone; a review on the owner's Fable model recorded
+as an override; a review on the row's models carrying none; the owner's
+unavailable model with no fallback; `make review` passing the owner's model; no
+step allowed the diff family's `--output`; every step allowed `make change-cost`.
+Results are in the round's evidence under 6d.
+
 ## 6b. Every run records its cost
 
 Delivers D19 (69 F6, 70 F7): each log line's model, cost, gap, and cache hit, and
@@ -1283,6 +1305,10 @@ network error are the last attempt's session total only, each attempt being its
 own session; the tokens and turns of all attempts are counted. The cost figures
 are the harness's list prices (`costBasis` in the result's `modelUsage`), not an
 invoice.
+
+Fix at the fifth round's triage (**74 O3 / R4**): every step may run `make
+change-cost`, by the orchestrator's edit of `common`'s allow (`Bash(make
+change-cost*)`) on the owner's grant, committed with the fix; D6 names it.
 
 ## 6c. Advancing on conditions: `## Next`, rounds from the plan, and the branch decision
 
@@ -1410,6 +1436,22 @@ renames "Phases and owner touchpoints"; it resolves until then, and it is code,
 which closeout does not edit, so it is reworded in implementation, by the round
 after this one, or at the triage.
 
+Fixes at the fifth round's triage. **77 F2:** `next_round` sends a planned round
+naming a section the task list lacks to the owner before anything is recorded,
+since a round line naming it would leave the round unclassifiable, and leaves a
+complete section out of its round as it does the closeout section. **74 R3:** a
+round noted as it starts records `commit`, `HEAD` then (`note_round`'s `commit`,
+none for a round given `--after`), and `round_view.py start` with no base takes
+the latest round line's commit, falling back to the latest triaged validation for
+a line that names none; this change's two round lines name none. D9 and the
+script's docstring say so. Verification (unit, `test_change_next_step.py`): a
+round naming a missing section going to the owner with no `round`; a complete
+section left out. Unit (`test_run_change_step.py`): `note round` in a Git
+repository recording `HEAD`, and none with `--after`. Repository level
+(`test_round_view.py`, real Git): the base taken from the latest round line past
+a commit landed between rounds, and the fallback when the latest line names none.
+Results are in the round's evidence under 6d.
+
 ## 6d. The skills: touchpoints, relaying without judging, and the cadence
 
 Delivers D12's skill changes for D8, D13, D15, D16, and D17 (69 F3, F5; 70 F2, F3,
@@ -1521,12 +1563,85 @@ a triage writes `## Next` last and alike in two review files, and whether the
 orchestrator records a `round` line `by: plan` from the computation's result. The
 two scaffolding files 6a left in this change's `reviews/`
 (`proposed-change-steps.toml`, `test_with_proposed_table.py`) stay for the
-orchestrating session to remove. `make change-cost` is not yet allowed to steps
-and was not run; this change's lines before 6b carry no `cost`. Still owed
+orchestrating session to remove. `make change-cost` was not then allowed to steps
+and was not run (allowed since the fifth round's triage, under 6b); this change's
+lines before 6b carry no `cost`. Still owed
 outside this round: `scripts/find_change.py`'s citation of "Phases and owner
 gates" (6c's handoff), and the table's placement of the review row under
 design's comment (6a.1), the owner's to tidy. The session grew large across four
 sections and their checks; the next round should start fresh.
+
+Fixes at the fifth round's triage, and the round's fix evidence. **74 R1:** an
+edit under `.claude/` is denied to every step, so `change-plan` gives such a task
+to the orchestrator, made on the owner's word before its section's session
+starts; `change-orchestrate` makes it so, uncommitted; `change-implement` accepts
+it in the worktree check, never attempts it, and commits it with the section;
+`change-triage` says the same of an accepted fix there. **74 R2:** a denial with
+no `reason` met a deny rule — D6a, `change-orchestrate`, the delta's permissions
+requirement, and `Stream`'s docstring; the evidence is in 7.2. The round's other
+fixes are noted under 6a (77 F1, 77 F3 / 74 O1), 6b (74 O3 / R4), and 6c (77 F2,
+74 R3); 74 O2 is section 6e, and 74 O4 / O5 an open question in
+`parallel-change-workflows`' proposal. Evidence, over all of them: the focused
+suites (`test_run_change_step.py`, `test_change_next_step.py`,
+`test_change_cost.py` unit with fake runners; `test_round_view.py` at repository
+level, real Git) 435 passed after the compliance check's fixes; `make test`
+passed, every suite, before them (`scripts/tests` 1059) and after (1061), and
+every check below was rerun after them;
+`make check-comment-hygiene` (after one test's record name was built from a
+variable), `make check-agent-skills`, `make check-doc-citations
+CHANGE=orchestrate-change-workflow`, `make check-tasks
+CHANGE=orchestrate-change-workflow`, `make check-change-index`, and `openspec
+validate orchestrate-change-workflow --strict`: passed. `openspec validate
+parallel-change-workflows --strict` fails as it did before, a proposal with no
+deltas. No dependency changed, so no relock or packaging check. Fresh-context
+compliance check of the diff against `5be661863` (a subagent, read-only): no
+history in comments, no import cycle (`round_view.py` now imports
+`run_change_step`, which imports neither it nor the computation); fixed what it
+found — the override missing from a stopped line of a review refused before it
+ran or interrupted (now set for every line of the run, with a test), three
+missing tests (an effort-only override; a refused override; a Codex override
+taking the table's effort), `change-implement`'s worktree check refusing the
+orchestrator's `.claude/` edit, the delta's permissions and model requirements,
+D13 silent on 77 F2, 70 F6's entry and 8.9's two lines stale, 7.2's stale
+parenthetical, a missing line in `change-triage`, the round view's docstring
+naming a migration rather than `--after`, and overlong lines. Declined: dropping
+the space from the `--output` deny rules against a quoted option — the table is
+the owner's, the harness's matching of a quoted argument is unverified, and the
+pilot's real denial (7.2) decides it.
+
+## 6e. The workflow tooling as a package
+
+Delivers 74 O2: `scripts/run_change_step.py`, grown past two thousand lines holding
+the log, the step table, both harnesses, cost, the review runner, and the command
+line, becomes a standard-library package structured as the buyer CLIs are — a
+`cli.py` dispatching each command to its own module, beside the plumbing they
+share — with no change in behaviour. Added at the fifth round's triage and
+implemented after the pilot resumes, on the owner's word; the plan maps no round
+for it, so the owner is asked for its round (D13). Touches `scripts/`, a new
+`scripts/change_workflow/`, `scripts/change_next_step.py`, `scripts/change_cost.py`,
+`scripts/round_view.py`, and `scripts/tests/`.
+
+- [ ] 6e.1 `scripts/change_workflow/`, standard library only, one module per
+      concern: the outcome schema check; the workflow log, its `note` lines, and
+      branch decisions; the step table, its models, and their policy; the event
+      stream, transcripts, and denials; the Claude and Codex harness runs and
+      their unavailability; cost measurement; the wrapper's `run` and `resume`;
+      the review runner, its records, and markers; `watch` and the denials
+      report; and `cli.py`, dispatching each subcommand to its module.
+      `scripts/run_change_step.py` stays as a thin entry point, so the `Makefile`
+      targets, the step table's rules naming it (`Bash(python3
+      scripts/run_change_step.py log*)`), and the skills are unchanged;
+      `change_next_step.py`, `change_cost.py`, and `round_view.py` import from the
+      package.
+- [ ] 6e.2 The tests move with the modules they test, unchanged in what they
+      assert; a test changed in substance means the move changed behaviour.
+- [ ] 6e.3 Verification: the moved suites (unit, `scripts/tests`, fake runners;
+      `test_round_view.py` at repository level, real Git), each passing with no
+      assertion changed; `make test`; `make check-comment-hygiene`; `make
+      check-doc-citations CHANGE=orchestrate-change-workflow`, since the change's
+      documents cite `scripts/run_change_step.py`; the entry point's commands run
+      as before (`python3 scripts/run_change_step.py log <change>`). No end-to-end
+      scenario covers it (contributor tooling).
 
 ## 7. Pilot
 
@@ -1545,9 +1660,17 @@ section records what they showed about the orchestrator.
       the script could not classify, the relay's latency in the design
       discussion, whether validation's background fetch survived a question,
       whether `--resume` applied a granted rule, and the `reason` value a denial
-      by a deny rule records (D6a reads any value but `mode` as not a gap until
-      it is known); for each item, which flow produced it — the hand-relayed Codex
-      tasks, the section-6 tooling, or the revised tooling (69 F8).
+      by a deny rule records; for each item, which flow produced it — the
+      hand-relayed Codex tasks, the section-6 tooling, or the revised tooling (69 F8).
+      Recorded so far: a deny-rule denial records no reason at all — the round of
+      6a–6d's eight `Edit(.claude/**)` denials carry none beside a `mode` denial
+      in the same run (this log's seq 76, read at seq 77; 74 R2), revised
+      tooling; D6a and `change-orchestrate` now read a denial with no reason as a
+      deny-rule match. Owed by the pilot: a real denial of `git diff --output=…`
+      by `common`'s deny rule (77 F1), which no step can provoke from a test,
+      and of the quoted `git diff HEAD '--output=x'`, which the rule's space
+      before `--output` may let through if the harness matches the command as
+      typed; if it does, the rule drops the space.
 - [ ] 7.3 Each allow-list gap the pilot found is a proposed edit to
       `.claude/change-steps.toml`, committed by the owner; each script gap is a
       rule added to `change_next_step.py` with its test; each is noted here.
@@ -1596,7 +1719,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the proposal landing on dev first); add "The owner is interrupted only for
         judgement" (D16: touchpoints replace gates; the cadence a design decision,
         D13), "The orchestrator relays and routes" (D17), "Models are policy, with
-        no same-vendor fallback" (D18: never Fable or Astra), and "Every run records
+        no same-vendor fallback" (D18: the workflow never chooses Fable or Astra;
+        the owner's override of a review run by hand may), and "Every run records
         its cost" (D19); update "Current limits" with one change at a time and leaf
         steps on Claude Code only.
       - `openspec/README.md` closeout requirements, part 6, the legend of
@@ -1613,8 +1737,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the cost report, and sourcing the completion script (6.4);
         "The review directory" gains `workflow.jsonl` and the step transcripts;
         the paragraph on `make review` says the review runs on the review row's
-        models, Codex then Claude, and that `REVIEW_MODEL` and `REVIEW_EFFORT`
-        replace only the Codex entry for one run (6a's fresh-context check).
+        models, Codex then Claude (6a's fresh-context check); its sentence on
+        `REVIEW_MODEL` and `REVIEW_EFFORT` as the owner's override was already
+        rewritten at the fifth round's triage (77 F3 / 74 O1).
       - `AGENTS.md` "Change workflow" — names `make orchestrate`.
       - `openspec/specs/change-workflow/spec.md` "Evidence" — already repointed
         from `run_change_review.py` (retired) to `run_change_step.py review` in

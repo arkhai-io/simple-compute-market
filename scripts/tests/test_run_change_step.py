@@ -392,10 +392,29 @@ def test_the_command_line_notes_a_round_and_prints_the_log(
     entries = step.read_log(log)[1:]
     assert [entry["outcome"] for entry in entries] == ["round", "orchestrator", "orchestrator"]
     assert (entries[0]["sections"], entries[0]["after"]) == ([[1], [2, 3]], 4)
+    # A round recorded after the fact started at a commit that is no longer HEAD.
+    assert "commit" not in entries[0]
     assert (entries[1]["by"], entries[1]["next"], entries[1]["kind"]) == (
         "owner", "review", "closeout")
     assert entries[2]["reads"] == 1
     assert [entry["seq"] for entry in printed] == [4]
+
+
+def test_a_round_noted_as_it_starts_records_head(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    log = _log(tmp_path)
+    for command in (["init", "-q"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                                     "commit", "-q", "--allow-empty", "-m", "start"]):
+        subprocess.run(["git", *command], cwd=tmp_path, check=True, capture_output=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+    assert step.main(["note", CHANGE, "round", "--sections", "2", "--by", "plan"],
+                     root=tmp_path) == 0
+
+    assert step.read_log(log)[-1]["commit"] == head
 
 
 def test_the_command_line_names_a_change_it_cannot_find(
@@ -539,6 +558,21 @@ def test_a_review_on_claude_only_reads() -> None:
     assert _allows(rules, "git diff dev...HEAD") and _allows(rules, "cat AGENTS.md")
     assert not any(_allows_edit(rules, tool, record) for tool in ("Edit", "Write"))
     assert not _allows(rules, "git commit -m x") and not _allows(rules, "make lock")
+
+
+@pytest.mark.parametrize("reading,writing", [
+    ("git diff dev...HEAD", "git diff --output=x dev...HEAD"),
+    ("git show HEAD", "git show HEAD --output x"),
+    ("git log -p", "git log -p --output=x"),
+])
+def test_no_step_writes_through_the_diff_familys_output(reading: str, writing: str) -> None:
+    for name, rules in step.load_steps().items():
+        assert _allows(rules, reading) and not _allows(rules, writing), name
+
+
+def test_every_step_may_run_the_cost_report() -> None:
+    assert all(_allows(rules, f"make change-cost CHANGE={CHANGE}")
+               for rules in step.load_steps().values())
 
 
 MODELS = 'models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]\n'
@@ -1450,14 +1484,75 @@ def test_a_review_runs_on_the_review_rows_codex_entry(tmp_path: Path) -> None:
     assert calls[0][calls[0].index("--config") + 1] == 'model_reasoning_effort="high"'
 
 
-def test_a_given_model_overrides_only_the_codex_entry() -> None:
+def test_the_owners_model_replaces_the_review_rows_for_one_run() -> None:
     rules = step.load_steps()["review"]
 
-    assert step.review_models(rules, "gpt-6.1-sol") == (
-        step.Model("codex", "gpt-6.1-sol", "high"), OPUS)
+    assert step.review_models(rules, "claude-fable-5-1") == (
+        step.Model("claude", "claude-fable-5-1", "high"),)
+    assert step.review_models(rules, "gpt-6-astra", "low") == (
+        step.Model("codex", "gpt-6-astra", "low"),)
+    assert step.review_models(rules, "gpt-6-astra") == (
+        step.Model("codex", "gpt-6-astra", "high"),)
     assert step.review_models(rules, effort="low") == (step.Model("codex", "gpt-6-sol", "low"),
-                                                       OPUS)
+                                                       step.Model("claude", "claude-opus-5-5",
+                                                                  "low"))
     assert step.review_models(rules) == rules.models
+
+
+def test_a_review_on_the_owners_model_is_recorded_as_an_override(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    claude = _claude_review(_review("implementation"))
+
+    line = step.review_and_log(CHANGE, "implementation", root=root, clock=_clock,
+                               model="claude-fable-5-1", runner=_codex_missing, claude=claude,
+                               head=lambda _: HEAD, echo=None)
+
+    assert _option(claude.commands[0], "--model") == "claude-fable-5-1"
+    text = (_reviews(root) / "01-implementation.md").read_text("utf-8")
+    assert "<!-- reviewer: claude claude-fable-5-1 high -->" in text
+    assert "<!-- reviewer-override: owner -->" in text
+    assert (line["outcome"], line["model"], line["override"]) == (
+        "finished", "claude-fable-5-1", True)
+    assert "unavailable" not in line
+
+
+def test_a_review_at_the_owners_effort_is_recorded_as_an_override(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+    calls: list[list[str]] = []
+
+    line = step.review_and_log(CHANGE, kind, root=root, clock=_clock, effort="low",
+                               runner=_writing(_review(), session="codex-1", calls=calls),
+                               head=lambda _: HEAD)
+
+    assert calls[0][calls[0].index("--config") + 1] == 'model_reasoning_effort="low"'
+    assert (line["model"], line["effort"], line["override"]) == ("gpt-6-sol", "low", True)
+    assert "<!-- reviewer-override: owner -->" in (
+        _reviews(root) / f"01-{kind}.md").read_text("utf-8")
+
+
+def test_a_review_on_the_rows_models_is_no_override(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    kind = "design"
+
+    line = step.review_and_log(CHANGE, kind, root=root, clock=_clock,
+                               runner=_writing(_review(), session="codex-1"), head=lambda _: HEAD)
+
+    assert "override" not in line
+    assert "reviewer-override" not in (_reviews(root) / f"01-{kind}.md").read_text("utf-8")
+
+
+def test_the_owners_unavailable_model_has_no_fallback(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+    claude = _claude_review(_review("design"))
+
+    line = step.review_and_log(CHANGE, "design", root=root, clock=_clock, model="gpt-6-astra",
+                               runner=_codex_missing, claude=claude, head=lambda _: HEAD,
+                               echo=None)
+
+    assert claude.commands == []
+    assert (line["outcome"], line["override"]) == ("stopped", True)
+    assert "no reviewer is available" in line["reason"]
 
 
 def test_a_review_with_no_findings_is_accepted(tmp_path: Path) -> None:
@@ -1949,11 +2044,11 @@ def test_make_review_runs_the_wrappers_review() -> None:
         'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev"    ']
 
 
-def test_make_review_passes_a_codex_model_for_one_run() -> None:
-    assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_MODEL=gpt-6.1-sol",
+def test_make_review_passes_the_owners_model_for_one_run() -> None:
+    assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_MODEL=claude-fable-5-1",
                    "REVIEW_EFFORT=low") == [
         'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
-        '--model "gpt-6.1-sol" --effort "low"  ']
+        '--model "claude-fable-5-1" --effort "low"  ']
 
 
 def test_make_change_cost_reports_the_changes_runs() -> None:
@@ -2152,6 +2247,17 @@ def test_a_review_refused_before_it_runs_is_logged_stopped(tmp_path: Path) -> No
 
     assert line["outcome"] == "stopped"
     assert "no validation record" in line["reason"]
+    assert "override" not in line
+
+
+def test_a_refused_review_on_the_owners_model_is_marked_an_override(tmp_path: Path) -> None:
+    root = _repository(tmp_path)
+
+    line = step.review_and_log(CHANGE, "pre-closeout", root=root, clock=_clock,
+                               model="gpt-6-astra", runner=_writing(_review("pre-closeout")),
+                               head=lambda _: HEAD)
+
+    assert (line["outcome"], line["override"]) == ("stopped", True)
 
 
 def test_an_interrupted_review_is_logged_stopped(tmp_path: Path) -> None:

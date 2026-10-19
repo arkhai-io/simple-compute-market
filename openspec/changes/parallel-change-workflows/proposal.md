@@ -72,6 +72,14 @@ earlier run of the same ref, not of another branch.
   change means another editor project per change.
 - How the owner reads a committed round for a change whose branch is not checked
   out.
+- Whether a round's validation and implementation review can run while the owner
+  reads it. Both describe the checkout's `HEAD`, which the round view moves to the
+  round's base, so today they start only at `make round-done`, and only the
+  end-to-end pipeline overlaps the reading. Running them against the round's head
+  somewhere the owner never opens, such as a worktree, raises the same questions
+  as a second change: the ignored `reviews/` directory the reviewer reads and
+  validation writes, the environments a fresh checkout must build, and which
+  resources the two share.
 - Which resources must be per change and which may be shared with a lock: the
   wheelhouse, project environments, image tags, the storefront environment, the
   Docker daemon, and the kube context.

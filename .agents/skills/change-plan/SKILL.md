@@ -172,6 +172,12 @@ promotion, and closeout work `openspec/README.md` and `openspec/config.yaml` req
 cited — and the evidence that proves it. A feature task with nothing to trace to is
 either missing from the design or not part of this change.
 
+**Give edits under `.claude/` to the orchestrator.** Every step is denied edits
+there, so a task that changes the step table or the project's Claude Code
+settings says it is the orchestrator's, made on the owner's word before the
+section's session starts, and that the session commits it with its section; the
+rest of the section stays the implementer's.
+
 **Name the permanent destinations.** For every entry under the proposal's
 `Knowledge to promote`, confirm or correct its destination and name it exactly —
 file and heading — including `openspec/specs/README.md` for a new capability or

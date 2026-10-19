@@ -892,10 +892,12 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 
 REVIEW_BASE ?= dev
 # The review's models are the review row's in .claude/change-steps.toml. Unset by
-# default; given, they replace that row's Codex entry for one run.
+# default; given, they are the owner's choice for one run, outside the row's policy:
+# REVIEW_MODEL replaces the whole list, a claude- model running on Claude and any
+# other on Codex, and the record says so. The orchestrating session never sets them.
 REVIEW_MODEL ?=
 REVIEW_EFFORT ?=
-review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<codex model>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
+review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@python3 scripts/run_change_step.py review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 # With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
