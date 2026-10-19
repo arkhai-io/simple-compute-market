@@ -1713,8 +1713,8 @@ Entered 2026-10-19 with the pre-closeout review waived by the owner ("advance to
 the helm render tests are done and run a review when closeout implementation completes";
 `interventions.jsonl`); the last implementation gates passed in
 `reviews/10-implementation-external.triage.md` and `reviews/12-implementation-external.triage.md`.
-Closeout stopped at 17.2, below, for a code fix round, which is done; the other documentation
-parts are done, and archival (17.11) remains.
+Closeout stopped at 17.2 for a code fix round (`47d9c67`), then resumed: 17.2 was confirmed
+against that commit's diff, the pipeline rerun on it (17.8), and the change archived (17.11).
 
 - [x] 17.1 **Comment hygiene.** Confirm `make check-comment-hygiene` passes and that no
       comment the change added names a change, a review, or a migration provenance.
@@ -1795,13 +1795,14 @@ parts are done, and archival (17.11) remains.
       (status, notes) and the graph line `share-site-projection-state (held projections and
       a publication loop for bare metal) ──► unbacked-bare-metal-listings`; other rows'
       `Depends on` are archive cleanup's. Name it in the promotion record.
-      Done: the row is `in closeout`, its Notes describing the closeout's state (the waived
-      review, the stop at 17.2, the archive waiting) and nothing of implementation; the graph
+      Done: the row is `in closeout`, its Notes describing the closeout (the waived review, the
+      import-placement fix round during closeout, the pipeline run at the final code commit) and
+      nothing of implementation, and, after the archive, linking the archive directory; the graph
       line reads `(in closeout; …)`. No other row changed. `make check-change-index`: OK.
 - [x] 17.7 **Packaging.** `make check-packaging` and `make check-architecture-change
       CHANGE=share-site-projection-state`, resolving every failure; the change owns no
       exception row.
-      Done at `9af52ff`: `make check-packaging` OK — every environment and image install derives
+      Done at `9af52ff`, and again at `47d9c67` after the fix round: `make check-packaging` OK — every environment and image install derives
       its internal packages from its lock, every lock matches its project, the wheels the tree
       builds, and the wheelhouse, every Python version selection reads the root declaration,
       every distribution is one package under `src/`, and the layers, scope, dependencies, and
@@ -1816,26 +1817,26 @@ parts are done, and archival (17.11) remains.
       `e2e_bare_metal_publication`, `e2e_bare_metal_mock_deal`,
       `e2e_bare_metal_introduction`, `e2e_credits_deal`, `e2e_credits_payment_deal`; and
       16.5's chart evidence or its blocker.
-      Done: run 39275286164 (validation 13, `reviews/13-validation.md`), dispatched on this
-      branch at `825737c`, success in all three lanes. VM lane: 134 passed, 118 deselected —
-      `e2e_deal` 31, `e2e_deal_buyer_cli` 27, `e2e_buy` 8, `multi_registry` 21,
-      `e2e_compute_dynamic_listings` 10, `e2e_alkahest_escrow_codecs` 12, `e2e_listing_shapes` 17,
-      `e2e_vm_introduction` 6, `e2e_non_erc20_settlement` 2. Bare-metal lane: 51 passed —
-      `e2e_bare_metal_publication` 11, `e2e_bare_metal_introduction` 5, `e2e_bare_metal_mock_deal`
-      35, each holding the loops, stepping `site-projections` and publication, and reading status
-      through the typed client; the provisioning service answered every storefront request 200
-      and both signed capacity-released callbacks reached the storefront. API-credit lane:
-      `e2e_credits_deal` passed; `e2e_credits_payment_deal`'s three tests skipped, the lane
-      supplying no payments target. `e2e_pool_declared_modes` is not among the VM lane's
-      selected modules. The run names `825737c`, the last implementation commit validated; the
-      commits after it (`721c008`, `f8db4f7`, `9af52ff`) touch only Helm charts and render tests,
-      Makefiles' Helm targets, a Helm script, and change documents, which no pipeline lane
-      builds or runs, and closeout changes no code, so the run describes the code this closeout
-      commit carries; the pre-closeout review it would have followed was waived. Earlier runs:
-      validation 09 (`8f5d102`) and 11 (run 39158420057, `da61cc9`). What no scenario exercises —
-      the bare-metal `publish` command and seller listing controls, reading `lifecycle` or
-      `publication_derivation`, the API-credit signed status, a VM publication preview, a timer
-      publication cycle, the startup refusals, and any chart deployment — is
+      Done: run 39341868764, dispatched on this branch at `47d9c67` (the 17.2 fix round, the
+      last code commit before the archive) through the GitHub API on 2026-10-19, success in all
+      three lanes: VM 134 passed, 118 deselected; bare metal 51 passed, 201 deselected; API
+      credits 1 passed, 3 skipped, 248 deselected -- the same counts as validation 13. The
+      archive commit changes documentation only, so this run describes the code it carries.
+      Scenarios exercising this change, as validation 13 (`reviews/13-validation.md`, run
+      39275286164 at `825737c`) names them: VM -- `e2e_deal` 31, `e2e_deal_buyer_cli` 27,
+      `e2e_buy` 8, `multi_registry` 21, `e2e_compute_dynamic_listings` 10,
+      `e2e_alkahest_escrow_codecs` 12, `e2e_listing_shapes` 17, `e2e_vm_introduction` 6,
+      `e2e_non_erc20_settlement` 2 (the fix round's `failure_actions.py` imports run in the VM
+      storefront image these start); bare metal -- `e2e_bare_metal_publication` 11,
+      `e2e_bare_metal_introduction` 5, `e2e_bare_metal_mock_deal` 35, each holding the loops,
+      stepping `site-projections` and publication, and reading status through the typed client;
+      API credits -- `e2e_credits_deal` passed, `e2e_credits_payment_deal`'s three tests skipped,
+      the lane supplying no payments target. `e2e_pool_declared_modes` is not among the VM lane's
+      selected modules, so no run exercises it. Earlier runs: 39117263451 (`8f5d102`, validation
+      09), 39158420057 (`da61cc9`, validation 11), 39275286164 (`825737c`, validation 13). What no
+      scenario exercises -- the bare-metal `publish` command and seller listing controls, reading
+      `lifecycle` or `publication_derivation`, the API-credit signed status, a VM publication
+      preview, a timer publication cycle, the startup refusals, and any chart deployment -- is
       application-integration, unit, or render evidence, as validation 13 lists. 16.5's chart
       evidence: the owner's local two-release run at `825737c` (16.5).
 - [x] 17.9 **Promotion.** Write the permanent documents and complete the design-promotion
@@ -2002,8 +2003,8 @@ parts are done, and archival (17.11) remains.
       the dispatch attachment; both seller quickstarts; `ROADMAP.md` (17.5); the index (17.6).
       `openspec/specs/README.md`: no new capability or companion, so unchanged. The
       `openspec/specs/site-capacity/spec.md` evidence line 8.5 edited outside the deltas is
-      recorded below. The five `spec.md` files the deltas cover are not yet written: the archive
-      (17.11) writes them and has not run.
+      recorded below. The five `spec.md` files the deltas cover were written by the archive
+      (17.11).
 - [x] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.
@@ -2013,9 +2014,9 @@ parts are done, and archival (17.11) remains.
       `scripts/validate/` lines and other changes' documents, all pre-existing); every `helm/`,
       `domains/`, `kit/`, and `dev-env/` path the promoted text cites, which the check does not
       scan, was checked to exist. `bunx @fission-ai/openspec@1.14.0 validate
-      share-site-projection-state --strict`: valid. Rerun both before archiving if any document
-      changes in the fix round.
-- [ ] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
+      share-site-projection-state --strict`: valid. Both rerun at `47d9c67`, after the fix round,
+      with the same results.
+- [x] 17.11 **Archival.** `bunx @fission-ai/openspec@1.14.0 archive share-site-projection-state
       -y`, merging the five deltas (`api-credits` added in Section 15's check); the index row links the archive.
       **Amended (round 05/06, 05 F11; moved here from 17.10 in round 08, 08 F9):** after the
       `archive` command and before the commit, confirm that the requirement
@@ -2023,16 +2024,23 @@ parts are done, and archival (17.11) remains.
       storefront that cannot publish refuses to start" in
       `openspec/specs/storefront-publication/spec.md`, exists there; until the archive it is
       only in the change's delta.
-      **Not run (2026-10-19):** archival waits on 17.2's fix round. The deltas were not
-      synchronized by hand (no requirement they add is in a permanent `spec.md`), so the archive
-      merges them, without `--skip-specs`. When it runs: also repoint `ROADMAP.md`'s Goal 4 closed
-      row and the index's graph line and row to the archive directory, and run `openspec validate
-      --specs --strict` and `make check-change-index`.
+      Done (2026-10-19, at `47d9c67`'s tree): the deltas were not synchronized by hand (no
+      requirement they add was in a permanent `spec.md`), so `bunx @fission-ai/openspec@1.14.0
+      archive share-site-projection-state -y` merged them, without `--skip-specs`: `api-credits` +1,
+      `deployment-state` +1 ~1, `market-composition` +2 ~1, `negotiation-protocol` +1,
+      `storefront-publication` +2 ~9; archived as
+      `openspec/changes/archive/2026-10-19-share-site-projection-state/`. The merged specs' diff
+      shows each added requirement once, each modified one replaced in place, no duplicate
+      requirement heading, and no other requirement changed. "A storefront that cannot publish
+      refuses to start", which `startup_refusal.py`'s docstring cites, now exists in
+      `openspec/specs/storefront-publication/spec.md`. The index row and the unowned-items note,
+      and `ROADMAP.md`'s closed Goal 4 row, link the archive. `openspec validate --specs
+      --strict`: 23 passed, 0 failed. `make check-change-index`: OK.
 
 ## Design promotion record
 
-`spec.md` destinations marked *(archive)* are written by 17.11's archive from this change's
-deltas; until then they are in `specs/`. Other destinations are written.
+`spec.md` destinations marked *(archive)* were written by 17.11's archive from this change's
+deltas. Every other destination was written by hand at closeout.
 
 | Accepted decision | Permanent location |
 |---|---|
