@@ -198,6 +198,8 @@ def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None
 def test_release_two_refuses_a_provisioning_service_that_does_not_trust_its_storefront() -> None:
     """With the VM storefront disabled, the smoke-test profile checks the
     bare-metal storefront's signer against provisioning's trust instead."""
+    # Bob's principal, Anvil account 2: a well-known development address, never
+    # for a public network.
     distrusted = {
         "provisioning": {
             "storefrontIdentity": {
@@ -214,10 +216,12 @@ def test_release_two_refuses_a_provisioning_service_that_does_not_trust_its_stor
 # --- release 1 ------------------------------------------------------------
 
 
-def test_release_one_renders_as_it_does_today() -> None:
-    """Release 1 runs the registry, Bob, provisioning, and dev-env; its
-    provisioning service trusts and calls back Bob, and its smoke tests target
-    Bob and the release's registry."""
+def test_release_one_runs_bob_on_its_own_provisioning_service() -> None:
+    """Release 1 runs the registry, Bob, provisioning, and dev-env, and no
+    bare-metal storefront; its provisioning service trusts and calls back Bob,
+    and its smoke tests target Bob and the release's registry. These are the
+    properties the release keeps; they are not compared with an earlier
+    render."""
     manifest = _release_one()
     charts = {source.split("/")[2] for source in _sources(manifest) if source.split("/")[1] == "charts"}
     provisioning = _provisioning_document(manifest)
@@ -233,6 +237,8 @@ def test_release_one_renders_as_it_does_today() -> None:
 
 
 def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob() -> None:
+    # The bare-metal storefront's principal, Anvil account 8: a well-known
+    # development address, never for a public network.
     distrusted = {
         "provisioning": {
             "storefrontIdentity": {
@@ -244,6 +250,30 @@ def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bo
 
     assert refused.returncode != 0, "render succeeded"
     assert "must include the active storefront signer principal" in refused.stderr
+
+
+def test_one_release_running_both_storefronts_on_its_provisioning_service_is_refused() -> None:
+    """The release's provisioning service trusts and calls back one storefront,
+    so a bare-metal storefront bound to it beside Bob is refused, naming the
+    second release that runs it; bound to a site of its own it is not."""
+    both = {"bare-metal-storefront": {"enabled": True}}
+    refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, both)
+
+    assert refused.returncode != 0, "render succeeded"
+    assert "run the bare-metal storefront as a second release" in refused.stderr
+    assert OVERLAY.name in refused.stderr and "make helm-topology-up" in refused.stderr
+    own_site = {
+        "bare-metal-storefront": {
+            "enabled": True,
+            "internalRegistryTrust": None,
+            "config": {
+                # Placeholder URLs on a reserved domain.
+                "registry": {"urls": ["https://registry.example.com"]},
+                "capacity": {"sites": {"site-a": "https://site-a.example.com"}},
+            },
+        }
+    }
+    _ok(_render(RELEASE_ONE, RELEASE_ONE_VALUES, own_site))
 
 
 # --- the storefront's own loader -----------------------------------------

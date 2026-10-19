@@ -44,16 +44,34 @@ def _render(overlay: dict | None = None, *, values: Path | None = VALUES) -> sub
         return subprocess.run(command, check=False, capture_output=True, text=True)
 
 
+#: The bare-metal storefront's principal in the umbrella renders: Anvil account
+#: 8, a well-known development address, never for a public network.
+UMBRELLA_STOREFRONT_PRINCIPAL = {"scheme": "eip191", "identifier": "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"}
+
+
 def _render_umbrella(overlay: dict | None = None) -> subprocess.CompletedProcess[str]:
-    """Render the umbrella with the bare-metal storefront enabled, over its
-    values.yaml, then ``overlay`` of the storefront's values."""
-    values = {"bare-metal-storefront": {"enabled": True, **(overlay or {})}}
-    with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
-        json.dump(values, handle)
+    """Render the umbrella as a release of the bare-metal storefront and its
+    own provisioning service, over its values.yaml, then ``overlay`` of the
+    storefront's values.
+
+    The VM storefront is disabled: the release's provisioning service trusts
+    and calls back one storefront, so a release running both is refused. The
+    provisioning service trusts the storefront's principal, as the smoke-test
+    profile requires.
+    """
+    release = {
+        "storefront": {"enabled": False},
+        "provisioning": {"storefrontIdentity": {"principals": [UMBRELLA_STOREFRONT_PRINCIPAL]}},
+        "bare-metal-storefront": {"enabled": True, "config": {"Identity": {"principal": UMBRELLA_STOREFRONT_PRINCIPAL}}},
+    }
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as base, tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+        json.dump(release, base)
+        base.flush()
+        json.dump({"bare-metal-storefront": overlay or {}}, handle)
         handle.flush()
         command = [
             "helm", "template", RELEASE, str(UMBRELLA),
-            "--values", str(UMBRELLA / "values.yaml"), "--values", handle.name,
+            "--values", str(UMBRELLA / "values.yaml"), "--values", base.name, "--values", handle.name,
         ]
         return subprocess.run(command, check=False, capture_output=True, text=True)
 

@@ -60,6 +60,26 @@ and the registry it publishes to. */ -}}
 {{- if not $provisioningStorefrontTrusted -}}
   {{- fail "provisioning storefront principals must include the active storefront signer principal" -}}
 {{- end -}}
+{{- /* The release's provisioning service trusts and calls back one storefront,
+this agent; a dedicated bare-metal storefront bound to it in the same release
+would have its requests refused and its callbacks sent here. Its config states
+no sites when the bare-metal chart derives `default` on that service. */ -}}
+{{- if and $bareMetal.enabled .Values.provisioning.enabled -}}
+  {{- $releaseProvisioning := printf "http://%s:%d" .Values.global.provisioning.host (int .Values.global.provisioning.port) -}}
+  {{- $bareMetalCapacity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "capacity") | fromJson -}}
+  {{- $bareMetalSitesKey := include "arkhai.storefrontConfigKey" (dict "doc" $bareMetalCapacity "name" "sites") -}}
+  {{- $bindsReleaseProvisioning := not $bareMetalSitesKey -}}
+  {{- if $bareMetalSitesKey -}}
+    {{- range $_, $siteURL := (index $bareMetalCapacity $bareMetalSitesKey | default dict) -}}
+      {{- if eq (trimSuffix "/" (toString $siteURL)) $releaseProvisioning -}}
+        {{- $bindsReleaseProvisioning = true -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if $bindsReleaseProvisioning -}}
+    {{- fail "the release's provisioning service serves one storefront, the VM storefront's agent; run the bare-metal storefront as a second release with its own provisioning service (helm/bare-metal-release-values.yaml, make helm-topology-up)" -}}
+  {{- end -}}
+{{- end -}}
 {{- $storefrontTests := .Values.storefront.tests | default dict -}}
 {{- $targetName := $storefrontTests.targetAgentName | default (first (keys $agents | sortAlpha)) -}}
 {{- if not (hasKey $agents $targetName) -}}

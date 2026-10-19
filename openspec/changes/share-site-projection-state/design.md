@@ -898,7 +898,7 @@ Secrets is owed. Accepted scope beyond the original proposal.
 - **C12. Documentation** named in the proposal's permanent documentation impact.
 - **C13. Several storefronts per registry, each in its own Helm release** (owner, 2026-10-19,
   round 12, 12 F1). The provisioning chart and service trust one storefront principal
-  (`storefrontIdentity`, its first entry read) and call back one storefront
+  (`storefrontIdentity`, whose values schema allows exactly one principal) and call back one storefront
   (`storefront_url`), so a bare-metal storefront beside Bob on the umbrella's provisioning
   service would have its signed requests refused and its capacity-released callbacks sent to
   Bob. Options weighed: (a) a second provisioning instance inside the umbrella for bare
@@ -925,7 +925,12 @@ Secrets is owed. Accepted scope beyond the original proposal.
   values could satisfy honestly in a release without it; they now apply only while
   `storefront.enabled`, and with the dedicated bare-metal storefront enabled instead the
   profile checks that provisioning trusts that storefront's `Identity.principal`. Release 1
-  renders byte for byte as before. `make helm-topology-up`, `helm-topology-down`, and
+  renders byte for byte as before. A release enabling both storefronts with the bare-metal
+  storefront bound to the release's own provisioning service (its derived `default` site, or
+  a stated site on that URL) is refused, naming the overlay and `make helm-topology-up`; bound
+  only to sites of its own it renders (round 12's check). The bare-metal chart's own umbrella
+  render tests and `test-render.sh`'s bare-metal renders therefore render a bare-metal-only
+  release. `make helm-topology-up`, `helm-topology-down`, and
   `helm-topology-check` (over `helm/Makefile`'s `topology-*`) install, remove, and test the
   two releases. No end-to-end scenario needs release 2 yet; one that does states it on its
   Makefile target and in its suite module.

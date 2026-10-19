@@ -106,11 +106,26 @@ TOPOLOGY_VALUES  := bare-metal-release-values.yaml
 # each holds.
 TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
 	arkhai-bare-metal-provisioning-identity
+# The Secrets $(RELEASE)'s `helm test` reads beyond a deploy's: the e2e-tests
+# chart's deal test credentials and buyer profile credential.
+TOPOLOGY_TEST_SECRETS := arkhai-e2e-credentials arkhai-buyer-profile-credential
+
+# $(TOPOLOGY_VALUES) names both releases' Services by the release names above,
+# so the topology targets refuse a RELEASE or TOPOLOGY_RELEASE given on the
+# command line (or from the environment under `make -e`) rather than install
+# releases whose storefront, registry, and provisioning URLs name Services that
+# do not exist.
+define TOPOLOGY_NAMES_FIXED
+$(if $(filter command line environment environment override,$(origin RELEASE) $(origin TOPOLOGY_RELEASE)),\
+	$(error $(TOPOLOGY_VALUES) names its Services by this Makefile's RELEASE and TOPOLOGY_RELEASE; do not override them))
+endef
 
 ## Install the two-release topology for local development, release 1 then
 ## release 2, each waiting for its workloads to be ready; both under
 ## local-values.yaml, so their volumes are deleted when they are uninstalled.
-topology-up: init
+## deploy-local updates the chart's dependencies for both.
+topology-up:
+	$(TOPOLOGY_NAMES_FIXED)
 	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(LOCAL_SECRETS) $(TOPOLOGY_SECRETS)"
 	@$(MAKE) --no-print-directory deploy-local
 	helm upgrade --install $(TOPOLOGY_RELEASE) $(CHART_DIR) \
@@ -123,16 +138,23 @@ topology-up: init
 ## Uninstall the two-release topology, release 2 first, waiting for each.
 ## Succeeds when neither is installed.
 topology-down:
+	$(TOPOLOGY_NAMES_FIXED)
 	helm uninstall $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
 	@$(MAKE) --no-print-directory undeploy
 
-## Run both releases' helm tests: release 1's smoke and contract tests, and
-## release 2's provisioning smoke test and bare-metal storefront health check.
-## A passing run shows the services answer, not that the storefronts trade:
-## the topology's evidence (signed requests admitted, callbacks reaching the
-## bare-metal storefront, projections loaded, a publication on release 1's
-## registry) is gathered against the running releases.
+## Run both releases' helm tests. Release 1's are its contract validation,
+## registry, storefront, and provisioning smoke tests and the e2e-tests chart's
+## deal test, which needs $(TOPOLOGY_TEST_SECRETS). Release 2's are its
+## provisioning smoke test, every case of which skips unless the smoke profile
+## carries provisioning.admin_credential and authority_identifier (a Secret-backed
+## smoke profile, which no values supply), and the bare-metal storefront's /health
+## check, the only one of them that proves release 2 answers. None shows the
+## storefronts trade: the topology's evidence (signed requests admitted,
+## callbacks reaching the bare-metal storefront, projections loaded, a
+## publication on release 1's registry) is gathered against the running releases.
 topology-check:
+	$(TOPOLOGY_NAMES_FIXED)
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(TOPOLOGY_TEST_SECRETS)"
 	helm test $(RELEASE) --namespace $(NAMESPACE) --logs
 	helm test $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --logs
 

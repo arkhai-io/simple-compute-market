@@ -14,16 +14,19 @@
 # targets install (`RELEASE` and `TOPOLOGY_RELEASE` in helm/Makefile); a render
 # test holds the two equal.
 #
-# Every principal and address here is a well-known Anvil development value: the
-# key of each is published with Foundry's default `test test ... junk` mnemonic,
-# so none may be used on a public network. Signing material is never here; it is
-# in out-of-band Secrets the same targets require:
+# Every principal and wallet address here is a well-known Anvil development
+# account, whose key is published with Foundry's default `test test ... junk`
+# mnemonic, and the settlement asset is a contract the dev chain deploys at a
+# deterministic address; none may be used on a public network. Signing material
+# is never here; it is in out-of-band Secrets the same targets require:
 #   arkhai-bare-metal-storefront-identity   `credential`: Anvil account 8's key
 #   arkhai-bare-metal-storefront-runtime    `storefront.secrets.toml`: [Wallet]
 #                                           private_key, Anvil account 8's key
 #   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
 # Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
-# provisioning does not read for delivery.
+# provisioning does not read for delivery. `topology-check` also needs release
+# 1's e2e-tests Secrets, arkhai-e2e-credentials and
+# arkhai-buyer-profile-credential, for its deal test.
 global:
   # Release 1's registry, which the bare-metal chart derives as the storefront's
   # registry; global.registryIdentity, values.yaml's, is that registry's signer,
@@ -115,7 +118,9 @@ bare-metal-storefront:
         rpc_url: ws://arkhai-node-operator-dev-env:8545
         alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
     pricing:
-      # The dev chain's deterministic test token, as the bare-metal lane sells.
+      # The dev chain's test ERC-20, deployed at a deterministic address on
+      # release 1's Anvil, as the bare-metal lane sells: a well-known development
+      # value, never for a public network.
       settlements:
         - mechanism: alkahest.v1
           asset: "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"

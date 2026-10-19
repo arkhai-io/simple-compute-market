@@ -287,11 +287,16 @@ storefront:
 
 # The dedicated bare-metal storefront is an optional role. The combined
 # compute storefront above already loads the bare-metal domain contribution.
-# Enabled, it publishes to the release's registry and trusts the release's
-# provisioning service as its `default` site, both of which the chart derives into
-# its configuration; the registry trust and the site's service peer below are the
-# release's development principals, as Bob's are. Its own principal, a settlement
-# mechanism, and its secrets are an operator's overlay to state.
+# The provisioning service below trusts and calls back one storefront, Bob, so
+# the dedicated storefront runs as a second release of this chart with its own
+# provisioning service, publishing to this release's registry:
+# helm/bare-metal-release-values.yaml, installed by `make helm-topology-up`.
+# Enabled beside Bob and bound to this release's provisioning service, it is
+# refused. Enabled, the chart derives its release's registry and provisioning
+# service, as its `default` site, into its configuration; the registry trust and
+# the site's service peer below are this release's development principals, as
+# Bob's are, which the second release's overlay replaces where they differ. Its
+# own principal, a settlement mechanism, and its secrets are an overlay's to state.
 bare-metal-storefront:
   enabled: false
   internalRegistryTrust:

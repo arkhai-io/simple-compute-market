@@ -15,7 +15,9 @@ TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
 RETAINED_RENDERED="$(mktemp)"
 LOCAL_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED" "$RETAINED_RENDERED" "$LOCAL_RENDERED"' EXIT
+RETAINED_BARE_METAL_RENDERED="$(mktemp)"
+LOCAL_BARE_METAL_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED" "$RETAINED_RENDERED" "$LOCAL_RENDERED" "$RETAINED_BARE_METAL_RENDERED" "$LOCAL_BARE_METAL_RENDERED"' EXIT
 
 # Render one release into a file. A render that fails stops the script with
 # Helm's own message rather than exiting silently under `set -e`.
@@ -50,19 +52,27 @@ render "$OVERLAP_RENDERED" "$RELEASE-overlap" "$CHART_DIR" \
 render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/two-registries-values.yaml"
+# The dedicated bare-metal storefront runs in a release of its own, beside its
+# own provisioning service (bare-metal-release-values.yaml).
 render "$BARE_METAL_RENDERED" "$RELEASE-bare-metal" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --set 'bare-metal-storefront.enabled=true'
-# Every persistent chart enabled, with and without the local overlay.
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
+# Every persistent chart enabled, with and without the local overlay: the
+# umbrella's own, then the bare-metal release's.
 render "$RETAINED_RENDERED" "$RELEASE-retained" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --set 'bare-metal-storefront.enabled=true' \
     --set 'api-credits-registry.enabled=true'
 render "$LOCAL_RENDERED" "$RELEASE-local" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/local-values.yaml" \
-    --set 'bare-metal-storefront.enabled=true' \
     --set 'api-credits-registry.enabled=true'
+render "$RETAINED_BARE_METAL_RENDERED" "$RELEASE-retained" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
+render "$LOCAL_BARE_METAL_RENDERED" "$RELEASE-local" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/local-values.yaml" \
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
 
 errors=0
 fail() {
@@ -170,15 +180,22 @@ pvc_retention() {
         END { if (pvc) print name "=" keep }
     ' "$1"
 }
-expected_pvcs="api-credits-registry-data bare-metal-storefront-data provisioning-data registry-data storefront-bob-data"
-for suffix in $expected_pvcs; do
-    grep -qx "$RELEASE-retained-$suffix=keep" <(pvc_retention "$RETAINED_RENDERED") \
-        && pass "$suffix is retained on uninstall by default" \
-        || fail "$suffix is retained on uninstall by default"
-    grep -qx "$RELEASE-local-$suffix=absent" <(pvc_retention "$LOCAL_RENDERED") \
-        && pass "$suffix is deleted on uninstall under the local overlay" \
-        || fail "$suffix is deleted on uninstall under the local overlay"
-done
+check_pvcs() {
+    local retained="$1" local_render="$2"
+    shift 2
+    for suffix in "$@"; do
+        grep -qx "$RELEASE-retained-$suffix=keep" <(pvc_retention "$retained") \
+            && pass "$suffix is retained on uninstall by default" \
+            || fail "$suffix is retained on uninstall by default"
+        grep -qx "$RELEASE-local-$suffix=absent" <(pvc_retention "$local_render") \
+            && pass "$suffix is deleted on uninstall under the local overlay" \
+            || fail "$suffix is deleted on uninstall under the local overlay"
+    done
+}
+check_pvcs "$RETAINED_RENDERED" "$LOCAL_RENDERED" \
+    api-credits-registry-data provisioning-data registry-data storefront-bob-data
+check_pvcs "$RETAINED_BARE_METAL_RENDERED" "$LOCAL_BARE_METAL_RENDERED" \
+    bare-metal-storefront-data provisioning-data
 expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"

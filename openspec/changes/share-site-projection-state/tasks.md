@@ -5115,6 +5115,13 @@ storefront's configuration reaches it through its configuration system"; `design
       overlay's `storefront.url` pointing at Bob the callback case fails. `helm lint` of
       release 2's values passes; `make -n` of the six targets prints the expected commands;
       no `shellcheck` is installed here. Nothing was installed: there is no cluster (16.5).
+      **Corrected (round 12's check):** one release enabling both storefronts with the
+      bare-metal storefront on the release's own provisioning service is refused; the render
+      tests are 8 (`test_one_release_running_both_storefronts_on_its_provisioning_service_is_refused`
+      added; the release-1 case is `test_release_one_runs_bob_on_its_own_provisioning_service`,
+      which checks the release's properties, not an earlier render); `topology-check` also
+      requires release 1's e2e-tests Secrets; the topology targets refuse an overridden
+      release name. See the round-12 block.
 
 Section 16 notes:
 
@@ -5264,7 +5271,45 @@ Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `
   check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
   (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. No version
   moved and no lock changed; `arkhai-kit-config` 0.4.0's wheel was rebuilt.
-- Fresh-context check: owed (the orchestrator runs it on the commit).
+- Fresh-context check of `e74558b` (release 1's byte-identity confirmed); every finding fixed:
+  - One release enabling both storefronts rendered F1's broken configuration silently (the
+    VM branch ran, the bare-metal trust check never did, and provisioning's schema allows one
+    trusted principal). The smoke profile now refuses it when the bare-metal storefront is
+    bound to the release's own provisioning service -- its derived `default` site, or a stated
+    site on that URL -- naming `helm/bare-metal-release-values.yaml` and `make
+    helm-topology-up`; bound only to sites of its own it renders. `helm/values.yaml`'s
+    bare-metal comment now says provisioning serves one storefront and names the overlay.
+    Since the umbrella no longer renders both, `test-render.sh`'s bare-metal render and its
+    bare-metal PVC retention checks render the second release (with and without
+    `local-values.yaml`), and the bare-metal chart's `_render_umbrella` renders a
+    bare-metal-only release (VM storefront off, provisioning trusting the storefront's
+    principal, Anvil account 8); its umbrella cases pass unchanged. Chart render test
+    `test_one_release_running_both_storefronts_on_its_provisioning_service_is_refused`.
+  - `topology-check`'s comment says what it proves: release 1's tests include the e2e-tests
+    chart's deal test, whose Secrets (`TOPOLOGY_TEST_SECRETS`: `arkhai-e2e-credentials`,
+    `arkhai-buyer-profile-credential`) it now checks for first, and the overlay's header
+    names; release 2's provisioning smoke test skips every case without
+    `provisioning.admin_credential` and `authority_identifier`, which only a Secret-backed
+    smoke profile supplies, so the bare-metal storefront's `/health` is the one release-2 check
+    that proves anything.
+  - The release-1 render test was renamed `test_release_one_runs_bob_on_its_own_provisioning_service`,
+    its docstring saying it checks properties, not an earlier render.
+  - Fixture comments: the test's Anvil account 2 and 8 addresses, and the overlay's settlement
+    asset (a contract at a deterministic address on the dev chain), each say they are
+    well-known development values never for a public network; the overlay header no longer
+    claims every address's key comes from the mnemonic.
+  - `design.md` C13: the provisioning values schema allows exactly one trusted principal.
+  - `helm/Makefile`: `topology-up` no longer runs `helm dependency update` twice
+    (`deploy-local` does it), and the three topology targets refuse a `RELEASE` or
+    `TOPOLOGY_RELEASE` given on the command line (or the environment under `make -e`), whose
+    Services the overlay would not name.
+  - Evidence: `make -C helm test-render` passed (140 assertions and cases, both loader checks
+    and the 8 topology cases run); release 1's render (with and without `local-values.yaml`)
+    still equals `59c2cba`'s; `make -n` of the topology targets prints the expected commands
+    and refuses an overridden name, at both the helm and root Makefiles; `make
+    check-packaging`, `make check-comment-hygiene`, `make check-doc-citations
+    CHANGE=share-site-projection-state` (nothing reported), `make check-tasks`, and `openspec
+    validate --strict` pass.
 
 ## 17. Closeout
 
