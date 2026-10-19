@@ -16,6 +16,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+import typer
 
 import arkhai_apicredits_buyer.settle_cli as settle_cli
 from core_buyer.buyer_config import ResolvedBuyerIdentity
@@ -256,8 +257,6 @@ def test_settle_without_agreed_proposal_refuses(
         "\n".join(json.dumps(e) for e in events) + "\n"
     )
 
-    import typer
-
     with pytest.raises(typer.Exit):
         settle_cli.run_settle_from_log(
             run_id="run-tok-2",
@@ -334,8 +333,6 @@ def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
         return refuse
 
     monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _no_escrow)
-
-    import typer
 
     with pytest.raises(typer.Exit) as refused:
         settle_cli.run_settle_from_log(

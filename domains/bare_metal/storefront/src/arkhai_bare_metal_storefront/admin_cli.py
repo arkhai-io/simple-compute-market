@@ -89,6 +89,9 @@ def reporting_failures() -> Iterator[None]:
     A request no storefront answered is reported by the origin it was sent to
     and the transport error's type, never a traceback.
     """
+    # Imported here, as in ``_storefront_client``: every command imports this
+    # module, and the CLI's help and its commands that do not call the
+    # storefront load no client or transport stack.
     import httpx
     from storefront_client import StorefrontClientError
 

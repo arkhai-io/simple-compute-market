@@ -9,18 +9,26 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_alkahest.alkahest import get_escrow_codec_for
 from market_alkahest.plans import escrow_terms_from_settlement_plan
 from market_alkahest.schemas import EscrowTerms
 from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
 )
-from market_capacity_publication import CapacityBindingError, SiteProjectionState
+from market_capacity_publication import (
+    CapacityBindingError,
+    SiteProjectionState,
+    capacity_availability,
+    remote_site_clients,
+)
 from market_identity import Identity
 from market_settlement_runtime import FailurePolicy
 
 import market_storefront.container as _container
 
 from market_storefront.services.capacity_client import (
+    build_capacity_runtime,
+    capacity_binding_for_listing,
     site_capacity_buckets,
     site_pool_projection,
 )
@@ -196,8 +204,6 @@ async def _refund_from_escrow_proposal(
             "reason": "escrow_chain_unknown",
         }
 
-    from market_alkahest.alkahest import get_escrow_codec_for
-
     from market_storefront.utils.config import CHAINS
 
     chain_cfg = CHAINS.get(chain_name)
@@ -305,13 +311,6 @@ async def _release_capacity(
     release: the reopen it reports is best-effort, refreshed from
     ``site_projections`` when one is given and skipped when not.
     """
-    from market_capacity_publication import capacity_availability, remote_site_clients
-
-    from market_storefront.services.capacity_client import (
-        build_capacity_runtime,
-        capacity_binding_for_listing,
-    )
-
     result = FulfillmentFailurePolicyResult(
         capacity_reservation_id=ctx.capacity_reservation_id
     )

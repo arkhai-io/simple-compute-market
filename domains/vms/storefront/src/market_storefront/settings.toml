@@ -65,7 +65,7 @@ identifier = ""
 
 # Every provisioning callback peer is an explicit public trust binding.
 # Configure one table per stable peer; site_id must be a configured
-# [capacity.sites] key (or "default" for the single-site form).
+# [capacity.sites] key.
 # [Identity.service_peers.provisioning_default]
 # role = "service"
 # site_id = "default"
@@ -120,15 +120,14 @@ root_path = ""
 [capacity]
 # The authoritative capacity ledger lives in site authorities (hosted
 # by the provisioning service); the storefront is strictly a client.
-# Sites come from a [capacity.sites] table of name → authority URL,
-# e.g.   [capacity.sites]
-#        dc-a = "http://prov-a:8081"
-#        dc-b = "http://prov-b:8081"
-# With no table, authority_url becomes the single site "default"
-# (and itself defaults to provisioning.service_url — that process
-# hosts the site authority). The first site is the storefront's home
-# site: local CSV inventory mirrors there. Every site client uses the
-# storefront signer and pins the site's configured public authority identity;
+# Sites come from a required [capacity.sites] table of stable site ID →
+# authority URL, with no packaged default; the storefront refuses to start
+# without one. e.g.   [capacity.sites]
+#                     dc-a = "http://prov-a:8081"
+#                     dc-b = "http://prov-b:8081"
+# Every site client signs as the storefront and verifies the site's responses
+# against the principals of the [Identity.service_peers] entry bound to that
+# site ID. Each site's projection is polled every poll_interval seconds, and
 # capacity deltas arrive by polling each authority's versioned event feed.
 # placement orders sites for reserves: "fill_first" (configuration
 # order — pack a site before touching the next) or "most_available"
@@ -153,7 +152,6 @@ root_path = ""
 # one deal at a time and has a recovery path; the alternative denies
 # every buyer at once. Turn holds back on only once held capacity is
 # billed, so that acquiring exclusivity costs the holder something.
-authority_url    = ""
 poll_interval    = 5
 # How old, in seconds, a site's last successful projection poll may be for the
 # seller's inventory guard to confirm a listing against it. A check past the

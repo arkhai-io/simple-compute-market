@@ -1713,8 +1713,8 @@ Entered 2026-10-19 with the pre-closeout review waived by the owner ("advance to
 the helm render tests are done and run a review when closeout implementation completes";
 `interventions.jsonl`); the last implementation gates passed in
 `reviews/10-implementation-external.triage.md` and `reviews/12-implementation-external.triage.md`.
-Closeout stopped at 17.2, below; the other documentation parts are done, and archival waits on
-17.2's fix round.
+Closeout stopped at 17.2, below, for a code fix round, which is done; the other documentation
+parts are done, and archival (17.11) remains.
 
 - [x] 17.1 **Comment hygiene.** Confirm `make check-comment-hygiene` passes and that no
       comment the change added names a change, a review, or a migration provenance.
@@ -1724,33 +1724,37 @@ Closeout stopped at 17.2, below; the other documentation parts are done, and arc
       review, round, or migration that introduced it. "Retired" and "no longer reads" describe
       the retired-settings catalogues' current behaviour, and "the change" in
       `ServicePeerTrust`'s docstrings is an identity change.
-- [ ] 17.2 **Import placement.** Confirm the imports each section added are at module level
+- [x] 17.2 **Import placement.** Confirm the imports each section added are at module level
       unless a recorded reason keeps one local.
-      **Stopped (2026-10-19): needs a code edit, so the change returns to implementation for a
-      fix round.** Function-local imports the change added or touched, with no recorded reason
-      beside them:
-      - `domains/vms/storefront/src/market_storefront/failure_actions.py:199`, `from
-        market_alkahest.alkahest import get_escrow_codec_for` (its name list trimmed by the
-        change). The module now imports `market_alkahest.plans` at module level, which imports
-        `market_alkahest.alkahest` there, so no lazy-load reason remains and no cycle stands in
-        the way. Related, pre-existing: line 308's local `market_capacity_publication` import,
-        whose package the change also imports at module level (line 17).
-      - `domains/apicredits/storefront/tests/unit/test_server_composition.py:116, 174, 186, 248,
-        319, 336, 345, 353-354`, several repeating module-level imports of the same names
-        (`negotiation_watchdog_policy`, line 13; `apicredits_storefront.utils.config`, line 11).
-      - `domains/vms/storefront/tests/integration/test_admin_api.py:595` (`FakeSite`, which the
-        module already imports from `tests.fake_site` at line 47) and
-        `domains/apicredits/buyer/tests/test_settle_credentials.py:338` (`typer`).
-      - Reason stated only nearby, not beside the import: `admin_cli.py:92-93`
-        (`reporting_failures`; the lazy-load reason is `_storefront_client`'s, above it) and
-        `cli.py:128` (`build_runtime_from_configuration` in `redeliver-introduction`), both in
-        `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/`.
-      Recorded as following their files' existing convention, not owed:
-      `domains/vms/storefront/tests/unit/cli/test_config.py:305` (every test in the file imports
-      `config_group` locally). Kept for a stated reason: `admin_cli.py:36-39` and `cli.py:70`.
-      Under `TYPE_CHECKING`, not function-local: `container.py:21, 24`.
-      Recommended fix round: move each to module level (or state the reason beside it), run the
-      affected suites, and return to closeout at 17.2; no permanent document changes.
+      Stopped 2026-10-19 for a code fix round over the function-local imports the change added
+      or touched with no reason beside them; each was settled by attempting the move.
+      - Moved: `market_storefront/failure_actions.py`'s `get_escrow_codec_for` and, in
+        `_release_capacity`, `capacity_availability`, `remote_site_clients`,
+        `build_capacity_runtime`, and `capacity_binding_for_listing` (no cycle; the module
+        already imported both packages). Four `test_failure_policy.py` cases failed on the move:
+        they patched the defining modules, so their patches now target
+        `market_storefront.failure_actions`, as the file's other patches do, and
+        `tests/fake_site.py` patches the runtime factory there beside `fulfillment_service`'s.
+        `CHAINS` stays local: tests replace `market_storefront.utils.config.CHAINS` and the
+        change did not add it.
+      - Moved: every local import in `apicredits/storefront/tests/unit/test_server_composition.py`
+        (the listed duplicates and the ones beside them in the same tests);
+        `vms/storefront/tests/integration/test_admin_api.py`'s `FakeSite` (not in the
+        module-level `tests.fake_site` import, as the stop note said; now added, and that file's
+        local re-imports of `FakeSite` and `site_capacity` dropped);
+        `apicredits/buyer/tests/test_settle_credentials.py`'s `typer` (both local copies).
+      - Reason stated beside the import (a deliberate lazy load): bare-metal `admin_cli.py`'s
+        `reporting_failures` imports (moving them loads `httpx` and `storefront_client` for
+        every command, `--help` included) and `cli.py`'s `build_runtime_from_configuration`
+        (moving it fails `test_the_command_loads_none_of_the_storefronts_database_or_runtime`).
+      - Also fixed: the VM `settings.toml` `[capacity]` comment (17.3) now describes the required
+        `[capacity.sites]` table and service-peer verification, and the unread `authority_url`
+        key is gone, as is the "single-site form" in the service-peer comment; the stale
+        `authority_url` remarks in `storefront.bob.toml` and a test fixture went with it.
+      Evidence: VM storefront unit 1101 passed, 1 skipped, and integration 448 passed
+      (`UV_FROZEN=1`); `make test-apicredits` OK (storefront 182, buyer 26); bare-metal
+      storefront `make test` 438 passed; `make dist`, `make check-packaging`, and
+      `make check-comment-hygiene` OK. No requirement changed, so no lock or version changed.
 - [x] 17.3 **Documentation compliance.** Re-check D0–D6, D14a–d, C1–C13, P1, and P2 against
       the placement rules in `openspec/README.md`.
       Done: every accepted decision is classified in the design-promotion record below —

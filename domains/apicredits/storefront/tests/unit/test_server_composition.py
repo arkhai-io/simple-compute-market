@@ -1,16 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from copy import deepcopy
 from types import SimpleNamespace
 
+import market_policy.negotiation_thread as negotiation_thread
 import pytest
 from market_identity import Ed25519Signer
+from storefront_client.settlement_routes import unmounted_settlement_routes
 
+import apicredits_storefront.container as container
 import apicredits_storefront.server as server
+from apicredits_storefront import startup
 from apicredits_storefront.utils import config as storefront_config
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.lifecycle_steps import negotiation_watchdog_policy
+from apicredits_storefront.lifecycle_steps import (
+    api_credit_loop_controller,
+    negotiation_watchdog_policy,
+    register_api_credit_lifecycle_steps,
+    register_api_credit_loops,
+)
+from apicredits_storefront.retired_settings import retired_setting_problems
+from apicredits_storefront.services.capacity_client import capacity_poll_interval
+from apicredits_storefront.startup_refusal import StorefrontStartupError
 from tests._settings_overrides import settings_overrides
 
 
@@ -108,16 +121,6 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     capacity-event pollers' fan-out, and `start_loops` starts them all. Payment
     reconciliation runs only while Arkhai payments is composed.
     """
-    import asyncio
-
-    import apicredits_storefront.container as container
-    import market_policy.negotiation_thread as negotiation_thread
-    from apicredits_storefront import startup
-    from apicredits_storefront.lifecycle_steps import (
-        api_credit_loop_controller,
-        register_api_credit_lifecycle_steps,
-    )
-
     domain = get_market_domain_contract()
     composition = (
         SimpleNamespace(payment_service=lambda _db: object()) if payments else None
@@ -171,31 +174,25 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
 
 def test_the_servicing_interval_is_read_from_its_key():
     """The packaged key sets the worker's interval; the old name is not read."""
-    from apicredits_storefront.utils import config
-
-    assert config.settings.get("claims_sweep_interval") is None
-    assert config.settlement_servicing_interval() == 30
+    assert storefront_config.settings.get("claims_sweep_interval") is None
+    assert storefront_config.settlement_servicing_interval() == 30
     with settings_overrides(
         settlement_servicing_interval_seconds=7, claims_sweep_interval=99
     ):
-        assert config.settlement_servicing_interval() == 7
+        assert storefront_config.settlement_servicing_interval() == 7
 
 
 @pytest.mark.parametrize("value", [0, -1, "soon", True, 1e11])
 def test_an_unusable_servicing_interval_is_refused_by_its_key(value):
-    from apicredits_storefront.utils import config
-
     refusal = r"^\[settlement_servicing_interval_seconds\] "
     with settings_overrides(settlement_servicing_interval_seconds=value):
         with pytest.raises(ValueError, match=refusal) as refused:
-            config.settlement_servicing_interval()
+            storefront_config.settlement_servicing_interval()
     assert refused.value.__context__ is None
 
 
 def test_every_settlement_route_contract_is_mounted() -> None:
     """The settle, status, and refund routes are mounted where the contract declares them."""
-    from storefront_client.settlement_routes import unmounted_settlement_routes
-
     mounted = [
         (method, route.path)
         for route in server.app.routes
@@ -245,8 +242,6 @@ def _refused(monkeypatch, tmp_path, **overrides):
     startup refusal comes before it, and so before the database and the
     servicing worker.
     """
-    from apicredits_storefront.startup_refusal import StorefrontStartupError
-
     monkeypatch.delenv("ARKHAI_IDENTITY_CREDENTIAL", raising=False)
     db_path = tmp_path / "agent.db"
     sites = overrides.pop("sites", _QUOTA_SITE)
@@ -316,8 +311,6 @@ def test_an_unusable_capacity_poll_interval_refuses_startup_by_key(
 
 
 def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
-    from apicredits_storefront.services.capacity_client import capacity_poll_interval
-
     settings = storefront_config.settings
     saved = deepcopy(settings.get("capacity"))
     try:
@@ -333,8 +326,6 @@ def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
 
 
 def test_a_configuration_stating_no_renamed_setting_is_not_refused():
-    from apicredits_storefront.retired_settings import retired_setting_problems
-
     assert retired_setting_problems() == []
 
 
@@ -342,20 +333,12 @@ def test_a_configuration_stating_no_renamed_setting_is_not_refused():
     "key", ["negotiation_timeout_seconds", "negotiation_watchdog_interval"]
 )
 def test_an_unusable_watchdog_duration_is_refused_by_its_key(key):
-    from apicredits_storefront.lifecycle_steps import negotiation_watchdog_policy
-
     with settings_overrides(**{key: float("nan")}):
         with pytest.raises(ValueError, match=rf"^\[{key}\] "):
             negotiation_watchdog_policy()
 
 
 def test_an_unusable_payment_reconciliation_interval_refuses_its_registration(monkeypatch):
-    import apicredits_storefront.container as container
-    from apicredits_storefront.lifecycle_steps import (
-        api_credit_loop_controller,
-        register_api_credit_loops,
-    )
-
     monkeypatch.setattr(
         container,
         "resolved_settlement_composition",

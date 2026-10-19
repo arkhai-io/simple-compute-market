@@ -99,7 +99,6 @@ def _settings(
         "identity.principal",
         TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
     )
-    source.set("capacity.authority_url", url)
     source.set("capacity.poll_interval", 0.01)
     source.set("capacity.sites", sites if sites is not None else {"default": url})
     source.set("capacity.placement", placement)

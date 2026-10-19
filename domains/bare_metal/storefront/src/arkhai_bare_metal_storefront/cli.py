@@ -125,6 +125,8 @@ def redeliver_introduction_cmd(
 
     from market_contact_exchange import IntroductionPayloadsDeletedError
 
+    # Imported here so only this command composes the storefront's runtime and
+    # database; ``publish`` and the other administrator commands load neither.
     from .runtime import build_runtime_from_configuration
 
     runtime = build_runtime_from_configuration()

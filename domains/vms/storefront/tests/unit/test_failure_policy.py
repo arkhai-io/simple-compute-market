@@ -54,7 +54,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(
         return binding
 
     monkeypatch.setattr(
-        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        "market_storefront.failure_actions.capacity_binding_for_listing",
         resolve_capacity_binding,
     )
 
@@ -242,7 +242,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch,
         },
     )
     monkeypatch.setattr(
-        "market_alkahest.alkahest.get_escrow_codec_for",
+        "market_storefront.failure_actions.get_escrow_codec_for",
         lambda *args, **kwargs: fake_codec,
     )
 

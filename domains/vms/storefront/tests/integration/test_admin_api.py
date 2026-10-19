@@ -46,6 +46,7 @@ from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests.publication_app import recorded_registries
 from tests.fake_site import (
     FakeProjectionSite,
+    FakeSite,
     loaded_site_projection_state,
     site_capacity,
     site_projection_state,
@@ -484,8 +485,6 @@ async def _seed_dynamic_listing_pool_rows(
 
 
 def _fake_pool_site():
-    from tests.fake_site import FakeSite
-
     fake = FakeSite(deliverable_modes={"vm"})
     fake.add_resource(
         "pool-h200-1", 4,
@@ -592,8 +591,6 @@ class TestFulfillmentEvents:
         proves the *observable* consequence of that fact, so it fails
         immediately if a future change ever adds such a shortcut.
         """
-        from tests.fake_site import FakeSite
-
         c, db = client
         await _seed_dynamic_listing_pool_rows(db)
         # The live site genuinely has zero capacity for this resource.
@@ -984,7 +981,6 @@ class TestFulfillmentEvents:
     ):
         """The watchdog usually released first; a second capacity-released
         for the same (or an unknown) reservation must land cleanly."""
-        from tests.fake_site import FakeSite, site_capacity
         async with site_capacity(
             FakeSite(deliverable_modes={"vm"}),
             project_pool_modes=True,
@@ -1257,7 +1253,6 @@ class TestReleaseReservations:
 
     async def test_releases_every_held_site_reservation(self, client):
         c, _db = client
-        from tests.fake_site import site_capacity
 
         async with site_capacity(_fake_pool_site()) as capacity:
             first = await _ledger_hold(capacity, gpu_count=1)
@@ -1272,7 +1267,6 @@ class TestReleaseReservations:
 
     async def test_a_second_call_releases_nothing_new(self, client):
         c, _db = client
-        from tests.fake_site import site_capacity
 
         async with site_capacity(_fake_pool_site()) as capacity:
             await _ledger_hold(capacity)
