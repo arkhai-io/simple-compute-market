@@ -30,6 +30,8 @@ The boundary this goal draws is between *physical* and *commercial* authority, n
 
 **Current state.** The provisioning service is authoritative for hosts, resource pools, capacity admission, scheduling, and the fulfillment lifecycle. Storefronts consume physical facts through the site resource-pool and capacity-bucket projections, and derive every listing from them; no storefront holds physical state.
 
+A Resource Pool's provider is fixed at creation on every administration path: the API and definition documents alike refuse to change it. Moving inventory to a different provider therefore takes a second pool and explicit member reassignment, under the site's live-obligation guard for capacity resources and the host pool-change hooks for hosts. A fresh site with a mounted pool document creates its `default` pool from that document with the declared provider, and the VM provider is named `vm.ansible` beside `bare_metal.ansible`.
+
 The VM storefront has no inventory tables, CSV import, or local listing-derivation path, and its site-scoped pool overrides are its only per-pool terms. It holds no allocation ledger, resource administration routes, or host identity on the fulfillment path. Fresh databases omit `compute_allocations`, which `kit/site`'s `CapacityReservation` supersedes, and the retired inventory tables. Older databases keep those tables frozen, with nothing reading or writing them, as input an operator may extract into provisioning.
 
 Buyer-access infrastructure is provisioning-owned. A tunnel relay is a resource in the provisioning service, referenced by the pools whose hosts dial it, holding its own rendezvous address, port window, and admission token. The VM storefront names no relay and holds no relay credential: which relay serves a host is a physical fact about where that host is, and a storefront selecting one per request would make a fleet-wide property depend on a commercial caller's configuration.
@@ -48,7 +50,6 @@ site remain outside its scope.
 
 | Open gap | Owned by |
 |---|---|
-| A Resource Pool's provider can be swapped in place, silently reinterpreting which executor its members belong to | [`fix-resource-pool-provider-at-creation`](../../openspec/changes/fix-resource-pool-provider-at-creation/) |
 | The relay path is implemented but unverified on a rented host: reload preservation of live sessions, the port window, teardown release, and relay deletion under live leases remain to be proved or decided | [`relay-vm-access-without-a-dashboard`](../../openspec/changes/relay-vm-access-without-a-dashboard/) |
 | Host inventory seeds the host registry only when it is empty and is never reconciled against its file, so editing a running deployment's inventory changes nothing | [`bring-host-inventory-under-definition-documents`](../../openspec/changes/bring-host-inventory-under-definition-documents/) |
 | One SSH key reaches every host in an environment, so a host prepared by another party cannot be registered with its own credential | [`contain-embedded-host-key-material`](../../openspec/changes/contain-embedded-host-key-material/) |

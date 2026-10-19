@@ -271,15 +271,22 @@ in the service. This trades a sometimes less specific error for avoiding databas
 work on a request wrong on its face. Share pure comparisons across paths instead
 of duplicating the validation in adapters.
 
-The design applies this locally. General guidance, its wording and permanent
-home remain for the owner's closeout consideration.
+The design applies this locally. At closeout the owner chose to promote it as
+repository-wide architecture (option B of three: no general promotion; a
+paragraph in `docs/development/ARCHITECTURE.md`; implementer guidance in
+`AGENTS.md`), with the wording proposed at closeout, as a paragraph under
+"Service Architecture → Route contracts and their HTTP binding". It belongs
+beside the route-contract pattern because it says which of that pattern's
+pieces — wire models or route service — owns each kind of check. Its closing
+sentence keeps it a default rather than a ranking of error messages, so no path
+is reordered or given an extra lookup to report a different error first.
+`AGENTS.md` was rejected because the principle is architecture, not a working
+rule. Leaving it local was rejected because the next contracts/authority pair
+would have to rediscover it.
 
 ## Open Questions
 
-- At closeout, the owner decides whether the validation-order principle warrants
-  general guidance and chooses its wording and home. Revisit during promotion;
-  no task may prescribe the guidance edit before that decision. No implementation
-  design question remains open.
+None. The validation-order guidance question was settled at closeout (above).
 
 ## Permanent documentation and planning handoff
 
@@ -317,3 +324,45 @@ are recorded. The owner passed the review gate: "Pass the gate." The change is
 Code and behavioral suites belong to implementation; this pass claims no
 implementation validation. `tasks.md`, code and permanent documents were not
 edited during recording.
+
+## Implementation record
+
+Closeout moved these from the task notes so the notes can keep only final
+behavior, evidence, and destinations.
+
+- **Missed bootstrap caller.** The section 3 caller audit concluded that no
+  fixture or caller relied on a provider swap. It missed the bare-metal
+  development fixture, which changed the migration-seeded `default` from
+  `ansible` to `bare_metal.ansible`. Validation 19/20 found it, and the
+  document-created default and `vm.ansible` identity above are the remedy.
+- **Test placement.** Real-database tests the change touched moved from `unit/`
+  to `integration/`. For provisioning that was `test_database.py` and the
+  backfill-convergence test. For fulfillment it was 38 scheduler,
+  ledger-persistence and acceptance-concurrency cases, with their fixtures; two
+  mocked persistence cases stayed as unit tests. Fresh-context compliance review
+  required this. The moved scheduler race case lost its future-work narration
+  and timing assumptions; explicit transaction-attempt, open and commit events
+  and bounded futures replaced them. The relocated provider fake needed a
+  class-level host-requirement boolean. Test-name inspection confirmed no
+  function was lost or duplicated.
+- **Payment-settlement race.** Twice, an aggregate run failed in the unchanged
+  VM storefront test
+  `test_settlement_is_pending_until_a_verified_receipt_then_delivers_once`: its
+  delivery fake could reach `ready` before the response read `provisioning`. In
+  round 1 the test began to hold its existing started/release events, with a
+  bounded wait and unconditional release. Production behavior is unchanged.
+- **Interrupted session and recovery.** Section 4's code was checkpointed by the
+  owner as "Section 4 pre-verification" during a session interruption, and the
+  completion commit added the final verification without amending it. Round 2's
+  fix was stashed while other workflow work landed. Only its four paths were
+  restored at `d1b22e4ce`, and the inspected stash was left intact. Logs from
+  before the stash were not counted for the restored tree.
+- **Contaminated wheelhouse.** Round 2's first aggregate attempt failed five VM
+  storefront unit tests. The cause was a wheelhouse holding higher settlement
+  and Alkahest versions than this branch builds. `make dist-clean` and
+  `make lock` rebuilt it and regenerated the affected locks to their exact
+  tracked contents. The failed attempt was not counted as a pass.
+- **Environment.** A sandboxed build could not write the shared uv cache. The
+  same build passed with ordinary escalation, and no call was denied. The pinned
+  OpenSpec 1.14.0 ran from its verified cached executable when the offline npm
+  launcher lacked a registry entry.
