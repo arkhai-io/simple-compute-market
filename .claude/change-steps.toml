@@ -44,7 +44,7 @@ deny = [
   "Bash(find * -delete*)", "Bash(find * -exec*)", "Bash(find * -ok*)",
   "Bash(find * -fprint*)", "Bash(find * -fls*)",
   # The diff family writes its output to a file with --output.
-  "Bash(git diff* --output*)", "Bash(git show* --output*)", "Bash(git log* --output*)",
+  "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
 ]
 
 # Design writes the change's documents and commits nothing; the owner commits
@@ -156,7 +156,8 @@ skill = "change-archive-cleanup"
 models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
 allow = [
   "Edit(openspec/changes/README.md)",
-  "Edit(openspec/changes/**/reviews/pull-request.md)",
+  "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
+  "Edit(openspec/changes/archive/*/interventions.jsonl)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]

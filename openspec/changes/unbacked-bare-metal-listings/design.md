@@ -230,6 +230,13 @@ Decided with the maintainer:
   beside its `request-introduction`, and the core buyer application refuses at
   startup a root command name two installed domains register, naming both. VM's
   root-level commands stay.
+  Seen in the pipeline: on `feat/orchestrate-change-workflow`, run `39294620474`'s
+  e2e-vm lane failed `test_vm_introduction.py::TestStage02_Reveal::test_04_the_buyer_cli_negotiates_and_reveals`,
+  the VM buyer's `settlement contact introduce` reaching bare metal's config loader
+  (`bare-metal buyer config is required via BARE_METAL_BUYER_CONFIG`). The rerun on
+  the next commit, run `39302015924`, passed with no product change between them:
+  the collision is intermittent on CI, decided by the order the image's entry points
+  are discovered.
 - The existing backed bare-metal introduction scenario stays: its retention and
   operator-deletion coverage is independent of backing.
 - There is no Helm evidence for bare metal in this change. The bare-metal chart
