@@ -165,6 +165,10 @@ def test_a_host_the_standard_accepts_is_accepted_whether_or_not_it_exists(stated
         ("http://site\n-a", "without control characters"),
         ("http://site\x00-a", "without control characters"),
         ("http://site-a\x7f", "without control characters"),
+        ("https://site.example.test\n", "without control characters"),
+        ("https://site.example.test\r\n", "without control characters"),
+        ("\thttps://site.example.test", "without control characters"),
+        (" https://site.example.test\t ", "without control characters"),
         ("http://[::1", "not a valid URL"),
     ],
 )
@@ -183,6 +187,8 @@ def test_a_url_that_is_not_an_http_origin_is_refused(stated, reason):
         "https://hunter2.example.test:hunter2",
         "http://hunter 2.example.test",
         "http://hunter2\t.example.test",
+        "\thttps://hunter2.example.test",
+        "https://hunter2.example.test\r\n",
     ],
 )
 def test_an_origin_refusal_carries_no_value_even_in_its_context(stated):

@@ -654,7 +654,10 @@ Secrets is owed. Accepted scope beyond the original proposal.
   is accepted. One guard precedes the parse, a check rather than a parser: an ASCII control
   character (U+0000 to U+001F, U+007F) anywhere in the value is refused, because the standard
   would rewrite the URL rather than refuse it -- it drops a tab or newline inside the URL and C0
-  controls at its ends, so `http://si<TAB>te` would bind to `http://site`. Empty credentials
+  controls at its ends, so `http://si<TAB>te` would bind to `http://site`. The guard reads the
+  value as stated, its ends included, before anything strips it; a plain surrounding space is
+  left for the parser to drop (corrected in round 12, 12 F3: the guard had read the stripped
+  value, so a leading tab or a trailing `\n` or `\r\n` was dropped, not refused). Empty credentials
   (`http://@a`, `http://:@a`) are dropped by the parser and accepted as `http://a`, which loses
   nothing. A refusal's reason is built from the parser's error type and fixed text, never its
   message, which keeps the input. Rejected: our own parser, which every edge case the standard
@@ -893,6 +896,39 @@ Secrets is owed. Accepted scope beyond the original proposal.
   settlement JSON; `[Wallet].address`, `[Chains.<name>]`, and the overlay's wallet key
   replace their variables; the all-or-none Alkahest input rule keeps its refusal.
 - **C12. Documentation** named in the proposal's permanent documentation impact.
+- **C13. Several storefronts per registry, each in its own Helm release** (owner, 2026-10-19,
+  round 12, 12 F1). The provisioning chart and service trust one storefront principal
+  (`storefrontIdentity`, its first entry read) and call back one storefront
+  (`storefront_url`), so a bare-metal storefront beside Bob on the umbrella's provisioning
+  service would have its signed requests refused and its capacity-released callbacks sent to
+  Bob. Options weighed: (a) a second provisioning instance inside the umbrella for bare
+  metal; (b) a multi-storefront provisioning contract -- per-storefront authorization and
+  reservation-scoped callbacks -- a separate change; (c) separate releases. The owner chose
+  (c): several storefronts per registry is the topology supported and testable today, each
+  storefront in its own release of the umbrella with its own provisioning service, publishing
+  to one release's registry. Several sites per storefront is in progress (this change's
+  per-site state); several storefronts per site is a later goal, which (b) would serve.
+  Replacing the umbrella provisioning service's principal or callback with bare metal's was
+  rejected: it breaks Bob.
+
+  As delivered (16.7): release 1 is the umbrella as `deploy-local` installs it; release 2,
+  `arkhai-bare-metal-seller`, is the same chart under `helm/bare-metal-release-values.yaml`,
+  values only: the bare-metal storefront (Anvil account 8, principal, wallet, and
+  administrator) and its own provisioning service (Anvil account 9), registry, VM storefront,
+  dev-env, contract validation, and the e2e-tests chart disabled; `global.registry.host` names
+  release 1's registry Service, whose principal the storefront's `internalRegistryTrust`
+  pins, and the chain and Alkahest address book are release 1's dev-env. Release 2 reuses
+  release 1's provisioning SSH and runtime Secrets and needs three of its own. One chart change
+  (owner-accepted): the umbrella's smoke-test profile (`templates/tests/test-config.yaml`)
+  applied its VM-agent requirement, provisioning-to-agent trust check, and agent-derived
+  `seller` and `registry` sections whether or not the VM storefront was enabled, which no
+  values could satisfy honestly in a release without it; they now apply only while
+  `storefront.enabled`, and with the dedicated bare-metal storefront enabled instead the
+  profile checks that provisioning trusts that storefront's `Identity.principal`. Release 1
+  renders byte for byte as before. `make helm-topology-up`, `helm-topology-down`, and
+  `helm-topology-check` (over `helm/Makefile`'s `topology-*`) install, remove, and test the
+  two releases. No end-to-end scenario needs release 2 yet; one that does states it on its
+  Makefile target and in its suite module.
 
 ### Owner principles and where they go
 

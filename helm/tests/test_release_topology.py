@@ -1,0 +1,316 @@
+"""The local two-release topology renders as one registry serving two storefronts.
+
+Release 1 is the umbrella as ``make -C helm deploy-local`` installs it; release 2
+is the same chart under ``bare-metal-release-values.yaml``: the bare-metal
+storefront and its own provisioning service, publishing to release 1's registry.
+Each test renders both releases with the names ``helm/Makefile``'s topology
+targets install them under, and reads the documents the charts render as JSON
+back with ``json``. Standard library only.
+
+Set ``BARE_METAL_STOREFRONT_PYTHON`` to the bare-metal storefront environment's
+interpreter to also load release 2's rendered document with the storefront's own
+configuration loader and publication checks.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+UMBRELLA = Path(__file__).resolve().parents[1]
+MAKEFILE = UMBRELLA / "Makefile"
+
+
+def _make_variable(name: str) -> str:
+    """A simple ``NAME := value`` assignment in helm/Makefile."""
+    match = re.search(rf"^{name}\s*:?=\s*(\S+)\s*$", MAKEFILE.read_text(), re.MULTILINE)
+    assert match, f"{name} not assigned in {MAKEFILE}"
+    return match.group(1)
+
+
+RELEASE_ONE = _make_variable("RELEASE")
+RELEASE_TWO = _make_variable("TOPOLOGY_RELEASE")
+OVERLAY = UMBRELLA / _make_variable("TOPOLOGY_VALUES")
+RELEASE_ONE_VALUES = (UMBRELLA / "values.yaml", UMBRELLA / "local-values.yaml")
+RELEASE_TWO_VALUES = (*RELEASE_ONE_VALUES, OVERLAY)
+
+
+def _render(release: str, values: tuple[Path, ...], overlay: dict | None = None) -> subprocess.CompletedProcess[str]:
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+        json.dump(overlay or {}, handle)
+        handle.flush()
+        command = ["helm", "template", release, str(UMBRELLA)]
+        for path in (*values, Path(handle.name)):
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _ok(rendered: subprocess.CompletedProcess[str]) -> str:
+    assert rendered.returncode == 0, rendered.stderr
+    return rendered.stdout
+
+
+def _release_one(overlay: dict | None = None) -> str:
+    return _ok(_render(RELEASE_ONE, RELEASE_ONE_VALUES, overlay))
+
+
+def _release_two(overlay: dict | None = None) -> str:
+    return _ok(_render(RELEASE_TWO, RELEASE_TWO_VALUES, overlay))
+
+
+def _documents(manifest: str) -> list[str]:
+    return manifest.split("\n---\n")
+
+
+def _source(manifest: str, path: str) -> str:
+    """The rendered document whose ``# Source:`` ends with ``path``."""
+    for document in _documents(manifest):
+        if any(line.startswith("# Source: ") and line.endswith(path) for line in document.splitlines()):
+            return document
+    raise AssertionError(f"{path} not rendered")
+
+
+def _sources(manifest: str) -> set[str]:
+    return {line.removeprefix("# Source: ") for line in manifest.splitlines() if line.startswith("# Source: ")}
+
+
+def _block(document: str, key: str) -> str:
+    """The text of the block scalar ``key: |`` that ``document``'s data holds."""
+    marker = f"  {key}: |\n"
+    assert marker in document, f"{key} not rendered"
+    lines = []
+    for line in document.split(marker, 1)[1].splitlines():
+        if line and not line.startswith("    "):
+            break
+        lines.append(line)
+    return textwrap.dedent("\n".join(lines))
+
+
+def _storefront_document(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "bare-metal-storefront/templates/configmap.yaml"), "storefront.json"))
+
+
+def _provisioning_document(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "provisioning/templates/configmap.yaml"), "config-production.yml"))
+
+
+def _smoke_profile(manifest: str) -> dict:
+    return json.loads(_block(_source(manifest, "templates/tests/test-config.yaml"), "config-helm.yml"))
+
+
+def _named(manifest: str, kind: str, name: str) -> str:
+    """The rendered ``kind`` named ``name``."""
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        if f"kind: {kind}" in lines and f"  name: {name}" in lines:
+            return document
+    raise AssertionError(f"no {kind} {name} rendered")
+
+
+def _service_url(manifest: str, name: str) -> str:
+    """``http://<name>:<port>`` for the Service ``name`` renders."""
+    service = _named(manifest, "Service", name)
+    port = re.search(r"^\s+port: (\d+)$", service, re.MULTILINE)
+    assert port, f"Service {name} renders no port"
+    return f"http://{name}:{port.group(1)}"
+
+
+def _env(document: str, name: str) -> str:
+    match = re.search(rf"- name: {name}\n\s+value: \"?([^\"\n]+)\"?", document)
+    assert match, f"{name} not set"
+    return match.group(1)
+
+
+# --- release 2 ------------------------------------------------------------
+
+
+def test_release_two_provisioning_admits_and_calls_back_the_bare_metal_storefront() -> None:
+    """Release 2's provisioning service trusts the bare-metal storefront's
+    signer for its requests and callbacks and calls back its Service, and the
+    storefront's `default` site is that provisioning service, trusted under its
+    own signer."""
+    manifest = _release_two()
+    storefront = _storefront_document(manifest)
+    provisioning = _provisioning_document(manifest)
+
+    storefront_service = _service_url(manifest, f"{RELEASE_TWO}-bare-metal-storefront")
+    provisioning_service = _service_url(manifest, f"{RELEASE_TWO}-provisioning")
+    assert provisioning["storefront_identity"] == storefront["Identity"]["principal"]
+    assert provisioning["storefront_url"] == storefront_service == storefront["base_url"]
+    assert storefront["capacity"]["sites"] == {"default": provisioning_service}
+    (peer,) = storefront["Identity"]["service_peers"].values()
+    assert peer["role"] == "service" and peer["site_id"] == "default"
+    assert peer["principals"] == [provisioning["identity"]]
+    # Release 2's provisioning signs as its own principal, not release 1's.
+    assert provisioning["identity"] != _provisioning_document(_release_one())["identity"]
+
+
+def test_release_two_publishes_to_release_ones_registry_under_its_pinned_trust() -> None:
+    """The bare-metal storefront's one registry is release 1's Service, its
+    trust the principal release 1's registry signs as; its chain and Alkahest
+    address book are release 1's dev-env."""
+    release_one = _release_one()
+    storefront = _storefront_document(_release_two())
+    registry = _source(release_one, "charts/registry/templates/deployment.yaml")
+
+    registry_url = _service_url(release_one, f"{RELEASE_ONE}-registry")
+    assert storefront["registry"]["urls"] == [registry_url]
+    assert storefront["registry"]["authorities"] == {
+        registry_url: {
+            "authority": _env(registry, "REGISTRY_AUTHORITY_ID"),
+            "principals": [
+                {
+                    "scheme": _env(registry, "REGISTRY_AUTHORITY_SCHEME"),
+                    "identifier": _env(registry, "REGISTRY_AUTHORITY_IDENTIFIER"),
+                }
+            ],
+        }
+    }
+    chain = _service_url(release_one, f"{RELEASE_ONE}-dev-env")
+    assert storefront["Chains"]["anvil"]["rpc_url"] == chain.replace("http://", "ws://", 1)
+    address_book = _named(release_one, "ConfigMap", f"{RELEASE_ONE}-dev-env-alkahest-addresses")
+    assert "  alkahest_anvil_addresses.json: |" in address_book.splitlines()
+    deployment = _source(_release_two(), "bare-metal-storefront/templates/deployment.yaml")
+    assert f'name: "{RELEASE_ONE}-dev-env-alkahest-addresses"' in {line.strip() for line in deployment.splitlines()}
+    path = "/etc/arkhai/alkahest/alkahest_anvil_addresses.json"
+    assert storefront["Chains"]["anvil"]["alkahest_address_config_path"] == path
+    assert storefront["Settlement"]["alkahest"]["address_config_path"] == path
+
+
+def test_release_two_runs_only_its_storefront_and_provisioning_service() -> None:
+    manifest = _release_two()
+    charts = {source.split("/")[2] for source in _sources(manifest) if source.split("/")[1] == "charts"}
+
+    assert charts == {"bare-metal-storefront", "provisioning"}
+    # Its smoke-test profile names its own provisioning service and no VM agent
+    # or registry, which release 2 does not run.
+    profile = _smoke_profile(manifest)
+    assert sorted(profile) == ["provisioning", "rpc", "settlement"]
+    assert profile["provisioning"]["api_url"] == _service_url(manifest, f"{RELEASE_TWO}-provisioning")
+
+
+def test_release_two_refuses_a_provisioning_service_that_does_not_trust_its_storefront() -> None:
+    """With the VM storefront disabled, the smoke-test profile checks the
+    bare-metal storefront's signer against provisioning's trust instead."""
+    distrusted = {
+        "provisioning": {
+            "storefrontIdentity": {
+                "principals": [{"scheme": "eip191", "identifier": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"}]
+            }
+        }
+    }
+    refused = _render(RELEASE_TWO, RELEASE_TWO_VALUES, distrusted)
+
+    assert refused.returncode != 0, "render succeeded"
+    assert "must include the bare-metal storefront's config.Identity.principal" in refused.stderr
+
+
+# --- release 1 ------------------------------------------------------------
+
+
+def test_release_one_renders_as_it_does_today() -> None:
+    """Release 1 runs the registry, Bob, provisioning, and dev-env; its
+    provisioning service trusts and calls back Bob, and its smoke tests target
+    Bob and the release's registry."""
+    manifest = _release_one()
+    charts = {source.split("/")[2] for source in _sources(manifest) if source.split("/")[1] == "charts"}
+    provisioning = _provisioning_document(manifest)
+    bob = json.loads(_block(_source(manifest, "storefront/templates/configmap.yaml"), "storefront.json"))
+
+    assert {"registry", "storefront", "provisioning", "dev-env"} <= charts
+    assert "bare-metal-storefront" not in charts
+    assert provisioning["storefront_identity"] == bob["Identity"]["principal"]
+    assert provisioning["storefront_url"] == _service_url(manifest, f"{RELEASE_ONE}-storefront-bob")
+    profile = _smoke_profile(manifest)
+    assert profile["seller"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-storefront-bob")
+    assert profile["registry"]["api_url"] == _service_url(manifest, f"{RELEASE_ONE}-registry")
+
+
+def test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob() -> None:
+    distrusted = {
+        "provisioning": {
+            "storefrontIdentity": {
+                "principals": [{"scheme": "eip191", "identifier": "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"}]
+            }
+        }
+    }
+    refused = _render(RELEASE_ONE, RELEASE_ONE_VALUES, distrusted)
+
+    assert refused.returncode != 0, "render succeeded"
+    assert "must include the active storefront signer principal" in refused.stderr
+
+
+# --- the storefront's own loader -----------------------------------------
+
+
+_PROBE = """
+import json, warnings; warnings.simplefilter('ignore')
+from arkhai_bare_metal_storefront.config import load_storefront_settings
+from arkhai_bare_metal_storefront.pool_overrides import compile_publication_clauses
+from arkhai_bare_metal_storefront.site_clients import parse_site_bindings
+from arkhai_bare_metal_storefront.startup_refusal import publication_startup_problems
+settings = load_storefront_settings()
+problems = publication_startup_problems(settings)
+report = {"problems": problems, "registries": sorted(settings.registry_authorities())}
+if not problems:
+    report["clauses"] = len(compile_publication_clauses(settings.pricing.settlements))
+    report["sites"] = [
+        [binding.site_id, binding.service_peer]
+        for binding in parse_site_bindings(settings.capacity.sites, settings.service_peer_configs())
+    ]
+print(json.dumps(report))
+"""
+
+
+def test_release_twos_document_loads_with_the_storefront_loader() -> None:
+    """Release 2's rendered document is one the storefront could publish under
+    (publishable, not startable: composing the runtime also needs the
+    credential, the overlay's wallet key, a writable database, and the chain)."""
+    python = os.environ.get("BARE_METAL_STOREFRONT_PYTHON")
+    if not python:
+        print("skip: BARE_METAL_STOREFRONT_PYTHON unset; the storefront loader check did not run")
+        return
+    config = _storefront_document(_release_two())
+    # The probe reads only the rendered document: the loader's override layer
+    # would also read any STOREFRONT_ variable this process carries.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("STOREFRONT_")}
+    with tempfile.TemporaryDirectory() as home:
+        directory = Path(home) / "arkhai"
+        directory.mkdir()
+        (directory / "storefront.json").write_text(json.dumps(config))
+        loaded = subprocess.run(
+            [python, "-c", _PROBE],
+            env={**environment, "XDG_CONFIG_HOME": home},
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    report = json.loads(loaded.stdout.strip().splitlines()[-1])
+
+    assert report["problems"] == [], report["problems"]
+    assert report["registries"] == config["registry"]["urls"]
+    assert report["clauses"] == 1
+    assert report["sites"] == [["default", "provisioning_default"]]
+
+
+def main() -> int:
+    failures = 0
+    for name, test in sorted(globals().items()):
+        if name.startswith("test_") and callable(test):
+            try:
+                test()
+                print(f"ok    {name}")
+            except Exception as exc:  # noqa: BLE001 - every error is a failed test
+                failures += 1
+                print(f"FAIL  {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

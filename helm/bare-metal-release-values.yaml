@@ -1,0 +1,144 @@
+# The second release of the local two-release topology: several storefronts per
+# registry, each storefront in its own release with its own provisioning service.
+#
+#   release 1  arkhai-node-operator      values.yaml + local-values.yaml
+#              (`make -C helm deploy-local`): the registry, Bob's VM storefront,
+#              its provisioning service, and dev-env's Anvil.
+#   release 2  arkhai-bare-metal-seller  values.yaml + local-values.yaml + this
+#              file: the dedicated bare-metal storefront and its own provisioning
+#              service, publishing to release 1's registry.
+#
+# `make -C helm topology-up` installs both, in that order, into one namespace;
+# `topology-check` runs both releases' Helm tests and `topology-down` removes them.
+# Service names below are release-scoped, so they name the release names those
+# targets install (`RELEASE` and `TOPOLOGY_RELEASE` in helm/Makefile); a render
+# test holds the two equal.
+#
+# Every principal and address here is a well-known Anvil development value: the
+# key of each is published with Foundry's default `test test ... junk` mnemonic,
+# so none may be used on a public network. Signing material is never here; it is
+# in out-of-band Secrets the same targets require:
+#   arkhai-bare-metal-storefront-identity   `credential`: Anvil account 8's key
+#   arkhai-bare-metal-storefront-runtime    `storefront.secrets.toml`: [Wallet]
+#                                           private_key, Anvil account 8's key
+#   arkhai-bare-metal-provisioning-identity `credential`: Anvil account 9's key
+# Release 2's provisioning reuses release 1's SSH and runtime Secrets, which mock
+# provisioning does not read for delivery.
+global:
+  # Release 1's registry, which the bare-metal chart derives as the storefront's
+  # registry; global.registryIdentity, values.yaml's, is that registry's signer,
+  # and the storefront's internalRegistryTrust (values.yaml's) pins it.
+  registry:
+    host: arkhai-node-operator-registry
+  # This release's own provisioning service, the storefront's `default` site.
+  provisioning:
+    host: arkhai-bare-metal-seller-provisioning
+  # Anvil account 9, this release's provisioning signer: a well-known
+  # development address, never for a public network.
+  provisioningIdentity:
+    scheme: eip191
+    identifier: "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"
+
+# Release 1 runs these; this release runs none of them. Their tests target Bob
+# and release 1's chain.
+dev-env:
+  enabled: false
+registry:
+  enabled: false
+storefront:
+  enabled: false
+validate-contracts:
+  enabled: false
+e2e-tests:
+  enabled: false
+
+bare-metal-storefront:
+  enabled: true
+  identity:
+    credentialSecret:
+      name: arkhai-bare-metal-storefront-identity
+      key: credential
+  secret:
+    secretName: arkhai-bare-metal-storefront-runtime
+    configKey: storefront.secrets.toml
+  # Release 1's dev-env ConfigMap of its Anvil's contract addresses; both address
+  # paths below name the file it mounts.
+  alkahestAddressBook:
+    configMapName: arkhai-node-operator-dev-env-alkahest-addresses
+    key: alkahest_anvil_addresses.json
+    mountPath: /etc/arkhai/alkahest
+  config:
+    Identity:
+      # Anvil account 8, the storefront's principal and seller wallet, and its
+      # administrator, so `bare-metal-storefront publish` and its other
+      # administrator commands sign as the storefront itself. A well-known
+      # development address, never for a public network.
+      principal:
+        scheme: eip191
+        identifier: "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"
+      administrators:
+        operator:
+          principals:
+            - scheme: eip191
+              identifier: "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"
+      # This release's provisioning service, Anvil account 9, replacing
+      # values.yaml's peer, release 1's signer.
+      service_peers:
+        provisioning_default:
+          role: service
+          site_id: default
+          principals:
+            - scheme: eip191
+              identifier: "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"
+    # Widened for this development release only, as Bob's is: a check that holds
+    # the loops and steps them is not refused for a projection poll older than
+    # three poll intervals. Production keeps the shipped window.
+    capacity:
+      source_confirmation_seconds: 3600
+    Settlement:
+      schema_version: 1
+      priority:
+        - alkahest.v1
+      alkahest:
+        enabled: true
+        address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+        oracle_gated: false
+        trusted_oracle_addresses: []
+        interruptible: false
+        interruptible_oracle_addresses: []
+    # Anvil account 8's address; its key is in the overlay Secret above.
+    Wallet:
+      address: "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"
+    # Release 1's Anvil.
+    Chains:
+      anvil:
+        rpc_url: ws://arkhai-node-operator-dev-env:8545
+        alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+    pricing:
+      # The dev chain's deterministic test token, as the bare-metal lane sells.
+      settlements:
+        - mechanism: alkahest.v1
+          asset: "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+          rate: "10"
+          per: hour
+          mechanism_input:
+            chain: anvil
+            escrow_kind: erc20_escrow_obligation_default
+      default_max_duration_seconds: 86400
+
+provisioning:
+  identity:
+    principal:
+      scheme: eip191
+      identifier: "0xa0ee7a142d267c1f36714e4a8f75612f20a79720"
+    credentialSecret:
+      name: arkhai-bare-metal-provisioning-identity
+      key: credential
+  # The storefront this provisioning service admits and calls back: the
+  # bare-metal storefront's principal, Anvil account 8, and its Service.
+  storefrontIdentity:
+    principals:
+      - scheme: eip191
+        identifier: "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"
+  storefront:
+    url: http://arkhai-bare-metal-seller-bare-metal-storefront:8000

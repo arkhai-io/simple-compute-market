@@ -117,9 +117,12 @@ def site_authority_url(value: Any) -> str:
     storefront hands its site client.
 
     One guard precedes the parse: an ASCII control character anywhere in the
-    value is refused, because the standard would rewrite the URL rather than
-    refuse it -- it drops a tab or newline inside it, so ``http://si<TAB>te``
-    would bind to ``http://site``, and C0 controls at its ends.
+    value, its ends included, is refused, because the standard would rewrite
+    the URL rather than refuse it -- it drops a tab or newline inside it, so
+    ``http://si<TAB>te`` would bind to ``http://site``, and C0 controls at its
+    ends, so a trailing newline would be silently dropped. The value is checked
+    as stated, before anything strips it; only a surrounding space is left for
+    the parser to drop.
 
     The parser decides syntax, not existence: a host the standard accepts but no
     resolver will (``-``, say) is accepted here and fails as unreachable at the
@@ -129,7 +132,7 @@ def site_authority_url(value: Any) -> str:
 
     if not isinstance(value, str):
         raise ValueError("must be a string")
-    if _ASCII_CONTROL.search(value.strip()):
+    if _ASCII_CONTROL.search(value):
         raise ValueError(f"{_NOT_AN_ORIGIN} without control characters")
     url, reason = _parsed(value)
     if url is None:

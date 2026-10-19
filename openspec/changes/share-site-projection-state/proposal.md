@@ -212,6 +212,9 @@ and `docs/development/ROADMAP.md` (Goal 4's gap row, Goal 7's current state).
 - Alkahest release conditions are the mechanism's, and an unadvertised one is refused —
   `openspec/specs/storefront-publication/spec.md` and `openspec/specs/negotiation-protocol/spec.md`.
 - A domain's tooling never writes another domain's artifact — `ARCHITECTURE.md`.
+- Several storefronts per registry is the supported deployment topology, each storefront in its
+  own Helm release with its own provisioning service (round 12, `design.md` C13) —
+  `DEPLOYMENT_AND_CONFIG.md` and `ARCHITECTURE.md` "Deployment topology".
 
 ## Dependencies
 

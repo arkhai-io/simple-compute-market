@@ -298,6 +298,40 @@ def test_no_capacity_site_refuses_startup(monkeypatch, tmp_path):
     assert not created
 
 
+@pytest.mark.parametrize("value", [0, -5, float("nan"), float("inf")])
+def test_an_unusable_capacity_poll_interval_refuses_startup_by_key(
+    monkeypatch, tmp_path, value
+):
+    """Refused with the other capacity refusals, before anything is composed,
+    rather than handed to the capacity-event pollers; zero is refused, not
+    read as the default, and the refusal names the key and not the value."""
+    refusal, created = _refused(monkeypatch, tmp_path, capacity__poll_interval=value)
+
+    assert str(refusal) == (
+        "the storefront cannot read its capacity configuration: "
+        "[capacity.poll_interval] must be a positive, finite number of seconds"
+    )
+    assert refusal.__context__ is None
+    assert not created
+
+
+def test_the_capacity_poll_interval_is_five_seconds_only_when_unstated():
+    from apicredits_storefront.services.capacity_client import capacity_poll_interval
+
+    settings = storefront_config.settings
+    saved = deepcopy(settings.get("capacity"))
+    try:
+        settings.unset("capacity", force=True)
+        settings.set("capacity", {key: value for key, value in (saved or {}).items() if key != "poll_interval"})
+        assert capacity_poll_interval() == 5
+    finally:
+        settings.unset("capacity", force=True)
+        if saved is not None:
+            settings.set("capacity", saved)
+    with settings_overrides(capacity__poll_interval=2.5):
+        assert capacity_poll_interval() == 2.5
+
+
 def test_a_configuration_stating_no_renamed_setting_is_not_refused():
     from apicredits_storefront.retired_settings import retired_setting_problems
 

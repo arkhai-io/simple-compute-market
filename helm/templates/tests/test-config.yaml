@@ -16,6 +16,23 @@ continue to work.
     {{- $rpcUrl = printf "http://%s:%d" $rpc.host (int $rpc.port) -}}
   {{- end -}}
 {{- end -}}
+{{- $generated := dict -}}
+{{- $_ := set $generated "settlement" (dict "schema_version" 1 "priority" list) -}}
+{{- if $rpcUrl -}}
+{{- $rpcConfig := dict "url" $rpcUrl -}}
+{{- if $rpc.chainId -}}
+  {{- $_ := set $rpcConfig "chain_id" $rpc.chainId -}}
+{{- end -}}
+{{- $_ := set $generated "rpc" $rpcConfig -}}
+{{- end -}}
+{{- $_ := set $generated "provisioning" (dict
+  "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
+) -}}
+{{- $bareMetal := index .Values "bare-metal-storefront" | default dict -}}
+{{- if .Values.storefront.enabled -}}
+{{- /* A release running the VM storefront: provisioning calls back one of its
+agents and must trust that agent's signer, and the smoke tests target an agent
+and the registry it publishes to. */ -}}
 {{- $agents := .Values.storefront.agents | default dict -}}
 {{- if not $agents -}}
   {{- fail "helm test config requires at least one storefront agent" -}}
@@ -65,20 +82,12 @@ agent's internalRegistryTrust. */ -}}
 {{- $settlementConfig := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "settlement") | fromJson -}}
 {{- $alkahestConfig := include "arkhai.storefrontConfigSection" (dict "doc" $settlementConfig "name" "alkahest") | fromJson -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
-{{- $generated := dict -}}
 {{- $schemaVersionKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "schema_version") -}}
 {{- $priorityKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "priority") -}}
 {{- $_ := set $generated "settlement" (dict
   "schema_version" ((and $schemaVersionKey (index $settlementConfig $schemaVersionKey)) | default 1)
   "priority" ((and $priorityKey (index $settlementConfig $priorityKey)) | default list)
 ) -}}
-{{- if $rpcUrl -}}
-{{- $rpcConfig := dict "url" $rpcUrl -}}
-{{- if $rpc.chainId -}}
-  {{- $_ := set $rpcConfig "chain_id" $rpc.chainId -}}
-{{- end -}}
-{{- $_ := set $generated "rpc" $rpcConfig -}}
-{{- end -}}
 {{- $_ := set $generated "registry" (dict
   "api_url" $registryURL
   "authorities" (dict $registryURL (dict
@@ -96,9 +105,25 @@ agent's internalRegistryTrust. */ -}}
   "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
 ) -}}
 {{- end -}}
-{{- $_ := set $generated "provisioning" (dict
-  "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
-) -}}
+{{- else if and $bareMetal.enabled .Values.provisioning.enabled -}}
+{{- /* A release running the dedicated bare-metal storefront and no VM
+storefront, such as a seller release publishing to another release's registry:
+its provisioning service calls the bare-metal storefront back, so it must trust
+that storefront's signer. No VM agent or registry is the smoke tests' target. */ -}}
+{{- $bareMetalIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "identity") | fromJson -}}
+{{- $bareMetalPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $bareMetalIdentity "name" "principal") | fromJson -}}
+{{- $bareMetalScheme := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "scheme") -}}
+{{- $bareMetalIdentifier := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "identifier") -}}
+{{- $bareMetalTrusted := false -}}
+{{- range $principal := (.Values.provisioning.storefrontIdentity.principals | default list) -}}
+  {{- if and $bareMetalIdentifier (eq $principal.scheme $bareMetalScheme) (eq $principal.identifier $bareMetalIdentifier) -}}
+    {{- $bareMetalTrusted = true -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $bareMetalTrusted -}}
+  {{- fail "provisioning storefront principals must include the bare-metal storefront's config.Identity.principal" -}}
+{{- end -}}
+{{- end -}}
 {{- $rendered := mergeOverwrite (deepCopy $generated) (deepCopy ($config.values | default dict)) -}}
 apiVersion: v1
 kind: ConfigMap

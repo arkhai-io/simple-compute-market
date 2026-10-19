@@ -6,10 +6,11 @@ problem of that kind named by its key:
 
 - a renamed setting it still states (`retired_settings`);
 - a capacity configuration it cannot read: no site, a site missing its URL or
-  trusted authorities, or authorities that are not valid principals. Reading it
-  here, rather than when the capacity runtime or the capacity-event pollers
-  are first composed, keeps a malformed site from stopping startup after some
-  of it has run.
+  trusted authorities, authorities that are not valid principals, or a
+  `[capacity].poll_interval` that is not a positive, finite number of seconds.
+  Reading it here, rather than when the capacity runtime or the capacity-event
+  pollers are first composed, keeps a malformed site or interval from stopping
+  startup after some of it has run.
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ from apicredits_storefront.retired_settings import (
     RETIRED_SETTINGS_HEADING,
     retired_setting_problems,
 )
-from apicredits_storefront.services.capacity_client import configured_site_ids
+from apicredits_storefront.services.capacity_client import (
+    capacity_poll_interval,
+    configured_site_ids,
+)
 
 CAPACITY_HEADING = "the storefront cannot read its capacity configuration"
 
@@ -31,12 +35,18 @@ class StorefrontStartupError(RuntimeError):
 
 
 def capacity_configuration_problems() -> list[str]:
-    """Why the configured capacity sites cannot be read, if they cannot."""
+    """Why the configured capacity sites or poll interval cannot be read, if
+    they cannot, each refusal naming its key."""
+    problems: list[str] = []
     try:
         configured_site_ids()
     except RuntimeError as exc:
-        return [str(exc)]
-    return []
+        problems.append(str(exc))
+    try:
+        capacity_poll_interval()
+    except ValueError as exc:
+        problems.append(str(exc))
+    return problems
 
 
 def require_startable_storefront(source: Dynaconf | None = None) -> None:

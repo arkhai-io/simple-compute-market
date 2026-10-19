@@ -13,7 +13,8 @@ LOCAL_VALUES := local-values.yaml
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
 
-.PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render
+.PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
+	topology-up topology-down topology-check
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -81,6 +82,59 @@ check-local-secrets:
 		echo "ERROR: Secrets missing from namespace $(NAMESPACE):$$missing" >&2; exit 1; \
 	fi; \
 	echo "Every out-of-band Secret a deploy needs exists in namespace $(NAMESPACE)."
+
+# ---------------------------------------------------------------------------
+# The local two-release topology: several storefronts per registry, each in its
+# own release with its own provisioning service, in one namespace.
+#   $(RELEASE)           as deploy-local installs it: the registry, Bob's VM
+#                        storefront, its provisioning service, and dev-env.
+#   $(TOPOLOGY_RELEASE)  the same chart under $(TOPOLOGY_VALUES): the
+#                        bare-metal storefront and its own provisioning service,
+#                        publishing to $(RELEASE)'s registry.
+# $(TOPOLOGY_VALUES) names both releases' Services by these release names; a
+# render test (tests/test_release_topology.py) holds them equal.
+#
+# No end-to-end scenario requires this topology yet: the Helm validation lane's
+# scenarios (`make validate-helm`) need $(RELEASE) alone. A scenario that needs
+# the bare-metal release says so on its Makefile target and in its suite
+# module's docstring, naming `make helm-topology-up` as what must be active.
+# ---------------------------------------------------------------------------
+TOPOLOGY_RELEASE := arkhai-bare-metal-seller
+TOPOLOGY_VALUES  := bare-metal-release-values.yaml
+# Out-of-band Secrets $(TOPOLOGY_RELEASE) reads beyond $(LOCAL_SECRETS), whose
+# provisioning SSH and runtime Secrets it shares; $(TOPOLOGY_VALUES) says what
+# each holds.
+TOPOLOGY_SECRETS := arkhai-bare-metal-storefront-identity arkhai-bare-metal-storefront-runtime \
+	arkhai-bare-metal-provisioning-identity
+
+## Install the two-release topology for local development, release 1 then
+## release 2, each waiting for its workloads to be ready; both under
+## local-values.yaml, so their volumes are deleted when they are uninstalled.
+topology-up: init
+	@$(MAKE) --no-print-directory check-local-secrets LOCAL_SECRETS="$(LOCAL_SECRETS) $(TOPOLOGY_SECRETS)"
+	@$(MAKE) --no-print-directory deploy-local
+	helm upgrade --install $(TOPOLOGY_RELEASE) $(CHART_DIR) \
+		--namespace $(NAMESPACE) \
+		--values $(VALUES) \
+		--values $(LOCAL_VALUES) \
+		--values $(TOPOLOGY_VALUES) \
+		--wait
+
+## Uninstall the two-release topology, release 2 first, waiting for each.
+## Succeeds when neither is installed.
+topology-down:
+	helm uninstall $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+	@$(MAKE) --no-print-directory undeploy
+
+## Run both releases' helm tests: release 1's smoke and contract tests, and
+## release 2's provisioning smoke test and bare-metal storefront health check.
+## A passing run shows the services answer, not that the storefronts trade:
+## the topology's evidence (signed requests admitted, callbacks reaching the
+## bare-metal storefront, projections loaded, a publication on release 1's
+## registry) is gathered against the running releases.
+topology-check:
+	helm test $(RELEASE) --namespace $(NAMESPACE) --logs
+	helm test $(TOPOLOGY_RELEASE) --namespace $(NAMESPACE) --logs
 
 ## Run helm tests against the deployed release
 test:

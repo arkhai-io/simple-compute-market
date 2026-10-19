@@ -69,8 +69,10 @@ def configured_site_ids() -> tuple[str, ...]:
 
 def capacity_poll_interval() -> float:
     """Seconds between each site's capacity-event poller cycles:
-    `[capacity].poll_interval`, five unless stated."""
-    return float(config.settings.get("capacity.poll_interval", 5) or 5)
+    `[capacity].poll_interval`, five unless stated, and refused by its key
+    unless it is a positive, finite number of seconds, so the kit's pollers
+    never wait on zero, a negative, NaN, or infinity."""
+    return config.seconds_setting("capacity.poll_interval", 5)
 
 
 _CONSUMING = frozenset({"reserved", "committed", "lease_truncated"})

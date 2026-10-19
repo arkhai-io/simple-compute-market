@@ -19,6 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
+.PHONY: helm-topology-up helm-topology-down helm-topology-check
 .PHONY: check-agent-skills review design-review design plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
@@ -553,6 +554,20 @@ deploy: deploy-helm
 
 deploy-helm:
 	$(MAKE) -C helm deploy
+
+# The local two-release topology on a development cluster: several storefronts
+# per registry. Release 1 is `make -C helm deploy-local`'s release; release 2 is
+# the bare-metal storefront and its own provisioning service, publishing to
+# release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
+# topology targets say what each installs, needs, and checks.
+helm-topology-up: ## Install the local two-release Helm topology: the umbrella, then the bare-metal seller release on its registry
+	$(MAKE) -C helm topology-up
+
+helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first
+	$(MAKE) -C helm topology-down
+
+helm-topology-check: ## Run both releases' helm tests against the installed two-release topology
+	$(MAKE) -C helm topology-check
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
 deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning

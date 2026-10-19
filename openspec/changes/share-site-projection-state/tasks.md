@@ -4977,11 +4977,31 @@ storefront's configuration reaches it through its configuration system"; `design
       bare-metal storefront enabled from the example values, confirm it starts, reports
       its loops and both projection families in status, and publishes; record the
       evidence or the blocker here. Not runnable in a cloud session.
+      **Rewritten (round 12, 12 F1; `design.md` C13):** deploy the two-release topology
+      16.7 commits, with the out-of-band Secrets `helm/Makefile`'s `TOPOLOGY_SECRETS` and
+      `LOCAL_SECRETS` name (the overlay's header says what each holds): `make
+      helm-topology-up` installs release 1 (`deploy-local`) and then release 2 from
+      `helm/bare-metal-release-values.yaml`, each with `--wait`; `make helm-topology-check`
+      runs both releases' `helm test`; `make helm-topology-down` removes release 2, then
+      release 1. Declare one bare-metal pool and one whole machine on release 2's
+      provisioning service (its operator API, as `test_bare_metal_publication` declares
+      them; the overlay declares no supply). Then record, against the running releases --
+      a healthy pod or a passing `helm test` is not enough: the bare-metal storefront's
+      signed requests admitted by release 2's provisioning service (its projections loaded,
+      not refused as an unknown storefront); both projection families loaded and its loops in
+      its status read; a capacity-released callback from release 2's provisioning service
+      reaching the bare-metal storefront (a lease released, the storefront marking it
+      released); and a publication on release 1's registry, found there by a buyer's query,
+      while Bob's listings stay published. No end-to-end scenario requires this topology
+      yet: the Helm validation lane's (`make validate-helm`, `scripts/validate_slice.py`'s
+      `HELM_SCENARIOS`, `contracts` and `e2e_alkahest_escrow_codecs`) need release 1 alone,
+      and `helm/Makefile`'s topology block says that a scenario needing release 2 names
+      `make helm-topology-up` on its Makefile target and in its suite module's docstring.
       **Not run (2026-10-19):** this session has no cluster, `kubectl`, or Docker daemon, so
       no image can be built and no release installed. Render and loader evidence (16.3,
       16.4) is all this section has; it is not deployment evidence (`TESTING.md` "Chart
       Render Tests"). See the handoff below for what a local deployment will need.
-- [ ] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
+- [x] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
       network policy blocks that index, so each section that bumps a package one of them
@@ -5013,6 +5033,88 @@ storefront's configuration reaches it through its configuration system"; `design
       Every internal wheel these locks name is unreleased in this change and records no hash,
       so a relock against the tree's `.dist` should differ, if at all, only in third-party
       resolution the index now offers; `make check-packaging` passes with the hand edits.
+      **Done (2026-10-19, owner's environment, which reaches the PyTorch CPU index):** at
+      `59c2cba`, `make lock` produced no lockfile change, and `make check-packaging` and
+      `make test` then passed. The hand-edited entries above are what uv writes, and the three
+      projects reinit and pass unfrozen. The round-12 fixes after `59c2cba` move no version and
+      edit no lock.
+- [x] 16.7 (round 12, 12 F1: the owner's topology) Several storefronts per registry, as separate
+      Helm releases of the umbrella. Release 1 is the umbrella as `deploy-local` installs it
+      (registry, Bob's VM storefront, provisioning, dev-env); release 2 is the same chart with
+      only the bare-metal storefront and its own provisioning service enabled, publishing to
+      release 1's registry. A committed release-2 overlay (`helm/bare-metal-release-values.yaml`,
+      development values only, each fixture commented as a well-known development value never
+      for a public network): release 2's provisioning trusts the bare-metal storefront's
+      principal (`storefrontIdentity.principals`) and calls back its Service (`storefront.url`);
+      the bare-metal chart's `global.registry.host` names release 1's registry Service, its
+      registry trust pins release 1's registry principal, and its Alkahest address book is
+      release 1's dev-env ConfigMap. Render tests: release 2's provisioning trusts the bare-metal
+      principal and calls back the bare-metal Service; bare metal publishes to release 1's
+      registry under the pinned trust; release 1 renders as it does today.
+      **Stopped, then resumed (2026-10-19).** The first attempt stopped: the umbrella's
+      `helm/templates/tests/test-config.yaml` (the `<release>-test-config` smoke-test profile,
+      rendered in every release and mounted by provisioning's and the e2e-tests chart's
+      helm-test pods) required a `storefront.agents` entry named by
+      `provisioning.storefront.agentName` and failed the render unless provisioning's trust
+      included that agent's principal, whether or not `storefront.enabled`, so release 2
+      failed with "provisioning storefront principals must include the active storefront
+      signer principal". The values-only ways round it (an agent release 2 does not deploy, or
+      Bob's principal in release 2's provisioning trust) misstate the release. The owner
+      accepted the chart change and release 2's identities (Anvil accounts 8 and 9).
+      Done (`design.md` C13). **Chart change:** `test-config.yaml` applies the VM-agent
+      requirement, the provisioning-to-agent trust check, and the agent-derived `seller`,
+      `registry`, `settlement`, and `buyer` sections only while `storefront.enabled`; with the
+      dedicated bare-metal storefront and provisioning enabled instead it refuses a
+      provisioning trust omitting `bare-metal-storefront.config.Identity.principal` ("must
+      include the bare-metal storefront's config.Identity.principal"); otherwise the profile
+      carries `provisioning`, `rpc`, and a default `settlement`. The umbrella stays 0.3.0.
+      Release 1's render (`values.yaml`, with and without `local-values.yaml`) and the
+      payments, EVM, and two-registry fixtures' renders are byte-identical before and after.
+      **Overlay:** `helm/bare-metal-release-values.yaml`, release `arkhai-bare-metal-seller`:
+      `global.registry.host` release 1's registry Service, `global.provisioning.host` its own
+      provisioning Service, `global.provisioningIdentity` and provisioning's `identity` Anvil
+      account 9 (`arkhai-bare-metal-provisioning-identity`); dev-env, registry, the VM
+      storefront, validate-contracts, and e2e-tests disabled; the bare-metal storefront's
+      principal, administrator, and `[Wallet].address` Anvil account 8, its credential
+      `arkhai-bare-metal-storefront-identity`, its wallet key in the overlay Secret
+      `arkhai-bare-metal-storefront-runtime`, its `default` peer Anvil account 9, Alkahest on
+      release 1's Anvil (`ws://arkhai-node-operator-dev-env:8545`) with release 1's
+      `arkhai-node-operator-dev-env-alkahest-addresses` mounted, one Alkahest clause on the
+      dev chain's test token, a lease bound, and `source_confirmation_seconds` widened as
+      Bob's is; provisioning trusting Anvil account 8 and calling back
+      `http://arkhai-bare-metal-seller-bare-metal-storefront:8000`. The registry trust is
+      values.yaml's, which already pins release 1's registry principal. Release 2 reuses
+      release 1's provisioning SSH and runtime Secrets. **Makefile:** `helm/Makefile`'s
+      `topology-up` (secrets checked, `deploy-local`, then release 2 with `--wait`),
+      `topology-down`, and `topology-check` (both releases' `helm test`), with
+      `TOPOLOGY_RELEASE`, `TOPOLOGY_VALUES`, and `TOPOLOGY_SECRETS`; the root `Makefile`'s
+      `helm-topology-up`, `helm-topology-down`, and `helm-topology-check` call them.
+      **Render tests** (`TESTING.md` "Chart Render Tests"; standard library):
+      `helm/tests/test_release_topology.py`, 7 cases, which `test-render.sh` now runs beside
+      each chart's `tests/test_render.py`; both releases render under the release names
+      `helm/Makefile` assigns, read from it so the overlay's Service names and the targets
+      cannot drift apart. `test_release_two_provisioning_admits_and_calls_back_the_bare_metal_storefront`
+      (provisioning's `storefront_identity` the storefront's principal, its `storefront_url`
+      the storefront's rendered Service and `base_url`, the storefront's `default` site the
+      provisioning Service under a peer naming provisioning's own principal, which differs
+      from release 1's); `test_release_two_publishes_to_release_ones_registry_under_its_pinned_trust`
+      (the one registry URL release 1's registry Service, its trust the authority and
+      principal release 1's registry Deployment signs as; the chain release 1's dev-env
+      Service and the mounted address book release 1's ConfigMap, both address paths naming
+      it); `test_release_two_runs_only_its_storefront_and_provisioning_service` (its only
+      subcharts, and a smoke profile of `provisioning`, `rpc`, `settlement`);
+      `test_release_two_refuses_a_provisioning_service_that_does_not_trust_its_storefront`;
+      `test_release_one_renders_as_it_does_today` (registry, Bob, provisioning, dev-env, no
+      bare-metal storefront; provisioning trusting and calling back Bob; the smoke profile
+      targeting Bob and the release's registry);
+      `test_release_one_still_refuses_a_provisioning_service_that_does_not_trust_bob`; and
+      `test_release_twos_document_loads_with_the_storefront_loader` (tier 2, through
+      `BARE_METAL_STOREFRONT_PYTHON`: no publication problem, the registry as rendered, one
+      clause, the `default` site bound to `provisioning_default`). Broken once each (edited,
+      then restored): without the bare-metal trust check the refusal case fails; with the
+      overlay's `storefront.url` pointing at Bob the callback case fails. `helm lint` of
+      release 2's values passes; `make -n` of the six targets prints the expected commands;
+      no `shellcheck` is installed here. Nothing was installed: there is no cluster (16.5).
 
 Section 16 notes:
 
@@ -5113,6 +5215,57 @@ Section 16 check fixes (fresh-context check of `b37dea9..9893b44`):
   (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. `make test`
   was not rerun in full for these fixes. No version moved and no lock changed.
 
+Round 12 triage fixes (`reviews/12-implementation-external.triage.md`, against `59c2cba`):
+
+- **12 F2 -- the API-credit capacity poll interval is validated.** `capacity_poll_interval()`
+  (`services/capacity_client.py`) reads `[capacity].poll_interval` through
+  `config.seconds_setting`, over `market_config.setting_types.positive_seconds`: five only when
+  unstated, and zero, a negative, NaN, or infinity refused by the key, naming no value.
+  `startup_refusal.capacity_configuration_problems` reads it beside the sites, so a bad
+  interval refuses startup under "the storefront cannot read its capacity configuration"
+  before the signer, the database, or a loop. Unit, through the composition's startup path
+  (`tests/unit/test_server_composition.py`):
+  `test_an_unusable_capacity_poll_interval_refuses_startup_by_key` (0, -5, NaN, inf; the exact
+  refusal, no exception context, no database created) and
+  `test_the_capacity_poll_interval_is_five_seconds_only_when_unstated`; against the unfixed
+  reader the four refusal cases fail. `make test-apicredits`: storefront 182 passed (177
+  before), service 72, buyer 26, sample app 1 and 8, middleware Python 41, and the TypeScript
+  and Rust parity checks, all passed.
+- **12 F3 -- the origin guard reads the value as stated.** `site_authority_url`
+  (`kit/config`) looks for ASCII control characters in the unstripped value, so a leading tab
+  or a trailing `\n` or `\r\n` is refused rather than dropped by the parser; a plain
+  surrounding space is still the parser's to drop, and the refusal still names no value and
+  carries no context. Its docstring and `design.md` D14b say so. Unit (`kit/config`,
+  `tests/unit/test_setting_types.py`): four refused cases (trailing `\n` and `\r\n`, a leading
+  `\t`, a space-wrapped `\t`) and two no-echo, no-context cases; 241 passed, and against the
+  unfixed guard six fail. `arkhai-kit-config` stays 0.4.0 (unreleased in this change); `make
+  dist` rebuilt its wheel, which `make test-bare-metal` reinstalled: domain 134, storefront
+  438, buyer 11, adapter 40 passed. VM storefront unit, frozen, the rebuilt wheel reinstalled:
+  1101 passed, 1 skipped.
+- **12 F1 -- the two-release topology (`design.md` C13).** 16.7, done: the release-2 overlay
+  `helm/bare-metal-release-values.yaml`, the umbrella smoke-test profile's change (the one chart
+  change, owner-accepted after the first attempt stopped on it), `helm/Makefile`'s
+  `topology-up`/`-down`/`-check` and the root `Makefile`'s `helm-topology-*`, and
+  `helm/tests/test_release_topology.py` (chart render tests, 7 cases, the loader check run).
+  16.5 rewritten around those targets, keeping its "Not run" record; no end-to-end scenario
+  requires the topology yet (the Helm lane's need release 1 alone), which 16.5 and the
+  topology block in `helm/Makefile` say. `proposal.md`'s knowledge to promote and 17.9 name the
+  permanent destinations; 17.3 counts C13.
+- Evidence for the round: kit/config unit 241 passed; `make test-apicredits` as above; `make
+  test-bare-metal` and the frozen VM storefront unit run as above; `make -C helm test-render`
+  passed (the umbrella's assertions, every chart's render tests with both loader checks run,
+  and the 7 topology cases); `make helm-values-schema` left every schema unchanged; `make -k
+  test`: every suite it ran passed (core, the kits, provisioning service 675 + 463, bare metal,
+  API credits, e2e unit 38, release tooling 944, the Helm render suites) and it stopped only at
+  the reinit of `kit/policy`, `domains/vms/storefront`, and `domains/vms/buyer`, whose PyTorch
+  index this container refuses; run frozen with the rebuilt `kit/config` wheel reinstalled:
+  `kit/policy` 80 passed, VM buyer 202 passed, VM storefront unit 1101 passed and 1 skipped,
+  integration 448 passed; `make check-packaging` (architecture rules included), `make
+  check-comment-hygiene`, `make check-doc-citations CHANGE=share-site-projection-state`
+  (nothing reported), `make check-tasks`, and `openspec validate --strict` pass. No version
+  moved and no lock changed; `arkhai-kit-config` 0.4.0's wheel was rebuilt.
+- Fresh-context check: owed (the orchestrator runs it on the commit).
+
 ## 17. Closeout
 
 The closeout task of `openspec/README.md#plan-closeout-requirements`, in its order. It edits
@@ -5122,7 +5275,7 @@ documentation only; a part needing code returns the change to implementation.
       comment the change added names a change, a review, or a migration provenance.
 - [ ] 17.2 **Import placement.** Confirm the imports each section added are at module level
       unless a recorded reason keeps one local.
-- [ ] 17.3 **Documentation compliance.** Re-check D0–D6, D14a–d, C1–C12, P1, and P2 against
+- [ ] 17.3 **Documentation compliance.** Re-check D0–D6, D14a–d, C1–C13, P1, and P2 against
       the placement rules in `openspec/README.md`.
 - [ ] 17.4 **Narrative compression.** Shorten Sections 2–16's notes to final behavior,
       material evidence, deferred work, and destinations; move any rationale not yet in
@@ -5256,6 +5409,22 @@ documentation only; a part needing code returns the change to implementation.
         a newer values file stating a key it does not know (`helm upgrade` to the older chart
         with the newer values, or `--reuse-values`), while `helm rollback` and the
         storefront's own start are unaffected.
+      - **Amended (round 12, 12 F1; `design.md` C13):** `DEPLOYMENT_AND_CONFIG.md`, a new
+        Kubernetes release-topology subsection beside "Stateful service persistence"'s
+        `deploy-local` text: several storefronts per registry, each storefront in its own
+        release with its own provisioning service (which trusts and calls back one
+        storefront); the two local releases, `helm/bare-metal-release-values.yaml`, the
+        out-of-band Secrets release 2 needs, `make helm-topology-up`/`-down`/`-check`, one
+        namespace; that an end-to-end scenario needing release 2 names it on its Makefile
+        target and in its suite module; and the umbrella's smoke-test profile checking the
+        bare-metal storefront's trust when the VM storefront is disabled.
+        `ARCHITECTURE.md` "Deployment topology" ("Production and staging", and "Local
+        development" for the Helm side): the supported topology is several storefronts per
+        registry as separate releases, several sites per storefront through each storefront's
+        per-site state, and several storefronts per site not yet supported (a provisioning
+        service trusts and calls back one storefront). `TESTING.md` "Chart Render Tests": the
+        umbrella's Python render tests live in `helm/tests/` and `test-render.sh` runs them
+        beside each chart's.
 - [ ] 17.10 **Documentation citations.** `make check-doc-citations
       CHANGE=share-site-projection-state`, resolving every match, then `bunx
       @fission-ai/openspec@1.14.0 validate share-site-projection-state --strict`.

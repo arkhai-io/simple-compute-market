@@ -277,7 +277,9 @@ BARE_METAL_STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/bare_metal/storefront/.v
 if [[ -z "${BARE_METAL_STOREFRONT_PYTHON:-}" && -x "$BARE_METAL_STOREFRONT_ENV_PYTHON" ]]; then
     export BARE_METAL_STOREFRONT_PYTHON="$BARE_METAL_STOREFRONT_ENV_PYTHON"
 fi
-for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py; do
+# The umbrella's own Python render tests (helm/tests/), such as the two-release
+# topology's, run beside the charts'.
+for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py "$CHART_DIR"/tests/test_*.py; do
     if ! "${PYTHON:-python3}" "$chart_test"; then
         echo "FAIL: $chart_test" >&2
         errors=$((errors + 1))
