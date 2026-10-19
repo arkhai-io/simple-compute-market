@@ -165,6 +165,12 @@ then started sets the status, as now. The confirmation is a decision line that
 resolves the `returned` run and names the phase's step as `next`, so the
 computation routes there until the step runs and sets the status (04 F1).
 
+The schema is one object schema, an `if`/`then` per outcome, declaring draft-07:
+the first hand runs found Claude Code refusing draft 2020-12 and the API refusing a
+top-level combinator in a tool's input schema, so the wrapper hands Claude Code the
+schema without its top-level `allOf` and checks the whole schema itself when the
+run ends, with a small validator for exactly the keywords the schema uses.
+
 Rejected: the final answer only, kept in the orchestrator's context — a restart
 loses session ids and round agreements. The step writing its own outcome file — a
 crashed or refused run writes nothing.
@@ -295,7 +301,10 @@ task sits under another section's heading is not routed on: the script answers
 `make check-tasks CHANGE=<change>`, which the skills that act on the list —
 implementation and closeout at their entry checks, planning after writing the
 plan — run first (39 F1: a heading lost in an edit handed section 6's tasks to
-section 5, and the script named sections 1–5 to implement again).
+section 5, and the script named sections 1–5 to implement again). An untriaged
+design review routes to the triage step rather than to `change-design`'s own
+triage of it: both skills can triage it, and a separate step keeps the design
+session's turns to the discussion.
 
 When the script fails — an error, a state it cannot classify, files and log that
 disagree — the orchestrator receives its output and the inputs it read, works out
@@ -578,7 +587,10 @@ finishes every part of its work that does not depend on a denied call, and one
 that can complete goes on and ends as it ends, the denial recorded on its outcome
 for the orchestrator's reading (X3, X5, 28 F1); and its last turn ends with an
 outcome matching `.agents/change-outcome.schema.json`. Interactive use is
-unchanged. Beyond that:
+unchanged. Each skill says so in one "Running unattended" section before its first
+step, mapping its stops by kind — a stop to ask is a `question`, a plain stop
+`stopped` — rather than editing each of the skills' several dozen stops one by one;
+a stop that ends as the wrong outcome shows in the log. Beyond that:
 
 - `change-plan` sizes a section as a coherent, verifiable slice rather than to one
   session, and drops "one section per session" from its handoff (D13).
@@ -702,8 +714,9 @@ each with its harness and effort; the wrapper runs the first available and the l
 line names the entry that ran. A harness is unavailable when its program is
 missing, it is not signed in, or it reports a usage limit — Claude's "hit your …
 limit", Codex's usage-limit error; the wrapper then falls to the next entry. A
-network error is retried twice and then ends the run `stopped`, with no fallback,
-and any other failure is a failed run as before. A waiting run is resumed only on
+network error is retried twice with the same command — a fresh run that never
+reached the API leaves no conversation to resume — and then ends the run
+`stopped`, with no fallback, and any other failure is a failed run as before. A waiting run is resumed only on
 the model it ran on, since a session cannot move between harnesses: when that model
 is unavailable, the resume ends `stopped` with the time the limit resets (69 F4). The
 policy:
@@ -763,7 +776,8 @@ on the session's last logged run, and the line is marked `usd_partial` when
 something intervened — the previous run crashed without a result, or the session's
 own conversation file gained turns the wrapper did not run, as when the owner took
 the session over (69 F6). A resumed run also records the gap since its session's
-last turn of any kind and whether its first turn hit the prompt cache.
+last turn of any kind and whether its first turn hit the prompt cache. The dollars
+are the harness's list prices, not an invoice.
 
 ```jsonl
 {"seq":74,"step":"triage","outcome":"question","session":"057b…","model":"claude-opus-5-5","effort":"high","gap_s":412,"cache_hit":true,"cost":{"usd":0.31,"turns":2,"duration_s":17.5,"input":2,"output":972,"cache_read":249533,"cache_write":1211},"message":"…","denials":[]}
@@ -1023,6 +1037,37 @@ no notes (117).
   another tool's wording, for one occurrence); revisit if Codex expires reviewer
   sessions routinely.
 
+### Declined at the fresh-context compliance checks
+
+Each implementation round's diff was checked by a fresh-context agent before its
+commit. What those checks raised and the round declined, with why:
+
+- Telling a Git error from "not an ancestor" in the computation's fix detection:
+  the wrapper's `changed_since` seam has that contract, and a Git error surfaces at
+  the next validation, which refuses an unreadable `HEAD` (round 1).
+- Reading the task list once rather than twice in the computation: a small file,
+  and a simpler signature (round 3).
+- Asserting the step named after a resumed stop: the test proves the stop's
+  release, and the step named after is other tests' subject (round 4).
+- Omitting the model from a line where no model ran: a resume of that run continues
+  on it (6a).
+- Recording a Claude attempt's spend when a review falls back from Claude to Codex:
+  the review row puts Codex first, so Claude never runs before it (6b).
+- A decision line accepting an inconclusive validation: a passing validation is what
+  clears it, and the owner result says so (6c).
+- Limiting the orchestrating session's start to its skill and the computation's
+  contract: `AGENTS.md` and its documents are repository rules, not a change's
+  documents or a finding, which D17 bars (6d).
+- Dropping the space from the `--output` deny rules against a quoted option, until
+  a real denial showed the matching: the pilot's probe (task 7.2) then did, and the
+  rules dropped it (fifth round, then 7.3).
+- Dropping `steps.py`'s citation of the delta's permissions requirement: the step
+  table cites the same requirement, and both resolve once the archive merges the
+  delta (6e).
+- Rewording D6a step 1's "the skill's 'never' line enforced": the deny rules are
+  each skill's "never" lines, as the step table's header says; and counting a
+  whitespace-only message as absent, which shows the owner nothing (sixth round).
+
 ## Risks / Trade-offs
 
 - **Relayed discussions cost a second rendering of every message**, and the relayed
@@ -1115,3 +1160,35 @@ which of its evidence came from which flow. Evidence for D16 to D19 — advancin
 without gates, the relay without judgement, models and fallback, and cost — comes
 from whatever runs on the revised tooling: the pilot's later steps if it is still
 open, this change's own remaining rounds, and the next change orchestrated.
+
+## Design promotion record
+
+Spec anchors are in `openspec/specs/change-workflow/spec.md`, written by the archive
+from this change's delta except where marked "by hand"; architecture anchors are in
+`openspec/specs/change-workflow/architecture.md`; the contributor guide is
+`docs/agents/change-workflow.md`.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1, D2, D3, D8 — steps run headless through one wrapper, resumed with the owner's answers; discussions as resumed sessions; every run's outcome in the workflow log; planning resumes design | architecture `#steps-run-headless-and-resume-with-the-owners-answers`; spec `#requirement-unattended-step-runs-end-with-a-structured-outcome`, `#requirement-discussion-steps-stay-conversations-with-the-owner`; guide "Skills", "Orchestrating a change", "The review directory" |
+| D13 — sections are slices, the cadence a design decision, rounds recorded from planning's mapping | architecture `#sections-are-slices-sessions-are-the-owners`; spec `#requirement-implementation-sections-and-sessions` (renamed from "One implementation section per fresh session"); guide "Orchestrating a change" |
+| D14, D10, D9's recovery — routing is code, the orchestrating session its backstop and stateless | architecture `#routing-is-code-with-the-model-as-backstop`; spec `#requirement-the-next-step-is-computed-from-the-files`, `#requirement-an-orchestrating-session-advances-one-change` |
+| D9 — the orchestrating session opens and closes the round view, the round's base its recorded commit | architecture `#an-implementation-round-is-triaged-together-in-a-fresh-session`; spec `#requirement-triage-of-an-implementation-round`; guide "Reviews" |
+| D5, D5a — a prerequisite proposed from dev halts its dependent, released on the owner's word | architecture `#a-prerequisite-is-proposed-from-dev-and-halts-its-dependent`; spec `#requirement-a-design-blocked-on-a-prerequisite-halts` |
+| D6, D6a, D12 — the step table binds unattended runs only; denials read from the record; substitutes after a `mode` denial | architecture `#restrictions-bind-unattended-runs-only`; spec `#requirement-unattended-runs-are-held-to-their-steps-permissions`; guide "Orchestrating a change" (maintaining the step table) |
+| D7 — transcripts, progress files, `make change-watch`, notifications | architecture `#steps-run-headless-and-resume-with-the-owners-answers`, "Current limits"; guide "Orchestrating a change", "The review directory" |
+| D11 — reviews under the wrapper, Codex then Claude, harness-tagged sessions, the owner's override | architecture `#models-are-policy-with-no-same-vendor-fallback`, `#reviews-are-files`; spec `#requirement-unattended-steps-run-on-their-steps-ordered-models`; guide "Reviews" |
+| D15 — the pilot on this change's branch | Change history: a deliberate exception for this change and its pilot. The mechanism it uses, the owner's recorded branch decision accepted by each step's branch check, lives in the skills (`change-orchestrate`, "The branch decision") |
+| D16 — touchpoints replace gates; `## Next` | architecture `#the-owner-is-interrupted-only-for-judgement`, `#phases-triage-and-archival`; spec `#requirement-phases-and-owner-touchpoints` (renamed from "Phases and owner gates"), `#requirement-index-transitions-are-written-by-the-step-that-makes-them` (its two scenario titles renamed by hand after the archive), the Purpose paragraph (by hand); `openspec/README.md` `#plan-closeout-requirements` part 6; the legend of `openspec/changes/README.md` |
+| D17 — the orchestrator relays and routes, and reports its own observations | architecture `#the-orchestrator-relays-and-routes`; spec `#requirement-an-orchestrating-session-advances-one-change` |
+| D18 — ordered models per step, never Fable or Astra, no same-vendor fallback | architecture `#models-are-policy-with-no-same-vendor-fallback`; spec `#requirement-unattended-steps-run-on-their-steps-ordered-models` |
+| D19 — every run records its cost | architecture `#every-run-records-its-cost`; spec `#requirement-unattended-runs-record-their-cost`; guide "Orchestrating a change" (reading the cost) |
+| 6e — the tooling as the `scripts/change_workflow/` package; `make check-change`; 39 F1's `make check-tasks` | spec "Evidence" (by hand); guide "Skills" |
+| 02 O1 — `make check-comment-hygiene` as a direct Python port with one named exemption | No document change: what the check catches is unchanged, and the exemption is a named rule of `scripts/check_comment_hygiene.py` |
+| The orchestrating skill and `make orchestrate` | `AGENTS.md` "Change workflow"; guide "Skills", "Orchestrating a change"; spec "Evidence" (by hand) |
+| The retired review runner | spec "Evidence", repointed to `scripts/run_change_step.py review` when the runner was deleted (section 3), now naming the package behind it |
+| Current limits — one change at a time; leaf steps on Claude Code only | architecture `#current-limits` |
+| Roadmap | No goal in `docs/development/ROADMAP.md` covers contributor workflow; no edit |
+| Change index | This change's row `in closeout`, then linked to its archive; independent, no campaign graph; no other row's `Depends on` touched |
+| `docs/development/ARCHITECTURE.md`, `openspec/specs/README.md` | No change: the workflow is contributor process, and it adds no capability or companion |
+| Open questions — loading less per session; a longer cache lifetime | Remain open; architecture `#every-run-records-its-cost` names the record they wait on |
