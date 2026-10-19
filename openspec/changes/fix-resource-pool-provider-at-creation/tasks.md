@@ -3,7 +3,7 @@
 Replanned the original wholly unchecked sections against the reviewed design and
 `reviews/14-design.triage.md` after its owner-passed gate. No completed task is
 removed or rewritten. All implementation tasks below answer to D1–D9/D11, the
-six delta requirements, and the validation/closeout obligations in
+eight delta requirements, and the validation/closeout obligations in
 `openspec/README.md#plan-closeout-requirements`, `openspec/config.yaml`, and
 `docs/development/TESTING.md`. D10 is documentation placement, not a further gate.
 
@@ -224,6 +224,31 @@ needed to use the shared refusal is demonstrated by these tests.
   and `make check-packaging`. Run `make check-comment-hygiene` and inspect imports
   and comments; record evidence before this section is complete.
 
+- [x] 3.8 **19 V1 / 20 V1 — document-created default.** In provisioning service
+  `db/database.py`, `db/migrate.py` and `db/migrations.py`, distinguish a genuinely
+  empty database from an existing schema. With a configured pool document, defer
+  the empty database's default creation to ordinary atomic startup import before
+  inventory. Preserve existing host backfill and no-document VM bootstrap. Update
+  the bare-metal fixture's explanation. No provider-swap exemption is allowed.
+- [x] 3.9 **19 V1 / 20 V1 — VM identity.** Register `vm.ansible` in the VM bundle
+  and handler; update current VM callers, API fixtures and Helm examples. Append
+  a migration of old pool/fulfillment provider columns, preserving configuration,
+  members, state, IDs and accepted envelopes. Keep historical backfill usable for
+  both spellings. Update `docs/seller-quickstart.md` operator guidance; no runtime
+  alias is required. The Ansible tool/readiness component retains its own name.
+- [x] 3.10 **19 V1 / 20 V1 — regression evidence.** Extend
+  `test_pool_declaration_startup.py` with real mounted-fixture/file-backed SQLite
+  creation, repeat migration/startup and refused later provider changes. Add
+  `tests/integration/test_vm_provider_identity_migration.py` for existing VM state
+  preservation, unaffected bare-metal rows and idempotence. Keep real legacy
+  backfill-to-teardown coverage passing under the canonical identity. Existing
+  legacy-host migration evidence must remain green with a configured document.
+- [x] 3.11 **19 V1 / 20 V1 — verification and handoff.** Rebuild wheels; run VM
+  adapter, provisioning service, affected e2e unit/configuration and chart targets,
+  `make test`, packaging, architecture, hygiene, citations, index, task and strict
+  OpenSpec checks. Record a fresh-context compliance review against `a3bd6b1d`,
+  commit the accepted fixes without pushing, and require fresh deployed validation.
+
 **Deployed coverage:** no existing pytest marker submits a provider change or
 changed-provider startup document. No new system scenario is owed for these
 single-authority transactions. `multi_registry`, `e2e_listing_shapes`,
@@ -279,8 +304,9 @@ their green result is regression evidence, not direct proof of immutability.
   proves the host hook refuses a relay-changing move under tunnel leases and
   permits a drained host move. A host move preserving its relay is not the
   capacity-resource move. No guard or duplicate member tests were added.
-  Source/caller inspection found no production fixture/setup dependency on a
-  provider swap; the old kit swap test now proves refusal. The refusal explicitly
+  The initial source/caller audit missed the bare-metal bootstrap fixture;
+  validation 19/20 corrected that conclusion, and appended tasks 3.8–3.11 own
+  its remedy. The old kit swap test now proves refusal. The refusal explicitly
   says “migrate its members”.
 - Deployed coverage confirmed in `e2e-tests/pyproject.toml` and scenario callers:
   `multi_registry`, `e2e_listing_shapes`, `e2e_deal`, `e2e_vm_introduction`,
@@ -307,6 +333,86 @@ their green result is regression evidence, not direct proof of immutability.
   section removes only the three production call sites. Configuration writes
   remain provider-owned and same-provider semantics are unchanged. Permanent
   behavior/rationale promotion remains in section 5; no member authority changed.
+
+**Implementation round 1 — 19 V1 / 20 V1:**
+
+- The owner accepted document-created defaults and the canonical VM identity.
+  A genuinely empty database with a configured pool document now defers default
+  creation to atomic startup import, after contributed definitions and before
+  inventory. Existing databases retain host backfill, and no-document bootstrap
+  retains the configured VM default. A missing or invalid document fails startup;
+  a later document cannot change the provider. The actual bare-metal development
+  fixture remains inert and uses `bare_metal.ansible` without a VM playbook.
+- VM bundle/handler registration, current service/API/e2e callers and Helm
+  examples use `vm.ansible`. The appended migration changes only historical
+  `ansible` provider columns in pools and fulfillment records. Configuration,
+  host membership, IDs, state, and operation envelopes remain unchanged. The
+  historical compiler accepts both names and preserves the candidate identity;
+  existing historical migrations still recognize their original inputs.
+  Current operation kinds already use `vm.ansible.*` and are unchanged. No
+  runtime alias or compatibility promise for old VM definition files is added.
+- Library/service integration evidence uses real SQLite: fresh startup reads
+  the actual bare-metal mounted fixture and a VM document, repeated migration
+  before first startup creates no implicit pool, and repeated startup skips the
+  unchanged digest. Subsequent provider changes are refused with state/digest
+  preservation; missing/invalid documents create neither default nor digest.
+  Existing-schema migration is parametrized with/without a configured document
+  and retains legacy host membership and VM configuration. A targeted upgrade
+  test compares complete pool/configuration/host/fulfillment rows, changing only
+  VM provider names, leaving bare-metal rows alone and proving idempotence.
+  The existing backfill-to-teardown test also runs the identity migration before
+  consuming the result through the canonical provider registration.
+- The touched database and backfill-convergence tests moved from `unit/` to
+  `integration/`, with their permanent evidence citations updated. This is test
+  placement correction, not behavior promotion. The VM adapter focused target
+  passed 29 unit tests. Provisioning's first successful focused run passed
+  662 unit and 476 integration tests before the final missing/invalid-document
+  cases and legacy-host parameterization; the aggregate run below includes them.
+- Deployed coverage: `e2e_vm_introduction`, `e2e_deal`, `e2e_deal_buyer_cli`,
+  `e2e_listing_shapes` and `multi_registry` exercise canonical VM pool creation
+  or bootstrapping; `e2e_bare_metal_publication`,
+  `e2e_bare_metal_introduction` and `e2e_bare_metal_mock_deal` start from the
+  bare-metal document-created default. These scenarios await validation of the
+  fix commit. None is counted as direct migration or provider-refusal proof.
+- The aggregate exposed the previously recorded payment-settlement test race:
+  the delivery fake could reach `ready` before the response asserted
+  `provisioning`. The test now uses its existing started/release events, with a
+  bounded wait and unconditional release, to hold the intended observable
+  state. Production payment behavior is unchanged. The focused payment
+  application-integration suite passed all 22 tests; the final aggregate rerun
+  includes that correction.
+- Final `make test` passed all aggregate targets: provisioning 662 unit and
+  479 integration tests, VM storefront 411 application integration tests, e2e
+  unit/configuration targets, 954 tooling tests and Helm render/loader checks.
+  Existing aggregate skips/warnings remain (two core tests and one storefront
+  collection skip); they are not new passes. VM adapter's focused unit target
+  passed 29 tests. Contracts' final focused unit target passed 375 after the
+  user-facing provider example changed; no contract shape or semantics changed.
+- `make dist-ci`, final `make check-packaging` and standalone architecture checks
+  passed, with zero architecture warnings. Hygiene, scoped citations, change
+  index, task structure, whitespace and pinned OpenSpec 1.14.0 strict validation
+  passed. The offline npm launcher lacked its registry cache entry; the verified
+  cached 1.14.0 executable passed directly. A normal sandbox build could not
+  write the shared uv cache; approved ordinary escalation ran the same build
+  successfully. No call was denied. No dependencies changed, so no lock refresh
+  was needed; no skill files changed and affected packages expose no typing
+  target.
+- Fresh-context compliance checked the complete diff against `a3bd6b1d`, including
+  untracked tests, migration ordering, test placement, documentation ownership
+  and evidence claims. It found no guidance violations or overstated evidence;
+  no findings were declined. The reviewer did not rerun behavioral suites.
+  Its reminder about the adjacent site-capacity provider example is now named
+  in the promotion map. All 13 existing test functions in the two relocated
+  modules are preserved without loss or duplication.
+- Handoff: the accepted fix is committed without pushing. Fresh validation must
+  run the full pipeline and served Helm scenarios against that fix; prior run
+  39129737284 is failure evidence for its parent, not evidence for this fix.
+  Another independent implementation review is recommended because bootstrap
+  and provider identity changed centrally. The owner has not passed the gate.
+  Permanent bootstrap/provider rationale joins the resource-pool spec and
+  architecture, repository Resource pools, and deployment definition-document/
+  migration guidance at closeout. Current operator cutover guidance is already
+  in `docs/seller-quickstart.md`; broader architecture promotion is deferred.
 
 ## 4. Remove configuration deletion from handlers and runtime composition
 
@@ -459,7 +565,7 @@ explicit owner question, not a prescribed edit.
   1–4 are at module level unless a verified cycle or recorded deliberate lazy-load
   reason requires otherwise. Record the inspection, returning code corrections
   to implementation rather than changing them during closeout.
-- [ ] 5.3 **Documentation compliance.** Audit D1–D9/D11, review F1/F2 and all six
+- [ ] 5.3 **Documentation compliance.** Audit D1–D9/D11, review F1/F2 and all eight
   requirements against the promotion map below and the actual code. Ask the owner
   whether to promote general validation-order guidance and its wording/home;
   record the decision without presuming an edit. Confirm that subsystem-local
@@ -527,6 +633,7 @@ deployed behavior; it confirms the section-specific pipeline markers above.
 | D11; model hints/HTTP 422 | 2 | 5.9, spec typed-model requirement and testing ownership |
 | D10; provisional documentation destinations | 5 | Map below; no separate decision gate |
 | General guidance question | 5.3 owner decision | Destination only if owner chooses promotion |
+| 19 V1 / 20 V1; document-created default and canonical VM identity | 3.8–3.11 | 5.9, new default/bootstrap and VM identity spec requirements; resource-pool architecture and deployment guidance |
 
 ## Design promotion record
 
@@ -549,5 +656,7 @@ and final headings, preserving any owner-deferred guidance disposition.
 | Model/structural unit ownership and library/app integration responsibilities | `docs/development/TESTING.md` — “Pool Offering-Mode Enforcement” |
 | Goal 1 current state and removal of its provider-swap gap | `docs/development/ROADMAP.md` — “Goal 1 — Consolidate physical-resource authority in the provisioning service” |
 | Campaign status/acceptance and independent graph node | `openspec/changes/README.md` — Goal 1 campaign |
+| Canonical provider example in adjacent projection contract | `openspec/specs/site-capacity/spec.md` — replace its generic `ansible` example with `vm.ansible` during promotion |
 | Canonical capability documentation index | `openspec/specs/README.md` — existing Resource-pool management row retained; no new capability or companion |
 | General validation-order guidance | Pending owner decision at 5.3; explicitly record promotion destination or no-promotion disposition |
+| 19 V1 / 20 V1: default creation before inventory and canonical VM routing/upgrade | `openspec/specs/resource-pool-management/spec.md`, via archive; its architecture's administrative reconciliation; `docs/development/DEPLOYMENT_AND_CONFIG.md` definition documents/migrations; `docs/development/ARCHITECTURE.md` Resource pools |

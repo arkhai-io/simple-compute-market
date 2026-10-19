@@ -41,7 +41,7 @@ class PoolCreate(BaseModel):
 
     id: str = Field(description="Operator-chosen pool slug, e.g. 'hetzner-eu-central'.")
     label: str = Field(description="Human-readable pool name.")
-    provider: str = Field(description="Fulfillment provider kind, e.g. 'ansible'.")
+    provider: str = Field(description="Fulfillment provider kind, e.g. 'vm.ansible'.")
     enabled: bool = True
     policy_tags: dict[str, Any] = Field(
         description=(

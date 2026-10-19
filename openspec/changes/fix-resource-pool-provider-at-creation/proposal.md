@@ -35,6 +35,11 @@ malformed request before database work.
 - Migrate inventory through a second pool and existing member APIs. Capacity
   declarations retain the site's live-obligation guard; host moves retain their
   relay-protection hooks. These guards have different scopes.
+- On an empty provisioning database with a mounted pool document, let startup
+  create the default from that document before inventory import. Existing
+  databases retain their default and host backfill; no document retains the VM
+  bootstrap. Canonicalize the VM provider identity to `vm.ansible`, preserving
+  existing VM pool configuration and fulfillment state through a migration.
 
 ## Capabilities
 
@@ -49,9 +54,9 @@ None.
 
 ## Non-Goals
 
-- No migration command or new member-move guard.
-- No change to provider registration, configuration schemas, or provider-owned
-  validation and persistence responsibilities.
+- No member-migration command or new member-move guard.
+- No change to provider configuration schemas or provider-owned validation and
+  persistence responsibilities. VM registration uses `vm.ansible`.
 - No storefront behavior change or domain-specific hint validation.
 - No general validation-guidance edit before the owner's closeout consideration
   of its wording and home.
@@ -75,8 +80,12 @@ None.
   Service-owned provider/configuration refusals retain HTTP 400.
 - A changed mounted document changing an existing provider fails startup, applies
   nothing and records no new digest. An unchanged document is still skipped.
-- The audit found no production fixture or setup relying on a provider swap. The
-  kit's swap test becomes refusal evidence; the direct handler-deletion test leaves.
+- The initial audit missed the bare-metal development default's bootstrap swap,
+  exposed by validation 19/20. Fresh databases now create that default from the
+  mounted document. Existing VM data is preserved; disposable bare-metal and test
+  state needs no compatibility path. VM documents/callers use `vm.ansible`; the
+  old `ansible` name has no runtime alias. The kit's swap test becomes refusal
+  evidence; the direct handler-deletion test leaves.
 
 ## Permanent documentation impact
 

@@ -1,5 +1,57 @@
 ## ADDED Requirements
 
+### Requirement: The default pool is created with its intended provider
+
+On an empty provisioning database with a configured pool definition document,
+schema initialization MUST leave default-pool creation to ordinary atomic
+startup document import. Contributed definitions MUST be imported before pools,
+and host inventory MUST follow pools. Without a configured document, schema
+initialization MUST retain the VM bootstrap.
+Existing databases MUST retain default-pool identity and host backfill; a mounted
+document MUST NOT change an existing pool's provider.
+
+#### Scenario: A fresh bare-metal site declares its default
+
+- **WHEN** a fresh provisioning database starts with a valid document declaring `default` as `bare_metal.ansible`
+- **THEN** import creates that pool with its declared configuration and records the digest atomically before admitting inventory
+- **AND** no implicit VM default is created, including on repeated migration before first startup
+
+#### Scenario: A fresh site has no pool document
+
+- **WHEN** a fresh provisioning database has no configured pool document
+- **THEN** migration creates the enabled VM default with its configured VM playbook
+
+#### Scenario: An existing site gains a pool document
+
+- **WHEN** migration runs against existing state with a newly configured pool document
+- **THEN** existing host membership and the default pool are preserved
+- **AND** startup import refuses a differing default provider
+
+#### Scenario: The configured document is missing or invalid
+
+- **WHEN** a fresh provisioning database has a configured pool document that cannot be imported
+- **THEN** startup fails without substituting an implicit VM default
+
+### Requirement: VM provider identity is namespaced
+
+The VM adapter MUST register as `vm.ansible`, alongside `bare_metal.ansible`.
+Upgrade MUST canonicalize historical `ansible` routing columns in pools and
+fulfillment records while preserving pool IDs, configuration, host membership,
+lifecycle state, job identity and accepted operation envelopes. Runtime documents
+and callers MUST use the canonical name; no historical-name alias is required.
+
+#### Scenario: Existing VM state is upgraded
+
+- **WHEN** migration encounters pools or fulfillment records with provider `ansible`
+- **THEN** only their provider routing columns become `vm.ansible`
+- **AND** configuration, members and accepted work retain their values, including on repeated migration
+- **AND** bare-metal records are unchanged
+
+#### Scenario: A canonical VM pool is administered
+
+- **WHEN** an operator creates or edits a VM pool with provider `vm.ansible`
+- **THEN** the VM adapter validates its configuration and handles fulfillment through that registration
+
 ### Requirement: A pool's provider is fixed at creation
 
 A Resource Pool's provider MUST NOT change after creation. Replace, patch and

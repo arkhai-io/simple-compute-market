@@ -13,6 +13,7 @@ points. Both are deterministic and do no network I/O.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 import yaml
@@ -44,7 +45,7 @@ _DECLARED_DOCUMENT = """
 pools:
   - id: default
     label: Default Pool
-    provider: ansible
+    provider: vm.ansible
     policy_tags:
       deliverable_modes: [vm]
       advertisable_modes: [vm]
@@ -57,7 +58,7 @@ _PREDATING_DOCUMENT = """
 pools:
   - id: default
     label: Default Pool (edited)
-    provider: ansible
+    provider: vm.ansible
     policy_tags:
       deliverable_modes: [vm]
     provider_config:
@@ -66,19 +67,22 @@ pools:
 
 
 class _Deployment:
-    def __init__(self, tmp_path, monkeypatch):
+    def __init__(self, tmp_path, monkeypatch, *, pool_document=None):
         self.engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
+        self.document = tmp_path / "pools.yaml"
+        if pool_document is not None:
+            self.document.write_text(pool_document, encoding="utf-8")
         run_migrations(
             self.engine,
             default_playbook_path="/configured/playbook.yaml",
             default_inventory_group="kvm_hosts",
+            pool_definitions_path=self.document if pool_document is not None else None,
         )
         self.session_factory = sessionmaker(bind=self.engine)
-        self.document = tmp_path / "pools.yaml"
         self.pool_service = ResourcePoolService(
             session_factory=self.session_factory,
             handlers={
-                "ansible": AnsiblePoolConfigHandler(),
+                "vm.ansible": AnsiblePoolConfigHandler(),
                 "bare_metal.ansible": BareMetalPoolConfigHandler(),
             },
         )
@@ -120,7 +124,7 @@ def test_a_stored_pool_without_declarations_stops_startup_and_is_named(deploymen
         db.add(ResourcePool(
             id="rewritten-by-older-version",
             label="Rewritten",
-            provider="ansible",
+            provider="vm.ansible",
             enabled=True,
             policy_tags={"deliverable_modes": ["vm"]},
         ))
@@ -166,6 +170,70 @@ def test_the_check_runs_after_the_pool_document_import():
     assert names.index("verify-pool-declarations") < names.index("seed-inventory")
 
 
+@pytest.mark.parametrize("bare_metal", [False, True])
+def test_a_fresh_database_creates_default_from_its_mounted_document(
+    tmp_path, monkeypatch, bare_metal,
+):
+    document = (
+        (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml")
+        .read_text(encoding="utf-8")
+        if bare_metal else _DECLARED_DOCUMENT
+    )
+    deployment = _Deployment(tmp_path, monkeypatch, pool_document=document)
+    assert deployment.pool_service.get_pool("default") is None
+    # A repeated migration before the first application start must not claim
+    # the provider that the mounted document is going to declare.
+    run_migrations(deployment.engine, pool_definitions_path=deployment.document)
+    assert deployment.pool_service.get_pool("default") is None
+
+    assert deployment.importer().import_pool_definitions().reconciled is True
+    created = deployment.pool_service.get_pool("default")
+    assert created.provider == ("bare_metal.ansible" if bare_metal else "vm.ansible")
+    if bare_metal:
+        assert created.provider_config == {}
+        assert created.policy_tags["deliverable_modes"] == []
+        assert created.policy_tags["advertisable_modes"] == []
+    else:
+        assert created.provider_config["playbook_path"] == "/configured/playbook.yaml"
+    assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
+    assert deployment.importer().import_pool_definitions().reconciled is False
+    app_runtime.verify_pool_declarations()
+
+    before = deployment.pool_service.export_pools_yaml()
+    changed = yaml.safe_load(_DECLARED_DOCUMENT)
+    if not bare_metal:
+        changed["pools"][0].update(provider="bare_metal.ansible", provider_config={})
+    deployment.document.write_text(yaml.safe_dump(changed), encoding="utf-8")
+    with pytest.raises(PoolValidationError, match="fixed at creation"):
+        deployment.importer().import_pool_definitions()
+    assert deployment.pool_service.export_pools_yaml() == before
+    assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
+
+
+def test_a_mounted_document_does_not_replace_an_existing_default_provider(deployment):
+    document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
+    deployment.document.write_text(document, encoding="utf-8")
+    run_migrations(deployment.engine, pool_definitions_path=deployment.document)
+
+    with pytest.raises(PoolValidationError, match="fixed at creation"):
+        deployment.importer().import_pool_definitions()
+    assert deployment.pool_service.get_pool("default").provider == "vm.ansible"
+    assert deployment.recorded_digest() is None
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_a_fresh_database_does_not_substitute_a_default_for_a_bad_document(
+    tmp_path, monkeypatch, missing,
+):
+    deployment = _Deployment(tmp_path, monkeypatch, pool_document="pools: []")
+    if missing:
+        deployment.document.unlink()
+    with pytest.raises(FileNotFoundError if missing else PoolValidationError):
+        deployment.importer().import_pool_definitions()
+    assert deployment.pool_service.get_pool("default") is None
+    assert deployment.recorded_digest() is None
+
+
 def test_changed_provider_document_retries_without_state_or_digest_changes_and_can_be_corrected(
     deployment,
 ):
@@ -197,7 +265,7 @@ def test_changed_provider_document_retries_without_state_or_digest_changes_and_c
         assert deployment.pool_service.get_pool("second") is None
 
     document["pools"][1].update(
-        provider="ansible", provider_config={"playbook_path": "/configured/corrected.yaml"},
+        provider="vm.ansible", provider_config={"playbook_path": "/configured/corrected.yaml"},
     )
     corrected = yaml.safe_dump(document)
     deployment.document.write_text(corrected, encoding="utf-8")
@@ -205,7 +273,7 @@ def test_changed_provider_document_retries_without_state_or_digest_changes_and_c
     assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(corrected)
     assert deployment.recorded_digest() != digest
     default = deployment.pool_service.get_pool("default")
-    assert default.provider == "ansible"
+    assert default.provider == "vm.ansible"
     assert default.label == "Changed"
     assert default.provider_config["playbook_path"] == "/configured/corrected.yaml"
     assert deployment.pool_service.get_pool("second").provider == "bare_metal.ansible"

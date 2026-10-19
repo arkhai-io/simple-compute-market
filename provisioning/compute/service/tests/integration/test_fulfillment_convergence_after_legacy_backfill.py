@@ -150,7 +150,7 @@ def watchdog(session_factory, repo):
     return FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": _StubAnsibleProvider()}),
+        provider_registry=ProviderRegistry({"vm.ansible": _StubAnsibleProvider()}),
         settings=_settings(),
     )
 

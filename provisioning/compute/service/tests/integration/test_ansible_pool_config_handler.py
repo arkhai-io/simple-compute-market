@@ -39,7 +39,7 @@ def db_engine():
     Base.metadata.create_all(bind=engine)
     with Session(engine) as session:
         session.add(ResourcePool(
-            id="pool-a", label="Pool A", provider="ansible",
+            id="pool-a", label="Pool A", provider="vm.ansible",
             enabled=True, policy_tags={},
         ))
         session.commit()

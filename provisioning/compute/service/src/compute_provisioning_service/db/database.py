@@ -1,4 +1,6 @@
-from sqlalchemy import create_engine, Engine
+from pathlib import Path
+
+from sqlalchemy import create_engine, Engine, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -42,6 +44,7 @@ def run_migrations(
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
     default_host_id: str | None = None,
+    pool_definitions_path: Path | None = None,
 ) -> None:
     """Create all tables and apply versioned migrations.
 
@@ -54,10 +57,14 @@ def run_migrations(
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """
+    # An empty database has no hosts requiring the implicit VM pool. Its
+    # mounted document creates the default atomically with provider config,
+    # after contributed definitions and before inventory is admitted.
+    seed_default_pool = pool_definitions_path is None or bool(inspect(engine).get_table_names())
+
     # Resource-pool tables must be created before VM's: ansible_pool_configs
     # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
     # resolution during create_all needs the referenced table to exist.
-    from sqlalchemy import inspect
     from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
@@ -86,5 +93,6 @@ def run_migrations(
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
         default_host_id=default_host_id,
+        seed_default_pool=seed_default_pool,
     )
     SiteBase.metadata.create_all(bind=engine)

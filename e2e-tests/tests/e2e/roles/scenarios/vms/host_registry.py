@@ -162,7 +162,7 @@ def register_e2e_pool(
     _pools(provisioning_client).create_pool(PoolCreate(
         id=pool_id,
         label=label or pool_id,
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "listing_mode": listing_mode,
             # A pool must declare the offering modes it delivers; reservation

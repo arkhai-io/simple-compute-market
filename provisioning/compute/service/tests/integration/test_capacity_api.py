@@ -128,7 +128,7 @@ class CapacityApi:
 async def _create_pool(provisioning_client, pool_id: str) -> None:
     """A declaration's pool must exist; create it through the operator client."""
     await provisioning_client.pools.create_pool(PoolCreate(
-        id=pool_id, label=pool_id, provider="ansible",
+        id=pool_id, label=pool_id, provider="vm.ansible",
         policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
@@ -421,7 +421,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config={
                 "playbook_path": "playbooks/vm-operations.yaml",
@@ -448,7 +448,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
 
     assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
     assert pool_row["pool_metadata"]["enabled"] is True
-    assert pool_row["pool_metadata"]["mechanism"] == "ansible"
+    assert pool_row["pool_metadata"]["mechanism"] == "vm.ansible"
     assert pool_row["pool_metadata"]["pool_views"] == {
         "vm.ansible_pool_defaults.v1": {
             "default_vm_ram": 65536,
@@ -486,7 +486,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={
                 "advertisable_modes": [],
                 "capacity_backing": "backed",
@@ -546,7 +546,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
         PoolCreate(
             id="shaped",
             label="Shaped",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={
                 "advertisable_modes": [],
                 "capacity_backing": "backed",
@@ -583,7 +583,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     await provisioning_client.pools.create_pool(PoolCreate(
         id="bare-metal-west",
         label="Bare metal west",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": ["bare_metal", "vm"],
             "advertisable_modes": ["bare_metal"],
@@ -626,7 +626,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     await provisioning_client.pools.create_pool(PoolCreate(
         id="vm-backed",
         label="VM backed",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": ["vm"],
             "advertisable_modes": ["vm"],
@@ -637,7 +637,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     await provisioning_client.pools.create_pool(PoolCreate(
         id="broker-unbacked",
         label="Broker",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": [],
             "advertisable_modes": ["vm"],

@@ -223,7 +223,7 @@ async def _reserved_capacity(pool_id: str, *, claim: dict[str, Any] | None = Non
         PoolCreate(
             id=pool_id,
             label=pool_id,
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config=_PROVIDER_CONFIG,
         )
@@ -502,7 +502,7 @@ class TestTeardownPreparation:
                 offering_mode="vm",
                 pool_id=pool_id,
                 resource_kind="compute.gpu",
-                provider="ansible",
+                provider="vm.ansible",
                 host_id="kvm-fulfillment-1", attributes={},
             ),
             provisioned_resources=(),
@@ -631,7 +631,7 @@ class TestAcknowledgementFailureRecovery:
         resource_pool_service = _container_module.resolved_resource_pool_service
         provider = app.container.vm_runtime().fulfillment_provider()
         faulty_orchestrator = FulfillmentOrchestrator(
-            provider_registry=ProviderRegistry({"ansible": provider}),
+            provider_registry=ProviderRegistry({"vm.ansible": provider}),
             unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
                 session_factory=session_factory,
                 pool_service=resource_pool_service,
@@ -804,7 +804,7 @@ class TestScheduleEndpoint:
         body = resp.json()
         assert body["settlement_resource_id"] == "pool-schedule-basic-r1"
         assert body["pool_id"] == "pool-schedule-basic"
-        assert body["provider"] == "ansible"
+        assert body["provider"] == "vm.ansible"
 
     async def test_schedule_is_idempotent_for_an_equivalent_retry(
         self, fulfillment: FulfillmentApi

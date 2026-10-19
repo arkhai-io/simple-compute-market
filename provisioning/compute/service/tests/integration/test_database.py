@@ -204,7 +204,10 @@ def _create_pre_migration_tables(engine):
         ))
 
 
-def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
+@pytest.mark.parametrize("pool_document_configured", [False, True])
+def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
+    tmp_path, pool_document_configured,
+):
     engine = _sqlite_memory_engine()
     _create_pre_migration_tables(engine)
     assert "vm_remove_job_id" not in {
@@ -215,6 +218,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         engine,
         default_playbook_path="/configured/playbook.yaml",
         default_inventory_group="legacy_hosts",
+        pool_definitions_path=tmp_path / "pools.yaml" if pool_document_configured else None,
     )
 
     inspector = inspect(engine)
@@ -322,7 +326,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "capacity_reservation_id": "pre-existing-alloc",
         "state": "active",
         "settlement_resource_id": "kvm1",
-        "provider": "ansible",
+        "provider": "vm.ansible",
     }
     assert resource["provisioned_resource_id"]
 
@@ -352,7 +356,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
             ResourcePool.id == DEFAULT_POOL_ID
         ).one()
         assert default_pool.label == "Default Pool"
-        assert default_pool.provider == "ansible"
+        assert default_pool.provider == "vm.ansible"
         assert default_pool.enabled is True
 
         # No ORM relationship crosses the resource_pools/ansible_pool_configs
@@ -481,6 +485,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
         "20261006_002_vm_job_backed_fulfillment",
         "20261006_003_vm_fulfillment_request_names_no_guest",
         "20261006_004_active_fulfillment_targets_on_reservations",
+        "20261019_001_vm_provider_identity",
     }
 
 

@@ -80,7 +80,7 @@ class AnsiblePoolConfig(Base):
     generic columns on ``resource_pools`` — see ARCHITECTURE.md § Physical
     Settlement Scheduler and FulfillmentProvider Architecture, "Settlement
     record metadata envelope" for the same principle applied to settlement
-    records. Only the "ansible" provider is implemented; other providers
+    records. Only the "vm.ansible" provider is implemented; other providers
     (kubernetes, gcp, ...) would get their own side table, not new columns
     here.
 

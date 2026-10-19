@@ -66,7 +66,7 @@ Malformed model bodies are the separate HTTP 422 boundary in D11.
 The provider message mirrors backing:
 
 ```text
-provider of pool 'hetzner-eu' is fixed at creation as 'ansible' and cannot become 'bare_metal.ansible'; declare a second pool with the intended provider and migrate its members instead
+provider of pool 'hetzner-eu' is fixed at creation as 'vm.ansible' and cannot become 'bare_metal.ansible'; declare a second pool with the intended provider and migrate its members instead
 ```
 
 Document code is `provider_immutable` at `pools[<i>].provider`, using the submitted
@@ -184,6 +184,49 @@ state and transactions. Representative service rejection tests establish HTTP
 typed-client testing, without depending on error response field names.
 
 ## Whole-design check
+
+### 19 V1 / 20 V1 — Default creation and canonical VM identity
+
+Validation of `a3bd6b1d` exposed a missed bootstrap caller: migration seeded
+`default` as `ansible`, then the bare-metal fixture tried to change it to
+`bare_metal.ansible`. The owner clarified that bare metal has not launched,
+fixtures and the development cluster are disposable, and VM's provider should
+be named `vm.ansible`. The owner accepted the revised recommendation: "I agree
+with the revised recommendation."
+
+For a genuinely empty database with a configured pool document, migrations
+create the schema without the implicit VM default. Ordinary startup imports
+contributed definitions first, then creates the default and its configuration
+atomically through the complete pool document, then admits inventory. This also
+keeps referenced relays ahead of pool configuration without parsing the document
+twice or adding a second default-provider setting. A configured but missing or
+invalid document fails startup; it does not fall back to a VM pool. An existing
+database retains its seeded default and host backfill. With no document, fresh
+bootstrap retains the VM default. An existing provider never changes because a
+document requests it.
+
+The canonical runtime VM provider is `vm.ansible`, alongside
+`bare_metal.ansible`. A versioned migration updates only old VM provider columns
+in pools and fulfillment records. It preserves pool IDs, configuration, host
+membership, lifecycle state, job IDs, and accepted operation envelopes. Legacy
+backfill recognizes both historical and canonical VM names without interpreting
+them as distinct providers. Versioned `vm.ansible.*` operation kinds stay as they
+are. Existing VM definition documents must use the canonical name; no old-name
+runtime alias is introduced.
+
+Keeping an inert VM default and adding a VM playbook to the bare-metal fixture
+was the smaller alternative; the owner instead chose creation from the mounted
+declaration. A separate configurable provider setting would duplicate the
+document's authority, and exempting the default from immutability would retain
+the routing defect. No compatibility migration is owed for disposable bare-metal
+state. These choices expand the implementation beyond the original review;
+another independent implementation review is recommended after the fix.
+
+Permanent destinations: resource-pool spec/default lifecycle and provider
+identity requirements, its architecture's administrative reconciliation,
+deployment definition-document and migration guidance, repository Resource pools,
+and current operator examples. Section 3's appended tasks own implementation and
+evidence; closeout promotes durable rationale.
 
 Contracts own domain-neutral request checks; the service owns composed-provider
 knowledge and stored-state comparisons; handlers own provider configuration.

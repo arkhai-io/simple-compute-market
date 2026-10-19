@@ -47,7 +47,7 @@ async def _create_pool(client: ProvisioningClients, pool_id: str = "hetzner-eu")
         PoolCreate(
             id=pool_id,
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config=_ANSIBLE_CONFIG,
         )
@@ -59,7 +59,7 @@ class TestDefaultPool:
         client, _ = client_and_queue
         pool = await client.pools.get_pool("default")
         assert pool.enabled is True
-        assert pool.provider == "ansible"
+        assert pool.provider == "vm.ansible"
 
     async def test_default_pool_appears_in_list(self, client_and_queue):
         client, _ = client_and_queue
@@ -108,7 +108,7 @@ class TestPolicyHintValidationThroughAdminApi:
         # Rejection-path test: bypass local construction to exercise the
         # server's model validation through the canonical typed client.
         malformed = PoolCreate.model_construct(
-            id="malformed", label="Malformed", provider="ansible", enabled=True,
+            id="malformed", label="Malformed", provider="vm.ansible", enabled=True,
             policy_tags={"advertisable_modes": [], "capacity_backing": "backed",
                          "max_reservation_hold_seconds": -1},
             provider_config=_ANSIBLE_CONFIG,
@@ -126,7 +126,7 @@ class TestPolicyHintValidationThroughAdminApi:
         # Rejection-path test: deliberately construct a body the local model
         # rejects. The typed client still owns routing and serialization.
         malformed = PoolReplace.model_construct(
-            label="Changed", provider="ansible", enabled=False,
+            label="Changed", provider="vm.ansible", enabled=False,
             policy_tags={"advertisable_modes": [], "capacity_backing": "backed",
                          "asking_rates": None},
             provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 8},
@@ -170,12 +170,12 @@ class TestPolicyHintValidationThroughAdminApi:
             "opaque_future_hint": {"value": [1, "two"]},
         }
         created = await client.pools.create_pool(PoolCreate(
-            id="hinted", label="Hinted", provider="ansible",
+            id="hinted", label="Hinted", provider="vm.ansible",
             policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
         ))
         assert created.policy_tags == tags
         replaced = await client.pools.replace_pool("hinted", PoolReplace(
-            label="Replaced", provider="ansible", enabled=True,
+            label="Replaced", provider="vm.ansible", enabled=True,
             policy_tags=tags, provider_config=_ANSIBLE_CONFIG,
         ))
         assert replaced.policy_tags == tags
@@ -222,7 +222,7 @@ class TestVmSizeDefaultsThroughAdminApi:
             PoolCreate(
                 id="hetzner-eu",
                 label="Hetzner EU",
-                provider="ansible",
+                provider="vm.ansible",
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config={
                     **_ANSIBLE_CONFIG,
@@ -256,7 +256,7 @@ class TestVmSizeDefaultsThroughAdminApi:
             PoolCreate(
                 id="hetzner-eu",
                 label="Hetzner EU",
-                provider="ansible",
+                provider="vm.ansible",
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": 65536},
             )
@@ -267,7 +267,7 @@ class TestVmSizeDefaultsThroughAdminApi:
             PoolReplace(
                 label="Hetzner EU",
                 enabled=True,
-                provider="ansible",
+                provider="vm.ansible",
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config=_ANSIBLE_CONFIG,
             ),
@@ -286,7 +286,7 @@ class TestVmSizeDefaultsThroughAdminApi:
                 PoolCreate(
                     id="hetzner-eu",
                     label="Hetzner EU",
-                    provider="ansible",
+                    provider="vm.ansible",
                     policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                     provider_config={**_ANSIBLE_CONFIG, "default_vm_ram": bad_value},
                 )
@@ -323,7 +323,7 @@ class TestUpdatePool:
             "hetzner-eu",
             PoolReplace(
                 label="Replacement",
-                provider="ansible",
+                provider="vm.ansible",
                 enabled=False,
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed", "region": "eu"},
                 provider_config=_ANSIBLE_CONFIG,
@@ -376,7 +376,7 @@ class TestDeletePool:
             "default",
             PoolReplace(
                 label="Default Pool",
-                provider="ansible",
+                provider="vm.ansible",
                 enabled=True,
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config=_ANSIBLE_CONFIG,
@@ -405,7 +405,7 @@ class TestImportAndValidatePools:
 pools:
   - id: default
     label: Default Pool
-    provider: ansible
+    provider: vm.ansible
     policy_tags:
       advertisable_modes: []
       capacity_backing: backed
@@ -413,7 +413,7 @@ pools:
       playbook_path: playbooks/vm-operations.yaml
   - id: hetzner-eu-central
     label: Hetzner EU Central
-    provider: ansible
+    provider: vm.ansible
     policy_tags:
       advertisable_modes: []
       capacity_backing: backed
@@ -541,7 +541,7 @@ def _declared_document(policy_tags_block: str) -> str:
 pools:
   - id: default
     label: Default Pool
-    provider: ansible
+    provider: vm.ansible
     policy_tags:
       deliverable_modes: [bare_metal, vm]
       advertisable_modes: [bare_metal, vm]
@@ -550,7 +550,7 @@ pools:
       playbook_path: playbooks/vm-operations.yaml
   - id: hetzner-eu
     label: Hetzner EU
-    provider: ansible
+    provider: vm.ansible
 {policy_tags_block}
     provider_config:
       playbook_path: playbooks/vm-operations.yaml
@@ -562,7 +562,7 @@ async def _create_backed_vm_pool(client: ProvisioningClients) -> None:
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags=dict(_BACKED_VM),
             provider_config=_ANSIBLE_CONFIG,
         )
@@ -575,7 +575,7 @@ def _unvalidated_replace(policy_tags: dict) -> PoolReplace:
     # client. Tests using it assert status and stored state only.
     return PoolReplace.model_construct(
         label="Hetzner EU",
-        provider="ansible",
+        provider="vm.ansible",
         enabled=True,
         policy_tags=policy_tags,
         provider_config=_ANSIBLE_CONFIG,
@@ -620,7 +620,7 @@ class TestDeclarationsRequiredOnEveryWrite:
         replaced = await client.pools.replace_pool(
             "hetzner-eu",
             PoolReplace(
-                label="Hetzner EU", provider="ansible", enabled=True,
+                label="Hetzner EU", provider="vm.ansible", enabled=True,
                 policy_tags=narrowed, provider_config=_ANSIBLE_CONFIG,
             ),
         )
@@ -654,7 +654,7 @@ class TestDeclarationsRequiredOnEveryWrite:
 
         with pytest.raises(ComputeProvisioningError) as created:
             await client.pools.create_pool(PoolCreate.model_construct(
-                id="fresh", label="Fresh", provider="ansible", enabled=True,
+                id="fresh", label="Fresh", provider="vm.ansible", enabled=True,
                 policy_tags=partial, provider_config=_ANSIBLE_CONFIG,
             ))
         with pytest.raises(ComputeProvisioningError) as replaced:
@@ -777,7 +777,7 @@ class TestBackingFixedAtCreationThroughAdminApi:
             await client.pools.replace_pool(
                 "hetzner-eu",
                 PoolReplace(
-                    label="Hetzner EU", provider="ansible", enabled=True,
+                    label="Hetzner EU", provider="vm.ansible", enabled=True,
                     policy_tags=dict(self._UNBACKED), provider_config=_ANSIBLE_CONFIG,
                 ),
             )
@@ -845,7 +845,7 @@ class TestProviderFixedAtCreationThroughAdminApi:
 
         assert refused.value.status_code == 400
         message = str(refused.value)
-        assert "'ansible'" in message and "'bare_metal.ansible'" in message
+        assert "'vm.ansible'" in message and "'bare_metal.ansible'" in message
         assert "declare a second pool" in message and "migrate its members" in message
         assert await client.pools.get_pool(original.id) == original
         assert await client.pools.export_pools_yaml() == exported
@@ -856,7 +856,7 @@ class TestProviderFixedAtCreationThroughAdminApi:
         client, _ = client_and_queue
         handler = _RecordingAnsiblePoolConfigHandler()
         service = ResourcePoolService(session_factory, {
-            "ansible": handler, "bare_metal.ansible": BareMetalPoolConfigHandler(),
+            "vm.ansible": handler, "bare_metal.ansible": BareMetalPoolConfigHandler(),
         })
         # The controller resolves its injected service through this accessor;
         # keep real persistence and record only the handler's write boundary.
@@ -864,7 +864,7 @@ class TestProviderFixedAtCreationThroughAdminApi:
         original = await _create_pool(client)
         handler.writes.clear()
 
-        unchanged = await client.pools.patch_pool(original.id, PoolUpdate(provider="ansible"))
+        unchanged = await client.pools.patch_pool(original.id, PoolUpdate(provider="vm.ansible"))
         assert unchanged == original
         renamed = await client.pools.patch_pool(original.id, PoolUpdate(label="Renamed"))
         assert renamed.policy_tags == original.policy_tags
@@ -872,16 +872,16 @@ class TestProviderFixedAtCreationThroughAdminApi:
         assert handler.writes == []
 
         replaced = await client.pools.replace_pool(original.id, PoolReplace(
-            label="Replaced", provider="ansible", enabled=True,
+            label="Replaced", provider="vm.ansible", enabled=True,
             policy_tags=original.policy_tags,
             provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 8},
         ))
-        assert replaced.provider == "ansible"
+        assert replaced.provider == "vm.ansible"
         assert replaced.provider_config["default_vm_vcpus"] == 8
         patched = await client.pools.patch_pool(original.id, PoolUpdate(
-            provider="ansible", provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 16},
+            provider="vm.ansible", provider_config={**_ANSIBLE_CONFIG, "default_vm_vcpus": 16},
         ))
-        assert patched.provider == "ansible"
+        assert patched.provider == "vm.ansible"
         assert patched.provider_config["default_vm_vcpus"] == 16
         assert handler.writes == [original.id, original.id]
 

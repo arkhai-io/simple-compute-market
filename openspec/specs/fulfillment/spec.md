@@ -555,4 +555,4 @@ The compute provisioning client SHALL expose `begin_fulfillment_teardown(fulfill
 
 - Legacy lease state derivation, provider-envelope preparation, and per-candidate validation: `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py`.
 - Cross-candidate enumeration, conflict rejection, idempotent rerun, and whole-migration atomicity: `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py`.
-- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py`.
+- Convergence observing and progressing backfilled rows: `provisioning/compute/service/tests/integration/test_fulfillment_convergence_after_legacy_backfill.py`.

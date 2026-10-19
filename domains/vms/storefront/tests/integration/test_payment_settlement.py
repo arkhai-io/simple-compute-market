@@ -306,9 +306,14 @@ async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once
     assert pending.escrow_uid == NEGOTIATION
     assert h.delivery.starts == []
 
+    h.delivery.started, h.delivery.release = asyncio.Event(), asyncio.Event()
     h.serve()
-    started = await h.settle()
-    assert started.status == "provisioning"
+    try:
+        started = await h.settle()
+        await asyncio.wait_for(h.delivery.started.wait(), timeout=5)
+        assert started.status == "provisioning"
+    finally:
+        h.delivery.release.set()
     await h.delivered()
     repeated = await h.settle()
     assert repeated.status == "ready"

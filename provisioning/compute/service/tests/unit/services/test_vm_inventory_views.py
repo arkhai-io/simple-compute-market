@@ -32,10 +32,10 @@ def _config(**defaults):
     return SimpleNamespace(pool_id="gpu-pool", **values)
 
 
-VIEWS = AnsiblePoolDefaultsViews(provider="ansible")
+VIEWS = AnsiblePoolDefaultsViews(provider="vm.ansible")
 
 
-def _views(db, provider="ansible"):
+def _views(db, provider="vm.ansible"):
     return VIEWS.pool_views(db, pool_id="gpu-pool", provider=provider)
 
 

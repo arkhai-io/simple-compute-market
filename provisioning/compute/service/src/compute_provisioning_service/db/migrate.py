@@ -38,6 +38,7 @@ def main() -> None:
         default_playbook_path=str(settings.resolved_playbook_path),
         default_inventory_group=str(settings.default_pool_inventory_group),
         default_host_id=getattr(settings, "default_host_id", None),
+        pool_definitions_path=settings.resolved_pool_definitions_path,
     )
     logger.info("Migrations applied successfully.")
 
