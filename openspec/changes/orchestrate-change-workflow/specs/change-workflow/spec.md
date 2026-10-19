@@ -8,8 +8,10 @@ its workflow log, so that a new session resumes the change from them alone. It M
 run the next step the next-step computation names, and MUST advance without the
 owner wherever the computation names a step. It MUST bring every question a step
 raises to the owner, showing each step's message as written, and MUST NOT answer a
-design question, decide or state a position on a finding, or commit. It MUST read
-only what routing needs: the computation, the workflow log, and the denials report.
+design question, decide or state a position on a finding, or commit. It MUST NOT
+read code, reviews, or change documents to form or state a view of a finding or a
+design question; it MAY read what routing and recovery need: the computation and
+the inputs it names, the workflow log, and the denials report.
 It MAY report misbehaviour of the workflow's own tooling that it observed across
 steps, as a numbered record marked as its own, for the next triage. It MUST advance
 only the change it was started for.
@@ -126,9 +128,11 @@ computation MUST be available to the owner by hand. When the computation fails o
 cannot classify the change's state, the orchestrating session MUST determine what
 happened and either resolve it, when it concerns only routing or recovery, or bring
 it to the owner, when it would decide a finding, settle a design question, or
-change a status; and MUST record what it decided in the workflow log. A triage
-MUST record, in its triage file, whether the change advances or another review
-round runs, and the computation MUST route on that record.
+change a status; and MUST record what it decided in the workflow log. A review's triage
+MUST record, in its triage file's `## Next`, whether the change advances or another
+review round runs, beginning with the token `Advance` or `Another round`; the
+computation MUST route on that token alone, and MUST treat a triage file without it
+as a triage in progress.
 
 #### Scenario: Reviews await triage
 
@@ -148,6 +152,24 @@ round runs, and the computation MUST route on that record.
   implementation or pre-closeout one once that commit has a passing validation;
   with no such commit, it names the review again on the same commit
 
+#### Scenario: A triage has not finished
+
+- **WHEN** a review's triage file exists without a `## Next` section
+- **THEN** the computation names the triage, or the run waiting in it, and no
+  review
+
+#### Scenario: A triage file predates `## Next`
+
+- **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`
+- **THEN** the computation reads it as `Advance`; any other legacy gate is brought
+  to the owner
+
+#### Scenario: A closeout correction awaits validation
+
+- **WHEN** a closeout review's triage records `Advance` and its correction changed
+  more than records since the reviewed commit
+- **THEN** the computation names validation of `HEAD` before archive cleanup
+
 #### Scenario: An implementation round advances
 
 - **WHEN** an implementation round's triage recorded that the change advances, and
@@ -164,8 +186,10 @@ round runs, and the computation MUST route on that record.
 
 ### Requirement: Discussion steps stay conversations with the owner
 
-Design and triage MUST NOT run without the owner. When orchestrated, each MUST run
-as its own resumable session, presenting one decision or finding per turn, and each
+Design MUST NOT run without the owner. Triage MUST bring every finding and every
+point of the owner's notes to the owner, and MAY finish without the owner only when
+there is none to dispose of. When orchestrated, each MUST run as its own resumable
+session, presenting one decision or finding per turn, and each
 of its messages MUST be shown to the owner in the orchestrating session, with the
 owner's reply resuming that session. Planning MUST NOT ask the owner to accept the
 plan; a plan that needs a decision the design does not make MUST return the change
@@ -260,8 +284,11 @@ limit, a missing sign-in, or a missing harness — and MUST record on the run's 
 line the model and effort that ran. The table MUST NOT name a Fable or Astra model,
 and a row MUST NOT list two models of one vendor. A model of another harness MUST
 appear only on a row whose limits that harness can enforce. A run whose models are
-all unavailable MUST end stopped, naming the reason. A review run on a model other
-than its row's first MUST name its reviewer's harness and model in its record.
+all unavailable MUST end stopped, naming the reason; a network error MUST be retried
+and MUST NOT cause a fallback. A waiting run MUST be resumed only on the model it ran
+on. A review run on a model other than its row's first MUST name its reviewer's
+harness and model in its record, and a review MUST continue a previous reviewer's
+session only on the same harness.
 
 #### Scenario: Codex is unavailable for a review
 
@@ -284,7 +311,9 @@ than its row's first MUST name its reviewer's harness and model in its record.
 
 Each unattended run's log line MUST record its cost: for a Claude run, the dollars,
 turns, duration, and input, output, cache-read, and cache-write tokens of that run
-alone, over all its turns; for a Codex review, the tokens it reports. A resumed
+alone, over all its turns; for a Codex review, the tokens it reports. Where a run's
+own dollars cannot be told from its session's earlier turns — a crashed run before
+it, or turns the wrapper did not run — the line MUST mark its dollars as partial. A resumed
 run MUST also record the time since its session's previous run and whether its
 first turn read the prompt cache. The cost of a change's runs MUST be reportable by
 step and by round, with the cache misses and their gaps listed.
@@ -552,8 +581,10 @@ NOT prescribe how sections are distributed across agent sessions or review round
 A session implementing sections MUST begin with no prior conversation and read the
 repository guidance documents, the change, and its sections; how many sessions
 implement the work, and how much each round covers before it is reviewed, MUST be
-settled in the design discussion as the change's implementation cadence, and the
-plan's sections ordered by it. Each section MUST still be checked, handed off, and
+settled in the design discussion as the change's implementation cadence, the
+plan's sections ordered by it, and the plan MUST map the cadence onto its sections
+as the sessions and rounds that implement them. Each round MUST be recorded as it
+starts, from that mapping. Each section MUST still be checked, handed off, and
 committed on its own. Anything a later session needs MUST be recorded in the change's
 files before each section is committed. Before a section is committed, its diff MUST
 be checked against the repository guidance by an agent whose context contains no
@@ -566,6 +597,14 @@ session MUST record why and stop without committing partial work.
 - **THEN** it records any handoff in the section's task notes, a fresh-context
   check of the section's diff passes, and the section is committed; the session
   continues into the next section it was given, or stops
+
+#### Scenario: A plan maps a two-round cadence
+
+- **WHEN** a design settles "round 1: the contract changes; round 2: the handlers
+  and the migration", and planning writes sections 1 to 4 in that order
+- **THEN** the plan's outcome carries `[[[1, 2]], [[3], [4]]]`, and the second
+  round's `round` line is recorded only when that round starts, after the first
+  round's triage advanced
 
 #### Scenario: The plan's premise fails mid-section
 

@@ -109,6 +109,13 @@ proposal deferred can be built on them.
 - [ ] New subsystem specification
 - [x] Contributor guidance — `docs/agents/change-workflow.md`, and `AGENTS.md`'s
       change workflow section.
+- [x] Workflow references that state the gate model — `openspec/README.md`'s
+      closeout requirements (part 6), the legend of `openspec/changes/README.md`
+      (`archived`, a dependency landing), and the Purpose paragraph of
+      `openspec/specs/change-workflow/spec.md`, which no delta reaches and closeout
+      edits by hand; and, after archive cleanup, the two scenario titles the pinned
+      validator keeps, "A closeout gate is passed" and "A pre-closeout gate is
+      passed".
 
 ### Knowledge to promote
 
