@@ -2117,7 +2117,8 @@ at `29a464a` and again at `6c66eb6` relocked all 52 projects with no lockfile ch
 check-packaging` passed.
 
 Closeout triage: registry storage and the provisioning signer pin (found by 17.8's Helm rerun;
-owner-directed, 2026-10-20, the registry fix as option (a)): the umbrella no longer overrides
+owner-directed, 2026-10-20; recorded with its options in the closeout triage's registry-storage
+entry, the owner choosing the in-change fix): the umbrella no longer overrides
 the registry chart's database URL, so release 1's registry keeps its database under its volume
 mount, and the smoke profile pins each release's provisioning signer (16.8), which
 `DEPLOYMENT_AND_CONFIG.md`'s smoke-test profile paragraph now names; render evidence only,

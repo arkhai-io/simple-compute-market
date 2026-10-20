@@ -178,7 +178,6 @@ api-credits-registry:
 
   config:
     filterSpecPath: "/app/filter-spec-apicredits.yaml"
-    databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
     host: "0.0.0.0"
     rootPath: ""
     enableHealthChecks: true

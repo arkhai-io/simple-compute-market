@@ -380,8 +380,9 @@ raised 2026-10-20, are open and are to be designed here.
        so a stage-event reader cannot tell a listing from a negotiation.
     4. Helm test pods carry their Deployment's selector labels, so a selector-based
        `kubectl logs` or `kubectl exec` finds the test pod beside the service's.
-    5. A VM deal Helm test that fails leaves Bob's loops paused: nothing resumes them
-       on failure.
+    5. A VM deal Helm test leaves Bob's loops paused: its first stage pauses them and
+       nothing resumes them, whether the test fails or passes (seen paused after a
+       passing run on 2026-10-20).
     6. Bare metal logs its notice that a pool states no region on every publication
        cycle; VM logs its derivation warnings once per projection generation.
 12. **Settlement questions left open by `share-site-projection-state`.** Raised
