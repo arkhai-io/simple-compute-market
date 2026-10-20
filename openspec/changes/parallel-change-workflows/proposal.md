@@ -1,101 +1,141 @@
 ## Why
 
 The change workflow assumes one change is worked at a time on one machine. Each
-step runs in the checkout it is started from and describes that checkout's
-`HEAD`, and validation states outright that one change is validated at a time,
-taking full control of the Docker daemon, the kube context, the release in it, and
-the port-forwards. Working two changes in parallel — one in implementation while
-another is reviewed, validated, or closed out — collides on every shared resource:
+step runs in the checkout it is started from and describes that checkout's `HEAD`,
+and its state lives in that checkout, mostly untracked: the checked-out branch, the
+`reviews/` directory with the workflow log and transcripts, the round view's state,
+the wheelhouse and project environments, `.snapshot/` evidence, and Claude Code's
+session files, which are keyed by the checkout's path. Validation holds `HEAD` for
+about an hour and takes full control of the Docker daemon, the kube context, the
+release in it, and the port-forwards. Working two changes in parallel — one in
+implementation while another is reviewed, validated, or closed out — collides on
+every one of these:
 
-- **The branch.** A checkout holds one branch, and every skill checks that the
-  checked-out branch carries the change it works on. Two changes in flight mean
-  switching branches between sessions, or a second checkout. A second checkout as a
-  sibling worktree was tried for the round view and rejected: each one has to be
-  added to the editor's workspace as another project, which is worse than reading
-  and testing changes in the existing project.
-- **Reading a round after it is committed.** `make round-view` shows a round as
-  uncommitted changes by resetting the checked-out branch to the round's base.
-  Reading one change's round while another change's branch is checked out has no
-  path today, and the reset itself moves whatever branch is checked out.
+- **The branch.** A checkout holds one branch. Switching branches only interleaves
+  changes, since validation fails if `HEAD` moves, and leaves the other change's
+  ignored `reviews/` on disk, which `scripts/find_change.py` and the index check
+  then misread. Git refuses one branch in two worktrees, so a worktree cannot hold
+  the branch the owner reads.
+- **Reading a round.** `make round-view` shows a round as uncommitted changes by
+  resetting the checked-out branch to the round's base, so review, validation, and
+  implementation wait until the owner has read it.
 - **Helm validation.** `make validate-helm` deploys one release
-  (`arkhai-node-operator`) to one namespace (`default`) in the allowed kube context,
-  uninstalls whatever release it finds there, requires that no release volume is
-  retained, and forwards fixed local ports (8545, 8080, 8001, 8081). Two validations
-  at once uninstall each other's release and contend for the same ports.
-- **Other static resources.** The wheelhouse in `.dist`, which every validation
-  part rebuilds with `make dist-clean`; in-tree project environments (`.venv`);
-  locally built image tags; the storefront environment validation reinstalls; the
-  Docker daemon and CPU the local and Helm parts already run one after the other to
-  share; and the evidence directories under `.snapshot/`, keyed by commit.
+  (`arkhai-node-operator`) into `default`, uninstalling that release first, and
+  forwards fixed local ports (8545, 8080, 8001, 8081). Two validations at once
+  uninstall each other's release and contend for the ports. Every image the chart
+  deploys has a fixed tag pulled `IfNotPresent` from the one Docker daemon the
+  cluster reads, so a separate namespace alone would still let one validation
+  deploy another's code.
 
 The end-to-end pipeline itself is per branch: its concurrency group cancels an
 earlier run of the same ref, not of another branch.
 
 ## What Changes
 
-- Let more than one change be worked at once, each on its own branch, with every
-  workflow step — design, planning, implementation, review, round reading,
-  validation, triage, closeout — able to run for one change while another change's
-  branch is in use, without one step's state, evidence, or deployment disturbing
-  the other's.
-- Let the owner read a change's committed round, and run its tests in place, while
-  another change is being worked, in a way the owner finds no worse than the
-  current in-checkout round view.
-- Give each Helm validation its own namespace — and with it its own release,
-  volumes, and port-forwards — so two validations run side by side, and clean up
-  only what that validation created.
-- Inventory every other resource two parallel changes would share, and make each
-  per change, safely shared, or explicitly serialized with a refusal that names the
-  holder.
-- Its pilots also verify what `agent-driven-change-workflow`'s could not: design
-  discussion, design review, and planning (`change-plan`) from a proposal alone,
-  since this change starts from one.
+- Each change is worked in its own clone of the owner's workspace, in a sibling
+  directory, holding its branch, records, environments, evidence, and step
+  sessions. The orchestrating session creates the clone and the change's branch
+  when feature work begins and bootstraps it in the background during design. A
+  change may still be worked in the owner's workspace without a clone.
+- The owner reads a committed round in their own workspace, on the change's branch
+  by name, fetched from the clone, as uncommitted changes over the round's base,
+  refreshed onto triage's fixes. Validation and the implementation review run in
+  the clone while the owner reads; triage starts after the owner's answer on the
+  round. An edit the owner commits while reading is pulled into the clone by
+  triage, fast-forward only.
+- Each Helm validation runs in its change's namespace: images tagged per change
+  (`IMAGE_SUFFIX`), Secrets generated by `make -C helm topology-secrets`, the
+  release upgraded from zero replicas over deleted volumes, the scenarios run as a
+  pod inside the namespace, the namespace scaled to zero afterwards, a capacity
+  preflight against a measured memory figure, and the namespace and its images
+  torn down at archive cleanup. `make -C helm forward` and `resume` take a change.
+- Archive cleanup copies a change's records and named validation evidence into the
+  owner's workspace, where later sessions find them; the owner removes a clone
+  after its merge.
+- Every step that commits feature work pushes it through the guarded push. The
+  design step commits its settled design. The orchestrating session also maintains
+  the workflow: it creates clones and branches and commits the skill, permission,
+  and other workflow changes the owner asks for, on the feature branch.
+- Takes from `helm-e2e-pipeline-parity` the Helm items this needs: the Secrets in
+  each namespace, forwarding to a named namespace, and running the Helm scenarios
+  in the cluster.
+- Its pilot is `seed-default-pool-at-runtime`, worked in a clone alongside this
+  change through archive cleanup. This change's own design verifies design, design
+  review, and planning from a proposal alone.
 
 ## Capabilities
 
 ### Modified Capabilities
 
-- `change-workflow`: the workflow steps run per change rather than per checkout,
-  and validation runs in its own namespace. The capability's permanent spec is
-  created by `agent-driven-change-workflow`'s closeout.
+- `change-workflow`: a change is worked in its own clone; the owner reads rounds in
+  their workspace while validation and review run; each Helm validation is isolated
+  in its change's namespace; steps push their own work; the orchestrating session
+  creates clones and branches and commits workflow maintenance; history moves to
+  the owner's workspace at archive cleanup.
 
 ## Non-Goals
 
-- An orchestrating skill that schedules several changes; that is the later change
-  `agent-driven-change-workflow` names.
+- Orchestrating several changes from one session; that is
+  `orchestrate-change-workflow`'s named follow-up.
 - Running two changes' end-to-end pipelines on one branch.
-
-## Open questions
-
-- Whether parallel changes use separate worktrees, a checkout that switches
-  branches between sessions, or another arrangement, given that a worktree per
-  change means another editor project per change.
-- How the owner reads a committed round for a change whose branch is not checked
-  out.
-- Whether a round's validation and implementation review can run while the owner
-  reads it. Both describe the checkout's `HEAD`, which the round view moves to the
-  round's base, so today they start only at `make round-done`, and only the
-  end-to-end pipeline overlaps the reading. Running them against the round's head
-  somewhere the owner never opens, such as a worktree, raises the same questions
-  as a second change: the ignored `reviews/` directory the reviewer reads and
-  validation writes, the environments a fresh checkout must build, and which
-  resources the two share.
-- Which resources must be per change and which may be shared with a lock: the
-  wheelhouse, project environments, image tags, the storefront environment, the
-  Docker daemon, and the kube context.
-- Whether a namespace per validation needs the chart's out-of-band Secrets in each
-  namespace, which `helm-e2e-pipeline-parity` may make optional.
+- A container per change with its own Docker daemon and cluster; discussed before
+  closeout as a change of its own.
+- Making the chart's out-of-band Secrets optional, which stays
+  `helm-e2e-pipeline-parity`'s.
 
 ## Dependencies and Related Changes
 
-- Depends on `agent-driven-change-workflow`, whose skills, Make targets, round
-  view, and validation scripts this change makes parallel.
-- Related to `helm-e2e-pipeline-parity`, which owns the charts and values a
-  per-namespace validation deploys, and the open question of making the chart's
-  out-of-band Secrets optional.
+- Builds on `agent-driven-change-workflow` and `orchestrate-change-workflow`, both
+  archived, whose skills, wrapper, next-step computation, round view, and
+  validation scripts it makes parallel.
+- `helm-e2e-pipeline-parity` depends on this change for its design; the Helm items
+  this change needs move here from it.
+- Pilot: `seed-default-pool-at-runtime`, on a branch created from this change's
+  branch, merging after it.
+- Unrelated to `isolate-end-to-end-lane-stacks`: no workflow step runs the local
+  compose lanes.
 
 ## Impact
 
-`.agents/skills/change-*`, the workflow Make targets, `scripts/round_view.py`,
-`scripts/validate_slice.py`, `helm/Makefile`'s release, namespace, and forwarding
-targets, and the `change-workflow` specification. No service code changes.
+- `scripts/round_view.py`, `scripts/change_next_step.py`, `scripts/find_change.py`,
+  `scripts/validate_slice.py`, `scripts/change_workflow/`, and new scripts for
+  clones and history, with their tests under `scripts/tests/`.
+- The root `Makefile`'s workflow targets and every image build target
+  (`IMAGE_SUFFIX`), the subproject Makefiles that build images, and
+  `helm/Makefile`'s namespace, forward, resume, and teardown targets.
+- `helm/validation-capacity.toml`, new.
+- `.agents/skills/change-*` and `.claude/change-steps.toml`.
+- The `change-workflow` specification. No service code changes.
+
+## Permanent documentation impact
+
+- [ ] `docs/development/ARCHITECTURE.md` — none; the workflow is contributor
+      process, not system architecture.
+- [x] Existing subsystem specification — `openspec/specs/change-workflow/spec.md`
+      and its `architecture.md` companion.
+- [ ] New subsystem specification
+- [x] Contributor and deployment guidance — `docs/agents/change-workflow.md`,
+      `AGENTS.md`'s change-workflow section, `docs/development/DEPLOYMENT_AND_CONFIG.md`,
+      and `docs/development/TESTING.md`.
+
+### Knowledge to promote
+
+- Clones per change, the round view in the owner's workspace, validation beside the
+  reading, Helm isolation per change, steps pushing their own work, the
+  orchestrating session's workflow maintenance, history in the owner's workspace —
+  `openspec/specs/change-workflow/spec.md`.
+- Why clones rather than branch switching, worktrees, or containers; why the
+  reading no longer gates validation; why per-change rather than commit image tags;
+  why the release is upgraded from zero; the inventory of shared resources; and the
+  principles the owner stated (the owner's workspace meets the workflow only for
+  reading; each step commits and pushes its own work; the orchestrating session
+  maintains the workflow; tooling refuses rather than taking silent risks with the
+  owner's uncommitted work; side work is chosen to stay clear of the critical-path
+  goal's files) — `openspec/specs/change-workflow/architecture.md`, with "Current
+  limits" rewritten.
+- How clones are created, read, taken over, and removed, and where history lives —
+  `docs/agents/change-workflow.md` and `AGENTS.md`'s change-workflow section.
+- Validation namespaces, per-change image tags with fixed rather than commit tags,
+  and the capacity figure — `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Stateful
+  service persistence".
+- The Helm scenarios running in the cluster — `docs/development/TESTING.md`.
