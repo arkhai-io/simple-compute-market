@@ -77,12 +77,12 @@ site_id = "default"
 principals = [{ scheme = "ed25519", identifier = "<provisioning-authority-public-key>" }]
 
 [registry]
-# The Arkhai public listing registry (preprod, Base Sepolia listings):
+# The listing registry to publish to (a placeholder: use the URL its operator publishes):
 urls = ["https://registry.example.com"]
 # Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<REGISTRY_HOST>:8080"]
 
-# Required: one pin per registry URL, keyed by exactly the string in `urls`,
+# Required: one pin per registry URL, keyed by the string in `urls`,
 # naming the registry's authority and the principal its responses are signed
 # with. A storefront refuses to start with a registry it cannot verify. Replace
 # both placeholders with the values the registry's operator publishes, and

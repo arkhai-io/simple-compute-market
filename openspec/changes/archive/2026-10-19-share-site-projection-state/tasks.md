@@ -2047,7 +2047,7 @@ the three storefronts pin the runtime at `==0.5.1` and require `arkhai-kit-polic
 testing the fail-closed guard; the VM storefront pins `arkhai-bare-metal-storefront==0.17.0`;
 no other bound moved (`arkhai-vms-negotiation`, `e2e-tests`, and the buyers do not depend on the
 new behaviour). `RELEASING.md` lists no versions and names no changelog. `make dist`; `make lock`
-relocked every project but the three PyTorch-index ones (`core/buyer`, `domains/apicredits`,
+relocked every project this container can resolve (`core/buyer`, `domains/apicredits`,
 its buyer, service, and storefront, `domains/bare_metal/buyer` and storefront, `e2e-tests`,
 `kit/negotiation-runtime`, `kit/storefront`); `domains/vms/storefront/uv.lock`,
 `domains/vms/buyer/uv.lock`, and `kit/policy/uv.lock` were edited by hand, only the internal
