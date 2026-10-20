@@ -118,6 +118,12 @@ def option(command: list[str], flag: str) -> str:
     return command[command.index(flag) + 1]
 
 
+def without_session_id(command: list[str]) -> list[str]:
+    """The command with its `--session-id` and value removed, for comparing runs."""
+    index = command.index("--session-id")
+    return command[:index] + command[index + 2:]
+
+
 def option_rules(command: list[str], flag: str) -> list[str]:
     start = command.index(flag) + 1
     end = next((i for i in range(start, len(command)) if command[i].startswith("--")),
