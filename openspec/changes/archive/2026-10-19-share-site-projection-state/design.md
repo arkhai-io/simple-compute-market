@@ -1153,35 +1153,41 @@ in the design-promotion record.
   the alternative is the kit shell stopping a storefront's loops itself, for every storefront.
   The API-credit storefront's stop hook leaves its loops running too. Raised in Section 13;
   not prescribed by any task, so no task carries it, and it is the owner's to decide or defer
-  to `kit-owned-storefront-shell`.
+  to `kit-owned-storefront-shell`. *Moved at the closeout triage (2026-10-20) to
+  [`kit-owned-storefront-shell`'s questions to settle](../../kit-owned-storefront-shell/design.md#questions-to-settle-before-planning).*
 
-Raised during implementation for the owner and left undecided; no task prescribes any of them:
+Raised during implementation for the owner and left undecided; no task prescribes any of them.
+At the closeout triage (2026-10-20) the first six moved to
+[`unbacked-bare-metal-listings`' open question 12](../../unbacked-bare-metal-listings/design.md#open-questions), for the owner to resolve
+during its design, and the seventh was settled:
 
 - *Oracle-gated configuration at startup (Section 6).* A storefront whose `oracle_gated` model
   names no trusted oracle, or names the seller wallet as its oracle, starts and then refuses
   every Alkahest candidate; these could be startup refusals, as an undeliverable release model
-  is.
+  is. *Now 12.1 in [`unbacked-bare-metal-listings`](../../unbacked-bare-metal-listings/design.md#open-questions).*
 - *An empty seller wallet (Sections 6, 7).* It still derives and publishes a recipient
   condition with no recipient, which every deal refuses as `release_condition_unreadable`,
-  rather than refusing at startup or publication (D14d).
+  rather than refusing at startup or publication (D14d). *Now 12.2 there.*
 - *An unpinned proposal's token (Section 7).* A proposal with the zero escrow address may name
   any token; the shape guard skips it and authorization does not read it. Pre-existing and
-  outside correction 9.
+  outside correction 9. *Now 12.3 there.*
 - *Re-authorization against the listing as it is now (Section 7).* Seller verification, bare
   metal's acceptance, and the API-credit settle path re-materialize against the listing as
   stored when they run, so a listing whose conditions changed after acceptance fails them
-  closed; VM's refund reads the accepted plan instead.
+  closed; VM's refund reads the accepted plan instead. *Now 12.4 there.*
 - *Resumed buyer runs (Section 7).* A resumed run holding only an accepted proposal refuses
   (`escrow_release_condition_missing`), while one holding the seller's accepted escrow terms
   creates the escrow from them unchecked; recording the listing's conditions in the run-log
-  would let both be checked.
+  would let both be checked. *Now 12.5 there.*
 - *Buyer-side checking of the seller's terms (Section 7).* Only the VM buyer's selection path
   checks a seller's accepted escrow terms against the listing (`validate_selected_escrow_plan`);
   the core orchestration creates the escrow unchecked for the API-credit buyer and VM's proposal
   path. Checking every path needs a domain hook, since `core/buyer` cannot import `kit/alkahest`.
+  *Now 12.6 there.*
 - *Version bumps for changed code (Section 7).* `kit/policy` and the storefronts changed code
   without a version bump; `kit/negotiation-runtime`'s exact pin of `kit/policy` is why it kept
-  0.4.0.
+  0.4.0. *Settled by the closeout triage (14 F4): the owner directed a version-bump round,
+  recorded in `tasks.md` Section 17.*
 
 Otherwise none. A mechanical check that storefronts read no application settings from their
 environment was decided against in this change and given a change of its own,

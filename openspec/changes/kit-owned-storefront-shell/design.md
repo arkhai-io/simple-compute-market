@@ -135,6 +135,15 @@ Design phase; not planned.
   `test_vm_storefront_imports_no_bare_metal_composition` stays, because the row
   that excuses the declaration would also excuse an import. Retire that test in the
   same commit that deletes the rows.
+- **Whether every storefront stops its loops at shutdown.** Raised 2026-10-20 by
+  `share-site-projection-state`'s closeout, from its
+  [open question](../archive/2026-10-19-share-site-projection-state/design.md#open-questions). The bare-metal storefront stops its loops
+  when its lifespan ends. The VM storefront's stop hook clears the container's lifespan
+  state while a loop may still be mid-cycle, so a cycle can outlive lifespan cleanup and
+  run on against collaborators the lifespan has dropped; the API-credit storefront's stop
+  hook leaves its loops running. Decide whether the VM and API-credit storefronts stop
+  their loops at shutdown as bare metal does, or the shell, whose composition root owns
+  the loop controller, stops every storefront's loops itself.
 
 ## Decisions
 

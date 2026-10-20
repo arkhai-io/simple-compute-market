@@ -82,11 +82,14 @@ urls = ["http://34.41.205.175/registry"]
 # Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<REGISTRY_HOST>:8080"]
 
-# One pin per registry URL, keyed by the exact URL: the registry's authority
-# name and the principal its responses are signed with.
-# [registry.authorities."<REGISTRY_URL>"]
-# authority  = "<registry-authority>"
-# principals = [{ scheme = "eip191", identifier = "<registry-principal>" }]
+# Required: one pin per registry URL, keyed by exactly the string in `urls`,
+# naming the registry's authority and the principal its responses are signed
+# with. A storefront refuses to start with a registry it cannot verify. Replace
+# both placeholders with the values the registry's operator publishes, and
+# re-key the table if you change `urls`.
+[registry.authorities."http://34.41.205.175/registry"]
+authority  = "<registry-authority>"
+principals = [{ scheme = "eip191", identifier = "<registry-principal>" }]
 
 [registry.auth]
 # Supply any write token through the deployment Secret overlay. Its key must

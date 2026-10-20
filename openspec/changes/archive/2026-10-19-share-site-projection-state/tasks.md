@@ -1578,26 +1578,6 @@ storefront's configuration reaches it through its configuration system"; `design
       bare-metal storefront enabled from the example values, confirm it starts, reports
       its loops and both projection families in status, and publishes; record the
       evidence or the blocker here. Not runnable in a cloud session.
-      **Rewritten (round 12, 12 F1; `design.md` C13):** deploy the two-release topology
-      16.7 commits, with the out-of-band Secrets `helm/Makefile`'s `TOPOLOGY_SECRETS` and
-      `LOCAL_SECRETS` name (the overlay's header says what each holds): `make
-      helm-topology-up` installs release 1 (`deploy-local`) and then release 2 from
-      `helm/bare-metal-release-values.yaml`, each with `--wait`; `make helm-topology-check`
-      runs both releases' `helm test`; `make helm-topology-down` removes release 2, then
-      release 1. Declare one bare-metal pool and one whole machine on release 2's
-      provisioning service (its operator API, as `test_bare_metal_publication` declares
-      them; the overlay declares no supply). Then record, against the running releases --
-      a healthy pod or a passing `helm test` is not enough: the bare-metal storefront's
-      signed requests admitted by release 2's provisioning service (its projections loaded,
-      not refused as an unknown storefront); both projection families loaded and its loops in
-      its status read; a capacity-released callback from release 2's provisioning service
-      reaching the bare-metal storefront (a lease released, the storefront marking it
-      released); and a publication on release 1's registry, found there by a buyer's query,
-      while Bob's listings stay published. No end-to-end scenario requires this topology
-      yet: the Helm validation lane's (`make validate-helm`, `scripts/validate_slice.py`'s
-      `HELM_SCENARIOS`, `contracts` and `e2e_alkahest_escrow_codecs`) need release 1 alone,
-      and `helm/Makefile`'s topology block says that a scenario needing release 2 names
-      `make helm-topology-up` on its Makefile target and in its suite module's docstring.
       **Rewritten (round 12, 12 F1; `design.md` C13):** deploy the two-release topology 16.7
       commits (`make helm-topology-up`, `-check`, `-down`), declare one bare-metal pool and
       machine on release 2's provisioning service, and record, against the running releases,
@@ -1768,9 +1748,9 @@ against that commit's diff, the pipeline rerun on it (17.8), and the change arch
       example configuration had no site, service peer, or registry pin, all of which startup
       now requires; `docs/bare-metal-seller-quickstart.md` named a long-superseded wheel
       version; `docs/configuration.md`'s policy table lacked the guards' release-condition
-      refusals. Not code-compliant and outside this closeout (a code comment): the VM
-      `settings.toml` `[capacity]` comment still describes a single-site fallback and CSV
-      inventory that the storefront no longer has; reported, not changed.
+      refusals. The VM `settings.toml` `[capacity]` comment, which described a single-site
+      fallback and CSV inventory the storefront does not have, was found here and is fixed in
+      the 17.2 round (`47d9c67`).
 - [x] 17.4 **Narrative compression.** Shorten Sections 2–16's notes to final behavior,
       material evidence, deferred work, and destinations; move any rationale not yet in
       `design.md` there first.
@@ -1838,7 +1818,14 @@ against that commit's diff, the pipeline rerun on it (17.8), and the change arch
       `lifecycle` or `publication_derivation`, the API-credit signed status, a VM publication
       preview, a timer publication cycle, the startup refusals, and any chart deployment -- is
       application-integration, unit, or render evidence, as validation 13 lists. 16.5's chart
-      evidence: the owner's local two-release run at `825737c` (16.5).
+      evidence: the owner's local two-release run at `825737c` (16.5), which proves the
+      topology's behaviour as deployed at that commit. 16.8's later chart and `helm/Makefile`
+      changes -- the smoke profile's derived keys, the registry chart's credential profile,
+      `topology-up`'s rollout restart, `make helm-topology-secrets`, and the deal test's
+      buyer-profile volume -- have chart render evidence only (16.8), and `make
+      helm-topology-check` has not yet been shown passing against a cluster. The owner reruns
+      `make helm-topology-secrets`, `helm-topology-up`, `helm-topology-check`, and
+      `helm-topology-down` on a cluster before the pull request (closeout triage, 14 F5 / 15 F1).
 - [x] 17.9 **Promotion.** Write the permanent documents and complete the design-promotion
       record below:
       - `docs/development/ARCHITECTURE.md`: "Capacity publication and multi-domain storefront
@@ -2037,6 +2024,17 @@ against that commit's diff, the pipeline rerun on it (17.8), and the change arch
       and `ROADMAP.md`'s closed Goal 4 row, link the archive. `openspec validate --specs
       --strict`: 23 passed, 0 failed. `make check-change-index`: OK.
 
+Closeout triage (reviews 14 and 15, 2026-10-20; `reviews/14-closeout.triage.md`), documentation
+edits: `storefront-publication/spec.md`'s bare-metal pool-override Evidence reads the held
+projection and cites existing tests (14 F1); `deployment-state/spec.md`'s bare-metal role, and
+`DEPLOYMENT_AND_CONFIG.md`'s bare-metal site reporting, keep diagnostics credential-free and let a
+site's public URL appear in its error text (14 F2); the open questions moved to
+`kit-owned-storefront-shell` and `unbacked-bare-metal-listings`, with their index rows' Notes
+(14 F3 / 15 F3); 17.8 states the Helm evidence's gap (14 F5 / 15 F1); 17.3 and 16.5 corrected
+(14 F6); present tense in `ROADMAP.md` and the `storefront-publication` companion (14 F7); two
+index sentences reworded as resolved (14 F8); `docs/seller-quickstart.md`'s registry pin live
+(14 F9).
+
 ## Design promotion record
 
 `spec.md` destinations marked *(archive)* were written by 17.11's archive from this change's
@@ -2084,7 +2082,7 @@ deltas. Every other destination was written by hand at closeout.
 | Owner principle: the compute storefront pulls every resource pool once for all listing types | `openspec/specs/storefront-publication/spec.md#requirement-projection-backed-listing-candidate-derivation` *(archive)*; `openspec/specs/storefront-publication/architecture.md#projection-families` |
 | Owner principle: storefronts converge on one compute storefront | Not promoted: a future `ROADMAP.md` goal, as `design.md` records |
 | Implementation findings | Change history (`design.md`); the behaviour each states is in the destinations above and in the code's docstrings |
-| Open questions left for the owner | `design.md`, "Open questions"; VM's and the API-credit storefront's stop hooks recorded as a current limitation in `openspec/specs/storefront-publication/architecture.md#autonomous-publication` |
+| Open questions left for the owner | `design.md`, "Open questions"; VM's and the API-credit storefront's stop hooks recorded as a current limitation in `openspec/specs/storefront-publication/architecture.md#autonomous-publication`. At the closeout triage: the stop hooks moved to `openspec/changes/kit-owned-storefront-shell/design.md#questions-to-settle-before-planning`, the six settlement questions to `openspec/changes/unbacked-bare-metal-listings/design.md#open-questions` (question 12), and the version bumps settled (14 F4) |
 | Section 8's edit of a permanent spec outside the deltas | `openspec/specs/site-capacity/spec.md`'s evidence line for per-site load-state reporting, citing `kit/capacity-publication/tests/unit/test_site_projection_state.py` |
 | Roadmap currency (17.5) | `docs/development/ROADMAP.md`, Goal 4's current state and its closed gap row; Goal 7's current state |
 | Campaign index currency (17.6) | `openspec/changes/README.md`, this change's row and its Goal 7 graph line |

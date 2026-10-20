@@ -336,8 +336,8 @@ No other mechanism replaces it.
 ## Open questions
 
 Questions 1 to 10, the 2026-10-14 review's and two raised the same day, were each decided
-with the maintainer, and those decisions stand. Question 11, raised 2026-10-19, is open
-and is to be designed here.
+with the maintainer, and those decisions stand. Questions 11, raised 2026-10-19, and 12,
+raised 2026-10-20, are open and are to be designed here.
 
 1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
    decision".
@@ -384,3 +384,33 @@ and is to be designed here.
        on failure.
     6. Bare metal logs its notice that a pool states no region on every publication
        cycle; VM logs its derivation warnings once per projection generation.
+12. **Settlement questions left open by `share-site-projection-state`.** Raised
+    2026-10-20 by that change's closeout, which moved them here from its archived
+    [open questions](../archive/2026-10-19-share-site-projection-state/design.md#open-questions); each was raised during its
+    implementation and none is decided. The owner resolves each during this change's
+    design, as a new change or as an implementation here:
+    1. A storefront whose `[Settlement].alkahest` `oracle_gated` release model names no
+       trusted oracle, or names the seller wallet as its oracle, starts and then refuses
+       every Alkahest candidate. Whether these are startup refusals, as an undeliverable
+       release model already is, is open.
+    2. A storefront with an empty seller wallet still derives and publishes a recipient
+       release condition with no recipient, which every deal then refuses as
+       `release_condition_unreadable`. Whether startup or publication refuses it instead
+       is open.
+    3. An Alkahest escrow proposal that pins no escrow address (the zero address) may
+       name any token: the escrow-shape guard skips it and release authorization does not
+       read it. Whether such a proposal's token is checked, and against what, is open.
+    4. Seller verification, bare metal's acceptance, and the API-credit settle path
+       re-derive the release conditions from the listing as it is stored when they run,
+       so a deal whose listing's conditions changed after acceptance fails them closed,
+       while the VM refund reads the accepted settlement plan. Whether a deal is checked
+       against its listing as it is now or as it was accepted is open.
+    5. A resumed buyer run that holds only an accepted proposal refuses
+       (`escrow_release_condition_missing`), while one that holds the seller's accepted
+       escrow terms creates the escrow from them unchecked. Recording the listing's
+       release conditions in the buyer's run log would let both be checked.
+    6. Only the VM buyer's selection path checks the seller's accepted escrow terms
+       against the listing (`validate_selected_escrow_plan`); the shared buyer
+       orchestration creates the escrow unchecked for the API-credit buyer and for VM's
+       proposal path. Checking every path needs a domain hook, since `core/buyer` cannot
+       import `kit/alkahest`.
