@@ -141,7 +141,7 @@ sequenceDiagram
     B->>S: settle: transaction id
     S->>P: read signed snapshot: verify receipt, deal hash, funded-through
     S->>X: reserve capacity, provision (lease end from the deal term)
-    S-->>B: (async) access: host, port; handle = transaction id
+    S-->>B: (async) access: host, port, handle = transaction id
     loop while service runs
         S->>P: read snapshot: serve until funded-through, tear down unless it moves
     end
