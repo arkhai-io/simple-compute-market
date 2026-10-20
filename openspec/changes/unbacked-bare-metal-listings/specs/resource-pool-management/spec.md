@@ -1,3 +1,26 @@
+## ADDED Requirements
+
+### Requirement: A service refuses to start while a stored pool names an unserved provider
+
+A service hosting the pool authority MUST refuse to start while any stored Resource
+Pool names a provider no registered configuration handler serves, naming each such
+pool and its provider and the providers that are registered. The check MUST run after
+any pool document import, beside the refusal of stored pools whose declarations are
+invalid. A running service therefore never holds a pool it cannot read, and no pool
+read, export, or fulfillment fails for a missing handler.
+
+#### Scenario: A stored pool's provider has no handler
+
+- **WHEN** the provisioning service starts with a stored pool whose provider is not one
+  its composition registers a handler for
+- **THEN** it refuses to start, naming the pool, its provider, and the registered
+  providers
+
+#### Scenario: A disabled pool's provider has no handler
+
+- **WHEN** the stored pool naming an unserved provider is disabled
+- **THEN** startup is refused all the same, because its records are still read
+
 ## MODIFIED Requirements
 
 ### Requirement: Capacity backing is interpreted by one delegate
@@ -26,9 +49,9 @@ operations:
 - carrying delivery terms, where a publication view or payload is built: the
   capacity-backed delegate passes the terms through and the unbacked delegate carries
   none of them;
-- constraining delivery terms, where a listing model validates: the capacity-backed
-  delegate requires every term present and non-empty and the unbacked delegate
-  requires every term absent.
+- constraining delivery terms, where a model validates: the capacity-backed delegate
+  requires every term present and non-empty and the unbacked delegate requires every
+  term absent.
 
 No delivery term MAY be given a default value, because a default would publish a
 commitment nothing stands behind.
@@ -56,11 +79,11 @@ commitment nothing stands behind.
 
 #### Scenario: A backed listing is validated without its terms
 
-- **WHEN** a capacity-backed listing omits one of its domain's delivery terms, or
+- **WHEN** a capacity-backed listing or view omits one of its domain's delivery terms, or
   carries it empty
 - **THEN** its validation refuses it
 
 #### Scenario: An unbacked listing is validated with a term
 
-- **WHEN** an unbacked listing carries one of its domain's delivery terms
+- **WHEN** an unbacked listing or view carries one of its domain's delivery terms
 - **THEN** its validation refuses it

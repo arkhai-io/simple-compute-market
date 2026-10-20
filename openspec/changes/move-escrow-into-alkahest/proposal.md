@@ -8,6 +8,12 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
 - `ConditionalEscrowClient`, the obligation journal and the servicing jobs become a library used internally by Alkahest and contact exchange. Domains and core stop driving a servicing lifecycle. Each mechanism's settle stage (see `route-settlement-by-mechanism`) calls into it.
 - `MechanismRegistration` shrinks to publication, readiness and buyer compatibility. `client_factory`, `accepted_obligation_builder` and `settlement_verifier` leave it. Each registration declares a typed resource model, replacing the untyped `resources: Mapping[str, Any]` bag.
 - The legacy path for negotiations without a `SettlementOption` is deleted. Every accepted deal has an Agreement.
+- The Agreement becomes a deal's complete settlement input: an Alkahest option carries its
+  release condition and the Agreement its escrow expiry, so each party derives the plan,
+  the escrow terms, and the obligation identity from the Agreement alone, and the accept
+  reply carries nothing derivable from it. `unbacked-bare-metal-listings` removes the
+  reply's `accepted_escrow_terms` and has the buyer derive its escrow and compare it with
+  the seller's plan; this is the end state that design records.
 - Rename the kit/site quota ledger's `escrow_uid` correlation API/persistence coordinate to a neutral name with its owning ledger and all consumers changed together. Credits issuance currently supplies its negotiation-derived fulfillment ID there, not an escrow or grant alias; domain-local renaming must not create another compatibility projection. This includes shared capacity `deal_ref` consumers, not just the credits service.
 - Escrow-shaped code leaves the foundation kits and the buyer core, so that no kit
   other than Alkahest's holds Alkahest in its scope (`ARCHITECTURE.md`, "Where the

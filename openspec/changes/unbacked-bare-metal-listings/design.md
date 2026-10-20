@@ -7,112 +7,121 @@ that Goal 7's primary target domain had no owner for the supply the goal exists 
 serve. `bare-metal-publication-reads-pool-declarations` refuses unbacked pools and
 records unbacked bare metal as a question with no owner; this change is that owner.
 
-A design review on 2026-10-14, against the tree after
-`bare-metal-mock-provisioned-deal` (archived 2026-10-09) and
-`pools-9-retire-local-physical-authority` (archived 2026-10-13), revised two of the
-original decisions and opened the questions listed at the end, all since decided. Its first outcome is a
-prerequisite change, `encapsulate-capacity-backing`.
+A design review on 2026-10-14 revised two of the original decisions and opened eight
+questions, all decided with the maintainer; its first outcome was the prerequisite
+`encapsulate-capacity-backing`, and a later question produced the second,
+`share-site-projection-state`. Both are archived.
+
+The change returned to design on 2026-10-20 for two sets of carried-in items: six
+pre-existing defects a local Helm deployment of bare metal beside Bob exposed, and six
+Alkahest settlement questions moved here by `share-site-projection-state`'s closeout.
+The maintainer chose to design and fix them here rather than hand them on again, so the
+change carries four groups of work:
+
+- **A. Unbacked bare metal**, the change's purpose, and the places where designing it
+  showed VM and bare metal diverging without reason.
+- **B. Alkahest settlement inputs**: what a seller verifies against, what a buyer funds,
+  which proposals are accepted, and what an unusable Alkahest configuration does.
+- **C. Deployment and test hygiene**: the VM storefront chart's dependency waits, Helm
+  test-pod labels, and end-to-end scenarios that pause shared services.
+- **D. The provisioning service**: stored pools whose provider no handler serves, and
+  failures after authentication.
+
+One carried-in defect, stage events recording a negotiation as their listing, is handed
+to a follow-up change (decision 24).
+
+Planning re-verifies against the tree the facts each decision marks as "planning
+confirms".
 
 ## Decisions
 
-### Backing is decided by one delegate both domains share
+### A. Unbacked bare metal
 
-Unbacked listings already exist for VM through `kit/capacity-publication`
-(a `PublicationBinding` carrying the unbacked delegate, source reconciliation scoped to
+#### 1. Backing is decided by one delegate both domains share
+
+Unbacked listings already exist for VM through `kit/capacity-publication` (a
+`PublicationBinding` carrying the unbacked delegate, source reconciliation scoped to
 every listing, capacity reconciliation scoped by the delegate) and `kit/resource-pools`'s
-declaration reader. Introductions settle through the composition
-`compose-contact-exchange-across-compute` promoted into the mechanism kit, so the two
-domains share one implementation of accepted-state interpretation and one per-origin
-contact resolution.
+declaration reader. Introductions settle through the composition the mechanism kit owns,
+so both domains share one implementation of accepted-state interpretation and one
+per-origin contact resolution.
 
-The review found that adopting those kits is not enough: every consumer still decides
-what backing means by comparing the label, and VM and bare metal already disagree
-about it. Bare metal handling unbacked supply by adding its own branches would
-duplicate each decision. So `encapsulate-capacity-backing` first gathers every
-decision that differs between backed and unbacked supply into one backing delegate,
-selected by the pool's `capacity_backing` label, and moves VM and bare metal onto it,
-unifying where they diverge. This change then makes bare metal accept unbacked pools,
-with no bare-metal branch on backing: what differs is the delegate's.
+Every decision that differs between backed and unbacked supply belongs to the backing
+delegate `encapsulate-capacity-backing` introduced. This change makes bare metal accept
+unbacked pools with no bare-metal branch on backing: what differs is the delegate's. No
+consumer compares the label to make a backing decision; each is asked of the delegate.
+Equality checks that decide nothing by backing remain — the pool's immutable
+`capacity_backing` tag, `backing_changed`'s comparison of a binding's delegate with its
+source's, and the binding column's `CHECK` constraint.
 
-### Identity is the site and the Physical Resource; host fields are optional when unbacked
+#### 2. Identity is the site and the Physical Resource; host fields are absent when unbacked
 
 An unbacked listing's derivation identity is its site and Physical Resource, the same
 identity a backed listing has, with `host_id` and `physical_host_id` absent because
 nothing delivers a host for unbacked supply. This is the resource-granular identity VM
-adopted when capacity stopped requiring hosts, applied to bare metal unchanged. The
-payload is decided under "Delivery terms are the delegate's decision".
+adopted when capacity stopped requiring hosts. An unbacked candidate's source envelope
+and comparison sets carry no host fields.
 
-### The site emits the bare-metal view for unbacked supply
+#### 3. The site emits the bare-metal view for unbacked supply
 
-Decided in the 2026-10-14 review, replacing the original decision that an unbacked
-candidate is derived from the capacity declaration rather than from a `bare_metal.v2`
-publication view.
+The site emits a resource's `bare_metal.v2` view when its declaration enables bare-metal
+publication, for a resource in an unbacked pool host or no host. Building the view asks
+the pool's backing delegate what stands behind the resource: a backed resource's view
+carries its host identity and availability; an unbacked resource's view carries neither.
+Nothing is fabricated: the view omits what the delegate says is not there.
 
-The site emits a resource's `bare_metal.v2` view only when its declaration enables
-bare-metal publication and names a host, and the bare-metal storefront ignores a
-resource without the view. A host-less unbacked declaration is therefore invisible to
-bare-metal publication today. Rather than have the storefront read unbacked resources
-around the view, the site emits the view for a resource in an unbacked pool, host or
-no host. Building the view asks the pool's backing delegate what stands behind the
-resource: a backed resource's view carries its host identity and availability; an
-unbacked resource's view carries neither. Nothing is fabricated: the view omits what
-the delegate says is not there, which is what the original decision's objection to a
-"fabricated physical view" was guarding against. The view-building logic is
-compute-family code shared with the site's other views and consumes the delegate; it
-holds no backing branch of its own.
+- The resource's own `bare_metal_publication` declaration attribute remains the opt-in
+  for backed and unbacked pools alike, and is where the view's access methods and
+  capabilities come from.
+- An unbacked resource is never judged against availability: an enabled, shaped resource
+  is a candidate and a disabled one is withdrawn. It never closes as unavailable.
+- The region, asking-rate, and override holds apply to an unbacked pool exactly as to a
+  backed one, and the shape rules — exactly one `units`, a GPU count and model — are
+  unchanged.
 
-Consequences, also decided:
+Rejected: deriving an unbacked candidate from the capacity declaration rather than from a
+view, which would give the storefront a second way to read unbacked resources around the
+view.
 
-- The resource's own `bare_metal_publication` declaration attribute remains the
-  opt-in for backed and unbacked pools alike, and it is where the view's access
-  methods and capabilities come from. An unbacked pool advertising bare metal lists
-  only the resources that enable it, as a backed pool does. Its access methods are
-  a delivery term, so an unbacked listing does not publish them (see "Delivery terms
-  are the delegate's decision").
-- An unbacked resource is never judged against availability: an enabled, shaped
-  resource is a candidate and a disabled one is withdrawn. It never closes as
-  unavailable. This is the delegate's decision, consistent with an unbacked listing
-  being inexhaustible.
-- The region, asking-rate, and override holds apply to an unbacked pool exactly as to
-  a backed one, and the shape rules — exactly one `units`, a GPU count and model —
-  are unchanged.
+#### 4. Resource views receive their pool's context and never fail the projection
 
-### The site's views receive the pool's delegate here
+`InventoryViewProjection.resource_views` receives the context of the resource's pool —
+its provider and its resolved declarations, the backing delegate among them — where it
+received only the declaration and its pool ID. The provisioning service resolves that
+context from the pool rows its metadata pass already reads; it interprets none of it.
 
-`encapsulate-capacity-backing` leaves the site's publication views alone, because no
-view reads backing until this change publishes an unbacked one. This change therefore
-gives views the pool's delegate:
+A contributed projection never raises on a declaration's content. Declarations arrive
+over the site's API from any client, and one declaration a view builder could not handle
+answered 500 for the site's whole resource-pool projection, every pool and every domain
+with it. A declaration from which no valid view can be built is projected without the
+view, and the projection reports why: each projected resource carries an optional
+`publication_view_problems` field, keyed by view identifier. A backed declaration naming
+no host or no access methods, a missing or invalid `allocation_mode`, a missing
+`physical_host_id` attribute, and a private-looking capacity or capability key are all
+such cases; the existing no-host rule is one of them. The bare-metal storefront reports
+each as a `publication_view_unbuildable` entry in its site derivation (decision 10).
 
-- `InventoryViewProjection.resource_views` receives the pool's context — its provider
-  and its resolved declarations, the backing delegate among them — where today it
-  receives only the declaration and its pool ID. The provisioning service's resource
-  pass resolves each declaration's pool from the pool rows its metadata pass already
-  reads; that is the provisioning composition reading its own pools, not a new
-  `kit/site` read of pool state.
-- The view carries the resource's delivery terms only as the delegate's
-  `carry_delivery_terms` passes them (see "Delivery terms are the delegate's
-  decision"): a backed resource's view carries its host identity, access methods, and
-  availability; an unbacked resource's carries none of them.
-- Bare metal's view builder consumes it, so its rule that a declaration naming no host
-  gets no view becomes the delegate's decision rather than a branch of its own.
+Rejected: refusing a malformed attribute when the declaration is written. Its
+backing-dependent rules need a site read of pool state, which `ARCHITECTURE.md` forbids
+while the site's edge into the pool authority stands, so a write-time check would be
+partial and the projection would still have to tolerate what it missed. Rejected: keeping
+the generation failure.
 
-### Delivery terms are the delegate's decision
+#### 5. Delivery terms are the delegate's decision
 
 Some fields of a listing commit the marketplace to delivering something: on a backed
-listing it stands behind them, and on an unbacked one nothing does, and neither the
-storefront nor the site could verify them. These are delivery terms. Whether a
-listing carries them is the backing delegate's decision, through two domain-neutral
-operations a domain applies to the fields it names as delivery terms:
+listing it stands behind them, and on an unbacked one nothing does. These are delivery
+terms. Whether a listing carries them is the backing delegate's decision, through two
+domain-neutral operations a domain applies to the fields it names as delivery terms:
 
-- `carry_delivery_terms(terms)`, used where the site builds a publication view: a
-  backed delegate passes the terms through, an unbacked delegate carries none.
-- `delivery_term_constraints(terms)`, used by a listing model's validation: a backed
-  delegate requires every term present and non-empty, an unbacked delegate requires
-  every term absent.
+- `carry_delivery_terms(terms)`, used where the site builds a publication view: a backed
+  delegate passes the terms through, an unbacked delegate carries none.
+- `delivery_term_constraints(terms)`, used where a model validates: a backed delegate
+  requires every term present and non-empty, an unbacked delegate requires every term
+  absent.
 
 Bare metal names `host_id`, `physical_host_id`, `access_methods`, and, on the view,
-`available` as its delivery terms. The payload model holds no backing knowledge, and
-its rule is that the terms are absent exactly when the listing is unbacked:
+`available` as its delivery terms. VM and API credits name none.
 
 | Field | Backed listing | Unbacked listing |
 |---|---|---|
@@ -121,297 +130,580 @@ its rule is that the terms are absent exactly when the listing is unbacked:
 | `access_methods` | required, non-empty, as declared | absent |
 | hardware, region, `asking_rate`, durations | as today | as today |
 
-The `["ssh"]` default for `access_methods` is removed: an absent field makes no
-commitment, and a default would publish one nothing stands behind. A backed listing
-still always carries its declared list, so its behaviour is unchanged. Hardware,
-region, rate, and durations remain the seller's description of the supply and its
-terms, not a delivery commitment. Rejected: publishing a declared host or access
-methods on an unbacked listing, which would read as a machine and access the
-marketplace delivers.
+The `["ssh"]` default for `access_methods` is removed from the listing model and the
+view carrier: an absent field makes no commitment, and a default would publish one
+nothing stands behind. Rejected: publishing a declared host or access methods on an
+unbacked listing, which would read as a machine and access the marketplace delivers.
 
-`capacity_backing` is the buyer-visible indicator. The compute registry schema filters
-it exactly, and every buyer CLI compiles its resource query from that schema, so a
-buyer can already ask for `capacity_backing=unbacked`. Nothing proves that across
-running services yet, so this change's end-to-end evidence includes it.
+`capacity_backing` is the buyer-visible indicator. The compute registry schema filters it
+exactly and every buyer CLI compiles its resource query from that schema, so a buyer can
+ask for `capacity_backing=unbacked`; this change's end-to-end evidence proves it.
 
-Every remaining reader of the host fields is on a path an unbacked listing cannot
-reach — escrow negotiation, accepted terms, and settlement verification are reached
-only through stages that deliver through capacity, which publication never offers an
-unbacked listing, and capacity effects are refused by the delegate's admission guard —
-except the fulfillment routes' context loader (open question 5).
+Every remaining reader of the host fields is on a path an unbacked listing cannot reach:
+escrow negotiation, accepted terms, and settlement verification are reached only through
+stages that deliver through capacity, which publication never offers an unbacked listing;
+capacity effects are refused by the delegate's admission guard; and the fulfillment routes
+refuse an introduction deal before loading a fulfillment context (decision 9).
 
-### A candidate with no settlement option yields no listing
+#### 6. The view carries no backing; the shared carrier validates its delivery terms
 
-The prerequisite's settlement admissibility already drops, from an unbacked candidate,
-every option whose mechanism bare metal fulfils through capacity, with an operator
-notice, and yields no listing for an unbacked candidate left with none. Contact
-exchange publishes no option for an origin site with no configured contact, so an
-unbacked pool at such a site yields no listing.
+The `bare_metal.v2` view on the wire carries no backing label. Backing has one source,
+the containing pool entry, as pool membership does, so backed views are byte for byte
+unchanged and no second copy of backing can disagree with the pool's.
 
-Bare-metal publication also accepts a payload with no settlement option and no
-accepted escrow today, and publishes a listing nobody can buy, where VM refuses the
-candidate. This change makes bare-metal publication refuse any candidate, backed or
-unbacked, whose payload carries neither, recording a `refuse` entry in the publication
-report that names the candidate and the readiness blockers. Unbacked supply makes the
-case likely — a contact-only candidate whose origin has no contact — and the check sits
-on the payload path this change edits.
+The view's own model, `BareMetalResourceProjection`, therefore makes its delivery terms
+optional and checks only their structure. The rule lives one level up, in
+`TrustedBareMetalResource`, the carrier in `arkhai_bare_metal` that both the site's view
+builder and the storefront use:
 
-### An unbacked listing's recheck reads its held projection, never availability
+- it carries `capacity_backing`, the containing pool's declared label, read through the
+  shared declaration resolver;
+- its validator applies that label's delegate's `delivery_term_constraints` to the view,
+  so a backed view missing a term and an unbacked view carrying one are both validation
+  errors, as a view contradicting its container's `pool_id` already is;
+- a pool whose declarations do not resolve has no label, so no term check runs; its
+  resources are held as unresolvable.
 
-`storefront-publication`'s inventory guard says the storefront must neither consult
-availability nor contact a site authority for an unbacked listing. Bare metal's recheck
-fetched its site's live projection, so this change first decided to scope that rule,
-letting an unbacked recheck read its origin site's declarations and accepting that its
-openings would be refused as retryable while the site was unreachable.
+A violation is a malformed view, and `trusted_bare_metal_projection` refuses the site's
+whole generation for it, as it does for every malformed view: the storefront then holds
+that site's listings as `site_projection_refused` with the validation error. The site
+builds its view through the same carrier after `carry_delivery_terms`, so a correct site
+cannot emit an inconsistent view; only a site of another build or a misbehaving one can.
 
-Superseded on 2026-10-14, after `encapsulate-capacity-backing` was implemented:
-`share-site-projection-state` gives bare metal the per-site projections VM holds, and
-its opening recheck reads the projection it holds for the listing's site. The inventory
-guard is unchanged, and this change carries no delta for it. The recheck goes through
-the binding's delegate, whose `judge` never asks availability of an unbacked listing, so
-an unbacked listing is refused only by its declaration: its shape, region, or Physical
-Resource, or its resource now in a pool other than its bound one. Provenance is the only
-check an unbacked listing gets, so the bound pool is tested explicitly. A site whose
-projection the storefront does not hold refuses openings as retryable for either
-backing.
+Rejected: a backing label on the view (a second source of backing and a new cross-check);
+a second view kind for unbacked supply (a domain branch on backing); tolerating the
+inconsistency in classification by holding a backed view missing a term and dropping an
+unbacked view's extra terms with a report (too lenient: what the site's own output gets
+wrong should be rejected where it is parsed); rejecting only the inconsistent resource
+(two rules for "the site sent a malformed view").
 
-### A deal settled by introduction has no fulfillment
+#### 7. A candidate with no settlement option yields no listing; an open one closes or is held
 
-An unbacked binding keeps its Physical Resource as its source, so the bare-metal
-fulfillment routes load its context; they then answer 409 "settlement is not
-authoritatively verified" because introduction evidence carries no delivery — the same
-answer a backed listing settled by introduction gets today, wrong in meaning because
-the introduction is verified and there is simply no fulfillment. On a storefront
-composed for introductions only, building the fulfillment service fails first and the
-routes answer 500.
+Bare-metal publication refuses a candidate, backed or unbacked, whose payload carries no
+settlement option and no accepted escrow, through a typed refusal. Settlement
+admissibility does not cover the unbacked case on its own: it refuses only when it drops
+an option, so a contact-only candidate whose origin has no configured contact dropped
+nothing and published with no option. This refusal is the guard, for VM and bare metal
+alike.
 
-Since `encapsulate-capacity-backing`, every fulfillment effect passes `CapacityEffects`,
-whose guard refuses an unbacked binding before any site call, so the guard is a
-backstop for this decision rather than its mechanism.
+The refusal is recorded in the cycle report with its site, pool, and Physical Resource at
+the top level, so it reaches status and the derivation log (decision 10).
 
-Decided: the fulfillment routes resolve the deal's accepted seller stage first, the
-entry settlement uses, and when it does not fulfil through capacity they answer 404,
-naming that the deal settled by introduction and has no fulfillment, before building
-the fulfillment service or loading a fulfillment context. The deciding fact is the
-mechanism's, not the listing's backing, because an introduction has no fulfillment
-whatever its listing's backing; no unbacked deal reaches fulfillment, since contact
-exchange is the only option admissibility leaves an unbacked listing. Delivery routes
-for a stage that fulfils through capacity are unchanged.
+For a candidate whose listing is already open, the refusal's readiness blockers decide:
 
-### The bare-metal evidence is VM's introduction scenario, stage for stage
+- **Configuration.** When the storefront's own configuration rules every mechanism out —
+  no clause, a contact-only option whose origin has no contact, a mechanism unready for
+  a configuration blocker — the listing is closed through reconciliation as
+  `no_settlement_option`. `ARCHITECTURE.md`'s rule for holding or closing applies: every
+  declaration reads, and the storefront can no longer say what its policy would sell. A
+  listing closed by reconciliation reopens under the same identity on the first cycle
+  whose payload builds again.
+- **Reachability.** When a mechanism is unready only because its readiness could not be
+  determined — its chain or service unreachable — the listing is held: its last terms
+  stand, the derivation records a hold, and it negotiates normally; settlement fails
+  retryably where it touches the unreachable dependency. Unknown is not unready, as a site
+  whose projection the storefront does not hold is unknown, not empty.
 
-Decided with the maintainer:
+Every readiness blocker therefore states whether it is a configuration or a reachability
+blocker; each mechanism's preflight sets it (decision 19). The core publication runner is
+schema-opaque, so `PublicationSource` gains a hook that closes a candidate's open listing
+with a reason, which VM and bare metal supply from their reconciliation close paths, and
+the runner calls it on a typed refusal whose blockers include a configuration blocker.
+Other payload failures keep their behaviour: reported, with the listing left as it is, so
+a defect never delists anything. API credits does not publish through the runner and is
+unaffected.
 
-- A new bare-metal lane scenario, `e2e_bare_metal_unbacked_introduction`, runs VM's
-  Goal 7 introduction scenario stage for stage and adds what this change introduces:
-  - supply: a backed pool with a host-bearing declaration and a rate; an unbacked pool
-    (no deliverable mode, advertising `bare_metal`, a configuration-free provider)
-    with a host-less declaration that enables bare-metal publication and a rate; and a
-    listing that publishes no rate. Contact settlement reaches the unbacked pool
-    through a storefront pool override, as in VM's scenario, so the lane's default
-    clauses and the mock deal are untouched;
-  - discovery through the buyer CLI: a rate-bounded `market bare-metal list` returns
-    the backed and unbacked listings together and excludes the one without a rate, and
-    a `capacity_backing=unbacked` query returns only the unbacked one;
+Rejected: holding every optionless listing, VM's prior behaviour, which fell out of the
+runner's control flow and advertised options the storefront could not honour; refreshing
+in place with no options, bare metal's prior behaviour, which published an unbuyable
+listing; refusing openings on a reachability-held listing, which needs a new seam from
+negotiation into settlement readiness for a transient case the chain already refuses.
+
+#### 8. An unbacked listing's recheck reads its held projection, never availability
+
+Bare metal's opening recheck reads the projection the storefront holds for the listing's
+site, as `share-site-projection-state` made it, and goes through the binding's delegate,
+whose `judge` never asks availability of an unbacked listing. An unbacked listing is
+refused only by its declaration: its shape, region, or Physical Resource, or its resource
+now in a pool other than its bound one. The recheck finds the resource by its bound pool
+and Physical Resource, so a resource moved to another pool answers that the resource is no
+longer projected under its pool, a declared mismatch. A site whose projection the
+storefront does not hold, or holds unconfirmed, refuses openings as retryable for either
+backing. The inventory guard is unchanged.
+
+#### 9. A deal settled by introduction has no settlement or fulfillment, in both domains
+
+A seller stage whose mechanism completes outside settlement and fulfillment — contact
+exchange today — declares that it has no settle, delivery, or refund operation, in VM and
+bare metal alike. Bare metal adopts VM's model: its contact stage stops recording the
+reveal as settlement evidence, which made an introduction look like a settlement with no
+delivery. Planning confirms nothing else reads that evidence; retention, deletion, and
+re-delivery are the contact-exchange kit's.
+
+Both domains answer from the stage the accepted Agreement selected, through one shared
+refusal, deciding by the stage's `fulfils_through_capacity` declaration and never by
+comparing a mechanism ID or the listing's backing:
+
+- a settle request answers **409**, "a contact exchange completes by introduction, not
+  settlement";
+- bare metal's fulfillment status, access, and result reads and its teardown answer
+  **404**, naming that the deal settled by introduction and has no fulfillment.
+
+The fulfillment routes check, in order: ownership, against the accepted negotiation
+thread's recorded buyer and terminal state, so a stranger cannot learn that a deal was an
+introduction; the accepted stage; the refusal; and only then the fulfillment service or
+context. An unbacked deal's binding has no host, so loading its context first could fail
+on a missing field rather than answer.
+
+The two domains' delivery route surfaces differ — VM reports delivery through settle
+status, bare metal through negotiation-keyed fulfillment routes — and unifying them is
+`kit-owned-listing-and-fulfillment-lifecycles`', which keeps this rule.
+
+Rejected: patching bare metal's fulfillment routes alone; unifying the route surfaces here;
+a requirement for a storefront composed without fulfillment, which production composition
+cannot build.
+
+#### 10. One site-derivation summary, status, and log for both compute storefronts
+
+A storefront's per-site derivation — every hold, refusal, and report a publication cycle
+made, each a reason code with its pool or Physical Resource and detail — is kept by one
+`kit/capacity-publication` site-derivation log that VM and bare metal both feed:
+
+- **Recorded by publication cycles only.** A real publication cycle records each site's
+  summary; a preview records nothing; VM's listing-source checks and capacity-event
+  reconciliation no longer record it. Status therefore always reports the last
+  publication cycle's derivation, in both domains.
+- **One status shape.** Both storefronts serve `publication_derivation` from it, per site,
+  as `holds`, `refusals`, and `reports`. VM's former categories become entries:
+  `regionless_pools` a hold with `pool_region_missing`, `legacy_overrides_in_effect` a
+  report naming the fields, and so on.
+- **Logged on change.** Each entry is logged as a warning when it first appears in a
+  site's summary and at info when it clears; a standing condition is logged once, not
+  every cycle, and previews never log.
+
+Bare metal had logged every pool condition every cycle, previews included; VM logged its
+whole report again whenever any part changed, from a module-level dictionary that also
+served status.
+
+Rejected: bare metal copying VM's rule in its own code (two implementations of one rule);
+once per projection generation (repeats standing conditions on unrelated changes);
+keeping the two status shapes.
+
+#### 11. This change removes bare metal's temporary refusal of unbacked pools
+
+`encapsulate-capacity-backing` kept one branch on a particular backing outside the
+delegate: bare-metal publication's refusal of an unbacked pool, kept deliberately because
+it added no unbacked bare-metal supply. This change deletes that check, its
+`pool_unbacked` report, and `SitePoolReading.unbacked`, after which bare metal derives
+listings from every enabled pool advertising `bare_metal` whatever its backing.
+
+#### 12. Negotiation and settlement compose the existing kit runtimes
+
+Negotiation and settlement for an unbacked bare-metal listing sit on the kit negotiation
+runtime and settlement composition `bare-metal-mock-provisioned-deal` composed for bare
+metal. Settlement, the reveal, per-origin contact resolution, seller-side delivery, and
+retention key only on the listing's origin site and need no change.
+
+#### 13. Bare metal publishes on a loop over held projections
+
+An unbacked listing is never judged against availability, so source reconciliation is the
+only reconciliation it gets, and it must run without an operator. `share-site-projection-state`
+gave bare metal VM's per-site projection state and publication loop, so a withdrawn
+unbacked pool's listings close on the next cycle.
+
+#### 14. The bare-metal evidence is VM's introduction scenario, stage for stage
+
+- A new bare-metal lane scenario, `e2e_bare_metal_unbacked_introduction`, runs VM's Goal 7
+  introduction scenario stage for stage and adds what this change introduces:
+  - supply: a backed pool with a host-bearing declaration and a rate; an unbacked pool (no
+    deliverable mode, advertising `bare_metal`, a configuration-free provider) with a
+    host-less declaration that enables bare-metal publication and a rate; and a listing
+    that publishes no rate. Contact settlement reaches the unbacked pool through a
+    storefront pool override, as in VM's scenario;
+  - discovery through the buyer CLI: a rate-bounded `market bare-metal list` returns the
+    backed and unbacked listings together and excludes the one without a rate, and a
+    `capacity_backing=unbacked` query returns only the unbacked one;
   - the unbacked listing publishes `capacity_backing: unbacked`, no host fields, no
     `access_methods`, and exactly `contact-exchange.v1`;
   - the reveal through the buyer CLI, with the buyer's file sink receiving the seller's
     contact, and seller-side delivery reaching the lane's mail sink;
   - the fulfillment status route answering 404 for the introduction deal.
-- The bare-metal lane gains a mail sink and the storefront's delivery configuration
-  for a `seller-mail` SMTP sink.
-- The stages both domains run identically move into a shared introduction stage
-  module, each domain supplying a driver for supply seeding and its CLI verbs, as the
-  compute deal stages already do; VM's introduction scenario moves onto it.
-- Both buyer plugins register a root-level `settlement` command group, and the core
-  buyer application adds every installed domain's commands without a duplicate check,
-  so with both plugins installed one domain's `settlement contact introduce` runs the
-  other's recovery. Bare metal's settlement group moves under `market bare-metal`,
-  beside its `request-introduction`, and the core buyer application refuses at
-  startup a root command name two installed domains register, naming both. VM's
-  root-level commands stay.
-  Seen in the pipeline: on `feat/orchestrate-change-workflow`, run `39294620474`'s
-  e2e-vm lane failed `test_vm_introduction.py::TestStage02_Reveal::test_04_the_buyer_cli_negotiates_and_reveals`,
-  the VM buyer's `settlement contact introduce` reaching bare metal's config loader
-  (`bare-metal buyer config is required via BARE_METAL_BUYER_CONFIG`). The rerun on
-  the next commit, run `39302015924`, passed with no product change between them:
-  the collision is intermittent on CI, decided by the order the image's entry points
-  are discovered.
+- The bare-metal lane gains a mail sink and the storefront's delivery configuration for a
+  `seller-mail` SMTP sink.
+- The stages both domains run identically move into a shared introduction stage module,
+  each domain supplying a driver for supply seeding and its CLI verbs, as the compute deal
+  stages do; VM's introduction scenario moves onto it. The new scenario holds the
+  storefront's loops through the module holds of decision 22.
+- Both buyer plugins registered a root-level `settlement` command group, and the core
+  buyer application added every installed domain's commands without a duplicate check, so
+  with both installed one domain's `settlement contact introduce` could run the other's
+  recovery; a pipeline run saw it, decided by entry-point discovery order. Bare metal's
+  settlement group moves under `market bare-metal`, beside its `request-introduction`, and
+  the core buyer application refuses at startup a root command name two installed domains
+  register, naming both. VM's root-level commands stay.
 - The existing backed bare-metal introduction scenario stays: its retention and
   operator-deletion coverage is independent of backing.
-- There is no Helm evidence for bare metal in this change. The bare-metal chart
-  forwards no registry, publication clauses, or delivery configuration, so a
-  chart-deployed bare-metal storefront cannot publish at all; that is chart work,
-  recorded with the chart item in `resolve-compute-family-findings`. An introduction
-  involves no provisioning, so the lane's mock provisioning profile does not weaken
-  this evidence.
+- **No pipeline scenario runs against the charts here.** Running pipeline scenarios
+  against the Helm charts is `helm-e2e-pipeline-parity`'s acceptance, so the unbacked
+  introduction scenario runs in its compose lane only. The bare-metal chart can publish
+  (it passes configuration through and derives its registry in an umbrella release), so
+  that is the only ground.
+- **The chart changes this change makes are validated on the local topology.** Decisions
+  20 to 22 change Helm-deployed behaviour, which a render test cannot show. Their evidence
+  is chart render tests, the VM storefront's degraded-start integration test, and
+  `make helm-topology-up` and `make helm-topology-check` passing on the change's commit,
+  with Bob's lifecycle loops shown running after the check and no init containers on the
+  VM storefront. The maintainer runs the Helm part locally when that round is validated;
+  if it has not run by closeout it is recorded as unrun.
+
+#### 15. Goal 7 closes on single-site evidence
+
+The live two-seller scenario — two seller sites behind one storefront — needs one
+storefront serving several sites, which is not supported and is not yet a goal. It is
+recorded as unowned in the change index for both domains, and Goal 7 closes without it.
+The per-origin contact resolution and delivery routing it would exercise are proven at
+integration level.
+
+### B. Alkahest settlement inputs
+
+#### 16. Settlement verifies against the plan committed at acceptance
+
+`ARCHITECTURE.md` already states that accepted terms and persisted operation identities
+remain authoritative through readiness or configuration changes, and VM's refund follows
+it, reading the accepted plan "so a listing changed since acceptance cannot block it".
+Settle verification did not: VM's `prepare_vm_settlement`, bare metal's acceptance,
+`verify_alkahest`, and `revalidate_alkahest`, and API credits' `_prepare_alkahest_settlement`
+re-derived from the listing as stored when they ran. A seller who changed release policy,
+wallet, or address book after acceptance made a buyer's correctly funded escrow fail
+verification and wait for reclaim.
+
+Every domain verifies and settles an Alkahest deal against the `settlement_plan` committed
+at acceptance. `kit/alkahest`'s escrow verification gains a form taking the accepted
+obligation rather than a listing, and the three domains call it; bare metal's acceptance
+builds its plan from the listing record the opening authorized. Planning confirms the
+smaller acceptance question.
+
+Rejected: handing it to `version-accepted-artifacts`, whose subject is evolving stored
+accepted artifacts across releases rather than which reference verification reads; handing
+it to `move-escrow-into-alkahest`, which has no design yet.
+
+#### 17. A buyer funds only what it derives from its acceptance and the listing
+
+The seller's accept reply carried derivable settlement data. `accepted_escrow_terms` was a
+legacy mirror of the plan, sent only by bare metal, read by VM's and API credits' buyers
+in preference to their own derivation, and funded unchecked on the escrow-proposal path
+and on resume; a seller naming a different arbiter or recipient than its listing advertised
+was funded.
+
+The Agreement and the listing it was accepted against are a deal's settlement inputs, and
+what they determine each party derives for itself; a counterparty's copy is compared with
+the derivation, never used in its place. Arkhai payments already works this way: the buyer
+re-derives the mandate and requires equality.
+
+- `accepted_escrow_terms` is removed from the accept reply models, `kit/alkahest`'s
+  producer, the legacy coercions, bare metal's response, and every buyer reader, including
+  the back-fill that synthesized it from the plan.
+- The buyer always materializes the escrow itself, through `kit/alkahest`, from its
+  accepted proposal or selection and the listing's advertised release condition.
+- Where the seller sent a plan, the buyer requires its own derivation to equal the plan's
+  obligation before funding. The domain-supplied plan check `core/buyer` already declares,
+  `AdvertisedPlanValidatorFn`, runs on every branch that receives a plan and on resume
+  rather than only on the selection branch, and API credits supplies it as VM does;
+  `core/buyer` gains no import of `kit/alkahest`.
+- The run-log records the selected listing's advertised release conditions at acceptance.
+  A resumed run derives the escrow from the Agreement's selected option and those
+  conditions, checking any recorded seller terms against them, rather than refusing or
+  funding blindly. An older run-log without them resumes as before.
+
+The settlement plan stays in the reply as the seller's committed copy the buyer compares
+against, which also detects derivation skew between buyer and seller before funds move.
+An Agreement carrying the release condition and expiry, so that a reply carries nothing
+derivable, is the end state, recorded in `move-escrow-into-alkahest`.
+
+Rejected: widening the buyer's check of the seller's terms while still funding them;
+removing every derived artifact from the reply now, which breaks the negotiate wire in
+every domain and overlaps the escrow-carrier changes.
+
+#### 18. An escrow proposal that names no escrow contract is refused
+
+`escrow_shape_guard` read an empty or zero escrow address as "this negotiation carries no
+escrow" and passed it, folding an incomplete Alkahest proposal into the no-escrow case.
+Such a proposal was then priced from the listing's first accepted escrow on any chain, and
+materialized and verified with whatever token it named, so a deal priced in one token could
+be escrowed in another.
+
+An escrow proposal that names no escrow contract is refused. The guard refuses it with a
+named reason while still passing a negotiation that carries no escrow proposal, and
+`kit/alkahest`'s `authorize_escrow_proposal` and `materialize_escrow_terms_from_proposal`
+refuse it too, because the guard is a seller policy a seller may omit and the
+materialization chokepoint is where `negotiation-protocol` already enforces the release
+condition independently of policy. Every unpinned branch goes: first-entry pricing in all
+three domains and bare metal's chain-blind fallback, verification's default-kind branch,
+and `_accepted_escrow_for_proposal`'s zero-address case. This closes Goal 6's unowned
+roadmap gap on how such a proposal is priced: it is refused.
+
+The rationale is the wire, not the clients: no buyer in this repository sends an unpinned
+proposal, but the protocol admitted one, and anything the wire admits must be handled
+whichever client sent it.
+
+Rejected: resolving an unpinned proposal to the listing's single entry on its chain, with
+or without kit enforcement, which keeps an inferred input in the settlement path; adding
+only a token check, which leaves first-entry pricing.
+
+#### 19. An Alkahest section that cannot settle makes Alkahest unready
+
+A storefront must not need Alkahest to function: sellers may settle on other rails, and an
+unusable Alkahest section should cost the seller Alkahest, not the storefront. Readiness is
+the contract every mechanism shares, so each case is an Alkahest readiness blocker:
+
+- an `oracle_gated` section with no trusted oracle;
+- a trusted or interruptible oracle equal to the seller wallet;
+- an empty seller wallet, including when the storefront composes clients, which previously
+  satisfied the check whatever the address;
+- an interruptible section with no interruptible oracle; `release_conditions`' fallback to
+  the seller wallet as oracle is deleted;
+- a configured release model the domain cannot deliver.
+
+Release conditions are derived only for ready Alkahest clauses: `kit/alkahest`'s
+`publication_release_conditions` takes the clauses' readiness and returns nothing for an
+unready mechanism, and VM, bare metal, and API credits call it after readiness. VM had
+derived conditions before readiness and refused every candidate per cycle.
+
+Two startup refusals move to readiness: bare metal's refusal of a configured section with
+no wallet, and every storefront's refusal of an undeliverable release model. The second
+was justified because a configured section owns the deals accepted under it; since
+decision 16, settlement verifies against the committed plan and never reads the section's
+current model. Planning confirms no settlement or collection path reads it; one that does
+keeps the undeliverable-model check at startup until it reads the committed plan.
+
+Each blocker states whether it is a configuration or a reachability blocker (decision 7).
+A section that does not parse still stops startup, as all configuration does. A wallet
+removed while Alkahest deals are settling leaves them unable to collect; readiness governs
+publication only, and this is a known limit.
+
+Rejected: one kit startup check refusing every case (makes a seller who does not want
+Alkahest depend on its section being usable); per-candidate refusal at publication;
+refusing a missing oracle in the configuration model's own validator, which cannot see the
+wallet.
+
+### C. Deployment and test hygiene
+
+#### 20. The VM storefront starts degraded instead of waiting in init containers
+
+The VM storefront chart's `wait-for-rpc` and `wait-for-registry` init containers polled
+with unbounded `wget` requests; one request hung across a registry restart and the pod
+never started. Both init containers are removed, as the bare-metal chart has none: the pod
+relies on a `startupProbe`, and the storefront's own loops retry.
+
+The VM storefront starts with its registry and chain unreachable. An unreachable chain
+makes Alkahest unready with a reachability blocker (decision 19); an unreachable registry
+shows as a failed publication or convergence cycle in loop status, retried each cycle.
+`/health` stays a process check and the degraded state is reported through system status,
+as bare metal reports it. Planning confirms nothing earlier in startup, Alkahest client
+construction included, touches either dependency. A render test asserts no `wait-for-`
+container renders, mirroring bare metal's.
+
+Rejected: bounding each attempt with a timeout, with or without an overall deadline, which
+keeps a deployment holding the service back on its dependencies.
+
+#### 21. Helm test pods carry no selector label of their chart's workloads
+
+Each chart's Helm test pod took its labels from the chart's general helper, which includes
+the selector labels its Deployment selects by, so a selector-based `kubectl logs` or
+`kubectl logs deploy/…` found the test pod beside the service's. Each chart gains a
+test-labels helper carrying chart, version, managed-by, instance, and
+`app.kubernetes.io/component: test`, but not `app.kubernetes.io/name`, which every
+Deployment selector requires. A render test over both topology releases asserts no Pod
+annotated `helm.sh/hook: test` carries all of any Deployment's `matchLabels`. The
+bare-metal test pod gains the hook delete policy the others have.
+
+Rejected: adding `component: test` while keeping `name`, which leaves registry and
+provisioning matching; adding `component` to every Deployment selector, which is immutable
+and forces each release to recreate its Deployments.
+
+#### 22. Scenarios hold shared services for the whole module
+
+Scenarios paused a storefront's loops inside a stage and never resumed them — the VM deal
+the Helm deal test runs, six more VM modules on Bob and Alice — and paused provisioning's
+lease watchdog, resuming it only at the end of the success path. Compose lanes hid it by
+tearing their stacks down; Helm releases persist, and Bob's loops were seen paused after a
+passing run.
+
+One mechanism serves every lane, extending the one both lanes already used for fulfillment
+convergence:
+
+- one shared helper per pause kind — the storefront's lifecycle loops, fulfillment
+  convergence, and the lease watchdog — pauses before the module's first stage, waits until
+  each loop reports itself paused at its gate, yields for the module, and resumes in a
+  `finally`;
+- each lane's conftest exposes one fixture per kind and client (Bob, Alice, the bare-metal
+  storefront, the provisioning service) built on those helpers; bare metal's and VM
+  introduction's own copies are replaced;
+- a module takes the holds it needs with `usefixtures`, listed first so they are released
+  last, after the module's other cleanup; stages assert a hold, through system status for
+  loops and the fixture's own state for the lease watchdog, and never pause or resume a
+  service;
+- a unit check over the scenario source refuses any direct call of a pause route.
+
+A module killed by `helm test`'s timeout runs no finaliser, and only a restart clears its
+pause; modules in a lane run serially.
+
+Rejected: an autouse teardown safety net in each lane, which leaves stages pausing and the
+window before their pause open; opt-in fixtures alongside stage pauses, which hold twice and
+can still leak.
+
+### D. The provisioning service
+
+#### 23. Unserved providers stop startup; failures after authentication are signed
+
+A stored resource pool whose provider no registered handler serves made the provisioning
+service's pool list, read, and export raise; the authentication middleware signs only
+after a route returns, so the caller got an unsigned 500 that its typed client reported as
+missing response authentication, and an exact retry got "in progress" until the dispatch
+lease expired. Handlers are fixed by the build and every write refuses an unknown provider,
+so such a row comes only from outside the service's write paths, and no pool document can
+repair it.
+
+- Startup refuses while any stored pool names a provider no handler serves, naming each
+  pool and provider, beside the existing refusal of stored pools with invalid
+  declarations. Unavailable dependencies start degraded (decision 20); unreadable own state
+  stops startup, because waiting does not repair it.
+- A failure after authentication answers a signed 500 with a fixed, non-revealing detail,
+  recorded as the request's replay outcome, so an exact retry gets the same signed answer.
+  The provisioning service's middleware and `kit/site`'s, which has the same gap in the
+  API-credits service, both do this, following VM's administrator middleware.
+
+Rejected: tolerating the row on reads with a problems field, which adds a pool wire field
+and a non-importable export entry; mapping the error in the read routes only.
+
+### Handed elsewhere and recorded
+
+#### 24. Stage events go to a follow-up change
+
+Stage events recorded a negotiation ID as their `listing_id` when an emitter named no
+listing, and several emitters passed the listing under another key. Investigating it showed
+the mechanism has no contract: it serves both an operator audit trail and the end-to-end
+synchronisation seam, with no defined event vocabulary, best-effort writes, no retention,
+and an operator CLI in one domain. Nothing here changes; the defect and its evidence go to
+a follow-up change, `redesign-storefront-stage-events`, proposed for the "Service-to-service
+trust and event delivery" lesser goal beside `replace-polling-with-authenticated-push`.
+
+#### 25. No upgrade-order record
+
+`ARCHITECTURE.md`'s "Operators" asks designs to record where upgrade order between sites
+and storefronts would matter. Upgrade order will not matter until something other than a
+storefront and provisioning pair is deployed, so this design records none.
+
+#### 26. Edits to other changes
+
+Made on this branch with this design's recording, as `share-site-projection-state`'s
+closeout edited this change:
+
+- `move-escrow-into-alkahest`'s proposal records the end state of decision 17: an
+  Agreement carrying the release condition and expiry, and a reply carrying nothing
+  derivable from the Agreement and its listing.
+- `kit-owned-listing-and-fulfillment-lifecycles`' proposal records that its unified
+  delivery surface keeps decision 9's rule, applied at the stage.
+- `resolve-compute-family-findings`' proposal: the bare-metal chart item is corrected (the
+  chart passes configuration through and derives its registry; running pipeline scenarios
+  against charts is `helm-e2e-pipeline-parity`'s; the negotiation-chain sentence is kept for
+  re-verification), and the unmatched-route item is restated as an unsigned 404, never a
+  405, which a typed client reports as missing response authentication.
+- `redesign-storefront-stage-events` is proposed in a worktree from dev, for the maintainer
+  to commit.
 
 ### Permanent documentation
 
-Decided with the maintainer (review question 6). Spec deltas this change carries:
+Spec deltas this change carries:
 
-- `storefront-publication`: remove "An unbacked pool yields no bare-metal listing";
-  add "Bare-metal publication derives unbacked listings", written to the decisions
-  above; scope "A bare-metal listing sells one whole unit" to capacity-backed
-  listings; scope the availability refusal in "Bare-metal opening rechecks its listing
-  against its source" to capacity-backed listings, written on the held-projection text
-  `share-site-projection-state` gives it; add requirements that a bare-metal listing carries
-  delivery terms only when backed, that a bare-metal candidate with no settlement
-  option yields no listing, and that a deal settled by introduction has no
-  fulfillment.
-- `physical-provisioning`: "A bare-metal publication view is built from its capacity
-  declaration" carries delivery terms only as the pool's delegate passes them; "Domains
-  contribute their inventory views" gives resource views the pool's context.
-- `resource-pool-management`: "Capacity backing is interpreted by one delegate",
-  which the prerequisite made permanent, modified to name delivery terms among the
-  delegate's decisions and to state the two delivery-term operations. A separate
-  requirement beside it would leave its list of the delegate's decisions incomplete.
-- `registry-discovery`: "Compute listings publish their capacity backing" publishes a
-  bare-metal listing's binding backing, backed or unbacked.
+- `storefront-publication`: remove "An unbacked pool yields no bare-metal listing"; add
+  "Bare-metal publication derives unbacked listings", "A bare-metal listing carries
+  delivery terms only when backed", "A compute candidate with no settlement option yields
+  no listing", "A deal settled by introduction has no settlement or fulfillment", and "A
+  compute storefront reports and logs its site derivation"; modify "A bare-metal listing
+  sells one whole unit", "Bare-metal opening rechecks its listing against its source" (on
+  its held-projection text), "Complete bare-metal seller lifecycle" (an unpinned opening is
+  refused), and "An Alkahest listing advertises its release conditions" (an undeliverable
+  model is unready).
+- `physical-provisioning`: modify "A bare-metal publication view is built from its capacity
+  declaration" and "Domains contribute their inventory views"; add "A failure after
+  authentication is answered signed".
+- `resource-pool-management`: modify "Capacity backing is interpreted by one delegate";
+  add "A service refuses to start while a stored pool names an unserved provider".
+- `registry-discovery`: modify "Compute listings publish their capacity backing".
+- `negotiation-protocol`: modify "An Alkahest obligation uses exactly the release
+  condition its listing authorizes" (an unpinned proposal is refused); add "The accept
+  reply carries no escrow terms".
+- `settlement-servicing`: add "Settlement verifies against the accepted plan".
+- `settlement-configuration`: add "An Alkahest section that cannot settle makes Alkahest
+  unready" and "Readiness blockers state their kind".
+- `buyer-orchestration`: add "A buyer funds only what it derives" and "Two domains may not
+  register one root command".
+- `deployment-state`: add "A deployment does not wait on a service's dependencies" and
+  "Helm test pods carry no workload selector labels".
+- `test-compatibility`: add "Scenarios hold shared services for the whole module".
 
-Promotion at closeout: the publication architecture companion's bare-metal passages
-(candidates, the backed-only statement, the one-unit commitment, and the recheck with
-its held-projection end state); `ARCHITECTURE.md`'s bare-metal commitment sentence;
-the bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
-machines; `TESTING.md` and `DEPLOYMENT_AND_CONFIG.md` for the evidence and topology;
-the roadmap's Goal 7 and the change index at completion.
+Promoted at closeout:
 
-### Goal 7 closes on single-site evidence
+- `docs/development/ARCHITECTURE.md`:
+  - "Authority boundaries": anything a counterparty can send is handled on its own terms,
+    whatever client produced it;
+  - "Settlement configuration": what an Agreement and its listing determine, each party
+    derives for itself; and a configured settlement mechanism whose section parses but
+    which cannot currently settle is unready, its options unpublished, while a section that
+    does not parse stops startup;
+  - "Holding or closing a listing": the same test applies to settlement — a listing left
+    with no option because a mechanism's readiness could not be determined is held, one the
+    storefront's configuration rules out is closed;
+  - "Composition from above and below": where two domains handle one concern differently
+    and nothing in their markets requires it, one behaviour is chosen for both rather than
+    patching the domain that showed the defect;
+  - the bare-metal commitment sentence and the "Storefront capacity boundary" passage on
+    the delegate's decisions.
+- `docs/development/DEPLOYMENT_AND_CONFIG.md`: a deployment does not hold a service back
+  with init containers that wait for or validate its external dependencies, and the
+  service reports them degraded; a service refuses to start when its own configuration or
+  stored state is incoherent; a Helm test pod carries no selector label of its chart's
+  workloads; the rewritten `publication_derivation` passages; the bare-metal lane's mail
+  sink and delivery configuration.
+- `docs/development/TESTING.md`: the module-hold guidance, in the wording the maintainer
+  agreed; the bounded topology render assertion; the new scenario and shared introduction
+  stages.
+- The `storefront-publication` architecture companion: bare-metal candidates, delivery
+  terms, the one-unit commitment, the recheck, the site-derivation log, and the no-option
+  close or hold.
+- The `physical-provisioning` and `resource-pool-management` companions where their
+  passages describe the view contract and the delegate's operations.
+- The bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
+  machines; both seller quickstarts' `publication_derivation` passages.
+- `docs/development/ROADMAP.md`: Goal 7's current state and gap row; Goal 6's unowned row
+  on unpinned proposals, closed here.
+- The change index at completion.
 
-This change was assigned the live two-seller scenario — two seller sites behind one
-storefront, each revealing its own seller's contact and receiving only its own
-seller-side delivery, on both lanes. The topology that supports it today is one
-registry with several storefronts, each holding its own site, where each storefront
-reveals its own seller's contact by construction. One storefront serving several sites
-is a capability of its own, weeks of work, and not yet a goal; the lesser goal for
-service-to-service trust and event delivery would precede it.
+The `TESTING.md` guidance agreed for decision 22:
 
-Decided with the maintainer: Goal 7 delivers without the scenario. It is withdrawn
-from this change and recorded as unowned in the change index, for both domains, to be
-taken up by whichever change makes one storefront serve several sites. The per-origin
-contact resolution and delivery routing it would exercise remain proven at
-integration level.
+> A scenario that needs a shared service's timer held — a storefront's lifecycle loops,
+> provisioning's fulfillment convergence or lease watchdog — takes that lane's hold fixture
+> for the whole module with `usefixtures`, listed first so it is released last. A hold is
+> taken before the module's first stage and waits until each loop is at its gate, and is
+> released in a finaliser whatever the module's outcome. Stages assert a hold; they never
+> pause or resume a service themselves, and a source check enforces it.
 
-### Negotiation and settlement compose the existing kit runtimes
+### Implementation cadence
 
-Negotiation and settlement for an unbacked bare-metal listing sit on the kit
-negotiation runtime and settlement composition that `bare-metal-mock-provisioned-deal`
-(archived) composed for bare metal. Settlement, the introduction reveal, per-origin
-contact resolution, seller-side delivery, and retention key only on the listing's
-origin site and need no change.
+Three rounds, each one implementation session, reviewed and validated before the next, then
+closeout. The order follows what each group relies on, so nothing is written twice:
 
-The original decision called this "a publication change" relying on that composition
-for the rest. The review found pieces outside publication that neither change owns —
-the opening source check, the capacity-effect guards, and the listing payload's
-readers — each decided above.
+1. **Round 1 — groups B and D.** Alkahest settlement inputs (decisions 16 to 19, including
+   the readiness blocker's kind) and the provisioning service (decision 23). Both later
+   rounds rely on decision 19: decision 20 on an unreachable chain being non-fatal, and
+   decision 7 on the blocker's kind.
+2. **Round 2 — group C.** Deployment and test hygiene (decisions 20 to 22). Its validation
+   includes the local Helm topology observations of decision 14, run by the maintainer.
+3. **Round 3 — group A.** Unbacked bare metal and its unifications (decisions 1 to 14),
+   written on round 2's module holds.
 
-### Bare metal publishes on a loop over held projections first
+## Open Questions
 
-Decided with the maintainer on 2026-10-14. An unbacked listing is never judged against
-availability, so source reconciliation is the only reconciliation it gets, and
-bare-metal publication ran only when an operator invoked it: an unbacked listing whose
-pool was withdrawn would stay advertised until someone ran it. Bare metal shares VM's
-per-site projection state and publication loop controller instead, through a new
-prerequisite, `share-site-projection-state`, carved out of
-`kit-owned-listing-and-fulfillment-lifecycles`. This change depends on it. Rejected: a
-version watch inside bare metal's publication, which would satisfy the loop's wake but
-keep two projection routes and the live recheck.
-
-### This change removes bare metal's temporary refusal of unbacked pools
-
-`encapsulate-capacity-backing` moves every backing decision into the backing delegate
-except one: bare-metal publication's refusal of an unbacked pool. It keeps that refusal
-deliberately, as an explicit and tested comparison of the pool's backing label in
-bare-metal publication's pool reading, because it adds no unbacked bare-metal supply
-and the delegate cannot express the refusal — bare metal composes contact exchange, so
-the delegate's settlement admissibility would otherwise publish a contact-only
-unbacked listing. It is the only comparison of the label that change leaves in the
-tree.
-
-This change deletes that check and its `pool_unbacked` report, after which bare metal
-derives listings from every enabled pool advertising `bare_metal` whatever its
-backing, like every other domain, and nothing outside the delegate compares the label.
-No other mechanism replaces it.
-
-## Open questions
-
-Questions 1 to 10, the 2026-10-14 review's and two raised the same day, were each decided
-with the maintainer, and those decisions stand. Questions 11, raised 2026-10-19, and 12,
-raised 2026-10-20, are open and are to be designed here.
-
-1. **The unbacked listing payload.** Decided: "Delivery terms are the delegate's
-   decision".
-2. **Backing on refresh and reopen.** Settled by the prerequisite: every domain,
-   bare metal included, applies one shared backing comparison first on every refresh,
-   reopen, and source check, and backing is no longer a bare-metal term field
-   (`encapsulate-capacity-backing`, "Divergence: backing disagreement on refresh and
-   reopen"). Nothing further is owed here.
-3. **Settlement options for unbacked listings.** Decided: "A candidate with no
-   settlement option yields no listing".
-4. **The opening source check.** Decided, then revised by question 9: "An unbacked
-   listing's recheck reads its held projection, never availability".
-5. **The fulfillment routes for an unbacked deal.** Decided: "A deal settled by
-   introduction has no fulfillment".
-6. **The permanent documentation delta.** Decided: see "Permanent documentation".
-7. **The bare-metal system evidence.** Decided: "The bare-metal evidence is VM's
-   introduction scenario, stage for stage".
-8. **The two-seller topology for both lanes.** Decided: "Goal 7 closes on
-   single-site evidence".
-9. **Source reconciliation without an operator.** Raised 2026-10-14 after the
-   prerequisite was implemented. Decided: "Bare metal publishes on a loop over held
-   projections first", which also supersedes the scoped recheck in question 4.
-10. **The resource-pool delta's form.** Raised the same day. Decided: a modification of
-    the now-permanent delegate requirement ("Permanent documentation").
-11. **Defects a local Helm deployment exposed.** Raised 2026-10-19 by
-    share-site-projection-state's local Helm run, which deployed bare metal beside Bob as
-    a second release of the umbrella publishing to the first release's registry. Each
-    predates that change and is to be designed here; none is decided:
-    1. A stored resource pool whose provider no registered handler serves makes the
-       provisioning service's pool read fail with an unhandled 500 that carries no
-       response signature, so the typed client reports missing response authentication
-       rather than the pool's problem; and the service's startup does not refuse the
-       row. Whether startup refuses it, the read reports it per pool, or both, is open.
-    2. The VM storefront chart's `wait-for-registry` init container
-       (`helm/charts/storefront/templates/deployment.yaml`) polls the registry's
-       `/health` with a `wget` that has no timeout, so one request hung across a
-       registry restart and the pod never started.
-    3. Stage events record the negotiation id as their `listing_id` when an entry
-       names no listing (the fallback in `core/storefront/src/core_storefront/stage_log.py`),
-       so a stage-event reader cannot tell a listing from a negotiation.
-    4. Helm test pods carry their Deployment's selector labels, so a selector-based
-       `kubectl logs` or `kubectl exec` finds the test pod beside the service's.
-    5. A VM deal Helm test leaves Bob's loops paused: its first stage pauses them and
-       nothing resumes them, whether the test fails or passes (seen paused after a
-       passing run on 2026-10-20).
-    6. Bare metal logs its notice that a pool states no region on every publication
-       cycle; VM logs its derivation warnings once per projection generation.
-12. **Settlement questions left open by `share-site-projection-state`.** Raised
-    2026-10-20 by that change's closeout, which moved them here from its archived
-    [open questions](../archive/2026-10-19-share-site-projection-state/design.md#open-questions); each was raised during its
-    implementation and none is decided. The owner resolves each during this change's
-    design, as a new change or as an implementation here:
-    1. A storefront whose `[Settlement].alkahest` `oracle_gated` release model names no
-       trusted oracle, or names the seller wallet as its oracle, starts and then refuses
-       every Alkahest candidate. Whether these are startup refusals, as an undeliverable
-       release model already is, is open.
-    2. A storefront with an empty seller wallet still derives and publishes a recipient
-       release condition with no recipient, which every deal then refuses as
-       `release_condition_unreadable`. Whether startup or publication refuses it instead
-       is open.
-    3. An Alkahest escrow proposal that pins no escrow address (the zero address) may
-       name any token: the escrow-shape guard skips it and release authorization does not
-       read it. Whether such a proposal's token is checked, and against what, is open.
-    4. Seller verification, bare metal's acceptance, and the API-credit settle path
-       re-derive the release conditions from the listing as it is stored when they run,
-       so a deal whose listing's conditions changed after acceptance fails them closed,
-       while the VM refund reads the accepted settlement plan. Whether a deal is checked
-       against its listing as it is now or as it was accepted is open.
-    5. A resumed buyer run that holds only an accepted proposal refuses
-       (`escrow_release_condition_missing`), while one that holds the seller's accepted
-       escrow terms creates the escrow from them unchecked. Recording the listing's
-       release conditions in the buyer's run log would let both be checked.
-    6. Only the VM buyer's selection path checks the seller's accepted escrow terms
-       against the listing (`validate_selected_escrow_plan`); the shared buyer
-       orchestration creates the escrow unchecked for the API-credit buyer and for VM's
-       proposal path. Checking every path needs a domain hook, since `core/buyer` cannot
-       import `kit/alkahest`.
+None. Questions 1 to 10 of the 2026-10-14 review and the carried-in items 11 and 12 are
+decided above; work deferred to other changes is recorded in decisions 9, 17, 24, and 26.
