@@ -114,6 +114,60 @@ The protocol is separate from this repository's software. A counterparty may run
 | Created by settlement | Settlement receipt or status |
 | Created by fulfillment | Fulfillment result |
 
+For an interruptible VM deal on hosted payments, the sequence and what each message carries:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Buyer
+    participant R as Registry
+    participant S as Storefront (seller)
+    participant P as Hosted payments (authority)
+    participant X as Site / provisioning
+    participant A as Dispute authority (deferred)
+
+    rect rgb(235, 242, 255)
+    Note over B,P: Market protocol
+    B->>R: listing query
+    R-->>B: listings: VM shape, early-termination clause (initiators, settlement rule), arkhai.payments.v1 option (rate per period, reserve-ahead, stop authorities)
+    B->>S: signed proposal: VM terms incl. ssh_public_key, chosen option and clause
+    S-->>B: signed acceptance = Agreement: terms, clause, mandate carrying deal hash = sha256(JCS(Agreement))
+    B->>P: authenticated approve: mandate (+ Agreement as attachment)
+    P-->>B: signed receipt, transaction id
+    end
+
+    rect rgb(240, 248, 236)
+    Note over B,X: Post-agreement exchange (between the parties)
+    B->>S: settle: transaction id
+    S->>P: read signed snapshot: verify receipt, deal hash, funded-through
+    S->>X: reserve capacity, provision (lease end from the deal term)
+    S-->>B: (async) access: host, port; handle = transaction id
+    loop while service runs
+        S->>P: read snapshot: serve until funded-through, tear down unless it moves
+    end
+    end
+
+    alt buyer stop
+        B->>P: stop (payer account, listed in stop authorities)
+        B-->>S: courtesy notice (hint only)
+        S->>P: read snapshot: stop record (effective time, cause payer)
+    else seller reclaim
+        S->>P: stop (payee account)
+        S-->>B: courtesy notice (hint only)
+        B->>P: read snapshot: stop record (cause payee)
+    else payer exhaustion
+        P->>P: terms stop at last funded boundary
+        S->>P: read snapshot: funded-through stops moving, stop record (cause terms)
+    end
+    S->>X: end service at T: shorten lease, tear down, release after proven teardown
+
+    opt dispute (deferred authority, outside the protocol)
+        B->>A: case: Agreement digest, transaction id, clause, claim, evidence[] (same from either party)
+    end
+```
+
+The stop alternatives follow D7 and D12: the authority's record is what each side acts on, and courtesy notices only bring a read forward. Notice periods are omitted while their form is open (D5).
+
 ### D9. Commitment form follows the arbitration mechanism
 
 Each settlement mechanism declares how parties commit to an agreement. That commitment must bind the parties to everything its evaluator decides. Every form binds the same canonical agreement digest, `sha256(JCS(agreement))`, so one agreement identity spans every mechanism:
