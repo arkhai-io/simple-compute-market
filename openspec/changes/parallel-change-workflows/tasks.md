@@ -22,7 +22,7 @@ Delivers `make change-clone` (D1, D6; requirement "Each change is worked in its 
 clone"). Touches a new `scripts/change_clone.py`, the root `Makefile`, and
 `scripts/tests/`.
 
-- [ ] 1.1 `scripts/change_clone.py create <change> [--branch B] [--from REF]`, run in
+- [x] 1.1 `scripts/change_clone.py create <change> [--branch B] [--from REF]`, run in
       the owner's workspace: clone it locally into `<workspace>.changes/<change>/`;
       set `origin` to the workspace's `origin` URL and add a `workspace` remote
       naming the workspace; check out the branch, the existing one or a new one from
@@ -30,19 +30,53 @@ clone"). Touches a new `scripts/change_clone.py`, the root `Makefile`, and
       workspace's; start `make init` in the background, recording in the clone's
       Git directory its process and log while it runs, then its exit status (D6).
       Default branch `feat/<change>`.
-- [ ] 1.2 Idempotence and refusals (D6, 17 F5): in a directory that is already a
+      Note: the clone is made with `git clone --no-checkout --origin workspace`, so
+      the `workspace` remote exists from the first step and an unfinished clone has
+      no index (its empty worktree is never read as uncommitted deletions). The
+      branch, existing or `--from`, is taken at its furthest point between the
+      workspace's copy and `origin`'s, and refused when the two have diverged — a
+      stale local `dev` would otherwise start a change without its own proposal. It
+      is checked out with no upstream in the workspace, tracking `origin`'s branch
+      when there is one, and the branch `git clone` made is deleted, so the push
+      guard never pushes into the workspace; that settling runs on every pass, so
+      a checkout interrupted before it is settled by the rerun (a branch the safe
+      delete refuses keeps only its upstream removed). Step 3 fetches the
+      workspace first, so a rerun reads its branches as they are now. What is
+      already in the clone — its `origin`, its branch, uncommitted changes — is
+      refused before anything is written; a diverged branch, a `--from` naming
+      nothing, and a settings path that is not the link are found only later,
+      after the `origin` remote is added, and leave the clone unfinished for a
+      rerun. The furthest-point rule is now in D6. The change and branch are
+      recorded, once the branch is checked out, in
+      the clone's Git directory (`change-clone.json`), beside the bootstrap's
+      `change-bootstrap.json` (pid, log), `.log`, and `.status`; the bootstrap runs
+      under `sh -c` in its own session, writing its status through a temporary
+      file. The settings link is made even while the workspace has no
+      `settings.local.json`, so the clone sees one as soon as the owner writes it.
+- [x] 1.2 Idempotence and refusals (D6, 17 F5): in a directory that is already a
       clone of the workspace, resume at the first step not done, never recloning;
       refuse, naming the directory and deleting nothing, a directory that is not a
       clone of the workspace, has another branch checked out, or has uncommitted
       changes. Rerunning restarts a failed bootstrap and leaves a running or
       succeeded one alone.
-- [ ] 1.3 `bootstrap_state(clone)` → `running` (recorded process alive),
+      Note: also refused, deleting nothing — a clone asked for another `--branch`
+      than the one it records, the clone of another change, a clone whose `origin`
+      is not the workspace's, a `--from` naming nothing, a settings path that is
+      not the link, a workspace with no `origin`, and running `create` in a clone
+      (its `workspace` remote names a directory). Settling the upstreams deletes
+      the branch `git clone` made inside the clone, and the workspace fetch prunes
+      the clone's copies of deleted workspace branches; neither is anyone's work.
+- [x] 1.3 `bootstrap_state(clone)` → `running` (recorded process alive),
       `succeeded` (status 0), `failed` (non-zero status, or a dead process with no
       status), or `absent`, with the log's path; and `clone_of(workspace, change)`
       → the clone's directory when it exists and holds the change's branch. Both
       are the computation's inputs (3.1), importable without side effects.
-- [ ] 1.4 `Makefile`: `make change-clone CHANGE=<change> [BRANCH=…] [FROM=…]`.
-- [ ] 1.5 Verification. Repository level (temporary workspace with a bare `origin`):
+      Note: `workspace_of(checkout)` beside them, the workspace a clone's
+      `workspace` remote names, or None for any other checkout; the round view and
+      the computation tell a clone from the workspace by it. A recorded pid reused
+      by another process would read as `running`; nothing guards against that.
+- [x] 1.4 `Makefile`: `make change-clone CHANGE=<change> [BRANCH=…] [FROM=…]`.
+- [x] 1.5 Verification. Repository level (temporary workspace with a bare `origin`):
       a fresh clone has both remotes, the branch, the settings link, and a bootstrap
       record (the bootstrap command injected); an interrupted creation, each step
       left undone in turn, is finished without recloning; each refusal deletes
@@ -50,6 +84,50 @@ clone"). Touches a new `scripts/change_clone.py`, the root `Makefile`, and
       a dead process with no status read as `failed`. `uv run --no-project --with
       pytest pytest -q scripts/tests/test_change_clone.py`; `make test`. No
       end-to-end scenario covers it.
+      Evidence: `scripts/tests/test_change_clone.py`, 36 passed — repository level,
+      the plan's term (real Git in a temporary directory, a workspace with a bare
+      `origin`, the bootstrap's spawn injected): the fresh clone; its tracking nothing in the workspace, with the
+      workspace on `dev` and with the change's branch checked out there; an
+      existing branch at its furthest point; a diverged one refused, then taken
+      once reconciled in the workspace; `--from` a workspace branch; `dev` from
+      `origin` when the workspace's is behind; a named branch recorded; resumption
+      after the clone, after the remotes, after a checkout whose upstream was not
+      yet settled (approximated by a checkout tracking the workspace), before the
+      link, and before the bootstrap alone (a sentinel in the Git directory shows
+      nothing was recloned); a failed bootstrap restarted, a running one and a
+      complete clone left alone; the refusals of a directory that is not a clone,
+      a file in its place, a clone of another repository, the clone of another
+      change, another branch checked out, uncommitted changes, another
+      `--branch`, an `origin` not the workspace's, a `--from` naming nothing (and
+      another `--branch` accepted after it), a settings file that is not the
+      link, a workspace without `origin`, and a clone as workspace, each but the
+      diverged one asserting what it leaves; the detached-`HEAD` wording and an
+      unreadable `origin` are untested; the real
+      spawn recording output and status. The bootstrap's states — `failed` for a
+      dead process without a status — are read over state files in a real clone
+      with the liveness check injected. The command line is exercised only on its
+      refusal, since a successful run starts the real `make init`.
+      `uv run --no-project --with pytest pytest -q scripts/tests`: 1121 passed.
+      `make test`: every suite passed up to `make -C helm test-render`, which
+      failed three render assertions (`internalRegistryTrust` got null, in
+      `helm/charts/storefront/tests/test_render.py` and
+      `helm/tests/test_release_topology.py`); this section touches nothing under
+      `helm/`, so the failure is not its own, and is left for validation to
+      report. `make check-packaging`: passed. `make check-change`: only the
+      citations of the scripts sections 5, 7, and 8 create
+      (`change_namespace.py`, `check_parallel_validation.py`,
+      `change_history.py`). No end-to-end scenario covers it.
+      Handoff: not done, deliberately — the bootstrap record is written just after
+      the spawn, so a run killed between the two reads `absent` and a rerun starts
+      a second `make init`; `--from` takes a branch name or a commit, not
+      `origin/<branch>`; `make change-clone` does not check the change's name with
+      `find_change.py`, since the change may exist only on the branch it starts
+      from; a checkout killed after writing its index but before moving `HEAD`
+      leaves the clone refused as on another branch, for the owner to delete; a
+      clone whose custom branch was checked out but not yet recorded is refused on
+      a rerun without `--branch`. The furthest-point rule is promoted with D6
+      (10.9). Section 3 must read
+      a clone `clone_of` returns whose bootstrap is `absent` as incomplete.
 
 ## 2. The round view in the owner's workspace
 
@@ -435,7 +513,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       - `openspec/specs/change-workflow/architecture.md` — a new "A change is worked
         in its own clone" (D1: why clones rather than branch switching, worktrees,
         or containers; the shared-resource inventory of D7; the owner's workspace
-        meets the workflow only for reading); "An implementation round is triaged
+        meets the workflow only for reading; D6's branch taken at its furthest
+        point and tracking `origin`, never the workspace); "An implementation round is triaged
         together, in a fresh session" rewritten for the reading in the workspace
         beside validation (D2, D3: why the reading no longer gates validation;
         tooling refuses rather than taking silent risks with the owner's

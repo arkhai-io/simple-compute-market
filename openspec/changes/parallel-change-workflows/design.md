@@ -339,7 +339,11 @@ next-step computation names `clone`, and the session runs
 2. sets `origin` to the workspace's `origin` URL, so the push guard's same-named
    upstream holds, and adds a `workspace` remote pointing back at the workspace —
    how every script in the clone finds the workspace;
-3. checks out the branch: the existing one, or a new one from `FROM`;
+3. checks out the branch: the existing one, or a new one from `FROM`, each taken
+   at its furthest point between the workspace's copy and `origin`'s and refused
+   when the two have diverged, since a stale local `dev` would start a change
+   without its own proposal; the branch tracks `origin`'s, never the workspace's,
+   so no push goes to the workspace;
 4. links `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
 5. starts `make init` in the background, recording its state in the clone's Git
