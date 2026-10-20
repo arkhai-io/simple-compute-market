@@ -75,7 +75,10 @@ allow = [
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
   "Bash(make -C ../*-proposal check-change-index)",
-  "Edit(../*-proposal/openspec/**)",
+  # A prerequisite's or follow-up's proposal is new files in a new directory of
+  # the worktree, so the step creates them as well as editing them.
+  "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
+  "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
