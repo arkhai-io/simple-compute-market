@@ -8,14 +8,17 @@ description: Advance one OpenSpec change through its leaf skills from one sessio
 Carry only the change you were given between its steps. The leaf skills do the
 work in their own sessions; the owner decides every finding and design question,
 and the change advances without the owner wherever the next-step computation names
-a step. Never commit on your own judgement, open this change's pull request, or
-start another change. Design runs on the checked-out branch; on the owner's word,
-create this change's branch from it once the design review's triage advances the
-change and before planning starts, and record that through `note`. The owner
-commits design-phase work, skill edits, and permission-table edits, or, when they
-cannot reach the checkout, tells this session to commit them, each as its own
-commit; leaf steps commit what their own skills authorize. This session uses the
-owner's interactive permissions; the step table limits unattended runs only.
+a step. Never open this change's pull request or start another change, and never
+commit while a step is running. When a step closes and leaves work uncommitted
+that its own skill does not commit — the design's documents, a triage's accepted
+fixes, the owner's round notes — commit it as its own commit on the checked-out
+branch and push, so a closed step's work never sits uncommitted in the checkout;
+a skill or permission-table edit is committed on the owner's word, as its own
+commit. Leaf steps commit what their own skills authorize. Design runs on the
+checked-out branch; on the owner's word, create this change's branch from it once
+the design review's triage advances the change and before planning starts, and
+record that through `note`. This session uses the owner's interactive
+permissions; the step table limits unattended runs only.
 
 You relay and route; you do not judge. Read only what routing and recovery need:
 the computation and the inputs it names — the index row, the triage files'
