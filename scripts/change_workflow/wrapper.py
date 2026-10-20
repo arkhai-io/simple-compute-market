@@ -271,7 +271,8 @@ class Wrapper:
         """The run's denials: the parent's own, from its stream, then those its
         subagents met, read from their transcripts beside the conversation file."""
         ran = stream.session or session
-        extra = subagent_denials(self.conversation(self.root, ran)) if ran else []
+        extra = (subagent_denials(self.conversation(self.root, ran), stream.tool_use_ids)
+                 if ran else [])
         seen = {d.get("tool_use_id") for d in stream.denials if d.get("tool_use_id")}
         return stream.denials + [d for d in extra if d.get("tool_use_id") not in seen]
 
