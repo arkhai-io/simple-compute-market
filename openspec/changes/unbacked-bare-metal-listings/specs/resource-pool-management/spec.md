@@ -50,8 +50,10 @@ operations:
   capacity-backed delegate passes the terms through and the unbacked delegate carries
   none of them;
 - constraining delivery terms, where a model validates: the capacity-backed delegate
-  requires every term present and non-empty and the unbacked delegate requires every
-  term absent.
+  requires every term present and the unbacked delegate requires every term absent.
+
+A term is present when it is neither absent nor null, and a string or collection term
+only when it is also non-empty; a boolean term is present as either value.
 
 No delivery term MAY be given a default value, because a default would publish a
 commitment nothing stands behind.
@@ -80,8 +82,13 @@ commitment nothing stands behind.
 #### Scenario: A backed listing is validated without its terms
 
 - **WHEN** a capacity-backed listing or view omits one of its domain's delivery terms, or
-  carries it empty
+  carries a string or collection term empty
 - **THEN** its validation refuses it
+
+#### Scenario: A backed view reports its host unavailable
+
+- **WHEN** a capacity-backed bare-metal view carries `available: false`
+- **THEN** its validation accepts the term as present
 
 #### Scenario: An unbacked listing is validated with a term
 

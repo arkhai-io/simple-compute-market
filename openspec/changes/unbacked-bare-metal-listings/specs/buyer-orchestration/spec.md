@@ -9,8 +9,9 @@ Where the seller's accept reply carries a settlement plan, the buyer MUST requir
 derivation to equal the plan's obligation before funding, on every path that funds an
 escrow, through the plan check its domain supplies. A buyer MUST record the selected
 listing's advertised release conditions in its run-log at acceptance, and a resumed run
-MUST derive the escrow from the Agreement's selected option and those recorded conditions;
-a run-log that predates them MUST resume as before.
+MUST derive the escrow from the Agreement's selected option and those recorded conditions.
+A resumed run whose run-log predates them and records no escrow MUST NOT fund one: it
+MUST end naming that the run was accepted before release conditions were recorded.
 
 #### Scenario: A seller's plan names another recipient
 
@@ -29,6 +30,13 @@ a run-log that predates them MUST resume as before.
 - **WHEN** a buyer resumes a run whose run-log holds the accepted proposal and the
   listing's recorded release conditions but no escrow
 - **THEN** it derives the escrow from them and creates it, rather than refusing
+
+#### Scenario: A run-log predates recorded release conditions
+
+- **WHEN** a buyer resumes a run whose run-log holds an accepted proposal and seller terms
+  but no recorded release conditions and no escrow
+- **THEN** it creates no escrow and ends the run naming that it was accepted before
+  release conditions were recorded
 
 ### Requirement: Two domains may not register one root command
 

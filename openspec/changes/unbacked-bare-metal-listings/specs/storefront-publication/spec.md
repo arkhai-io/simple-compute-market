@@ -40,9 +40,9 @@ delegate the binding carries.
 ### Requirement: A bare-metal listing carries delivery terms only when backed
 
 A bare-metal listing's delivery terms — its host identity, physical host identity,
-and access methods, and on its site view its availability — MUST be present and
-non-empty when the listing is capacity-backed and absent when it is unbacked, as its
-backing delegate decides. No delivery term MAY be given a default value. The site's
+and access methods, and on its site view its availability — MUST be present when the
+listing is capacity-backed, each string or collection non-empty, and absent when it is
+unbacked, as its backing delegate decides. No delivery term MAY be given a default value. The site's
 bare-metal view carries no backing label: the storefront MUST validate each view's
 delivery terms against the backing its containing pool declares, through that
 backing's delegate, and MUST treat a view whose terms the delegate refuses as a
@@ -84,13 +84,14 @@ The storefront MUST report each resource the site projects with a
 VM and bare-metal publication MUST refuse a candidate, whatever its backing, whose
 payload carries no settlement option and no accepted escrow, through a typed refusal
 recorded with the candidate's site, pool, and source resource. When the candidate's
-listing is open, the refusal's readiness blockers MUST decide what becomes of it: when
-any mechanism is ruled out by a configuration blocker, or no clause is configured, the
-listing MUST be closed through reconciliation as `no_settlement_option` and MUST reopen
-under the same identity on the first cycle whose payload builds again; when every
-mechanism is ruled out only by reachability blockers, the listing MUST be held, keeping
-its last-published terms. A payload failure other than this refusal MUST leave an open
-listing as it is.
+listing is open, each mechanism MUST be classified from the refusal's readiness blockers:
+ruled out by configuration when the storefront's configuration excludes it or it reports
+any configuration blocker, and unknown when every blocker it reports is a reachability
+blocker. When every mechanism is ruled out by configuration, or no clause is configured,
+the listing MUST be closed through reconciliation as `no_settlement_option` and MUST
+reopen under the same identity on the first cycle whose payload builds again; when any
+mechanism is unknown, the listing MUST be held, keeping its last-published terms. A
+payload failure other than this refusal MUST leave an open listing as it is.
 
 #### Scenario: An unbacked candidate's origin has no contact
 
@@ -113,6 +114,19 @@ listing as it is.
 - **THEN** the listing stays open on its last-published terms and the site's derivation
   records a hold
 
+#### Scenario: An unreachable mechanism beside one ruled out by configuration
+
+- **WHEN** an open listing published with only an Alkahest option loses it because its
+  chain cannot be reached, while a contact-exchange section is configured with no contact
+  for the listing's origin
+- **THEN** the listing is held on its last-published terms, not closed
+
+#### Scenario: A mechanism with both kinds of blocker
+
+- **WHEN** an open listing's only mechanism is unready for a missing oracle and its chain
+  cannot be reached
+- **THEN** the listing is closed as `no_settlement_option`
+
 #### Scenario: A payload fails for another reason
 
 - **WHEN** building an open listing's payload raises an error that is not the
@@ -121,11 +135,13 @@ listing as it is.
 
 ### Requirement: A deal settled by introduction has no settlement or fulfillment
 
-A seller stage whose mechanism completes outside settlement and fulfillment MUST
-declare that it has no settle, delivery, or refund operation, in every compute
-domain. Settle and fulfillment requests MUST be answered from the stage the deal's
+Every compute domain's seller stage-table entry MUST declare whether its mechanism
+completes outside settlement and fulfillment, so that it has no settle, delivery, or
+refund operation, and a stage that does not declare it MUST NOT be constructible. Settle
+and fulfillment requests MUST be answered from that declaration on the stage the deal's
 accepted Agreement selected, through one shared refusal, and MUST NOT compare a
-mechanism identifier or the listing's backing: a settle request MUST be refused with
+mechanism identifier or the listing's backing, or read whether the stage fulfils
+through capacity: a settle request MUST be refused with
 409, and a fulfillment status, access, or result read or a teardown MUST be refused
 with 404, each naming that the deal settled by introduction. A fulfillment route MUST
 check the caller's ownership against the accepted negotiation before resolving the
@@ -167,11 +183,12 @@ fulfillment service. A stage without delivery MUST NOT record settlement evidenc
 The VM and bare-metal storefronts MUST keep each configured site's publication
 derivation — every hold, refusal, and report a publication cycle made, each a reason
 code with its pool or Physical Resource and any detail — in one kit-owned site
-derivation log. Only a real publication cycle MUST record it; a preview, a
-listing-source check, and capacity-event reconciliation MUST NOT. Each storefront's
-system status MUST report `publication_derivation` from it, per site, as `holds`,
-`refusals`, and `reports`, a site that derived cleanly present with empty lists. The
-log MUST record each entry as a warning when it first appears in a site's derivation
+derivation log, keyed by publication source and site. Only a real publication cycle
+MUST record it; a preview, a listing-source check, and capacity-event reconciliation
+MUST NOT. Each storefront's system status MUST report `publication_derivation` from it,
+per site, as `holds`, `refusals`, and `reports`: a site that derived cleanly present with
+empty lists, and a configured site no publication cycle has derived since start absent.
+The log MUST record each entry as a warning when it first appears in a site's derivation
 and at info when it clears, and MUST NOT log a standing entry again or log a preview.
 
 #### Scenario: A pool states no region for many cycles
@@ -189,6 +206,12 @@ and at info when it clears, and MUST NOT log a standing entry again or log a pre
 
 - **WHEN** an administrator previews a publication cycle
 - **THEN** the site derivation and its log are unchanged
+
+#### Scenario: A site before its first cycle
+
+- **WHEN** an administrator reads system status after a restart, before any publication
+  cycle has derived a configured site
+- **THEN** that site is absent from `publication_derivation`
 
 #### Scenario: VM and bare metal report alike
 
@@ -293,7 +316,7 @@ the site by at most that window; admission at the site remains authoritative.
 - **THEN** the opening is refused as retryable
 
 ### Requirement: Complete bare-metal seller lifecycle
-A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled, wherever its configuration supplies them; a configured mechanism whose section parses but which cannot settle is unready rather than a reason to refuse startup. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
+A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms, settlement materialization, receipt, and access-result artifacts through its installed domain contract. The listing binding MUST freeze the trusted `site_id`, Physical Resource identity, `bare_metal` offering mode, and contract identity/version; the accepted negotiation MUST copy that binding before persisting domain artifacts. Settlement and fulfillment MUST reload that binding and MUST NOT infer a site, executor, URL, credential, or domain from buyer payload data. Alkahest fulfillment MUST start when settlement verifies the escrow, through the kit settlement-servicing worker's ready hook, which the storefront composes whenever it has a settlement configuration, and MUST NOT wait for a buyer request to begin it or be retried by any other path. Arkhai payments MUST retain receipt-verified delivery and receipt-based reconciliation without creating conditional-escrow obligations. The storefront MUST refuse to start without its settlement configuration, and MUST build a configured mechanism's recovery resources whether or not the mechanism is enabled, wherever its configuration supplies them; a configured mechanism whose section parses but which cannot settle is unready rather than a reason to refuse startup, and the storefront MUST refuse to start when Alkahest inputs are supplied with no Alkahest section. An Alkahest fulfillment MUST publish on chain only its evidence's digest, and MUST NOT submit evidence again once a submission's outcome is unknown.
 
 #### Scenario: Administrator waits while settlement servicing is held
 - **WHEN** an accepted bare-metal deal has begun fulfillment and its selected site converges it to active while the storefront's settlement-servicing loop is held
@@ -351,7 +374,8 @@ A bare-metal storefront MUST validate listing, negotiation-message, agreed-terms
 - **THEN** the storefront terminates the lease at the recorded site
 
 #### Scenario: The storefront starts without its settlement configuration
-- **WHEN** the bare-metal storefront starts with no settlement configuration
+- **WHEN** the bare-metal storefront starts with no settlement configuration, or with a
+  seller address, chains, or wallet key supplied and no Alkahest section
 - **THEN** startup refuses with a clear error, and no mechanism is enabled implicitly
 
 #### Scenario: A configured Alkahest section cannot settle
@@ -405,6 +429,36 @@ naming the model, rather than refusing startup.
 - **WHEN** a VM storefront's Alkahest section is oracle-gated with no trusted oracle
 - **THEN** no release condition is derived for its clauses, and its candidates publish
   only the options of its ready mechanisms
+
+#### Scenario: An API-credit listing request supplies its escrows
+
+- **WHEN** an API-credit listing is created with accepted escrows supplied and no clauses
+  while Alkahest is unready
+- **THEN** no release condition is derived for them and no Alkahest option is published
+
+### Requirement: Publication derives all ready settlement options
+
+A storefront MUST preflight every enabled installed settlement registration and derive deterministic listing options from every ready mechanism in configured priority order and the seller's validated settlement publication clauses. A clause MUST NOT make a disabled or unready mechanism publishable. One unready mechanism MUST be suppressed with an operator-visible sanitized blocker while ready peers remain publishable. If no enabled ready mechanism has a valid publication clause, no option is derived: a VM or bare-metal candidate MUST be refused as "A compute candidate with no settlement option yields no listing" requires, and an API-credit listing MUST NOT be created; neither MAY mutate accepted negotiations or active settlement state.
+
+#### Scenario: Arkhai payments is unready and Alkahest is ready
+
+- **WHEN** both have publication clauses but payments configuration is unready
+- **THEN** the storefront publishes the Alkahest option, omits the Arkhai payment option, and reports the mechanism blocker without provider detail
+
+#### Scenario: Readiness returns after publication
+
+- **WHEN** a previously suppressed mechanism becomes ready and its publication clause remains valid
+- **THEN** reconciliation may add its deterministic option without changing listing identity or any already accepted Terms
+
+#### Scenario: Clause names a disabled mechanism
+
+- **WHEN** seller publication input names a mechanism whose typed configuration is disabled
+- **THEN** publication rejects that clause without using it as an implicit enablement override
+
+#### Scenario: No mechanism is ready for one candidate
+
+- **WHEN** one VM pool's override names only an unready mechanism while another pool's clauses name a ready one
+- **THEN** the first pool's candidates are refused, the second's publish, and no accepted negotiation or settlement state changes
 
 ## REMOVED Requirements
 

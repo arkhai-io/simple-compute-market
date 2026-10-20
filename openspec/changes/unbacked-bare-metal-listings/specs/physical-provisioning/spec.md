@@ -5,9 +5,12 @@
 A provisioning authority, and every service authenticating through the site kit's
 middleware, MUST answer a request that fails after it was authenticated — a route
 raising an unexpected error — with a signed 500 response carrying a fixed detail that
-reveals nothing of the error, and MUST record that response as the request's replay
-outcome, so an exact retry receives the same signed answer rather than an unsigned one
-or an in-progress refusal. The error itself MUST be logged by the service.
+reveals nothing of the error, and MUST log the error itself. A middleware whose replay
+store records outcomes, as the provisioning service's does, MUST record that response as
+the request's replay outcome, so an exact retry receives the same signed answer rather
+than an unsigned one or an in-progress refusal. The site kit's middleware, whose store
+keeps no outcomes, records nothing, and an exact retry is handled as its route's retry
+contract already says.
 
 #### Scenario: A route raises after authentication
 
@@ -18,8 +21,16 @@ or an in-progress refusal. The error itself MUST be logged by the service.
 
 #### Scenario: The failed request is retried exactly
 
-- **WHEN** the caller retries that request with the same request identity and body
+- **WHEN** the caller retries that request to the provisioning service with the same
+  request identity and body
 - **THEN** it receives the recorded signed 500 without the route running again
+
+#### Scenario: A route behind the site kit's middleware raises
+
+- **WHEN** an authenticated request to the API-credits service reaches a route that
+  raises an unexpected error
+- **THEN** the caller receives a signed 500 its typed client verifies, and the error is
+  logged by the service
 
 ## MODIFIED Requirements
 
@@ -95,8 +106,10 @@ declared by two projections.
 
 A projection producing a resource view MUST receive the context of the resource's pool —
 its provider and its resolved declarations, the backing delegate among them — alongside
-the resource's declaration. The provisioning service MUST resolve that context from the
-pool records it already reads for the projection, and MUST NOT interpret it. A
+the resource's declaration, through the compute provisioning layer's view protocol. The
+provisioning service MUST resolve that context in its own resource pass, from the pool
+records it reads there through the shared declaration resolver, and MUST NOT interpret
+it; the site kit MUST NOT carry pool state into the resource pass. A
 contributed projection MUST NOT raise on a declaration's content: it MUST return, beside
 the views it built, the problems that kept it from building a view it declares, and the
 provisioning service MUST carry them on the projected resource as

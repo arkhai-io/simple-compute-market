@@ -3,10 +3,12 @@
 ### Requirement: A deployment does not wait on a service's dependencies
 
 A chart MUST NOT hold a service back with init containers that wait for or validate its
-external dependencies, such as a registry, a chain, or a site. The service MUST start
-while a dependency is unreachable, report the dependency as degraded in its status while
-its process health check answers, and recover without a restart when the dependency
-answers.
+external dependencies, such as a registry, a chain, or a site, and a service MUST NOT
+wait for one, or refuse to start because one is unreachable, in its own startup. The
+service MUST start while a dependency is unreachable, report the dependency as degraded
+in its status while its process health check answers, and recover without a restart when
+the dependency answers. A chart whose service starts slowly MUST give it a startup probe,
+so that a slow start is not judged by its liveness probe.
 
 #### Scenario: The VM storefront starts before its registry and chain
 
@@ -15,10 +17,18 @@ answers.
   with a reachability blocker and a failed publication cycle, and both recover once the
   dependencies answer
 
+#### Scenario: A storefront starts before its site or service
+
+- **WHEN** the VM storefront starts while its provisioning service is unreachable, or the
+  API-credit storefront while its credits service is
+- **THEN** it starts and answers its health check, calls to that service fail retryably,
+  and they succeed once it answers, without a restart
+
 #### Scenario: A storefront chart renders
 
 - **WHEN** the VM or bare-metal storefront chart is rendered
-- **THEN** its Deployment carries no init container that waits on a dependency
+- **THEN** its Deployment carries no init container that waits on a dependency, and its
+  container carries a startup probe
 
 ### Requirement: Helm test pods carry no workload selector labels
 

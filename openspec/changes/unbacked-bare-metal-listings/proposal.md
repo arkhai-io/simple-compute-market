@@ -43,12 +43,14 @@ follow-up change.
 - Refuse a VM or bare-metal candidate with no settlement option and no accepted escrow,
   recorded per site. An open listing closes as `no_settlement_option` when the storefront's
   configuration rules every mechanism out, and reopens when an option returns; it is held
-  when a mechanism is unready only because its chain or service is unreachable.
+  while any mechanism is unready only because its chain or service cannot be reached.
 - Recheck an unbacked listing against the projection the storefront holds, never its
   availability.
-- Answer an introduction deal from its accepted stage in both domains: settle answers 409,
-  bare metal's fulfillment reads and teardown answer 404, and bare metal's contact stage
-  stops recording the reveal as settlement evidence.
+- Answer an introduction deal from its accepted stage in both domains, through one
+  refusal in `kit/storefront` deciding by a required stage declaration that the stage
+  completes outside settlement: settle answers 409, bare metal's fulfillment reads and
+  teardown answer 404, and bare metal's contact stage stops recording the reveal as
+  settlement evidence.
 - Keep one site-derivation summary in `kit/capacity-publication` for VM and bare metal:
   recorded by publication cycles only, served as one `publication_derivation` status shape,
   and logged when an entry appears or clears.
@@ -71,14 +73,18 @@ follow-up change.
 - Refuse an escrow proposal that names no escrow contract, in the shape guard and at the
   kit's materialization chokepoint, removing every unpinned branch.
 - Make an Alkahest section that cannot settle — no oracle, an oracle equal to the wallet,
-  no wallet, an undeliverable release model — unready rather than fatal, derive release
-  conditions only for ready clauses, and have every readiness blocker state whether it is a
-  configuration or a reachability blocker.
+  no wallet address or key, no chains, an undeliverable release model — unready rather
+  than fatal, derive release conditions only for ready clauses, and have every readiness
+  blocker state whether it is a configuration or a reachability blocker.
+- Probe each Alkahest chain apart from readiness, at most once per interval with bounded
+  calls, telling an unreachable chain (reachability) from a wrong chain or a missing
+  contract (configuration), and rebuilding a chain client that could not be constructed.
 
 ### C. Deployment and test hygiene
 
-- Remove the VM storefront chart's dependency-waiting init containers; the VM storefront
-  starts with its registry and chain unreachable and reports them degraded.
+- Remove the VM storefront chart's dependency-waiting init containers and give the chart
+  a startup probe; remove the VM and API-credit storefronts' in-process dependency
+  preflights. Each starts with its dependencies unreachable and reports them degraded.
 - Give Helm test pods labels no Deployment selector matches.
 - Hold shared services' loops for a whole scenario module through one fixture mechanism in
   every lane, released in a finaliser, with stages asserting holds and a source check
@@ -87,8 +93,9 @@ follow-up change.
 ### D. The provisioning service
 
 - Refuse startup while a stored pool names a provider no handler serves.
-- Answer a failure after authentication with a signed 500 recorded as the request's
-  outcome, in the provisioning service's middleware and `kit/site`'s.
+- Answer a failure after authentication with a signed 500, in the provisioning service's
+  middleware, which records it as the request's outcome, and in `kit/site`'s, whose store
+  keeps no outcomes.
 
 ## Capabilities
 
@@ -136,28 +143,35 @@ None.
 ## Impact
 
 - `kit/resource-pools-contracts`: the delegate's delivery-term operations.
-- `kit/resource-pools` and the compute provisioning service: the stored-provider startup
-  check, signed failures after authentication, and the resource pass's pool context and
-  view problems; `kit/site`'s middleware.
+- `provisioning/compute` (`compute_provisioning`): the view protocol's pool context and
+  view problems. The compute provisioning service: the resource pass's pool context, the
+  stored-provider startup check, and signed failures after authentication. `kit/site`'s
+  middleware: signed failures. `kit/site` and `kit/resource-pools` otherwise unchanged.
 - `domains/bare_metal/src/arkhai_bare_metal/`: the listing schema, the view carriers and
   their validation, classification, and the recheck; the bare-metal provisioning adapter's
   view builder.
 - `kit/capacity-publication` and `core/storefront`'s publication runner: the
   site-derivation log, and the source close hook for optionless listings.
 - The VM and bare-metal storefronts' publication, status, settlement stages, and settle and
-  fulfillment routes; the API-credit storefront's settlement verification and release
-  conditions.
+  fulfillment routes; the VM and API-credit storefronts' startup; the API-credit
+  storefront's settlement verification and release conditions.
+- `kit/storefront`: the shared introduction refusal and the Alkahest chain probe beside
+  client construction.
 - `kit/alkahest`, `kit/policy`, and `kit/settlement-runtime`'s readiness carrier;
   `core/buyer` and the VM and API-credit buyers; the bare-metal buyer's commands.
-- `helm/`: the VM storefront chart's init containers, every chart's test-pod labels, and a
-  topology render test.
+- `helm/`: the VM storefront chart's init containers and startup probe, every chart's
+  test-pod labels, and a topology render test.
 - `e2e-tests/`: hold helpers and fixtures in every lane, the source check, shared
   introduction stages, the new bare-metal scenario, VM's introduction scenario, and the
   bare-metal lane's mail sink and delivery configuration.
 - Wire: the site projection gains an optional per-resource field; the accept reply loses
   `accepted_escrow_terms`; VM's administrator status reports `publication_derivation` in the
-  shared shape; an unpinned escrow proposal is refused; bare metal's fulfillment routes
-  answer 404 for an introduction deal. A backed bare-metal listing's payload and binding are
+  shared shape; readiness blockers carry a `kind` and status reports each Alkahest chain's
+  last probe; an unpinned escrow proposal is refused; bare metal's fulfillment routes
+  answer 404 for an introduction deal.
+- Configuration: the VM storefront's `[seller.provisioning]` `fail_on_unreachable` and
+  `preflight_timeout`, and the API-credit storefront's `credits` counterparts, are
+  removed; an Alkahest probe interval is added. A backed bare-metal listing's payload and binding are
   unchanged.
 
 ## Permanent documentation impact
@@ -169,8 +183,8 @@ None.
       `physical-provisioning`, `resource-pool-management`, `registry-discovery`,
       `negotiation-protocol`, `settlement-servicing`, `settlement-configuration`,
       `buyer-orchestration`, `deployment-state`, and `test-compatibility`, and the
-      `storefront-publication`, `physical-provisioning`, and `resource-pool-management`
-      architecture companions.
+      `storefront-publication`, `physical-provisioning`, `resource-pool-management`,
+      `market-composition`, and `settlement-configuration` architecture companions.
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 
@@ -189,8 +203,10 @@ and the change index.
   `resource-pool-management` spec and companion.
 - Settlement against the accepted plan — `settlement-servicing`; derived settlement inputs
   and the reply without escrow terms — `buyer-orchestration` and `negotiation-protocol`;
-  the unpinned refusal — `negotiation-protocol`; unready Alkahest and blocker kinds —
-  `settlement-configuration`.
+  the unpinned refusal — `negotiation-protocol`; unready Alkahest, blocker kinds, and the
+  chain probe — `settlement-configuration` spec and companion.
+- The `completes_outside_settlement` stage declaration and the introduction refusal as a
+  `kit/storefront` stage convention — `market-composition` companion.
 - Anything a counterparty can send is handled on its own terms; what an Agreement and its
   listing determine each party derives; a settlement mechanism that cannot settle is
   unready; unknown readiness holds a listing; one behaviour for one concern across domains
