@@ -113,7 +113,9 @@ it; the site kit MUST NOT carry pool state into the resource pass. A
 contributed projection MUST NOT raise on a declaration's content: it MUST return, beside
 the views it built, the problems that kept it from building a view it declares, and the
 provisioning service MUST carry them on the projected resource as
-`publication_view_problems`, keyed by view identifier.
+`publication_view_problems`, keyed by view identifier. The site kit's resource-pool
+projection MUST carry that field when present, as it carries `publication_views`, without
+reading or interpreting it.
 
 #### Scenario: A third domain contributes a view
 

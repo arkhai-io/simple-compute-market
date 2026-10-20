@@ -5,7 +5,7 @@ Every prerequisite is archived: `bare-metal-publication-reads-pool-declarations`
 `encapsulate-capacity-backing`, `share-site-projection-state`, and
 `bare-metal-mock-provisioned-deal`. Design reviewed 2026-10-14; returned to design
 2026-10-20 for twelve carried-in items, and that design reviewed and its findings decided
-the same day (1.14). Not yet planned.
+the same day (1.14), and its second design review decided (1.15). Not yet planned.
 
 ## 1. Design
 
@@ -87,6 +87,19 @@ the same day (1.14). Not yet planned.
       fatal (decision 19), `kit/site`'s signed failures without outcome recording
       (decision 23), and the upgrade-order points recorded as unreachable in the
       supported deployment shape (decision 25).
+- [x] 1.15 **Decision gate.** Decide the second 2026-10-20 design review (61) and record
+      each decision in `design.md`. Decided with the maintainer: the chain probe, its
+      schedule, and the client map it rebuilds in `kit/alkahest`, registered by each
+      storefront as the `alkahest-chain-probe` loop, its results not expiring while held,
+      and the runtime's own blockers given a kind (decision 19; 61 F3, F5); API credits'
+      seed as the `listing-seed` loop step waiting for its dependencies, a reachability
+      refusal of a create answered 503, and the storefront CLI's `publish` and `listings`
+      commands as clients of the running storefront (decision 19; 61 F1); only the
+      mechanisms of a candidate's admissible clauses classified, an empty admissible set
+      closing (decision 7; 61 F2); `kit/site`'s projection and the site-client fixture
+      carrying `publication_view_problems` (decision 4; 61 F4); a rollout's mixed-version
+      window recorded as a hold (decision 25; 61 F6); and the unowned API-credit limit
+      added to the roadmap promotion (61 F7).
 - [ ] 1.2 Plan the implementation, naming the files each decision touches, the focused
       and integration suites, and the permanent documentation destinations.
 

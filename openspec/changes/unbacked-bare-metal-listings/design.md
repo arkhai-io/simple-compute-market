@@ -36,6 +36,13 @@ reachability the hold relies on, a listing is held while any mechanism is unknow
 storefronts' own dependency preflights go with the init containers, and the placement of
 the pool context and the introduction refusal follows each package's responsibility.
 
+Its second round and triage revised decisions 4, 7, 19, and 25: the chain probe and the
+client map it rebuilds belong to `kit/alkahest` as a loop each storefront registers, API
+credits' seed waits for its dependencies and its CLI goes through the running storefront,
+a listing is classified only by the mechanisms its candidate could publish, `kit/site`
+carries the view problems it does not read, and a rollout's brief mixed-version window is
+recorded as a hold.
+
 Planning re-verifies against the tree the facts each decision marks as "planning
 confirms".
 
@@ -109,7 +116,11 @@ nothing above the compute family learns of it:
   serves both this pass and `load_capacity_pool_metadata`, so the two cannot drift.
 - The VM and bare-metal provisioning adapters take the new signature; the bare-metal
   adapter declares `arkhai-kit-resource-pools-contracts` wherever it imports from it.
-- `kit/site`, `kit/resource-pools`, and core do not change.
+- `kit/site`'s `resource_pool_projection`, which rebuilds each projected resource from
+  named fields, copies the optional per-resource `publication_view_problems` mapping when
+  present, as it copies `publication_views`, and neither reads nor interprets it; the
+  site-client resource-pool fixture both sides of the boundary test against carries it.
+  `kit/resource-pools` and core do not change.
 
 `kit/site` still calls the pool directory and the resource inventory separately, and the
 two reads need not agree by construction: a pool's `capacity_backing` and provider are
@@ -241,8 +252,14 @@ alike.
 The refusal is recorded in the cycle report with its site, pool, and Physical Resource at
 the top level, so it reaches status and the derivation log (decision 10).
 
-For a candidate whose listing is already open, each mechanism is classified by its
-readiness blockers, and the classification decides:
+For a candidate whose listing is already open, each mechanism of the candidate's
+admissible clauses is classified by its readiness blockers, and the classification
+decides. The admissible clauses are the ones the candidate could publish: its pool's
+override, or the configured clauses where it has none, after admissibility for its
+backing. A mechanism outside them could never settle this listing, so its readiness says
+nothing about the offer it published. A candidate left with no admissible clause is the
+same typed refusal with every mechanism ruled out by configuration, so it closes, where it
+had been an untyped failure that left the listing open.
 
 - A mechanism is **ruled out by configuration** when the storefront's own configuration
   excludes it — no clause, a contact-only option whose origin has no contact, or any
@@ -265,7 +282,11 @@ storefront does not hold is unknown, not empty. A mechanism ruled out by configu
 beside it does not change that: a listing published with only an Alkahest option whose
 chain is down is held, even where a contact-exchange section that never applied to the
 listing's origin is configured, because the offer it published is still one the
-storefront would make once the chain answers.
+storefront would make once the chain answers. Conversely, an unknown mechanism outside
+the candidate's admissible clauses holds nothing: an unbacked listing whose only
+mechanism, contact exchange, is configured away closes while Alkahest's chain is down,
+since admissibility drops Alkahest for unbacked bare metal and the close is due whatever
+the chain answers.
 
 Every readiness blocker therefore states whether it is a configuration or a reachability
 blocker; each mechanism's preflight sets it, and Alkahest's chain probe is what produces
@@ -278,7 +299,10 @@ defect never delists anything. API credits does not publish through the runner; 
 unready Alkahest does to an open API-credit listing is recorded in decision 19.
 
 Rejected: closing whenever any mechanism is ruled out by configuration, which let an
-unrelated, unusable mechanism decide whether an outage delists supply; deciding per
+unrelated, unusable mechanism decide whether an outage delists supply; classifying every
+configured mechanism, which let an outage on a mechanism the candidate could never use
+hold a listing whose close is already due; classifying the mechanisms admissible for the
+candidate's backing alone, which misses a pool override that excludes one; deciding per
 previously published option, which needs the runner to read a listing's last-published
 options; holding every optionless listing, VM's prior behaviour, which fell out of the
 runner's control flow and advertised options the storefront could not honour; refreshing
@@ -617,9 +641,11 @@ governs publication only, so two known limits follow:
   re-deriving publication path, so the limit is unowned.
 
 **Readiness blockers state their kind, and Alkahest probes its chains.** `ReadinessBlocker`
-gains a required `kind`, `configuration` or `reachability`, set by every preflight;
-Arkhai payments and contact exchange contact nothing during readiness, so every blocker
-they report is a configuration blocker. Nothing parses a status payload through the model,
+gains a required `kind`, `configuration` or `reachability`, set on every blocker: by each
+preflight, and by the settlement runtime on the `not_configured` and `disabled` blockers
+it builds itself, both configuration blockers since an absent or disabled section is the
+seller's configuration. Arkhai payments and contact exchange contact nothing during
+readiness, so every blocker they report is a configuration blocker. Nothing parses a status payload through the model,
 so the field is wire-safe. Reachability is produced by one chain probe in `kit/alkahest`:
 
 - **What it calls.** For each configured chain it reads the chain ID, then the code at
@@ -631,16 +657,43 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   `contract_probe`, `required_addresses`, `observed_chain_id`, and `deployed_contracts`
   resources, which only tests passed, are deleted. Planning confirms the transport: the
   SDK client or a JSON-RPC call against the chain's `rpc_url`.
-- **Who supplies it.** `kit/storefront`'s Alkahest client-construction seam builds it
-  beside the chain clients, so every storefront composing Alkahest has it with no domain
-  code. A chain whose client could not be constructed is probed like any other and its
-  client is rebuilt at its next probe, rather than dropped for the life of the process.
+- **Who owns it.** The probe is one `kit/alkahest` object holding the configured chains,
+  a per-chain client constructor supplied at composition, the live client map, each
+  chain's last result and when it was taken, and an async step that probes the chains
+  that are due. Consumers are handed that map, and the probe updates it in place, so a
+  chain whose client could not be constructed is probed like any other and its rebuilt
+  client reaches every consumer, rather than being dropped for the life of the process.
+  Each storefront composing Alkahest builds the probe beside its clients, passing a
+  constructor over the existing factory's per-chain construction, hands it to the
+  Alkahest registration as a resource, from which readiness reads its results, and
+  registers its step as the `alkahest-chain-probe` loop beside its other loops: one
+  registration per domain. `kit/storefront` gains nothing Alkahest-specific, so the
+  client factory's later move into the Alkahest registration carries no probe with it.
 - **Cadence.** Readiness is evaluated per candidate, per status read, and at startup, so
-  the probe runs apart from it: in the storefront's lifecycle loops, at most once per
-  chain per probe interval (a setting, 30 seconds by default). The Alkahest preflight
-  reads each chain's last result and makes no chain call. A chain not yet probed since
-  start reads as reachability, so a fresh storefront holds its open listings rather than
-  closing them. Status reports each chain's result and when it was taken.
+  the probe runs apart from it: in the `alkahest-chain-probe` loop, at most once per
+  chain per probe interval (a setting, 30 seconds by default), with the pause and
+  `run-cycle` step every storefront loop has. The Alkahest preflight reads each chain's
+  last result and makes no chain call. A chain not yet probed since start reads as
+  reachability, so a fresh storefront holds its open listings rather than closing them.
+  A result does not expire: while the loops are held, readiness reads the last result
+  however old, as a held scenario expects. Status reports each chain's result and when it
+  was taken.
+- **Paths that publish once.** Only reconciling paths can wait for a later cycle, so
+  API credits' one-shot paths are shaped around reachability:
+  - The configured seed no longer runs in startup. It is the `listing-seed` loop step,
+    which waits, logging nothing at error level, while the credits service cannot be
+    reached for its quota registration or a mechanism its clauses use is unknown; gives
+    up, logging once, on a configuration failure; and finishes once the listing exists,
+    created or found. A storefront whose dependencies answer publishes its seed within a
+    probe interval of start.
+  - A create refused only because a mechanism is unknown answers 503, naming the
+    unreached mechanism and that the create can be retried once it is reached; a
+    configuration refusal answers 400 with its blocker codes, as today.
+  - The storefront CLI's `publish` and `listings` commands are clients of the running
+    storefront's routes, through the typed listing client, which gains a list method,
+    rather than building the storefront's services or opening its database in their own
+    process. A listing created with no storefront serving it is one no buyer can
+    negotiate, and a process with no loops would never have a probe result.
 - **Timeouts.** Each RPC call is bounded, 5 seconds by default; a timed-out run records
   an unreachable result and is retried at the next interval, never in a tight loop.
 
@@ -651,7 +704,13 @@ wallet; reporting no reachability and keeping a kind every blocker shares, or dr
 kind and the hold with it, either of which leaves an undeployed or wrong address book
 undetected at readiness; probing inside the preflight, which would call the chain once per
 candidate per cycle; refusing API-credit openings on an unready mechanism, a new seam from
-negotiation into readiness.
+negotiation into readiness; scheduling the probe and rebuilding clients in `kit/storefront`'s
+client-construction seam, which adds Alkahest behaviour to an edge `ARCHITECTURE.toml`
+records as an exception to be removed, against the mechanism neutrality decision 9 keeps
+for the same kit; one bounded probe pass at startup before startup publication, and
+probing on demand on the create path, both rejected for the seed waiting on its
+dependencies and an operator's create getting a retryable error; the CLI probing for
+itself, which keeps a create path that needs no running storefront.
 
 ### C. Deployment and test hygiene
 
@@ -793,8 +852,11 @@ in the only deployment shape supported today:
   rejects, refusing the site's whole generation; and an older site emits host fields on a
   host-bearing declaration in an unbacked pool, which the new carrier rejects the same
   way. Each holds every listing at the site as `site_projection_refused`. A bare-metal
-  storefront and its provisioning service are deployed by one Helm release and upgrade
-  together, so neither order occurs.
+  storefront and its provisioning service are deployed by one Helm release, so neither
+  version runs beside the other for longer than a rollout: a `helm upgrade` or rollback
+  rolls both Deployments concurrently and can briefly pair an old pod with a new one.
+  Within that window the site's listings are held, never closed, and the hold clears at
+  the first projection poll after both pods are current.
 - an upgraded core buyer beside an older bare-metal buyer plugin still registering a root
   `settlement` group, with VM installed, refuses to start. The bare-metal buyer pins
   `arkhai-core-buyer` exactly, so an installer cannot pair them without forcing it.
@@ -879,7 +941,8 @@ Promoted at closeout:
   delivery configuration.
 - `docs/development/TESTING.md`: the module-hold guidance, in the wording the maintainer
   agreed; the bounded topology render assertion; the new scenario and shared introduction
-  stages.
+  stages; the `alkahest-chain-probe` loop in each storefront's row of the loop table, and
+  `listing-seed` in the API-credit row.
 - The `storefront-publication` architecture companion: bare-metal candidates, delivery
   terms, the one-unit commitment, the recheck, the site-derivation log, and the no-option
   close or hold.
@@ -894,7 +957,9 @@ Promoted at closeout:
 - The bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
   machines; both seller quickstarts' `publication_derivation` passages.
 - `docs/development/ROADMAP.md`: Goal 7's current state and gap row; Goal 6's unowned row
-  on unpinned proposals, closed here.
+  on unpinned proposals, closed here; and a new Goal 6 row, "An API-credit listing's
+  options are fixed at creation, so an unready mechanism's option stays advertised until
+  the seller closes it", owned by "Unowned — needs a new change".
 - The change index at completion.
 
 The `TESTING.md` guidance agreed for decision 22:

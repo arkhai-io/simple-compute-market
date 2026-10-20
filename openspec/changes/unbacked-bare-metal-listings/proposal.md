@@ -42,8 +42,9 @@ follow-up change.
   never reserve, hold, schedule, or fulfil an unbacked listing.
 - Refuse a VM or bare-metal candidate with no settlement option and no accepted escrow,
   recorded per site. An open listing closes as `no_settlement_option` when the storefront's
-  configuration rules every mechanism out, and reopens when an option returns; it is held
-  while any mechanism is unready only because its chain or service cannot be reached.
+  configuration rules out every mechanism its candidate could publish, and reopens when an
+  option returns; it is held while any of those mechanisms is unready only because its
+  chain or service cannot be reached.
 - Recheck an unbacked listing against the projection the storefront holds, never its
   availability.
 - Answer an introduction deal from its accepted stage in both domains, through one
@@ -76,9 +77,13 @@ follow-up change.
   no wallet address or key, no chains, an undeliverable release model — unready rather
   than fatal, derive release conditions only for ready clauses, and have every readiness
   blocker state whether it is a configuration or a reachability blocker.
-- Probe each Alkahest chain apart from readiness, at most once per interval with bounded
-  calls, telling an unreachable chain (reachability) from a wrong chain or a missing
-  contract (configuration), and rebuilding a chain client that could not be constructed.
+- Probe each Alkahest chain apart from readiness, in a `kit/alkahest` loop each storefront
+  registers, at most once per interval with bounded calls, telling an unreachable chain
+  (reachability) from a wrong chain or a missing contract (configuration), and rebuilding a
+  chain client that could not be constructed.
+- Create the API-credit seed listing from a loop step that waits for its dependencies,
+  answer an operator's create refused for reachability with a retryable 503, and make the
+  storefront CLI's listing commands clients of the running storefront.
 
 ### C. Deployment and test hygiene
 
@@ -145,19 +150,23 @@ None.
 - `kit/resource-pools-contracts`: the delegate's delivery-term operations.
 - `provisioning/compute` (`compute_provisioning`): the view protocol's pool context and
   view problems. The compute provisioning service: the resource pass's pool context, the
-  stored-provider startup check, and signed failures after authentication. `kit/site`'s
-  middleware: signed failures. `kit/site` and `kit/resource-pools` otherwise unchanged.
+  stored-provider startup check, and signed failures after authentication. `kit/site`:
+  its middleware's signed failures, and its resource-pool projection carrying
+  `publication_view_problems` without interpreting it; `kit/site-client`'s resource-pool
+  fixture carries the field. `kit/resource-pools` unchanged.
 - `domains/bare_metal/src/arkhai_bare_metal/`: the listing schema, the view carriers and
   their validation, classification, and the recheck; the bare-metal provisioning adapter's
   view builder.
 - `kit/capacity-publication` and `core/storefront`'s publication runner: the
   site-derivation log, and the source close hook for optionless listings.
 - The VM and bare-metal storefronts' publication, status, settlement stages, and settle and
-  fulfillment routes; the VM and API-credit storefronts' startup; the API-credit
-  storefront's settlement verification and release conditions.
-- `kit/storefront`: the shared introduction refusal and the Alkahest chain probe beside
-  client construction.
-- `kit/alkahest`, `kit/policy`, and `kit/settlement-runtime`'s readiness carrier;
+  fulfillment routes; every storefront's loop registration of the Alkahest chain probe;
+  the VM and API-credit storefronts' startup; the API-credit storefront's settlement
+  verification and release conditions, its seed as a loop step, its create route's
+  retryable refusal, and its CLI's listing commands as clients of the running storefront.
+- `kit/storefront`: the shared introduction refusal.
+- `kit/alkahest`, including the chain probe and the client map it rebuilds; `kit/policy`;
+  and `kit/settlement-runtime`'s readiness carrier;
   `core/buyer` and the VM and API-credit buyers; the bare-metal buyer's commands.
 - `helm/`: the VM storefront chart's init containers and startup probe, every chart's
   test-pod labels, and a topology render test.
@@ -168,7 +177,9 @@ None.
   `accepted_escrow_terms`; VM's administrator status reports `publication_derivation` in the
   shared shape; readiness blockers carry a `kind` and status reports each Alkahest chain's
   last probe; an unpinned escrow proposal is refused; bare metal's fulfillment routes
-  answer 404 for an introduction deal.
+  answer 404 for an introduction deal; an API-credit create refused only for reachability
+  answers 503; the storefronts' lifecycle loops gain `alkahest-chain-probe`, and API
+  credits' `listing-seed`.
 - Configuration: the VM storefront's `[seller.provisioning]` `fail_on_unreachable` and
   `preflight_timeout`, and the API-credit storefront's `credits` counterparts, are
   removed; an Alkahest probe interval is added. A backed bare-metal listing's payload and binding are

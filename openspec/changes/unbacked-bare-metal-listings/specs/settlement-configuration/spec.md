@@ -38,9 +38,11 @@ configuration does.
 Every mechanism's readiness blocker MUST carry a kind: `configuration`, which the
 storefront's own configuration causes and only an operator can clear, or `reachability`,
 raised because a dependency the mechanism needs could not be reached, or has not yet been
-probed, to determine readiness. Each mechanism's preflight MUST set the kind on every
-blocker it reports, and status MUST report it. A mechanism whose readiness contacts
-nothing reports only configuration blockers.
+probed, to determine readiness. The kind MUST be set on every blocker: by each
+mechanism's preflight on the blockers it reports, and by the settlement runtime on the
+`not_configured` and `disabled` blockers it builds itself, which are configuration
+blockers. Status MUST report it. A mechanism whose readiness contacts nothing reports only
+configuration blockers.
 
 #### Scenario: A chain cannot be reached
 
@@ -58,17 +60,26 @@ nothing reports only configuration blockers.
 - **WHEN** Alkahest's seller wallet has no address
 - **THEN** its blocker is a configuration blocker
 
+#### Scenario: A mechanism is disabled
+
+- **WHEN** a mechanism's section is absent or disabled
+- **THEN** the settlement runtime's `not_configured` or `disabled` blocker is a
+  configuration blocker
+
 ### Requirement: Alkahest probes its chains apart from readiness
 
 A storefront composing Alkahest MUST probe each configured chain apart from readiness
-evaluation: reading the chain's identity and the code at each contract address its
-address configuration requires, at most once per chain per configured probe interval,
-with every call bounded by a timeout. Alkahest readiness MUST read each chain's last
-probe result and MUST NOT call a chain itself. A chain not yet probed since start MUST
-read as a reachability blocker. A chain whose client could not be constructed MUST be
-probed, and its client rebuilt, at each probe until construction succeeds, so the
-storefront recovers without a restart. Status MUST report each chain's last result and
-when it was taken.
+evaluation, in its `alkahest-chain-probe` lifecycle loop, which the Alkahest kit supplies
+and the storefront registers beside its other loops, with the pause and explicit step
+every storefront loop has: reading the chain's identity and the code at each contract
+address its address configuration requires, at most once per chain per configured probe
+interval, with every call bounded by a timeout. Alkahest readiness MUST read each chain's
+last probe result and MUST NOT call a chain itself. A chain not yet probed since start
+MUST read as a reachability blocker. A result MUST NOT expire while the loops are held. A
+chain whose client could not be constructed MUST be probed, and its client rebuilt, at
+each probe until construction succeeds, and every consumer of the storefront's Alkahest
+clients MUST read them through the map the probe updates, so the storefront recovers
+without a restart. Status MUST report each chain's last result and when it was taken.
 
 #### Scenario: Readiness is evaluated for many candidates
 
@@ -81,3 +92,9 @@ when it was taken.
   answers
 - **THEN** Alkahest is unready with a reachability blocker until a probe succeeds, then
   ready, without a restart
+
+#### Scenario: A scenario holds the loops
+
+- **WHEN** a storefront's loops are held after a probe and its chain later stops answering
+- **THEN** readiness keeps reporting the held result, with the time it was taken, until
+  the `alkahest-chain-probe` loop is stepped or resumed

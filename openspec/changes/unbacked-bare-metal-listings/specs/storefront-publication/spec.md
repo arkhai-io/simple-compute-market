@@ -83,8 +83,11 @@ The storefront MUST report each resource the site projects with a
 
 VM and bare-metal publication MUST refuse a candidate, whatever its backing, whose
 payload carries no settlement option and no accepted escrow, through a typed refusal
-recorded with the candidate's site, pool, and source resource. When the candidate's
-listing is open, each mechanism MUST be classified from the refusal's readiness blockers:
+recorded with the candidate's site, pool, and source resource; a candidate left with no
+admissible clause MUST be refused the same way. When the candidate's listing is open, each
+mechanism of the candidate's admissible clauses — its pool's override, or the configured
+clauses where it has none, after admissibility for its backing — MUST be classified from
+the refusal's readiness blockers, and a mechanism outside them MUST NOT be classified:
 ruled out by configuration when the storefront's configuration excludes it or it reports
 any configuration blocker, and unknown when every blocker it reports is a reachability
 blocker. When every mechanism is ruled out by configuration, or no clause is configured,
@@ -126,6 +129,19 @@ payload failure other than this refusal MUST leave an open listing as it is.
 - **WHEN** an open listing's only mechanism is unready for a missing oracle and its chain
   cannot be reached
 - **THEN** the listing is closed as `no_settlement_option`
+
+#### Scenario: An unreachable mechanism the candidate could never publish
+
+- **WHEN** an open unbacked bare-metal listing's only admissible mechanism, contact
+  exchange, is configured away while Alkahest's chain cannot be reached
+- **THEN** the listing is closed as `no_settlement_option`, not held
+
+#### Scenario: A pool override leaves no admissible clause
+
+- **WHEN** an open unbacked bare-metal listing's pool override names only a mechanism
+  bare metal fulfils through capacity
+- **THEN** the candidate is refused as having no settlement option, and the listing is
+  closed as `no_settlement_option`
 
 #### Scenario: A payload fails for another reason
 
@@ -435,6 +451,43 @@ naming the model, rather than refusing startup.
 - **WHEN** an API-credit listing is created with accepted escrows supplied and no clauses
   while Alkahest is unready
 - **THEN** no release condition is derived for them and no Alkahest option is published
+
+### Requirement: API-credit listing creation waits for or names an unreachable mechanism
+
+An API-credit storefront's configured seed listing MUST be created by a lifecycle loop
+step, never during startup: the step MUST wait while the credits service cannot be
+reached or a mechanism the seed's clauses use is unknown, MUST stop after logging once on
+a configuration failure, and MUST stop once the listing exists. A create request refused
+only because a mechanism's readiness is unknown MUST answer 503 naming the unreached
+mechanism, and a create refused for configuration MUST answer 400 with its blocker codes.
+The storefront CLI's listing commands MUST act through the running storefront's routes and
+MUST NOT build the storefront's services or open its database in their own process.
+
+#### Scenario: A storefront starts with its dependencies up
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain and its
+  credits service answer
+- **THEN** the seed listing is published once its chain's first probe succeeds
+
+#### Scenario: A storefront starts with its chain down
+
+- **WHEN** an API-credit storefront with a configured seed starts while its chain cannot
+  be reached, and the chain later answers
+- **THEN** no seed listing is created while the chain is unreachable, and it is published
+  after a probe reaches the chain, without a restart
+
+#### Scenario: An operator creates a listing before the chain is reached
+
+- **WHEN** an operator creates an API-credit listing whose only mechanism is Alkahest
+  before any probe has reached its chain
+- **THEN** the storefront answers 503 naming Alkahest's unreached chain, and the same
+  request succeeds once a probe reaches it
+
+#### Scenario: An operator publishes through the CLI
+
+- **WHEN** an operator runs the storefront CLI's publish command
+- **THEN** the listing is created by the running storefront through its create route, and
+  the command fails naming the storefront when it cannot be reached
 
 ### Requirement: Publication derives all ready settlement options
 
