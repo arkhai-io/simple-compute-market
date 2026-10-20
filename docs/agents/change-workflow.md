@@ -72,7 +72,9 @@ Ask the owner questions in prose, never through a multiple-choice selector
 change through its steps: it runs the step `scripts/change_next_step.py` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
-question and commits nothing. It stops for you at the design discussion's questions,
+question. It commits nothing while a step runs; when a step closes leaving work its
+own skill does not commit, the session commits that work as its own commit and
+pushes it. It stops for you at the design discussion's questions,
 your reading of each implementation round, the triage discussion, and anything no
 rule settles — an environmental remedy, a denial that needs a rule, a proposed
 return, a stopped step; every other step follows without asking.
