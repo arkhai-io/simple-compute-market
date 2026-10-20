@@ -11,6 +11,7 @@ LOCAL_VALUES := local-values.yaml
 # arkhai-api-credits-registry-identity.
 LOCAL_SECRETS := arkhai-registry-identity arkhai-bob-identity arkhai-bob-runtime \
 	arkhai-provisioning-identity arkhai-provisioning-runtime arkhai-provisioning-ssh
+
 # The Secrets the release's `helm test` reads beyond a deploy's: the e2e-tests
 # chart's deal test credentials, which under local-values.yaml the registry smoke
 # test also layers for the buyer's credential, and the buyer CLI's profile
