@@ -8,7 +8,10 @@ change MAY instead be worked in the owner's workspace itself. When a change's br
 is checked out neither in a clone of its own nor in the checkout the next-step
 computation runs in, the computation MUST name the creation of its clone, and the
 orchestrating session MUST create it and, when the branch does not exist, the
-branch. Creating a clone MUST be safe to repeat: it MUST finish a clone left
+branch — unless the workspace already holds the change's records, when the
+computation MUST NOT name the clone and MUST bring the change to the owner, naming
+both routes: working it in the workspace, or moving it into a clone by hand.
+Creating a clone MUST be safe to repeat: it MUST finish a clone left
 incomplete, and MUST refuse, deleting nothing, a directory that is not a clone of
 the workspace, has another branch checked out, or has uncommitted changes. The
 clone's `origin` MUST be the workspace's `origin`, and one of its remotes MUST name
@@ -36,6 +39,14 @@ merged, and it holds no commit and no change its `origin` lacks.
   in the background
 - **AND** the computation names no implementation or validation until the
   bootstrap has succeeded
+
+#### Scenario: A change already under way in the workspace
+
+- **WHEN** the owner starts the orchestrating session for a change whose branch no
+  clone holds and whose records are in the owner's workspace
+- **THEN** the computation names no clone and brings the change to the owner,
+  naming both routes: checking out its branch in the workspace and working it there,
+  or moving it into a clone by hand
 
 #### Scenario: Clone creation was interrupted
 
@@ -107,7 +118,9 @@ events, the other namespaces' workloads at the time, and the rendered requests a
 limits: as environmental only when that evidence shows contention for the node's
 memory, and otherwise as caused by the commit or of unknown cause.
 Archive cleanup MUST remove the change's namespace and images and MUST record the
-memory the change's latest validation measured.
+memory the change's latest validation measured, with when it was measured; where
+two branches' recorded figures conflict at a merge, the one measured later MUST be
+kept.
 
 #### Scenario: Two changes are validated at once
 
@@ -199,7 +212,10 @@ them, and MUST leave every edit the owner did not commit uncommitted. It MUST ca
 path the round also changed only when the commit's version holds every change the
 round made to that path, and MUST refuse without moving the branch when it does not,
 when any such commit is a merge, or when the branch has left the line of the round's
-base. A view MUST NOT be
+base. A path the round added, deleted, or changed as a binary file, a symlink, or a
+mode MUST be carried only when the commit's version is the round's — absent, for a
+path the round deleted — and an absent path MUST NOT be taken for an empty file. A
+view MUST NOT be
 moved to a new head while such commits or uncommitted edits are present. A commit the
 owner makes on the change's branch while reading MUST reach the clone only through a
 fast-forward triage makes. A pre-closeout review MUST NOT run, and its triage MUST NOT
@@ -274,6 +290,24 @@ ledgers and review records, except where the owner overrides it.
 - **THEN** ending the reading carries the commit, and the later edit stays
   uncommitted
 
+#### Scenario: The owner edits a file the round added
+
+- **WHEN** a commit made during the view holds a file the round added, with an edit
+  of the owner's
+- **THEN** ending the reading refuses, naming the file and how to commit it again on
+  the round's commit, and the branch is not moved
+
+#### Scenario: The owner commits a deletion the round made
+
+- **WHEN** a commit made during the view deletes a file the round deleted
+- **THEN** ending the reading carries the commit, and the file stays absent
+
+#### Scenario: The owner commits a binary file the round changed
+
+- **WHEN** a commit made during the view holds a binary file the round changed
+- **THEN** ending the reading carries it only when its contents are the round's,
+  and otherwise refuses, naming the file
+
 #### Scenario: The owner merges during the view
 
 - **WHEN** a commit made during the view has two parents
@@ -313,8 +347,11 @@ code, reviews, or change documents to form or state a view of a finding or a des
 question; it MAY read what routing and recovery need: the computation and the inputs
 it names, the workflow log, and the denials report.
 It MAY report misbehaviour of the workflow's own tooling that it observed across
-steps, as a numbered record marked as its own, for the next triage. It MUST advance
-only the change it was started for.
+steps, as a numbered record marked as its own, for the next triage. When the owner
+waives another design review for a design decision made after a return, it MUST
+record the owner's word as a decision directing planning, and the next-step
+computation MUST then name planning. It MUST advance only the change it was started
+for.
 
 #### Scenario: The orchestrating session restarts
 
@@ -336,6 +373,15 @@ only the change it was started for.
   owner's notes raise no point to dispose of
 - **THEN** the triage records that the change advances, and the orchestrating
   session runs the next step without asking the owner
+
+#### Scenario: The owner waives a design review after a return under orchestration
+
+- **WHEN** planning returned a change to design, the design step settled the
+  decision and finished, and the owner tells the orchestrating session they waive
+  another design review
+- **THEN** the owner's word is recorded in the workflow log as a decision directing
+  planning, the waiver is recorded in the intervention ledger, and the computation
+  names planning rather than a design review
 
 #### Scenario: A finding is relayed
 

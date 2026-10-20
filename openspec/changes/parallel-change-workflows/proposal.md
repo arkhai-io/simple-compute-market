@@ -36,7 +36,9 @@ earlier run of the same ref, not of another branch.
   directory, holding its branch, records, environments, evidence, and step
   sessions. The orchestrating session creates the clone and the change's branch
   when feature work begins and bootstraps it in the background during design. A
-  change may still be worked in the owner's workspace without a clone.
+  change may still be worked in the owner's workspace without a clone; one whose
+  records are already there is not cloned, and the owner either works it there or
+  moves it into a clone by hand.
 - The owner reads a committed round in their own workspace, on the change's branch
   by name, fetched from the clone, as uncommitted changes over the round's base,
   refreshed onto triage's fixes. Validation and the implementation review run in
@@ -55,7 +57,9 @@ earlier run of the same ref, not of another branch.
 - Every step that commits feature work pushes it through the guarded push. The
   design step commits its settled design. The orchestrating session also maintains
   the workflow: it creates clones and branches and commits the skill, permission,
-  and other workflow changes the owner asks for, on the feature branch.
+  and other workflow changes the owner asks for, on the feature branch. The owner's
+  waiver of another design review after a return, which the specification already
+  allows, is carried out by the next-step computation.
 - Takes from `helm-e2e-pipeline-parity` the Helm items this needs: the Secrets in
   each namespace, forwarding to a named namespace, and running the Helm scenarios
   in the cluster.
