@@ -136,14 +136,30 @@ descendants of the round's head; anything not committed stays uncommitted in the
 worktree, and nothing is swept in. `round-done` prints each original commit beside
 its replacement.
 
-It refuses, moving nothing and saying how to return, when:
+A path the round did not change is carried as the commit gave it. A path the round
+changed is carried only when the commit's version holds every change the round made
+to it (26 F3): a three-way merge of the base's, the head's, and the commit's
+versions (`git merge-file`) comes out clean and equal to the commit's version. With
+the index at the base, a round change missing from the commit means either that the
+owner did not stage it (`git add -p`) or that they removed it, and the files cannot
+say which; laying such a version over the head would revert the round's change
+inside the owner's commit, and merging it in would undo a removal the owner meant.
+So `round-done` refuses, moving nothing and saying how to return
+(`git reset --mixed <head>`, then commit again on the round's head), when:
 
-- a commit partly staged a file the round also changed (`git add -p`): its version
-  of the path differs both from the worktree's at close and from the round's head,
-  so laying it over the head would revert the round's changes there; the refusal
-  names the file, and the owner commits it again by hand;
-- the branch has left the base's line — an amend of the base, a reset, a rebase, or
-  a merge made during the view, as `done` already refuses today.
+- a commit's version of a path the round changed lacks some of the round's changes
+  to it, or the merge conflicts; the refusal names the file. A deliberate revert of
+  a round change, committed during the view, is refused with them and committed
+  again after `round-done`;
+- any commit made during the view has two parents (`git rev-list --min-parents=2`),
+  since a merge from the base's line still descends from the base;
+- the branch has left the base's line — an amend of the base, a reset, or a rebase.
+
+Rejected (26 F3): telling a partly staged file by its version differing both from
+the worktree at close and from the round's head (a commit of part of a file, its
+remainder then discarded from the worktree, passes and loses the round's other
+changes, while a whole file committed and then edited further is refused); carrying
+by three-way merge (it silently undoes an owner's removal of a round change).
 
 A commit the owner makes after `round-done` already sits on the round's head and
 needs nothing. Triage pulls the owner's commits into the clone with
@@ -254,12 +270,19 @@ owner's notes, which are triaged beside it).
   figure with the node's allocatable memory; a deployment that would not fit is an
   environmental failure put to the owner with its remedy. With no recorded figure —
   before the first archive cleanup writes one — it warns that the check was
-  skipped and goes on. Two preflights can pass together; a pod that then fails to
-  schedule for memory, is evicted, or is OOM-killed is diagnosed from the
-  namespace's collected events as an environmental failure, its remedy scaling
-  another change's namespace to zero or rerunning once it is down. Usage is
-  measured through `metrics-server`; when it is missing the preflight warns and
-  goes on. Archive cleanup writes the figure from the change's latest validation;
+  skipped and goes on. Two preflights can pass together, so a pod may then fail to
+  schedule for memory, be evicted, or be OOM-killed. Such a failure is classified
+  as validation classifies any (26 F2), since a commit that raises a request,
+  lowers a limit, or leaks fails the same way: environmental when a pod could not
+  be scheduled or was evicted while another change's namespace had workloads up
+  and the node's allocatable memory was exhausted, its remedy scaling that
+  namespace to zero or rerunning once it is down; caused by the commit when a
+  container was killed at its own limit or the commit changed the rendered
+  requests or limits; otherwise of unknown cause, so `failed` and triaged.
+  Validation collects what that needs beside the namespace's events: the other
+  namespaces' replica counts when the failure happened, and the rendered requests
+  and limits beside the previous validation's. Usage is measured through
+  `metrics-server`; when it is missing the preflight warns and goes on. Archive cleanup writes the figure from the change's latest validation;
   this change's own archive cleanup writes the first. Rejected: no check; sums of
   the rendered requests and limits (declared, not used); `docker stats` on the
   node; a reservation held from preflight to scale-to-zero (it brings back the
@@ -314,11 +337,12 @@ transcripts, and the step sessions are the clone's. Taking a step over is
 `make change-clone` by hand; starting the orchestrating session inside the clone.
 
 `make change-clone-remove CHANGE=<change>`, run by the owner after the merge,
-refuses unless every file of the clone's `reviews/` and named evidence is in the
-workspace with identical contents (17 F4), the branch is merged into `origin/dev`,
-and the clone has no commit `origin` lacks and no uncommitted change; a missing or
-differing record is named, with `make change-history` as the remedy. Archive
-cleanup does not remove the clone, since the pull request may need another round.
+first runs the history synchronization (D11, 26 F1), then refuses unless every file
+of the clone's `reviews/` and named evidence is in the workspace with identical
+contents (17 F4), the branch is merged into `origin/dev`, and the clone has no
+commit `origin` lacks and no uncommitted change; a record the synchronization
+refused for differing contents is named, and nothing is deleted. Archive cleanup
+does not remove the clone, since the pull request may need another round.
 
 ### D7 — Every shared resource is per change, shared safely, or checked
 
@@ -427,10 +451,22 @@ workspace, at the same paths, the archived change's whole `reviews/` directory a
 the validation evidence its records name (`.snapshot/validation/<commit>/` and
 `.snapshot/e2e-logs/<run>/`), through `make change-history CHANGE=<change>`. It is
 a synchronization, safe to run again: it copies files not yet there, compares
-files on both sides by content, and refuses, naming each, when they differ, never
-overwriting one; nothing rebuildable is copied. A record written after cleanup —
-another round on the pull request — is carried across by running it again, and
-clone removal (D6) refuses until it has been. Until the merge
+files on both sides by content, extends a workspace file that is a byte-for-byte
+prefix of the clone's to the clone's, and refuses, naming each, when a file differs
+otherwise, never overwriting one; nothing rebuildable is copied.
+
+The copy cannot be the last write (26 F1): the wrapper appends the cleanup run's
+outcome to `workflow.jsonl` after the skill returns, the run's own transcript is
+still being written while the copy runs, and the orchestrating session's decision
+lines and another round on the pull request add more. Those files only grow, so the
+prefix rule carries them; and clone removal (D6) runs the synchronization as its
+first act, so the last copy always follows the last record without the owner
+running anything. Archive cleanup's own copy stays, so sessions in other clones find
+the history before the clone is removed. Rejected: the wrapper or the orchestrating
+session running the copy after recording cleanup's outcome (the generic wrapper
+learns one step's special case, and later lines still need the prefix rule and a
+rerun); copying the log and transcripts only at removal (between cleanup and
+removal the workspace's history would have no rounds, sessions, or costs). Until the merge
 reaches the workspace's branch, the copy is an archive directory holding only
 `reviews/`, which `find_change.py` and the index check do not misread.
 
@@ -479,7 +515,8 @@ the workflow (open question 1); then the pre-closeout review.
 - **Two releases at once on one node** may exhaust Docker Desktop's memory. The
   capacity figure is only as current as the last archive cleanup that wrote it,
   and absent until one does; the preflight is an estimate, so two validations
-  starting together can both pass it, and the overflow is diagnosed and rerun.
+  starting together can both pass it; an overflow the evidence shows to be
+  contention is rerun.
 - **The pilot's branch is merged from this change's branch** at least twice. The
   merges are by hand on the owner's word and conflict on the index rows.
 - **A usage limit stops every change's runs at once.** Parallel work spends the

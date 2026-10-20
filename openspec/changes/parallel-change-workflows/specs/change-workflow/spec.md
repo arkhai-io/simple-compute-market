@@ -18,13 +18,14 @@ so that running, succeeded, and failed are told apart, and a failed bootstrap MU
 be brought to the owner, naming its log, rather than retried by itself. As its last
 act, after every record it writes, archive cleanup MUST copy the change's records,
 and the validation evidence they name, into the owner's workspace at the same
-paths; the copy MUST be safe to repeat, and MUST NOT overwrite a file there,
+paths; the copy MUST be safe to repeat, MUST extend a file there whose contents
+are a prefix of the clone's, and MUST NOT otherwise overwrite a file there,
 refusing and naming any whose contents differ. A step that reads another change's
 or an earlier change's records MUST look for them in its own checkout and then in
-the owner's workspace. A clone MUST be removed only on the owner's command, and
-only once its records and named evidence are in the workspace with identical
-contents, its branch is merged, and it holds no commit and no change its `origin`
-lacks.
+the owner's workspace. A clone MUST be removed only on the owner's command; the
+removal MUST first repeat the copy, and MUST proceed only once the clone's records
+and named evidence are in the workspace with identical contents, its branch is
+merged, and it holds no commit and no change its `origin` lacks.
 
 #### Scenario: Feature work begins on a change
 
@@ -70,12 +71,18 @@ lacks.
   records are not all in the workspace
 - **THEN** the removal is refused, naming what is missing, and nothing is deleted
 
-#### Scenario: A record is written after archive cleanup
+#### Scenario: Records grow after archive cleanup copied them
 
-- **WHEN** another round on a change's pull request writes a record in its clone
-  after archive cleanup copied the history
-- **THEN** clone removal is refused, naming the record, until the copy is run
-  again, and the copy adds it without overwriting anything
+- **WHEN** archive cleanup's outcome is appended to the clone's workflow log after
+  its copy, and another round on the pull request writes a record in the clone
+- **THEN** the next copy, or clone removal's own, extends the workspace's log and
+  adds the record, overwriting nothing
+
+#### Scenario: A copied record conflicts
+
+- **WHEN** a file in the owner's workspace differs from the clone's other than by
+  the clone's having grown it
+- **THEN** the copy refuses, naming the file, and clone removal deletes nothing
 
 ### Requirement: Each Helm validation is isolated in its change's namespace
 
@@ -95,7 +102,10 @@ need, times the releases that would be running, with what the node can allocate,
 and MUST treat a deployment that would not fit as an environmental failure; it is
 an estimate and reserves nothing. When no figure is recorded, or usage cannot be
 measured, it MUST warn and go on. A pod that fails for memory after a passed
-preflight MUST be diagnosed as an environmental failure.
+preflight MUST be classified as any validation failure is, from the namespace's
+events, the other namespaces' workloads at the time, and the rendered requests and
+limits: as environmental only when that evidence shows contention for the node's
+memory, and otherwise as caused by the commit or of unknown cause.
 Archive cleanup MUST remove the change's namespace and images and MUST record the
 memory the change's latest validation measured.
 
@@ -134,10 +144,17 @@ memory the change's latest validation measured.
 #### Scenario: Two validations pass the preflight together
 
 - **WHEN** two changes' preflights pass before either deploys, and one's pods then
-  cannot be scheduled, are evicted, or are killed for memory
-- **THEN** that validation's failure is diagnosed from the namespace's events as
-  environmental, with the remedy of scaling another change's namespace to zero or
-  running again once it is down
+  cannot be scheduled or are evicted for memory while the other's workloads are up
+- **THEN** that validation's failure is diagnosed as environmental, with the remedy
+  of scaling another change's namespace to zero or running again once it is down
+
+#### Scenario: A commit's own pod is killed for memory
+
+- **WHEN** a pod is killed at its own memory limit after a passed preflight, and the
+  commit changed the rendered requests or limits or the evidence shows no
+  contention
+- **THEN** the failure is reported as caused by the commit or of unknown cause, so
+  validation fails and the failure is triaged
 
 #### Scenario: A change's archive is cleaned up
 
@@ -172,13 +189,17 @@ when the round's sections are committed, beside the reading; and triage MUST NOT
 until the owner has answered on the round, with notes or with none, and the answer is
 saved as the round's owner record. For a change worked in the owner's workspace, while
 its branch is moved to show the round, review, validation, triage, and implementation
-MUST NOT start. Ending the reading MUST return the branch to the round's commit. A view
-MUST NOT move a checkout in which an unattended run is in progress. Ending the reading
-MUST carry each commit the owner made while the branch was moved onto the round's
-commit, holding exactly the paths that commit changed at the content it gave them,
-and MUST leave every edit the owner did not commit uncommitted; when such a commit
-cannot be carried without reverting the round's changes, or the branch has left the
-line of the round's base, it MUST refuse without moving the branch. A view MUST NOT be
+MUST NOT start. Ending the reading MUST return the branch to the round's commit when
+the owner made no commit while it was moved, and otherwise to the last of those
+commits carried onto the round's commit; the round's own commits MUST NOT change. A
+view MUST NOT move a checkout in which an unattended run is in progress. Ending the
+reading MUST carry each commit the owner made while the branch was moved onto the
+round's commit, holding exactly the paths that commit changed at the content it gave
+them, and MUST leave every edit the owner did not commit uncommitted. It MUST carry a
+path the round also changed only when the commit's version holds every change the
+round made to that path, and MUST refuse without moving the branch when it does not,
+when any such commit is a merge, or when the branch has left the line of the round's
+base. A view MUST NOT be
 moved to a new head while such commits or uncommitted edits are present. A commit the
 owner makes on the change's branch while reading MUST reach the clone only through a
 fast-forward triage makes. A pre-closeout review MUST NOT run, and its triage MUST NOT
@@ -210,7 +231,8 @@ ledgers and review records, except where the owner overrides it.
 - **WHEN** the owner reads a round of a change worked in its own clone
 - **THEN** the round is shown in the owner's workspace as uncommitted changes over the
   commit the previous round ended on, on the change's branch by name, and when the
-  reading ends that branch is back at the round's commit with the commits unchanged
+  reading ends with no commit made during it that branch is back at the round's
+  commit with the commits unchanged
 - **AND** the branch in the change's clone never moves
 
 #### Scenario: Validation runs while the owner reads
@@ -231,16 +253,31 @@ ledgers and review records, except where the owner overrides it.
 - **WHEN** the owner commits an edit on the branch in their workspace while the view
   shows the round
 - **THEN** ending the reading carries the commit onto the round's commit, with the
-  paths it changed and nothing else, keeping its author and message, and names it
-  beside its replacement
+  paths it changed and nothing else, keeping its author and message, names it
+  beside its replacement, and leaves the branch at the replacement, the round's own
+  commits unchanged
 - **AND** triage presents it like any point and, once disposed of, pulls it into the
   clone only as a fast-forward, refusing a branch that has diverged
 
 #### Scenario: The owner commits part of a file the round changed
 
-- **WHEN** a commit made during the view holds a file the round also changed with only
-  some of its changes staged
-- **THEN** ending the reading refuses, naming the file, and the branch is not moved
+- **WHEN** a commit made during the view holds a file the round also changed without
+  some of the round's changes to it, whether they were left unstaged or removed
+- **THEN** ending the reading refuses, naming the file and how to commit it again on
+  the round's commit, and the branch is not moved
+
+#### Scenario: The owner commits a whole file the round changed, then edits on
+
+- **WHEN** a commit made during the view holds a file the round changed with all of
+  the round's changes and the owner's edit, and the owner edits the file again
+  without committing
+- **THEN** ending the reading carries the commit, and the later edit stays
+  uncommitted
+
+#### Scenario: The owner merges during the view
+
+- **WHEN** a commit made during the view has two parents
+- **THEN** ending the reading refuses, naming the commit, and the branch is not moved
 
 #### Scenario: The view is refreshed over the owner's commit
 
