@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from functools import partial
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
@@ -32,7 +33,11 @@ from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
 from arkhai_vms_negotiation.policies import _amount_from_proposal
-from market_capacity_publication import CapacityRuntime, PublicationBinding
+from market_capacity_publication import (
+    CapacityRuntime,
+    PublicationBinding,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -102,7 +107,8 @@ class ListingService:
         marketplace_signer: Signer,
         alkahest_clients: dict[str, Any],
         settlement_composition_provider: Callable[[], Any],
-        source_backing_resolver: Callable[..., CapacityBacking] = resolve_source_backing,
+        site_projections: SiteProjectionState,
+        source_backing_resolver: Callable[..., CapacityBacking] | None = None,
     ) -> None:
         from market_storefront.utils.config import (
             CHAINS,
@@ -131,9 +137,12 @@ class ListingService:
         self._marketplace_signer = marketplace_signer
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
-        # What a source's site currently declares about it; injected so the
-        # create path can be exercised without a loaded projection.
-        self._source_backing = source_backing_resolver
+        # What a source's site currently declares about it, read from the held
+        # projection; replaceable so the create path can be exercised without
+        # a loaded one.
+        self._source_backing = source_backing_resolver or partial(
+            resolve_source_backing, site_projections
+        )
 
         self._token_transfers_available = bool(
             self._alkahest_clients and CHAINS and get_evm_wallet_private_key()

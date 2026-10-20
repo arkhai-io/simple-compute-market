@@ -10,9 +10,16 @@ delegate decides whether the second question is asked at all, so a listing
 availability does not bound makes no availability call.
 
 It answers with the policy kit's ``ListingSourceVerdict``, which the negotiation
-runtime enforces before every seller decision and every acceptance. A site whose
-projection this storefront has not loaded cannot confirm the listing, which is
-retryable rather than a mismatch.
+runtime enforces before every seller decision and every acceptance. Only a
+freshly confirmed projection confirms the listing: every family the check reads
+must have been confirmed by a successful poll within the storefront's
+source-confirmation window. Every listing reads the resource-pool family; a
+fungible listing also reads the capacity-bucket family, from which its
+availability is computed, while a listing bound to one resource does not. A
+family that is not held, whose latest poll failed, or whose last confirmation
+is older than the window cannot confirm the listing, which is retryable rather
+than a mismatch. Publication reads the same held generations
+without this rule, because holding listings through an outage is its job.
 
 See openspec/specs/storefront-publication/spec.md, "The seller's inventory guard
 checks a listing against its own source".
@@ -22,7 +29,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
@@ -33,6 +41,13 @@ from arkhai_vms_listings.reconciler import (
     slice_identity,
     stored_listing_key,
 )
+from market_capacity_publication import (
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
+    CapacityBindingError,
+    SiteProjectionState,
+    freshly_confirmed,
+)
 from market_policy.listing_source import ListingSourceVerdict
 from market_resource_pools_contracts.backing import capacity_backing
 
@@ -42,6 +57,7 @@ from market_storefront.services.capacity_client import (
     site_pool_projection,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.utils.config import source_confirmation_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +88,42 @@ def _site_only(
     return {site_id: list(projection[site_id])}
 
 
+def _unconfirmed(
+    site_projections: SiteProjectionState,
+    site_id: str,
+    *,
+    reads_buckets: bool,
+    now: datetime,
+    window_seconds: float,
+) -> str | None:
+    """Why the site's projections cannot confirm a listing now, or ``None``.
+
+    The resource-pool family is always read, and the capacity-bucket family
+    when ``reads_buckets``. Every site holds both families, so a bucket family
+    with no generation is not held and confirms nothing; nor is a stale one
+    dropped in favour of the pool rows, which would make what is computed
+    depend on freshness.
+    """
+    try:
+        read = [(RESOURCE_POOL, site_projections.view(site_id, RESOURCE_POOL))]
+        if reads_buckets:
+            read.append((CAPACITY_BUCKET, site_projections.view(site_id, CAPACITY_BUCKET)))
+    except CapacityBindingError:
+        return f"site {site_id!r} is not a configured capacity site"
+    for family, view in read:
+        if view.value is None:
+            # Nothing can confirm the declaration the listing was derived from.
+            return f"site {site_id!r} {family} projection is not loaded"
+        if not freshly_confirmed(view, now=now, window_seconds=window_seconds):
+            confirmed = view.fetched_at.isoformat() if view.fetched_at else "never"
+            return (
+                f"site {site_id!r} {family} projection is not freshly confirmed "
+                f"(state {view.state.value}, last confirmed {confirmed}, "
+                f"window {window_seconds:g}s)"
+            )
+    return None
+
+
 def _slices_by_key(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(row["resource_key"]): row for row in rows if row.get("resource_key")}
 
@@ -96,7 +148,10 @@ async def check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     shape_feasible: ShapeFeasibility | None = None,
+    confirmation_window_seconds: float | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> ListingSourceVerdict:
     """Check one listing against its own source.
 
@@ -106,13 +161,24 @@ async def check_listing_source(
     where the binding's backing says availability bounds it. A declared mismatch is
     logged with the fields that differ, because the buyer's refusal carries only
     its reason.
+
+    ``confirmation_window_seconds`` defaults to the configured
+    source-confirmation window, and ``clock`` -- the time a confirmation's age
+    is measured at -- to the current UTC time.
     """
     verdict = await _check_listing_source(
         repository=repository,
         listing_record=listing_record,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         shape_feasible=shape_feasible or vm_shape_feasibility(),
+        window_seconds=(
+            source_confirmation_seconds()
+            if confirmation_window_seconds is None
+            else confirmation_window_seconds
+        ),
+        now=(clock or _utc_now)(),
     )
     if verdict.outcome == "declared_mismatch":
         logger.warning(
@@ -131,7 +197,10 @@ async def _check_listing_source(
     listing_record: Mapping[str, Any],
     binding: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     shape_feasible: ShapeFeasibility,
+    window_seconds: float,
+    now: datetime,
 ) -> ListingSourceVerdict:
     site_id = binding.site_id
     stored = stored_listing_resource(listing_record)
@@ -142,14 +211,25 @@ async def _check_listing_source(
     key = stored_listing_key(
         recorded.source_envelope_json if recorded is not None else None, stored, site_id
     )
-    projection = _site_only(site_pool_projection(), site_id)
-    if projection is None:
-        # This site's projection has not loaded, so nothing can confirm the
-        # declaration the listing was derived from.
-        return ListingSourceVerdict(
-            "unverifiable", f"site {site_id!r} projection is not loaded"
-        )
-    buckets = _site_only(site_capacity_buckets(), site_id)
+    # A listing bound to one resource is an exact listing, whose availability
+    # is that resource's; a fungible listing's is computed from the site's
+    # capacity buckets.
+    fungible = recorded is None or recorded.physical_resource_id is None
+    # Judged and then read with nothing awaited between, so the generations
+    # derived from are the ones just confirmed, and a confirmed family is held.
+    unconfirmed = _unconfirmed(
+        site_projections,
+        site_id,
+        reads_buckets=fungible,
+        now=now,
+        window_seconds=window_seconds,
+    )
+    if unconfirmed is not None:
+        return ListingSourceVerdict("unverifiable", unconfirmed)
+    projection = _site_only(site_pool_projection(site_projections), site_id)
+    buckets = (
+        _site_only(site_capacity_buckets(site_projections), site_id) if fungible else None
+    )
     # Only the admissibility default affects which listings derive; the
     # terms these settings also carry are discarded by the comparison below.
     admissibility = PoolHintResolutionSettings(
@@ -214,6 +294,10 @@ async def _check_listing_source(
 
     verdict = await binding.backing.judge_async(declared, available)
     return verdict if verdict is not None else ListingSourceVerdict("matches")
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 __all__ = ["check_listing_source", "stored_listing_resource"]

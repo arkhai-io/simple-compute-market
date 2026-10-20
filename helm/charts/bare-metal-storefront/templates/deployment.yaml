@@ -1,3 +1,15 @@
+{{/*
+One storefront process. The pod mounts storefront.json (the ConfigMap) and, when
+`secret` names one, storefront.secrets.toml (an existing Secret) at
+/etc/arkhai/, and points XDG_CONFIG_HOME at /etc so the storefront's loader
+finds them. Its environment carries XDG_CONFIG_HOME and the signing credential
+alone: every other setting reaches the storefront through those files. Service
+links are off because Kubernetes would otherwise inject variables for every
+Service in the namespace, and those named for a Service beginning `storefront`
+would land in the loader's STOREFRONT_ override layer.
+
+checksum/config rolls the pod when the rendered configuration changes.
+*/}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,7 +27,10 @@ spec:
     metadata:
       labels:
         {{- include "bare-metal-storefront.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      enableServiceLinks: false
       securityContext:
         fsGroup: 1001
       containers:
@@ -25,61 +40,32 @@ spec:
           command:
             - bare-metal-storefront
             - serve
-            - --host
-            - 0.0.0.0
-            - --port
-            - {{ .Values.service.port | quote }}
           env:
-            - name: BARE_METAL_STOREFRONT_IDENTITY_SCHEME
-              value: {{ .Values.identity.principal.scheme | quote }}
-            - name: BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER
-              value: {{ .Values.identity.principal.identifier | quote }}
-            - name: BARE_METAL_STOREFRONT_ADMIN_IDENTITIES
-              value: {{ .Values.adminPrincipals | toJson | quote }}
-            - name: BARE_METAL_STOREFRONT_PUBLIC_URL
-              value: {{ required "bare-metal storefront publicUrl is required" .Values.publicUrl | quote }}
-            {{- $alkahestInputs := list (ne .Values.sellerEvmAddress "") (gt (len .Values.chains) 0) (ne .Values.walletKeySecret.name "") }}
-            {{- if and (has true $alkahestInputs) (has false $alkahestInputs) }}
-            {{- fail "sellerEvmAddress, chains, and walletKeySecret.name are set together or not at all" }}
-            {{- end }}
-            {{- if ne .Values.sellerEvmAddress "" }}
-            - name: BARE_METAL_STOREFRONT_EVM_ADDRESS
-              value: {{ .Values.sellerEvmAddress | quote }}
-            - name: BARE_METAL_STOREFRONT_CHAINS
-              value: {{ .Values.chains | toJson | quote }}
-            - name: BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.walletKeySecret.name | quote }}
-                  key: {{ .Values.walletKeySecret.key | quote }}
-            {{- end }}
-            - name: BARE_METAL_STOREFRONT_SETTLEMENT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal settlement config Secret name is required" .Values.settlementConfigSecret.name | quote }}
-                  key: {{ required "bare-metal settlement config Secret key is required" .Values.settlementConfigSecret.key | quote }}
-            - name: BARE_METAL_STOREFRONT_SITE_PLACEMENT
-              value: {{ .Values.sitePlacement | quote }}
-            - name: BARE_METAL_STOREFRONT_DB_PATH
-              value: {{ .Values.databasePath | quote }}
+            - name: XDG_CONFIG_HOME
+              value: /etc
             - name: ARKHAI_IDENTITY_CREDENTIAL
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "bare-metal storefront identity credential Secret name is required" .Values.identity.credentialSecret.name | quote }}
-                  key: {{ required "bare-metal storefront identity credential Secret key is required" .Values.identity.credentialSecret.key | quote }}
-            - name: BARE_METAL_STOREFRONT_SITES
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "bare-metal storefront site bindings Secret name is required" .Values.siteBindingsSecret.name | quote }}
-                  key: {{ required "bare-metal storefront site bindings Secret key is required" .Values.siteBindingsSecret.key | quote }}
+                  name: {{ required "bare-metal storefront identity.credentialSecret.name is required" .Values.identity.credentialSecret.name | quote }}
+                  key: {{ required "bare-metal storefront identity.credentialSecret.key is required" .Values.identity.credentialSecret.key | quote }}
           ports:
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.port }}
               protocol: TCP
           volumeMounts:
+            - name: config
+              mountPath: /etc/arkhai/storefront.json
+              subPath: storefront.json
+              readOnly: true
+            {{- if .Values.secret.secretName }}
+            - name: secrets
+              mountPath: /etc/arkhai/storefront.secrets.toml
+              subPath: storefront.secrets.toml
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath | quote }}
-            {{- if ne .Values.alkahestAddressBook.configMapName "" }}
+            {{- if .Values.alkahestAddressBook.configMapName }}
             - name: alkahest-address-book
               mountPath: {{ .Values.alkahestAddressBook.mountPath | quote }}
               readOnly: true
@@ -105,6 +91,20 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: config
+          configMap:
+            name: {{ include "bare-metal-storefront.configMapName" . | quote }}
+            items:
+              - key: storefront.json
+                path: storefront.json
+        {{- if .Values.secret.secretName }}
+        - name: secrets
+          secret:
+            secretName: {{ .Values.secret.secretName | quote }}
+            items:
+              - key: {{ .Values.secret.configKey | quote }}
+                path: storefront.secrets.toml
+        {{- end }}
         - name: data
           {{- if or .Values.persistence.enabled .Values.persistence.existingClaim }}
           persistentVolumeClaim:
@@ -112,7 +112,7 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if ne .Values.alkahestAddressBook.configMapName "" }}
+        {{- if .Values.alkahestAddressBook.configMapName }}
         - name: alkahest-address-book
           configMap:
             name: {{ .Values.alkahestAddressBook.configMapName | quote }}

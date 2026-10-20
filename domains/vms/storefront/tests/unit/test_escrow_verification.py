@@ -5,7 +5,7 @@ failure, chain read failure, revoked, expired, no-expiration, and each
 field of obligation_data diverging) and the happy path.
 
 The alkahest ``get_obligation`` call and the canonical
-``build_payment_obligation_data`` helper are injected via test seams so
+legacy recipient obligation builder are injected via test seams so
 tests are fully offline — no web3, no eth-abi setup beyond what's
 needed to round-trip an ABI-encoded address.
 """
@@ -154,7 +154,7 @@ def _canonical_obligation_data(
     arbiter_address: str = ARBITER,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Same shape ``build_payment_obligation_data`` produces. Test seam
+    """Same shape the legacy recipient obligation builder produces. Test seam
     feeds this back to the verifier so we don't need the real alkahest
     chain config lookups. ``agreed_amount`` is the absolute payment in
     base units of the payment token (already multiplied out from any
@@ -208,6 +208,10 @@ def _good_listing() -> dict:
             }
         ],
         "listing_resource": {"gpu_model": "H200", "gpu_count": 1},
+        # The seller's recipient condition, which an escrow settles under.
+        "demands": [
+            {"chain_name": "anvil", "arbiter": ARBITER, "demand_data": {"recipient": SELLER}}
+        ],
     }
 
 

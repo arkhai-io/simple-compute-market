@@ -26,9 +26,9 @@ log_file_path       = "./logs/alice.log"
 # assert that the storefront is idle. Shortening them changes nothing about
 # what a loop does, only how soon it notices it has been asked to stop.
 # Production keeps the shipped values.
-negotiation_watchdog_interval     = 2
-claims_sweep_interval             = 2
-fulfillment_resume_sweep_interval = 2
+negotiation_watchdog_interval         = 2
+settlement_servicing_interval_seconds = 2
+fulfillment_resume_sweep_interval     = 2
 
 [[storefront_domains]]
 contribution = "vms"
@@ -95,6 +95,15 @@ principals = [
   { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
 ]
 
+[capacity]
+# How long a confirmed projection poll lets the inventory guard confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production
+# keeps the shipped window.
+source_confirmation_seconds = 3600
+
 # The site alias is local to this storefront and matches its service peer.
 [capacity.sites]
 default = "http://alice-provisioning:8081"
@@ -102,11 +111,6 @@ default = "http://alice-provisioning:8081"
 [provisioning]
 service_url   = "http://alice-provisioning:8081"
 poll_interval = 1
-
-[provisioning.identity]
-principals = [
-  { scheme = "ed25519", identifier = "3NPn0gInwKKqVkrFl5_C07yYcjLOfVszbq51kw6EnPw" },
-]
 
 [negotiation]
 policies = ["has_matching_inventory_guard", "escrow_shape_guard", "bisection"]

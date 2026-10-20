@@ -19,6 +19,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
+.PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
 .PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
@@ -385,19 +386,18 @@ e2e-apicredits-dev-env: ## Print the API-credit lane's VAR=value lines for `dock
 #
 # The lane is a separate stack on its own dev chain, so it reuses the committed
 # Anvil development credentials under the assignments recorded in
-# dev-env/identities/README.md ("The bare-metal lane"). The option expiry and
-# fulfillment deadline are absolute instants, so they are generated a week
-# ahead at each run rather than committed, where they would go stale.
+# dev-env/identities/README.md ("The bare-metal lane"). The storefront's own
+# settings are not here: they are its development storefront.toml and secrets
+# overlay, which this target names as files for the stack to mount. Only the
+# bare-metal stack's own files and the variables its Compose files read are
+# printed.
 # ---------------------------------------------------------------------------
 E2E_BARE_METAL_DIR := $(CURDIR)/dev-env/bare-metal
 E2E_BARE_METAL_REGISTRY_ID := 0x90f79bf6eb2c4f870365e785982e1f101e93b906
 E2E_BARE_METAL_SITE_AUTHORITY_ID := 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
 E2E_BARE_METAL_STOREFRONT_ID := 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
-E2E_BARE_METAL_STOREFRONT_ADMIN_ID := 0x976ea74026e726554db657fa54763abd0c3a0aa9
 E2E_BARE_METAL_SITE_ADMIN_ID := 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
 E2E_BARE_METAL_SITE_ID := bare-metal-e2e
-# The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.
-E2E_BARE_METAL_ALKAHEST_ASSET := 0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0
 
 e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `docker compose --env-file`
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
@@ -409,7 +409,6 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_REGISTRY_DISPLAY_NAME=Local Bare Metal Compute Registry'
 	@echo 'BARE_METAL_OPERATOR_IDENTITY=Arkhai local development'
 	@echo 'BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
-	@echo 'BARE_METAL_REGISTRY_PRINCIPALS_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_REGISTRY_ID)"}]'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
@@ -419,29 +418,13 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
 	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
 	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
-	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@# The site binds its seller role to the storefront's principal, which the
+	@# storefront's development storefront.toml states as [Identity.principal].
 	@echo 'BARE_METAL_STOREFRONT_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_STOREFRONT_ID)'
-	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
-	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
-	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
-	@echo 'BARE_METAL_STOREFRONT_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/bare-metal.wallet.env'
-	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
-	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
-	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
-	@# Contact exchange is enabled so the introduction scenario can offer it through
-	@# a pool override; the configured clauses below stay Alkahest-only, so no other
-	@# listing changes. The seller contact is a development fixture on a reserved
-	@# domain, never to be used on a public network. A 5-second retention window lets
-	@# the scenario watch an introduction expire; the day-long sweep interval keeps
-	@# the timer out of the way of the steps the scenario takes itself.
-	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1","contact-exchange.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]},"contact":{"enabled":true,"contact_payload":{"email":"seller@bare-metal-e2e.invalid"},"profiles":{"default":{"channel":"email","terms":"Development introduction; no commercial terms."}},"retention_seconds":5,"retention_sweep_interval_seconds":86400}}'
-	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
-	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"10","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
-	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
-	@echo "BARE_METAL_OPTION_EXPIRES_AT=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
-	@echo "BARE_METAL_FULFILLMENT_DEADLINE=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
-	@echo 'BARE_METAL_MAX_DURATION_SECONDS=86400'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'BARE_METAL_STOREFRONT_CONFIG_FILE=$(CURDIR)/domains/bare_metal/storefront/storefront.dev.toml'
+	@echo 'BARE_METAL_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bare-metal.storefront.secrets.toml'
 	@# The buyer service is in the `buyer` profile and the lane never starts it,
 	@# but compose still requires its variables.
 	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
@@ -571,6 +554,25 @@ deploy: deploy-helm
 
 deploy-helm:
 	$(MAKE) -C helm deploy
+
+# The local two-release topology on a development cluster: several storefronts
+# per registry. Release 1 is `make -C helm deploy-local`'s release; release 2 is
+# the bare-metal storefront and its own provisioning service, publishing to
+# release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
+# topology targets say what each installs, needs, and checks; helm-topology-secrets
+# creates the Secrets both releases read and the deal test's buyer-profile volume,
+# from development values only.
+helm-topology-secrets: ## Create the local two-release Helm topology's Secrets and the buyer-profile volume, from development values (cast and kubectl)
+	$(MAKE) -C helm topology-secrets
+
+helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments, all but dev-env's, onto rebuilt images
+	$(MAKE) -C helm topology-up
+
+helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first
+	$(MAKE) -C helm topology-down
+
+helm-topology-check: ## Run both releases' helm tests against the installed two-release topology
+	$(MAKE) -C helm topology-check
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
 deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning
@@ -757,14 +759,16 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
-# The Helm values schemas carry one definition generated from the storefront's
-# typed configuration models; it keeps secret-marked fields out of an agent's
-# pass-through config. It runs in the storefront's own environment (make
-# init-storefront), and the storefront's unit suite fails when it is stale.
-STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
-
-helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
-	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
+# Each storefront chart's values schema carries one definition generated from
+# that storefront's typed configuration models; it keeps secret-marked fields
+# out of the chart's pass-through config. Each storefront names the schema files
+# it writes -- VM's storefront chart and the umbrella's storefront definition, and
+# the bare-metal chart's -- and its generator runs in that storefront's own
+# environment (make init-storefront; make -C domains/bare_metal/storefront init),
+# whose test suite fails when a committed definition is stale.
+helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
+	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)

@@ -32,7 +32,6 @@ from market_fulfillment import (
 from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 
 from market_storefront import container as _container
-from market_storefront.lifecycle import FULFILLMENT_RESUME, gate, idle
 from market_storefront.services.capacity_client import (
     build_capacity_client,
     build_fulfillment_client,
@@ -571,11 +570,15 @@ async def resume_incomplete_fulfillments_once(
     composition = composition or _container.resolved_settlement_composition
     if composition is None:
         raise RuntimeError("settlement composition was not initialized")
+    deliveries = await db.list_incomplete_vm_deliveries(limit=limit)
+    if not deliveries:
+        # Nothing to resume needs no site or provisioning client.
+        return 0
     capacity = capacity_client or build_capacity_client(lambda: db)
     remote = fulfillment_client or build_fulfillment_client(capacity)
     worker = owner or f"fulfillment-resume:{uuid.uuid4()}"
     progressed = 0
-    for delivery in await db.list_incomplete_vm_deliveries(limit=limit):
+    for delivery in deliveries:
         negotiation_id = delivery["negotiation_id"]
         claimed = await db.claim_vm_delivery(
             negotiation_id=negotiation_id,
@@ -631,10 +634,6 @@ async def resume_incomplete_fulfillments_once(
     return progressed
 
 
-#: Cadence for re-reading a held gate; idle work only.
-_PAUSED_POLL_SECONDS = 0.05
-
-
 async def _reconcile_payment_deals() -> None:
     """Advance accepted payment deals a buyer has not settled (none without payments)."""
     composition = _container.resolved_settlement_composition
@@ -643,32 +642,14 @@ async def _reconcile_payment_deals() -> None:
         await coordinator.reconcile_once()
 
 
-async def fulfillment_resume_loop(sqlite_client: SQLiteClient) -> None:
-    """Periodically sweep unfinished accepted VM deliveries."""
-    from market_storefront.utils.config import settings
+async def fulfillment_resume_cycle_once(*, sqlite_client: SQLiteClient) -> None:
+    """One cycle of the fulfillment-resume loop: re-drive every unfinished
+    accepted VM delivery, then advance accepted payment deals.
 
-    interval = float(getattr(settings, "fulfillment_resume_sweep_interval", 30))
-    db = sqlite_client
-    while True:
-        try:
-            # Checked before the sweep, not during: a paused storefront must not
-            # be part-way through re-driving a delivery when a scenario reads
-            # its state.
-            if gate(FULFILLMENT_RESUME):
-                await asyncio.sleep(_PAUSED_POLL_SECONDS)
-                continue
-            await resume_incomplete_fulfillments_once(sqlite_client=db)
-            await _reconcile_payment_deals()
-        except asyncio.CancelledError:
-            logger.info("[FULFILLMENT_RESUME] cancelled, shutting down")
-            break
-        except Exception:
-            # A cycle that raises must not end the loop. The per-delivery handler
-            # inside the sweep contains its own failures; this catches the ones
-            # outside it -- listing the incomplete deliveries, or building a client
-            # -- which would otherwise stop the resume worker for the life of
-            # the process with no further sweep and no recovery.
-            logger.exception("[FULFILLMENT_RESUME] sweep failed; continuing")
-        # Through the controller, so a pause requested during the interval
-        # reaches the gate at once rather than after it.
-        await idle(interval)
+    The loop's timer and an operator's step both run exactly this. A failure
+    of one delivery is contained inside the sweep; a failure outside it --
+    listing the incomplete deliveries, or building a client -- fails the cycle,
+    which the loop controller records, and the timer carries on.
+    """
+    await resume_incomplete_fulfillments_once(sqlite_client=sqlite_client)
+    await _reconcile_payment_deals()

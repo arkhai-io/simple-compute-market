@@ -8,6 +8,7 @@ that grants no unfunded quota hold — runs against a temporary SQLite database.
 
 from __future__ import annotations
 
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -19,6 +20,7 @@ from apicredits_storefront.negotiation_runtime import (
 )
 from core_storefront.models.negotiation_models import NegotiateNewResponse
 from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
+from market_alkahest.alkahest import encode_recipient_demand
 from market_identity import Ed25519Signer
 from market_policy.negotiation_middleware import NegotiationDecision
 from market_policy.seller_round import SellerRoundResult
@@ -26,8 +28,10 @@ from market_policy.seller_round import SellerRoundResult
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_PRINCIPAL,
+    CONDITION,
     FakeCapacity,
     SELLER_PRINCIPAL,
+    SELLER_WALLET,
     payment_option,
     payment_selection,
     proposal,
@@ -60,9 +64,17 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
     response = await _start(db, amount=300, quantity=3)
     assert response["action"] == "accept"
     assert response["accepted_provision_terms"]["payload"]["quantity"] == 3
-    # Plan materialization needs a resolvable alkahest chain config (the
-    # e2e topology provides one); here the proposal echo is the artifact.
     assert response["accepted_escrow_proposal"]["fields"]["amount"] == "300"
+    # The chain names the development address book, so the escrow's plan is
+    # materialized under the listing's release condition.
+    (obligation,) = response["settlement_plan"]["obligations"]
+    assert obligation["mechanism"] == "alkahest.v1"
+    assert int(obligation["amount"]) == 300
+    data = obligation["params"]["obligation_data"]
+    assert data["arbiter"].lower() == CONDITION["arbiter"].lower()
+    assert data["demand"] == "0x" + encode_recipient_demand(SELLER_WALLET).hex()
+    assert obligation["payer_principal"] == BUYER_PRINCIPAL.model_dump(mode="json")
+    assert obligation["claimant_principal"] == SELLER_PRINCIPAL.model_dump(mode="json")
 
     neg_id = response["negotiation_id"]
     terms = await db.load_credit_terms(negotiation_id=neg_id)
@@ -76,9 +88,42 @@ async def test_listed_price_accept_persists_terms_without_unfunded_hold(
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     assert thread["terminal_state"] == "success"
     assert int(thread["agreed_price"]) == 300
+    assert thread["settlement_plan"] == response["settlement_plan"]
 
     assert fake_capacity.reserved == []
     assert await db.load_capacity_hold(negotiation_id=neg_id) is None
+
+
+async def test_an_escrow_whose_plan_cannot_be_materialized_is_refused(
+    db, fake_capacity, key_records
+):
+    """An escrow is accepted only with the plan its settlement is verified
+    against: a proposal the codecs cannot price refuses the round under the
+    listed-price default, and nothing is recorded."""
+    unpriceable = proposal(300).model_copy(
+        update={
+            "rates": [
+                *proposal(300).rates,
+                {"field": "bonus", "per": "fortnight", "value": "1"},
+            ]
+        }
+    )
+
+    with pytest.raises(OfferUnfulfillableError, match="settlement_plan_unmaterializable"):
+        await build_api_credit_negotiation_runtime(_DOMAIN).start(
+            repository=db,
+            listing_id="L-tok",
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+            proposal=unpriceable,
+            terms=terms(3),
+            seller_agent_url="http://seller:8002",
+            buyer_agent_url="http://buyer:9000",
+            actor_principal=BUYER_PRINCIPAL,
+        )
+
+    with sqlite3.connect(db.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM negotiation_threads").fetchone()[0] == 0
 
 
 async def test_accept_result_satisfies_the_controllers_response_model(
@@ -407,3 +452,59 @@ async def test_accept_revalidates_the_current_trusted_listing_option(db, fake_ca
             actor_principal=BUYER_PRINCIPAL,
             actor_role="buyer",
         )
+
+
+async def _accept_as_proposed(*, history, **_round):
+    """A seller policy that accepts the buyer's escrow as it stands."""
+    proposal = dict(history[-1].proposal)
+    return SellerRoundResult(
+        our_amount=300,
+        strategy_label="listed_price",
+        direction="maximize",
+        chain_label="accept_as_proposed",
+        decision=NegotiationDecision(action="accept", proposal=proposal),
+        intermediate={"uses_scalar_amount": True},
+    )
+
+
+@pytest.mark.parametrize(
+    ("demands", "reason"),
+    [
+        pytest.param(
+            [CONDITION], "release_condition_not_authorized", id="substituted recipient"
+        ),
+        pytest.param([], "release_condition_not_advertised", id="listing authorizes none"),
+    ],
+)
+async def test_an_unauthorized_release_condition_is_refused_whatever_the_policy(
+    db, fake_capacity, key_records, demands, reason
+):
+    """With a seller policy that accepts anything, the escrow is still held to
+    the listing's release condition, and nothing is accepted."""
+    await db.update_listing(listing_id="L-tok", demands=demands)
+    substituted = proposal(300).model_copy(
+        update={
+            "demand": {**CONDITION, "demand_data": {"recipient": "0x" + "77" * 20}}
+        }
+    )
+
+    with pytest.raises(OfferUnfulfillableError, match=reason):
+        await build_api_credit_negotiation_runtime(
+            _DOMAIN, seller_round_hook=_accept_as_proposed
+        ).start(
+            repository=db,
+            listing_id="L-tok",
+            buyer_principal=BUYER_PRINCIPAL,
+            seller_principal=SELLER_PRINCIPAL,
+            proposal=substituted,
+            terms=terms(3),
+            seller_agent_url="http://seller:8002",
+            buyer_agent_url="http://buyer:9000",
+            actor_principal=BUYER_PRINCIPAL,
+        )
+
+    with sqlite3.connect(db.db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM negotiation_threads "
+            "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+        ).fetchone()[0] == 0

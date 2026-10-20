@@ -169,6 +169,7 @@ async def _persist_accepted_negotiation(
         agreed_price=42,
         agreed_duration_seconds=3600,
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
+        settlement_data={"accepted_escrow_proposal": proposal},
     )
     await db.update_negotiation_thread_terminal(
         negotiation_id=negotiation_id,
@@ -256,9 +257,11 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     }
     obligations = [_obligation(0), _obligation(1)]
     build_contexts = []
+    build_listings = []
 
-    def build_plan(*, context):
+    def build_plan(*, context, listing):
         build_contexts.append(context)
+        build_listings.append(listing)
         return {"settlement_plan": {"obligations": obligations}}
 
     domain = build_vm_storefront_domain()
@@ -325,6 +328,8 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     assert build_context.site_id == thread_binding.site_id
     assert build_context.buyer_principal == _BUYER
     assert build_context.seller_principal == _SELLER
+    # The plan is rebuilt against the listing the deal was negotiated against.
+    assert [listing["listing_id"] for listing in build_listings] == ["listing-1"]
     verify.assert_awaited_once()
     assert verify.await_args.kwargs["alkahest_client"] is chain_client, (
         "escrow verification reads the chain through the alkahest client's "

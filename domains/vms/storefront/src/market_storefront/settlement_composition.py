@@ -22,6 +22,11 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    require_deliverable_release_model,
+)
 from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
@@ -237,9 +242,10 @@ def _settlement_plan_obligations(
     domain: MarketDomainContract,
     context: StorefrontSettlementBuildContext,
     stage: Any,
+    listing: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     artifacts = build_domain_settlement_artifacts(
-        domain, context, build_plan=stage.build_plan
+        domain, context, build_plan=partial(stage.build_plan, listing=listing)
     )
     obligations = artifacts.settlement_plan["obligations"]
     return tuple(dict(item) for item in obligations)
@@ -328,7 +334,7 @@ async def prepare_vm_settlement(
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     obligations = _settlement_plan_obligations(
-        domain=domain, stage=stage,
+        domain=domain, stage=stage, listing=dict(order),
         context=StorefrontSettlementBuildContext(
             binding=thread_binding.binding,
             negotiation_id=negotiation_id,
@@ -827,6 +833,27 @@ async def preflight_settlement_mechanisms(
     return readiness
 
 
+def require_vm_release_model(
+    domain: MarketDomainContract, settlement_config: SettlementConfig | None = None
+) -> None:
+    """Refuse a configured Alkahest release model ``domain`` cannot deliver.
+
+    A configured section owns the deals accepted under it, enabled or not, so
+    its release model must be one the domain's Alkahest entry declares. With no
+    ``settlement_config``, the storefront's own configuration is resolved.
+    """
+    if settlement_config is None:
+        settlement_config = build_storefront_settlement_registry().resolve(
+            storefront_config.settlement_config_mapping(), role="seller"
+        )
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    alkahest_stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    if alkahest_section is not None and alkahest_stage is not None:
+        require_deliverable_release_model(
+            alkahest_section, alkahest_stage.release_models
+        )
+
+
 def build_vm_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -851,6 +878,8 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
+    require_vm_release_model(domain, settlement_config)
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
         "clients": dict(alkahest_clients),
@@ -858,7 +887,6 @@ def build_vm_settlement_composition(
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
     }
-    alkahest_section = settlement_config.mechanism_config("alkahest")
     if alkahest_section is not None and (
         bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
     ):
@@ -923,9 +951,7 @@ def build_vm_settlement_composition(
         runtime,
         repository,
         worker_id=f"vm-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=float(
-            getattr(storefront_config.settings, "claims_sweep_interval", 30)
-        ),
+        interval_seconds=storefront_config.settlement_servicing_interval(),
         on_event=on_event,
         on_terminal=on_terminal,
     )

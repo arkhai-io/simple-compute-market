@@ -186,26 +186,30 @@ def build_api_credit_accepted_artifacts(
     buyer_principal: Identity,
     seller_principal: Identity,
     proposal: Any,
+    listing: Mapping[str, Any],
     agreed_amount: int,
     uses_scalar_amount: bool = True,
     duration_seconds: int = 0,
-    listing: Mapping[str, Any] | None = None,
     **_unused: Any,
 ) -> dict[str, Any]:
-    """Materialize the domain's durationless accepted settlement artifacts."""
+    """Materialize the domain's durationless accepted settlement artifacts.
+
+    The escrow settles under the release condition ``listing`` authorizes on
+    its chain, which a condition the proposal selects must be; the kit refuses
+    any other, and a listing authorizing none, with
+    ``market_alkahest.proposals.ReleaseConditionError``, and an escrow whose
+    plan cannot be materialized with ``SettlementPlanMaterializationError``.
+    """
 
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=str(settings.get("wallet.address", "") or ""),
         chain_config_paths={name: chain.alkahest_address_config_path for name, chain in CHAINS.items()},
         heartbeat_interval_seconds=None,
     )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        logger.debug("Could not materialize accepted escrow terms: %s", error)
     plan = artifacts.get("settlement_plan")
     if isinstance(plan, dict):
         buyer_wire = buyer_principal.model_dump(mode="json")
@@ -314,6 +318,8 @@ async def _prepare_alkahest_settlement(
         if isinstance(proposal_raw, dict)
         else None
     )
+    # Verification and the plan below materialize the escrow under the release
+    # condition the listing authorizes; the kit refuses any other.
     matched_index = await verify_escrow_for_settlement(
         escrow_uid=escrow_uid,
         seller_wallet=settings.wallet.address or "",
@@ -331,6 +337,7 @@ async def _prepare_alkahest_settlement(
         agreed_amount=int(thread["agreed_price"]),
         buyer_principal=buyer_principal,
         seller_principal=seller_principal,
+        listing=order,
     )
     plan = accepted.get("settlement_plan")
     obligations_raw = plan.get("obligations") if isinstance(plan, dict) else None
@@ -392,6 +399,9 @@ class ArkhaiPaymentsSellerStage:
     """
 
     registration = staticmethod(create_arkhai_payments_registration)
+    # A payment deal settles from the Agreement's mandate and receipt, so its
+    # exact selection is accepted without a settlement plan.
+    settles_from_agreement = True
 
     def __init__(self, *, fulfils_through_capacity: bool) -> None:
         # Whether settling through this stage issues credits against quota.
@@ -522,10 +532,21 @@ class AlkahestSellerStage:
     _delivery_locks: dict[str, asyncio.Lock] = {}
     registration = staticmethod(create_alkahest_registration)
     retry_uncertain = False
+    # An escrow is verified against the plan its escrow proposal materializes
+    # under the listing's release condition, which an exact selection cannot
+    # build, so a selection of it is refused.
+    settles_from_agreement = False
 
-    def __init__(self, *, fulfils_through_capacity: bool) -> None:
+    def __init__(
+        self, *, fulfils_through_capacity: bool, release_models: frozenset[str]
+    ) -> None:
         # As for the payment stage: required, with no default.
         self.fulfils_through_capacity = fulfils_through_capacity
+        # The Alkahest release models, from market_alkahest.RELEASE_MODELS, a
+        # credit deal may be released under. Composition refuses a configured
+        # [Settlement.alkahest] model outside them, so a listing never
+        # advertises a condition its deal could not honour.
+        self.release_models = release_models
 
     def validate_selection(self, selection: Any) -> None:
         if selection.expiration_unix is None:

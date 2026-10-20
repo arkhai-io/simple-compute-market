@@ -1,3 +1,6 @@
+# A production-shaped release of the bare-metal storefront. Every principal,
+# address, and URL below is a placeholder that names nothing real; replace each
+# with the operator's own before deploying.
 image:
   repository: registry.example.com/arkhai
   name: arkhai
@@ -5,39 +8,81 @@ image:
   digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   pullPolicy: IfNotPresent
 
+port: 8000
+
+service:
+  type: ClusterIP
+
 identity:
-  principal:
-    scheme: ed25519
-    identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
   credentialSecret:
     name: bare-metal-storefront-identity
     key: credential
 
-adminPrincipals:
-  - scheme: ed25519
-    identifier: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+# An existing Secret whose storefront.secrets.toml states the seller wallet's
+# key ([Wallet] private_key), which the values schema refuses in `config`.
+secret:
+  secretName: bare-metal-storefront-runtime
+  configKey: storefront.secrets.toml
 
-# This existing Secret owns `sites.json`; the chart does not render authority
-# URLs or routing topology into a ConfigMap or release-managed Secret.
-siteBindingsSecret:
-  name: bare-metal-storefront-sites
-  key: sites.json
-sitePlacement: round_robin
-
-publicUrl: https://bare-metal.example.com
-sellerEvmAddress: ""
-chains: {}
-walletKeySecret:
-  name: ""
-  key: private-key
 alkahestAddressBook:
   configMapName: ""
   key: alkahest_addresses.json
   mountPath: /etc/arkhai/alkahest
-settlementConfigSecret:
-  name: bare-metal-storefront-settlement
-  key: settlement.json
-databasePath: /var/lib/arkhai/bare-metal-storefront.db
+
+config:
+  base_url: https://bare-metal.example.com
+  Identity:
+    principal:
+      scheme: ed25519
+      identifier: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    administrators:
+      operator:
+        principals:
+          - scheme: ed25519
+            identifier: EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE
+    # Each site is trusted through exactly one service peer bound to it, which
+    # the storefront seeds into its durable identity state when it starts.
+    service_peers:
+      site_a_authority:
+        role: service
+        site_id: site-a
+        principals:
+          - scheme: ed25519
+            identifier: IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+  capacity:
+    placement: fill_first
+    sites:
+      site-a: https://site-a.example.com
+  registry:
+    urls:
+      - https://registry.example.com
+    authorities:
+      https://registry.example.com:
+        authority: registry
+        principals:
+          - scheme: ed25519
+            identifier: MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
+  Settlement:
+    schema_version: 1
+    priority:
+      - alkahest.v1
+    alkahest:
+      enabled: true
+  Wallet:
+    address: "0x00000000000000000000000000000000000000aa"
+  Chains:
+    base_sepolia:
+      rpc_url: https://rpc.example.com
+  pricing:
+    settlements:
+      - mechanism: alkahest.v1
+        asset: "0x00000000000000000000000000000000000000bb"
+        rate: "10"
+        per: hour
+        mechanism_input:
+          chain: base_sepolia
+          escrow_kind: erc20_escrow_obligation_default
+    default_max_duration_seconds: 86400
 
 persistence:
   enabled: true

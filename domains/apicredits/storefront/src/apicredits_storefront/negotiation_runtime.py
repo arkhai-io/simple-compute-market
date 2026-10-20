@@ -12,6 +12,11 @@ from typing import Any
 
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+    authorized_escrow_proposal_at_amount,
+)
 from market_core import MarketDomainContract
 from market_core.schemas import (
     Agreement,
@@ -392,7 +397,11 @@ def _accepted_selection_artifacts(
     The mechanism is resolved exactly once — from the selection — and the
     obligation is built by the composed registry dispatch. The domain keeps
     only domain semantics: the negotiated credit quantity that scales
-    counted rates, and the plan's ``api_credits.v1`` service terms.
+    counted rates, and the plan's ``api_credits.v1`` service terms. A
+    mechanism the registry builds no obligation for is accepted without a
+    plan only when its seller entry ``settles_from_agreement``; any other
+    would be accepted with nothing its settlement could be verified against,
+    so it is refused.
     """
 
     accepted = SettlementSelection.model_validate(selection)
@@ -409,6 +418,8 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
     if build_obligation is None:
+        if stage is None or not getattr(stage, "settles_from_agreement", False):
+            raise OfferUnfulfillableError("settlement_selection_requires_plan")
         return {
             "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),
             "_agreement_settlement_option": advertised.model_dump(
@@ -577,22 +588,37 @@ def _build_response_artifacts(
         if accepted:
             return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
         return {"settlement_selection": artifacts["settlement_selection"]}
-    artifacts = build_api_credit_accepted_artifacts(
-        buyer_principal=acceptance.buyer_principal,
-        seller_principal=acceptance.seller_principal,
-        proposal=acceptance.pinned_proposal,
-        agreed_amount=acceptance.agreed_amount,
-        uses_scalar_amount=acceptance.uses_scalar_amount,
-        listing=acceptance.listing_record,
-    )
-    if accepted:
-        return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
-    accepted_proposal = artifacts.get("accepted_escrow_proposal")
-    return (
-        {"accepted_escrow_proposal": accepted_proposal}
-        if accepted_proposal is not None
-        else {}
-    )
+    if not accepted:
+        # A round that does not accept offers the escrow back at its amount,
+        # under the listing's release condition; its plan is built only when
+        # the escrow is accepted.
+        if acceptance.pinned_proposal is None:
+            return {}
+        try:
+            offered = authorized_escrow_proposal_at_amount(
+                proposal=acceptance.pinned_proposal,
+                listing=acceptance.listing_record,
+                agreed_amount=acceptance.agreed_amount,
+                uses_scalar_amount=acceptance.uses_scalar_amount,
+            )
+        except ReleaseConditionError as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
+        return {"accepted_escrow_proposal": offered}
+    try:
+        artifacts = build_api_credit_accepted_artifacts(
+            buyer_principal=acceptance.buyer_principal,
+            seller_principal=acceptance.seller_principal,
+            proposal=acceptance.pinned_proposal,
+            agreed_amount=acceptance.agreed_amount,
+            uses_scalar_amount=acceptance.uses_scalar_amount,
+            listing=acceptance.listing_record,
+        )
+    except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
+        # An escrow the listing authorizes no condition for, a condition it
+        # does not authorize, and an escrow whose settlement plan cannot be
+        # materialized refuse the round before anything is recorded.
+        raise OfferUnfulfillableError(str(exc)) from exc
+    return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
 
 
 async def _persist_opening(repository: Any, opening: OpeningRecord) -> None:

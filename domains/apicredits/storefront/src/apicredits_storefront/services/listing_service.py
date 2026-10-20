@@ -158,6 +158,7 @@ class ListingService:
         accepted_escrows, settlement_options = _admissible_settlement_terms(
             pool, accepted_escrows=accepted_escrows, settlement_options=settlement_options
         )
+        demands = self._settlement_composition.release_conditions(accepted_escrows)
 
         listing = get_market_domain_contract().codecs.listing(
             {
@@ -172,7 +173,7 @@ class ListingService:
                 },
                 "accepted_escrows": accepted_escrows,
                 "settlement_options": settlement_options,
-                "demands": [],
+                "demands": demands,
             }
         )
         listing_id = str(uuid.uuid4())

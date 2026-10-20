@@ -19,6 +19,7 @@ from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import Acceptance, AgreementTerms, NegotiationTerms
 from market_storefront.negotiation_runtime import _place_capacity_hold
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 
@@ -52,6 +53,9 @@ async def _place_hold(
             binding=binding,
         ),
         capacity_runtime=capacity,
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
 
 class FakeCapacity:
@@ -485,7 +489,7 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {"max_reservation_hold_seconds": 30}
@@ -517,7 +521,7 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {}

@@ -794,7 +794,16 @@ def escrow_shape_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Veto when the buyer's escrow proposal diverges from the listing."""
+    """Veto when the buyer's escrow proposal diverges from the listing.
+
+    A proposal carrying no escrow (none, no escrow address, or the zero-address
+    placeholder) and a listing accepting no escrow pass. Otherwise the escrow
+    must be one the listing accepts, with its literal fields, and the release
+    condition the proposal selects must be one the listing advertises on the
+    proposal's chain; a listing advertising none refuses. This is the early,
+    explained refusal: the seller's plan materialization holds the release
+    condition to the listing whether or not this guard runs.
+    """
     proposal = _peer_proposal(history)
     if not isinstance(proposal, dict):
         return None, context
@@ -850,32 +859,45 @@ def escrow_shape_guard(
                 ),
                 context,
             )
+    # An escrow is released only under a condition its listing advertises, so
+    # a listing advertising none on the proposal's chain leaves nothing the
+    # buyer could select: the guard refuses rather than skipping the check.
     listing_demands = _normalize_demands_for_chain(
         listing.get("demands"),
         proposal.get("chain_name"),
     )
-    if listing_demands:
-        try:
-            selected_demand = _normalize_selected_demand(proposal)
-        except ValueError as exc:
-            return (
-                NegotiationDecision(
-                    action="reject",
-                    reason=f"invalid_selected_demand:{exc}",
+    if not listing_demands:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    "release_condition_not_advertised: the listing advertises no "
+                    f"release condition on chain {proposal.get('chain_name')!r}"
                 ),
-                context,
-            )
-        if selected_demand not in listing_demands:
-            return (
-                NegotiationDecision(
-                    action="reject",
-                    reason=(
-                        f"selected_demand_not_allowed:"
-                        f"{selected_demand!r} not in {listing_demands!r}"
-                    ),
+            ),
+            context,
+        )
+    try:
+        selected_demand = _normalize_selected_demand(proposal)
+    except ValueError as exc:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=f"invalid_selected_demand:{exc}",
+            ),
+            context,
+        )
+    if selected_demand not in listing_demands:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason=(
+                    f"selected_demand_not_allowed:"
+                    f"{selected_demand!r} not in {listing_demands!r}"
                 ),
-                context,
-            )
+            ),
+            context,
+        )
     return None, context
 
 
@@ -1085,7 +1107,15 @@ def accept_exact_listing_middleware(
             ),
             context,
         )
-    if expected_demands and selected_demand not in expected_demands:
+    if not expected_demands:
+        return (
+            NegotiationDecision(
+                action="reject",
+                reason="exact_listing:release_condition_not_advertised",
+            ),
+            context,
+        )
+    if selected_demand not in expected_demands:
         return (
             NegotiationDecision(
                 action="reject",

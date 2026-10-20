@@ -8,20 +8,33 @@ pinned seller trust, and signed seller responses.
 from __future__ import annotations
 
 
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 import sqlite3
 
 import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_policy.negotiation_middleware import (
+    NegotiationDecision,
+    their_last_proposal,
+)
+from market_policy.seller_round import SellerRoundResult
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from storefront_client import StorefrontClient, StorefrontClientError
-from market_capacity_publication import publication_binding
+from market_capacity_publication import RESOURCE_POOL, publication_binding
 
 import market_storefront.container as _container
+# The server module completes the controllers' import cycle; the admin
+# controller, imported first, would be partially initialized.
+import market_storefront.server  # noqa: F401  (import order, see above)
+from market_storefront import lifecycle, lifecycle_steps
+from market_storefront.controllers.admin_controller import router as admin_router
+from market_storefront.utils.config import site_projection_poll_interval
 import market_storefront.middleware.admin_identity as _admin_identity
 from market_storefront.controllers.negotiations_controller import (
     router as negotiations_router,
@@ -35,14 +48,31 @@ from market_storefront.domain_runtime import (
     build_vm_storefront_registry,
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
-from market_storefront.services import site_projection_cache
 from tests._settings_overrides import settings_overrides
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x21" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
 _EXPECTED_PUBLISHERS = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _RECIPIENT = "0x" + "33" * 20
+
+
+def _recipient_condition(recipient: str) -> dict:
+    """The recipient release condition on the anvil chain paying ``recipient``."""
+    return {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ),
+        "demand_data": {"recipient": recipient},
+    }
+
+
+#: The release condition a seeded listing authorizes: the recipient arbiter
+#: paying the seller wallet the fixture configures. A buyer naming a pinned
+#: escrow selects it, as the buyer builds its proposal from the listing.
+_AUTHORIZED = [_recipient_condition(_RECIPIENT)]
 
 
 def _vm_provision(duration_seconds: int = 3600) -> dict:
@@ -74,10 +104,14 @@ async def db(tmp_path):
 # The site-test projection the storefront reads each listing's own source from.
 # Seeding a listing declares its source here, as the site would.
 _SITE_POOLS: list[dict] = []
+# The site-test site serving ``_SITE_POOLS``, for tests that make it fail.
+_PROJECTION_SITES: list[FakeProjectionSite] = []
 # The fixture's recorded site requests, for tests asserting no site call.
 _SITE_REQUESTS: list[list[str]] = []
 # The fixture's application, for tests that also drive it as an administrator.
 _APPS: list[FastAPI] = []
+# Builds the fixture's negotiation runtime with other seller-round hooks.
+_RUNTIME_BUILDERS: list = []
 # A deterministic development key for these tests only; never used on any network.
 _ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
 
@@ -111,22 +145,21 @@ def _declare_source(
     })
 
 
-def _site_projection_caches():
-    from core_storefront.site_projections import (
-        ProjectionCache,
-        ProjectionIdentity,
-        ProjectionState,
-    )
-
+def _site_projections():
+    """The storefront's projection state over the site-test site serving
+    ``_SITE_POOLS``, holding nothing until polled."""
     _SITE_POOLS.clear()
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = _SITE_POOLS
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="site-test")
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
+    site = FakeProjectionSite(resource_pools=_SITE_POOLS)
+    _PROJECTION_SITES[:] = [site]
+    return site_projection_state({"site-test": site})
+
+
+def _unheld_site_projections():
+    """A state over a site-test site that has never answered, as a storefront
+    restarted while its site cannot be reached holds it."""
+    site = FakeProjectionSite(resource_pools=[])
+    site.failing = True
+    return site_projection_state({"site-test": site})
 
 
 async def _upsert_bound_listing(
@@ -141,6 +174,8 @@ async def _upsert_bound_listing(
     capacity_backing: str = "backed",
     escrow_address: str = "0x" + "11" * 20,
     literal_fields: dict | None = None,
+    demands: list[dict] | None = _AUTHORIZED,
+    extra_rates: tuple[dict, ...] = (),
 ) -> None:
     _declare_source(
         listing_id,
@@ -148,6 +183,8 @@ async def _upsert_bound_listing(
         available_gpu_count=available_gpu_count,
         capacity_backing=capacity_backing,
     )
+    # The poller's cycle: the storefront now holds the source just declared.
+    await _container.site_projections().poll_once()
     pool_id = f"pool-{listing_id}"
     # Bound as publication binds it: the listing's shape and the resource it
     # publishes, so every reader finds the listing's key in its binding.
@@ -164,9 +201,9 @@ async def _upsert_bound_listing(
     entry = {
         "chain_name": "anvil", "escrow_address": escrow_address,
         "literal_fields": {"token": _TOKEN} if literal_fields is None else dict(literal_fields),
-        "rates": [] if demand_amount is None else [
+        "rates": ([] if demand_amount is None else [
             {"field": "amount", "per": "hour", "value": str(demand_amount)}
-        ],
+        ]) + list(extra_rates),
     }
     body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
             "rates": [RateValue.model_validate(rate) for rate in entry["rates"]],
@@ -208,6 +245,7 @@ async def _upsert_bound_listing(
         max_duration_seconds=max_duration_seconds,
         storefront_url="http://seller:8001",
         seller_principal=_SELLER_SIGNER.identity,
+        demands=demands,
     )
 
 
@@ -257,6 +295,8 @@ async def client(db, monkeypatch):
     app = FastAPI()
     app.include_router(negotiate_router)
     app.include_router(negotiations_router)
+    # The lifecycle routes, for tests that hold the loops and step them.
+    app.include_router(admin_router)
     app.middleware("http")(listing_lifecycle_middleware)
     app.middleware("http")(_admin_identity.administrator_identity_middleware)
     _APPS[:] = [app]
@@ -317,29 +357,26 @@ async def client(db, monkeypatch):
         capacity_binding_for_listing,
     )
     registration = db.domain_registry.resolve_mode("vm")
-    _container.resolved_negotiation_runtime = (
-        _negotiation_runtime.build_vm_negotiation_runtime(
+    site_projections = _site_projections()
+    monkeypatch.setattr(_container, "resolved_site_projections", site_projections)
+
+    def build_runtime(*, projections=site_projections, **hooks):
+        return _negotiation_runtime.build_vm_negotiation_runtime(
             registration.contract,
             registry=db.domain_registry,
             binding=registration.binding,
             capacity_runtime=capacity_runtime,
+            site_projections=projections,
+            **hooks,
         )
-    )
-    transport = httpx.ASGITransport(app=app)
-    from unittest.mock import patch as _patch
 
+    _RUNTIME_BUILDERS[:] = [build_runtime]
+    _container.resolved_negotiation_runtime = build_runtime()
+    transport = httpx.ASGITransport(app=app)
     with settings_overrides(
         **{
-            "provisioning.identity.principals": [
-                _BUYER_SIGNER.identity.model_dump(mode="json"),
-                _SELLER_SIGNER.identity.model_dump(mode="json"),
-            ],
             "wallet.address": _RECIPIENT,
         }
-    ), _patch.dict(
-        site_projection_cache._caches,
-        {"site-test": _site_projection_caches()},
-        clear=True,
     ):
         async with StorefrontClient(
             "http://test",
@@ -391,6 +428,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -403,7 +441,7 @@ class TestNegotiateNew:
             await c.negotiate_new(
                 listing_id="neg-missing-selection", initial_amount=5000,
                 provision_terms=_vm_provision(), token=_TOKEN, chain_name="anvil",
-                escrow_address="0x" + "11" * 20,
+                escrow_address="0x" + "11" * 20, demands=_AUTHORIZED,
             )
         assert error.value.status_code == 409
         assert "settlement_mechanism_required" in str(error.value)
@@ -427,6 +465,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
         assert "negotiation_id" in result
@@ -446,6 +485,7 @@ class TestNegotiateNew:
             token=_TOKEN,
             chain_name="anvil",
             escrow_address="0x" + "11" * 20,
+            demands=_AUTHORIZED,
         )
         _assert_canonical_owners(result)
 
@@ -587,6 +627,7 @@ class TestNegotiateNew:
                 literal_fields=literals,
                 rates=[],
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
         _assert_canonical_owners(result)
 
@@ -713,6 +754,7 @@ class TestUnbackedListingNegotiation:
                 literal_fields={"token": _TOKEN},
                 rates=[],
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
 
         assert result["action"] == "accept"
@@ -765,6 +807,7 @@ class TestAdministrativeAcceptance:
                 chain_name="anvil",
                 escrow_address="0x" + "11" * 20,
                 escrow_expiration_unix=1_800_000_000,
+                demands=_AUTHORIZED,
             )
             assert opened["action"] == "counter"
             negotiation_id = opened["negotiation_id"]
@@ -793,6 +836,116 @@ class TestAdministrativeAcceptance:
         # The acceptance hold reserves at the listing's site, as it does after
         # a negotiated acceptance.
         assert any("reserv" in request for request in site_requests), site_requests
+
+
+@pytest_asyncio.fixture
+async def held_loops(client):
+    """The site-projection poller's timer registered as startup registers it
+    and started held, so no poll runs unless an operator steps one; it is
+    cancelled and awaited afterwards."""
+    await lifecycle.reset_for_tests()
+    lifecycle.controller().request_pause(True)
+    lifecycle.register_loop(
+        lifecycle.SITE_PROJECTION_POLLER,
+        route="site-projections",
+        step=lifecycle_steps.site_projections_step,
+        interval_seconds=site_projection_poll_interval(),
+    )
+    lifecycle.start_loops()
+    yield
+    await lifecycle.reset_for_tests()
+
+
+def _admin_client() -> StorefrontClient:
+    (app,) = _APPS
+    return StorefrontClient(
+        "http://test",
+        signer=_ADMIN_SIGNER,
+        caller_role="admin",
+        expected_publishers=_EXPECTED_PUBLISHERS,
+        transport=httpx.ASGITransport(app=app),
+    )
+
+
+class TestSourceConfirmationWindow:
+    """A source check confirms a listing only from a projection a poll
+    confirmed within the source-confirmation window, so a storefront whose
+    loops are held while it trades refuses rather than judging on projections
+    nobody polls."""
+
+    async def test_a_round_past_the_window_is_retryable_until_the_projection_is_stepped(
+        self, client, db, held_loops
+    ):
+        """Spec scenario "The loops are held past the confirmation window".
+
+        The runtime measures each check at a clock the test sets: first at an
+        instant past the window since the seeding poll, while the held poller
+        has polled nothing; then a second after the poll the operator's step
+        ran, which the test confirms happened."""
+        c, db = client
+        await _seed_listing(db, "neg-window")
+        state = _container.site_projections()
+        (site,) = _PROJECTION_SITES
+        seeded = state.view("site-test", RESOURCE_POOL).fetched_at
+        now = {"at": seeded + timedelta(seconds=61)}
+
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            source_confirmation_clock=lambda: now["at"]
+        )
+        opening = dict(
+            listing_id="neg-window",
+            settlement_selection=await _selection(db, "neg-window"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+        )
+        with settings_overrides(**{"capacity.source_confirmation_seconds": 60}):
+            async with _admin_client() as admin:
+                held = await admin.admin_pause_lifecycle_loops()
+                assert held["loops"][lifecycle.SITE_PROJECTION_POLLER] == "paused"
+
+                with pytest.raises(StorefrontClientError) as refused:
+                    await c.negotiate_new(**opening)
+                assert refused.value.status_code == 503
+                assert "listing_source_unverifiable" in str(refused.value)
+                assert state.view("site-test", RESOURCE_POOL).fetched_at == seeded
+
+                calls = len(site.calls)
+                await admin.admin_run_lifecycle_cycle("site-projections")
+                stepped = state.view("site-test", RESOURCE_POOL).fetched_at
+                assert "resource_pool.version" in site.calls[calls:]
+                assert stepped > seeded
+                now["at"] = stepped + timedelta(seconds=1)
+                opened = await c.negotiate_new(**opening)
+
+                still_held = await admin.admin_pause_lifecycle_loops()
+
+        assert opened["action"] == "counter"
+        assert still_held["loops"][lifecycle.SITE_PROJECTION_POLLER] == "paused"
+
+    async def test_an_unbacked_listings_stale_site_is_retryable(self, client, db):
+        """Spec scenario "An unbacked listing's site is stale": the retained
+        generation still declares the listing's source, but its latest poll
+        failed, and nothing else backs an unbacked listing."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-unbacked-stale", capacity_backing="unbacked")
+        (site,) = _PROJECTION_SITES
+        site.failing = True
+        await _container.site_projections().poll_once()
+        (site_requests,) = _SITE_REQUESTS
+        site_requests.clear()
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_new(
+                listing_id="neg-unbacked-stale",
+                settlement_selection=await _selection(db, "neg-unbacked-stale"),
+                initial_amount=4000,
+                provision_terms=_vm_provision(),
+            )
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+        assert site_requests == []
 
 
 class TestAcceptanceRechecksTheSource:
@@ -831,8 +984,11 @@ class TestAcceptanceRechecksTheSource:
     async def test_an_accept_whose_source_cannot_be_read_is_retryable(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-unread")
-
-        site_projection_cache._caches.pop("site-test")
+        # Restarted while the site cannot be reached: nothing is held for it.
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            projections=_unheld_site_projections()
+        )
 
         with pytest.raises(StorefrontClientError) as refused:
             await c.negotiate_continue(negotiation_id, action="accept")
@@ -843,9 +999,209 @@ class TestAcceptanceRechecksTheSource:
     async def test_a_buyer_exits_whatever_the_source(self, client, db):
         c, db = client
         negotiation_id = await self._open_countered(c, db, "neg-recheck-exit")
-
-        site_projection_cache._caches.pop("site-test")
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            projections=_unheld_site_projections()
+        )
 
         result = await c.negotiate_continue(negotiation_id, action="exit")
 
         assert result["action"] == "exit"
+
+
+#: A recipient other than the seller wallet the listing's condition pays.
+_BUYER_RECIPIENT = "0x" + "77" * 20
+
+
+async def _accept_as_proposed(*, listing, history, **_round):
+    """A seller policy that accepts the buyer's proposal as it stands."""
+    proposal = their_last_proposal(history)
+    return SellerRoundResult(
+        our_amount=5000,
+        strategy_label="maximize",
+        direction="maximize",
+        chain_label="accept_as_proposed",
+        decision=NegotiationDecision(action="accept", proposal=dict(proposal)),
+        intermediate={"uses_scalar_amount": True},
+    )
+
+
+class TestReleaseConditionAuthorization:
+    """An accepted plan uses exactly the condition the listing authorizes.
+
+    Each case opens at the listed rate, so the seller would accept at once and
+    materialize the plan; the refusal must come before any agreement or plan is
+    recorded, whatever seller policies run.
+    """
+
+    @staticmethod
+    def _without_seller_policy() -> None:
+        """Run negotiation with a seller hook that accepts whatever is proposed.
+
+        VM prepends the escrow-shape guard to every configured chain, so a seller
+        without it is a seller-round hook of its own.
+        """
+        (build_runtime,) = _RUNTIME_BUILDERS
+        _container.resolved_negotiation_runtime = build_runtime(
+            seller_round_hook=_accept_as_proposed
+        )
+
+    async def _open(self, c, db, listing_id: str, **proposal):
+        return await c.negotiate_new(
+            listing_id=listing_id,
+            settlement_selection=await _selection(db, listing_id),
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_expiration_unix=1_800_000_000,
+            **proposal,
+        )
+
+    @staticmethod
+    def _nothing_accepted(db) -> None:
+        with sqlite3.connect(db.db_path) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM negotiation_threads "
+                "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+            ).fetchone()[0] == 0
+
+    async def test_a_substituted_recipient_is_refused_without_the_shape_guard(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-substituted", demands=[_recipient_condition(_RECIPIENT)]
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            self._without_seller_policy()
+            await self._open(
+                c, db, "rc-substituted",
+                escrow_address="0x" + "11" * 20,
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_a_listing_authorizing_no_condition_accepts_none(self, client, db):
+        c, db = client
+        await _upsert_bound_listing(db, "rc-unauthorized", demands=None)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            self._without_seller_policy()
+            await self._open(
+                c, db, "rc-unauthorized",
+                escrow_address="0x" + "11" * 20,
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
+        self, client, db
+    ):
+        """Under the default seller chain the shape guard finds no escrow
+        address to compare and skips, so materialization alone refuses the
+        buyer's condition."""
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-unpinned", demands=[_recipient_condition(_RECIPIENT)]
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open(
+                c, db, "rc-unpinned",
+                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+            )
+
+        assert refused.value.status_code == 409
+        assert "release_condition" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def _open_selecting_only(self, c, db, listing_id: str):
+        """An exact selection with no escrow carrier, as a payments buyer opens."""
+        return await c.negotiate_new(
+            listing_id=listing_id,
+            settlement_selection=await _selection(db, listing_id),
+            initial_amount=5000,
+            provision_terms=_vm_provision(),
+            selection_only=True,
+        )
+
+    async def test_an_exact_selection_is_accepted_only_with_its_authorized_plan(
+        self, client, db
+    ):
+        """VM's Alkahest entry builds the escrow from the selected option under
+        the listing's condition, so an exact selection is never accepted
+        without the plan its settlement is verified against."""
+        c, db = client
+        authorized = _recipient_condition(_RECIPIENT)
+        await _upsert_bound_listing(db, "rc-exact", demands=[authorized])
+
+        result = await self._open_selecting_only(c, db, "rc-exact")
+
+        assert result["action"] == "accept"
+        (obligation,) = result["settlement_plan"]["obligations"]
+        data = obligation["params"]["obligation_data"]
+        assert data["arbiter"].lower() == authorized["arbiter"].lower()
+        assert data["demand"] == "0x" + encode_recipient_demand(_RECIPIENT).hex()
+        thread = await db.load_negotiation_thread_row(
+            negotiation_id=result["negotiation_id"]
+        )
+        assert thread["settlement_plan"]["obligations"] == [obligation]
+
+    async def test_an_exact_selection_of_a_listing_with_no_demands_is_refused(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(db, "rc-exact-none", demands=None)
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open_selecting_only(c, db, "rc-exact-none")
+
+        assert refused.value.status_code == 409
+        assert "release_condition_not_advertised" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_an_escrow_whose_plan_cannot_be_materialized_is_refused(
+        self, client, db
+    ):
+        """The selected option names a rate the codecs cannot price, so its
+        authorized escrow has no plan; the round is refused, not accepted
+        without one."""
+        c, db = client
+        await _upsert_bound_listing(
+            db, "rc-unpriceable",
+            extra_rates=({"field": "bonus", "per": "fortnight", "value": "1"},),
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await self._open_selecting_only(c, db, "rc-unpriceable")
+
+        assert refused.value.status_code == 409
+        assert "settlement_plan_unmaterializable" in str(refused.value)
+        self._nothing_accepted(db)
+
+    async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
+        self, client, db
+    ):
+        c, db = client
+        authorized = _recipient_condition(_RECIPIENT)
+        await _upsert_bound_listing(db, "rc-default", demands=[authorized])
+
+        self._without_seller_policy()
+        result = await self._open(
+            c, db, "rc-default",
+            escrow_address="0x" + "11" * 20,
+        )
+
+        assert result["action"] == "accept"
+        (obligation,) = result["settlement_plan"]["obligations"]
+        data = obligation["params"]["obligation_data"]
+        assert data["arbiter"].lower() == authorized["arbiter"].lower()
+        assert data["demand"] == "0x" + encode_recipient_demand(_RECIPIENT).hex()

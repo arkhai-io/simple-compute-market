@@ -54,6 +54,12 @@ _TOKEN = "0x" + "22" * 20
 _OTHER_TOKEN = "0x" + "33" * 20
 _ARBITER = "0x" + "44" * 20
 _RECIPIENT = "0x" + "55" * 20
+#: The release condition the listings below advertise, which a buyer selects.
+_CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": _ARBITER,
+    "demand_data": {"recipient": _RECIPIENT},
+}
 
 
 def _listing_with_one_escrow(**field_overrides) -> dict:
@@ -69,6 +75,7 @@ def _listing_with_one_escrow(**field_overrides) -> dict:
                 "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
             }
         ],
+        "demands": [_CONDITION],
     }
 
 
@@ -80,6 +87,7 @@ class TestPassesWhenAllFieldsMatch:
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
                 "literal_fields": {"token": _TOKEN},
+                "demand": _CONDITION,
             },
         )
         decision, _ctx_out = escrow_shape_guard(history, ctx)
@@ -97,6 +105,7 @@ class TestPassesWhenAllFieldsMatch:
                 "chain_name": "anvil",
                 "escrow_address": mixed_addr,
                 "literal_fields": {"token": mixed_token},
+                "demand": _CONDITION,
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -114,6 +123,7 @@ class TestPassesWhenAllFieldsMatch:
                 "chain_name": "anvil",
                 "escrow_address": _ADDR,
                 "literal_fields": {"token": _TOKEN},
+                "demand": _CONDITION,
             },
         )
         decision, _ = escrow_shape_guard(history, ctx)
@@ -128,7 +138,7 @@ class TestAcceptExactListing:
             "fields": {"token": _TOKEN, "amount": 1000},
             "literal_fields": {"token": _TOKEN},
             "rates": [{"field": "amount", "per": "hour", "value": "1000"}],
-            "demands": [],
+            "demands": [_CONDITION],
         }
         proposal.update(overrides)
         return proposal
@@ -230,17 +240,9 @@ class TestAcceptExactListing:
         assert decision.action == "accept"
 
     def test_rejects_missing_demands(self):
-        listing = _listing_with_one_escrow()
-        listing["demands"] = [
-            {
-                "chain_name": "anvil",
-                "arbiter": _ARBITER,
-                "demand_data": {"recipient": _RECIPIENT},
-            }
-        ]
         history, ctx = _ctx(
-            listing=listing,
-            escrow_proposal=self._proposal(),
+            listing=_listing_with_one_escrow(),
+            escrow_proposal=self._proposal(demands=[]),
         )
         decision, _ = accept_exact_listing_middleware(history, ctx)
         assert decision is not None
@@ -259,6 +261,7 @@ class TestAcceptExactListing:
                     "rates": [],
                 }
             ],
+            "demands": [_CONDITION],
         }
         history, ctx = _ctx(
             listing=listing,
@@ -268,7 +271,7 @@ class TestAcceptExactListing:
                 "fields": {},
                 "literal_fields": {"attestationUid": attestation_uid},
                 "rates": [],
-                "demands": [],
+                "demands": [_CONDITION],
             },
         )
         decision, _ = accept_exact_listing_middleware(history, ctx)
@@ -288,6 +291,7 @@ class TestAcceptExactListing:
                     "rates": [],
                 }
             ],
+            "demands": [_CONDITION],
         }
         history, ctx = _ctx(
             listing=listing,
@@ -297,7 +301,7 @@ class TestAcceptExactListing:
                 "fields": {"amount": 1000},
                 "literal_fields": {"attestationUid": attestation_uid},
                 "rates": [],
-                "demands": [],
+                "demands": [_CONDITION],
             },
         )
         decision, _ = accept_exact_listing_middleware(history, ctx)
@@ -381,6 +385,41 @@ class TestPassesThroughWithoutVetoing:
         )
         decision, _ = escrow_shape_guard(history, ctx)
         assert decision is None
+
+
+class TestRejectsWithoutAnAdvertisedReleaseCondition:
+    """A listing advertising no release condition on the proposal's chain
+    leaves the buyer nothing to select, so both policies refuse."""
+
+    def _listing_without_condition(self) -> dict:
+        listing = _listing_with_one_escrow()
+        listing["demands"] = [{**_CONDITION, "chain_name": "base_sepolia"}]
+        return listing
+
+    def test_the_guard_rejects(self):
+        history, ctx = _ctx(
+            listing=self._listing_without_condition(),
+            escrow_proposal={
+                "chain_name": "anvil",
+                "escrow_address": _ADDR,
+                "literal_fields": {"token": _TOKEN},
+                "demand": _CONDITION,
+            },
+        )
+        decision, _ = escrow_shape_guard(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert (decision.reason or "").startswith("release_condition_not_advertised")
+
+    def test_the_exact_listing_policy_rejects(self):
+        history, ctx = _ctx(
+            listing=self._listing_without_condition(),
+            escrow_proposal=TestAcceptExactListing()._proposal(),
+        )
+        decision, _ = accept_exact_listing_middleware(history, ctx)
+        assert decision is not None
+        assert decision.action == "reject"
+        assert decision.reason == "exact_listing:release_condition_not_advertised"
 
 
 class TestRejectsWhenEscrowNotAdvertised:

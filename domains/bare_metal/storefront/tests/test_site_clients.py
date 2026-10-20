@@ -1,19 +1,40 @@
+"""Trusted site bindings, the durable reservation-to-site map, and the site
+clients the storefront builds.
+
+The site's trust is its service peer's, seeded into a real SQLite identity
+state as startup seeds it; rotations go through that trust's identity
+authority, the one the storefront's rotation routes commit through.
+"""
+
 from __future__ import annotations
 
-import json
+import sqlite3
+import time
 from types import SimpleNamespace
 
 import pytest
-from market_identity import Identity
+from compute_provisioning_client import ComputeProvisioningAuthenticationError
+from core_storefront.identity_authority import SERVICE_PEER_AUTHORITY
+from core_storefront.service_peers import ServicePeerTrust
+from market_identity import (
+    Eip191Signer,
+    Identity,
+    RotationIntent,
+    TrustedIdentitySet,
+    sign_rotation,
+)
+from market_site_client import SiteCapacityAuthenticationError
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.site_clients import (
-    BareMetalSiteBinding,
     DurableReservationSiteMap,
     SelectedSiteFulfillmentClient,
+    build_trusted_site_clients,
     parse_site_bindings,
 )
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
+from signed_sites import SignedSite, SignedSites
+from site_trust import peer_id, seeded_sites
 
 
 PRINCIPAL = {
@@ -21,106 +42,220 @@ PRINCIPAL = {
     "identifier": "0x1111111111111111111111111111111111111111",
 }
 
+# Development keys; never used on any public network.
+SITE_A = Eip191Signer(bytes.fromhex("41" * 32))
+SITE_A_NEXT = Eip191Signer(bytes.fromhex("42" * 32))
+SITE_B = Eip191Signer(bytes.fromhex("43" * 32))
+STOREFRONT = Eip191Signer(bytes.fromhex("44" * 32))
+OPERATOR = Eip191Signer(bytes.fromhex("45" * 32))
 
-def _bindings_json() -> str:
-    return json.dumps(
-        [
-            {
-                "site_id": "site-a",
-                "authority_url": "https://provisioning.internal:8443",
-                "authority_principal": PRINCIPAL,
-            }
-        ]
+_NONCE = "rotate-site-a-1"
+_OVERLAP_SECONDS = 600
+
+
+def _peers(*site_ids: str) -> dict:
+    """One service peer for each site named, as the configuration states them."""
+    principals = TrustedIdentitySet(identities=(Identity.model_validate(PRINCIPAL),))
+    return {f"{site_id}-peer": ("service", site_id, principals) for site_id in site_ids}
+
+
+def _database(tmp_path) -> str:
+    db_path = str(tmp_path / "storefront.db")
+    SQLiteClient(db_path, domain=get_market_domain_contract())
+    return db_path
+
+
+def _rotation(expires_at: int):
+    return sign_rotation(
+        current_signer=SITE_A,
+        replacement_signer=SITE_A_NEXT,
+        intent=RotationIntent(
+            current=SITE_A.identity,
+            replacement=SITE_A_NEXT.identity,
+            subject=peer_id("site-a"),
+            authority=SERVICE_PEER_AUTHORITY,
+            nonce=_NONCE,
+            overlap_seconds=_OVERLAP_SECONDS,
+            expires_at=expires_at,
+        ),
     )
 
 
-def test_site_binding_diagnostics_redact_routing_url() -> None:
-    binding = parse_site_bindings(_bindings_json())[0]
-    assert binding.diagnostic() == {
+def _rotate(trust: ServicePeerTrust, *, complete: bool) -> None:
+    """Rotate site-a's peer from SITE_A to SITE_A_NEXT through the trust's
+    identity authority; ``complete`` retires SITE_A, ending the overlap."""
+    now = int(time.time())
+    rotation = _rotation(now + 300)
+    authority = trust.identity_authority()
+    authority.apply_rotation(rotation, operator=OPERATOR.identity, now=now)
+    if complete:
+        authority.complete_rotation(
+            authority=SERVICE_PEER_AUTHORITY,
+            subject=peer_id("site-a"),
+            rotation_nonce=_NONCE,
+            principal=SITE_A.identity,
+            operator=OPERATOR.identity,
+            now=now,
+        )
+
+
+def test_a_binding_names_its_peer_and_diagnoses_its_principals_without_its_url(
+    tmp_path,
+) -> None:
+    bindings, trust = seeded_sites(_database(tmp_path), {"site-a": SITE_A.identity})
+    binding = parse_site_bindings(
+        {"site-a": "https://provisioning.internal:8443"}, trust.peers
+    )[0]
+
+    assert bindings[0].service_peer == binding.service_peer == peer_id("site-a")
+    assert binding.diagnostic(trust) == {
         "site_id": "site-a",
-        "authority_principal": PRINCIPAL,
+        "service_peer": peer_id("site-a"),
+        "authority_principals": [SITE_A.identity.model_dump(mode="json")],
     }
+    assert binding.diagnostic(None)["authority_principals"] == []
     assert "provisioning.internal" not in repr(binding)
-    assert "authority_url" not in binding.diagnostic()
+    assert "authority_url" not in binding.diagnostic(trust)
 
 
 @pytest.mark.parametrize(
-    "payload",
+    ("sites", "peers"),
     [
-        "not-json",
-        "[]",
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://user:secret@example.test",
-                    "authority_principal": PRINCIPAL,
-                }
-            ]
-        ),
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://user:secret＠example.test",
-                    "authority_principal": PRINCIPAL,
-                }
-            ]
-        ),
-        json.dumps(
-            [
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://one.example.test",
-                    "authority_principal": PRINCIPAL,
-                },
-                {
-                    "site_id": "site-a",
-                    "authority_url": "https://two.example.test",
-                    "authority_principal": PRINCIPAL,
-                },
-            ]
-        ),
+        pytest.param({}, {}, id="no site"),
+        pytest.param({"site-a": "https://user:secret@example.test"}, _peers("site-a"),
+                     id="credentials in the URL"),
+        pytest.param({"site-a": "https://user:secret＠example.test"}, _peers("site-a"),
+                     id="a full-width at sign"),
+        pytest.param({"site-a": "https://one.example.test?secret=1"}, _peers("site-a"),
+                     id="a query"),
+        pytest.param({"site-a": "https://one.example.test/secret"}, _peers("site-a"),
+                     id="a path"),
+        pytest.param({"site-a": "https://one.example.test:secret"}, _peers("site-a"),
+                     id="a port that is not a number"),
+        pytest.param({"site a": "https://one.example.test"}, _peers("site a"),
+                     id="an invalid site ID"),
+        pytest.param({"site-a": "https://one.example.test"}, {}, id="no service peer"),
+        pytest.param({"site-a": "https://one.example.test"},
+                     {**_peers("site-a"), "second": _peers("site-a")["site-a-peer"]},
+                     id="two service peers"),
     ],
 )
-def test_invalid_site_bindings_fail_closed_without_echoing_payload(payload: str) -> None:
+def test_invalid_site_bindings_fail_closed_without_echoing_payload(sites, peers) -> None:
     with pytest.raises(ValueError) as raised:
-        parse_site_bindings(payload)
+        parse_site_bindings(sites, peers)
     assert "secret" not in str(raised.value)
     assert "one.example.test" not in str(raised.value)
 
 
-def test_selected_site_binding_survives_restart_and_rejects_authority_rotation(
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        pytest.param("https://one.example.test/v1", " without a path", id="a path"),
+        pytest.param("https://one.example.test:bad", ": it is not a valid URL",
+                     id="a port that is not a number"),
+        pytest.param("https://one example.test", ": it is not a valid URL",
+                     id="a space in the host"),
+        pytest.param("https://one.exa\tmple.test", " without control characters",
+                     id="a tab inside, which the standard would drop"),
+        pytest.param("ftp://one.example.test", ": its scheme is http or https",
+                     id="not HTTP"),
+    ],
+)
+def test_a_site_url_that_is_not_an_origin_is_refused_naming_the_site(url, reason) -> None:
+    """A path would prefix every route the site's clients join to it, and a
+    URL that does not parse fails only when a client is built."""
+    with pytest.raises(
+        ValueError, match=rf"site 'site-a' authority_url must be an HTTP\(S\) origin{reason}$"
+    ):
+        parse_site_bindings({"site-a": url}, _peers("site-a"))
+
+
+def test_a_site_is_bound_to_its_url_as_the_url_standard_normalizes_it() -> None:
+    """The site's clients are given the normalized origin."""
+    (binding,) = parse_site_bindings({"site-a": "HTTPS://One.Example.Test:443/"}, _peers("site-a"))
+    assert binding.authority_url == "https://one.example.test"
+
+
+def test_a_refused_site_url_carries_no_value_in_its_exception_chain() -> None:
+    with pytest.raises(ValueError) as refused:
+        parse_site_bindings(
+            {"site-a": "https://user:secret@one.example.test"}, _peers("site-a")
+        )
+    assert "secret" not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "peers",
+    [
+        pytest.param({}, id="no service peer"),
+        pytest.param({**_peers("site-a"), "second": _peers("site-a")["site-a-peer"]},
+                     id="two service peers"),
+    ],
+)
+def test_a_site_bound_to_no_peer_or_to_two_is_refused_by_name(peers) -> None:
+    """Spec scenario "A site has no service peer", at the bindings; the startup
+    refusal names it too (``test_app_composition``)."""
+    with pytest.raises(ValueError, match="site 'site-a' must be bound to exactly one"):
+        parse_site_bindings({"site-a": "https://one.example.test"}, peers)
+
+
+def test_a_reservation_stays_bound_to_its_site_across_an_authorized_rotation(
     tmp_path,
 ) -> None:
-    db_path = str(tmp_path / "storefront.db")
-    SQLiteClient(
-        db_path,
-        domain=get_market_domain_contract(),
+    """Spec scenario "A bare-metal storefront restarts after a rotation".
+
+    The reservation is pinned to the site's peer, so a restart after the peer's
+    principal rotated keeps it bound; the principal recorded beside it stays
+    the one active when it was made, for audit. Configuration names the
+    replacement for the restart, as durable state then requires.
+    """
+    db_path = _database(tmp_path)
+    bindings, trust = seeded_sites(db_path, {"site-a": SITE_A.identity})
+    routes = DurableReservationSiteMap(
+        db_path, {binding.site_id: binding for binding in bindings}, trust
     )
-    binding = BareMetalSiteBinding(
-        site_id="site-a",
-        authority_url="https://one.example.test",
-        authority_principal=Identity.model_validate(PRINCIPAL),
-    )
-    routes = DurableReservationSiteMap(db_path, {"site-a": binding})
     routes["reservation-1"] = "site-a"
+    _rotate(trust, complete=True)
 
-    restarted = DurableReservationSiteMap(db_path, {"site-a": binding})
-    assert restarted == {"reservation-1": "site-a"}
-
-    replacement = BareMetalSiteBinding(
-        site_id="site-a",
-        authority_url="https://two.example.test",
-        authority_principal=Identity.model_validate(
-            {
-                "scheme": "eip191",
-                "identifier": "0x2222222222222222222222222222222222222222",
-            }
-        ),
+    restarted_bindings, restarted_trust = seeded_sites(
+        db_path, {"site-a": SITE_A_NEXT.identity}
     )
-    with pytest.raises(RuntimeError, match="site authority changed"):
-        DurableReservationSiteMap(db_path, {"site-a": replacement})
+    restarted = DurableReservationSiteMap(
+        db_path,
+        {binding.site_id: binding for binding in restarted_bindings},
+        restarted_trust,
+    )
+
+    assert restarted == {"reservation-1": "site-a"}
+    with sqlite3.connect(db_path) as conn:
+        recorded = conn.execute(
+            "SELECT site_id, service_peer, authority_scheme, authority_identifier "
+            "FROM bare_metal_selected_site_bindings"
+        ).fetchall()
+    assert recorded == [
+        ("site-a", peer_id("site-a"), "eip191", SITE_A.identity.identifier)
+    ]
+
+
+def test_a_reservation_whose_site_is_bound_to_another_peer_refuses_restart(
+    tmp_path,
+) -> None:
+    db_path = _database(tmp_path)
+    bindings, trust = seeded_sites(db_path, {"site-a": SITE_A.identity})
+    routes = DurableReservationSiteMap(
+        db_path, {binding.site_id: binding for binding in bindings}, trust
+    )
+    routes["reservation-1"] = "site-a"
+    # Configuration now binds the site to a peer the reservation was not made under.
+    renamed = {
+        "replacement-peer": ("service", "site-a", TrustedIdentitySet(identities=(SITE_B.identity,)))
+    }
+    rebound = parse_site_bindings({"site-a": "http://site-a"}, renamed)
+
+    with pytest.raises(RuntimeError, match="bound to another service peer"):
+        DurableReservationSiteMap(db_path, {b.site_id: b for b in rebound}, trust)
 
 
 class _RecordingFulfillmentClient:
@@ -160,23 +295,17 @@ class _RecordingFulfillmentClient:
 async def test_every_fulfillment_verb_routes_to_persisted_site_after_restart(
     tmp_path,
 ) -> None:
-    db_path = str(tmp_path / "storefront.db")
-    SQLiteClient(db_path, domain=get_market_domain_contract())
-    bindings = {
-        site_id: BareMetalSiteBinding(
-            site_id=site_id,
-            authority_url=f"https://{site_id}.example.test",
-            authority_principal=Identity.model_validate(PRINCIPAL),
-        )
-        for site_id in ("site-a", "site-b")
-    }
-    first_routes = DurableReservationSiteMap(db_path, bindings)
+    db_path = _database(tmp_path)
+    authorities = {"site-a": SITE_A.identity, "site-b": SITE_B.identity}
+    bindings, trust = seeded_sites(db_path, authorities)
+    by_site = {binding.site_id: binding for binding in bindings}
+    first_routes = DurableReservationSiteMap(db_path, by_site, trust)
     first_routes["reservation-b"] = "site-b"
 
-    restarted_routes = DurableReservationSiteMap(db_path, bindings)
+    restarted_routes = DurableReservationSiteMap(db_path, by_site, trust)
     clients = {
         site_id: _RecordingFulfillmentClient(site_id)
-        for site_id in bindings
+        for site_id in by_site
     }
     fulfillment = SelectedSiteFulfillmentClient(clients, restarted_routes)
     request = SimpleNamespace(capacity_reservation_id="reservation-b")
@@ -224,23 +353,85 @@ async def test_every_fulfillment_verb_routes_to_persisted_site_after_restart(
 
 
 def test_reservation_site_binding_is_immutable(tmp_path) -> None:
-    db_path = str(tmp_path / "storefront.db")
-    SQLiteClient(db_path, domain=get_market_domain_contract())
-    bindings = {
-        site_id: BareMetalSiteBinding(
-            site_id=site_id,
-            authority_url=f"https://{site_id}.example.test",
-            authority_principal=Identity.model_validate(PRINCIPAL),
-        )
-        for site_id in ("site-a", "site-b")
-    }
-    routes = DurableReservationSiteMap(db_path, bindings)
+    db_path = _database(tmp_path)
+    bindings, trust = seeded_sites(
+        db_path, {"site-a": SITE_A.identity, "site-b": SITE_B.identity}
+    )
+    by_site = {binding.site_id: binding for binding in bindings}
+    routes = DurableReservationSiteMap(db_path, by_site, trust)
     routes["reservation-1"] = "site-a"
 
     with pytest.raises(RuntimeError, match="conflicts with its persisted"):
         routes["reservation-1"] = "site-b"
 
     assert routes["reservation-1"] == "site-a"
-    assert DurableReservationSiteMap(db_path, bindings) == {
+    assert DurableReservationSiteMap(db_path, by_site, trust) == {
         "reservation-1": "site-a"
     }
+
+
+async def test_each_sites_clients_verify_against_its_peers_active_principals(
+    tmp_path,
+) -> None:
+    """Composition: the storefront's site-client builder over a real SQLite
+    trust, with only the sites' transports replaced, its built clients called
+    directly. Both of a site's clients verify its responses against its peer's
+    active principals as they are at each response, so a rotation reaches them
+    with no rebuild, and one site's principal verifies nothing of another's."""
+    db_path = _database(tmp_path)
+    bindings, trust = seeded_sites(
+        db_path, {"site-a": SITE_A.identity, "site-b": SITE_B.identity}
+    )
+    sites = SignedSites({"site-a": SignedSite(SITE_A), "site-b": SignedSite(SITE_B)})
+    capacity, fulfillment = build_trusted_site_clients(
+        bindings=bindings,
+        signer=STOREFRONT,
+        db_path=db_path,
+        placement="fill_first",
+        trust=trust,
+        factories=sites.factories(),
+    )
+    capacity.reservation_sites["reservation-a"] = "site-a"
+
+    async def verifies(site_id: str, signer: Eip191Signer) -> tuple[bool, bool]:
+        sites.sites[site_id].signer = signer
+        try:
+            await capacity.site(site_id).resource_pool_projection_version()
+            capacity_verified = True
+        except SiteCapacityAuthenticationError:
+            capacity_verified = False
+        try:
+            await fulfillment.get_lease("reservation-a")
+            fulfillment_verified = True
+        except ComputeProvisioningAuthenticationError:
+            fulfillment_verified = False
+        return capacity_verified, fulfillment_verified
+
+    assert await verifies("site-a", SITE_A) == (True, True)
+    assert await verifies("site-a", SITE_A_NEXT) == (False, False)
+    assert await verifies("site-a", SITE_B) == (False, False)
+
+    _rotate(trust, complete=False)
+    # During the overlap either principal verifies.
+    assert await verifies("site-a", SITE_A_NEXT) == (True, True)
+    assert await verifies("site-a", SITE_A) == (True, True)
+
+    authority = trust.identity_authority()
+    authority.complete_rotation(
+        authority=SERVICE_PEER_AUTHORITY,
+        subject=peer_id("site-a"),
+        rotation_nonce=_NONCE,
+        principal=SITE_A.identity,
+        operator=OPERATOR.identity,
+        now=int(time.time()),
+    )
+    # The overlap has ended: only the replacement verifies, same clients.
+    assert await verifies("site-a", SITE_A_NEXT) == (True, True)
+    assert await verifies("site-a", SITE_A) == (False, False)
+    # The other site keeps its own peer's trust.
+    sites.sites["site-b"].signer = SITE_B
+    await capacity.site("site-b").resource_pool_projection_version()
+    sites.sites["site-b"].signer = SITE_A_NEXT
+    with pytest.raises(SiteCapacityAuthenticationError):
+        await capacity.site("site-b").resource_pool_projection_version()
+

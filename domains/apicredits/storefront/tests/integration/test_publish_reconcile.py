@@ -129,6 +129,9 @@ class _SettlementComposition:
     ) -> tuple[list[dict], list[dict], tuple[()]]:
         return [], [], ()
 
+    def release_conditions(self, _accepted_escrows) -> list[dict]:
+        return []
+
 
 @pytest.fixture
 async def db(tmp_path):

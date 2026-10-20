@@ -73,6 +73,18 @@ Design phase; not planned.
 - **Loop registration.** Whether a domain keeps registering its loops with the kit
   loop controller, or the kit runtimes register their own loops and the domain
   supplies only timings.
+- **Retiring VM's admin projection refresh route.** `POST /api/v1/admin/capacity/projections/refresh`
+  (`admin_refresh_site_projections` on the core storefront client) is VM-only and
+  duplicates an existing control: `share-site-projection-state` makes the
+  `site-projections` run-cycle step exactly the poller's cycle, over a per-site state
+  that refreshes in place and keeps a site's last generation when a fetch fails, and the
+  resource-pool digest covers availability and views, so a step observes every change a
+  forced refresh would. Bare metal serves no such route. Decide whether the shared route
+  set drops it, moving its two VM end-to-end callers (`host_registry.py` and the
+  multi-registry scenario) to the step, and how that squares with this change's
+  non-goal of changing no wire contract: removing a route and its client method is a
+  wire change, so either this change takes it as a stated exception or a follow-up
+  owns it.
 - **A mechanism-named seam on the neutral lifespan.** *Gates the executable-assembly
   step.* `core_storefront.app_lifecycle.StorefrontLifecycleCallbacks` has a
   `build_alkahest_clients` field, and every storefront root fills it by reading its
@@ -123,6 +135,15 @@ Design phase; not planned.
   `test_vm_storefront_imports_no_bare_metal_composition` stays, because the row
   that excuses the declaration would also excuse an import. Retire that test in the
   same commit that deletes the rows.
+- **Whether every storefront stops its loops at shutdown.** Raised 2026-10-20 by
+  `share-site-projection-state`'s closeout, from its
+  [open question](../archive/2026-10-19-share-site-projection-state/design.md#open-questions). The bare-metal storefront stops its loops
+  when its lifespan ends. The VM storefront's stop hook clears the container's lifespan
+  state while a loop may still be mid-cycle, so a cycle can outlive lifespan cleanup and
+  run on against collaborators the lifespan has dropped; the API-credit storefront's stop
+  hook leaves its loops running. Decide whether the VM and API-credit storefronts stop
+  their loops at shutdown as bare metal does, or the shell, whose composition root owns
+  the loop controller, stops every storefront's loops itself.
 
 ## Decisions
 

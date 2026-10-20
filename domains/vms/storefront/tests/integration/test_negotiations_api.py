@@ -39,6 +39,7 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 _ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -221,6 +222,9 @@ def _make_runtime(db: SQLiteClient):
         registry=db.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
 
 

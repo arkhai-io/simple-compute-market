@@ -9,13 +9,17 @@ automatically and there is no lease to refund against.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
-from pydantic import BaseModel, Field
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.listing_publication import (
+    PUBLISH_FROM_QUOTA_OPERATION,
+    PUBLISH_FROM_QUOTA_PATH,
+    PublishFromQuotaRequest,
+    PublishFromQuotaResponse,
+)
 from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.middleware.seller_auth import make_seller_auth_dep
 from core_storefront.models.listing_models import (
@@ -28,27 +32,6 @@ from core_storefront.models.listing_models import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["listings"])
-
-
-class PublishFromQuotaRequest(BaseModel):
-    """Seller's quota-backed publish request."""
-
-    resource_id: str = Field(
-        description="Quota resource in the credits service's ledger."
-    )
-    service_name: str
-    accepted_escrows: list[dict[str, Any]] = Field(default_factory=list)
-    settlement_clauses: list[dict[str, Any]] | None = None
-    description: str | None = None
-    openapi_url: str | None = None
-    base_url: str | None = None
-    paused: bool = False
-
-
-class PublishFromQuotaResponse(BaseModel):
-    status: str
-    listing_id: str
-    registry_status: str | None = None
 
 
 @cbv(router)
@@ -150,10 +133,10 @@ class ListingsController:
         )
 
     @router.post(
-        "/listings/publish-from-quota",
+        PUBLISH_FROM_QUOTA_PATH.removeprefix(router.prefix),
         response_model=PublishFromQuotaResponse,
         summary="Create + publish a listing backed by a quota resource (seller auth)",
-        dependencies=[Depends(make_seller_auth_dep("create_listing"))],
+        dependencies=[Depends(make_seller_auth_dep(PUBLISH_FROM_QUOTA_OPERATION))],
     )
     async def publish_from_quota(
         self,

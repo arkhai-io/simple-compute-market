@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
+from .admin_cli import reporting_failures
 from .pool_override_cli import pool_override_app
+from .publication_cli import close_all_open_listings, run_publication_cycle
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(
@@ -41,27 +46,69 @@ def main(
     """Operate the seller-side bare-metal storefront."""
 
 
+@dataclass(frozen=True)
+class ServeProcess:
+    """What ``serve`` runs: given as the command line's context object, it
+    replaces the storefront's HTTP process, which runs when none is given."""
+
+    run: Callable[..., None]
+
+
 @app.command("serve")
 def serve_cmd(
+    context: typer.Context,
     host: str = typer.Option("0.0.0.0", "--host", help="Bind interface."),
-    port: int = typer.Option(8000, "--port", help="Bind port."),
+    port: int | None = typer.Option(
+        None, "--port", help="Bind port; defaults to the configured port."
+    ),
     root_path: str = typer.Option("", "--root-path", help="ASGI root path."),
 ) -> None:
     """Run the storefront HTTP process."""
-    from .server import run_serve
+    process = context.find_object(ServeProcess)
+    if process is None:
+        # Importing the server composes the application; only serve needs it.
+        from .server import run_serve
 
-    run_serve(host=host, port=port, root_path=root_path)
+        process = ServeProcess(run=run_serve)
+    process.run(host=host, port=port, root_path=root_path)
 
 
 @app.command("publish")
-def publish_cmd() -> None:
-    """Publish one authenticated round from fresh trusted-site projections."""
+def publish_cmd(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report what one publication cycle would do, and do none of it.",
+    ),
+    abort_all: bool = typer.Option(
+        False,
+        "--abort-all",
+        help=(
+            "Close every open listing as the seller. Reconciliation does not "
+            "reopen a listing its seller closed; resume one to re-list it."
+        ),
+    ),
+    storefront_url: str | None = typer.Option(
+        None,
+        "--storefront-url",
+        "-a",
+        help="Storefront base URL; defaults to the configured base_url.",
+    ),
+) -> None:
+    """Run, or preview, one cycle of the running storefront's publication loop.
 
-    import json
-
-    from .publication_cli import run_publication_once
-
-    typer.echo(json.dumps(run_publication_once(), sort_keys=True))
+    The cycle runs in the storefront, through its administrator API, as the
+    loop's timer runs it; the command opens no database. ``--abort-all``
+    instead closes every open listing as its seller.
+    """
+    if abort_all and dry_run:
+        raise typer.BadParameter("--abort-all cannot be combined with --dry-run")
+    with reporting_failures():
+        if abort_all:
+            report: dict[str, object] = {"closed": close_all_open_listings(storefront_url)}
+        else:
+            report = run_publication_cycle(storefront_url, dry_run=dry_run)
+    typer.echo(json.dumps(report, sort_keys=True))
 
 
 @app.command("redeliver-introduction")
@@ -75,13 +122,14 @@ def redeliver_introduction_cmd(
     """Send an already-revealed introduction to this operator's sinks again."""
 
     import asyncio
-    import json
 
     from market_contact_exchange import IntroductionPayloadsDeletedError
 
-    from .runtime import build_runtime_from_environment
+    # Imported here so only this command composes the storefront's runtime and
+    # database; ``publish`` and the other administrator commands load neither.
+    from .runtime import build_runtime_from_configuration
 
-    runtime = build_runtime_from_environment()
+    runtime = build_runtime_from_configuration()
     delivery = runtime.introduction_delivery
     if delivery is None:
         raise typer.BadParameter("no delivery sinks are configured")

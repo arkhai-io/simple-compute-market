@@ -65,11 +65,31 @@ identifier = "<unpadded-base64url-public-key>"
 service_url = "http://seller-provisioning:8081"
 mode = "http"                            # "mock" for a dry run
 
+[capacity.sites]
+# Each site the storefront sells from, by stable ID, and its authority's origin.
+default = "http://seller-provisioning:8081"
+
+# The one service peer the site is bound to: the provisioning authority's
+# public principal. Its responses and callbacks are verified against it.
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principals = [{ scheme = "ed25519", identifier = "<provisioning-authority-public-key>" }]
+
 [registry]
-# The Arkhai public listing registry (preprod, Base Sepolia listings):
-urls = ["http://34.41.205.175/registry"]
+# The listing registry to publish to (a placeholder: use the URL its operator publishes):
+urls = ["https://registry.example.com"]
 # Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<REGISTRY_HOST>:8080"]
+
+# Required: one pin per registry URL, keyed by the string in `urls`,
+# naming the registry's authority and the principal its responses are signed
+# with. A storefront refuses to start with a registry it cannot verify. Replace
+# both placeholders with the values the registry's operator publishes, and
+# re-key the table if you change `urls`.
+[registry.authorities."https://registry.example.com"]
+authority  = "<registry-authority>"
+principals = [{ scheme = "eip191", identifier = "<registry-principal>" }]
 
 [registry.auth]
 # Supply any write token through the deployment Secret overlay. Its key must
@@ -102,6 +122,10 @@ settlements = [
 default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
+
+The storefront refuses to start, naming each problem, when it cannot publish:
+with no registry or a registry without its pin, no enabled settlement mechanism,
+or no site, or a site not bound to exactly one service peer.
 
 For payments-only publication, set priority to `["arkhai.payments.v1"]`,
 configure `[Settlement.arkhai_payments]`, omit wallet and chains, and publish a

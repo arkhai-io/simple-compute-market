@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from arkhai_apicredits.settlement import CreditsServiceClient
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    RECIPIENT_RELEASE,
+    release_conditions,
+    require_deliverable_release_model,
+)
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
@@ -40,7 +47,12 @@ from apicredits_storefront.settlement_stages import AlkahestSellerStage, ArkhaiP
 from apicredits_storefront.utils import config as storefront_config
 
 SELLER_STAGES = SettlementStageTable({
-    "alkahest.v1": AlkahestSellerStage(fulfils_through_capacity=True),
+    # A credit grant releases to the seller once issued; nothing here judges an
+    # oracle's verdict or splits a refund, so only the recipient model is
+    # delivered.
+    ALKAHEST_MECHANISM_ID: AlkahestSellerStage(
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
+    ),
     ARKHAI_PAYMENTS_MECHANISM: ArkhaiPaymentsSellerStage(fulfils_through_capacity=True),
 })
 
@@ -76,6 +88,7 @@ class ApiCreditsSettlementComposition:
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any
     arkhai_payments_stage: PaymentSellerStage | None = None
+    seller_wallet_address: str = ""
 
     def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
         mechanism = agreement["settlement"]["mechanism"]
@@ -131,6 +144,35 @@ class ApiCreditsSettlementComposition:
 
             dispatch[mechanism_id] = build
         return dispatch
+
+    def release_conditions(
+        self, accepted_escrows: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """The release conditions a listing publishing ``accepted_escrows`` advertises.
+
+        Accepted escrows are the Alkahest publication form, so each one's chain
+        gets the condition the Alkahest mechanism derives from the configured
+        section, the seller wallet, and that chain's address book. An escrow on
+        a chain this storefront does not configure is refused, since nothing
+        could settle it. An unset wallet still derives a condition, with no
+        recipient; materialization refuses every deal under it as unreadable.
+        """
+        chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
+        if not chain_names:
+            return []
+        chains = self.mechanism_resources["chains"]
+        unconfigured = sorted(name for name in chain_names if name not in chains)
+        if unconfigured:
+            raise ValueError(
+                f"accepted escrow names chain {unconfigured[0]!r}, which this "
+                "storefront does not configure under [chains]"
+            )
+        return release_conditions(
+            self.settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
+            chain_names=chain_names,
+            chains=chains,
+            wallet_address=self.seller_wallet_address,
+        )
 
     async def publication_artifacts(
         self,
@@ -220,6 +262,24 @@ class ApiCreditsSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
+def require_api_credit_release_model(settlement_config: Any = None) -> None:
+    """Refuse a configured Alkahest release model API credits cannot deliver.
+
+    A configured section owns the deals accepted under it, enabled or not, so
+    its release model must be one the Alkahest entry declares. With no
+    ``settlement_config``, the storefront's own configuration is resolved.
+    """
+    if settlement_config is None:
+        settlement_config = build_storefront_settlement_registry().resolve(
+            storefront_config.settlement_config_mapping(), role="seller"
+        )
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    if alkahest_section is not None:
+        require_deliverable_release_model(
+            alkahest_section, SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models
+        )
+
+
 def build_api_credit_settlement_composition(
     *,
     domain: MarketDomainContract,
@@ -230,13 +290,14 @@ def build_api_credit_settlement_composition(
     payments_client_for_owner: ClientForOwner | None = None,
 ) -> ApiCreditsSettlementComposition:
     """Build lazy mechanism clients and the shared servicing worker."""
-    repository = SettlementSQLiteRepository(
-        sqlite_client.db_path, apply_migrations=False
-    )
     registry = build_storefront_settlement_registry()
     settlement_config = registry.resolve(
         storefront_config.settlement_config_mapping(),
         role="seller",
+    )
+    require_api_credit_release_model(settlement_config)
+    repository = SettlementSQLiteRepository(
+        sqlite_client.db_path, apply_migrations=False
     )
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
@@ -272,9 +333,7 @@ def build_api_credit_settlement_composition(
         runtime,
         repository,
         worker_id=f"api-credit-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=float(
-            storefront_config.settings.get("claims_sweep_interval", 30)
-        ),
+        interval_seconds=storefront_config.settlement_servicing_interval(),
     )
     composition = ApiCreditsSettlementComposition(
         domain=domain,
@@ -291,6 +350,9 @@ def build_api_credit_settlement_composition(
         private_results=private_results,
         failure_policy=failure_policy,
         arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
+        seller_wallet_address=str(
+            storefront_config.settings.get("wallet.address", "") or ""
+        ),
     )
     return composition
 

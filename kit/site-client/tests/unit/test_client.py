@@ -1,4 +1,8 @@
-"""Authenticated v2 contracts for both site-capacity clients."""
+"""Authenticated v2 contracts for both site-capacity clients.
+
+Every signer seed here (a repeated byte) is a deterministic development key that
+must never be used on a public network.
+"""
 
 from __future__ import annotations
 import time
@@ -375,6 +379,92 @@ async def test_authority_rotation_overlap_then_retired_identity_removal(
         await retired.snapshot(request_id="retired-old")
     site.authority = new_authority
     await retired.snapshot(request_id="retired-new")
+
+
+@pytest.mark.parametrize("client_type", (SiteCapacityClient, SiteCapacityAdminClient))
+@pytest.mark.asyncio
+async def test_a_trust_provider_is_read_per_response_so_a_rotation_reaches_a_live_client(
+    site: FakeSite,
+    signer_pair: tuple[Signer, Signer],
+    client_type: type[SiteCapacityClient] | type[SiteCapacityAdminClient],
+) -> None:
+    """One client follows a rotation from overlap to retirement, never rebuilt."""
+    caller, old_authority = signer_pair
+    new_authority = Ed25519Signer(b"\x33" * 32)
+    trusted = [TrustedIdentitySet(identities=(old_authority.identity,))]
+    reads: list[TrustedIdentitySet] = []
+
+    def provider() -> TrustedIdentitySet:
+        reads.append(trusted[0])
+        return trusted[0]
+
+    client = client_type(
+        "http://site-authority:8081",
+        caller,
+        provider,
+        transport=site.transport(),
+    )
+
+    async def read(request_id: str) -> None:
+        if isinstance(client, SiteCapacityAdminClient):
+            await client.list_resources(request_id=request_id)
+        else:
+            await client.snapshot(request_id=request_id)
+
+    await read("before-rotation")
+    trusted[0] = TrustedIdentitySet(
+        identities=(new_authority.identity, old_authority.identity)
+    )
+    await read("overlap-old")
+    site.authority = new_authority
+    await read("overlap-new")
+
+    trusted[0] = TrustedIdentitySet(identities=(new_authority.identity,))
+    await read("retired-new")
+    site.authority = old_authority
+    with pytest.raises(SiteCapacityAuthenticationError, match="wrong_principal"):
+        await read("retired-old")
+
+    assert len(reads) == 5
+
+
+@pytest.mark.asyncio
+async def test_a_failing_trust_provider_fails_the_response_closed(
+    site: FakeSite, signer_pair: tuple[Signer, Signer]
+) -> None:
+    caller, _ = signer_pair
+
+    def unavailable() -> TrustedIdentitySet:
+        raise RuntimeError("durable identity state is unavailable")
+
+    def not_a_set() -> TrustedIdentitySet:
+        return None  # type: ignore[return-value]
+
+    for name, provider, expected in (
+        ("unavailable", unavailable, "could not be resolved"),
+        ("not-a-set", not_a_set, "no trusted identity set"),
+    ):
+        client = SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            provider,
+            transport=site.transport(),
+        )
+        with pytest.raises(SiteCapacityAuthenticationError, match=expected) as excinfo:
+            await client.snapshot(request_id=f"provider-{name}")
+        assert excinfo.value.status_code == 200
+
+
+def test_expected_authorities_must_be_a_trusted_set_or_a_provider(
+    signer_pair: tuple[Signer, Signer],
+) -> None:
+    caller, authority = signer_pair
+    with pytest.raises(TypeError, match="callable returning one"):
+        SiteCapacityClient(
+            "http://site-authority:8081",
+            caller,
+            (authority.identity,),  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio

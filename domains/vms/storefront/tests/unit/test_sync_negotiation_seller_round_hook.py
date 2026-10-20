@@ -41,6 +41,7 @@ from market_storefront.negotiation_runtime import (
     _default_seller_round_hook,
     build_vm_negotiation_runtime,
 )
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 _BUYER_SIGNER = Ed25519Signer(b"\x41" * 32)
 _SELLER_SIGNER = Ed25519Signer(b"\x42" * 32)
@@ -57,6 +58,11 @@ _DOMAIN = build_vm_storefront_domain()
 
 async def _noop_reconcile(_context) -> None:
     return None
+
+
+def _no_projections():
+    """A projection state over the runtime's site that has served nothing yet."""
+    return site_projection_state({"site-test": FakeProjectionSite(resource_pools=[])})
 
 
 def _capacity_runtime() -> CapacityRuntime:
@@ -102,17 +108,11 @@ def _listing_binding(db, listing_id: str) -> StorefrontListingBinding:
 @pytest.fixture
 def marketplace_dependencies(monkeypatch):
     from market_storefront import container
-    from market_storefront.services import capacity_client
 
     monkeypatch.setattr(
         container,
         "resolved_marketplace_signer",
         _SELLER_SIGNER,
-    )
-    monkeypatch.setattr(
-        capacity_client,
-        "get_provisioning_authorities",
-        lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
 
@@ -177,6 +177,15 @@ async def db(tmp_path, monkeypatch):
         max_duration_seconds=7200,
         storefront_url="http://seller:8001",
         seller_principal=_SELLER,
+        # The release condition the accepted plan settles under: the address
+        # book's recipient arbiter, paying the seller.
+        demands=[
+            {
+                "chain_name": "anvil",
+                "arbiter": "0x" + "33" * 20,
+                "demand_data": {"recipient": "0x" + "44" * 20},
+            }
+        ],
     )
 
     async def resolve_capacity_binding(repository, listing_id):
@@ -252,6 +261,7 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )
@@ -293,6 +303,7 @@ async def _continue(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=capacity_runtime or _capacity_runtime(),
+        site_projections=_no_projections(),
         seller_round_hook=seller_round_hook,
         listing_source_check=listing_source_check or _source_matches,
     )

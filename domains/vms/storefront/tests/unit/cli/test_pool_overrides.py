@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 
+import httpx
 import pytest
 from market_pool_overrides import (
     PoolOverride,
@@ -150,3 +151,18 @@ def test_a_storefront_refusal_exits_non_zero_and_names_it(runner, app, monkeypat
 
     assert result.exit_code == 1
     assert "site unreachable" in result.stderr
+
+
+def test_a_storefront_nothing_answers_for_is_reported_without_a_traceback(
+    runner, app, monkeypatch
+):
+    refused = httpx.ConnectError(
+        "connection refused",
+        request=httpx.Request("GET", "http://127.0.0.1:9/api/v1/admin/pool-overrides"),
+    )
+    _install(monkeypatch, _Client(error=refused))
+
+    result = runner.invoke(app, ["pool-override", "list"])
+
+    assert result.exit_code == 1
+    assert "no storefront answered at http://127.0.0.1:9 (ConnectError)" in result.output

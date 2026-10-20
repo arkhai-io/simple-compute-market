@@ -16,15 +16,67 @@ continue to work.
     {{- $rpcUrl = printf "http://%s:%d" $rpc.host (int $rpc.port) -}}
   {{- end -}}
 {{- end -}}
-{{- $agents := .Values.storefront.agents | default list -}}
+{{- $generated := dict -}}
+{{- $_ := set $generated "settlement" (dict "schema_version" 1 "priority" list) -}}
+{{- if $rpcUrl -}}
+{{- $rpcConfig := dict "url" $rpcUrl -}}
+{{- if $rpc.chainId -}}
+  {{- $_ := set $rpcConfig "chain_id" $rpc.chainId -}}
+{{- end -}}
+{{- $_ := set $generated "rpc" $rpcConfig -}}
+{{- end -}}
+{{- /* The provisioning smoke test verifies the service's responses against the
+signer the release's clients trust, global.provisioningIdentity, which the
+provisioning chart refuses to render unless its own identity equals. The
+administrator credential its signed cases also need is signing material and is
+never here. */ -}}
+{{- $provisioningProfile := dict
+  "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
+-}}
+{{- $provisioningIdentity := .Values.global.provisioningIdentity | default dict -}}
+{{- if and $provisioningIdentity.scheme $provisioningIdentity.identifier -}}
+  {{- $_ := set $provisioningProfile "authority_scheme" $provisioningIdentity.scheme -}}
+  {{- $_ := set $provisioningProfile "authority_identifier" $provisioningIdentity.identifier -}}
+{{- end -}}
+{{- $_ := set $generated "provisioning" $provisioningProfile -}}
+{{- /* The release's development buyer, where its e2e-tests chart states one.
+That buyer signs and pays from one EIP-191 account, so the chart's public buyer
+principal is its wallet address, which contract validation reads. Its signing
+material is never here: a smoke test that signs as the buyer reads it from a
+Secret-backed profile. */ -}}
+{{- $buyer := dict -}}
+{{- $e2e := index .Values "e2e-tests" | default dict -}}
+{{- $e2eBuyer := (($e2e.buyer | default dict).identity) | default dict -}}
+{{- if and $e2e.enabled (eq ($e2eBuyer.scheme | default "") "eip191") $e2eBuyer.identifier -}}
+  {{- $_ := set $buyer "wallet_address" $e2eBuyer.identifier -}}
+{{- end -}}
+{{- /* The release's clients trust global.registryIdentity as its registry; the
+registry signs as its own chart's identity. Where the release runs its registry
+and both are stated, they are one identity. */ -}}
+{{- $registryChart := .Values.registry | default dict -}}
+{{- if and $registryChart.enabled $registryChart.identity .Values.global.registryIdentity -}}
+  {{- $signs := $registryChart.identity -}}
+  {{- $trusted := .Values.global.registryIdentity -}}
+  {{- $signsPrincipal := $signs.principal | default dict -}}
+  {{- $trustedPrincipal := $trusted.principal | default dict -}}
+  {{- if or (ne (toString $signs.authority) (toString $trusted.authority)) (ne (toString $signsPrincipal.scheme) (toString $trustedPrincipal.scheme)) (ne (toString $signsPrincipal.identifier) (toString $trustedPrincipal.identifier)) -}}
+    {{- fail "global.registryIdentity, the registry the release's clients trust, must equal registry.identity, the identity its registry signs as (authority, scheme, and identifier)" -}}
+  {{- end -}}
+{{- end -}}
+{{- $bareMetal := index .Values "bare-metal-storefront" | default dict -}}
+{{- if .Values.storefront.enabled -}}
+{{- /* A release running the VM storefront: provisioning calls back one of its
+agents and must trust that agent's signer, and the smoke tests target an agent
+and the registry it publishes to. */ -}}
+{{- $agents := .Values.storefront.agents | default dict -}}
 {{- if not $agents -}}
   {{- fail "helm test config requires at least one storefront agent" -}}
 {{- end -}}
 {{- $provisioningTargetName := .Values.provisioning.storefront.agentName -}}
 {{- $provisioningStorefrontFound := false -}}
 {{- $provisioningStorefrontTrusted := false -}}
-{{- range $agent := $agents -}}
-  {{- if eq $agent.name $provisioningTargetName -}}
+{{- range $name, $agent := $agents -}}
+  {{- if eq $name $provisioningTargetName -}}
     {{- $provisioningStorefrontFound = true -}}
     {{- $agentIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($agent.config | default dict) "name" "identity") | fromJson -}}
     {{- $agentPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $agentIdentity "name" "principal") | fromJson -}}
@@ -43,21 +95,32 @@ continue to work.
 {{- if not $provisioningStorefrontTrusted -}}
   {{- fail "provisioning storefront principals must include the active storefront signer principal" -}}
 {{- end -}}
-{{- $storefrontTests := .Values.storefront.tests | default dict -}}
-{{- $targetName := $storefrontTests.targetAgentName | default "" -}}
-{{- $targetAgent := first $agents -}}
-{{- if $targetName -}}
-  {{- $found := false -}}
-  {{- range $agent := $agents -}}
-    {{- if eq $agent.name $targetName -}}
-      {{- $targetAgent = $agent -}}
-      {{- $found = true -}}
+{{- /* The release's provisioning service trusts and calls back one storefront,
+this agent; a dedicated bare-metal storefront bound to it in the same release
+would have its requests refused and its callbacks sent here. Its config states
+no sites when the bare-metal chart derives `default` on that service. */ -}}
+{{- if and $bareMetal.enabled .Values.provisioning.enabled -}}
+  {{- $releaseProvisioning := printf "http://%s:%d" .Values.global.provisioning.host (int .Values.global.provisioning.port) -}}
+  {{- $bareMetalCapacity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "capacity") | fromJson -}}
+  {{- $bareMetalSitesKey := include "arkhai.storefrontConfigKey" (dict "doc" $bareMetalCapacity "name" "sites") -}}
+  {{- $bindsReleaseProvisioning := not $bareMetalSitesKey -}}
+  {{- if $bareMetalSitesKey -}}
+    {{- range $_, $siteURL := (index $bareMetalCapacity $bareMetalSitesKey | default dict) -}}
+      {{- if eq (trimSuffix "/" (toString $siteURL)) $releaseProvisioning -}}
+        {{- $bindsReleaseProvisioning = true -}}
+      {{- end -}}
     {{- end -}}
   {{- end -}}
-  {{- if not $found -}}
-    {{- fail (printf "storefront test targetAgentName %q did not match any agent" $targetName) -}}
+  {{- if $bindsReleaseProvisioning -}}
+    {{- fail "the release's provisioning service serves one storefront, the VM storefront's agent; run the bare-metal storefront as a second release with its own provisioning service (helm/bare-metal-release-values.yaml, make helm-topology-up)" -}}
   {{- end -}}
 {{- end -}}
+{{- $storefrontTests := .Values.storefront.tests | default dict -}}
+{{- $targetName := $storefrontTests.targetAgentName | default (first (keys $agents | sortAlpha)) -}}
+{{- if not (hasKey $agents $targetName) -}}
+  {{- fail (printf "storefront test targetAgentName %q did not match any agent" $targetName) -}}
+{{- end -}}
+{{- $targetAgent := merge (dict "name" $targetName) (index $agents $targetName) -}}
 {{- $targetConfig := $targetAgent.config | default dict -}}
 {{- /* Smoke tests talk to the registry the target storefront uses: its first
 configured URL and that URL's trust entry, or the internal registry and the
@@ -74,40 +137,70 @@ agent's internalRegistryTrust. */ -}}
 {{- $settlementConfig := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "settlement") | fromJson -}}
 {{- $alkahestConfig := include "arkhai.storefrontConfigSection" (dict "doc" $settlementConfig "name" "alkahest") | fromJson -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
-{{- $generated := dict -}}
 {{- $schemaVersionKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "schema_version") -}}
 {{- $priorityKey := include "arkhai.storefrontConfigKey" (dict "doc" $settlementConfig "name" "priority") -}}
 {{- $_ := set $generated "settlement" (dict
   "schema_version" ((and $schemaVersionKey (index $settlementConfig $schemaVersionKey)) | default 1)
   "priority" ((and $priorityKey (index $settlementConfig $priorityKey)) | default list)
 ) -}}
-{{- if $rpcUrl -}}
-{{- $rpcConfig := dict "url" $rpcUrl -}}
-{{- if $rpc.chainId -}}
-  {{- $_ := set $rpcConfig "chain_id" $rpc.chainId -}}
-{{- end -}}
-{{- $_ := set $generated "rpc" $rpcConfig -}}
-{{- end -}}
-{{- $_ := set $generated "registry" (dict
+{{- $registryProfile := dict
   "api_url" $registryURL
   "authorities" (dict $registryURL (dict
     "authority" (required "storefront test target registry trust requires an authority" $registryAuthority.authority)
     "principals" (required "storefront test target registry trust requires principals" $registryAuthority.principals)
   ))
-) -}}
-{{- $_ := set $generated $component (dict
+-}}
+{{- /* The registry smoke test pins one EIP-191 registry signer under one
+authority. For the internal registry those are what the release's clients trust,
+global.registryIdentity, which the registry's own identity matches (checked
+above). It verifies only EIP-191 signatures, so another scheme's identity is not
+pinned; and a registry the agent names in registry.urls is not the release's, so
+its pins come only from config.values. */ -}}
+{{- $releaseRegistry := .Values.global.registryIdentity | default dict -}}
+{{- $releaseRegistryPrincipal := $releaseRegistry.principal | default dict -}}
+{{- if and (not $targetUrlsKey) (eq ($releaseRegistryPrincipal.scheme | default "") "eip191") -}}
+  {{- $_ := set $registryProfile "authority_id" (required "the internal registry's smoke-test pins require global.registryIdentity.authority" $releaseRegistry.authority) -}}
+  {{- $_ := set $registryProfile "identifier" (required "the internal registry's smoke-test pins require global.registryIdentity.principal.identifier" $releaseRegistryPrincipal.identifier) -}}
+{{- end -}}
+{{- $_ := set $generated "registry" $registryProfile -}}
+{{- $targetProfile := dict
   "api_url" (printf "http://%s-storefront-%s:%d" .Release.Name $targetAgent.name (int $targetAgent.port))
   "base_url_override" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "base_url") | default "base_url")) | default "")
   "agent_id" ((get $targetConfig (include "arkhai.storefrontConfigKey" (dict "doc" $targetConfig "name" "agent_id") | default "agent_id")) | default "")
-) -}}
-{{- if and (eq (include "arkhai.storefrontConfigValue" (dict "doc" $alkahestConfig "name" "enabled")) "true") $rpc.enabled $rpc.host $rpc.port -}}
-{{- $_ := set $generated "buyer" (dict
-  "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port))
-) -}}
+-}}
+{{- /* The target's wallet, which contract validation reads, where its config
+states one. */ -}}
+{{- $targetWallet := include "arkhai.storefrontConfigSection" (dict "doc" $targetConfig "name" "wallet") | fromJson -}}
+{{- $targetWalletAddress := include "arkhai.storefrontConfigValue" (dict "doc" $targetWallet "name" "address") -}}
+{{- if $targetWalletAddress -}}
+  {{- $_ := set $targetProfile "wallet_address" $targetWalletAddress -}}
 {{- end -}}
-{{- $_ := set $generated "provisioning" (dict
-  "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
-) -}}
+{{- $_ := set $generated $component $targetProfile -}}
+{{- if and (eq (include "arkhai.storefrontConfigValue" (dict "doc" $alkahestConfig "name" "enabled")) "true") $rpc.enabled $rpc.host $rpc.port -}}
+{{- $_ := set $buyer "chain_rpc_url" (printf "ws://%s:%d" $rpc.host (int $rpc.port)) -}}
+{{- end -}}
+{{- else if and $bareMetal.enabled .Values.provisioning.enabled -}}
+{{- /* A release running the dedicated bare-metal storefront and no VM
+storefront, such as a seller release publishing to another release's registry:
+its provisioning service calls the bare-metal storefront back, so it must trust
+that storefront's signer. No VM agent or registry is the smoke tests' target. */ -}}
+{{- $bareMetalIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "identity") | fromJson -}}
+{{- $bareMetalPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $bareMetalIdentity "name" "principal") | fromJson -}}
+{{- $bareMetalScheme := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "scheme") -}}
+{{- $bareMetalIdentifier := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "identifier") -}}
+{{- $bareMetalTrusted := false -}}
+{{- range $principal := (.Values.provisioning.storefrontIdentity.principals | default list) -}}
+  {{- if and $bareMetalIdentifier (eq $principal.scheme $bareMetalScheme) (eq $principal.identifier $bareMetalIdentifier) -}}
+    {{- $bareMetalTrusted = true -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $bareMetalTrusted -}}
+  {{- fail "provisioning storefront principals must include the bare-metal storefront's config.Identity.principal" -}}
+{{- end -}}
+{{- end -}}
+{{- if $buyer -}}
+{{- $_ := set $generated "buyer" $buyer -}}
+{{- end -}}
 {{- $rendered := mergeOverwrite (deepCopy $generated) (deepCopy ($config.values | default dict)) -}}
 apiVersion: v1
 kind: ConfigMap

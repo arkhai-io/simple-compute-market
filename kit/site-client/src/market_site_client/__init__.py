@@ -5,6 +5,7 @@ read/reserve/commit and operator resource registration/update.
 from market_site_client.client import (  # noqa: F401
     CAPACITY_DEFINITION_ROUTE_CONTRACTS,
     CAPACITY_ROUTE_CONTRACTS,
+    AuthorityTrust,
     CapacityRouteContract,
     SiteCapacityAdminClient,
     SiteCapacityAdminClientError,

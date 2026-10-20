@@ -22,8 +22,10 @@ from .capacity import (
     remote_site_clients,
     run_capacity_event_pollers,
 )
+from .capacity_remote import SiteEventCycle
 from .cycle import (
     PublicationCycleDriver,
+    PublicationCycleStopped,
     PublicationCycleReport,
     converge_registries,
 )
@@ -35,6 +37,12 @@ from .publication import (
     PublicationRuntime,
     RegistryDivergence,
     ReconciliationPlan,
+)
+from .site_projections import (
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
+    SiteProjectionState,
+    freshly_confirmed,
 )
 
 __all__ = [
@@ -60,10 +68,16 @@ __all__ = [
     "remote_site_clients",
     "PublicationCandidate",
     "PublicationCycleDriver",
+    "PublicationCycleStopped",
     "PublicationCycleReport",
     "PublicationDomainHooks",
     "PublicationRepository",
     "PublicationRuntime",
     "RegistryDivergence",
     "ReconciliationPlan",
+    "CAPACITY_BUCKET",
+    "RESOURCE_POOL",
+    "SiteEventCycle",
+    "SiteProjectionState",
+    "freshly_confirmed",
 ]

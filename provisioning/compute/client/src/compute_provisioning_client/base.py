@@ -4,16 +4,17 @@ Every request carries the caller's version 2 proof over its method, the route's
 signed operation and resource, a request identity, a timestamp, and the digest
 of its canonical body; every response must carry a valid proof from one of the
 pinned authority principals acting as ``service`` before its body is trusted.
-The variants differ only in how they send.
+The pinned set is either fixed when the client is built or read from a provider
+at each response's verification. The variants differ only in how they send.
 """
 
 from __future__ import annotations
 
 import hashlib
 import time
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeAlias
 
 import httpx
 from compute_provisioning_contracts import (
@@ -45,6 +46,13 @@ from market_identity import (
 from .errors import ComputeProvisioningAuthenticationError, ComputeProvisioningError
 
 CALLER_ROLES = frozenset({"seller", "admin"})
+
+#: The authority principals a response must come from: a fixed set, or a
+#: provider called at each response's verification. A provider lets trust that
+#: rotates in durable state reach a long-lived client without rebuilding it.
+#: It is called synchronously, on an async client's event loop too, so it
+#: should read only local state.
+AuthorityTrust: TypeAlias = TrustedIdentitySet | Callable[[], TrustedIdentitySet]
 
 
 def _unix_time() -> int:
@@ -90,7 +98,7 @@ class SigningBase:
         base_url: str,
         signer: Signer,
         caller_role: str,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         max_timestamp_skew: int,
     ) -> None:
@@ -98,9 +106,13 @@ class SigningBase:
             raise TypeError("signer must implement market_identity.Signer")
         if caller_role not in CALLER_ROLES:
             raise ValueError("caller_role must be 'seller' or 'admin'")
-        if not isinstance(expected_authorities, TrustedIdentitySet):
+        if not (
+            isinstance(expected_authorities, TrustedIdentitySet)
+            or callable(expected_authorities)
+        ):
             raise TypeError(
-                "expected_authorities must be a market_identity.TrustedIdentitySet"
+                "expected_authorities must be a market_identity.TrustedIdentitySet "
+                "or a callable returning one"
             )
         if max_timestamp_skew < 0:
             raise ValueError("max_timestamp_skew must not be negative")
@@ -206,6 +218,29 @@ class SigningBase:
             raise ComputeProvisioningError(str(detail), status_code=response.status_code)
         return body
 
+    def _current_authorities(self, status_code: int) -> TrustedIdentitySet:
+        """The principals this response must come from, read now.
+
+        A provider that fails, or returns anything but a trusted set, fails the
+        response closed, as an untrusted signer would.
+        """
+
+        if isinstance(self._expected_authorities, TrustedIdentitySet):
+            return self._expected_authorities
+        try:
+            authorities = self._expected_authorities()
+        except Exception as exc:
+            raise ComputeProvisioningAuthenticationError(
+                "provisioning authority trust could not be resolved",
+                status_code=status_code,
+            ) from exc
+        if not isinstance(authorities, TrustedIdentitySet):
+            raise ComputeProvisioningAuthenticationError(
+                "provisioning authority trust provider returned no trusted identity set",
+                status_code=status_code,
+            )
+        return authorities
+
     def _verify(self, response: httpx.Response, signed: Signed, body: Any) -> None:
         try:
             principal = Identity(
@@ -238,7 +273,7 @@ class SigningBase:
             now=_unix_time(),
             max_skew=self._max_timestamp_skew,
             expected_role="service",
-            expected_principals=self._expected_authorities,
+            expected_principals=self._current_authorities(response.status_code),
             expected_method=signed.method,
             expected_operation=signed.operation,
             expected_resource=signed.resource,
@@ -259,4 +294,11 @@ class SigningBase:
         return response.json()
 
 
-__all__ = ["CALLER_ROLES", "Signed", "SigningBase", "multipart_descriptor", "wire_query"]
+__all__ = [
+    "CALLER_ROLES",
+    "AuthorityTrust",
+    "Signed",
+    "SigningBase",
+    "multipart_descriptor",
+    "wire_query",
+]

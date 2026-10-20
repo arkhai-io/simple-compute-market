@@ -91,6 +91,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},

@@ -8,7 +8,8 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from functools import partial
+from typing import Any, ClassVar
 
 from arkhai_vms import normalize_vm_provision_terms
 from arkhai_vms_listings import extract_compute_from_order
@@ -17,11 +18,15 @@ from arkhai_vms_settlement import (
     token_resource_from_accepted_escrow,
 )
 from arkhai_vms_settlement.fulfillment import reconcile_or_submit_compute_fulfillment
-from arkhai_vms_settlement.proposals import escrow_proposal_from_accepted_entry
 from core_storefront import build_domain_settlement_artifacts
 from core_storefront.models.settle_models import AgreementSettleResponse
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
+from market_alkahest import RELEASE_MODELS
+from market_alkahest.proposals import (
+    escrow_proposal_from_accepted_entry,
+    selected_release_condition,
+)
 from market_arkhai_payments import (
     MandatePolicyError,
     PaymentSettlementData,
@@ -35,6 +40,7 @@ from market_core.schemas import (
 )
 from market_identity import Identity
 
+import market_storefront.container as _container
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
     apply_fulfillment_failure_policy,
@@ -80,12 +86,25 @@ class PaymentSettleResult:
 
 @dataclass(frozen=True)
 class VmAlkahestSellerStage:
+    # Whether a deal through this entry settles from the accepted Agreement
+    # alone, with no settlement plan. Declared by every VM seller stage: an
+    # exact selection of a mechanism the registry builds no obligation for is
+    # accepted without a plan only when its entry says so. An Alkahest escrow
+    # is verified against its plan, which this entry materializes itself.
+    settles_from_agreement: ClassVar[bool] = False
+    # Called with the settlement build context and the listing the deal was
+    # negotiated against, whose release conditions authorize the escrow's.
     build_plan: Callable[..., Any]
     mechanism: str = "alkahest.v1"
     # Whether settling through this stage delivers through VM capacity-backed
     # fulfillment. Required of every VM seller stage, with no default, because
     # publication drops such a stage's options from an unbacked listing.
     fulfils_through_capacity: bool = field(kw_only=True)
+    # The Alkahest release models this entry can deliver, from
+    # market_alkahest.RELEASE_MODELS. Composition refuses a configured
+    # [Settlement.alkahest] model outside them, so a listing never advertises
+    # a release condition its deal could not honour.
+    release_models: frozenset[str] = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         chains = tuple(
@@ -101,13 +120,6 @@ class VmAlkahestSellerStage:
             else {}
         )
 
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return {
-            str(clause.mechanism_input["chain"])
-            for clause in clauses
-            if isinstance(clause.mechanism_input.get("chain"), str)
-        }
-
     def accepted_artifacts(
         self, *, domain: Any, context: Any, listing: Mapping[str, Any],
         selection: Any, option: Mapping[str, Any], build_selection: Callable,
@@ -115,12 +127,17 @@ class VmAlkahestSellerStage:
         entry = option.get("params", {}).get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow")
+        # The escrow settles under the listing's authorized condition, and a
+        # condition the buyer's proposal selects beside its option must be that
+        # one: the selection names the option, never the condition.
         proposal = escrow_proposal_from_accepted_entry(
             listing=dict(listing), entry=dict(entry),
             expiration_unix=selection.expiration_unix,
+            demand=selected_release_condition(context.proposal),
         )
         artifacts = build_domain_settlement_artifacts(
-            domain, replace(context, proposal=proposal), build_plan=self.build_plan,
+            domain, replace(context, proposal=proposal),
+            build_plan=partial(self.build_plan, listing=dict(listing)),
         )
         return {
             **dict(artifacts.supplemental),
@@ -264,6 +281,7 @@ class VmAlkahestSellerStage:
             db,
             FulfillmentFailureContext(**fields, escrow_uid=evidence.settlement_ref),
             capacity=build_capacity_runtime(lambda: db),
+            site_projections=_container.resolved_site_projections,
         )
 
     async def refund_failed_delivery(
@@ -285,8 +303,10 @@ class VmAlkahestSellerStage:
         selected = agreement.get("settlement")
         if not isinstance(selected, Mapping) or selected.get("mechanism") != self.mechanism:
             raise ValueError("accepted Agreement does not select Alkahest")
+        # Only the accepted proposal carries the release condition the seller
+        # authorized; the buyer's opening is not a substitute for it.
         data = thread.get("settlement_data") or {}
-        proposal = data.get("accepted_escrow_proposal") or thread.get("buyer_escrow_proposal")
+        proposal = data.get("accepted_escrow_proposal")
         if not isinstance(proposal, dict) or "chain_name" not in proposal:
             raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
         return proposal
@@ -399,14 +419,13 @@ class VmAlkahestSellerStage:
 
 @dataclass(frozen=True)
 class VmPaymentsSellerStage:
+    # A payment deal settles from the Agreement's mandate and receipt.
+    settles_from_agreement: ClassVar[bool] = True
     mechanism: str = "arkhai.payments.v1"
     fulfils_through_capacity: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
-
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return set()
 
     def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
         return build_selection()
@@ -492,6 +511,7 @@ class VmPaymentsSellerStage:
             db,
             FulfillmentFailureContext(**fields),
             capacity=build_capacity_runtime(lambda: db),
+            site_projections=_container.resolved_site_projections,
         )
 
     def revalidate(
@@ -686,14 +706,13 @@ class VmContactSellerStage:
     settle, delivery or refund operation.
     """
 
+    # Its plan is built by the registration's obligation builder.
+    settles_from_agreement: ClassVar[bool] = False
     mechanism: str = CONTACT_MECHANISM
     fulfils_through_capacity: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
-
-    def publication_chains(self, clauses: Any) -> set[str]:
-        return set()
 
     def accepted_artifacts(self, *, build_selection: Callable, **_: Any) -> dict[str, Any]:
         return build_selection()
@@ -713,8 +732,10 @@ class VmContactSellerStage:
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
         {
+            # A VM listing may be a preemptible spot shape, so VM delivers every
+            # release model, the interruptible splitter included.
             "alkahest.v1": VmAlkahestSellerStage(
-                build_plan, fulfils_through_capacity=True
+                build_plan, fulfils_through_capacity=True, release_models=RELEASE_MODELS
             ),
             # A payment deal provisions its VM through capacity, like Alkahest.
             "arkhai.payments.v1": VmPaymentsSellerStage(fulfils_through_capacity=True),

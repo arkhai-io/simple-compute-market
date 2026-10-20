@@ -35,8 +35,10 @@ enable_registry_discovery = true
 # Negotiation watchdog
 negotiation_timeout_seconds   = 1800
 negotiation_watchdog_interval = 60
-# Shared settlement-servicing worker cadence (seconds).
-claims_sweep_interval = 30
+# Shared settlement-servicing worker cadence (seconds): how often due
+# obligations are serviced. The earlier name, claims_sweep_interval, refuses
+# startup naming this key.
+settlement_servicing_interval_seconds = 30
 
 [identity]
 scheme     = ""

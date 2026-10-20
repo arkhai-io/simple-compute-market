@@ -15,6 +15,7 @@ from market_identity import Ed25519Signer
 from market_storefront.services.system_service import SystemService
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
@@ -33,10 +34,13 @@ def _make_service(
     *,
     projection_status_provider=None,
     listing_cardinality_mode_explanation_provider=None,
+    site_projections=None,
 ) -> SystemService:
     return SystemService(
         sqlite_client=db,
         marketplace_signer=MARKETPLACE_SIGNER,
+        site_projections=site_projections
+        or site_projection_state({"site-a": FakeProjectionSite(resource_pools=[])}),
         agent_id="test-agent",
         projection_status_provider=projection_status_provider,
         listing_cardinality_mode_explanation_provider=listing_cardinality_mode_explanation_provider,
@@ -90,15 +94,23 @@ class TestGetHealthSiteProjections:
         result = await svc.get_health(include_registry=False)
         assert "site_projections" not in result
 
-    async def test_default_provider_is_the_real_projection_status_summary(self, db):
-        """With no provider injected, get_health falls back to the real
-        production source rather than silently returning nothing."""
-        svc = _make_service(db)  # no projection_status_provider -- exercises the default
+    async def test_default_provider_reports_the_injected_projection_state(self, db):
+        """With no provider injected, get_health reports the projection state
+        it was given, each family by its own state and never its rows."""
+        site = FakeProjectionSite(resource_pools=[{"pool_id": "pool-1"}])
+        state = site_projection_state({"site-a": site})
+        await state.poll_once()
+        svc = _make_service(db, site_projections=state)
         result = await svc.get_health(include_registry=True)
-        # No sites are configured/loaded in this process, so the real
-        # summary is an empty dict, not None -- proving the default path
-        # actually ran rather than swallowing an exception.
-        assert result["site_projections"] == {}
+
+        families = result["site_projections"]["site-a"]
+        assert families["resource_pool"]["state"] == "loaded"
+        assert families["resource_pool"]["revision"] == 1
+        assert families["resource_pool"]["digest"]
+        assert "pool-1" not in str(families)
+        # The site serves no bucket projection, so that family never loaded.
+        assert families["capacity_bucket"]["state"] == "unavailable"
+        assert families["capacity_bucket"]["last_error"]
 
     async def test_one_site_unavailable_is_reported_outside_the_health_gate(self, db):
         """An unavailable/invalid site must be reported, not gated on.
@@ -200,15 +212,19 @@ class TestGetHealthListingModeExplanations:
         result = await svc.get_health(include_registry=False)
         assert "listing_cardinality_mode_explanations" not in result
 
-    async def test_default_provider_is_the_real_listing_cardinality_mode_explanations(self, db):
-        """With no provider injected, get_health falls back to the real
-        production source rather than silently returning nothing."""
-        svc = _make_service(db)  # no listing_cardinality_mode_explanation_provider injected
+    async def test_default_provider_reads_the_injected_projection_state(self, db):
+        """With no provider injected, get_health reports the notices of the
+        projection state it was given."""
+        site = FakeProjectionSite(resource_pools=[{
+            "pool_id": "gpu-pool", "resources": [],
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
+        }])
+        state = site_projection_state({"site-a": site})
+        await state.poll_once()
+        svc = _make_service(db, site_projections=state)
         result = await svc.get_health(include_registry=True)
-        # No sites are configured/loaded in this process, so the real
-        # function returns an empty dict, not None -- proving the default
-        # path actually ran rather than swallowing an exception.
-        assert result["listing_cardinality_mode_explanations"] == {}
+
+        assert set(result["listing_cardinality_mode_explanations"]) == {"site-a"}
 
     async def test_reporting_failure_does_not_add_a_checks_entry(self, db):
         def _boom():

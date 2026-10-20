@@ -28,8 +28,9 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
     storefront_config_files,
 )
 from market_config.registry_url import normalize_registry_url
+from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
 
@@ -207,6 +208,135 @@ def get_evm_wallet_private_key(source: Dynaconf | None = None) -> str:
     return str(active.get("wallet.private_key", "") or "").strip()
 
 
+def settlement_servicing_interval(source: Dynaconf | None = None) -> float:
+    """Seconds between the settlement servicing sweeps:
+    `settlement_servicing_interval_seconds`, thirty unless stated, refused by
+    key unless it is a positive, finite number of seconds that can be applied
+    to an instant."""
+
+    active = settings if source is None else source
+    return _positive_seconds(
+        active.get("settlement_servicing_interval_seconds", 30),
+        key="settlement_servicing_interval_seconds",
+    )
+
+
+def introduction_retention_sweep_interval(seconds: Any) -> float:
+    """The introduction retention sweep's interval,
+    `[Settlement.contact].retention_sweep_interval_seconds`, refused by key
+    unless it is a positive, finite number of seconds that can be applied to an
+    instant."""
+
+    return _positive_seconds(seconds, key="Settlement.contact.retention_sweep_interval_seconds")
+
+
+_POSITIVE_SECONDS: TypeAdapter[float] = TypeAdapter(PositiveSeconds)
+_SITE_AUTHORITY_URL: TypeAdapter[str] = TypeAdapter(SiteAuthorityUrl)
+
+
+def _validated_setting(adapter: TypeAdapter[Any], value: Any) -> tuple[Any, str | None]:
+    """``value`` validated by a shared setting type, and ``None``; or ``None``
+    and the reason the type refused it, which names no configured value.
+
+    The caller raises its refusal outside this handler, so the refusal carries
+    no exception context: a `ValidationError` keeps the value it refused.
+    """
+
+    try:
+        return adapter.validate_python(value), None
+    except ValidationError as exc:
+        return None, "; ".join(
+            str(error.get("ctx", {}).get("error", error["msg"])) for error in exc.errors()
+        )
+
+
+def configured_capacity_sites(source: Dynaconf | None = None) -> dict[str, str]:
+    """`[capacity.sites]`: each stable site ID and its authority URL, an
+    HTTP(S) origin; a URL that is not one is refused under its site's key."""
+
+    active = settings if source is None else source
+    raw_sites = active.get("capacity.sites")
+    if not raw_sites:
+        raise RuntimeError(
+            "No capacity site authority configured: [capacity.sites] must map "
+            "each stable site ID to an authority URL."
+        )
+    sites: dict[str, str] = {}
+    for raw_name, raw_url in dict(raw_sites).items():
+        site_id = str(raw_name).strip()
+        if not site_id:
+            raise RuntimeError("capacity site IDs must be non-empty")
+        url, reason = _validated_setting(_SITE_AUTHORITY_URL, raw_url)
+        if reason is not None:
+            raise RuntimeError(f"[capacity.sites.{site_id}] {reason}")
+        sites[site_id] = url
+    return sites
+
+
+#: The site-projection poller's interval when `[capacity].poll_interval` is unset.
+_DEFAULT_POLL_INTERVAL_SECONDS = 5.0
+
+#: How many poll intervals a confirmed generation confirms a listing-source
+#: check for, when `[capacity].source_confirmation_seconds` is not stated.
+_CONFIRMATION_POLL_INTERVALS = 3
+
+
+def site_projection_poll_interval(source: Dynaconf | None = None) -> float:
+    """`[capacity].poll_interval`: seconds between the projection poller's
+    cycles and the capacity-event pollers', five unless stated.
+
+    A stated value that is not a positive, finite number of seconds that can be
+    applied to an instant is refused by key rather than defaulted: it also sets
+    the default source-confirmation window, which must stay a usable bound.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("capacity.poll_interval")
+    if stated is None:
+        return _DEFAULT_POLL_INTERVAL_SECONDS
+    return _positive_seconds(stated, key="capacity.poll_interval")
+
+
+def source_confirmation_seconds(source: Dynaconf | None = None) -> float:
+    """How old a site's last confirmed poll may be for a listing-source check
+    to rely on it: `[capacity].source_confirmation_seconds`, else three poll
+    intervals.
+
+    A cache turns stale only when a poll fails, so while no poll runs -- the
+    loops held with trading live, or a poller that has stopped -- a generation
+    would stay loaded indefinitely; this window is what bounds how far a
+    source check can lag its site. An operator holding the loops restores it by
+    stepping `site-projections`.
+    """
+
+    active = settings if source is None else source
+    stated = active.get("capacity.source_confirmation_seconds")
+    if stated is not None:
+        return _positive_seconds(stated, key="capacity.source_confirmation_seconds")
+    derived = _CONFIRMATION_POLL_INTERVALS * site_projection_poll_interval(active)
+    window, reason = _validated_setting(_POSITIVE_SECONDS, derived)
+    if reason is not None:
+        # The interval is usable, but three of them are not: refused by the
+        # interval's key, since no window is stated.
+        raise ValueError(
+            "[capacity.poll_interval] sets [capacity].source_confirmation_seconds "
+            f"when it is not stated, to {_CONFIRMATION_POLL_INTERVALS} poll "
+            f"intervals, which {reason}"
+        )
+    return window
+
+
+def _positive_seconds(value: Any, *, key: str) -> float:
+    """A stated duration, refused by key unless it is a positive, finite number
+    of seconds that can be applied to an instant without leaving `datetime`'s
+    range."""
+
+    seconds, reason = _validated_setting(_POSITIVE_SECONDS, value)
+    if reason is not None:
+        raise ValueError(f"[{key}] {reason}")
+    return seconds
+
+
 class AdministratorDeclaration(BaseModel):
     """One ``[Identity.administrators.<subject>]`` entry."""
 
@@ -347,18 +477,6 @@ def get_registry_authorities(
             f"(missing={missing}, unexpected={unexpected})"
         )
     return authorities
-
-
-def get_provisioning_authorities(
-    source: Dynaconf | None = None,
-) -> TrustedIdentitySet:
-    """Return the ordered public trust pins for the provisioning service."""
-
-    active = settings if source is None else source
-    return _trusted_identity_set(
-        active.get("provisioning.identity.principals"),
-        field="provisioning.identity",
-    )
 
 
 def get_service_peer_configs(

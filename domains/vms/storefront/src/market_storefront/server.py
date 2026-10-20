@@ -15,7 +15,9 @@ negotiation runtime.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from core_storefront.app_composition import default_storefront_app_config
@@ -23,9 +25,10 @@ from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
 )
+from core_storefront.service_peers import ServicePeerConfigs, ServicePeerTrust
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_capacity_publication import CapacityRuntime
+from market_capacity_publication import CapacityRuntime, SiteProjectionState
 from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
@@ -52,7 +55,6 @@ from market_storefront.middleware.admin_identity import (
 )
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.middleware.service_peer_auth import (
-    initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
@@ -60,7 +62,7 @@ from market_storefront.utils.config import (
     AGENT_ID,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
-    get_registry_authorities,
+    get_service_peer_configs,
     resolve_marketplace_signer,
     settings,
     storefront_domain_registry,
@@ -77,7 +79,8 @@ from market_storefront.services.publication_terms import (
     parse_configured_admissibility_default,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.services.site_projection_cache import refresh_site_resource_pools
+from market_storefront.settlement_composition import require_vm_release_model
+from market_storefront.startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +179,7 @@ def build_pool_override_service(
     *,
     sqlite_client: Any,
     capacity_runtime: Any,
+    site_projections: SiteProjectionState,
     admissibility_default: Declaration | None,
 ) -> Any:
     """Compose the pool-override kit's service over this storefront's effects.
@@ -184,9 +188,10 @@ def build_pool_override_service(
     shapes against ``admissibility_default``, the configured default
     publication also resolves with. A write is checked
     against the named site through the capacity runtime's signed client,
-    refreshes only that site's resource-pool cache, and wakes the publication
-    loop; status is judged against the source publication derives from. The
-    lifespan and the publication test harness compose it identically.
+    refreshes only that site's held projections, and wakes the publication
+    loop; status is judged against the held resource-pool projection
+    publication derives from. The lifespan and the publication test harness
+    compose it identically.
     """
     contribution = VmPoolOverrideContribution(
         db_path=sqlite_client.db_path,
@@ -199,8 +204,8 @@ def build_pool_override_service(
         site_client=lambda site_id: capacity_runtime.site_client(site_id),
         contributions={contribution.offering_mode: contribution},
         compile_clauses=compile_publication_clauses,
-        projection_source=site_pool_projection,
-        refresh_site=refresh_site_resource_pools,
+        projection_source=partial(site_pool_projection, site_projections),
+        refresh_site=site_projections.refresh_site,
         wake_publication=wake_publication_loop,
     )
 
@@ -233,6 +238,8 @@ class VmStorefrontServices:
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
     capacity_runtime: CapacityRuntime
+    site_projections: SiteProjectionState
+    service_peer_trust: ServicePeerTrust
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
     negotiation_service: Any
@@ -244,11 +251,30 @@ class VmStorefrontServices:
     introduction_delivery: Any
 
 
+@dataclass(frozen=True, slots=True)
+class VmCompositionSeams:
+    """What the composition root reads its service-peer trust and its startup
+    refusal through.
+
+    The defaults are production's: the configured service peers, the durable
+    trust over the storefront's database, and the refusal of a configuration
+    that states a retired setting or could never publish. A test of the root's
+    wiring supplies compatible objects instead of patching the module.
+    """
+
+    service_peer_configs: Callable[[], ServicePeerConfigs] = get_service_peer_configs
+    service_peer_trust: Callable[[str, ServicePeerConfigs], ServicePeerTrust] = (
+        ServicePeerTrust
+    )
+    startup_refusal: Callable[[], None] = require_publishable_storefront
+
+
 def _build_vm_services(
     *,
     registry: StorefrontDomainRegistry,
     binding: StorefrontDomainBinding,
     domain: MarketDomainContract,
+    seams: VmCompositionSeams = VmCompositionSeams(),
 ) -> VmStorefrontServices:
     registration = registry.resolve_registration(binding)
     if registration.contract is not domain:
@@ -256,17 +282,37 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read stops startup rather than publishing without it.
+    # cannot read, an Alkahest release model it cannot deliver, or a
+    # configuration under which it could never publish stops startup rather
+    # than running without it.
     admissibility_default = parse_configured_admissibility_default()
+    require_vm_release_model(domain)
+    seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = _build_alkahest_clients()
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
+    # Each site's responses and callbacks are verified against its service
+    # peer's principals, which this trust holds once the lifespan seeds it.
+    service_peer_trust = seams.service_peer_trust(
+        sqlite_client.db_path, seams.service_peer_configs()
+    )
+    site_projections: SiteProjectionState | None = None
+    # Capacity reconciliation reads the state built just below, over this
+    # runtime's own aggregate; the provider is read when a delta arrives.
     capacity_runtime = build_capacity_runtime_for(
         lambda: sqlite_client,
         signer=marketplace_signer,
+        site_projections=lambda: site_projections,
+        service_peer_trust=service_peer_trust,
+    )
+    # One state per process, over the runtime's own aggregate: every consumer
+    # reads it, and a resource-pool change a poll observes wakes publication.
+    site_projections = SiteProjectionState(
+        capacity_runtime.client(),
+        on_resource_pool_change=wake_publication_loop,
     )
     settlement_composition = _build_settlement_composition(
         domain=domain,
@@ -279,6 +325,7 @@ def _build_vm_services(
         registry=registry,
         binding=binding,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         accepted_obligation_dispatch=(
             settlement_composition.accepted_obligation_dispatch()
         ),
@@ -289,6 +336,7 @@ def _build_vm_services(
         binding=binding,
         domain=domain,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
@@ -301,10 +349,12 @@ def _build_vm_services(
     system_service = _build_system_service(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
+        site_projections=site_projections,
     )
     pool_override_service = build_pool_override_service(
         sqlite_client=sqlite_client,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
         admissibility_default=admissibility_default,
     )
     known_origins = capacity_runtime.site_ids
@@ -326,6 +376,8 @@ def _build_vm_services(
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
         capacity_runtime=capacity_runtime,
+        site_projections=site_projections,
+        service_peer_trust=service_peer_trust,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
         negotiation_service=negotiation_service,
@@ -350,12 +402,12 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
     try:
         _container.resolved_sqlite_client = services.sqlite_client
         _container.resolved_marketplace_signer = services.marketplace_signer
-        if settings.enable_registry_discovery:
-            get_registry_authorities()
         initialize_administrator_identities(services.sqlite_client.db_path)
-        initialize_service_peer_identities(services.sqlite_client.db_path)
+        services.service_peer_trust.seed()
+        _container.resolved_service_peer_trust = services.service_peer_trust
         _container.resolved_alkahest_clients = services.alkahest_clients
         _container.resolved_capacity_runtime = services.capacity_runtime
+        _container.resolved_site_projections = services.site_projections
         _container.resolved_listing_service = services.listing_service
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service
@@ -433,9 +485,20 @@ from market_storefront.controllers.system_controller import (  # noqa: E402
     router as system_router,
 )
 
+# Registers every loop's step, which the lifecycle routes run; startup registers
+# each loop's timer over the same step and starts it.
+import market_storefront.lifecycle_steps  # noqa: E402,F401
 
-def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
-    """Build the VM HTTP application from one explicit frozen registry."""
+
+def build_vm_storefront_app(
+    *,
+    registry: StorefrontDomainRegistry,
+    seams: VmCompositionSeams = VmCompositionSeams(),
+):
+    """Build the VM HTTP application from one explicit frozen registry.
+
+    ``seams`` defaults to production's service-peer trust and startup refusal.
+    """
 
     registration = registry.resolve_mode("vm")
     selected_domain = validate_vm_storefront_domain(registration.contract)
@@ -450,6 +513,7 @@ def build_vm_storefront_app(*, registry: StorefrontDomainRegistry):
             registry=registry,
             binding=selected_binding,
             domain=domain,
+            seams=seams,
         )
 
     return build_composed_storefront_app(

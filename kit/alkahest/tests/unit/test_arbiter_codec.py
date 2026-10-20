@@ -10,8 +10,8 @@ plugs into the same registry. These tests pin down:
   touching the existing flow.
 - RecipientArbiterCodec encoding: SDK RecipientArbiterDemandData bytes
   round-trips through eth_abi.decode back to the same address.
-- build_payment_obligation_data dispatches through the codec: the
-  produced demand bytes match what the codec returns directly.
+- Legacy verification's recipient obligation dispatches through the codec:
+  the produced demand bytes match what the codec returns directly.
 """
 
 from dataclasses import dataclass
@@ -23,12 +23,12 @@ from market_alkahest.alkahest import (
     AgreementContext,
     ArbiterCodec,
     RecipientArbiterCodec,
-    build_payment_obligation_data,
     encode_recipient_demand,
     get_arbiter_codec,
     known_arbiter_kinds,
     register_arbiter_codec,
 )
+from market_alkahest.escrow_verification import _legacy_recipient_obligation_data
 
 
 _SELLER_WALLET = "0x" + "ab" * 20
@@ -152,11 +152,11 @@ def test_recipient_codec_ignores_price_and_duration():
 
 
 # ---------------------------------------------------------------------------
-# build_payment_obligation_data dispatch
+# legacy recipient obligation dispatch
 # ---------------------------------------------------------------------------
 
 
-def test_build_payment_obligation_data_dispatches_through_codec(restore_registry):
+def test_legacy_recipient_obligation_data_dispatches_through_codec(restore_registry):
     """Replace the recipient codec with a sentinel and verify the
     builder calls it (rather than reaching past the registry into
     legacy helpers)."""
@@ -175,7 +175,7 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
 
     register_arbiter_codec(_CapturingCodec())
 
-    obligation_data = build_payment_obligation_data(
+    obligation_data = _legacy_recipient_obligation_data(
         seller_wallet=_SELLER_WALLET,
         agreed_amount=500,
         duration_seconds=7200,
@@ -199,9 +199,9 @@ def test_build_payment_obligation_data_dispatches_through_codec(restore_registry
     assert obligation_data["amount"] == 500
 
 
-def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
+def test_legacy_recipient_obligation_data_raises_for_unknown_arbiter_kind():
     with pytest.raises(ValueError, match="nonexistent_arbiter"):
-        build_payment_obligation_data(
+        _legacy_recipient_obligation_data(
             seller_wallet=_SELLER_WALLET,
             agreed_amount=1000,
             duration_seconds=3600,
@@ -211,7 +211,7 @@ def test_build_payment_obligation_data_raises_for_unknown_arbiter_kind():
         )
 
 
-def test_build_payment_obligation_data_amount_unchanged_by_codec_swap(restore_registry):
+def test_legacy_recipient_obligation_data_amount_unchanged_by_codec_swap(restore_registry):
     """The amount comes straight from the negotiated agreed_amount —
     swapping arbiters doesn't change it."""
     class _NoopCodec:
@@ -224,7 +224,7 @@ def test_build_payment_obligation_data_amount_unchanged_by_codec_swap(restore_re
             return b""
 
     register_arbiter_codec(_NoopCodec())
-    result = build_payment_obligation_data(
+    result = _legacy_recipient_obligation_data(
         seller_wallet=_SELLER_WALLET,
         agreed_amount=500,
         duration_seconds=1800,

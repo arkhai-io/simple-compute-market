@@ -7,9 +7,11 @@ from core_storefront.domain_registry import (
     StorefrontDomainBinding,
     StorefrontDomainRegistry,
 )
-from market_capacity_publication import CapacityRuntime, CapacitySite
+from market_capacity_publication import CapacityRuntime, CapacitySite, SiteProjectionState
 from market_core import MarketDomainContract
 from market_identity import Signer, TrustedIdentitySet
+
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 async def _noop_reconcile(_context: object) -> None:
@@ -51,6 +53,8 @@ class VmListingCollaborators:
     binding: StorefrontDomainBinding
     domain: MarketDomainContract
     capacity_runtime: CapacityRuntime
+    #: Holds nothing until polled; its one site serves no pools.
+    site_projections: SiteProjectionState
 
 
 def vm_listing_collaborators(
@@ -67,5 +71,8 @@ def vm_listing_collaborators(
         capacity_runtime=build_test_capacity_runtime(
             signer=signer,
             authorities=authorities,
+        ),
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
         ),
     )

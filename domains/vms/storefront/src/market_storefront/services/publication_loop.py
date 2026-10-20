@@ -37,7 +37,6 @@ from arkhai_vms_listings.listing_comparison import (
 from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
-    derivation_reports,
     open_listing_resource_keys,
     ReconciliationScope,
     stale_open_listing_ids,
@@ -48,13 +47,14 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    SiteProjectionState,
     converge_registries,
 )
 from market_resource_pools_contracts.backing import capacity_backing
 
 import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.lifecycle import PUBLICATION, gate, idle
+from market_storefront.lifecycle import enter_stage
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
     VmPublicationSourceCallbacks,
@@ -97,12 +97,25 @@ _DEFAULT_INTERVAL_SECONDS = 30.0
 
 # Set when a site's resource-pool projection generation changes, so a change a
 # site declares reaches the loop without waiting out its interval. A held loop
-# stays held: the gate is consulted before any work either way.
+# stays held: the controller's timer reads its gate before any work either way.
 _WAKE = asyncio.Event()
 
 
 def wake_publication_loop() -> None:
     _WAKE.set()
+
+
+def new_publication_wake() -> asyncio.Event:
+    """A fresh wake for a publication timer about to be registered.
+
+    An event is bound to the event loop that first waits on it, so each start
+    of the loops registers its own; `wake_publication_loop` sets whichever is
+    current. A wake raised before the timer starts is not carried over, which
+    loses nothing: the timer's first cycle runs as soon as it starts.
+    """
+    global _WAKE
+    _WAKE = asyncio.Event()
+    return _WAKE
 
 
 def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -128,18 +141,25 @@ class VmPublicationCycle:
         sqlite_client: Any,
         listing_service: Any,
         capacity_runtime: Any,
+        site_projections: SiteProjectionState,
         registry: Any,
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
         admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
+        enter_stage: Callable[[str], None] | None = None,
     ) -> None:
+        """``enter_stage`` names each stage the cycle reaches -- ``compose``,
+        ``run``, ``converge`` -- so a failure is recorded in the stage it
+        happened in; the loop controller's, when a cycle runs under it."""
         self._db = sqlite_client
+        self._enter_stage = enter_stage or (lambda _stage: None)
         self._admissibility_default = admissibility_default
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
+        self._site_projections = site_projections
         self._registry = registry
         self._storefront_url = storefront_url
         self._wallet_address = wallet_address
@@ -161,12 +181,14 @@ class VmPublicationCycle:
     # -- cycle -----------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
+        self._enter_stage("compose")
         self._sites = tuple(self._capacity.site_ids)
         if not self._sites:
+            self._enter_stage("converge")
             await self._converge_registries()
             return self._report()
-        self._projection = site_pool_projection()
-        self._buckets = site_capacity_buckets()
+        self._projection = site_pool_projection(self._site_projections)
+        self._buckets = site_capacity_buckets(self._site_projections)
         try:
             self._availability = dict(await self._capacity.availability())
         except Exception as exc:
@@ -187,8 +209,10 @@ class VmPublicationCycle:
                 reopen_existing=self._reopen_existing,
             ),
         )
+        sources = selection.build_sources()
+        self._enter_stage("run")
         await self._driver.run(
-            selection.build_sources(),
+            sources,
             db_path=self._db.db_path,
             base_url=self._storefront_url,
             build_payload=self._build_payload,
@@ -196,6 +220,7 @@ class VmPublicationCycle:
             close_stale=self._availability is not None,
             skip_open=False,
         )
+        self._enter_stage("converge")
         await self._converge_registries()
         return self._report()
 
@@ -217,6 +242,9 @@ class VmPublicationCycle:
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
+        # A preview derives exactly as the cycle would and publishes no
+        # derivation report, so status keeps describing the last cycle that ran.
+        reports: dict[str, dict[str, Any]] = {}
         candidates = available_compute_slices(
             db_path,
             member_availability=self._availability,
@@ -228,6 +256,8 @@ class VmPublicationCycle:
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
+            record_reports=not self.dry_run,
+            reports=reports,
         )
         for kind, site_id, source_id in sorted(holds):
             if kind == "site":
@@ -242,7 +272,6 @@ class VmPublicationCycle:
         # derivation's own report rather than from the candidates, because a
         # pool with no available slice yields no candidate and is held all
         # the same.
-        reports = derivation_reports()
         for site_id in sorted(self._projection):
             for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
                 self.report.record(
@@ -260,6 +289,7 @@ class VmPublicationCycle:
             scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
             admissibility_default=self._admissibility_default,
+            record_reports=not self.dry_run,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -502,23 +532,35 @@ class VmPublicationCycle:
         )
 
 
-async def run_publication_cycle_once(*, dry_run: bool) -> dict[str, Any]:
-    """Run, or preview, exactly one publication cycle — the timer's cycle."""
+async def run_publication_cycle_once(
+    *, dry_run: bool, site_projections: SiteProjectionState | None = None
+) -> dict[str, Any]:
+    """Run, or preview, exactly one publication cycle — the timer's cycle.
 
+    ``site_projections`` is the storefront's state; without one, the cycle reads
+    the state the composition root put in the container. Resolving the
+    cycle's collaborators, the domain registry among them, is its ``compose``
+    stage.
+    """
+
+    enter_stage("compose")
     cycle = VmPublicationCycle(
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,
         capacity_runtime=container.resolved_capacity_runtime,
+        site_projections=site_projections or container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
         wallet_address=get_evm_wallet_address() or "",
         dry_run=dry_run,
         admissibility_default=container.resolved_admissibility_default,
+        enter_stage=enter_stage,
     )
     return await cycle.run()
 
 
-def _interval_seconds() -> float:
+def publication_interval_seconds() -> float:
+    """``[capacity].publication_interval_seconds``, the timer's wait between cycles."""
     capacity = getattr(settings, "capacity", None)
     return float(
         getattr(capacity, "publication_interval_seconds", 0)
@@ -526,25 +568,10 @@ def _interval_seconds() -> float:
     )
 
 
-async def publication_loop(
-    run_cycle: Callable[..., Awaitable[dict[str, Any]]] = run_publication_cycle_once,
-) -> None:
-    """Timer-driven publication, woken early by a projection change."""
-    while True:
-        if gate(PUBLICATION):
-            await asyncio.sleep(0.05)
-            continue
-        _WAKE.clear()
-        try:
-            await run_cycle(dry_run=False)
-        except Exception:
-            logger.exception("[PUBLICATION] publication cycle failed")
-        await idle(_interval_seconds(), wake=_WAKE)
-
-
 __all__ = [
     "VmPublicationCycle",
-    "publication_loop",
+    "new_publication_wake",
+    "publication_interval_seconds",
     "run_publication_cycle_once",
     "wake_publication_loop",
 ]

@@ -12,10 +12,10 @@ dependencies = [
   # creation. Imported lazily from the domain-owned escrow client so
   # loading the CLI does not pay the native-binary cost unless a deal settles.
   "alkahest-py==1.1.2",
-  "arkhai-core-buyer>=0.4.0",
+  "arkhai-core-buyer>=0.5.0",
   "arkhai-core>=0.4.0",
   "arkhai-apicredits-domain>=0.5.0",
-  "arkhai-kit-alkahest",
+  "arkhai-kit-alkahest>=0.7.0",
   "arkhai-kit-arkhai-payments>=0.2.0",
   "arkhai-kit-config",
   "arkhai-kit-identity==0.4.0",

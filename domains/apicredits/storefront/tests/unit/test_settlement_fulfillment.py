@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_alkahest import RECIPIENT_RELEASE
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
@@ -232,7 +233,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
         credits_client=CreditsServiceClient("http://tokens:8082", "k"),
     )
     result = await settlement_stages.AlkahestSellerStage(
-        fulfils_through_capacity=True
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
     ).continue_delivery(
         result, evidence=evidence, client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=fake_submit)),
         composition=composition,
@@ -551,6 +552,11 @@ async def settled_db(tmp_path, monkeypatch):
     )
     token = "0x" + "01" * 20
     escrow_addr = "0x" + "11" * 20
+    condition = {
+        "chain_name": "anvil",
+        "arbiter": "0x" + "33" * 20,
+        "demand_data": {"recipient": "0x" + "22" * 20},
+    }
     await upsert_bound_listing(
         client,
         listing_id="L-tok",
@@ -566,6 +572,8 @@ async def settled_db(tmp_path, monkeypatch):
                 "rates": [{"field": "amount", "per": "token", "value": "100"}],
             }
         ],
+        # The address book's recipient arbiter paying the seller wallet.
+        demands=[condition],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://seller:8002",
@@ -584,6 +592,7 @@ async def settled_db(tmp_path, monkeypatch):
             fields={"token": token, "amount": 300},
             literal_fields={"token": token},
             rates=[{"field": "amount", "per": "token", "value": "100"}],
+            demand=condition,
             expiration_unix=1_800_000_000,
         ),
         terms=ProvisionTerms(
@@ -924,7 +933,9 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
 async def test_a_stage_without_seller_refunds_refuses_the_route_and_skips_the_action():
     from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
 
-    stage = AlkahestSellerStage(fulfils_through_capacity=True)
+    stage = AlkahestSellerStage(
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
+    )
     with pytest.raises(SettlementRefusal) as refused:
         await stage.refund(db=None, composition=None, negotiation_id="neg-alkahest")
     assert refused.value.status_code == 409

@@ -20,8 +20,14 @@ import pytest
 from market_pool_overrides import PoolOverrideClient, pool_override_statuses
 from storefront_client import StorefrontClientError
 
-from market_storefront.services import site_projection_cache
-from tests.publication_app import SITE, SITE_B, pool, publication_app, settlement_clause
+from tests._settings_overrides import replaced_setting
+from tests.publication_app import (
+    SITE,
+    SITE_B,
+    pool,
+    publication_app,
+    settlement_clause,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -53,6 +59,10 @@ def _overrides(world) -> PoolOverrideClient:
 
 
 async def _cycle(world, loop: str = "publication") -> dict:
+    """One cycle of ``loop``; a publication cycle follows the projection
+    poller's, so it reads what the harness's sites now serve."""
+    if loop == "publication":
+        await world.client.admin_run_lifecycle_cycle("site-projections")
     return await world.client.admin_run_lifecycle_cycle(loop)
 
 
@@ -98,6 +108,7 @@ def _site_calls(site) -> list:
 async def test_an_accepted_write_reports_feasibility_and_the_live_generation(world):
     world.pools.append(_shaped())
     too_big = {"gpu": {"count": 1, "model": "H100"}, "memory": {"gib": 4096}}
+    fetched = world.projection.snapshots["resource_pool"]
 
     written = await _overrides(world).put_pool_override(
         _record(listing_shapes=[OVERRIDE_SHAPE, too_big], terms={"sla": 99.5})
@@ -107,8 +118,8 @@ async def test_an_accepted_write_reports_feasibility_and_the_live_generation(wor
     assert written.projection.revision == world.site.pool_projection_revision
     assert written.projection.digest
     assert written.override.terms == {"sla": 99.5}
-    # The write refreshed the written site's cache in place.
-    assert world.projection.snapshots == 1
+    # The write refreshed the written site's held projection in place.
+    assert world.projection.snapshots["resource_pool"] == fetched + 1
 
 
 async def test_an_override_replacing_hint_shapes_republishes_and_survives_reconciliation(tmp_path):
@@ -180,6 +191,27 @@ async def test_commercial_terms_reach_the_published_listing(world):
     ((_, row),) = (await _open_rows(world)).items()
     assert row["listing_resource"]["sla"] == 97.5
     assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
+
+
+async def test_a_storefront_with_no_configured_clauses_publishes_a_pool_whose_override_states_them(
+    world,
+):
+    """A storefront's terms may live in its pools: with no storefront-wide
+    settlement clause, a pool resolving none publishes nothing, and one whose
+    override states clauses publishes under them. That such a storefront starts
+    is tests/unit/test_startup_refusal.py's."""
+    with replaced_setting("pricing.settlements", []):
+        world.pools.append(_shaped())
+        await _cycle(world)
+        assert await _open_rows(world) == {}
+
+        await _overrides(world).put_pool_override(
+            _record(settlements=[settlement_clause(rate="7")])
+        )
+        await _cycle(world)
+
+        ((_, row),) = (await _open_rows(world)).items()
+        assert row["accepted_escrows"][0]["rates"][0]["value"] == "7"
 
 
 async def test_an_override_rate_reaches_the_published_listing(world):
@@ -260,12 +292,14 @@ async def test_a_refresh_failure_does_not_fail_the_write(world):
     world.pools.append(_shaped())
     await _cycle(world)
     world.projection.failing = True
+    fetched = world.projection.snapshots["resource_pool"]
 
     written = await _overrides(world).put_pool_override(_record(listing_shapes=[OVERRIDE_SHAPE]))
 
     assert written.override.listing_shapes == [OVERRIDE_SHAPE]
-    assert world.projection.snapshots == 1  # the refresh was attempted
-    # The cache keeps its last generation, and publication still applies the write.
+    # The refresh was attempted.
+    assert world.projection.snapshots["resource_pool"] == fetched + 1
+    # The state keeps its last generation, and publication still applies the write.
     await _cycle(world)
     assert [r["ram_gb"] for r in (await _open_listings(world)).values()] == [16]
 
@@ -296,14 +330,22 @@ async def test_an_override_at_a_non_home_site_is_checked_stored_and_published_th
         world.pools.append(_shaped())
         world.pools_b.append(_shaped())
         await _cycle(world)
+        fetched = (
+            world.projection.snapshots["resource_pool"],
+            world.projection_b.snapshots["resource_pool"],
+        )
 
         await _overrides(world).put_pool_override(
             _record(site_id=SITE_B, listing_shapes=[OVERRIDE_SHAPE])
         )
 
-        # The write reached site-b's authority, and refreshed only site-b's cache.
+        # The write reached site-b's authority, and refreshed only site-b's
+        # held projection.
         assert _site_calls(world.site) == [] and len(_site_calls(world.site_b)) == 1
-        assert (world.projection.snapshots, world.projection_b.snapshots) == (0, 1)
+        assert (
+            world.projection.snapshots["resource_pool"],
+            world.projection_b.snapshots["resource_pool"],
+        ) == (fetched[0], fetched[1] + 1)
         (stored,) = await _stored(world)
         assert (stored.site_id, stored.pool_id) == (SITE_B, "gpu")
 
@@ -550,7 +592,15 @@ async def test_a_site_with_no_projection_holds_its_listings_and_its_override_is_
         before = await _open_listings(world)
         assert len(before) == 2
 
-        removed = site_projection_cache._caches.pop(SITE_B)
+    # The storefront restarts while site-b cannot be reached, so it holds no
+    # projection of site-b at all.
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        second_site=True,
+        unreachable_sites=(SITE_B,),
+    ) as world:
+        world.pools.append(_shaped())
         result = await _cycle(world)
 
         # Unknown is not empty: site-b's listing is neither closed nor refreshed.
@@ -562,21 +612,25 @@ async def test_a_site_with_no_projection_holds_its_listings_and_its_override_is_
         assert (await _states(world))[(SITE_B, "gpu", "vm")] == "unknown"
 
         # When the site returns, its listings reconcile against it as usual.
-        site_projection_cache._caches[SITE_B] = removed
-        world.pools_b.clear()
+        world.projection_b.failing = False
         assert (await _cycle(world))["counts"] == {"close": 1}
 
 
-async def test_with_no_site_known_nothing_is_derived_or_closed(world):
-    world.pools.append(_shaped())
-    await _cycle(world)
-    before = await _open_listings(world)
+async def test_with_no_site_known_nothing_is_derived_or_closed(tmp_path):
+    async with publication_app(tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE) as world:
+        world.pools.append(_shaped())
+        await _cycle(world)
+        before = await _open_listings(world)
 
-    site_projection_cache._caches.pop(SITE)
-    result = await _cycle(world)
+    # Restarted while its one site cannot be reached.
+    async with publication_app(
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, unreachable_sites=(SITE,)
+    ) as world:
+        world.pools.append(_shaped())
+        result = await _cycle(world)
 
-    assert await _open_listings(world) == before
-    assert "publish" not in result["counts"] and "close" not in result["counts"]
+        assert await _open_listings(world) == before
+        assert "publish" not in result["counts"] and "close" not in result["counts"]
 
 
 async def _published_backed_pool(world, gpu_count: int) -> dict[int, str]:

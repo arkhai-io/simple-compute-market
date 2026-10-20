@@ -3,20 +3,99 @@
 Turns negotiated ``EscrowProposal``s into the accepted-escrow response
 artifacts (settlement plan + legacy flat terms) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
-every scalar-escrow domain (moved here from ``arkhai_vms_settlement``
-when the API-credits domain became the second consumer).
+every domain that settles through an Alkahest escrow.
+
+An escrow settles only under a release condition its listing authorizes,
+whatever seller policies ran: every function here that builds a proposal or
+materializes an obligation takes the listing and authorizes the condition
+itself (``market_alkahest.release_authorization``), refusing a selection the
+listing does not authorize and a listing authorizing none. A seller policy
+such as an escrow-shape guard may refuse earlier, but nothing here relies on
+one having run, and no caller can reach a materialized condition its listing
+does not authorize.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from market_alkahest.plans import escrow_terms_from_settlement_plan
+from market_alkahest.alkahest import (
+    address_to_slot,
+    encode_authorized_release_condition,
+)
+from market_alkahest.plans import (
+    escrow_terms_from_settlement_plan,
+    materialize_settlement_plan_from_proposal,
+)
+from market_alkahest.release_authorization import (
+    ReleaseConditionError,
+    authorized_release_condition,
+    authorized_release_conditions,
+    selected_release_condition,
+)
 from market_alkahest.schemas import (
     EscrowProposal,
     accepted_demands,
     accepted_token_address,
 )
+
+__all__ = [
+    "ReleaseConditionError",
+    "SettlementPlanMaterializationError",
+    "accepted_escrow_artifacts_from_proposal",
+    "authorize_escrow_proposal",
+    "authorized_escrow_proposal_at_amount",
+    "authorized_release_condition",
+    "authorized_release_conditions",
+    "escrow_proposal_from_accepted_entry",
+    "proposal_is_oracle_gated",
+    "proposal_is_splitter_gated",
+    "selected_release_condition",
+    "validate_selected_escrow_plan",
+]
+
+
+class SettlementPlanMaterializationError(ValueError):
+    """An accepted escrow cannot be materialized as its settlement plan.
+
+    An Alkahest deal is accepted only with the plan its settlement is verified
+    against, so any failure to build that plan from an authorized proposal
+    refuses the acceptance rather than leaving artifacts without one. A
+    release condition the listing does not authorize, or cannot be encoded, is
+    refused separately with ``ReleaseConditionError``. The message starts with
+    ``settlement_plan_unmaterializable``.
+    """
+
+
+def _escrow_proposal(proposal: EscrowProposal | Mapping[str, Any] | Any) -> EscrowProposal:
+    if isinstance(proposal, EscrowProposal):
+        return proposal
+    return EscrowProposal.model_validate(
+        proposal.model_dump() if hasattr(proposal, "model_dump") else proposal
+    )
+
+
+def authorize_escrow_proposal(
+    proposal: EscrowProposal | Mapping[str, Any],
+    *,
+    listing: Any,
+) -> EscrowProposal:
+    """``proposal`` settling under exactly the condition ``listing`` authorizes.
+
+    The proposal's own selection is kept only when the listing authorizes it on
+    the proposal's chain, and replaced by the listing's form of it; a proposal
+    selecting none takes the listing's authorized condition. Its escrow address
+    plays no part, so a proposal that leaves its contract unpinned is held to
+    the listing all the same. Raises ``ReleaseConditionError``.
+    """
+    model = _escrow_proposal(proposal)
+    condition = authorized_release_condition(
+        listing,
+        chain_name=model.chain_name,
+        selected=selected_release_condition(model),
+    )
+    return model.model_copy(update={"demand": condition, "demands": None})
 
 
 def escrow_proposal_from_accepted_entry(
@@ -24,21 +103,23 @@ def escrow_proposal_from_accepted_entry(
     listing: dict[str, Any],
     entry: dict[str, Any],
     expiration_unix: int,
+    demand: Any = None,
 ) -> EscrowProposal:
-    """Build the buyer's negotiation proposal from a selected listing entry."""
-    from market_alkahest.schemas import accepted_demands, accepted_token_address
+    """Build the proposal for a selected listing entry, under its authorized condition.
 
+    ``demand`` is a condition the caller selected; it must be one the listing
+    authorizes on the entry's chain. Without it the listing's authorized
+    condition on that chain is used. Raises ``ReleaseConditionError`` when the
+    listing authorizes none, or not the one selected.
+    """
     literal_fields = dict(entry.get("literal_fields") or {})
     token = accepted_token_address(entry)
     if token:
         literal_fields["token"] = token
     selected_chain = entry.get("chain_name")
-    matching_demands = [
-        demand
-        for demand in accepted_demands(listing)
-        if not demand.get("chain_name") or demand.get("chain_name") == selected_chain
-    ]
-    selected_demand = matching_demands[0] if matching_demands else None
+    condition = authorized_release_condition(
+        listing, chain_name=str(selected_chain or ""), selected=demand
+    )
     # A native-token escrow has no token. Naming one as None would put a
     # ``token`` key into the materialized obligation data that the chain's
     # obligation never carries, so the escrow could never verify.
@@ -48,7 +129,7 @@ def escrow_proposal_from_accepted_entry(
         fields={"token": token} if token else {},
         literal_fields=literal_fields,
         rates=entry.get("rates") or [],
-        demand=selected_demand,
+        demand=condition,
         expiration_unix=expiration_unix,
     )
 
@@ -58,15 +139,19 @@ def validate_selected_escrow_plan(
     *,
     listing: dict[str, Any],
     entry: dict[str, Any],
+    addr_config_path: str | None = None,
 ) -> None:
     """Check an accepted plan funds the escrow a buyer's selection names.
 
     A selection names a listing's accepted-escrow entry rather than carrying
     escrow terms, and the seller materializes it into one concrete
     ``alkahest.v1`` obligation. That obligation must be on the entry's chain
-    and escrow contract, in its token, and collected through the arbiter the
-    listing's demand advertises for that chain. Amount and expiry are the
-    negotiation's and are checked by its caller. Raises ``ValueError``.
+    and escrow contract, in its token, and released under the condition the
+    listing authorizes on that chain: its arbiter, and its demand data encoded
+    through that arbiter's codec, which ``addr_config_path`` (the chain's
+    address book) resolves. A listing authorizing no condition fails. Amount and
+    expiry are the negotiation's and are checked by its caller. Raises
+    ``ValueError``.
     """
     # Read through the wire form: the plan may be any model of the shared
     # settlement-plan contract, not only this codec's.
@@ -84,16 +169,15 @@ def validate_selected_escrow_plan(
     token = accepted_token_address(entry)
     if token and str(term.obligation_data.get("token", "")).lower() != token.lower():
         raise ValueError("selected Alkahest plan escrows another token")
-    demands = [
-        demand
-        for demand in accepted_demands(listing)
-        if not demand.get("chain_name") or demand.get("chain_name") == chain
-    ]
-    arbiter = demands[0].get("arbiter") if demands else None
-    if arbiter and str(term.obligation_data.get("arbiter", "")).lower() != str(
-        arbiter
-    ).lower():
+    arbiter, demand = encode_authorized_release_condition(
+        listing, chain_name=str(chain or ""), config_path=addr_config_path
+    )
+    if str(term.obligation_data.get("arbiter", "")).lower() != arbiter.lower():
         raise ValueError("selected Alkahest plan names another arbiter")
+    if str(term.obligation_data.get("demand", "")).lower() != demand.lower():
+        raise ValueError(
+            "selected Alkahest plan names another demand than the listing authorizes"
+        )
 
 
 def proposal_is_oracle_gated(
@@ -103,8 +187,6 @@ def proposal_is_oracle_gated(
 ) -> bool:
     """True when the proposal's demand tree gates collection on a
     trusted oracle (directly or inside an AllArbiter conjunction)."""
-    from market_alkahest.alkahest import address_to_slot
-    from market_alkahest.schemas import accepted_demands
 
     chain = (
         proposal.chain_name
@@ -142,8 +224,6 @@ def proposal_is_splitter_gated(
     chain_config_paths: dict[str, str | None] | None = None,
 ) -> bool:
     """True when collection routes through a splitter arbiter."""
-    from market_alkahest.alkahest import address_to_slot
-    from market_alkahest.schemas import accepted_demands
 
     chain = (
         proposal.chain_name
@@ -176,33 +256,23 @@ def proposal_is_splitter_gated(
     return False
 
 
-def accepted_escrow_artifacts_from_proposal(
+def authorized_escrow_proposal_at_amount(
     *,
-    proposal: EscrowProposal | dict[str, Any] | None,
+    proposal: EscrowProposal | dict[str, Any],
+    listing: Any,
     agreed_amount: int,
-    duration_seconds: int,
     uses_scalar_amount: bool = True,
-    seller_wallet_address: str | None = None,
-    chain_config_paths: dict[str, str | None] | None = None,
-    heartbeat_interval_seconds: int | None = None,
 ) -> dict[str, Any]:
-    """Build accepted escrow response artifacts from a negotiated proposal.
+    """The proposal as accepted at ``agreed_amount``, without materializing a plan.
 
-    The codec layer owns materialization; the calling domain supplies the
-    agreed amount, the lease duration (0 for durationless deals such as
-    token credits), and the chain address-config lookup.
+    The proposal is authorized against ``listing`` (``authorize_escrow_proposal``),
+    so it names the listing's form of its release condition, and carries the
+    agreed amount when the escrow bargains over one. This is what a seller
+    offers back in a round that does not accept; an acceptance takes
+    ``accepted_escrow_artifacts_from_proposal``, which also builds the plan.
+    Raises ``ReleaseConditionError``.
     """
-    if proposal is None:
-        return {}
-    proposal_model = (
-        proposal
-        if isinstance(proposal, EscrowProposal)
-        else (
-            EscrowProposal.model_validate(proposal.model_dump())
-            if hasattr(proposal, "model_dump")
-            else EscrowProposal.model_validate(proposal)
-        )
-    )
+    proposal_model = authorize_escrow_proposal(proposal, listing=listing)
     fields = dict(proposal_model.fields or {})
     if uses_scalar_amount:
         fields["amount"] = str(agreed_amount)
@@ -215,20 +285,53 @@ def accepted_escrow_artifacts_from_proposal(
         demand=proposal_model.demand,
         expiration_unix=proposal_model.expiration_unix,
     )
+    payload = accepted.model_dump(mode="json")
+    if payload.get("demands") is None:
+        payload.pop("demands", None)
+    return payload
 
-    accepted_payload = accepted.model_dump(mode="json")
-    if accepted_payload.get("demands") is None:
-        accepted_payload.pop("demands", None)
+
+def accepted_escrow_artifacts_from_proposal(
+    *,
+    proposal: EscrowProposal | dict[str, Any] | None,
+    listing: Any,
+    agreed_amount: int,
+    duration_seconds: int,
+    uses_scalar_amount: bool = True,
+    chain_config_paths: dict[str, str | None] | None = None,
+    heartbeat_interval_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Build accepted escrow response artifacts from a negotiated proposal.
+
+    The codec layer owns materialization; the calling domain supplies the
+    listing the proposal was negotiated against, the agreed amount, the lease
+    duration (0 for durationless deals such as token credits), and the chain
+    address-config lookup. The proposal is first authorized against
+    ``listing`` (``authorized_escrow_proposal_at_amount``), so the recorded
+    accepted proposal names the listing's form of its condition and the plan is
+    materialized under exactly that condition.
+
+    Artifacts for a proposal always carry its settlement plan: a condition the
+    listing does not authorize, or that cannot be encoded, raises
+    ``ReleaseConditionError``, and any other failure to materialize the plan
+    raises ``SettlementPlanMaterializationError``, so no caller can accept an
+    escrow without the plan its settlement is verified against. With no
+    proposal there is no escrow, and the artifacts are empty.
+    """
+    if proposal is None:
+        return {}
+    accepted_payload = authorized_escrow_proposal_at_amount(
+        proposal=proposal,
+        listing=listing,
+        agreed_amount=agreed_amount,
+        uses_scalar_amount=uses_scalar_amount,
+    )
+    accepted = EscrowProposal.model_validate(accepted_payload)
     out: dict[str, Any] = {
         "proposal": dict(accepted_payload),
         "accepted_escrow_proposal": dict(accepted_payload),
     }
     try:
-        from market_alkahest.plans import (
-            escrow_terms_from_settlement_plan,
-            materialize_settlement_plan_from_proposal,
-        )
-
         service_terms: dict[str, Any] = {}
         if heartbeat_interval_seconds and proposal_is_oracle_gated(
             accepted, chain_config_paths=chain_config_paths
@@ -246,7 +349,7 @@ def accepted_escrow_artifacts_from_proposal(
             }
         plan = materialize_settlement_plan_from_proposal(
             proposal=accepted,
-            seller_wallet_address=seller_wallet_address,
+            listing=listing,
             agreed_amount=int(agreed_amount),
             duration_seconds=int(duration_seconds),
             addr_config_path=(chain_config_paths or {}).get(accepted.chain_name),
@@ -266,6 +369,11 @@ def accepted_escrow_artifacts_from_proposal(
             payload["obligation_data"] = obligation_data
             accepted_terms.append(payload)
         out["accepted_escrow_terms"] = accepted_terms
+    except ReleaseConditionError:
+        # A condition the listing does not authorize keeps its own reason.
+        raise
     except Exception as exc:
-        out["accepted_escrow_terms_error"] = str(exc)
+        raise SettlementPlanMaterializationError(
+            f"settlement_plan_unmaterializable: {exc}"
+        ) from exc
     return out

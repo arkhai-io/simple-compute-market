@@ -9,8 +9,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core_storefront.stage_log import stage_event
+from market_alkahest.alkahest import get_escrow_codec_for
+from market_alkahest.plans import escrow_terms_from_settlement_plan
+from market_alkahest.schemas import EscrowTerms
 from arkhai_vms_listings.reconciler import (
     closed_available_listing_ids,
+)
+from market_capacity_publication import (
+    CapacityBindingError,
+    SiteProjectionState,
+    capacity_availability,
+    remote_site_clients,
 )
 from market_identity import Identity
 from market_settlement_runtime import FailurePolicy
@@ -18,12 +27,13 @@ from market_settlement_runtime import FailurePolicy
 import market_storefront.container as _container
 
 from market_storefront.services.capacity_client import (
+    build_capacity_runtime,
+    capacity_binding_for_listing,
     site_capacity_buckets,
     site_pool_projection,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.utils.config import (
-    get_evm_wallet_address,
     get_evm_wallet_private_key,
     settings,
 )
@@ -133,18 +143,24 @@ async def _load_failed_thread(
     return await db.load_negotiation_thread_row(negotiation_id=negotiation_id)
 
 
-def _thread_duration_seconds(thread: dict[str, Any]) -> int:
-    for key in ("agreed_duration_seconds", "requested_duration_seconds"):
-        raw = thread.get(key)
-        if raw is None:
-            continue
-        try:
-            duration = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if duration > 0:
-            return duration
-    return 3600
+def _accepted_escrow_obligation(
+    plan: Any, *, chain_name: str, escrow_address: str
+) -> EscrowTerms:
+    """The accepted plan's one Alkahest obligation on this escrow's contract."""
+    if not isinstance(plan, dict):
+        raise ValueError("the negotiation records no accepted settlement plan")
+    matches = [
+        terms
+        for terms in escrow_terms_from_settlement_plan(plan)
+        if terms.chain_name == chain_name
+        and terms.escrow_contract.lower() == escrow_address.lower()
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "the accepted settlement plan holds no single obligation on escrow "
+            f"{escrow_address!r} of chain {chain_name!r}"
+        )
+    return matches[0]
 
 
 async def _refund_from_escrow_proposal(
@@ -155,8 +171,23 @@ async def _refund_from_escrow_proposal(
     buyer_evm_address: str,
     thread: dict[str, Any],
 ) -> dict[str, Any] | None:
-    proposal_raw = thread.get("buyer_escrow_proposal")
+    # Only the accepted proposal carries the release condition the seller
+    # authorized and the escrow was created under; the buyer's opening is not
+    # a substitute, so a deal that recorded none is refused rather than refunded
+    # from it.
+    settlement_data = thread.get("settlement_data")
+    proposal_raw = (
+        settlement_data.get("accepted_escrow_proposal")
+        if isinstance(settlement_data, dict)
+        else None
+    )
     if not isinstance(proposal_raw, dict):
+        if isinstance(thread.get("buyer_escrow_proposal"), dict):
+            return {
+                "action": "refund",
+                "status": "failed",
+                "reason": "accepted_escrow_proposal_unavailable",
+            }
         return None
     if not ctx.escrow_uid or not hasattr(db, "load_escrow"):
         return {"action": "refund", "status": "skipped", "reason": "escrow_uid_unknown"}
@@ -172,12 +203,6 @@ async def _refund_from_escrow_proposal(
             "status": "failed",
             "reason": "escrow_chain_unknown",
         }
-
-    from market_alkahest.alkahest import (
-        get_escrow_codec_for,
-        materialize_escrow_terms_from_proposal,
-    )
-    from market_core.schemas import EscrowProposal
 
     from market_storefront.utils.config import CHAINS
 
@@ -198,19 +223,15 @@ async def _refund_from_escrow_proposal(
             "reason": "wallet_private_key_empty",
         }
 
+    # A refund returns the escrow's token and amount, which the accepted plan
+    # recorded when the deal was accepted; it is read from there rather than
+    # materialized again, so a listing changed since acceptance cannot block it.
     try:
-        proposal = EscrowProposal.model_validate(proposal_raw)
-        terms = materialize_escrow_terms_from_proposal(
-            proposal=proposal,
-            seller_wallet_address=get_evm_wallet_address() or None,
-            agreed_amount=(
-                int(thread["agreed_price"])
-                if thread.get("agreed_price") is not None
-                else None
-            ),
-            duration_seconds=_thread_duration_seconds(thread),
-            addr_config_path=chain_cfg.alkahest_address_config_path,
-        )[0]
+        terms = _accepted_escrow_obligation(
+            thread.get("settlement_plan"),
+            chain_name=chain_name,
+            escrow_address=escrow_address,
+        )
         codec = get_escrow_codec_for(
             chain_name,
             escrow_address,
@@ -282,22 +303,14 @@ async def _release_capacity(
     db: Any,
     ctx: FulfillmentFailureContext,
     capacity: Any | None = None,
+    site_projections: SiteProjectionState | None = None,
 ) -> FulfillmentFailurePolicyResult:
-    """Release failed capacity at the listing's exact recorded site."""
-    from market_capacity_publication import capacity_availability, remote_site_clients
+    """Release failed capacity at the listing's exact recorded site.
 
-    from market_storefront.services.capacity_client import (
-        build_capacity_runtime,
-        capacity_binding_for_listing,
-    )
-
-    # Refreshing projections wakes the publication loop, which composes the
-    # settlement table whose seller entries apply this policy; importing it at
-    # module scope would make that composition import itself.
-    from market_storefront.services.site_projection_cache import (
-        refresh_site_projections,
-    )
-
+    Once the site has released the reservation, nothing after it may fail the
+    release: the reopen it reports is best-effort, refreshed from
+    ``site_projections`` when one is given and skipped when not.
+    """
     result = FulfillmentFailurePolicyResult(
         capacity_reservation_id=ctx.capacity_reservation_id
     )
@@ -324,16 +337,30 @@ async def _release_capacity(
         result.resource_id = reservation.get("resource_id")
         result.gpu_count = reservation.get("allocated_gpu_count")
         reopened: list[str] = []
-        if remote_site_clients(runtime.client()):
+        if site_projections is None:
+            logger.warning(
+                "[FAILURE] no site projection state; released %s reopens nothing",
+                result.capacity_reservation_id,
+            )
+        elif remote_site_clients(runtime.client()):
             # The same source publication derives from, refreshed for the site
             # this release just changed, so a reopen here agrees with what
             # publication would keep open and reports this release's own effect.
-            await refresh_site_projections(binding.site_id)
+            # The refresh reconciles inline, so it wakes nothing; a failed fetch
+            # keeps the site's last generation and never raises.
+            try:
+                await site_projections.refresh_site(binding.site_id)
+            except CapacityBindingError:
+                logger.warning(
+                    "[FAILURE] site %s holds no projection here; reopening from "
+                    "what is held",
+                    binding.site_id,
+                )
             reopened = closed_available_listing_ids(
                 db.db_path,
                 member_availability=await capacity_availability(runtime.client()),
-                site_pool_projection=site_pool_projection(),
-                site_capacity_buckets=site_capacity_buckets(),
+                site_pool_projection=site_pool_projection(site_projections),
+                site_capacity_buckets=site_capacity_buckets(site_projections),
                 shape_feasible=vm_shape_feasibility(),
                 configured_sites=runtime.site_ids,
                 admissibility_default=_container.resolved_admissibility_default,
@@ -485,6 +512,7 @@ async def _release_capacity_handler(
         db,
         _context_model(state),
         state.get("_capacity_client"),
+        state.get("_site_projections"),
     )
     state.update(
         {
@@ -550,11 +578,14 @@ async def apply_fulfillment_failure_policy(
     ctx: FulfillmentFailureContext,
     *,
     capacity: Any | None = None,
+    site_projections: SiteProjectionState | None = None,
 ) -> FulfillmentFailurePolicyResult:
     context = dict(ctx.__dict__)
     context["listing_id"] = await _resolve_listing_id(db, ctx)
     if capacity is not None:
         context["_capacity_client"] = capacity
+    if site_projections is not None:
+        context["_site_projections"] = site_projections
     token = _ACTIVE_FAILURE_STATE.set(context)
     try:
         dispatched = await _VM_FAILURE_POLICY.apply(db, context)

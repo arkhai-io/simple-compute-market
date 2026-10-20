@@ -61,12 +61,12 @@ STOREFRONT_PYTHON = Path(STOREFRONT_PROJECT, ".venv/bin/python")
 # The end-to-end pipeline's scenario selections, one per lane; the Helm run reads
 # them from e2e-tests/Makefile so the two lists cannot drift apart.
 PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
-# The scenarios the default charts can serve, run against the Helm deployment. The
-# charts configure no settlement mechanism, so no scenario that creates a listing
-# can pass there; nor do they deploy a second storefront and registry, the
-# API-credits and bare-metal services, or forward Mailpit. Every other pipeline
-# scenario is reported as not run against Helm, never as passed. A scenario joins
-# this list when the charts serve what the pipeline's compose stacks do.
+# The scenarios run against the Helm deployment. The local release enables
+# Alkahest and contact exchange for its one storefront, but the charts deploy no
+# second storefront and registry, none of the API-credits and bare-metal services,
+# and forward no Mailpit, so a scenario that needs any of those cannot pass there.
+# Every other pipeline scenario is reported as not run against Helm, never as
+# passed. A scenario joins this list when the Helm deployment serves what it needs.
 HELM_SCENARIOS = ("contracts", "e2e_alkahest_escrow_codecs")
 NOT_SERVED = ("the default charts do not serve it: no settlement mechanism, and not "
               "every service the pipeline's compose stacks run")

@@ -1175,6 +1175,7 @@ def _pool_rows_from_projection(
     overrides: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
     record_reports: bool = True,
     excluded: set[tuple[str, str, str]] | None = None,
+    reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
@@ -1187,7 +1188,8 @@ def _pool_rows_from_projection(
 
     ``record_reports`` false leaves the published per-site derivation reports
     untouched, for a caller judging a projection other than the one
-    publication derives from.
+    publication derives from, or previewing a cycle. ``reports``, when given,
+    receives each site's report whether or not it is published.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -1244,6 +1246,8 @@ def _pool_rows_from_projection(
                     excluded=excluded,
                 )
             )
+        if reports is not None:
+            reports[site_id] = report.as_dict()
         if record_reports:
             _record_site_report(site_id, report)
     return pool_rows
@@ -1340,14 +1344,16 @@ def available_compute_slices(
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
     excluded: set[tuple[str, str, str]] | None = None,
+    record_reports: bool = True,
+    reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return publishable compute listing slices from the site projections.
 
     ``site_pool_projection`` is the ``site_id -> resource-pool projection rows``
-    mapping the storefront holds (the shape
-    ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
-    produces). It is the only source of listing structure: which pools and
-    members exist comes from it for every site in it, and a configured site
+    mapping the storefront's per-site projection state holds, a site's last
+    generation included while it is stale. It is the only source of listing
+    structure: which pools and members exist comes from it for every site in
+    it, and a configured site
     absent from it is held (below). Shapes and terms resolve through the
     storefront's site-scoped overrides, read through the pool-override kit, then
     each pool's projected hints, then the storefront's configured defaults --
@@ -1402,6 +1408,11 @@ def available_compute_slices(
     ``hint_resolution`` controls how much a pool's own projected
     ``region``/``sla`` hints are trusted relative to the storefront's override
     and configured defaults -- see `arkhai_vms_listings.pool_descriptors`.
+
+    Each site's derivation report is published for status
+    (``derivation_reports``) unless ``record_reports`` is false, as for a
+    previewed cycle, which changes nothing a status reader sees; ``reports``,
+    when given, receives every site's report either way.
     """
     held = holds if holds is not None else set()
     for site_id in configured_sites:
@@ -1420,6 +1431,8 @@ def available_compute_slices(
             shape_feasible=shape_feasible,
             declared_only=declared_range,
             excluded=excluded,
+            record_reports=record_reports,
+            reports=reports,
         )
     finally:
         conn.close()
@@ -1502,6 +1515,7 @@ def current_available_resource_keys(
     configured_sites: Collection[str] = (),
     admissibility_default: Declaration | None,
     excluded: set[tuple[str, str, str]] | None = None,
+    record_reports: bool = True,
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1528,6 +1542,7 @@ def current_available_resource_keys(
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
         excluded=excluded,
+        record_reports=record_reports,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1757,6 +1772,7 @@ def stale_open_listing_ids(
     scope: ReconciliationScope,
     shape_feasible: ShapeFeasibility,
     admissibility_default: Declaration | None,
+    record_reports: bool = True,
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
@@ -1769,6 +1785,8 @@ def stale_open_listing_ids(
     reconciliation acts only on listings availability bounds.
     ``admissibility_default`` is the storefront's configured default, which
     publication applies, so a listing whose offer it excludes is stale here too.
+    ``record_reports`` false, for a previewed cycle, publishes no derivation
+    report (see ``available_compute_slices``).
     """
 
     holds: set[tuple[str, str, str]] = set()
@@ -1783,6 +1801,7 @@ def stale_open_listing_ids(
         configured_sites=configured_sites,
         admissibility_default=admissibility_default,
         excluded=excluded,
+        record_reports=record_reports,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(

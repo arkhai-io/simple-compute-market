@@ -58,7 +58,9 @@ async def offer_introduction(world, site: str, pool_id: str) -> None:
 
 
 async def publish(world) -> dict[str, dict]:
-    """One publication cycle; the open listings keyed by the pool they come from."""
+    """Poll the sites, then one publication cycle; the open listings keyed by
+    the pool they come from."""
+    await world.client.admin_run_lifecycle_cycle("site-projections")
     report = await world.client.admin_run_lifecycle_cycle("publication")
     validate_cycle_report(report)
     page = await world.client.list_listings(status="open", limit=200)

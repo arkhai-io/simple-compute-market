@@ -37,12 +37,13 @@ from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
     pytest.mark.e2e_bare_metal_introduction,
-    pytest.mark.usefixtures("held_loops"),
+    pytest.mark.usefixtures("bare_metal_loops_held"),
 ]
 
 BARE_METAL = "bare_metal"
 CONTACT_MECHANISM = "contact-exchange.v1"
 PUBLICATION = "publication"
+SITE_PROJECTIONS = "site-projections"
 RETENTION = "introduction-retention"
 REGION = "us-west"
 GPU_MODEL = "H200"
@@ -73,20 +74,6 @@ class IntroductionState:
 @pytest.fixture(scope="module")
 def state() -> IntroductionState:
     return IntroductionState()
-
-
-@pytest.fixture(scope="module")
-def held_loops(bare_metal_storefront_admin):
-    """Hold the storefront's timer loops for this module and resume afterwards.
-
-    The scenario steps the retention sweep itself, so its timer must not run
-    the cycle the scenario is about to observe. Resumed in a finaliser so a
-    failing stage does not leave the next module with the loops stopped.
-    """
-    held = bare_metal_storefront_admin.admin_pause_lifecycle_loops()
-    assert held["loops"].get("introduction_retention") == "paused", held
-    yield
-    bare_metal_storefront_admin.admin_resume_lifecycle_loops()
 
 
 @pytest.fixture(scope="module")
@@ -203,6 +190,8 @@ class TestStage01_OfferIntroduction:
                 )
 
         asyncio.run(declare())
+        # The held poller does not see the new pool; one step of it does.
+        bare_metal_storefront_admin.admin_run_lifecycle_cycle(SITE_PROJECTIONS)
         # Only this pool offers introduction: the lane's configured clauses are
         # Alkahest-only, so every other scenario's listings are untouched.
         SyncPoolOverrideClient(bare_metal_storefront_admin).put_pool_override(

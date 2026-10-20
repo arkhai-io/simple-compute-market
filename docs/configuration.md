@@ -81,29 +81,29 @@ or `policy = "..."` is used when one escrow kind needs its own sequence.
 
 ### Bare-metal storefront
 
-The bare-metal storefront reads its seller chain from the environment variable
-`BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES`, a JSON list of the policy names
-below, for example `["escrow_shape_guard", "bisection"]`. Unset, the chain is
+The bare-metal storefront reads its seller chain from `[negotiation].policies` in
+its configuration files (`storefront.toml`, or the `config` a chart renders), the
+same key VM's storefront reads: a list of the policy names below, for example
+`policies = ["escrow_shape_guard", "bisection"]`. Unset, the chain is
 `["escrow_shape_guard", "listed_price"]`: it accepts at or above the listed rate
 and exits below it, so it never counters; a chain ending in `bisection` counters.
 `has_matching_inventory_guard` always runs first, whether named or not, and the
 domain's own checks (lease duration bounds, access method, SSH key) run before
-the chain. An unknown name, or a value that is not JSON, stops the storefront at
-startup.
+the chain. An unknown name stops the storefront at startup.
 
 ### Bundled policies
 
 | Name | Type | Round(s) | Behavior |
 |---|---|---|---|
 | `has_matching_inventory_guard` | Guard | every | Rejects with `no_matching_declaration` when the listing's own source (its site's pool or Physical Resource) no longer declares what it publishes, and with `no_matching_inventory` when a capacity-backed listing's published quantity is not free at its own site. It reads the check the negotiation runtime makes before every seller decision; the runtime also enforces that check itself, at a buyer's or an administrator's acceptance and whatever the chain contains, and refuses a source it cannot confirm with a retryable 503. |
-| `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`. |
+| `escrow_shape_guard` | Guard | every | Rejects with `escrow_field_mismatch` if any seller-pinned key on `accepted_escrows[i].literal_fields` doesn't equal the buyer's value in `escrow_proposal.literal_fields`, and with `release_condition_not_advertised` when the listing advertises no Alkahest release condition on the proposal's chain. A proposal naming no escrow address, or the zero placeholder, passes. It is the early, explained rejection: plan materialization refuses an unauthorized release condition whatever the chain contains. |
 | `max_rounds_guard` | Guard | every | Exits with `max_rounds_reached` once `len(history) >= [negotiation].max_rounds` (default 5). |
 | `bisection` | Decider | every | Bisects between the seller's floor (`accepted_escrows[0]` primary rate × duration) and the peer's latest offer; accepts within ~1% convergence, counters at midpoint, exits with `price_unreasonable` when the peer's offer is below `floor / 1.5`. No ML dependencies. |
 | `listed_price` | Decider | every | Accepts the peer's proposal when its amount is within the side's bound (≥ the floor in `maximize`, ≤ the ceiling in `minimize`); exits with `price_above_bound` otherwise. Never counters beyond the opening; accepts amountless escrow shapes as proposed. |
 | `rl` | Decider | every | Loads the trained pufferlib checkpoint at `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/models/arkhai_negotiator_seller.pt` and produces the next move. Requires the `[rl]` extra (torch + pufferlib). Exits with `torch_unavailable` if torch isn't installed; exits with `model_missing` if the checkpoint isn't at the configured path. |
 | `erc20_bisection`, `native_token_bisection`, `erc1155_bisection` | Decider | every | Escrow-family names for the same scalar-`amount` bisection policy. Useful in `[negotiation.policies]` dispatch tables. |
 | `erc20_rl`, `native_token_rl`, `erc1155_rl` | Decider | every | Escrow-family names for the same scalar-`amount` RL policy. Requires the same torch/checkpoint setup as `rl`. |
-| `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches and never counters. |
+| `accept_exact_listing` | Decider | every | Accepts only when the buyer proposal exactly matches the selected listing escrow entry, listing-level demands, and concrete amount; rejects all mismatches, a listing advertising no release condition on the proposal's chain among them (`exact_listing:release_condition_not_advertised`), and never counters. |
 | `buyer_escrow_shape_guard` | Guard | every | Buyer-side mirror of `escrow_shape_guard`: rejects when the seller's counter changes a field the buyer pinned at round 0 (excludes `amount`, which is what's being negotiated). |
 
 `bisection` is the seller's safe default decider. `rl` is opt-in — keep
