@@ -74,6 +74,3 @@ class BareMetalPoolConfigHandler:
     ) -> None:
         del unit_of_work, pool_id
         self.validate_config(config)
-
-    def delete_config(self, unit_of_work: Any, pool_id: str) -> None:
-        del unit_of_work, pool_id

@@ -45,16 +45,23 @@ the session, and every turn ends with an outcome matching
   run's own record. Otherwise go on and end as the step ends: the wrapper records
   the denial on the outcome whatever it is, and the orchestrating session reads it
   before the change moves on. One denied call is not a denied tool: never report
-  the tool as not allowed. Never do by another tool what a denied call would have
-  done, and never ask about a denial as a question.
+  the tool as not allowed. A call a deny rule refused is forbidden: no other tool
+  does it. A call denied because no rule allows it — the harness reports it as
+  don't ask mode — may be done instead by a tool this step's rules allow for the
+  same work, such as the Edit tool for a shell write or Read or Grep for a shell
+  read; name the substitute in your message. Never ask about a denial as a
+  question.
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
 - **The end is an outcome.** An environmental failure (section 5) is a
   `question` naming the evidence and the remedy, awaiting the owner's word; once
   answered, take only the action the answer names, and rerun the part. When the
-  record is written, end with `finished`, `next` naming triage, or the
-  implementation review when it has not landed.
+  record is written, end with `finished`, `next` naming triage when the record has
+  a `V<n>` or the round's review awaits triage, the implementation review when it
+  has not landed, and otherwise what follows a passing validation of this commit —
+  the next round, the pre-closeout review, closeout, or archive cleanup, as the
+  next-step computation names it. `next` is the owner's to read, never a route.
 
 ## 1. Check that this commit may be validated
 
@@ -65,7 +72,11 @@ run `make round-done`.
 
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
-  branch belongs to another change, stop and ask the owner.
+  branch belongs to another change, stop and ask the owner — unless the change's
+  log holds the owner's decision that it runs on this branch: run
+  `git branch --show-current`, then
+  `python3 scripts/run_change_step.py log <change> --branch <that branch>`; a line
+  it prints is that decision, and the branch is accepted.
 - **Worktree.** `git status --porcelain --untracked-files=all` is empty. Ignored
   files do not count.
 - **Commit.** Record `git rev-parse HEAD` and the branch. Every part below describes
@@ -280,8 +291,11 @@ Report a list that should grow under "About the validation".
 Tell the owner the commit, the result and each part's, the pipeline run and its
 conclusion, the coverage of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and
-anything under "About the validation". Then say what comes next: the
-implementation round — this record, the implementation review of the same commit,
-and the owner's own notes — is triaged together in a fresh session,
+anything under "About the validation". Then say what comes next. When this is a
+round's validation beside its review, or it has a `V<n>`: the implementation
+round — this record, the implementation review of the same commit, and the
+owner's own notes — is triaged together in a fresh session,
 `make triage CHANGE=<change>`, which fixes what the owner accepts; the fix commit
-is then validated again.
+is then validated again. When it is the passing validation of a fix commit, of
+`HEAD` before closeout, or of a closeout correction, the change moves on without a
+triage, to whatever the triage before it recorded.

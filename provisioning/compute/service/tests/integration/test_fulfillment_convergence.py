@@ -61,7 +61,7 @@ def _requirement(**dimensions):
     )
 
 
-def _resource(provider="ansible"):
+def _resource(provider="vm.ansible"):
     return SettlementResource(
         settlement_resource_id="res-1",
         pool_id="pool-1",
@@ -160,7 +160,7 @@ async def test_dispatch_pending_creates_success_transitions_to_dispatching(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -181,7 +181,7 @@ async def test_dispatch_pending_creates_leaves_claim_intact_on_provider_exceptio
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -213,7 +213,7 @@ async def test_converge_creates_success_persists_resource_and_transitions_to_act
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -275,7 +275,7 @@ def _activation_watchdog(session_factory, repo, ledger, metadata):
     return FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
         capacity_ledger=ledger,
     )
@@ -366,7 +366,7 @@ async def test_converge_creates_fails_terminally_on_invalid_resource_metadata(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -396,7 +396,7 @@ async def test_converge_creates_leaves_claim_intact_while_status_is_pending(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -436,7 +436,7 @@ async def test_dispatch_pending_teardowns_success_transitions_to_tearing_down(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -457,7 +457,7 @@ async def test_dispatch_pending_teardowns_leaves_claim_intact_on_provider_except
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -489,7 +489,7 @@ async def test_converge_teardowns_success_updates_resources_and_transitions_to_t
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -539,7 +539,7 @@ async def test_converge_teardowns_leaves_claim_intact_while_status_is_pending(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
     await watchdog.converge_teardowns()
@@ -611,7 +611,7 @@ async def test_advance_cycle_reaches_a_row_this_worker_still_holds(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
     watchdog.pause()
@@ -647,7 +647,7 @@ async def test_advance_cycle_is_refused_while_the_timer_is_live(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": _StubProvider()}),
+        provider_registry=ProviderRegistry({"vm.ansible": _StubProvider()}),
         settings=_settings(),
     )
     assert watchdog.is_paused is False
@@ -681,7 +681,7 @@ async def test_converge_teardowns_provider_failure_is_not_terminal(session_facto
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -711,7 +711,7 @@ async def test_stale_claim_outcome_is_discarded_not_applied(session_factory, rep
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -844,7 +844,7 @@ async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_sta
         session_factory=factory,
         repository=repo,
         provider_registry=ProviderRegistry(
-            {"ansible": _StubProvider(dispatch_create_error=RuntimeError("never gets here"))}
+            {"vm.ansible": _StubProvider(dispatch_create_error=RuntimeError("never gets here"))}
         ),
         settings=_settings(),
     )
@@ -866,7 +866,7 @@ async def test_fresh_watchdog_against_the_same_database_resumes_from_durable_sta
         session_factory=factory,
         repository=repo,
         provider_registry=ProviderRegistry(
-            {"ansible": _StubProvider(
+            {"vm.ansible": _StubProvider(
                 dispatch_create_result=FulfillmentResult(provider_metadata={"job": "2"})
             )}
         ),
@@ -907,7 +907,7 @@ async def test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restar
         session_factory=factory,
         repository=repo,
         provider_registry=ProviderRegistry(
-            {"ansible": _StubProvider(dispatch_teardown_error=RuntimeError("never gets here"))}
+            {"vm.ansible": _StubProvider(dispatch_teardown_error=RuntimeError("never gets here"))}
         ),
         settings=_settings(),
     )
@@ -929,7 +929,7 @@ async def test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restar
         session_factory=factory,
         repository=repo,
         provider_registry=ProviderRegistry(
-            {"ansible": _StubProvider(
+            {"vm.ansible": _StubProvider(
                 dispatch_teardown_result=FulfillmentResult(provider_metadata={"teardown_job": "2"})
             )}
         ),
@@ -1010,7 +1010,7 @@ async def test_transient_dispatch_failure_grows_backoff_without_reaching_a_termi
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": failing_provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": failing_provider}),
         settings=_settings(
             fulfillment_convergence_backoff_initial_seconds=1.0,
             fulfillment_convergence_backoff_multiplier=2.0,
@@ -1063,7 +1063,7 @@ async def test_eventual_convergence_after_repeated_failures_then_success(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": failing_provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": failing_provider}),
         settings=_settings(),
     )
 
@@ -1091,7 +1091,7 @@ async def test_eventual_convergence_after_repeated_failures_then_success(
         db.commit()
 
     watchdog._providers = ProviderRegistry(
-        {"ansible": _StubProvider(
+        {"vm.ansible": _StubProvider(
             dispatch_create_result=FulfillmentResult(provider_metadata={"job": "recovered"})
         )}
     )
@@ -1106,7 +1106,7 @@ async def test_eventual_convergence_after_repeated_failures_then_success(
         db.commit()
 
     watchdog._providers = ProviderRegistry(
-        {"ansible": _StubProvider(
+        {"vm.ansible": _StubProvider(
             status=ProviderStatus(state=ProviderOperationState.succeeded),
             resolve_result=("vm-1",),
         )}
@@ -1170,7 +1170,7 @@ def test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome(tmp_path):
         watchdog = FulfillmentConvergenceWatchdog(
             session_factory=factory,
             repository=repo,
-            provider_registry=ProviderRegistry({"ansible": _StubProvider()}),
+            provider_registry=ProviderRegistry({"vm.ansible": _StubProvider()}),
             settings=_settings(),
             worker_id="worker-a",
         )
@@ -1259,7 +1259,7 @@ async def test_requeue_teardown_failures_makes_teardown_failed_retryable(
     watchdog = FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 
@@ -1405,7 +1405,7 @@ def _watchdog(session_factory, repo, provider):
     return FulfillmentConvergenceWatchdog(
         session_factory=session_factory,
         repository=repo,
-        provider_registry=ProviderRegistry({"ansible": provider}),
+        provider_registry=ProviderRegistry({"vm.ansible": provider}),
         settings=_settings(),
     )
 

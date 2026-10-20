@@ -38,7 +38,7 @@ def _request(**overrides) -> VersionedEnvelope:
 def _resource(**overrides) -> SettlementResource:
     values = {
         "settlement_resource_id": "kvm1", "pool_id": "pool-1", "offering_mode": "vm",
-        "resource_kind": "vm", "provider": "ansible", "host_id": "kvm1",
+        "resource_kind": "vm", "provider": "vm.ansible", "host_id": "kvm1",
     }
     values.update(overrides)
     return SettlementResource(**values)

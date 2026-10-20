@@ -190,6 +190,14 @@ execution, and teardown are owned by the selected provisioning site.
 
 ### Declaring capacity
 
+VM pools declare provider `vm.ansible`. Provisioning migrations canonicalize
+stored `ansible` routing names while preserving pool configuration and existing
+fulfillment state. Use `vm.ansible` in mounted pool documents and operator
+requests before starting the upgraded service; the old name is not a runtime
+alias. A fresh site with a mounted pool document creates its default from that
+document before importing host inventory. Without a document, migration supplies
+the configured VM default.
+
 A site sells what its capacity declarations say. A declaration names its Resource
 Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
 `ram_gb`, …), the categorical `attributes` claims match (`gpu_model`, `region`),

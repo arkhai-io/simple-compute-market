@@ -21,10 +21,16 @@ is measured against.
 
 ## Running unattended
 
-A review runs unattended in Codex, through `make review`, and nothing in this
-skill changes for it: your final message is the review. It carries no structured
-outcome; `scripts/run_change_step.py` logs one from the record it publishes, or a
-stopped one when your message is not a review.
+A review runs unattended through `make review`, on the review's models in order:
+in Codex's read-only sandbox, or, when Codex is unavailable, on Claude, whose rules
+let it read the repository and its history and edit nothing. Nothing in this
+skill changes for either: your final message is the review, and nothing else —
+on Claude too, where no outcome schema is given. It carries no structured
+outcome; `scripts/run_change_step.py` checks it, publishes it, and logs an outcome
+from the record it publishes, or a stopped one when your message is not a review.
+Nobody can answer a question in the session; where this skill would ask, say so
+in the review instead. Run one command per Bash call: on Claude, a chained command
+runs only when every command in it is allowed.
 
 ## 1. Load everything first
 

@@ -42,6 +42,20 @@
       "type": "string",
       "minLength": 1
     },
+    "rounds": {
+      "description": "finished, from planning: how the plan's sections are implemented, as the design's cadence gives it — a list of rounds, each a list of sessions, each a list of the section ids that session implements, in order; [[[1, 2]], [[3], [4]]] is a round of sections 1 and 2 in one session, then a round of 3 and 4 in a session each.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"anyOf": [{"type": "integer"}, {"type": "string", "minLength": 1}]}
+        }
+      }
+    },
     "denials": {
       "description": "Any outcome: the tool calls the run was denied, as the run's own record lists them, each with the harness's reason; the wrapper sets this on every outcome, and it is required on stopped.",
       "type": "array",

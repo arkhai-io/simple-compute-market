@@ -311,9 +311,12 @@ async def test_settlement_is_pending_until_a_verified_receipt_then_delivers_once
     # delivery free to finish first would answer ``ready``.
     h.delivery.started, h.delivery.release = asyncio.Event(), asyncio.Event()
     h.serve()
-    started = await h.settle()
-    assert started.status == "provisioning"
-    h.delivery.release.set()
+    try:
+        started = await h.settle()
+        await asyncio.wait_for(h.delivery.started.wait(), timeout=5)
+        assert started.status == "provisioning"
+    finally:
+        h.delivery.release.set()
     await h.delivered()
     repeated = await h.settle()
     assert repeated.status == "ready"

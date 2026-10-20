@@ -23,7 +23,7 @@ from vm_provisioning_adapter.services.relay_port_allocator import (
 
 
 #: The provider identity this bundle registers.
-ANSIBLE_PROVIDER = "ansible"
+ANSIBLE_PROVIDER = "vm.ansible"
 
 #: What this bundle's providers declare about needing a host, keyed by
 #: provider identity. Read from the provider classes so composition can hand it

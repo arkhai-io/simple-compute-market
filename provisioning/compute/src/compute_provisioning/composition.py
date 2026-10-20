@@ -143,7 +143,6 @@ def _validate_pool_config_handler(
         "validate_config_problems",
         "read_config",
         "replace_config",
-        "delete_config",
     )
     missing_hooks = [
         hook for hook in required_hooks if not callable(getattr(handler, hook, None))

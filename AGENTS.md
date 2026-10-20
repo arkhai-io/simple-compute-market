@@ -197,8 +197,10 @@ blocking defect rather than a stale link to fix later.
 ### Change workflow
 
 Each step of an OpenSpec change is a leaf skill under `.agents/skills/`, started
-through `make` or a slash command. See `docs/agents/change-workflow.md` for which
-skill each step uses, the review files, and the intervention ledger.
+through `make` or a slash command, or carried from step to step by one
+orchestrating session, `make orchestrate CHANGE=<change>`. See
+`docs/agents/change-workflow.md` for which skill each step uses, orchestrating a
+change, the review files, and the intervention ledger.
 
 ### Issue tracker
 

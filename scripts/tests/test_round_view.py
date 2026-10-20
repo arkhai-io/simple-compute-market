@@ -9,6 +9,7 @@ go through an injected runner, since they reach a remote and GitHub.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -155,6 +156,41 @@ def test_the_base_is_the_latest_triaged_validation(repo: Path) -> None:
     view = rounds.start(repo, CHANGE, e2e=False)
 
     assert view.base == second
+
+
+def _round_line(repo: Path, commit: str | None) -> None:
+    reviews = repo / REVIEWS
+    reviews.mkdir(parents=True, exist_ok=True)
+    line = {"seq": 1, "step": "orchestrator", "outcome": "round", "sections": [[2]],
+            "by": "plan", "after": 0, **({"commit": commit} if commit else {})}
+    with (reviews / "workflow.jsonl").open("a", encoding="utf-8") as log:
+        log.write(json.dumps(line) + "\n")
+
+
+def test_the_base_is_the_commit_the_latest_round_started_at(repo: Path) -> None:
+    validated = _git(repo, "rev-parse", "HEAD")
+    _validation(repo, 3, validated, triaged=True)
+    # A design revision lands on the branch between the rounds.
+    started = _write(repo, {f"openspec/changes/{CHANGE}/notes.txt": "revised\n"})
+    _round_line(repo, started)
+    _write(repo, {"src/kept.py": "2\n"})
+
+    view = rounds.start(repo, CHANGE, e2e=False)
+
+    assert view.base == started
+
+
+def test_a_round_line_naming_no_commit_falls_back_to_the_triaged_validation(
+        repo: Path) -> None:
+    validated = _git(repo, "rev-parse", "HEAD")
+    _validation(repo, 3, validated, triaged=True)
+    _round_line(repo, _write(repo, {"src/kept.py": "2\n"}))
+    _round_line(repo, None)
+    _write(repo, {"src/kept.py": "3\n"})
+
+    view = rounds.start(repo, CHANGE, e2e=False)
+
+    assert view.base == validated
 
 
 def test_with_no_triaged_validation_the_base_must_be_given(repo: Path) -> None:

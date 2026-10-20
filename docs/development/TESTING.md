@@ -458,9 +458,11 @@ Tests").
 Pool offering-mode coverage follows the lowest-meaningful-level rule while
 proving that no execution layer relies on another layer's earlier decision:
 
-- `kit/resource-pools` unit tests own declaration shape, typed reads,
-  membership, absent-as-empty behavior, and identical validation across
-  individual and bulk administration.
+- `kit/resource-pools-contracts` unit tests own declaration shape, typed reads,
+  membership, absent-as-empty behavior, the pool models' refusal of every
+  malformed domain-neutral hint, and asking-rate structure. `kit/resource-pools`
+  library integration tests own identical validation across individual and
+  bulk administration against real persistence.
 - `kit/site` unit tests own explicit claim identity and reservation admission.
   They assert that neither a VM-shaped resource nor any resource attribute
   supplies a missing mode, that an undeclared mode creates no hold, and that
@@ -474,16 +476,28 @@ proving that no execution layer relies on another layer's earlier decision:
   idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
   backfill, conflicting proof, unproved active rows, and terminal rows.
 - Advertisement and backing declarations follow the same split.
-  `kit/resource-pools` unit tests own declaration shape, both cross-tag rules,
-  the pool models' refusal to build an invalid write, and the resolver's
-  distinction between an absent and a malformed declaration. Its library
-  integration suite owns identical validation across individual and bulk
-  administration, backing immutability, and the stored-declaration check.
+  `kit/resource-pools-contracts` unit tests own declaration shape, both cross-tag
+  rules, the pool models' refusal to build an invalid write, and the resolver's
+  distinction between an absent and a malformed declaration. The
+  `kit/resource-pools` library integration suite owns identical validation
+  across individual and bulk administration, backing immutability, and the
+  stored-declaration check.
   Provisioning integration tests own server-side refusal through the typed
   client — status and stored state only, per the rejection-path rule — plus the
   upgrade migration, the startup refusal, and every projected pool carrying both
   declarations. The API-credits service's integration suite owns its own
   migration and startup refusal.
+- Provider and backing immutability follow the same split. `kit/resource-pools`
+  unit tests own the pure stored-versus-proposed comparison; no database is
+  needed to prove it. Its library integration suite owns preserved state on
+  refused replace, patch and import, and the no-write equal-provider patch, using
+  real persistence and a recording handler. Provisioning integration tests own
+  the HTTP 400 and HTTP 422 statuses through the typed client — rejection-path
+  bodies for malformed hints — and, against file-backed SQLite with the real
+  importer, a refused startup document leaving its digest unchanged, the
+  document-created default, interrupted first migration, and the VM provider
+  identity upgrade. No deployed scenario is owed for these single-authority
+  transactions.
 - The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
   mode for a real matching capacity resource and observes HTTP 409 plus no
   reservation row. It stops at the reservation boundary by design: provider

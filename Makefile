@@ -20,7 +20,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks next round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -895,9 +895,13 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
 REVIEW_BASE ?= dev
-REVIEW_MODEL ?= gpt-6-sol
-REVIEW_EFFORT ?= high
-review: round-view-closed ## Review an OpenSpec change in Codex, read-only (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=gpt-6.1-sol] [REVIEW_EFFORT=high] [FRESH=1] [UNVALIDATED=1])
+# The review's models are the review row's in .claude/change-steps.toml. Unset by
+# default; given, they are the owner's choice for one run, outside the row's policy:
+# REVIEW_MODEL replaces the whole list, a claude- model running on Claude and any
+# other on Codex, and the record says so. The orchestrating session never sets them.
+REVIEW_MODEL ?=
+REVIEW_EFFORT ?=
+review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
 	@python3 scripts/run_change_step.py review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
 
 # With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
@@ -910,6 +914,12 @@ STEP_RUN = python3 scripts/run_change_step.py run
 design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
+
+# The orchestrating session relays and routes rather than judging, so it needs a
+# large context for a change's relayed turns, not a high effort.
+orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on Opus 5.5 at medium effort (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
 plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
@@ -933,6 +943,9 @@ check-change-index: ## Fail if the change index has a malformed row, an unresolv
 check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
 	@python3 scripts/check_tasks.py "$(CHANGE)"
 
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
+	@python3 scripts/check_change.py "$(CHANGE)"
+
 change-watch: ## Follow the progress of an OpenSpec change's steps as they run, moving to each new step's progress file as it starts; Ctrl+C stops (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/run_change_step.py watch "$(CHANGE)"
@@ -941,7 +954,11 @@ change-next: ## Print the next step of an OpenSpec change as the orchestrator co
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
 
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout gate has passed: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
+change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/change_cost.py "$(CHANGE)"
+
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
 

@@ -7,18 +7,31 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from .hints import validate_pool_declarations
+from .asking_rates import validate_asking_rates
+from .hints import (
+    validate_hold_preference,
+    validate_listing_shapes,
+    validate_pool_declarations,
+    validate_pricing_rates,
+    validate_sla_preference,
+)
 
 
-def _require_pool_declarations(policy_tags: dict[str, Any]) -> None:
-    """Refuse a pool write whose mode or backing declarations are invalid.
+def _require_valid_policy_tags(policy_tags: dict[str, Any]) -> None:
+    """Validate declarations and domain-neutral hint structure before dispatch.
 
-    Both declarations are required rather than defaulted: a default backing
-    would assert whether anything stands behind a listing, and a default
-    advertisable set would widen or silently narrow what a pool may sell.
-    The service reapplies the same check to what it persists.
+    Required declarations state what a pool can advertise and what backs it.
+    Optional hints are checked only for structure; the reading domain owns
+    their vocabulary and provider handlers own configuration semantics.
     """
-    problems = validate_pool_declarations(policy_tags)
+    problems = (
+        validate_pool_declarations(policy_tags)
+        + validate_hold_preference(policy_tags)
+        + validate_sla_preference(policy_tags)
+        + validate_listing_shapes(policy_tags)
+        + validate_asking_rates(policy_tags)
+        + validate_pricing_rates(policy_tags)
+    )
     if problems:
         raise ValueError("; ".join(problems))
 
@@ -28,7 +41,7 @@ class PoolCreate(BaseModel):
 
     id: str = Field(description="Operator-chosen pool slug, e.g. 'hetzner-eu-central'.")
     label: str = Field(description="Human-readable pool name.")
-    provider: str = Field(description="Fulfillment provider kind, e.g. 'ansible'.")
+    provider: str = Field(description="Fulfillment provider kind, e.g. 'vm.ansible'.")
     enabled: bool = True
     policy_tags: dict[str, Any] = Field(
         description=(
@@ -42,8 +55,8 @@ class PoolCreate(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _declarations(self) -> "PoolCreate":
-        _require_pool_declarations(self.policy_tags)
+    def _policy_tag_hints(self) -> "PoolCreate":
+        _require_valid_policy_tags(self.policy_tags)
         return self
 
 
@@ -57,8 +70,8 @@ class PoolReplace(BaseModel):
     provider_config: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _declarations(self) -> "PoolReplace":
-        _require_pool_declarations(self.policy_tags)
+    def _policy_tag_hints(self) -> "PoolReplace":
+        _require_valid_policy_tags(self.policy_tags)
         return self
 
 
@@ -66,17 +79,23 @@ class PoolUpdate(BaseModel):
     """Partial update body accepted by ``PATCH /api/v1/pools/{pool_id}``."""
 
     label: str | None = None
-    provider: str | None = None
+    provider: str | None = Field(
+        default=None,
+        description=(
+            "Must equal the pool's provider, which is fixed at creation. "
+            "Restating it has no effect and does not rewrite configuration."
+        ),
+    )
     enabled: bool | None = None
     policy_tags: dict[str, Any] | None = None
     provider_config: dict[str, Any] | None = None
 
     @model_validator(mode="after")
-    def _declarations(self) -> "PoolUpdate":
+    def _policy_tag_hints(self) -> "PoolUpdate":
         # A patch supplying policy tags replaces the whole map, so it must
         # restate both declarations; one that leaves the map alone does not.
         if self.policy_tags is not None:
-            _require_pool_declarations(self.policy_tags)
+            _require_valid_policy_tags(self.policy_tags)
         return self
 
 

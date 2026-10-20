@@ -2,8 +2,8 @@
 """Check the active-change index against the change directories it describes.
 
 `openspec/changes/README.md` is read by every workflow step to decide what may
-start next, and the steps that edit it — triage at a phase-closing gate,
-closeout, archive cleanup — change rows by hand. The citation check does not
+start next, and the steps that edit it — the triage of a phase-closing review
+that advances the change, closeout, archive cleanup — change rows by hand. The citation check does not
 read it: its links are relative directory links, not cited paths. This check
 holds what a hand edit can break:
 

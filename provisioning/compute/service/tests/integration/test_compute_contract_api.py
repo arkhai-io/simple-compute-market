@@ -153,7 +153,7 @@ def _create_fulfillment_aggregate(
                 scheduling_requirements={"resource_kind": "vm"},
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
-                provider="ansible",
+                provider="vm.ansible",
                 resource_host_id="kvm1", resource_attributes={},
                 fulfillment_request={
                     "kind": "vm.fulfillment.request",
