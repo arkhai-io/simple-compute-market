@@ -8,16 +8,23 @@ change MAY instead be worked in the owner's workspace itself. When a change's br
 is checked out neither in a clone of its own nor in the checkout the next-step
 computation runs in, the computation MUST name the creation of its clone, and the
 orchestrating session MUST create it and, when the branch does not exist, the
-branch. The clone's `origin` MUST be the workspace's `origin`, and one of its
-remotes MUST name the workspace. The clone's bootstrap MAY run while design
-proceeds; implementation and validation MUST NOT start before it has finished.
-Archive cleanup MUST copy the change's records, and the validation evidence they
-name, into the owner's workspace at the same paths, never overwriting a file there.
-A step that reads another change's or an earlier change's records MUST look for
-them in its own checkout and then in the owner's workspace. A clone MUST be removed
-only on the owner's command, and only once its records and named evidence are in
-the workspace, its branch is merged, and it holds no commit and no change its
-`origin` lacks.
+branch. Creating a clone MUST be safe to repeat: it MUST finish a clone left
+incomplete, and MUST refuse, deleting nothing, a directory that is not a clone of
+the workspace, has another branch checked out, or has uncommitted changes. The
+clone's `origin` MUST be the workspace's `origin`, and one of its remotes MUST name
+the workspace. The clone's bootstrap MAY run while design proceeds; implementation
+and validation MUST NOT start before it has succeeded. Its state MUST be recorded
+so that running, succeeded, and failed are told apart, and a failed bootstrap MUST
+be brought to the owner, naming its log, rather than retried by itself. As its last
+act, after every record it writes, archive cleanup MUST copy the change's records,
+and the validation evidence they name, into the owner's workspace at the same
+paths; the copy MUST be safe to repeat, and MUST NOT overwrite a file there,
+refusing and naming any whose contents differ. A step that reads another change's
+or an earlier change's records MUST look for them in its own checkout and then in
+the owner's workspace. A clone MUST be removed only on the owner's command, and
+only once its records and named evidence are in the workspace with identical
+contents, its branch is merged, and it holds no commit and no change its `origin`
+lacks.
 
 #### Scenario: Feature work begins on a change
 
@@ -27,7 +34,22 @@ the workspace, its branch is merged, and it holds no commit and no change its
   with the change's branch, and design runs while the clone's bootstrap continues
   in the background
 - **AND** the computation names no implementation or validation until the
-  bootstrap has finished
+  bootstrap has succeeded
+
+#### Scenario: Clone creation was interrupted
+
+- **WHEN** an orchestrating session restarts after creating a change's clone only
+  in part
+- **THEN** the computation names the clone again, and creating it finishes the
+  steps not yet done without recloning or deleting anything
+
+#### Scenario: The bootstrap failed
+
+- **WHEN** a clone's bootstrap ended with a failure, or its process died without
+  recording a status
+- **THEN** the computation names no implementation or validation, and the failure
+  is brought to the owner naming its log; creating the clone again restarts the
+  bootstrap
 
 #### Scenario: Two changes are worked at once
 
@@ -48,6 +70,13 @@ the workspace, its branch is merged, and it holds no commit and no change its
   records are not all in the workspace
 - **THEN** the removal is refused, naming what is missing, and nothing is deleted
 
+#### Scenario: A record is written after archive cleanup
+
+- **WHEN** another round on a change's pull request writes a record in its clone
+  after archive cleanup copied the history
+- **THEN** clone removal is refused, naming the record, until the copy is run
+  again, and the copy adds it without overwriting anything
+
 ### Requirement: Each Helm validation is isolated in its change's namespace
 
 Validation's Helm part MUST deploy into a namespace of its change's own, derived
@@ -62,8 +91,11 @@ refused, saying so. Its scenarios MUST run inside the namespace and MUST NOT dep
 on a local port. After the scenarios it MUST keep every pod's log and the
 namespace's events with the attempt's evidence, and MUST scale the namespace's
 workloads to zero. A preflight MUST compare the memory a release is recorded to
-need with what the node can allocate and MUST treat a deployment that would not fit
-as an environmental failure; when usage cannot be measured, it MUST warn and go on.
+need, times the releases that would be running, with what the node can allocate,
+and MUST treat a deployment that would not fit as an environmental failure; it is
+an estimate and reserves nothing. When no figure is recorded, or usage cannot be
+measured, it MUST warn and go on. A pod that fails for memory after a passed
+preflight MUST be diagnosed as an environmental failure.
 Archive cleanup MUST remove the change's namespace and images and MUST record the
 memory the change's latest validation measured.
 
@@ -92,6 +124,20 @@ memory the change's latest validation measured.
 - **WHEN** the cluster has no metrics source
 - **THEN** the preflight warns that no memory figure will be recorded, and the part
   goes on
+
+#### Scenario: No memory figure is recorded yet
+
+- **WHEN** a validation's preflight runs before any archive cleanup has recorded
+  the memory a release needs
+- **THEN** it warns that the check was skipped, and the part goes on
+
+#### Scenario: Two validations pass the preflight together
+
+- **WHEN** two changes' preflights pass before either deploys, and one's pods then
+  cannot be scheduled, are evicted, or are killed for memory
+- **THEN** that validation's failure is diagnosed from the namespace's events as
+  environmental, with the remedy of scaling another change's namespace to zero or
+  running again once it is down
 
 #### Scenario: A change's archive is cleaned up
 
@@ -127,8 +173,14 @@ until the owner has answered on the round, with notes or with none, and the answ
 saved as the round's owner record. For a change worked in the owner's workspace, while
 its branch is moved to show the round, review, validation, triage, and implementation
 MUST NOT start. Ending the reading MUST return the branch to the round's commit. A view
-MUST NOT move a checkout in which an unattended run is in progress. A commit the owner
-makes on the change's branch while reading MUST reach the clone only through a
+MUST NOT move a checkout in which an unattended run is in progress. Ending the reading
+MUST carry each commit the owner made while the branch was moved onto the round's
+commit, holding exactly the paths that commit changed at the content it gave them,
+and MUST leave every edit the owner did not commit uncommitted; when such a commit
+cannot be carried without reverting the round's changes, or the branch has left the
+line of the round's base, it MUST refuse without moving the branch. A view MUST NOT be
+moved to a new head while such commits or uncommitted edits are present. A commit the
+owner makes on the change's branch while reading MUST reach the clone only through a
 fast-forward triage makes. A pre-closeout review MUST NOT run, and its triage MUST NOT
 advance the change, unless the latest validation's result is `passed` and it names
 `HEAD`, or a commit from which `HEAD` descends and differs only in changes' intervention
@@ -176,10 +228,26 @@ ledgers and review records, except where the owner overrides it.
 
 #### Scenario: The owner commits an edit while reading
 
-- **WHEN** the owner commits a change on the branch in their workspace and names it in
-  their answer
-- **THEN** triage presents it like any point and, once disposed of, pulls it into the
+- **WHEN** the owner commits an edit on the branch in their workspace while the view
+  shows the round
+- **THEN** ending the reading carries the commit onto the round's commit, with the
+  paths it changed and nothing else, keeping its author and message, and names it
+  beside its replacement
+- **AND** triage presents it like any point and, once disposed of, pulls it into the
   clone only as a fast-forward, refusing a branch that has diverged
+
+#### Scenario: The owner commits part of a file the round changed
+
+- **WHEN** a commit made during the view holds a file the round also changed with only
+  some of its changes staged
+- **THEN** ending the reading refuses, naming the file, and the branch is not moved
+
+#### Scenario: The view is refreshed over the owner's commit
+
+- **WHEN** the owner opens the view again while a commit made during it is on the
+  branch
+- **THEN** the view is refused, naming the commit and the command that ends the
+  reading
 
 #### Scenario: A view would move a checkout with a run in progress
 

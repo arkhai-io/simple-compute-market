@@ -91,7 +91,8 @@ earlier run of the same ref, not of another branch.
 - `helm-e2e-pipeline-parity` depends on this change for its design; the Helm items
   this change needs move here from it.
 - Pilot: `seed-default-pool-at-runtime`, on a branch created from this change's
-  branch, merging after it.
+  branch, into which this change's branch is merged for later rounds' tooling,
+  merging after it.
 - Unrelated to `isolate-end-to-end-lane-stacks`: no workflow step runs the local
   compose lanes.
 

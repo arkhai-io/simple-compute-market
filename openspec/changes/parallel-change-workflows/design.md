@@ -111,16 +111,51 @@ checked out in the current checkout.
    shows as uncommitted changes exactly as before.
 
 Run again while that change's view is open, it moves the view to the branch's new
-head over the same base, so the owner follows triage's fixes. `make round-done`
-resets `feat/<change>` to the round's head and returns the workspace to where it
-was. The view never touches the clone, so it never moves the branch any step runs
-on. It leaves the owner's environments alone: rebuilding and relocking happen in
-the clone, or by the owner's hand.
+head over the same base, so the owner follows triage's fixes; it refuses while the
+workspace holds uncommitted edits or commits made during the view, naming them and
+pointing at `make round-done`. `make round-done` resets `feat/<change>` to the
+round's head and returns the workspace to where it was. The view never touches the
+clone, so it never moves the branch any step runs on. It leaves the owner's
+environments alone: rebuilding and relocking happen in the clone, or by the owner's
+hand.
 
-An edit the owner makes while reading is committed on `feat/<change>` in the
-workspace and named in the owner's answer on the round; triage pulls it into the
-clone with `git pull --ff-only workspace feat/<change>`, refusing anything that is
-not a fast-forward.
+**Commits made during the view (17 F1).** The owner cannot be stopped from
+committing while the branch sits at the base — an editor's "commit all" is one
+click — so `round-done` repairs such commits rather than relying on a target the
+owner might not use. While the view is open the worktree holds the round's head
+plus the owner's edits, and the index the base, the round's new files
+intent-to-add; so every path a commit made then changed holds what was on disk at
+that moment — the round's version of the file with the owner's edits — and every
+path it did not change keeps the base's version, which the owner did not mean as a
+revert. `round-done` therefore carries each such commit, oldest first, onto the
+round's head: each new commit starts from the previous one's tree (the round's head
+first), sets every path the original changed against its parent to the original's
+version, deleting what it deleted, and keeps the original's author and message; the
+branch is then mixed-reset to the last. What the owner committed is on the branch as
+descendants of the round's head; anything not committed stays uncommitted in the
+worktree, and nothing is swept in. `round-done` prints each original commit beside
+its replacement.
+
+It refuses, moving nothing and saying how to return, when:
+
+- a commit partly staged a file the round also changed (`git add -p`): its version
+  of the path differs both from the worktree's at close and from the round's head,
+  so laying it over the head would revert the round's changes there; the refusal
+  names the file, and the owner commits it again by hand;
+- the branch has left the base's line — an amend of the base, a reset, a rebase, or
+  a merge made during the view, as `done` already refuses today.
+
+A commit the owner makes after `round-done` already sits on the round's head and
+needs nothing. Triage pulls the owner's commits into the clone with
+`git pull --ff-only workspace feat/<change>`, refusing anything that is not a
+fast-forward, and identifies them as the commits between the round's head and what
+it pulled, so the owner's answer need not name their hashes.
+
+Rejected: committing only after the view closes (it has no answer to a commit made
+during it); a `make round-commit` target used during the view (the owner cannot be
+made to use it, and the editor's commit stays a trap); committing everything the
+worktree holds beyond the head (it sweeps uncommitted work, and a file a test run
+rewrote, into the owner's commit).
 
 Step 2's refusal of a workspace with a run in progress is what keeps reading
 safe while this change is itself worked in the owner's workspace (the pilot, D9):
@@ -213,13 +248,23 @@ owner's notes, which are triaged beside it).
   objects and volumes. Rejected: leaving releases running (resident memory grows
   with the active changes); uninstalling.
 - **Capacity.** `helm/validation-capacity.toml`, tracked, holds the memory one
-  release needs, and when and from which change it was measured. The preflight
-  compares it, times the releases it would have running, with the node's
-  allocatable memory; a deployment that would not fit is an environmental failure
-  put to the owner with its remedy. Usage is measured through `metrics-server`;
-  when it is missing the preflight warns and goes on. Archive cleanup writes the
-  figure from the change's latest validation. Rejected: no check; sums of the
-  rendered requests and limits (declared, not used); `docker stats` on the node.
+  release needs, and when and from which change it was measured. The preflight is
+  an advisory estimate that reserves nothing (17 F3): it counts the namespaces with
+  workloads above zero replicas, adds its own, and compares that many times the
+  figure with the node's allocatable memory; a deployment that would not fit is an
+  environmental failure put to the owner with its remedy. With no recorded figure —
+  before the first archive cleanup writes one — it warns that the check was
+  skipped and goes on. Two preflights can pass together; a pod that then fails to
+  schedule for memory, is evicted, or is OOM-killed is diagnosed from the
+  namespace's collected events as an environmental failure, its remedy scaling
+  another change's namespace to zero or rerunning once it is down. Usage is
+  measured through `metrics-server`; when it is missing the preflight warns and
+  goes on. Archive cleanup writes the figure from the change's latest validation;
+  this change's own archive cleanup writes the first. Rejected: no check; sums of
+  the rendered requests and limits (declared, not used); `docker stats` on the
+  node; a reservation held from preflight to scale-to-zero (it brings back the
+  coordination D5 dissolved, and recovery of a lease a crashed validation left, to
+  prevent a failure that costs one rerun).
 - **Teardown.** Archive cleanup deletes the change's namespace and its
   `-<change>` images.
 
@@ -243,10 +288,26 @@ next-step computation names `clone`, and the session runs
 3. checks out the branch: the existing one, or a new one from `FROM`;
 4. links `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
-5. starts `make init` in the background, writing a marker when it finishes.
+5. starts `make init` in the background, recording its state in the clone's Git
+   directory: its process and log while it runs, then its exit status.
+
+`make change-clone` is idempotent (17 F5). It inspects the target and finishes
+whatever is missing: it clones into an absent directory, and in a directory that is
+already a clone of the workspace it resumes at the first step not yet done. It
+refuses, naming the directory and deleting nothing, when the directory is not a
+clone of the workspace, has another branch checked out, or has uncommitted changes.
+The bootstrap is in one of three states: running, while its recorded process is
+alive; succeeded, its exit status 0; failed, a non-zero exit status, or a dead
+process that recorded none. The computation routes each: an absent or incomplete
+clone names `clone`; while the bootstrap runs, design and planning go on and
+implementation and validation wait; a failed bootstrap goes to the owner as an
+environmental failure naming its log, and rerunning `make change-clone` restarts
+it; a succeeded one lets the change proceed. A failed bootstrap is not retried by
+itself: `make init` failing is almost always the environment, and a silent retry
+would hide it.
 
 Design proceeds meanwhile; the computation holds implementation and validation
-until the marker exists. From then on the session drives every step with
+until the bootstrap has succeeded. From then on the session drives every step with
 `make -C <clone> <step> UNATTENDED=1`, so the wrapper's root, the log, the
 transcripts, and the step sessions are the clone's. Taking a step over is
 `cd <clone> && claude --resume <session>`. Rejected: the owner running
@@ -254,9 +315,10 @@ transcripts, and the step sessions are the clone's. Taking a step over is
 
 `make change-clone-remove CHANGE=<change>`, run by the owner after the merge,
 refuses unless every file of the clone's `reviews/` and named evidence is in the
-workspace, the branch is merged into `origin/dev`, and the clone has no commit
-`origin` lacks and no uncommitted change. Archive cleanup does not remove the
-clone, since the pull request may need another round.
+workspace with identical contents (17 F4), the branch is merged into `origin/dev`,
+and the clone has no commit `origin` lacks and no uncommitted change; a missing or
+differing record is named, with `make change-history` as the remedy. Archive
+cleanup does not remove the clone, since the pull request may need another round.
 
 ### D7 — Every shared resource is per change, shared safely, or checked
 
@@ -312,7 +374,32 @@ chart change makes the Helm part real evidence; and it stays clear of Goal 7's
 open work (`unbacked-bare-metal-listings`), meeting it at most in compute
 provisioning's startup. Its feature branch is created from this change's branch,
 not from `dev`, so its clone inherits the tooling without a merge to `dev`; its
-pull request merges after this one. This change itself is worked in the owner's
+pull request merges after this one.
+
+A branch created once holds only the tooling of its moment, so this change's branch
+is merged into the pilot's for the tooling of later rounds (17 F2). On the owner's
+word, the pilot's orchestrating session runs, in the pilot's clone,
+`git pull --no-rebase workspace feat/parallel-change-workflows` — a merge commit —
+and pushes it through `make push-branch`, as workflow maintenance (D8). A merge is
+made only between the pilot's steps: never while one of its steps runs or its view
+is open, and never between one of its rounds being committed and that round's
+triage, so it never falls inside a round's diff; a merge made before a round starts
+lies below that round's recorded base. Two merges at least: once this change's
+round-2 sections are committed, before the pilot's first implementation round, so
+the pilot validates in its own namespace beside round 2's validation; and once
+round 3 is triaged, before the pilot's closeout. Others whenever the owner asks,
+such as for round 2's triage fixes. No revalidation rule is added: the pilot's next
+validation is of the merged `HEAD`, and the pre-closeout and archive-cleanup gates
+already require a passed validation naming `HEAD` once a path outside `openspec/`
+and `docs/` changed. The index rows are the merge's expected conflicts, resolved in
+the merge commit; any other conflict stops the merge and goes to the owner. The
+next-step computation is not taught a parent branch: an ordinary change branches
+from `dev` and never needs one. Rejected: rebasing the pilot onto this branch (it
+rewrites a pushed branch, and every fast-forward-only pull then refuses); holding
+the pilot back until rounds are triaged (it leaves a merge, and forgoes the
+overlapping validations the pilot is evidence for).
+
+This change itself is worked in the owner's
 workspace throughout, which is also the evidence for working a change without a
 clone. Rejected as pilots: `resolve-compute-family-findings` and
 `kit-owned-storefront-shell` (they reshape the bare-metal storefront Goal 7
@@ -334,11 +421,16 @@ inside it.
 
 ### D11 — History moves into the owner's workspace at archive cleanup
 
-After its commit, archive cleanup copies into the owner's workspace, at the same
-paths, the archived change's whole `reviews/` directory and the validation evidence
-its records name (`.snapshot/validation/<commit>/` and `.snapshot/e2e-logs/<run>/`),
-through `make change-history CHANGE=<change>`. It copies, adding only files not yet
-there and never overwriting one; nothing rebuildable is copied. Until the merge
+As its last act, after its commit and after the pull-request draft is written to
+`reviews/pull-request.md` (17 F4), archive cleanup copies into the owner's
+workspace, at the same paths, the archived change's whole `reviews/` directory and
+the validation evidence its records name (`.snapshot/validation/<commit>/` and
+`.snapshot/e2e-logs/<run>/`), through `make change-history CHANGE=<change>`. It is
+a synchronization, safe to run again: it copies files not yet there, compares
+files on both sides by content, and refuses, naming each, when they differ, never
+overwriting one; nothing rebuildable is copied. A record written after cleanup —
+another round on the pull request — is carried across by running it again, and
+clone removal (D6) refuses until it has been. Until the merge
 reaches the workspace's branch, the copy is an archive directory holding only
 `reviews/`, which `find_change.py` and the index check do not misread.
 
@@ -354,8 +446,10 @@ Three rounds:
 
 1. **Clones and reading**, in two sessions: the scripts and their tests
    (`change-clone`, `change-clone-remove`, the bootstrap marker, the `workspace`
-   remote, the round view in its clone form with its refusals, the computation's
-   `clone` step, init gate, and round of three records, triage's pull); then the
+   remote, the idempotent clone and the bootstrap's three states, the round view in
+   its clone form with its refusals, `round-done` carrying commits made during the
+   view onto the round's head, the computation's `clone` step, bootstrap routing,
+   and round of three records, triage's pull); then the
    skills, the step table, and `docs/agents/change-workflow.md`. Validated in the
    owner's workspace on the existing Helm part. The pilot's design may start in its
    clone once this round is triaged.
@@ -363,11 +457,13 @@ Three rounds:
    namespace naming and `CHANGE=`, `topology-secrets` per namespace, the upgrade
    from zero, the scenario pod, logs and scale-to-zero, the `metrics-server`
    warning and the capacity preflight, `forward` and `resume`; then
-   `change-validate` and the scripted two-validation check. This round's
+   `change-validate` and the scripted two-validation check. Once its sections are
+   committed, this change's branch is merged into the pilot's (D9), and this round's
    validation overlaps the pilot's.
 3. **History and teardown**, in one session: `make change-history`,
    `find_change.py --records` and the skills that read history, namespace and
-   image teardown, and the capacity figure at archive cleanup. The pilot then
+   image teardown, and the capacity figure at archive cleanup. Once it is triaged,
+   this change's branch is merged into the pilot's again, and the pilot then
    reaches archive cleanup on this tooling.
 
 Before closeout, the owner and the agent discuss opening a change to containerize
@@ -382,7 +478,10 @@ the workflow (open question 1); then the pre-closeout review.
   merges.
 - **Two releases at once on one node** may exhaust Docker Desktop's memory. The
   capacity figure is only as current as the last archive cleanup that wrote it,
-  and absent until one does.
+  and absent until one does; the preflight is an estimate, so two validations
+  starting together can both pass it, and the overflow is diagnosed and rerun.
+- **The pilot's branch is merged from this change's branch** at least twice. The
+  merges are by hand on the owner's word and conflict on the index rows.
 - **A usage limit stops every change's runs at once.** Parallel work spends the
   account's limits faster.
 - **The index is edited on several branches.** Rows that sit next to each other
