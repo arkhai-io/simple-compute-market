@@ -1597,6 +1597,24 @@ storefront's configuration reaches it through its configuration system"; `design
       `e2e_bare_metal_mock_deal` marker against the topology, and `make helm-topology-down`.
       Release 1's pods kept old images until restarted by hand (16.8). **Amended (16.8's
       check):** a rerun runs `make helm-topology-secrets` first.
+      **Rerun (2026-10-20, the owner's local cluster, at `6c66eb6`):** release 2's
+      provisioning service answered the bare-metal storefront's requests 2xx with
+      `storefront_auth: ok`; both families `loaded` for `default`; the publication, poller,
+      watchdog, and servicing loops `running` with completed timer cycles;
+      `test_bare_metal_publication` against release 2 passed (11); a probe running 26 of the
+      mock deal's stages (a listed price under the chart's shipped policy, development-chain
+      escrow, mock delivery) passed, release 2's provisioning service posting
+      `capacity-released` and the storefront recording the reservation released; a buyer's
+      hardware query on release 1's registry found the listing while two of Bob's listings
+      stayed open. An earlier attempt passed the same stages but failed its Bob check: the
+      upgrade's registry restart had dropped Bob's listing (the registry database outside
+      its volume, fixed by the closeout triage's registry-storage correction) and release
+      1's deal hook leaves Bob's loops paused (already `unbacked-bare-metal-listings`'s open
+      question 11). `make helm-topology-check` is shown passing (17.8). Still not shown: the
+      `e2e_bare_metal_mock_deal` marker against the topology. Observation files held by the
+      owner, not in the repository: `25-publication.log`, `28-bare-metal-deal.log`,
+      `33-bare-metal-deal-with-bob.log`, `34-final-status.log`,
+      `35-bare-metal-storefront-logs.log`, `36-bare-metal-provisioning-logs.log`.
 - [x] 16.6 Relock `domains/vms/storefront`, `kit/policy`, and `domains/vms/buyer` with
       `make lock` in an environment that reaches the PyTorch CPU index, and run `make test`
       there unrefreshed; the hand-edited locks should produce no diff. This container's
@@ -1659,6 +1677,14 @@ storefront's configuration reaches it through its configuration system"; `design
       `TOPOLOGY_ROLLOUT_ORDER`, never dev-env's (`design.md` C13). Chart render tests (15
       topology cases), each failing with its behaviour undone; release 2's render
       byte-identical to `825737c`'s.
+      **Shown against a cluster (17.8's rerun at `6c66eb6`):** the registry smoke test
+      signed as the development buyer under `e2e-secret` and passed; `helm-topology-secrets`
+      replaced every Secret (the claim's creation not exercised); `topology-up` restarted in
+      `TOPOLOGY_ROLLOUT_ORDER` and rolled the rebuilt images, dev-env left in place.
+      **Corrected (closeout triage, owner-directed):** the profile also carries
+      `provisioning.authority_scheme` and `authority_identifier` from
+      `global.provisioningIdentity`, which the provisioning smoke test reads; render
+      evidence only.
 
 Section 16 notes: the bare-metal lane's storefront starts from `serve` on the configured
 `port`; no pipeline scenario deploys the chart.
@@ -1826,6 +1852,31 @@ against that commit's diff, the pipeline rerun on it (17.8), and the change arch
       helm-topology-check` has not yet been shown passing against a cluster. The owner reruns
       `make helm-topology-secrets`, `helm-topology-up`, `helm-topology-check`, and
       `helm-topology-down` on a cluster before the pull request (closeout triage, 14 F5 / 15 F1).
+      **Helm rerun (closeout triage, 14 F5 / 15 F1; 2026-10-20, the owner's local cluster,
+      at `6c66eb6`):** `make helm-topology-down` removed the earlier deployment's releases,
+      release 2 first, keeping the buyer-profile claim; `make helm-topology-secrets`
+      replaced all eleven Secrets (the buyer-profile claim already existed and was left as
+      it is, so its creation did not run); `make helm-topology-up` installed both releases
+      and, after `make build-dev` at `6c66eb6`, upgraded them, restarting the registry, both
+      provisioning services, and both storefronts in that order, each rollout waited on,
+      never dev-env (dev-env's pod and chain history stayed); `make helm-topology-check`
+      passed: release 1's deal test 31 passed, registry smoke 3 passed, storefront smoke 3
+      passed, chain hook 1 passed, provisioning smoke 4 skipped; release 2's bare-metal
+      `/health` hook succeeded and its provisioning smoke 4 skipped -- the eight skips are
+      the smoke profile carrying no provisioning administrator credential (nor, at that
+      commit, the service's signer pin, which the correction below derives), not passes.
+      `make lock` (no lockfile change) and `make check-packaging` passed at the same commit;
+      the checkout fast-forwarded from `29a464a` (documentation only) during the first
+      build, so lock, packaging, and build were repeated at `6c66eb6`. Not run: `make
+      helm-topology-down` after the check; the `e2e_bare_metal_mock_deal` marker against the
+      topology. Found: the registry database outside its volume (pre-existing on `dev`;
+      every topology-up emptied the registry because of this change's restart), fixed by the
+      closeout triage's registry-storage correction (below), whose evidence is render
+      evidence only: the rerun predates it. Observation files held by the owner, not in the
+      repository: `02-topology-down.log`, `05-topology-secrets.log`,
+      `17-topology-up-stable-head.log`, `24-helm-topology-check.log`,
+      `31-registry-storage-diagnosis.log`, `rollout-verification.json`,
+      `image-verification.json`.
 - [x] 17.9 **Promotion.** Write the permanent documents and complete the design-promotion
       record below:
       - `docs/development/ARCHITECTURE.md`: "Capacity publication and multi-domain storefront
@@ -2061,6 +2112,16 @@ environments, VM storefront unit 1101 passed, 1 skipped, and integration 448 pas
 them); `make check-change CHANGE=share-site-projection-state` and `make check-comment-hygiene`
 OK. The three hand-edited locks are confirmed when an environment that reaches the PyTorch index
 next runs `make lock` with no diff, as 16.6 did.
+Confirmed 2026-10-20 in the owner's environment, which reaches the PyTorch index: `make lock`
+at `29a464a` and again at `6c66eb6` relocked all 52 projects with no lockfile change, and `make
+check-packaging` passed.
+
+Closeout triage: registry storage and the provisioning signer pin (found by 17.8's Helm rerun;
+owner-directed, 2026-10-20, the registry fix as option (a)): the umbrella no longer overrides
+the registry chart's database URL, so release 1's registry keeps its database under its volume
+mount, and the smoke profile pins each release's provisioning signer (16.8), which
+`DEPLOYMENT_AND_CONFIG.md`'s smoke-test profile paragraph now names; render evidence only,
+`helm/tests/test_release_topology.py` holding both.
 
 ## Design promotion record
 

@@ -130,9 +130,14 @@ registry pins `registry.authority_id` and `registry.identifier`, which are what 
 release's clients trust (`global.registryIdentity`), carried only for the internal
 registry and only for an EIP-191 identity, the one scheme the registry smoke test
 verifies; `buyer.wallet_address`, from the e2e-tests chart's development buyer
-identity; and `seller.wallet_address`, from the target agent's `[Wallet].address`.
-The profile refuses a release whose registry chart signs as an `identity` other
-than the one its clients trust. Signing material no values carry reaches a smoke pod
+identity; `seller.wallet_address`, from the target agent's `[Wallet].address`; and
+`provisioning.authority_scheme` and `provisioning.authority_identifier`, the
+provisioning signer the release's clients trust (`global.provisioningIdentity`),
+which the provisioning chart's own identity must equal. The provisioning smoke
+test's signed cases also need an administrator credential, which the local
+topology's values do not give its pod, so there they skip. The profile refuses a
+release whose registry chart signs as an `identity` other than the one its clients
+trust. Signing material no values carry reaches a smoke pod
 as a profile file from a pre-existing Secret: the registry chart's
 `tests.credentialProfile` (`secretName`, `profile`) mounts `config-<profile>.yml`
 into the registry smoke pod alone and appends the profile, once, to its

@@ -229,8 +229,9 @@ topology-down:
 ## profile and signed as the development buyer from arkhai-e2e-credentials'
 ## e2e-secret profile; the storefront smoke test, signed as Bob from
 ## arkhai-bob-runtime's seller profile; the provisioning smoke test, whose
-## signed cases skip without an administrator credential, which its profile
-## does not carry; and the e2e-tests chart's deal test. Release 2's: its
+## signed cases skip without an administrator credential, the one input its
+## profile does not carry (it pins the service's signer from
+## global.provisioningIdentity); and the e2e-tests chart's deal test. Release 2's: its
 ## provisioning smoke test, which skips the same way, and the bare-metal
 ## storefront's /health check, the one that proves release 2 answers. None
 ## shows the storefronts trade: the topology's evidence (signed requests

@@ -25,9 +25,20 @@ continue to work.
 {{- end -}}
 {{- $_ := set $generated "rpc" $rpcConfig -}}
 {{- end -}}
-{{- $_ := set $generated "provisioning" (dict
+{{- /* The provisioning smoke test verifies the service's responses against the
+signer the release's clients trust, global.provisioningIdentity, which the
+provisioning chart refuses to render unless its own identity equals. The
+administrator credential its signed cases also need is signing material and is
+never here. */ -}}
+{{- $provisioningProfile := dict
   "api_url" (printf "http://%s-provisioning:%d" .Release.Name (int .Values.provisioning.server.port))
-) -}}
+-}}
+{{- $provisioningIdentity := .Values.global.provisioningIdentity | default dict -}}
+{{- if and $provisioningIdentity.scheme $provisioningIdentity.identifier -}}
+  {{- $_ := set $provisioningProfile "authority_scheme" $provisioningIdentity.scheme -}}
+  {{- $_ := set $provisioningProfile "authority_identifier" $provisioningIdentity.identifier -}}
+{{- end -}}
+{{- $_ := set $generated "provisioning" $provisioningProfile -}}
 {{- /* The release's development buyer, where its e2e-tests chart states one.
 That buyer signs and pays from one EIP-191 account, so the chart's public buyer
 principal is its wallet address, which contract validation reads. Its signing

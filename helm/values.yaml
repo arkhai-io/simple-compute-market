@@ -132,7 +132,10 @@ registry:
 
   config:
     filterSpecPath: "/app/filter-spec.yaml"
-    databaseUrl: "sqlite:///./indexer.db"
+    # databaseUrl is the registry chart's default, a SQLite file under its
+    # persistence mount, so the index survives a pod replacement; a path
+    # outside that mount is on the container's own filesystem and is lost
+    # with the pod.
     host: "0.0.0.0"
     enableHealthChecks: true
     healthCheckInterval: 60

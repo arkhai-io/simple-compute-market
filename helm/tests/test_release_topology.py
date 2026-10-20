@@ -21,7 +21,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 UMBRELLA = Path(__file__).resolve().parents[1]
 MAKEFILE = UMBRELLA / "Makefile"
@@ -284,6 +284,41 @@ def test_release_ones_smoke_profile_carries_the_pins_and_wallets_the_release_sta
     assert f"secretName: {secret.group(1)}" in {line.strip() for line in deal.splitlines()}
     assert _env(smoke, "ACTIVE_PROFILES") == "helm,e2e-secret"
     assert "mountPath: /app/config/config-e2e-secret.yml" in {line.strip() for line in smoke.splitlines()}
+
+
+def test_the_smoke_profile_pins_each_releases_provisioning_signer() -> None:
+    """The provisioning smoke test verifies the service's responses against
+    `provisioning.authority_scheme` and `authority_identifier`: each release's
+    profile carries the signer its provisioning service renders, its own
+    global.provisioningIdentity, whatever its scheme, and never the
+    administrator credential, which is signing material."""
+    ed25519 = _ok(_render(RELEASE_ONE, (UMBRELLA / "values.yaml", UMBRELLA / "fixtures/payments-ed25519-values.yaml")))
+    for manifest in (_release_one(), _release_two(), ed25519):
+        signer = _provisioning_document(manifest)["identity"]
+        profile = _smoke_profile(manifest)["provisioning"]
+        assert {"scheme": profile["authority_scheme"], "identifier": profile["authority_identifier"]} == signer
+        assert "admin_credential" not in profile
+    assert _smoke_profile(_release_two())["provisioning"]["authority_identifier"] != (
+        _smoke_profile(_release_one())["provisioning"]["authority_identifier"]
+    )
+
+
+def test_each_registry_keeps_its_database_on_its_volume() -> None:
+    """Release 1's registry, and the API-credits registry where it is enabled,
+    keep their SQLite database under the mount of the PersistentVolumeClaim
+    their chart renders, so a replaced registry pod -- `topology-up` restarts
+    the registry on every run -- keeps its listings."""
+    manifest = _release_one({"api-credits-registry": {"enabled": True}})
+    for chart in ("registry", "api-credits-registry"):
+        deployment = _source(manifest, f"charts/{chart}/templates/deployment.yaml")
+        url = _env(deployment, "DATABASE_URL")
+        assert url.startswith("sqlite:///"), url
+        database = PurePosixPath(url.removeprefix("sqlite:///"))
+        mount = re.search(r'- name: arkhai-data\n\s+mountPath: "?([^"\n]+)"?', deployment)
+        claim = re.search(r'- name: arkhai-data\n\s+persistentVolumeClaim:\n\s+claimName: "?([^"\n]+)"?', deployment)
+        assert mount and claim, f"{chart} mounts no claim as arkhai-data"
+        assert database.is_absolute() and PurePosixPath(mount.group(1)) in database.parents, (chart, url, mount.group(1))
+        _named(manifest, "PersistentVolumeClaim", claim.group(1))
 
 
 def test_the_registry_smoke_test_appends_its_credential_profile_once() -> None:
