@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Collection
 
 SUBAGENT_PREFIX = "agent-"
 
@@ -25,31 +25,44 @@ def subagents_directory(conversation: Path) -> Path:
     return conversation.with_suffix("") / "subagents"
 
 
-def subagent_denials(conversation: Path) -> list[dict[str, Any]]:
+def subagent_denials(conversation: Path, spawned: Collection[str] | None = None
+                     ) -> list[dict[str, Any]]:
     """Every call a subagent of the session was denied, in transcript order, each
-    shaped as the harness shapes the parent's denials and naming its subagent."""
+    shaped as the harness shapes the parent's denials and naming its subagent.
+
+    A session's directory holds the subagents of every run of that session, so a
+    resumed run passes `spawned`, the tool-use ids of its own turn, and only the
+    subagents those calls started are read; their earlier runs' subagents were
+    read on their own lines. A subagent whose record names no starting call is
+    then left out rather than guessed at.
+    """
     directory = subagents_directory(conversation)
     if not directory.is_dir():
         return []
     denials: list[dict[str, Any]] = []
     for transcript in sorted(directory.glob(f"{SUBAGENT_PREFIX}*.jsonl")):
-        denials.extend(_transcript_denials(transcript))
+        meta = _meta(transcript)
+        if spawned is not None and meta.get("toolUseId") not in spawned:
+            continue
+        denials.extend(_transcript_denials(transcript, meta))
     return denials
 
 
-def _description(transcript: Path) -> str | None:
+def _meta(transcript: Path) -> dict[str, Any]:
+    """The subagent's record beside its transcript: its task and the call that
+    started it, or nothing when the harness wrote none."""
     meta = transcript.with_name(transcript.name[: -len(".jsonl")] + ".meta.json")
     try:
         data = json.loads(meta.read_text("utf-8"))
     except (OSError, ValueError):
-        return None
-    description = data.get("description") if isinstance(data, dict) else None
-    return description if isinstance(description, str) and description else None
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
-def _transcript_denials(transcript: Path) -> list[dict[str, Any]]:
+def _transcript_denials(transcript: Path, meta: dict[str, Any]) -> list[dict[str, Any]]:
     subagent: dict[str, Any] = {"id": transcript.name[len(SUBAGENT_PREFIX): -len(".jsonl")]}
-    if (description := _description(transcript)) is not None:
+    description = meta.get("description")
+    if isinstance(description, str) and description:
         subagent["description"] = description
     try:
         lines = transcript.read_text("utf-8").splitlines()

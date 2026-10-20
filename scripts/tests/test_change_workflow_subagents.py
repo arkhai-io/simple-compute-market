@@ -30,14 +30,19 @@ def _result(tool_id: str, decision: dict | None) -> str:
     return json.dumps(event)
 
 
-def write_subagent(conversation: Path, lines: list[str], description: str | None = None) -> Path:
+def write_subagent(conversation: Path, lines: list[str], description: str | None = None,
+                   agent: str = AGENT, started_by: str | None = None) -> Path:
     directory = subagents_directory(conversation)
     directory.mkdir(parents=True, exist_ok=True)
-    transcript = directory / f"agent-{AGENT}.jsonl"
+    transcript = directory / f"agent-{agent}.jsonl"
     transcript.write_text("\n".join(lines) + "\n", "utf-8")
+    meta: dict = {}
     if description is not None:
-        (directory / f"agent-{AGENT}.meta.json").write_text(
-            json.dumps({"description": description}), "utf-8")
+        meta["description"] = description
+    if started_by is not None:
+        meta["toolUseId"] = started_by
+    if meta:
+        (directory / f"agent-{agent}.meta.json").write_text(json.dumps(meta), "utf-8")
     return transcript
 
 
@@ -68,19 +73,47 @@ def test_no_subagent_directory_means_no_denials(tmp_path: Path) -> None:
     assert subagent_denials(tmp_path / f"{SESSION}.jsonl") == []
 
 
-def test_a_runs_line_carries_its_subagents_denials_after_its_own(tmp_path: Path) -> None:
+def _spawn(tool_id: str) -> str:
+    return json.dumps({"type": "assistant", "session_id": SESSION, "message": {
+        "role": "assistant", "content": [
+            {"type": "tool_use", "id": tool_id, "name": "Agent", "input": {"prompt": "verify"}}]}})
+
+
+def test_a_runs_line_carries_the_denials_of_the_subagents_it_started(tmp_path: Path) -> None:
     parent = {"tool_name": "Bash", "tool_use_id": "p-1", "tool_input": {"command": "make lock"}}
-    claude = FakeClaude((event_lines(VALID["finished"], denials=[parent]), 0))
-    write_subagent(conversations(tmp_path) / f"{SESSION}.jsonl", [
+    claude = FakeClaude(([_spawn("spawn-1") + "\n"]
+                         + event_lines(VALID["finished"], denials=[parent]), 0))
+    conversation = conversations(tmp_path) / f"{SESSION}.jsonl"
+    write_subagent(conversation, [
         _use("s-1", "sleep 5"),
         _result("s-1", {"decision": "reject", "source": "config", "reasonType": "mode"}),
-    ], description="Verify F3")
+    ], description="Verify F3", started_by="spawn-1")
+    # The same session's earlier run started another subagent, read on its own line.
+    write_subagent(conversation, [
+        _use("e-1", "awk 1 x"),
+        _result("e-1", {"decision": "reject", "source": "config", "reasonType": "mode"}),
+    ], description="Earlier run", agent="aaaaaaaaaaaaaaaaa", started_by="spawn-0")
+    # One with no record of what started it is left out rather than guessed at.
+    write_subagent(conversation, [
+        _use("u-1", "sed -i x"),
+        _result("u-1", {"decision": "reject", "source": "config", "reasonType": "mode"}),
+    ], agent="bbbbbbbbbbbbbbbbb")
 
     line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
 
     assert line["denials"] == [parent, {
         "tool_name": "Bash", "tool_use_id": "s-1", "tool_input": {"command": "sleep 5"},
         "reason": "mode", "subagent": {"id": AGENT, "description": "Verify F3"}}]
+
+
+def test_without_a_spawned_set_every_subagent_is_read(tmp_path: Path) -> None:
+    conversation = tmp_path / f"{SESSION}.jsonl"
+    write_subagent(conversation, [
+        _use("u-1", "sleep 1"),
+        _result("u-1", {"decision": "reject", "source": "config", "reasonType": "mode"}),
+    ])
+
+    assert [d["tool_use_id"] for d in subagent_denials(conversation)] == ["u-1"]
 
 
 def test_the_denial_report_names_the_subagent_instead_of_listing_later_calls(tmp_path: Path) -> None:
