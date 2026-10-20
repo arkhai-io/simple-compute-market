@@ -20,7 +20,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -968,14 +968,11 @@ archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning 
 round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
 	@python3 scripts/round_view.py check
 
-round-view: ## Show an implementation round as uncommitted changes in this checkout for the owner's reading, after pushing HEAD and dispatching the E2E pipeline (CHANGE=<change> [BASE=<commit>] [NO_E2E=1])
-	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)") $(if $(filter 1,$(NO_E2E)),--no-e2e)
+round-view: ## Show an implementation round as uncommitted changes for the owner's reading: in the owner's workspace, on the branch fetched from the change's clone, or in place for a change with no clone; run again to follow the clone's new commits (CHANGE=<change> [BASE=<commit>])
+	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)")
 
-round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
+round-done: ## Return the branch to the round's commit after round-view, carrying commits made during the view onto it and keeping other edits uncommitted, then return the workspace to where it was
 	@python3 scripts/round_view.py done
-
-round-e2e-baseline: ## Print, and forget, the run before the E2E run round-view dispatched for HEAD, if it dispatched one
-	@python3 scripts/round_view.py e2e-baseline
 
 design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
 	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design

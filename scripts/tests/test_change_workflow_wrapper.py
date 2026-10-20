@@ -4,6 +4,7 @@ answer: the wrapper's command and the outcome it logs."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from change_workflow.common import StepError
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
+from change_workflow.running import Run, live_runs, recorded_run, runs_directory
 from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
@@ -526,3 +528,70 @@ def test_a_run_that_went_on_past_a_denial_is_logged_as_it_ended_with_the_denial(
 
     assert (line["outcome"], line["message"], line["denials"]) == (
         kind, VALID[kind]["message"], recorded)
+
+
+# A run in progress is recorded in its checkout, so a round view never moves it.
+
+def test_a_run_is_recorded_while_it_runs_and_forgotten_once_its_line_is_written(
+        tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+    seen: list[list[Run]] = []
+
+    class Watching(FakeClaude):
+        def __call__(self, command, cwd, feed) -> int:
+            seen.append(live_runs(runs))
+            return super().__call__(command, cwd, feed)
+
+    wrapper = make_wrapper(tmp_path, Watching((event_lines(VALID["finished"]), 0)))
+    wrapper.runs = lambda _: runs
+    # The log reads the clock last, for the time on the line it then writes.
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    wrapper.run("implement", CHANGE)
+
+    (recorded,) = seen[0]
+    assert (recorded.pid, recorded.step, recorded.change, recorded.started) == (
+        os.getpid(), "implement", CHANGE, "2026-10-21T09:15:40Z")
+    assert at_clock[-1] == seen[0]
+    assert len(read_log(log_path(tmp_path, CHANGE))) == 1
+    assert list(runs.iterdir()) == []
+
+
+def test_an_interrupted_run_forgets_its_record_after_its_line(tmp_path: Path) -> None:
+    runs = tmp_path / "git" / "change-runs"
+
+    def interrupted(command, cwd, feed) -> int:
+        assert live_runs(runs)
+        raise KeyboardInterrupt
+
+    wrapper = make_wrapper(tmp_path, FakeClaude())
+    wrapper.runner = interrupted
+    wrapper.runs = lambda _: runs
+    at_clock: list[list[Run]] = []
+    wrapper.clock = lambda: (at_clock.append(live_runs(runs)), clock())[1]
+
+    with pytest.raises(KeyboardInterrupt):
+        wrapper.run("validate", CHANGE)
+
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["outcome"] == "stopped"
+    assert len(at_clock[-1]) == 1
+    assert list(runs.iterdir()) == []
+
+
+def test_a_record_whose_process_is_gone_counts_as_no_run(tmp_path: Path) -> None:
+    runs = tmp_path / "change-runs"
+    with recorded_run(runs, "triage", CHANGE, clock=clock, pid=4242):
+        (live,) = live_runs(runs, alive=lambda pid: pid == 4242)
+        assert live.describe() == (
+            f"triage of {CHANGE} (process 4242, started 2026-10-21T09:15:40Z)")
+        assert live_runs(runs, alive=lambda pid: False) == []
+    assert live_runs(runs, alive=lambda pid: True) == []
+
+
+def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:
+    # The pytest temporary directory is not inside a Git checkout.
+    assert runs_directory(tmp_path) is None
+    with recorded_run(None, "design", CHANGE):
+        assert live_runs(None) == []
+    assert list(tmp_path.iterdir()) == []

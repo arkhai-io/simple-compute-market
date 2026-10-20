@@ -35,6 +35,7 @@ from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, mi
 from change_workflow.log import last_run, log_path, read_log, record_outcome
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript
+from change_workflow.running import recorded_run, runs_directory
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
 
@@ -96,6 +97,8 @@ class Wrapper:
     # Where Claude Code keeps a session's conversation, read for the turns it gained
     # outside the wrapper and the time of its last turn.
     conversation: Callable[[Path, str], Path] = conversation_file
+    # Where a run in progress is recorded, so no round view moves its checkout.
+    runs: Callable[[Path], Path | None] = runs_directory
 
     def run(self, step: str, change: str, *, arguments: str = "",
             sections: Sequence[int | str] | None = None, fresh: bool = False) -> Entry:
@@ -177,6 +180,15 @@ class Wrapper:
     def _turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
               models: Sequence[Model], *, session: str | None, granted: Sequence[str] = (),
               extra: Entry | None = None) -> Entry:
+        """Run one turn and log it, recorded as in progress in the checkout until its
+        line is written, however it ends."""
+        with recorded_run(self.runs(self.root), step, change, clock=self.clock):
+            return self._logged_turn(step, rules, change, log, prompt, models,
+                                     session=session, granted=granted, extra=extra)
+
+    def _logged_turn(self, step: str, rules: StepRules, change: str, log: Path, prompt: str,
+                     models: Sequence[Model], *, session: str | None,
+                     granted: Sequence[str] = (), extra: Entry | None = None) -> Entry:
         """Run one turn on the first of `models` that is available, and log it.
 
         A model whose harness is missing, not signed in, or at its usage limit

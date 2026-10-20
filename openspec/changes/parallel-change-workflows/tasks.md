@@ -136,11 +136,26 @@ and dispatch (requirement "Triage of an implementation round"). Touches
 `scripts/round_view.py`, `scripts/change_workflow/wrapper.py`, the root `Makefile`,
 `scripts/tests/test_round_view.py`, and `scripts/tests/test_change_workflow_wrapper.py`.
 
-- [ ] 2.1 The record of a run in progress (D2 step 2): the wrapper writes the run's
+- [x] 2.1 The record of a run in progress (D2 step 2): the wrapper writes the run's
       process, step, and change into its checkout's Git directory as a run starts,
       and removes it once the run's line is written, an interrupt included;
       `runs_in_progress(root)` reads the live ones, a dead process counting as none.
-- [ ] 2.2 `round_view.py start <change>` for a change whose clone holds its branch
+      Note: a new module, `scripts/change_workflow/running.py`, beside the wrapper
+      rather than in it, since the round view reads it and need not import the
+      harness: one file per run under `<git-dir>/change-runs/` (the wrapper's pid
+      and a random suffix, so validation and a review side by side each have
+      theirs), written by `recorded_run` around the whole turn, model fallbacks
+      included, and removed in its `finally` after the line is written.
+      `live_runs(directory)` reads a directory; `runs_in_progress(root)` the
+      checkout's. Outside a Git checkout nothing is recorded. A record is written
+      aside and renamed, so a reader never takes a half-written one for no run. The
+      review runner, which moves no branch but reads `HEAD` throughout, records its
+      runs too, its directory injectable as `runs`. Beyond the files the section
+      names, it also touches `scripts/change_workflow/running.py` (new),
+      `review.py`, the package docstring, the test fixtures (whose wrapper now
+      records nothing), `test_change_workflow_review.py`, and
+      `test_change_next_step.py` (the view's dropped `e2e` argument).
+- [x] 2.2 `round_view.py start <change>` for a change whose clone holds its branch
       (1.3), run in the workspace: refuse a dirty workspace, naming the files; a run
       in progress there (2.1), naming it; another change's open view, naming the
       change; then fast-forward the workspace's branch from the clone's `workspace`
@@ -148,11 +163,34 @@ and dispatch (requirement "Triage of an implementation round"). Touches
       record where the workspace was (branch or detached commit); check out the
       branch and mixed-reset it, with `-N`, to the base read from the clone's latest
       `round` line (D2). The state records the clone, so `done` and refresh find it.
-- [ ] 2.3 Refresh (D2): `start` again for the change whose view is open moves the
+      Note: the base falls back, as in place, to the clone's latest triaged
+      validation. A workspace branch that is not an ancestor of the clone's — one
+      holding a commit of the owner's that triage has not yet pulled, or diverged —
+      is refused, naming it; a branch the workspace lacks is created at the
+      clone's commit, and one checked out there is fast-forwarded with
+      `merge --ff-only`. The state is written before the checkout moves; a failure
+      that left the checkout where it was removes it, one after leaves it for
+      `make round-done` (the failure paths are untested: a clean workspace leaves
+      no way to make the checkout fail). `round-done` refuses while a run is in
+      progress, since closing moves the checkout too. The in-place view does not
+      check that the checked-out branch is the change's, as before.
+      `start` refuses in a clone (its `workspace` remote names a directory), whose
+      branch every step runs on.
+- [x] 2.3 Refresh (D2): `start` again for the change whose view is open moves the
       view to the branch's new head over the same base, after the same fetch;
       refuse while the workspace holds uncommitted edits or commits made during the
       view, naming them and `make round-done`.
-- [ ] 2.4 `done` carries commits made during the view (D2, 17 F1, 26 F3, 37 F2):
+      Note: edits are the worktree's differences from the view's commit plus
+      untracked files; once there are none, the move is `git reset --hard` to the
+      new head, which overwrites no edit of the owner's (an ignored file where the
+      new head adds one would be replaced), then the state is written, then the
+      mixed reset to the base, so a failure leaves the state where the branch is. A
+      new head that does not descend from the view's is refused, and so is a
+      `BASE=` given to a refresh; the same head leaves the view as it is. An
+      in-place view is not refreshed (now in D2): its branch is the one its steps
+      run on, and nothing moves it while the view is open, so `start` again
+      refuses as before.
+- [x] 2.4 `done` carries commits made during the view (D2, 17 F1, 26 F3, 37 F2):
       oldest first onto the round's head, each new commit from the previous one's
       tree, with every path the original changed against its parent set to the
       original's version (deletions deleted), keeping author and message; then
@@ -167,13 +205,40 @@ and dispatch (requirement "Triage of an implementation round"). Touches
       nothing and naming the file or commit with `git reset --mixed <head>` as the
       way back, on any such failure, on a commit with two parents, and when the
       branch has left the base's line. No commit: back at the head, as today.
-- [ ] 2.5 The view of a change with no clone, whose branch is the workspace's own,
+      Note: every commit is judged before any is made; the replacements are built
+      with `read-tree`, `update-index --index-info`, `write-tree`, and
+      `commit-tree` in a private index, so the checkout's own index, which holds
+      the view, is untouched until the final mixed reset. The kinds: a path the
+      round added or deleted, then a mode the round changed, a symlink or
+      submodule, or a binary (a NUL in a blob's first 8000 bytes, Git's test) on
+      any side, must equal the head's; a text file present at both ends must also
+      keep the head's mode, and is refused when the commit deletes it. "Left the
+      base's line" is a branch not descending from the base, or whose merge base
+      with the round's head is not the base — a reset into the round followed by a
+      commit. A branch reset to one of the round's own commits carries nothing. A
+      branch already at or past the round's head is closed as it stands, unless a
+      commit not descending from the head reaches it — a commit made on the base
+      and merged with the head — which is refused. A commit whose replayed tree
+      equals the previous one's is dropped and named (`Carried.replacement` is
+      None). Every refusal's way back names `make round-done`. The carry applies
+      to a view in place as well, replacing the earlier leaving of such commits'
+      changes uncommitted. Returning the workspace is skipped while it holds
+      uncommitted edits, which a checkout would carry onto the branch it went back
+      to: `done` closes the view, leaves the workspace on the change's branch, and
+      says to commit or discard them and check out where it was. These, the
+      refusal of a text file's mode change, the dropping of empty commits, and how
+      the view tells a clone's change from one in place are now recorded in D2.
+- [x] 2.5 The view of a change with no clone, whose branch is the workspace's own,
       keeps today's behaviour: the branch reset in place, the reading first (D2,
       D3). `round_view.py` no longer pushes or dispatches: `--no-e2e`, the
       `e2e-baseline` action, `E2E_BASELINES`, and `make round-e2e-baseline` are
       removed, and `make round-view` loses `NO_E2E` (D3). `check` refuses only in
       the checkout whose branch the view moved.
-- [ ] 2.6 Verification. Repository level (a workspace and a clone in a temporary
+      Note: the in-place view now also refuses a run in progress and names a dirty
+      worktree's files. `check` needed no change: the state lives in the Git
+      directory of the checkout the view moved, so a clone's steps never see a
+      workspace's view.
+- [x] 2.6 Verification. Repository level (a workspace and a clone in a temporary
       directory, real Git): each refusal of 2.2 and 2.3; a view and its refresh onto
       a triage fix; `done` with no commit; each delta scenario of "Triage of an
       implementation round" on carrying — a commit of an edit, a partly staged file
@@ -185,6 +250,63 @@ and dispatch (requirement "Triage of an implementation round"). Touches
       pytest -q scripts/tests/test_round_view.py
       scripts/tests/test_change_workflow_wrapper.py`; `make test`. No end-to-end
       scenario covers it.
+      Evidence: `scripts/tests/test_round_view.py`, 65 passed — repository level
+      (real Git in a temporary directory; runs in progress injected). In place:
+      the view, `done` with and without edits, the base from the round line and
+      from the triaged validation, the guard, the earlier recovery cases, and each
+      refusal (dirty worktree naming the file, a run in progress naming it, a base
+      not an ancestor, a detached `HEAD`, an empty round, an unknown change).
+      Carrying, in place: a commit of an edit, kept with its author, date, and
+      message, and `make round-done`'s output naming it beside its replacement; a
+      whole file committed then edited on, the edit left uncommitted; "commit all"
+      carrying only the owner's edit, and with no edit dropped and named; two
+      commits carried oldest first; a committed deletion of a file the round
+      deleted (dropped, holding nothing beyond the round) before a carried edit; a
+      file lacking a round change, staged by part and with the change removed,
+      each refused with the way back and nothing moved; an edit inside a line the
+      round changed refused; a text file the round changed refused when the
+      commit deletes it or changes its mode; an edited added file refused; a
+      binary refused at the owner's contents and carried, beside an owner's edit,
+      at the round's; a symlink and a mode the round changed carried as the round
+      left them, and a mode the commit undid refused; a merge (a
+      two-parent commit made with `commit-tree`) refused, and one bringing in the
+      round's head over an owner's commit refused; a reset into the round followed
+      by a commit, and an amended base, refused as leaving the base's line. From a
+      clone (a workspace with a bare `origin` and a clone made by
+      `change_clone.create`): the view on the branch by name, the clone's `HEAD`
+      and status unchanged and its `check` passing; `done` returning to `dev`, to
+      a detached commit, and to the branch itself; an owner's commit carried and
+      then pulled into the clone fast-forward; uncommitted edits keeping the
+      workspace on the branch; the workspace branch fast-forwarded by `update-ref`
+      and, when checked out, by `merge --ff-only`; the refusals of a workspace
+      branch ahead of the clone and one diverged from it, a dirty workspace, a run
+      in progress, another change's view, and a view in the clone; `done` refused
+      with a run in progress; a refresh onto a triage fix over the same base, one
+      with nothing new leaving the view as it is, and its refusals over edits,
+      over a commit made during the view, over a branch moved back to the round by
+      hand, with a run in progress, onto a head not descending from the view's,
+      and of a `BASE=`. `scripts/tests/test_change_workflow_wrapper.py`, unit with
+      the runs directory injected: a run's record present while it runs and at
+      the clock reading the log takes for the line it then writes, gone after; an
+      interrupted run's likewise; a record whose process is gone counting as none;
+      and `runs_directory` None outside a Git checkout (the wrapper is not run
+      there). `scripts/tests/test_change_workflow_review.py`: a review recorded
+      while it runs and forgotten after. `uv run --no-project --with pytest pytest
+      -q scripts/tests`: 1162 passed after the last fixes. `make check-packaging`
+      and `make check-comment-hygiene`: passed. `make test`, before the last
+      fixes, which touched only scripts and their tests: every suite passed, the
+      script tests' 1157 among them, up to `make -C helm
+      test-render`, which failed on the Helm JSON schema's error wording
+      (`internalRegistryTrust` got null, a port's type, retired keys) in the
+      storefront and bare-metal chart render tests and
+      `helm/tests/test_release_topology.py`, as in section 1; nothing under
+      `helm/` changed. No end-to-end scenario covers it.
+      Handoff: the change-validate skill (`make round-e2e-baseline`), the
+      orchestrating skill and `change-implement`'s report (the view pushing and
+      dispatching), `docs/agents/change-workflow.md`, and the step table's
+      validation allow of `make round-e2e-baseline` still describe the removed
+      push and dispatch; sections 4.1, 4.2, 4.4, and 4.5 rewrite them, so this
+      round is not validated before section 4 is committed.
 
 ## 3. The next-step computation for a change in a clone
 

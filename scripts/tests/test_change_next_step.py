@@ -922,7 +922,7 @@ def test_a_round_view_opened_and_closed_in_git_is_seen_and_then_not(tmp_path: Pa
     _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
     _git(root, "commit", "-qam", "section 2")
 
-    rounds.start(root, CHANGE, base=base, e2e=False)
+    rounds.start(root, CHANGE, base=base)
     during = nxt.compute(root, CHANGE)
     rounds.done(root)
     after = nxt.compute(root, CHANGE)

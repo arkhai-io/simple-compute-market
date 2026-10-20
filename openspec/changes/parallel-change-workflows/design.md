@@ -103,12 +103,14 @@ checked out in the current checkout.
 1. refuses unless the workspace is clean, naming the files (the owner stashes and
    reapplies their own work by hand, rather than the tool holding it);
 2. refuses while an unattended run is in progress in the workspace, naming it, and
-   while another change's view is open, naming that change; the wrapper records
-   each run in progress in its checkout's Git directory — its process, step, and
+   while another change's view is open, naming that change; the wrapper, and the
+   review runner beside it, record each run in progress in its checkout's Git
+   directory — its process, step, and
    change — and removes the record once the run's line is written, and a recorded
    process no longer alive counts as no run;
 3. fast-forwards the workspace's `feat/<change>` from the change's clone, refusing
-   if it has diverged;
+   if it has diverged or holds a commit the clone lacks — one of the owner's that
+   triage has not yet pulled;
 4. records where the workspace was, checks out `feat/<change>`, and mixed-resets it
    to the round's base, read from the clone's latest `round` line, so the round
    shows as uncommitted changes exactly as before.
@@ -116,7 +118,9 @@ checked out in the current checkout.
 Run again while that change's view is open, it moves the view to the branch's new
 head over the same base, so the owner follows triage's fixes; it refuses while the
 workspace holds uncommitted edits or commits made during the view, naming them and
-pointing at `make round-done`. `make round-done` resets `feat/<change>` to the
+pointing at `make round-done`, and refuses a new head that does not descend from
+the view's and a base given anew, since the view's base is fixed. Closing the view
+moves the checkout too, so `round-done` refuses while a run is in progress there. `make round-done` resets `feat/<change>` to the
 round's head and returns the workspace to where it was. The view never touches the
 clone, so it never moves the branch any step runs on. It leaves the owner's
 environments alone: rebuilding and relocking happen in the clone, or by the owner's
@@ -156,7 +160,9 @@ So `round-done` refuses, moving nothing and saying how to return
   again after `round-done`;
 - any commit made during the view has two parents (`git rev-list --min-parents=2`),
   since a merge from the base's line still descends from the base;
-- the branch has left the base's line — an amend of the base, a reset, or a rebase.
+- the branch has left the base's line — an amend of the base, a reset, or a rebase:
+  it does not descend from the base, or its merge base with the round's head is not
+  the base, as after a reset into the round followed by a commit.
 
 The merge test needs a text version on every side, so a path the round changed is
 judged by its kind (37 F2), comparing the commit's version with the base's and the
@@ -173,6 +179,20 @@ file:
 So an edit the owner commits during the view inside a line the round changed —
 where the merge conflicts — or anywhere in a file the round added is refused, and
 committed again on the round's head after `round-done`, as a deliberate revert is.
+A commit that changes the mode of a text file the round changed is refused too, as
+anything else is. A commit holding nothing beyond the round's head — "commit all"
+with no edit of the owner's — is dropped and named rather than replayed empty,
+since triage would otherwise present it as an owner's commit. A branch already at
+or past the round's head, back by hand, is closed as it stands, unless a commit
+made on the base during the view reaches it through a merge, which is refused like
+any merge.
+
+`round-done` returns the workspace to where it was only when it holds no
+uncommitted edit, since a checkout would carry such an edit onto the branch it
+went back to; otherwise it leaves the workspace on the change's branch, says so,
+and the owner commits or discards the edit and checks out by hand. A view of a
+change worked without a clone is not refreshed: its branch is the one the
+change's steps run on, and nothing moves it while the view is open.
 
 Rejected (26 F3): telling a partly staged file by its version differing both from
 the worktree at close and from the round's head (a commit of part of a file, its
@@ -204,7 +224,10 @@ workspace's environments on every view (unwanted; the owner runs `make dist-clea
 or `make lock` when they want them).
 
 For a change worked without a clone, whose branch is checked out in the
-workspace itself, the view resets that branch in place, as before this change.
+workspace itself, the view resets that branch in place, as before this change. The
+view tells the two apart by whether a clone of the change holds its branch, not by
+what the workspace has checked out, since the workspace may have the branch of a
+change in a clone checked out for reading.
 
 ### D3 — Validation and review start when the round is committed
 

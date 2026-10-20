@@ -11,6 +11,7 @@ import pytest
 from change_workflow.log import log_path, read_log
 from change_workflow.review import (ReviewError, claim_record, review_and_log, review_models,
                                     run_review)
+from change_workflow.running import live_runs
 from change_workflow.steps import Model, load_steps
 from change_workflow_fixtures import (CHANGE, HEAD, RECORDS, VALIDATED, FakeClaude,
                                       claude_review, clock, codex_missing, codex_saying,
@@ -677,3 +678,27 @@ def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path
 
     assert (line["outcome"], line["commit"]) == ("stopped", HEAD)
     assert line["reason"] == "the review did not finish: PermissionError: codex"
+
+
+def test_a_review_is_recorded_in_progress_while_it_runs_and_forgotten_after(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    runs = tmp_path / "git" / "change-runs"
+    seen: list[list] = []
+    review = writing(review_text(), session="codex-1")
+
+    def watched(command: Sequence[str], log: Path) -> int:
+        seen.append(live_runs(runs))
+        return review(command, log)
+
+    def head(_: Path) -> str:
+        seen.append(live_runs(runs))
+        return HEAD
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, runner=watched, head=head,
+                          runs=lambda _: runs)
+
+    assert line["outcome"] == "finished" and len(seen) >= 2
+    assert all([(run.step, run.change) for run in live] == [("review", CHANGE)]
+               for live in seen)
+    assert list(runs.iterdir()) == []
