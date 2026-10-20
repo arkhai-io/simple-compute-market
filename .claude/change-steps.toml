@@ -34,6 +34,14 @@ allow = [
   "Bash(openspec show *)", "Bash(openspec status*)",
   "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
   "Bash(grep *)", "Bash(echo *)", "Bash(diff *)", "Bash(find *)",
+  # The rest of the read-only text toolbox the steps reach for, and the git
+  # reads in their `-C <dir>` form. A chain runs only when every command in it
+  # is allowed, so a leading `cd` is allowed as the no-op it is: it grants
+  # nothing to the commands after it.
+  "Bash(sed -n *)", "Bash(awk *)", "Bash(cut *)", "Bash(sort *)", "Bash(uniq *)",
+  "Bash(tr *)", "Bash(cd *)",
+  "Bash(git -C * status*)", "Bash(git -C * log*)", "Bash(git -C * diff*)",
+  "Bash(git -C * show*)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
@@ -45,6 +53,9 @@ deny = [
   "Bash(find * -fprint*)", "Bash(find * -fls*)",
   # The diff family writes its output to a file with --output.
   "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
+  "Bash(git -C *--output*)",
+  # sed reads only with -n; its in-place forms edit the file.
+  "Bash(sed -i*)", "Bash(sed * -i*)", "Bash(sed *--in-place*)",
 ]
 
 # Design writes the change's documents and commits nothing; the owner commits
