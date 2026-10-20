@@ -96,6 +96,15 @@ def denial_report(reviews: Path, entry: Entry) -> list[str]:
     for denial in denials:
         call = f"{denial.get('tool_name', '?')} {call_summary(denial.get('tool_input'))}".rstrip()
         reason = denial.get("reason")
+        subagent = denial.get("subagent")
+        if isinstance(subagent, dict):
+            # A subagent's calls are in its own transcript, not the run's, so the
+            # report names the subagent instead of listing what followed.
+            name = subagent.get("description") or subagent.get("id") or "?"
+            shown.append(f"denied in subagent {name!r}: {call} "
+                         f"({reason if reason else 'reason not recorded'})")
+            shown.append("  its later calls are in the subagent's own transcript")
+            continue
         shown.append(f"denied: {call} ({reason if reason else 'reason not recorded'})")
         key = denial.get("tool_use_id")
         index = next((i for i, (id_, _) in enumerate(calls) if key is not None and id_ == key),

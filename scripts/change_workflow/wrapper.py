@@ -37,6 +37,7 @@ from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
 from change_workflow.records import git_head, next_transcript
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
+from change_workflow.subagents import subagent_denials
 
 
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
@@ -238,16 +239,17 @@ class Wrapper:
                 reason = (f"{model.model} could not be reached after "
                           f"{NETWORK_RETRIES + 1} attempts: {reached[1]}")
             else:
-                outcome = run_outcome(status, stream.result, schema, stream.denials)
+                outcome = run_outcome(status, stream.result, schema,
+                                      self._denials(stream, session))
                 break
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
-                       "denials": stream.denials}
+                       "denials": self._denials(stream, session)}
             break
         else:
             reason = "no model of the step is available: " + "; ".join(
                 f"{entry['model']}: {entry['reason']}" for entry in passed_over)
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
-                       "denials": stream.denials}
+                       "denials": self._denials(stream, session)}
         extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
         if passed_over:
             extra["unavailable"] = passed_over
@@ -264,6 +266,14 @@ class Wrapper:
         if failure is not None and not isinstance(failure, Exception):
             raise failure
         return line
+
+    def _denials(self, stream: Stream, session: str | None) -> list[dict[str, Any]]:
+        """The run's denials: the parent's own, from its stream, then those its
+        subagents met, read from their transcripts beside the conversation file."""
+        ran = stream.session or session
+        extra = subagent_denials(self.conversation(self.root, ran)) if ran else []
+        seen = {d.get("tool_use_id") for d in stream.denials if d.get("tool_use_id")}
+        return stream.denials + [d for d in extra if d.get("tool_use_id") not in seen]
 
     def _before(self, log: Path, session: str | None) -> Entry:
         if session is None:
