@@ -78,7 +78,7 @@ principals = [{ scheme = "ed25519", identifier = "<provisioning-authority-public
 
 [registry]
 # The Arkhai public listing registry (preprod, Base Sepolia listings):
-urls = ["http://34.41.205.175/registry"]
+urls = ["https://registry.example.com"]
 # Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<REGISTRY_HOST>:8080"]
 
@@ -87,7 +87,7 @@ urls = ["http://34.41.205.175/registry"]
 # with. A storefront refuses to start with a registry it cannot verify. Replace
 # both placeholders with the values the registry's operator publishes, and
 # re-key the table if you change `urls`.
-[registry.authorities."http://34.41.205.175/registry"]
+[registry.authorities."https://registry.example.com"]
 authority  = "<registry-authority>"
 principals = [{ scheme = "eip191", identifier = "<registry-principal>" }]
 
