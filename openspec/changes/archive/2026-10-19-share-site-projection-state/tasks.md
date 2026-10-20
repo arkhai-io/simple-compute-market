@@ -2035,6 +2035,33 @@ site's public URL appear in its error text (14 F2); the open questions moved to
 index sentences reworded as resolved (14 F8); `docs/seller-quickstart.md`'s registry pin live
 (14 F9).
 
+Closeout triage: version bumps (14 F4; owner-directed, option (a), 2026-10-20). Per
+`docs/development/RELEASING.md`'s versioning policy (before 1.0.0 an incompatible change takes a
+minor bump): `arkhai-bare-metal-storefront` 0.16.0 → 0.17.0 (configuration through files);
+`arkhai-vms-storefront` 0.16.1 → 0.17.0 and `arkhai-apicredits-storefront` 0.9.0 → 0.10.0 (retired
+keys refuse startup); `arkhai-kit-policy` 0.4.0 → 0.5.0, since `escrow_shape_guard` and
+`accept_exact_listing_middleware` now refuse a listing advertising no release condition, which
+they passed before. **Differed:** `arkhai-kit-negotiation-runtime` 0.5.0 → 0.5.1, because it pins
+`arkhai-kit-policy` exactly (now `==0.5.0`), as earlier policy bumps moved it. Consumer bounds:
+the three storefronts pin the runtime at `==0.5.1` and require `arkhai-kit-policy>=0.5.0`, each
+testing the fail-closed guard; the VM storefront pins `arkhai-bare-metal-storefront==0.17.0`;
+no other bound moved (`arkhai-vms-negotiation`, `e2e-tests`, and the buyers do not depend on the
+new behaviour). `RELEASING.md` lists no versions and names no changelog. `make dist`; `make lock`
+relocked every project but the three PyTorch-index ones (`core/buyer`, `domains/apicredits`,
+its buyer, service, and storefront, `domains/bare_metal/buyer` and storefront, `e2e-tests`,
+`kit/negotiation-runtime`, `kit/storefront`); `domains/vms/storefront/uv.lock`,
+`domains/vms/buyer/uv.lock`, and `kit/policy/uv.lock` were edited by hand, only the internal
+packages' versions, wheel names, and specifiers, exactly as uv wrote the same entries in
+`domains/apicredits/storefront/uv.lock` and `domains/bare_metal/storefront/uv.lock`. Evidence:
+`make check-packaging` OK; `make -k test` passed every target but the three projects' `reinit`
+(the PyTorch index is unreachable here), among them the bare-metal storefront (438), API-credit
+storefront (182) and buyer (26); after reinstalling the rebuilt wheels into their frozen
+environments, VM storefront unit 1101 passed, 1 skipped, and integration 448 passed
+(`UV_FROZEN=1`), `kit/policy` 80 passed, VM buyer 202 passed (unit level, as `TESTING.md` defines
+them); `make check-change CHANGE=share-site-projection-state` and `make check-comment-hygiene`
+OK. The three hand-edited locks are confirmed when an environment that reaches the PyTorch index
+next runs `make lock` with no diff, as 16.6 did.
+
 ## Design promotion record
 
 `spec.md` destinations marked *(archive)* were written by 17.11's archive from this change's

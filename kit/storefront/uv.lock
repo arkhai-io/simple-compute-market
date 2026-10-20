@@ -243,19 +243,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.0"
+version = "0.5.1"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.5.1-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -263,7 +263,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.4.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
