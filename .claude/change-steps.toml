@@ -129,7 +129,7 @@ allow = [
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
 
