@@ -325,15 +325,32 @@ sentence that says otherwise.
 Delivers D3 and D4's mechanism. Touches `.github/workflows/tests.yml` and
 `helm/scripts/test-render.sh`.
 
-- [ ] 5.1 `.github/workflows/tests.yml`: pass `version: "v4.3.0"` to
+- [x] 5.1 `.github/workflows/tests.yml`: pass `version: "v4.3.0"` to
       `azure/setup-helm@v4`, as the same job pins uv (D3).
-- [ ] 5.2 `helm/scripts/test-render.sh`: print `helm version --short` before the first
+      — Done in the `release-deployment` job beside its `setup-uv` pin.
+- [x] 5.2 `helm/scripts/test-render.sh`: print `helm version --short` before the first
       render, so every render log, `make validate-helm`'s included, names the Helm it ran
       (D4).
+      — Printed as `helm <version>` right after the release name is set, before any
+      render; the comment says why and names the workflow pin as the supported Helm.
 - [ ] 5.3 Verification: `make -C helm test-render` prints the version first and passes;
       `make test-release-tooling`. CI's run of the pushed branch shows Helm v4.3.0 in
       its setup step and passes `make -C helm test-render`; record the run.
       End-to-end: none; the pin and the printed version change no deployment.
+      — `make -C helm test-render` (chart render tests): prints
+      `helm v4.3.0+gbec5b06` after `helm dependency update` and before the first
+      render, and passes. `make test-release-tooling` (release tooling unit tests):
+      1090 passed. `make test`: passes, its render step printing the version first.
+      Not run here: CI on the pushed branch, since this step may not
+      push; validation pushes the branch and records that run, and 5.3 stays open
+      until it does. End-to-end confirmed: none.
+
+Notes: the version prints after `helm dependency update`, before the first render. The
+fresh-context check found the script's comment claiming a merge difference between Helm
+releases that the change never established; reworded to the reason D4 gives. Closeout
+6.9 must replace `TESTING.md`'s "rely on the pinned Helm of the release environment for
+anything recorded as evidence", which now reads as the evidence-only-on-the-pin claim D4
+rules out.
 
 ## 6. Closeout
 
