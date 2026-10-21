@@ -313,7 +313,8 @@ owner's notes, which are triaged beside it).
   checks for `cast`. Rejected: copying them from `default` (the generator needs
   nothing from it); waiting for `helm-e2e-pipeline-parity` to make them optional.
 - **After the scenarios.** Validation records the namespace's peak memory in the
-  part's `summary.json`, copies every pod's log and the namespace's events into
+  part's `summary.json` when a metrics source measures it, leaving the field empty
+  otherwise (83 F2), copies every pod's log and the namespace's events into
   the attempt's directory, and scales the namespace's workloads to zero, keeping
   objects and volumes. Rejected: leaving releases running (resident memory grows
   with the active changes); uninstalling.
@@ -347,9 +348,11 @@ owner's notes, which are triaged beside it).
   evidence records the figure its cleanup wrote, or that it wrote none for want of
   a metrics source. Rejected: requiring a measured figure, with `metrics-server`
   installed on the development cluster before the pilot's cleanup (a cluster-wide
-  component for an advisory check). The pilot's archive
-  cleanup (D9) writes the first, on the pilot's branch, which this branch never
-  merges; this change's archive cleanup writes its own here. The file then conflicts
+  component for an advisory check). Where a metrics source measured both, the
+  pilot's archive cleanup (D9) writes the first figure, on the pilot's branch, which
+  this branch never merges, and this change's archive cleanup writes its own here
+  (83 F2); on the development cluster today neither writes one, and nothing
+  conflicts. When both have, the file conflicts
   when the pilot's pull request merges after this one's, beside the index rows, and
   the merge keeps the measurement with the later recorded time — this change's,
   since round 4 follows the pilot's archive cleanup (37 F3); any later conflict over
@@ -673,14 +676,16 @@ hand.
 In each dispatched run, validation judges each named job and its observation. A
 named job that fails, or an observation that is absent, is caused by the commit or
 of unknown cause: a `V<n>`, and the result `failed`. Every other job that fails is
-compared failure by failure (78 F1) — pytest's failing test IDs where the job
-reports them, otherwise the failing step and its error lines — with the same job in
-the baseline: the latest completed run of the same workflow on `dev` whose head
-commit is an ancestor of the validated commit, usually the merge base, since
-`tests.yml` runs on every push to `dev`. A failure the baseline shows too is
-reported as already failing on `dev` and is not a finding; any other — a job
-passing in the baseline, or a test failing only on the branch in a job failing in
-both — is diagnosed like any failure, so caused by the commit or unknown, a `V<n>`.
+compared failure by failure (78 F1) — each failing test's ID with its exception
+type, both read from pytest's short summary (`FAILED <id> - <type>: <message>`),
+where the job prints one (83 F1); otherwise the failing step and its error lines —
+with the same job in the baseline: the latest completed run of the same workflow on
+`dev` whose head commit is an ancestor of the validated commit, usually the merge
+base, since `tests.yml` runs on every push to `dev`. A failure the baseline shows
+too is reported as already failing on `dev` and is not a finding; any other — a job
+passing in the baseline, a test failing only on the branch in a job failing in
+both, or a test failing in both with another exception type on the branch — is
+diagnosed like any failure, so caused by the commit or unknown, a `V<n>`.
 With no baseline run, or a job whose logs cannot be compared, the failure is of
 unknown cause and triaged. The record names the baseline run and its commit. A run that
 produced no evidence — `gh` not signed in, a runner outage, a run cancelled by a
@@ -701,7 +706,7 @@ The record gains a `ci` part and a section:
 
 Baseline: dev's tests.yml run `<run>` at `968a4a9cd` (the merge base).
 
-Not owed: `py · vms-storefront` — failed, 3 tests (`TimeoutError`), each failing in the baseline; `py · bare-metal-storefront` — failed, `test_abort_all_is_not_previewed`, failing in the baseline.
+Not owed: `py · vms-storefront` — failed, 3 tests (`TimeoutError`), each failing in the baseline with `TimeoutError`; `py · bare-metal-storefront` — failed, `test_abort_all_is_not_previewed` (`AssertionError`), failing in the baseline with `AssertionError`.
 ```
 
 With nothing owed, the part reads `ci not owed` and nothing is dispatched. The
@@ -715,9 +720,18 @@ the named jobs would let a job the commit broke pass unseen; the comparison with
 place is of unknown cause, so triaged. A job's status alone cannot show a failure
 inherited: the branch can break another test in a job already failing, and
 `dev`'s latest run may test code the branch does not contain (53 V1's `dev` run was
-not an ancestor of the branch).
+not an ancestor of the branch). A test ID alone cannot show it either: a test failing
+on `dev` with a `TimeoutError` can fail on the branch with a new exception, which the
+exception type tells apart. The type is compared mechanically, from a line pytest
+already prints, so a timeout whose wording varies from run to run raises nothing.
 
-Rejected: the run's conclusion; the named jobs alone; the observation alone (its job
+Rejected: the test ID alone (it calls a new exception in an already failing test
+inherited); the test ID with the exception type and its message, volatile detail
+disregarded by validation's judgement (a changed assertion in an already failing
+test is caught, but every comparison becomes a judgement about which detail is
+volatile, for a test that already gives little signal); every failure in a test
+already failing on `dev` of unknown cause (the same findings at every validation
+until those tests are fixed); the run's conclusion; the named jobs alone; the observation alone (its job
 passing was part of what was owed); every job judged against `dev` without named
 jobs (a general CI gate no plan asked for); comparing job statuses with `dev`'s
 latest run (it hides a new failure in a failing job, and its run may not be of the

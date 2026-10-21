@@ -181,7 +181,7 @@ conflict at a merge, the one measured later MUST be kept.
 
 - **WHEN** archive cleanup runs for a change validated on Helm
 - **THEN** the change's namespace and images are removed, and the memory its latest
-  validation measured is recorded for the preflight
+  validation measured, if it measured any, is recorded for the preflight
 
 ## MODIFIED Requirements
 
@@ -269,8 +269,8 @@ none that publishes; adding to the list MUST be a tracked change by the owner. I
 MUST judge each named job and what that job must show, from a run whose head commit
 is the commit under validation; a named job that fails, or an observation that is
 absent, MUST be a failure. It MUST compare each failure of every other failing job
-of that run — a failing test where the job reports one, otherwise the failing step
-and its error — with the same job in the latest completed run of the same workflow
+of that run — a failing test's ID and its exception type where the job reports
+them, otherwise the failing step and its error — with the same job in the latest completed run of the same workflow
 on `dev` whose head commit is an ancestor of the commit under validation, and MUST
 name that run and its commit: a failure that run shows too MUST be reported as
 already failing on `dev` and MUST NOT be a failure, and any other MUST be diagnosed
@@ -321,8 +321,8 @@ name the end-to-end scenarios that exercise the change, with the basis for each.
 
 - **WHEN** a complete section owes `tests.yml`'s `release · deployment contracts`
   job passing, and the dispatched run passes that job and fails two others whose
-  failing tests also fail in `dev`'s latest run of `tests.yml` at a commit the
-  branch contains
+  failing tests also fail, with the same exception types, in `dev`'s latest run of
+  `tests.yml` at a commit the branch contains
 - **THEN** validation judges the owed job passed, reports the two others as already
   failing on `dev`, naming that run and its commit, and neither is a failure
 
@@ -339,6 +339,13 @@ name the end-to-end scenarios that exercise the change, with the basis for each.
   run's same job fails with that test and another
 - **THEN** validation reports the first as already failing on `dev` and diagnoses the
   other as any failure
+
+#### Scenario: A test that fails on `dev` fails another way on the branch
+
+- **WHEN** a job no section owes fails on `dev` with a test raising `TimeoutError`,
+  and the dispatched run's same job fails that test with an `AssertionError`
+- **THEN** validation does not report it as already failing on `dev`, and diagnoses
+  it as any failure
 
 #### Scenario: No `dev` run of the branch's code
 

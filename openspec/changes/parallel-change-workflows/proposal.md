@@ -64,7 +64,7 @@ earlier run of the same ref, not of another branch.
   push does not trigger — as owed by validation, never as a task's checkbox.
   Validation dispatches each such workflow from a fixed list that holds no
   publishing workflow, judges the named jobs and their observations, and compares
-  every other job's failures, test by test, with `dev`'s latest run of code the
+  every other job's failures, by test and exception type, with `dev`'s latest run of code the
   branch contains.
 - A one-run permission grant reaches a fresh run as well as a resumed one: every
   unattended step target takes `ALLOW`, one or more `;`-separated rules.
