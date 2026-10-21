@@ -75,8 +75,10 @@ release's merge did:
   reader of an agent reads through it: the storefront chart's `configmap`, `deployment`,
   `service`, `secrets`, `pvc`, and `tests/storefront-environment-test.yaml`, the
   `_helpers.tpl` release checks, and the umbrella's `templates/tests/test-config.yaml`.
-  The bare-metal chart applies it to its single agent's values and `config`. No reader
-  needs to know about `null`.
+  The bare-metal chart applies it to its single agent's values and `config`, and the
+  umbrella's test-config, which also reads the bare-metal agent's `config` to find the
+  sites it binds, reads that through the same normalization. No reader needs to know
+  about `null`.
 - An agent renders as it would had a removed key never been stated. A setting the
   storefront defaults is omitted and defaulted; a value the chart adds when absent —
   `port`, `base_url`, `db_path`, the internal registry and its trust, the provisioning
