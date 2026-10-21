@@ -4,6 +4,9 @@ export UV_PYTHON := $(or $(shell cat ../../../.python-version 2>/dev/null),$(err
 IMAGE_NAME ?= arkhai
 IMAGE_TAG  ?= storefront
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 
 # Path to the monorepo .dist/ wheel directory, relative to domains/vms/storefront/.
 # Used by uv when resolving pure-Python internal packages
@@ -35,12 +38,12 @@ reinit: ## Force-reinstall verified internal wheels.
 build: build-images
 
 build-images:
-	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
-	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+	docker build --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 build-no-cache: ## Full Docker cache bust — use when .dist/ changes are not picked up by build-images.
-	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG} ../../..
-	docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX)
+	docker build --no-cache --ulimit nofile=65536 -f Dockerfile --build-arg INSTALL_RL_DEPS=false --build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) -t ${IMAGE_NAME}:${IMAGE_TAG}$(IMAGE_SUFFIX) ../../..
+	$(if $(IMAGE_SUFFIX),,docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:${IMAGE_TAG}-$(GIT_SUFFIX))
 
 test: reinit test-unit test-integration ## Run all tests
 

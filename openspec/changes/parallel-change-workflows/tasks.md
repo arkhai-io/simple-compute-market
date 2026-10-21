@@ -707,31 +707,176 @@ it deploys (53 V1). No change owns the failure; the index records it as unowned
 work under the local end-to-end stack campaign. Its fix lands and is merged in from
 `dev` before round 2 is validated.
 
-- [ ] 5.1 `IMAGE_SUFFIX`, empty by default, appended to every image tag the build
+- [x] 5.1 `IMAGE_SUFFIX`, empty by default, appended to every image tag the build
       targets write — `build`, `build-dev`, `build-seller`, and each image target the
       root `Makefile` and the subproject Makefiles define — so `make build-dev
       IMAGE_SUFFIX=-<change>` builds `arkhai:storefront-<change>` and its siblings;
       compose, the pipeline lanes, and the owner's own deployments keep bare tags
       (D4).
-- [ ] 5.2 `scripts/change_namespace.py <change>` prints `validate-<change>`, cut to 63
+      Note: the root image targets append it to their `-t`; the five that delegate
+      (`build-registry`, `build-storefront`, `build-provisioning`, `build-dev-env`,
+      `build-test-image`) still run `cd <project> && make build`, so no jobserver
+      reaches them and nothing about their order changes, now passing
+      `IMAGE_SUFFIX=$(IMAGE_SUFFIX)` explicitly, which `make -n` shows. Each
+      subproject's `IMAGE_SUFFIX ?=` ends the image's tag, `arkhai:<tag><suffix>`
+      (the VM storefront's `build-no-cache` too); a suffixed build writes no
+      commit tag, since D4 tags a change's images per change alone and a commit
+      tag would keep one image per validated commit, while a bare build still
+      writes `arkhai:<tag>-<sha>`, which `push-images` reads. The e2e-tests
+      targets that run the image (`test-buyer-machine`, `test-container-module`)
+      keep the bare tag, as the lanes do.
+- [x] 5.2 `scripts/change_namespace.py <change>` prints `validate-<change>`, cut to 63
       characters with a short hash of the full name appended when longer; every
       `helm/Makefile` target that takes `NAMESPACE=` also takes `CHANGE=`, deriving
       the namespace through it (D4).
-- [ ] 5.3 `make -C helm forward CHANGE=<change>` forwards that namespace on the usual
+      Note: the hash is the first 8 hex digits of the full name's SHA-256, after a
+      cut of 54 characters with any trailing hyphen dropped. A name that is not a
+      change name (lowercase letters and digits in hyphen-separated words) is
+      refused, exit 2. `helm/Makefile` derives `NAMESPACE` once, at the top, from
+      `CHANGE`, so every target reading it takes `CHANGE=`; `CHANGE=` beside a
+      command-line `NAMESPACE=` is refused, and so is a `CHANGE` the script
+      refuses. A `make` step's own `CHANGE=` reaches `make -C helm` through
+      `MAKEFLAGS`, inherited by everything the step runs: an unattended
+      validation started as `make validate CHANGE=<change>` derives the change's
+      namespace in every `make -C helm` call unless that call passes `CHANGE=`
+      itself, which section 6's `validate_slice.py` must do on every call
+      (`CHANGE=` empty for `default`), and tests reading these targets drop
+      `MAKEFLAGS` and `CHANGE`.
+- [x] 5.3 `make -C helm forward CHANGE=<change>` forwards that namespace on the usual
       ports, a second forward failing on bind and naming the port; `make -C helm
       resume CHANGE=<change>` scales its workloads back up; `topology-secrets` runs
       for a derived namespace (D4).
-- [ ] 5.4 The image overlay: a function that writes a values overlay naming every
+      Note: forwarding moved into a new `helm/scripts/port-forward.sh` (`start`,
+      `stop`), run with `bash` since the file carries no executable bit. `start`
+      waits for each forward to print kubectl's "Forwarding from" or exit; a
+      forward that exits is named with its port and kubectl's error, every
+      forward is waited for so all failing ports are named, and on any failure
+      every forward it started is stopped and `forward` fails. `stop`
+      (`unforward`) now waits up to 15 s (`WAIT_SECONDS`) for its forwards to
+      exit, so the `unforward` `forward` runs first cannot leave its own ports
+      bound, and fails over one that outlives the wait, keeping it in the PID
+      file for the next `unforward`.
+      `resume` reads every installed release's manifest in the namespace (`helm
+      list`, `helm get manifest`) and scales each Deployment and StatefulSet to
+      the replicas it states, so it renders nothing from the checkout and changes
+      no release; it fails when no release states any. A stale PID file whose
+      processes ignore the signal makes `unforward`, and so `forward`, fail
+      naming the file to remove. `topology-secrets.sh` creates its namespace when
+      `kubectl get namespace` finds none, before any Secret.
+- [x] 5.4 The image overlay: a function that writes a values overlay naming every
       image tag `helm/values.yaml` sets with the suffix; a render test in
       `helm/tests/` holds the overlay to every image the chart renders, so an image
       added later cannot stay bare (D4).
-- [ ] 5.5 Verification. Unit: the namespace name for a short, a 63-character, and a
+      Note: `change_namespace.image_overlay(change, values)` and
+      `write_image_overlay` (JSON, which Helm reads as YAML; also
+      `change_namespace.py <change> --image-overlay <path>`) name the `tag` of every
+      mapping with `name: arkhai` — an image built here; a third-party image's tag
+      is left alone — by its path of keys, in the block mappings `helm/values.yaml`
+      is written in, skipping block scalars and refusing a tag inside a list rather
+      than skipping it. `helm/values.yaml` gains the
+      two image settings it left to subchart defaults — `bare-metal-storefront.image`
+      and `validate-contracts.integrationTests` — since the overlay can name only
+      what that file sets; the render test found the second missing. The test is
+      `helm/tests/test_image_overlay.py`; "built here" is an image named `arkhai`
+      with no repository, and third-party images (busybox, redis, mailpit) keep
+      their tags.
+- [x] 5.5 Verification. Unit: the namespace name for a short, a 63-character, and a
       longer change, the hash stable; `make -n` of each build target with and
       without `IMAGE_SUFFIX` and of each Helm target with `CHANGE=`. Chart render
       tests (`make -C helm test-render`, `helm/tests/`): the overlay over every
       rendered image. `uv run --no-project --with pytest pytest -q scripts/tests`;
       `make test`; `make test-deployment-packaging`. No end-to-end scenario covers
       it.
+      Evidence: `scripts/tests/test_change_namespace.py`, unit, 21 passed: a short
+      name, one of exactly 63 characters kept whole, a longer one cut to 63 and
+      ending in the full name's hash, stable, two sharing a 60-character prefix
+      apart, a cut ending in a hyphen not doubled, seven names refused; the tags of
+      a sample values file's `arkhai` images by path — comments and quotes
+      dropped, a third-party image's tag and a block scalar's lines left out — a
+      tag in a list refused (as a field and opening an item), the overlay holding
+      the suffixed tags alone, the overlay written as JSON, and the command
+      printing, writing, and refusing. Which of the umbrella's images the overlay
+      names is the render test's, below.
+      `scripts/tests/test_change_build_and_helm_targets.py`, 43 passed: through
+      `make -n` (unit, over the real Makefiles), each root image target's tag bare
+      and suffixed, each subproject image target's bare build writing the image
+      and commit tags and its suffixed build the suffixed tag alone (and the VM
+      storefront's `build-no-cache` suffixed), each delegating root target passing
+      the suffix, and `build`, `build-dev`, and `build-seller` each writing their
+      own images' tags bare without and suffixed with it and passing it, empty or
+      set, to each subproject they build (the subprojects' recipes are printed,
+      not run, under `make -n`, so their tags are the tests before; `build-e2e-*`
+      are not read, and keep bare tags as the lanes do); `print-NAMESPACE` with and without `CHANGE=`, the two
+      refusals, and thirteen namespaced targets plus `topology-secrets` naming
+      `validate-<change>` and no `--namespace default` or `NAMESPACE=default`.
+      Against fake `kubectl`, `helm`, and `cast` on `PATH` (the scripts run for
+      real; the fakes stand at the process boundary they wrap): four forwards in
+      the change's namespace on the usual ports, then `unforward` leaving none
+      alive and no PID file, each fake taking a second to exit once signalled so
+      a `stop` that did not wait would leave them alive; two held ports each named
+      with kubectl's error and the two that listened stopped; `unforward` failing
+      over a process that ignores the signal, keeping it in the PID file;
+      `resume` scaling two releases' Deployment and StatefulSet to their
+      manifests' 1 and 2 and skipping a Service, and failing over a namespace with
+      no release and over one stating no workload; `topology-secrets` creating the
+      namespace first only when absent, each Secret rendered and applied in it,
+      and the buyer-profile volume looked for and applied there. Not tested: a
+      forward that never listens within the wait, and
+      a real kubectl's bind error text. `helm/tests/test_image_overlay.py`, chart
+      render test, 3 passed (`uv run --no-project --with pytest pytest`, and in
+      `make -C helm test-render`): the local release, with the API-credits
+      registry enabled, and the bare-metal release each render only suffixed
+      `arkhai` images, one per bare tag, and every other image as without the
+      overlay; removing `validate-contracts.integrationTests.tag` from
+      `helm/values.yaml` failed the first two, then restored. `uv run --no-project
+      --with pytest pytest -q scripts/tests`: 1285 passed. `make check-packaging`:
+      passed. `make check-change`: only the citations of the scripts sections 7
+      and 8 create (`check_parallel_validation.py`, `change_history.py`). `make
+      test`, which runs `make test-deployment-packaging` as its last suite: every
+      suite passed up to `make -C helm test-render`, which failed the thirteen
+      render tests 53 V1 and 64 V1 name (four bare-metal storefront, seven
+      storefront, two release topology) and no other; the new overlay tests pass
+      there; run again after the fresh-context check's fixes, the same. End to
+      end: none — no scenario in `e2e-tests/` exercises the build or Helm
+      targets; the Helm scenarios first run in the change's namespace in
+      section 6.
+      The fresh-context check of the diff found, and this section fixed: a
+      suffixed build still wrote a commit tag (D4: never a commit tag); the
+      overlay suffixed every `tag` key, a third-party image's included, and would
+      have read a block scalar's lines; `unforward` gave up silently over a
+      forward that outlived its wait; a unit test sat in `helm/tests/`; and four
+      evidence claims went beyond their tests (`unforward`'s wait, several failing
+      ports, `default` never named, third-party images unchanged), each now
+      tested. Declined: that `MAKEFLAGS` carries a step's `CHANGE` into `make -C
+      helm` — the 5.2 note hands it to section 6, and nothing validates this
+      round before section 7; and that three comments (the root Makefile's
+      `IMAGE_SUFFIX`, `resume`'s, `helm/values.yaml`'s two restated images)
+      describe validation's use before section 6 builds it — section 6 lands in
+      the same round, which is read and reviewed whole. A second check, after
+      those fixes, found and this section fixed: `resume` restored one release
+      where D4 resumes a namespace; a stale PID file's error did not say to remove
+      it; `helm/Makefile`'s pointer to the script read as `helm/scripts/`; a unit
+      test repeated the render test's job; and the composite targets, the
+      uncached storefront build, and `topology-secrets`' applies and volume were
+      claimed beyond their tests, now tested, as is `resume` over two releases;
+      and 10.9 now names the manual access, `CHANGE=`, `IMAGE_SUFFIX`, and the
+      namespace `topology-secrets` creates for promotion. Declined: the new
+      script's executable bit — this step cannot change a file's mode, and
+      setting it in the index alone would leave the worktree differing from the
+      commit, which validation refuses; `helm/Makefile` runs it with `bash`.
+      After the second fixes, which touched only `helm/Makefile`'s `resume`,
+      the forward script's message, and tests: `uv run --no-project --with
+      pytest pytest -q scripts/tests` and `make -C helm test-render` again,
+      the latter the same thirteen failures.
+      Handoff: section 6's `validate_slice.py` passes `CHANGE=<change>` (or
+      `CHANGE=` for `default`) on every `make -C helm` call, since a step's own
+      `CHANGE` reaches it through `MAKEFLAGS`; it writes the image overlay into the
+      attempt's directory with `change_namespace.write_image_overlay` and can
+      layer it as `EXTRA_VALUES` the way `deploy-local` layers `local-values.yaml`
+      (`helm/Makefile`'s `deploy` takes `$(EXTRA_VALUES)`); and it drops the
+      forward and port steps, since its scenarios run in the cluster. The
+      validation skill (section 7) still runs `make validate-helm` with no
+      `CHANGE`.
 
 ## 6. The Helm part of validation in the change's namespace
 
@@ -945,7 +1090,11 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         — a new "### Validation namespaces" subsection: the namespace per change,
         per-change fixed image tags and why not commit tags, the release upgraded
         from zero over deleted volumes, scale-to-zero, the capacity figure and its
-        merge rule, and teardown at archive cleanup.
+        merge rule, and teardown at archive cleanup; with them `CHANGE=` on every
+        `helm/` target, `IMAGE_SUFFIX` on the build targets, manual access through
+        `make -C helm forward` and `resume` (one forwarded namespace per host, a
+        held port named), and, in "Release topology"'s `make
+        helm-topology-secrets` bullet, that it creates its namespace when absent.
       - `docs/development/TESTING.md` "### 4. System Integration Tests
         (End-to-End)" — the Helm scenarios run as a pod in the change's namespace,
         reaching services by name.

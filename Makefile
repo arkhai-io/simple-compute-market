@@ -267,6 +267,15 @@ test-kits:
 # runners carry (4.3) has no `.WAIT` to order them, so these targets order
 # their steps as recipe lines of recursive calls instead. Only the images,
 # which share nothing but `.dist/`, are built in parallel.
+#
+# IMAGE_SUFFIX, empty by default, is appended to every image tag a build target
+# writes, here and in each subproject the image targets delegate to, which is
+# passed it explicitly. A change's Helm validation builds with
+# `IMAGE_SUFFIX=-<change>` and deploys those tags, so two changes' builds never
+# write one tag (scripts/change_namespace.py). Compose, the pipeline lanes, and
+# an owner's own deployments use the bare tags.
+IMAGE_SUFFIX ?=
+
 build: ## Build the wheels, the buyer CLI binary, and every runtime image
 	$(MAKE) init-prerequisites
 	$(MAKE) dist
@@ -483,37 +492,37 @@ build-anvil-state:
 	cd kit/alkahest && uv run --find-links ../../.dist python ../../dev-env/generate_state.py
 
 build-dev-env: build-anvil-state
-	cd dev-env && make build
+	cd dev-env && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-registry:
-	cd core/registry && make build
+	cd core/registry && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-storefront:
-	cd domains/vms/storefront && make build
+	cd domains/vms/storefront && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 build-bare-metal-storefront:
 	docker build --ulimit nofile=65536:65536 \
 		-f domains/bare_metal/storefront/Dockerfile \
-		-t arkhai:bare-metal-storefront .
+		-t arkhai:bare-metal-storefront$(IMAGE_SUFFIX) .
 
 build-provisioning:
-	cd provisioning/compute/service && make build
+	cd provisioning/compute/service && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 # API-credits domain images (item 6). Built from the repo root so each
 # Dockerfile's `COPY .dist/` + `COPY domains/` resolve. The api-credits
 # registry reuses arkhai:registry (built by build-registry) with a
 # different filter-spec mounted at runtime.
 build-apicredits-service:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service$(IMAGE_SUFFIX) .
 
 build-apicredits-storefront:
-	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront .
+	docker build --ulimit nofile=65536 -f domains/apicredits/storefront/Dockerfile -t arkhai:apicredits-storefront$(IMAGE_SUFFIX) .
 
 build-apicredits-sample-app:
-	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app .
+	docker build --ulimit nofile=65536:65536 -f domains/apicredits/sample-app/Dockerfile -t arkhai:apicredits-sample-app$(IMAGE_SUFFIX) .
 
 build-test-image:
-	cd e2e-tests && make build
+	cd e2e-tests && make build IMAGE_SUFFIX=$(IMAGE_SUFFIX)
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.

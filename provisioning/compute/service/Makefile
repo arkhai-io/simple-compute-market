@@ -49,6 +49,9 @@ clean: ## Remove generated files
 IMAGE_NAME ?= arkhai
 IMAGE_TAG ?= compute-provisioning
 GIT_SUFFIX := $(shell git rev-parse --short HEAD)
+# Appended to the image's tag; the root Makefile's IMAGE_SUFFIX. A suffixed build
+# is tagged per change alone: a commit tag would keep one image per validated commit.
+IMAGE_SUFFIX ?=
 APPUSER_UID ?= 1000
 APPUSER_GID ?= 1000
 
@@ -60,9 +63,9 @@ build-image: ## Build the wheel-only destination image
 		--build-arg APPUSER_UID=$(APPUSER_UID) \
 		--build-arg APPUSER_GID=$(APPUSER_GID) \
 		--build-arg DIST_FINGERPRINT=$(DIST_FINGERPRINT) \
-		-t $(IMAGE_NAME):$(IMAGE_TAG) \
+		-t $(IMAGE_NAME):$(IMAGE_TAG)$(IMAGE_SUFFIX) \
 		-f Dockerfile ../../..
-	docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX)
+	$(if $(IMAGE_SUFFIX),,docker tag $(IMAGE_NAME):$(IMAGE_TAG) $(IMAGE_NAME):$(IMAGE_TAG)-$(GIT_SUFFIX))
 
 deploy: ## Run the destination image with mock provisioning
 	docker run -d --rm --name compute-provisioning \

@@ -301,6 +301,14 @@ storefront:
 # own principal, a settlement mechanism, and its secrets are an overlay's to state.
 bare-metal-storefront:
   enabled: false
+  # Restated from the subchart's defaults so that every image tag the release can
+  # deploy is set here, where a change's validation suffixes each one.
+  image:
+    repository: ""
+    name: arkhai
+    tag: bare-metal-storefront
+    digest: ""
+    pullPolicy: IfNotPresent
   internalRegistryTrust:
     authority: registry-a
     principals:
@@ -396,6 +404,14 @@ validate-contracts:
   # Override the RPC endpoint. Leave empty to use global.rpc.host:port
   # (i.e. the dev-env service when that subchart is enabled).
   rpcUrl: ""
+  # Restated from the subchart's defaults so that every image tag the release can
+  # deploy is set here, where a change's validation suffixes each one.
+  integrationTests:
+    repository: ""
+    name: arkhai
+    tag: e2e-tests
+    digest: ""
+    pullPolicy: IfNotPresent
 
 integrationTests:
   image:
