@@ -99,12 +99,12 @@ Argument: dict with `root` and `agent`.
 
 {{/*
 A values file's `null` removes what it names, whether or not Helm's merge removed
-it: Helm drops a parent's `null` for a subchart only where the subchart's own
-defaults define the key, and every agent and every key under one comes from the
-parent or an overlay. So the chart removes them itself before any template reads
-an agent, and an agent renders as it would had the removed key never been stated.
-See openspec/specs/deployment-state/spec.md, "A storefront chart passes service
-configuration through".
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and every agent and every
+key under one comes from the parent or an overlay. So the chart removes them
+itself before any template reads an agent, and an agent renders as it would had
+the removed key never been stated. See openspec/specs/deployment-state/spec.md,
+"A storefront chart passes service configuration through".
 
 `storefront.dropNulls`: remove, in place, every key whose value is `null` from the
 mapping `.`, at every depth, inside list elements too. A list element is a value
@@ -320,14 +320,14 @@ storefront's loader reads them. Returns "true" or "".
 Render the per-agent public storefront document, `storefront.json`.
 
 The agent's `config` is the storefront's own configuration and passes through
-unchanged: the chart supplies no service default and does not validate the
-service's settings, which the storefront does at startup. The chart adds only
-what the release knows — the agent's port, its Service URL, the internal
-registry and provisioning URLs, a default capacity site, and the database path
-under the persistence mount — and, except for the port, only where the
-configuration does not state it. It refuses a release whose parts disagree.
-See openspec/specs/deployment-state/spec.md, "A storefront chart passes
-service configuration through".
+with its `null` keys removed (`storefront.agents` removes them). The chart
+supplies no service default and does not validate the service's settings, which
+the storefront does at startup. The chart adds only what the release knows — the
+agent's port, its Service URL, the internal registry and provisioning URLs, a
+default capacity site, and the database path under the persistence mount — and,
+except for the port, only where the configuration does not state it. It refuses
+a release whose parts disagree. See openspec/specs/deployment-state/spec.md, "A
+storefront chart passes service configuration through".
 
 Keys are matched case-insensitively at every level, as the storefront's loader
 matches them, so a check cannot be bypassed by spelling a key differently, and

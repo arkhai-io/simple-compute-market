@@ -427,6 +427,18 @@ orchestrating session on the owner's word. Checks: `scripts/tests/test_change_wo
 no leak and every cited path resolving; fixed: the new rows now give full test paths and no
 longer read as owned; declined: a note in `parallel-change-workflows`' proposal, since the
 owner chose the table as the hand-off.
+Pre-closeout triage (43 F1), comments only: both charts' document-renderer comments and
+`helm/values.yaml`'s note on `storefront.agents` say `config` passes through with its
+`null` keys removed, not unchanged; both storefront charts' `dropNulls` comments state the
+merge rule as the supported Helm release's behaviour, naming no version (D4). Checks:
+`make -C helm test-render` (chart render tests) passed, printing `helm v4.3.0+gbec5b06`;
+`make test` passed; `make check-packaging` and `make check-change` passed. The
+fresh-context check found the edited comments accurate and free of history or private
+detail; fixed: the rewrapped paragraphs ran past the surrounding width, and the storefront
+renderer comment's relative clause made its colon ambiguous; declined: the pre-existing
+"Helm cannot remove a subchart's default agent" in `helm/charts/storefront/values.yaml`,
+outside 43 F1. The owner directed the fix commit's validation as `make validate-helm`, and
+is to waive the pipeline's part for the known VM buyer failure (40 V1).
 
 ## 6. Closeout
 
