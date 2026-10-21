@@ -62,7 +62,7 @@ def settlement_admin_routes(
         composition = runtime.settlement_composition
         chain_name = str(request.get("chain_name") or "")
         clients = (
-            composition.resources.get("clients") or {}
+            composition.chain_clients
             if composition is not None and composition.configures(ALKAHEST_MECHANISM)
             else {}
         )

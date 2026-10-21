@@ -222,12 +222,16 @@ def _start_lifecycle_loops() -> None:
     """
     composition = _container.resolved_contact_exchange
     retention = composition.retention() if composition is not None else None
+    probe = _container.resolved_alkahest_chain_probe
     intervals = register_vm_loops(
         retention_interval_seconds=(
             introduction_retention_sweep_interval(retention.policy.sweep_interval_seconds)
             if retention is not None
             else None
-        )
+        ),
+        alkahest_probe_interval_seconds=(
+            probe.interval_seconds if probe is not None else None
+        ),
     )
     for name in start_loops():
         logger.info("[STARTUP] %s started (interval=%ss)", name, intervals.get(name))

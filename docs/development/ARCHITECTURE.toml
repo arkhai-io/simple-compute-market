@@ -310,14 +310,6 @@ since = 2026-10-13
 reason = "The refund and token-transfer helpers move to the Alkahest kit."
 
 [[exceptions]]
-rule = "undeclared_import"
-project = "arkhai-kit-alkahest"
-target = "arkhai-kit-config"
-owner = "move-escrow-into-alkahest"
-since = 2026-10-13
-reason = "The buyer resolves the best-price timeout and passes it; the kit stops reading configuration."
-
-[[exceptions]]
 rule = "vocabulary"
 project = "arkhai-core"
 target = "alkahest.v1"

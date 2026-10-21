@@ -393,5 +393,5 @@ def alkahest_servicing(runtime: Any) -> BareMetalAlkahestLifecycle | None:
         runtime=runtime.settlement_runtime,
         local_principal=runtime.seller_principal,
         fulfillment_service=runtime.fulfillment_service,
-        chain_clients=composition.resources.get("clients") or {},
+        chain_clients=composition.chain_clients,
     )

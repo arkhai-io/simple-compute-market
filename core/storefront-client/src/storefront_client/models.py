@@ -186,6 +186,11 @@ class HealthResponse:
     #: of its most recent cycle, whether its timer or an operator's step ran
     #: it; present on /api/v1/system/status where the storefront reports it.
     lifecycle: dict[str, Any] | None = None
+    #: Each composed settlement mechanism's readiness as its registration
+    #: projects it -- ``mechanism``, ``ready``, and each blocker's ``code`` and
+    #: ``kind`` among it; present on /api/v1/system/status where the storefront
+    #: reports it.
+    settlement: list[dict[str, Any]] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -199,7 +204,9 @@ class HealthResponse:
             "disclosures",
             "settlement_manual_required",
             "lifecycle",
+            "settlement",
         }
+        raw_settlement = d.get("settlement")
         raw_chain_id = d.get("chain_id")
         raw_manual = d.get("settlement_manual_required")
         return cls(
@@ -219,6 +226,11 @@ class HealthResponse:
                 int(raw_manual) if raw_manual is not None else None
             ),
             lifecycle=d.get("lifecycle"),
+            settlement=(
+                [dict(item) for item in raw_settlement]
+                if raw_settlement is not None
+                else None
+            ),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

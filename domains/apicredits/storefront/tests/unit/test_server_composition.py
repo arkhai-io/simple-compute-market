@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import market_policy.negotiation_thread as negotiation_thread
 import pytest
+from market_alkahest import AlkahestChainProbe
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
 
@@ -119,7 +120,8 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
 
     Startup registers each sweep's timer over the step its route runs and the
     capacity-event pollers' fan-out, and `start_loops` starts them all. Payment
-    reconciliation runs only while Arkhai payments is composed.
+    reconciliation runs only while Arkhai payments is composed; the Alkahest
+    chain probe, composed here, runs while Alkahest is.
     """
     domain = get_market_domain_contract()
     composition = (
@@ -127,6 +129,11 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
+    monkeypatch.setattr(
+        container,
+        "resolved_alkahest_chain_probe",
+        AlkahestChainProbe((), interval_seconds=3600),
+    )
     loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
 
@@ -151,7 +158,7 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
     monkeypatch.setattr(startup, "_seed_demo_listing", _noop)
 
-    timed = {"negotiation_watchdog", "settlement_servicing"}
+    timed = {"negotiation_watchdog", "settlement_servicing", "alkahest_chain_probe"}
     if payments:
         timed.add("payment_reconciliation")
     loops.request_pause(True)

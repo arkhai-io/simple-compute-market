@@ -78,7 +78,7 @@ follow-up change.
   than fatal, derive release conditions only for ready clauses, and have every readiness
   blocker state whether it is a configuration or a reachability blocker.
 - Probe each Alkahest chain apart from readiness, in a `kit/alkahest` loop each storefront
-  registers, at most once per interval with bounded calls, telling an unreachable chain
+  registers, on a timer interval with bounded calls, telling an unreachable chain
   (reachability) from a wrong chain or a missing contract (configuration), and rebuilding a
   chain client that could not be constructed.
 - Create the API-credit seed listing from a loop step that waits for its dependencies,

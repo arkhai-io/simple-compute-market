@@ -167,7 +167,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.17.1"
+version = "0.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -219,9 +219,9 @@ requires-dist = [
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "arkhai-core-storefront", specifier = ">=0.15.2" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
-    { name = "arkhai-kit-alkahest", specifier = ">=0.9.0" },
+    { name = "arkhai-kit-alkahest", specifier = ">=0.10.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = "==0.3.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.10.1" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.10.2" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },
     { name = "arkhai-kit-contact-exchange", specifier = "==0.4.0" },
     { name = "arkhai-kit-delivery", specifier = "==0.2.1" },
@@ -234,7 +234,7 @@ requires-dist = [
     { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.5.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.11.0" },
-    { name = "arkhai-kit-storefront", specifier = "==0.8.0" },
+    { name = "arkhai-kit-storefront", specifier = "==0.9.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = "~=0.115.8" },
     { name = "httpx", specifier = ">=0.27" },
@@ -246,7 +246,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-bare-metal-buyer", specifier = ">=0.5.0" },
-    { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
+    { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-site", specifier = ">=0.10.0" },
     { name = "pytest", specifier = ">=8.3.4,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25,<2.0" },
@@ -336,7 +336,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.15.2"
+version = "0.16.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -348,33 +348,34 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.15.2-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.16.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.26.0"
+version = "0.27.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.26.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.27.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-alkahest"
-version = "0.9.0"
+version = "0.10.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
+    { name = "arkhai-kit-config" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "pydantic" },
     { name = "web3" },
 ]
 wheels = [
-    { path = "arkhai_kit_alkahest-0.9.0-py3-none-any.whl" },
+    { path = "arkhai_kit_alkahest-0.10.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -414,7 +415,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.10.1"
+version = "0.10.2"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -422,7 +423,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.10.1-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.10.2-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -607,7 +608,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-storefront"
-version = "0.8.0"
+version = "0.9.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -618,7 +619,7 @@ dependencies = [
     { name = "arkhai-kit-negotiation-runtime" },
 ]
 wheels = [
-    { path = "arkhai_kit_storefront-0.8.0-py3-none-any.whl" },
+    { path = "arkhai_kit_storefront-0.9.0-py3-none-any.whl" },
 ]
 
 [[package]]

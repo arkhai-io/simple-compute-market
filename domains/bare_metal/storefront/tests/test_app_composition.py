@@ -590,6 +590,42 @@ def test_a_configured_alkahest_section_composes_its_client_and_worker(
     assert WALLET_KEY not in repr(runtime)
     assert runtime.settlement_worker is not None
     assert "settlement-servicing" in runtime.loops.step_routes()
+    # The chain probe owns the one live client map every consumer holds, and
+    # readiness reads it through the composition's resources.
+    probe = runtime.alkahest_chain_probe
+    assert probe is not None
+    assert probe.clients is runtime.chain_clients
+    assert runtime.settlement_composition.resources["clients"] is probe.clients
+    assert runtime.settlement_composition.resources["chain_probe"] is probe
+    assert probe.chain_names == ("anvil",)
+    assert probe.interval_seconds == 30.0
+    assert runtime.loops.step_routes()["alkahest-chain-probe"] == "alkahest_chain_probe"
+
+
+def test_every_consumer_holds_the_probes_map_while_it_is_empty(monkeypatch, tmp_path):
+    """A chain whose client could not be built at start leaves the map empty;
+    servicing still holds that map, so the client the probe rebuilds reaches it."""
+    document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
+    document["Wallet"] = {"address": WALLET_ADDRESS}
+    document["Chains"] = CHAINS
+    chain_clients = ChainClients()
+    chain_clients.built = {}
+
+    runtime = _configured_runtime(
+        monkeypatch,
+        tmp_path,
+        document,
+        secrets=f'[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
+        build_chain_clients=chain_clients,
+    )
+
+    probe = runtime.alkahest_chain_probe
+    assert probe is not None and probe.clients == {}
+    assert runtime.settlement_composition.chain_clients is probe.clients
+    assert runtime.obligation_servicing["alkahest.v1"].chain_clients is probe.clients
+    rebuilt = object()
+    probe.clients["anvil"] = rebuilt
+    assert runtime.obligation_servicing["alkahest.v1"].chain_clients["anvil"] is rebuilt
 
 
 @pytest.mark.parametrize("enabled", [True, False])

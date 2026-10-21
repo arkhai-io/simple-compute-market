@@ -251,6 +251,23 @@ class SettlementCompositionDouble:
             dispatch[mechanism_id] = build
         return dispatch
 
+    async def readiness(self):
+        """Each mechanism's readiness, evaluated by the real registry.
+
+        Alkahest's preflight reads the chain probe the container holds, as the
+        real composition hands it, and the harness's seller wallet and chains.
+        """
+        resources = {
+            "wallet": {"address": SELLER_WALLET},
+            "chains": dict(storefront_config.CHAINS),
+            "default_chain": "anvil",
+        }
+        if container.resolved_alkahest_chain_probe is not None:
+            resources["chain_probe"] = container.resolved_alkahest_chain_probe
+        return await self.configuration_registry.ordered_readiness(
+            self.settlement_config, role="seller", resources=resources
+        )
+
     async def publication_artifacts(self, resources, clauses=None):
         options = await self._registry_options(resources, clauses)
         accepted = [

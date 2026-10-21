@@ -25,6 +25,7 @@ from core_storefront.stage_log import stage_event
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
+    AlkahestChainProbe,
     require_deliverable_release_model,
 )
 from market_arkhai_payments import (
@@ -860,8 +861,15 @@ def build_vm_settlement_composition(
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
+    chain_probe: AlkahestChainProbe | None = None,
 ) -> VmSettlementComposition:
-    """Construct the VM runtime from explicit settlement mechanisms."""
+    """Construct the VM runtime from explicit settlement mechanisms.
+
+    ``alkahest_clients`` is the live map the chain probe updates in place, so
+    every consumer here holds it rather than a copy and reaches a client the
+    probe rebuilds; ``chain_probe`` is the probe whose results Alkahest
+    readiness reads.
+    """
     registry_owner = getattr(sqlite_client, "domain_registry", None)
     if registry_owner is None:
         raise RuntimeError(
@@ -882,11 +890,13 @@ def build_vm_settlement_composition(
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
-        "clients": dict(alkahest_clients),
+        "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
     }
+    if chain_probe is not None:
+        mechanism_resources["chain_probe"] = chain_probe
     if alkahest_section is not None and (
         bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
     ):
@@ -919,7 +929,7 @@ def build_vm_settlement_composition(
                 "[SETTLEMENT] disabled mechanism has no recoverable client: %s",
                 registration.mechanism_id,
             )
-    evidence_clients = dict(alkahest_clients)
+    evidence_clients = alkahest_clients
     # A fulfillment attempt provisions a VM, and the storefront gives that its
     # own bound. The operation lease has to outlive it, or the deal is handed to
     # a second worker while the first is still provisioning.

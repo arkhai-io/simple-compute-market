@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from market_alkahest import (
     ALKAHEST_MECHANISM_ID,
     AlkahestConditionalEscrowClient,
     AlkahestSettlementConfig,
+    ChainProbeResult,
     create_alkahest_registration,
 )
 from market_alkahest.settlement_config import alkahest_preflight
@@ -36,6 +38,25 @@ from pydantic import ValidationError
 def test_alkahest_config_rejects_foreign_or_invalid_fields(payload: dict) -> None:
     with pytest.raises(ValidationError):
         AlkahestSettlementConfig.model_validate(payload)
+
+
+def test_the_probe_runs_every_thirty_seconds_with_five_second_calls_by_default() -> None:
+    config = AlkahestSettlementConfig()
+
+    assert config.probe_interval_seconds == 30.0
+    assert config.rpc_timeout_seconds == 5.0
+    assert AlkahestSettlementConfig.model_validate(
+        {"probe_interval_seconds": 2, "rpc_timeout_seconds": "0.5"}
+    ).rpc_timeout_seconds == 0.5
+
+
+@pytest.mark.parametrize("key", ["probe_interval_seconds", "rpc_timeout_seconds"])
+@pytest.mark.parametrize("value", [0, -1, True, "soon", float("inf")])
+def test_a_probe_duration_that_is_not_positive_seconds_is_refused_by_key(key, value) -> None:
+    with pytest.raises(ValidationError) as refused:
+        AlkahestSettlementConfig.model_validate({key: value})
+
+    assert refused.value.errors()[0]["loc"] == (key,)
 
 
 @pytest.mark.asyncio
@@ -168,8 +189,90 @@ async def test_a_section_that_cannot_settle_names_its_configuration_blocker(
     assert expected in await _blockers(config, _seller_resources(**resources))
 
 
-def _failing_probe(_chain, _addresses):
-    raise TimeoutError("no answer")
+class _StubProbe:
+    """The chain probe's read side: each chain's last result, set by the test."""
+
+    def __init__(self, results: dict) -> None:
+        self._results = results
+
+    def result(self, chain_name):
+        return self._results.get(chain_name)
+
+    def public_results(self):
+        return {
+            name: result.public() if result is not None else None
+            for name, result in self._results.items()
+        }
+
+
+_PROBED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "expected"),
+    [
+        (None, ("alkahest.chain_unreachable", "reachability")),
+        ("alkahest.chain_unreachable", ("alkahest.chain_unreachable", "reachability")),
+        ("alkahest.chain_id_mismatch", ("alkahest.chain_id_mismatch", "configuration")),
+        ("alkahest.contract_missing", ("alkahest.contract_missing", "configuration")),
+        (
+            "alkahest.address_config_invalid",
+            ("alkahest.address_config_invalid", "configuration"),
+        ),
+    ],
+    ids=["unprobed", "unreachable", "chain-id-mismatch", "contract-missing", "address-config"],
+)
+async def test_each_chain_probe_result_is_read_as_its_blocker(result, expected) -> None:
+    probe = _StubProbe(
+        {"anvil": ChainProbeResult(result, _PROBED_AT) if result else None}
+    )
+
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True), _seller_resources(chain_probe=probe)
+    )
+
+    assert blockers == {expected}
+
+
+@pytest.mark.asyncio
+async def test_a_reachable_chain_raises_no_blocker_and_status_reports_its_probe() -> None:
+    probe = _StubProbe({"anvil": ChainProbeResult("reachable", _PROBED_AT)})
+
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(chain_probe=probe),
+        "seller",
+    )
+
+    assert status.ready is True
+    assert status.public_details["chain_probe"] == {
+        "anvil": {"result": "reachable", "probed_at": _PROBED_AT.isoformat()}
+    }
+
+
+@pytest.mark.asyncio
+async def test_only_the_chains_the_clauses_select_are_read() -> None:
+    probe = _StubProbe(
+        {
+            "anvil": ChainProbeResult("reachable", _PROBED_AT),
+            "base_sepolia": ChainProbeResult("alkahest.chain_unreachable", _PROBED_AT),
+        }
+    )
+
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(
+            chain_probe=probe,
+            chains={
+                "anvil": {"rpc_url": "http://anvil.test"},
+                "base_sepolia": {"rpc_url": "http://base.test"},
+            },
+            accepted_escrows=[{"chain_name": "anvil"}],
+        ),
+    )
+
+    assert blockers == set()
 
 
 @pytest.mark.asyncio
@@ -180,29 +283,6 @@ def _failing_probe(_chain, _addresses):
             {},
             {"chains": {"anvil": {"chain_id": 31337}}, "clients": {}},
             ("alkahest.rpc_missing", "configuration"),
-        ),
-        (
-            {},
-            {"observed_chain_id": 1},
-            ("alkahest.chain_id_mismatch", "configuration"),
-        ),
-        (
-            {},
-            {"deployed_contracts": {"escrow": False}},
-            ("alkahest.contract_missing", "configuration"),
-        ),
-        (
-            {},
-            {"contract_probe": _failing_probe, "required_addresses": {"escrow": "0x1"}},
-            ("alkahest.contract_probe_failed", "reachability"),
-        ),
-        (
-            {},
-            {
-                "contract_probe": lambda _chain, addresses: dict.fromkeys(addresses, False),
-                "required_addresses": {"escrow": "0x1"},
-            },
-            ("alkahest.contract_missing", "configuration"),
         ),
         (
             {"address_config_path": "/nonexistent/alkahest-addresses.json"},
@@ -217,10 +297,6 @@ def _failing_probe(_chain, _addresses):
     ],
     ids=[
         "rpc-missing",
-        "chain-id-mismatch",
-        "contract-missing",
-        "contract-probe-failed",
-        "contract-probe-reports-missing",
         "address-config-invalid",
         "asset-missing",
     ],
@@ -293,8 +369,6 @@ async def test_ready_alkahest_preflight_is_observational_and_public_only() -> No
             }
         },
         "chain_name": "ethereum_sepolia",
-        "observed_chain_id": 11155111,
-        "deployed_contracts": {"escrow": True, "arbiter": True},
         "get_client": forbid_client_access,
         "settlement_state": {"unchanged": True},
     }
@@ -331,7 +405,6 @@ async def test_alkahest_preflight_admits_all_listing_chains_without_default() ->
             {"chain_name": "chain-a"},
             {"chain_name": "chain-b"},
         ],
-        "observed_chain_id": {"chain-a": 1, "chain-b": 2},
     }
 
     status = await alkahest_preflight(

@@ -29,6 +29,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistryError,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, ALKAHEST_CHAIN_PROBE_ROUTE
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityConfigurationError,
@@ -234,6 +235,23 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
             woken=True,
         )
     )
+
+    probe = runtime.alkahest_chain_probe
+    if probe is not None:
+
+        async def alkahest_chain_probe_step() -> Mapping[str, Any]:
+            return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, **(await probe.step())}
+
+        # Its first cycle runs as its timer starts: readiness reads every chain
+        # unprobed until it has.
+        composed.append(
+            _Loop(
+                ALKAHEST_CHAIN_PROBE_LOOP,
+                ALKAHEST_CHAIN_PROBE_ROUTE,
+                alkahest_chain_probe_step,
+                interval_seconds=probe.interval_seconds,
+            )
+        )
 
     if runtime.payments_reconciliation_enabled():
 

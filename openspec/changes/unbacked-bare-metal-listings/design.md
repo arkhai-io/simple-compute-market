@@ -659,8 +659,8 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   SDK client or a JSON-RPC call against the chain's `rpc_url`.
 - **Who owns it.** The probe is one `kit/alkahest` object holding the configured chains,
   a per-chain client constructor supplied at composition, the live client map, each
-  chain's last result and when it was taken, and an async step that probes the chains
-  that are due. Consumers are handed that map, and the probe updates it in place, so a
+  chain's last result and when it was taken, and an async step that probes every chain.
+  Consumers are handed that map, and the probe updates it in place, so a
   chain whose client could not be constructed is probed like any other and its rebuilt
   client reaches every consumer, rather than being dropped for the life of the process.
   Each storefront composing Alkahest builds the probe beside its clients, passing a
@@ -670,14 +670,23 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   registration per domain. `kit/storefront` gains nothing Alkahest-specific, so the
   client factory's later move into the Alkahest registration carries no probe with it.
 - **Cadence.** Readiness is evaluated per candidate, per status read, and at startup, so
-  the probe runs apart from it: in the `alkahest-chain-probe` loop, at most once per
-  chain per probe interval (a setting, 30 seconds by default), with the pause and
-  `run-cycle` step every storefront loop has. The Alkahest preflight reads each chain's
+  the probe runs apart from it: in the `alkahest-chain-probe` loop, whose timer probes
+  each chain once per probe interval (a setting, 30 seconds by default), with the pause
+  and `run-cycle` step every storefront loop has. The Alkahest preflight reads each chain's
   last result and makes no chain call. A chain not yet probed since start reads as
   reachability, so a fresh storefront holds its open listings rather than closing them.
   A result does not expire: while the loops are held, readiness reads the last result
   however old, as a held scenario expects. Status reports each chain's result and when it
-  was taken.
+  was taken. Every step probes every chain, so an operator's explicit step always acts on
+  the chain as it is; the loop's timer is what bounds how often a chain is called
+  (settled in implementation, Section 4, after a step that skipped chains probed within
+  the interval made an explicit step a no-op).
+- **Status carries readiness.** No storefront's system status reported mechanism readiness,
+  so the probe's results had nowhere to appear. Each storefront's status gains a
+  mechanism-neutral `settlement` list, each composed mechanism's readiness as its safe
+  projection, and Alkahest's projection carries the per-chain probe results; core's status
+  model and the storefront client carry the list without interpreting it. Planning settled
+  this during implementation (Section 4).
 - **Paths that publish once.** Only reconciling paths can wait for a later cycle, so
   API credits' one-shot paths are shaped around reachability:
   - The configured seed no longer runs in startup. It is the `listing-seed` loop step,
@@ -879,6 +888,13 @@ closeout edited this change:
   re-verification), and the unmatched-route item is restated as an unsigned 404, never a
   405, which a typed client reports as missing response authentication.
 - `redesign-storefront-stage-events` is proposed, on dev.
+- `move-escrow-into-alkahest`'s `ARCHITECTURE.toml` exception row excusing
+  `arkhai-kit-alkahest`'s undeclared import of `arkhai-kit-config` is deleted: the probe
+  settings use `kit/config`'s `PositiveSeconds`, so the kit now declares the dependency and
+  the row excuses nothing. The divergence that change owns — the kit reading a user
+  configuration file for the best-price timeout — is a content judgement no check sees; it
+  stays recorded in `ARCHITECTURE.md`'s "Where the current tree diverges" and in that
+  change's proposal, and is unchanged.
 
 ### Permanent documentation
 
@@ -936,7 +952,8 @@ Promoted at closeout:
   service reports them degraded, and no service waits for one in process either; a
   service refuses to start when its own configuration or stored state is incoherent; a
   Helm test pod carries no selector label of its chart's workloads; the removed
-  `fail_on_unreachable` and `preflight_timeout` settings and the Alkahest probe interval;
+  `fail_on_unreachable` and `preflight_timeout` settings and the Alkahest probe interval
+  and RPC timeout; system status's `settlement` readiness in "System status";
   the rewritten `publication_derivation` passages; the bare-metal lane's mail sink and
   delivery configuration.
 - `docs/development/TESTING.md`: the module-hold guidance, in the wording the maintainer

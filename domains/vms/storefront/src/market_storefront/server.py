@@ -33,12 +33,14 @@ from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
+from market_alkahest import ALKAHEST_CONFIG_KEY, AlkahestChainProbe, ProbedChain
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    alkahest_client_constructor,
     build_alkahest_clients,
     build_composed_storefront_app,
 )
@@ -60,11 +62,13 @@ from market_storefront.middleware.service_peer_auth import (
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from market_storefront.utils.config import (
     AGENT_ID,
+    CHAINS,
     get_evm_wallet_address,
     get_evm_wallet_private_key,
     get_service_peer_configs,
     resolve_marketplace_signer,
     settings,
+    settlement_config_mapping,
     storefront_domain_registry,
 )
 from market_storefront.utils.sqlite_client import get_sqlite_client
@@ -80,6 +84,7 @@ from market_storefront.services.publication_terms import (
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.settlement_composition import require_vm_release_model
+from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.startup_refusal import require_publishable_storefront
 
 logger = logging.getLogger(__name__)
@@ -103,38 +108,70 @@ def run_serve(
 # ---------------------------------------------------------------------------
 
 
-def _build_alkahest_clients() -> dict[str, Any]:
-    from market_storefront.utils.config import CHAINS, settlement_config_mapping
-
+def _alkahest_client_policy() -> AlkahestClientPolicy | None:
+    """What the storefront's Alkahest clients are built from; ``None`` when no
+    Alkahest section asks for any."""
     alkahest = settlement_config_mapping().get("alkahest", {})
     if not isinstance(alkahest, dict) or not alkahest:
-        return {}
+        return None
     if not bool(alkahest.get("enabled", False)) and not CHAINS:
-        return {}
+        return None
     missing: list[str] = []
     if not get_evm_wallet_address():
         missing.append("wallet.address")
     private_key = get_evm_wallet_private_key()
     if not private_key:
         missing.append("wallet.private_key")
-    return build_alkahest_clients(
-        AlkahestClientPolicy(
-            private_key=private_key,
-            chains=(
-                ()
-                if missing
-                else tuple(
-                    AlkahestChain(
-                        name=name,
-                        rpc_url=chain.rpc_url,
-                        address_config_path=chain.alkahest_address_config_path,
-                    )
-                    for name, chain in CHAINS.items()
+    return AlkahestClientPolicy(
+        private_key=private_key,
+        chains=(
+            ()
+            if missing
+            else tuple(
+                AlkahestChain(
+                    name=name,
+                    rpc_url=chain.rpc_url,
+                    address_config_path=chain.alkahest_address_config_path,
                 )
-            ),
-            missing_requirements=tuple(missing),
+                for name, chain in CHAINS.items()
+            )
         ),
-        logger=logger,
+        missing_requirements=tuple(missing),
+    )
+
+
+def _build_alkahest_clients() -> dict[str, Any]:
+    policy = _alkahest_client_policy()
+    if policy is None:
+        return {}
+    return build_alkahest_clients(policy, logger=logger)
+
+
+def _build_alkahest_chain_probe(
+    alkahest_clients: dict[str, Any],
+) -> AlkahestChainProbe | None:
+    """The chain probe over every configured chain, owning ``alkahest_clients``.
+
+    Composed whenever ``[Settlement.alkahest]`` is configured, enabled or not:
+    a disabled section still services the obligations accepted under it, which
+    need their chains' clients.
+    """
+    section = (
+        build_storefront_settlement_registry()
+        .resolve(settlement_config_mapping(), role="seller")
+        .mechanism_config(ALKAHEST_CONFIG_KEY)
+    )
+    if section is None:
+        return None
+    policy = _alkahest_client_policy()
+    return AlkahestChainProbe(
+        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        build_client=(
+            alkahest_client_constructor(policy) if policy is not None else None
+        ),
+        clients=alkahest_clients,
+        interval_seconds=section.probe_interval_seconds,
+        rpc_timeout_seconds=section.rpc_timeout_seconds,
     )
 
 
@@ -216,6 +253,7 @@ def _build_settlement_composition(
     sqlite_client,
     alkahest_clients,
     marketplace_signer,
+    chain_probe=None,
 ):
     from market_storefront.domain_runtime import build_settlement_runtime
 
@@ -224,6 +262,7 @@ def _build_settlement_composition(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
+        chain_probe=chain_probe,
     )
 
 
@@ -237,6 +276,7 @@ class VmStorefrontServices:
     sqlite_client: Any
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
+    alkahest_chain_probe: AlkahestChainProbe | None
     capacity_runtime: CapacityRuntime
     site_projections: SiteProjectionState
     service_peer_trust: ServicePeerTrust
@@ -292,6 +332,9 @@ def _build_vm_services(
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
     alkahest_clients = _build_alkahest_clients()
+    # The probe owns the client map from here: every consumer below is handed
+    # this one dict, which the probe updates in place as it rebuilds clients.
+    alkahest_chain_probe = _build_alkahest_chain_probe(alkahest_clients)
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
     # Each site's responses and callbacks are verified against its service
@@ -319,6 +362,7 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
+        chain_probe=alkahest_chain_probe,
     )
     negotiation_runtime = build_vm_negotiation_runtime(
         domain,
@@ -375,6 +419,7 @@ def _build_vm_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
+        alkahest_chain_probe=alkahest_chain_probe,
         capacity_runtime=capacity_runtime,
         site_projections=site_projections,
         service_peer_trust=service_peer_trust,
@@ -406,6 +451,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         services.service_peer_trust.seed()
         _container.resolved_service_peer_trust = services.service_peer_trust
         _container.resolved_alkahest_clients = services.alkahest_clients
+        _container.resolved_alkahest_chain_probe = services.alkahest_chain_probe
         _container.resolved_capacity_runtime = services.capacity_runtime
         _container.resolved_site_projections = services.site_projections
         _container.resolved_listing_service = services.listing_service

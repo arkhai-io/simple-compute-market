@@ -332,7 +332,8 @@ live client map it rebuilds, and its results in status (D19, D20;
 blockers state their kind"). Touches `kit/alkahest`, `kit/storefront`'s client factory, and
 the three storefronts' composition, loops, and status.
 
-- [ ] 4.1 `kit/alkahest/src/market_alkahest/chain_probe.py`: an `AlkahestChainProbe` holding
+- [x] 4.1 (Amended in its note: a step probes every chain; the timer spaces the calls.)
+      `kit/alkahest/src/market_alkahest/chain_probe.py`: an `AlkahestChainProbe` holding
       the configured chains, a per-chain client constructor supplied at composition, the
       live client map, each chain's last result and when it was taken, a probe interval,
       and an RPC timeout, with an async `step()` that probes the chains that are due. The
@@ -346,7 +347,22 @@ the three storefronts' composition, loops, and status.
       constructed at each probe until it succeeds, updating the map in place. The module's
       startup-time `probe_addresses` helpers are kept only as far as
       `domains/vms/buyer`'s `chain_cli.py` still uses them (D19, D20).
-- [ ] 4.2 `alkahest_preflight` reads the probe's results from a `chain_probe` resource and
+      Done: `AlkahestChainProbe(chains, *, build_client, clients, interval_seconds,
+      rpc_timeout_seconds, json_rpc, required_addresses, clock)` over `ProbedChain`s
+      (`ProbedChain.from_config`), results as `ChainProbeResult(result, probed_at)`;
+      `step()` probes every chain and returns them with every chain's public result; the
+      loop's timer, not the step, spaces the calls, so an operator's explicit step always
+      probes (the first version skipped chains probed within the interval, which made a
+      step inside it a no-op; review caught it). A probe runs
+      in a worker thread, address configuration first (its failure is
+      `alkahest.address_config_invalid`, a configuration result), then `eth_chainId`, then
+      `eth_getCode` at each required contract (`recipient_arbiter`, `eas`, and the ERC-20
+      default escrow obligation), the address book's when one resolves and the SDK's
+      defaults otherwise. Only `probe_addresses_sync` stays for the VM buyer; the async
+      `probe_addresses`, `ChainProbeError`, and `fail_on_missing` went. Exported with
+      `ALKAHEST_CHAIN_PROBE_LOOP` (`alkahest_chain_probe`) and `ALKAHEST_CHAIN_PROBE_ROUTE`
+      (`alkahest-chain-probe`).
+- [x] 4.2 `alkahest_preflight` reads the probe's results from a `chain_probe` resource and
       makes no chain call: per chain its clauses use, no result yet or an unreachable
       result is the reachability blocker `alkahest.chain_unreachable`; a mismatch or
       missing contract is the configuration blocker of the same name. Delete
@@ -355,17 +371,42 @@ the three storefronts' composition, loops, and status.
       buyer's — reports no chain blocker, as before. Alkahest's `public_detail_keys` gains
       the per-chain result and when it was taken, so status reports both through the
       mechanism's readiness and core's status model stays mechanism-neutral (D19).
-- [ ] 4.3 Settings: `[Settlement.alkahest]` gains a probe interval (30 seconds by default)
+      Done: a chain's blocker comes from its probe result (`_chain_probe_blockers`), only
+      for the chains the selected clauses use; the public detail `chain_probe` carries
+      each chain's result and `probed_at`. **Differed:** "status reports both" needed a
+      field: no storefront's status carried mechanism readiness, so each status gains a
+      mechanism-neutral `settlement` list of the mechanisms' safe projections (core
+      `HealthResponse.settlement` and the storefront client's model, bare metal's
+      `BareMetalHealthResponse.settlement`), which is how the integration tests in 4.6 read
+      the probe result through the typed client.
+- [x] 4.3 Settings: `[Settlement.alkahest]` gains a probe interval (30 seconds by default)
       and an RPC timeout (5 seconds by default), positive seconds refused by key otherwise,
       as every storefront duration is (D19).
-- [ ] 4.4 `kit/storefront/src/market_storefront_kit/alkahest_clients.py`: expose the
+      Done: `probe_interval_seconds` and `rpc_timeout_seconds`, `PositiveSeconds` from
+      `kit/config` (a new declared dependency of `kit/alkahest`, which also retires the
+      `ARCHITECTURE.toml` exception row excusing that edge as undeclared), seller-only. The
+      three values schemas carrying the generated definition were edited by hand to the
+      generator's output, since `make helm-values-schema` was not permitted in this
+      session; VM's and bare metal's drift tests pass against them.
+- [x] 4.4 `kit/storefront/src/market_storefront_kit/alkahest_clients.py`: expose the
       factory's per-chain construction as a constructor the probe calls, so a chain whose
       construction fails is no longer dropped for the life of the process; the kit gains
       no probe, schedule, or other Alkahest behaviour. Confirm whether the SDK's
       construction opens the RPC connection and say so in the constructor's docstring;
       either way the probe rebuilds a missing client, and an address-configuration failure
       remains `alkahest.address_config_invalid` (D19, D20).
-- [ ] 4.5 VM (`src/server.py`, `settlement_composition.py`, `lifecycle_steps.py`,
+      Done: `alkahest_client_constructor(policy)` returns the per-chain constructor, or
+      `None` when the policy is missing a requirement (the wallet key, or what the caller's
+      policy names); a policy with no chains gets a constructor with nothing to construct.
+      `build_alkahest_clients` uses
+      it. Confirmed: an HTTP `rpc_url` builds without contacting the RPC, and a websocket
+      one connects at construction, so only a websocket chain's client is missing while it
+      is unreachable. A test pins that behaviour against the installed SDK
+      (`kit/storefront/tests/unit/test_zz_sdk_construction_probe.py`). It connects to a
+      refused loopback port, so it is not a pure unit test, and its name is left from a
+      scratch probe; this session could neither rename nor move files (`mv` and `git mv`
+      were refused). **For triage:** move it to `tests/integration/` under a permanent name.
+- [x] 4.5 VM (`src/server.py`, `settlement_composition.py`, `lifecycle_steps.py`,
       `services/listing_service.py`), bare metal (`src/runtime.py`, `lifecycle_steps.py`,
       `settlement_composition.py`), and API credits (`src/server.py`,
       `settlement_composition.py`, `lifecycle_steps.py`): each builds the probe beside its
@@ -375,7 +416,21 @@ the three storefronts' composition, loops, and status.
       `settlement_composition.py` (`dict(alkahest_clients)`, `evidence_clients`) and API
       credits' are removed, and VM's `listing_service` reads client availability live
       rather than once at construction (D19).
-- [ ] 4.6 Tests: `kit/alkahest/tests/unit/test_chain_probe.py` (new, unit, a stub JSON-RPC
+      Done. VM and API credits build the probe in `server.py` over the client map, hold it
+      on the container (`resolved_alkahest_chain_probe`), and pass it to the settlement
+      composition, which hands the same map to every consumer; bare metal builds it in
+      `build_runtime_from_configuration`, whose new `build_chain_client` parameter (the
+      kit constructor by default) is a seam no test uses yet. Bare metal's consumers read
+      the map through `BareMetalStorefrontSettlementComposition.chain_clients`, the map
+      itself even while empty; an `or {}` there had handed servicing a fresh dict whenever
+      no client was built at start (review caught it). A storefront with no Alkahest
+      section composes no probe and registers no probe loop (VM's step reports the loop
+      disabled). VM and bare metal also probe a configured but disabled section, whose
+      accepted obligations are still serviced over its chains; API credits builds neither
+      clients nor a probe for a disabled section, as it built no clients before. VM's
+      `_token_transfers_available` and `_alkahest_available` are properties read per call.
+- [x] 4.6 (Amended in its note: readiness makes no chain call, and every step probes.)
+      Tests: `kit/alkahest/tests/unit/test_chain_probe.py` (new, unit, a stub JSON-RPC
       transport injected): each result; a chain probed at most once per interval however
       often readiness runs; a held step leaves the last result standing however old; a
       missing client rebuilt on a later step. `kit/storefront/tests/unit/test_alkahest_clients.py`
@@ -387,13 +442,112 @@ the three storefronts' composition, loops, and status.
       result in status, and becomes ready on a stepped probe once the chain answers, without
       a restart. Each storefront's "registers and starts every loop" unit test lists the new
       loop (D19).
-- [ ] 4.7 Versions: `arkhai-kit-alkahest`, `arkhai-kit-storefront` (exact pins in the
+      Done. Unit: `test_chain_probe.py` — each result, `eth_getCode` failing after
+      `eth_chainId` answers, the configured timeout reaching every call, the required
+      contracts read from the development address book through the default
+      `required_contract_addresses`, readiness making no chain call however often it runs,
+      every step probing, readiness reporting a held result however old, and a client
+      rebuilt into the live map; the probe-result blocker cases and the two settings in
+      `test_settlement_config.py`; the constructor in `test_alkahest_clients.py`; VM's
+      `tests/unit/test_alkahest_chain_probe_composition.py` (the probe composed over the
+      map with the section's interval and timeout, none without a section); bare metal's
+      `test_app_composition.py` (the composition and servicing hold the probe's map, an
+      empty one included, and see a client added to it). Application integration through
+      `StorefrontClient`, one per storefront, with a stub JSON-RPC transport at the probe's
+      boundary: the loop is listed and steppable, an unanswering chain reports
+      `alkahest.chain_unreachable` and the probe result in status, and a stepped probe once
+      it answers makes Alkahest ready without a restart. **What these do not cover:** VM's
+      and API credits' tests replace both the container's probe and its settlement
+      composition with doubles whose readiness hands the probe in by hand, so the
+      production hand-off of `chain_probe` in their settlement compositions, API credits'
+      `_build_alkahest_chain_probe`, and VM's per-call client availability are untested at
+      that level. Bare metal's is the same shape: it hands its probe by hand to a
+      test-built composition and runtime, and the production hand-off in
+      `build_runtime_from_configuration` is covered only by `test_app_composition.py`'s
+      identity assertions. The three tests step the probe twice with no clock advance
+      between, so each also shows a step inside the interval acts. No storefront test
+      shows a rebuilt client reaching a consumer through a real step; the kit's test and
+      bare metal's identity test together stand for it. The "every loop" tests in all three
+      list the probe loop.
+- [x] 4.7 Versions: `arkhai-kit-alkahest`, `arkhai-kit-storefront` (exact pins in the
       storefronts), and the three storefronts; `make lock`.
-- [ ] 4.8 **Verify.** `make -C kit test-alkahest test-storefront`; `make test-storefront`,
+      Bumped: Alkahest 0.10.0, kit storefront 0.9.0, `arkhai-core-storefront` 0.16.0 and
+      `arkhai-core-storefront-client` 0.27.0 (the status field), VM storefront 0.18.0,
+      bare-metal storefront 0.18.0, API-credit storefront 0.11.0; patch bumps for pins
+      only: capacity publication 0.10.2, compute provisioning service 0.17.3. Every exact
+      pin on them moved, and the floors of the packages that need the new versions (the
+      storefronts' Alkahest and status-model floors); floors in packages that read neither
+      the new field nor the probe were left (`kit/storefront`'s core floors, bare metal's
+      runtime core floors, `e2e-tests`, the provisioning service's dev group). `make lock`
+      refreshed every lock. The publish
+      manifest (`manifests/published-distributions.json`) now lists `arkhai-kit-config`
+      before `arkhai-kit-alkahest`, and `docs/development/RELEASING.md` names the new
+      dependency, as the release-tooling tests require.
+- [x] 4.8 **Verify.** `make -C kit test-alkahest test-storefront`; `make test-storefront`,
       `make test-bare-metal`, `make test-apicredits`; `make test`; `make check-packaging`.
       End-to-end: every lane's Alkahest scenario (`e2e_deal`, `e2e_buy`,
       `e2e_alkahest_escrow_codecs`, `e2e_bare_metal_mock_deal`, `e2e_credits_deal`)
       publishes only after the first probe, so each passing proves the loop runs.
+      Results, rerun after the review fixes: `make -C kit test-alkahest` 347 passed and
+      `test-storefront` 127 (unit); `make test-storefront` unit 1103 passed, integration 447
+      passed and the same two environmental `test_alkahest.py` failures (`test_rust`,
+      `test_python`: no host Node.js or Anvil); `make test-bare-metal` (storefront 440) and
+      `make test-apicredits` all passed. Before the fixes, `make test`
+      by its components, as in Section 3: `test-core`, `test-kits`, the four compute
+      provisioning suites, `test-provisioning`, `test-provisioning-iac`, `test-registry`,
+      `test-registry-client`, `test-provisioning-adapter`, `test-compute`,
+      `test-vms-domain`, `test-vms-buyer`, and `test-e2e-unit` passed (the fixes touch only
+      `kit/alkahest`, `kit/storefront`, and the three storefronts, rerun above);
+      `test-deployment-packaging`'s Python checks passed (1079) after the manifest fix, and
+      its chart render half is **unrun** (no `helm` here), as is Section 3's render-probe
+      edit. After the review fixes, `make check-packaging` passed, and `make check-change`
+      (comment hygiene included) fails only on the two citations of files Sections 13 and
+      22 create. End-to-end, confirmed by reading the
+      scenarios rather than a run: the VM and bare-metal lanes configure Alkahest on their
+      dev chain with publication clauses, so `e2e_deal`, `e2e_buy`,
+      `e2e_alkahest_escrow_codecs`, and `e2e_bare_metal_mock_deal` publish their Alkahest
+      options only once the probe has seen the chain. `e2e_credits_deal` is **not**
+      evidence for the loop: API credits seeds its listing during startup, before its loops
+      start, from escrows the seed supplies rather than clauses, and that path does not
+      read readiness until 5.3 gates it (Section 6 then moves the seed onto a loop step).
+      None steps the probe: its first cycle runs as its timer starts, before any scenario's
+      stage-0 pause, so a lane whose chain is not yet answering at that first cycle and
+      whose loops are then held reads Alkahest unready until the probe is stepped. The
+      pipeline run validation makes is the evidence of whether that happens.
+
+Section 4 notes (handoff):
+
+- **The loop's first cycle runs as its timer starts,** then every interval (30 s by
+  default); a stepped `alkahest-chain-probe` run-cycle probes at once, whenever it is
+  sent. Until the first cycle has run, Alkahest
+  is unready with a reachability blocker, which Section 18's hold rule reads; Section 6's
+  `listing-seed` step waits on it.
+- **The probe owns the one client map,** created by the composition root and handed to
+  the probe and every consumer by reference; nothing may copy it, or a rebuilt client
+  never reaches the copy.
+- **The constructor is `None`** when the policy is missing a requirement (the wallet key),
+  so a storefront in that state probes reachability but never builds a client; bare
+  metal's missing-input refusals still stop startup before that until 5.2.
+- **For 5.1/5.3:** VM's settlement composition supplies the `wallet` resource only when
+  the section is enabled or the client map is non-empty at composition, a decision taken
+  once on a map that may be empty at start; Section 5's wallet change supplies it whenever
+  a section is configured.
+- **Status's `settlement` field** is new in all three storefronts; Section 5's tests can
+  read a blocker through it.
+- **Not done here:** `ARCHITECTURE.md`'s note that `kit/alkahest` "reads a user
+  configuration file" still stands (the aggregation timeout), owned elsewhere; only the
+  undeclared-import row went, recorded in `design.md` decision 26.
+- **Fresh-context review, findings declined:** status readiness in VM and API credits is
+  evaluated without clauses, so only the default chain raises a blocker there, while the
+  `chain_probe` detail reports every chain's result (kept; the same readiness the
+  `settlement status` command shows); the constructor test patches the kit's dependency
+  loader and VM's composition test replaces settings, both the existing patterns of those
+  files; the hand-edited values schemas stand on the drift tests, since the generator is
+  not permitted here; `chain_probe.py` imports `_sdk_addresses_for_chain` from its own
+  package's `alkahest` module, which is within one package; the disabled-section probe is
+  kept as recorded under 4.5, since the permanent "only when invoked or enabled" sentence
+  governs the status command's checks and a disabled section's servicing already uses its
+  chains.
 
 ## 5. Each storefront derives Alkahest options only from ready clauses
 

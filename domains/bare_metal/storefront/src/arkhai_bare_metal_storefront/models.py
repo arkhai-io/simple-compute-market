@@ -80,6 +80,9 @@ class BareMetalHealthResponse(BaseModel):
     # Each configured site's holds, refusals, and reports, each with its reason,
     # from the latest publication cycle; on status, and empty before any cycle.
     publication_derivation: dict[str, dict[str, list[dict[str, object]]]] | None = None
+    # Each composed settlement mechanism's readiness as its registration
+    # projects it, each blocker with its kind; on status.
+    settlement: list[dict[str, object]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):

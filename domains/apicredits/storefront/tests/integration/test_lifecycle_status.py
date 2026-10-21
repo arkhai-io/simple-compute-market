@@ -14,9 +14,11 @@ standing in for the quota authority's feeds.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import httpx
 import pytest
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, AlkahestChainProbe, ProbedChain
 from market_capacity_publication import SiteEventCycle
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementServicingWorker
@@ -37,6 +39,9 @@ from apicredits_storefront.lifecycle_steps import (
 )
 from apicredits_storefront.middleware import admin_auth
 from apicredits_storefront.services.system_service import SystemService
+from apicredits_storefront.settlement_composition import (
+    build_storefront_settlement_registry,
+)
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -207,6 +212,105 @@ async def test_a_sites_failing_capacity_event_feed_is_reported_under_its_loop(st
     assert poller["last_outcome"]["error"] == {"type": "ConnectionError", "message": None}
     assert status.lifecycle[CAPACITY_EVENTS_POLLER]["last_outcome"] is None
     assert _AUTHORITY_URL not in str(status)
+
+
+class _Rpc:
+    """The chain's JSON-RPC endpoint, the boundary the probe calls: refusing
+    connections until ``answering`` is set."""
+
+    def __init__(self) -> None:
+        self.answering = False
+
+    def __call__(self, rpc_url, method, params, timeout):
+        if not self.answering:
+            raise ConnectionRefusedError("connection refused")
+        return hex(31337) if method == "eth_chainId" else "0x6080"
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class _AlkahestReadiness:
+    """The settlement composition's readiness, through the storefront's own
+    registry and the real Alkahest preflight, over the probe the container
+    holds, as the composition hands it its resources."""
+
+    def __init__(self, probe: AlkahestChainProbe) -> None:
+        self._registry = build_storefront_settlement_registry()
+        self._config = self._registry.resolve(
+            {"schema_version": 1, "priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
+            role="seller",
+        )
+        self._probe = probe
+
+    def payment_service(self, _db):
+        # Arkhai payments is not composed, so no reconciliation loop runs.
+        return None
+
+    async def readiness(self):
+        return await self._registry.ordered_readiness(
+            self._config,
+            role="seller",
+            resources={
+                # A deterministic development address, never for a public network.
+                "wallet": {"address": "0x" + "33" * 20},
+                "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+                "default_chain": "anvil",
+                "chain_probe": self._probe,
+            },
+        )
+
+
+async def test_the_chain_probe_loop_steps_alkahest_from_unreachable_to_ready(
+    storefront, monkeypatch
+):
+    """Spec scenario "A storefront starts with its chain down": the
+    ``alkahest-chain-probe`` loop is listed and steppable, and Alkahest is
+    unready with the reachability blocker until a stepped probe reaches the
+    chain, then ready, without a restart."""
+    app, loops, _obligations, start = storefront
+    rpc, clock = _Rpc(), _Clock()
+    probe = AlkahestChainProbe(
+        [ProbedChain(name="anvil", rpc_url="http://anvil.test", chain_id=31337)],
+        json_rpc=rpc,
+        required_addresses=lambda _chain: {"escrow": "0x" + "11" * 20},
+        clock=clock,
+    )
+    monkeypatch.setattr(container, "resolved_alkahest_chain_probe", probe)
+    monkeypatch.setattr(
+        container, "resolved_settlement_composition", _AlkahestReadiness(probe)
+    )
+    loops.request_pause(True)
+    start(_QuotaSite())
+    await asyncio.wait_for(loops.await_quiescence(), timeout=1.0)
+
+    def alkahest(status) -> dict:
+        (item,) = [m for m in status.settlement if m["mechanism"] == "alkahest.v1"]
+        return item
+
+    async with _admin(app) as admin:
+        held = await admin.get_system_status()
+        await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+        refused = alkahest(await admin.get_system_status())
+        # A step probes at once, with no interval to wait out.
+        rpc.answering = True
+        await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+        ready = alkahest(await admin.get_system_status())
+
+    assert held.lifecycle[ALKAHEST_CHAIN_PROBE_LOOP]["state"] == "paused"
+    assert [(b["code"], b["kind"]) for b in alkahest(held)["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert refused["public_details"]["chain_probe"]["anvil"]["result"] == (
+        "alkahest.chain_unreachable"
+    )
+    assert ready["ready"] is True
+    assert ready["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"
 
 
 async def test_an_unsigned_status_read_is_refused(storefront):

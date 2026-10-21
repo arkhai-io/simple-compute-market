@@ -51,7 +51,11 @@ from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.publication_terms import (
     demands_for_publication_clauses,
 )
-from market_storefront.utils.config import get_evm_wallet_address
+from market_storefront.utils.config import (
+    CHAINS,
+    get_evm_wallet_address,
+    get_evm_wallet_private_key,
+)
 from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
 from market_resource_pools_contracts.backing import CapacityBacking
 from market_storefront.services.listing_sources import resolve_source_backing
@@ -115,11 +119,6 @@ class ListingService:
         site_projections: SiteProjectionState,
         source_backing_resolver: Callable[..., CapacityBacking] | None = None,
     ) -> None:
-        from market_storefront.utils.config import (
-            CHAINS,
-            get_evm_wallet_private_key,
-        )
-
         if getattr(sqlite_client, "domain_registry", None) is not registry:
             raise RuntimeError(
                 "listing service and SQLite repository must share the exact "
@@ -140,6 +139,8 @@ class ListingService:
         self._capacity_runtime = capacity_runtime
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
+        # The live map the chain probe updates in place; read when needed, so a
+        # client the probe rebuilds is available without a restart.
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
         # What a source's site currently declares about it, read from the held
@@ -149,10 +150,13 @@ class ListingService:
             resolve_source_backing, site_projections
         )
 
-        self._token_transfers_available = bool(
-            self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
-        )
-        self._alkahest_available = bool(self._alkahest_clients)
+    @property
+    def _token_transfers_available(self) -> bool:
+        return bool(self._alkahest_clients and CHAINS and get_evm_wallet_private_key())
+
+    @property
+    def _alkahest_available(self) -> bool:
+        return bool(self._alkahest_clients)
 
     @property
     def domain_registry(self) -> StorefrontDomainRegistry:

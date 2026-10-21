@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import re
 from collections.abc import Mapping
@@ -22,8 +21,17 @@ from market_settlement_runtime import (
     SettlementRole,
     decimal_rate_to_base_units,
 )
+from market_config.setting_types import PositiveSeconds
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .chain_probe import (
+    ADDRESS_CONFIG_INVALID,
+    CHAIN_ID_MISMATCH,
+    CHAIN_UNREACHABLE,
+    CONTRACT_MISSING,
+    DEFAULT_PROBE_INTERVAL_SECONDS,
+    DEFAULT_TIMEOUT_SECONDS,
+)
 from .claim_hooks import AlkahestConditionalEscrowClient
 from .escrow_verification import verify_escrow_for_settlement
 
@@ -75,6 +83,14 @@ class AlkahestSettlementConfig(BaseModel):
     trusted_oracle_addresses: tuple[str, ...] = ()
     interruptible: bool = False
     interruptible_oracle_addresses: tuple[str, ...] = ()
+    #: How often each configured chain is probed, at most.
+    probe_interval_seconds: PositiveSeconds = Field(
+        default=DEFAULT_PROBE_INTERVAL_SECONDS, json_schema_extra={"roles": ["seller"]}
+    )
+    #: The bound on each JSON-RPC call a probe makes.
+    rpc_timeout_seconds: PositiveSeconds = Field(
+        default=DEFAULT_TIMEOUT_SECONDS, json_schema_extra={"roles": ["seller"]}
+    )
 
     @field_validator("address_config_path")
     @classmethod
@@ -241,8 +257,45 @@ def _release_model_blockers(
     return blockers
 
 
-async def _await_if_needed(value: Any) -> Any:
-    return await value if inspect.isawaitable(value) else value
+def _chain_probe_blockers(
+    chain_probe: Any, chain_names: tuple[str, ...]
+) -> list[ReadinessBlocker]:
+    """The blocker each selected chain's last probe result raises.
+
+    Readiness reads the probe's last results and calls no chain. A chain not yet
+    probed, or whose last probe could not reach it, is unknown rather than
+    ruled out. A buyer composes no probe and so reports no chain blocker.
+    """
+    if chain_probe is None:
+        return []
+    blockers: list[ReadinessBlocker] = []
+    for chain_name in chain_names:
+        result = chain_probe.result(chain_name)
+        if result is None:
+            blockers.append(
+                _reachability_blocker(
+                    CHAIN_UNREACHABLE, "a selected settlement chain has not been probed yet"
+                )
+            )
+        elif result.result == CHAIN_UNREACHABLE:
+            blockers.append(
+                _reachability_blocker(
+                    CHAIN_UNREACHABLE, "a selected settlement chain could not be reached"
+                )
+            )
+        elif not result.reachable:
+            blockers.append(
+                _configuration_blocker(result.result, _PROBE_MESSAGES[result.result])
+            )
+    # One blocker per code: two chains failing alike are one public reason.
+    return list({blocker.code: blocker for blocker in blockers}.values())
+
+
+_PROBE_MESSAGES = {
+    CHAIN_ID_MISMATCH: "a selected RPC reports a different chain identity",
+    CONTRACT_MISSING: "one or more required Alkahest contracts are not deployed",
+    ADDRESS_CONFIG_INVALID: "a selected chain's Alkahest address configuration cannot be resolved",
+}
 
 
 def _selected_chain_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
@@ -294,9 +347,12 @@ async def alkahest_preflight(
       seller stage delivers; a configured model outside them is a blocker;
     - ``signs_transactions``: true where the storefront submits transactions
       with the seller wallet's key, so a missing key or no configured chain is
-      a blocker.
+      a blocker;
+    - ``chain_probe``: its :class:`~market_alkahest.chain_probe.AlkahestChainProbe`,
+      whose last result per selected chain readiness reads; readiness makes no
+      chain call of its own.
 
-    A buyer supplies neither.
+    A buyer supplies none of them.
     """
 
     config = AlkahestSettlementConfig.model_validate(section)
@@ -371,18 +427,7 @@ async def alkahest_preflight(
                         "a selected settlement chain has no RPC client",
                     )
                 )
-            configured_chain_id = _value(chain, "chain_id")
-            observed = resources.get("observed_chain_id")
-            if isinstance(observed, Mapping):
-                observed = observed.get(chain_name)
-            if configured_chain_id is not None and observed is not None:
-                if int(configured_chain_id) != int(observed):
-                    blockers.append(
-                        _configuration_blocker(
-                            "alkahest.chain_id_mismatch",
-                            "a selected RPC reports a different chain identity",
-                        )
-                    )
+        blockers.extend(_chain_probe_blockers(resources.get("chain_probe"), chain_names))
 
     if config.address_config_path and not _validate_address_file(
         config.address_config_path
@@ -393,49 +438,6 @@ async def alkahest_preflight(
                 "the Alkahest address configuration cannot be loaded",
             )
         )
-
-    deployed = resources.get("deployed_contracts")
-    if isinstance(deployed, Mapping) and any(
-        value is not True for value in deployed.values()
-    ):
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.contract_missing",
-                "one or more required Alkahest contracts are not deployed",
-            )
-        )
-    probe = resources.get("contract_probe")
-    required_addresses = resources.get("required_addresses")
-    if (
-        callable(probe)
-        and isinstance(required_addresses, Mapping)
-        and required_addresses
-    ):
-        for chain_name in chain_names:
-            try:
-                result = await _await_if_needed(
-                    probe(chain_name, dict(required_addresses))
-                )
-            except Exception:
-                result = None
-            if not isinstance(result, Mapping):
-                # A probe that did not answer cannot tell a missing contract
-                # from an unreachable chain, so it rules nothing out.
-                blockers.append(
-                    _reachability_blocker(
-                        "alkahest.contract_probe_failed",
-                        "required Alkahest deployments could not be verified",
-                    )
-                )
-                break
-            if any(value is not True for value in result.values()):
-                blockers.append(
-                    _configuration_blocker(
-                        "alkahest.contract_missing",
-                        "one or more required Alkahest contracts are not deployed",
-                    )
-                )
-                break
 
     if resources.get("require_asset") and not resources.get("asset"):
         blockers.append(
@@ -460,6 +462,9 @@ async def alkahest_preflight(
         details["chain"] = chain_names[0]
     if isinstance(resources.get("asset"), str):
         details["asset"] = resources["asset"]
+    chain_probe = resources.get("chain_probe")
+    if chain_probe is not None:
+        details["chain_probe"] = chain_probe.public_results()
     return MechanismReadiness(
         mechanism=ALKAHEST_MECHANISM_ID,
         configured=True,
@@ -747,7 +752,7 @@ def create_alkahest_registration(
         publication_input_validator=validate_alkahest_publication_input,
         buyer_compatibility=alkahest_buyer_compatibility,
         public_detail_keys=frozenset(
-            {"chain", "asset", "oracle_gated", "interruptible"}
+            {"chain", "asset", "oracle_gated", "interruptible", "chain_probe"}
         ),
     )
 

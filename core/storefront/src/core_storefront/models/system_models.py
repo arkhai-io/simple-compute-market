@@ -114,6 +114,11 @@ class HealthResponse(BaseModel):
     #: its most recent cycle, the publication loop's included. Present on
     #: system status, not on the liveness probes.
     lifecycle: dict[str, LoopStatus] | None = None
+    #: Each composed settlement mechanism's readiness as its registration
+    #: projects it: whether it is ready, each blocker's code, message, and kind,
+    #: and the public details the mechanism reports. Present on system status,
+    #: not on the liveness probes.
+    settlement: tuple[dict[str, Any], ...] | None = None
 
 
 class AdminPauseResponse(BaseModel):

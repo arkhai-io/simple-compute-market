@@ -29,6 +29,7 @@ from core_storefront.domain_registry import (
     StorefrontDomainRegistryError,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, ALKAHEST_CHAIN_PROBE_ROUTE
 from market_capacity_publication import (
     CapacityBindingError,
     CapacityConfigurationError,
@@ -173,6 +174,14 @@ async def payment_reconciliation_step() -> Mapping[str, Any]:
     return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
 
 
+async def alkahest_chain_probe_step() -> Mapping[str, Any]:
+    """Probe each configured chain."""
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is None:
+        raise LifecycleRouteError(503, "Alkahest chain probe is not composed")
+    return {"loop": ALKAHEST_CHAIN_PROBE_LOOP, **(await probe.step())}
+
+
 def _capacity_runtime() -> Any:
     client = _sqlite_client()
     try:
@@ -225,6 +234,13 @@ def register_api_credit_lifecycle_steps(loops: StorefrontLoopController) -> None
         step=capacity_events_step,
         preview=capacity_events_preview,
     )
+    # Registered with the loop it steps, which runs only when Alkahest is composed.
+    if _container.resolved_alkahest_chain_probe is not None:
+        loops.register_step(
+            ALKAHEST_CHAIN_PROBE_LOOP,
+            route=ALKAHEST_CHAIN_PROBE_ROUTE,
+            step=alkahest_chain_probe_step,
+        )
 
 
 def _capacity_site_names(runtime: Any | None) -> tuple[str, ...]:
@@ -255,10 +271,12 @@ def register_api_credit_loops(
     runs, so startup registers what the running configuration states. Each
     sweep changes durable deals, so its first cycle is due one interval after
     its timer starts, giving an operator who holds the loops as the storefront
-    starts a whole interval to do so. ``capacity_runtime`` is the runtime the
-    pollers drain, the configured one unless given. ``start_loops`` on the
-    controller then starts every one. Returns each registered loop's interval,
-    by loop name.
+    starts a whole interval to do so. While Alkahest is composed the chain
+    probe is registered too, its first cycle as its timer starts, since
+    readiness reads every chain unprobed until it has run.
+    ``capacity_runtime`` is the runtime the pollers drain, the configured one
+    unless given. ``start_loops`` on the controller then starts every one.
+    Returns each registered loop's interval, by loop name.
     """
     intervals = {
         NEGOTIATION_WATCHDOG: negotiation_watchdog_policy().interval_seconds,
@@ -278,6 +296,15 @@ def register_api_credit_loops(
             step=step,
             interval_seconds=intervals[name],
             initial_delay_seconds=intervals[name],
+        )
+    probe = _container.resolved_alkahest_chain_probe
+    if probe is not None:
+        intervals[ALKAHEST_CHAIN_PROBE_LOOP] = probe.interval_seconds
+        loops.register_loop(
+            ALKAHEST_CHAIN_PROBE_LOOP,
+            route=ALKAHEST_CHAIN_PROBE_ROUTE,
+            step=alkahest_chain_probe_step,
+            interval_seconds=probe.interval_seconds,
         )
     loops.register_fan_out(
         CAPACITY_EVENTS_POLLER,

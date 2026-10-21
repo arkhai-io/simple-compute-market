@@ -3,6 +3,7 @@
 from .alkahest_clients import (
     AlkahestChain,
     AlkahestClientPolicy,
+    alkahest_client_constructor,
     build_alkahest_clients,
 )
 from .composition import (
@@ -76,6 +77,7 @@ __all__ = [
     "StorefrontServiceHooks",
     "TradingPause",
     "TradingPauseRouteService",
+    "alkahest_client_constructor",
     "build_alkahest_clients",
     "build_composed_storefront_app",
     "build_storefront_lifespan",

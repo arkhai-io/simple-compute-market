@@ -19,6 +19,7 @@ from core_storefront.domain_registry import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
+from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
 from market_storefront_kit import (
@@ -27,6 +28,7 @@ from market_storefront_kit import (
     StorefrontComposition,
     StorefrontRouteHooks,
     StorefrontServiceHooks,
+    alkahest_client_constructor,
     build_alkahest_clients,
     build_composed_storefront_app,
 )
@@ -96,6 +98,7 @@ class ApiCreditsStorefrontServices:
     sqlite_client: Any
     marketplace_signer: Any
     alkahest_clients: dict[str, Any]
+    alkahest_chain_probe: AlkahestChainProbe | None
     settlement_repository: Any
     settlement_runtime: Any
     settlement_worker: Any
@@ -110,24 +113,38 @@ class ApiCreditsStorefrontServices:
     system_service: Any
 
 
-def _build_alkahest_clients() -> dict[str, Any]:
+def _alkahest_client_policy() -> AlkahestClientPolicy:
     private_key = (settings.wallet.private_key or "").strip()
     missing = () if private_key else ("wallet.private_key",)
-    return build_alkahest_clients(
-        AlkahestClientPolicy(
-            private_key=private_key,
-            chains=tuple(
-                AlkahestChain(
-                    name=name,
-                    rpc_url=chain.rpc_url,
-                    address_config_path=chain.alkahest_address_config_path,
-                )
-                for name, chain in CHAINS.items()
-            ),
-            missing_requirements=missing,
-            warn_if_no_chains=True,
+    return AlkahestClientPolicy(
+        private_key=private_key,
+        chains=tuple(
+            AlkahestChain(
+                name=name,
+                rpc_url=chain.rpc_url,
+                address_config_path=chain.alkahest_address_config_path,
+            )
+            for name, chain in CHAINS.items()
         ),
-        logger=logger,
+        missing_requirements=missing,
+        warn_if_no_chains=True,
+    )
+
+
+def _build_alkahest_clients() -> dict[str, Any]:
+    return build_alkahest_clients(_alkahest_client_policy(), logger=logger)
+
+
+def _build_alkahest_chain_probe(
+    section: Any, alkahest_clients: dict[str, Any]
+) -> AlkahestChainProbe:
+    """The chain probe over every configured chain, owning ``alkahest_clients``."""
+    return AlkahestChainProbe(
+        [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
+        build_client=alkahest_client_constructor(_alkahest_client_policy()),
+        clients=alkahest_clients,
+        interval_seconds=section.probe_interval_seconds,
+        rpc_timeout_seconds=section.rpc_timeout_seconds,
     )
 
 
@@ -152,8 +169,14 @@ def _build_api_credit_services(
     alkahest_enabled = bool(
         alkahest_section is not None and getattr(alkahest_section, "enabled", False)
     )
+    alkahest_chain_probe: AlkahestChainProbe | None = None
     if alkahest_enabled:
         alkahest_clients = _build_alkahest_clients()
+        # The probe owns the client map from here: every consumer below is
+        # handed this one dict, which it updates in place.
+        alkahest_chain_probe = _build_alkahest_chain_probe(
+            alkahest_section, alkahest_clients
+        )
     else:
         alkahest_clients = {}
     sqlite_client = get_sqlite_client(
@@ -168,6 +191,7 @@ def _build_api_credit_services(
         alkahest_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
         failure_policy=failure_policy,
+        chain_probe=alkahest_chain_probe,
     )
     negotiation_runtime = build_api_credit_negotiation_runtime(
         domain,
@@ -205,6 +229,7 @@ def _build_api_credit_services(
         sqlite_client=sqlite_client,
         marketplace_signer=marketplace_signer,
         alkahest_clients=alkahest_clients,
+        alkahest_chain_probe=alkahest_chain_probe,
         settlement_repository=settlement_repository,
         settlement_runtime=settlement_runtime,
         settlement_worker=settlement_worker,
@@ -238,6 +263,7 @@ async def _start_api_credit_services(
     _container.resolved_market_domain = services.domain
     _container.resolved_sqlite_client = services.sqlite_client
     _container.resolved_alkahest_clients = services.alkahest_clients
+    _container.resolved_alkahest_chain_probe = services.alkahest_chain_probe
     _container.resolved_settlement_repository = services.settlement_repository
     _container.resolved_settlement_runtime = services.settlement_runtime
     _container.resolved_settlement_worker = services.settlement_worker

@@ -12,6 +12,7 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     RECIPIENT_RELEASE,
+    AlkahestChainProbe,
     release_conditions,
     require_deliverable_release_model,
 )
@@ -288,8 +289,13 @@ def build_api_credit_settlement_composition(
     marketplace_signer: Signer,
     failure_policy: Any,
     payments_client_for_owner: ClientForOwner | None = None,
+    chain_probe: AlkahestChainProbe | None = None,
 ) -> ApiCreditsSettlementComposition:
-    """Build lazy mechanism clients and the shared servicing worker."""
+    """Build lazy mechanism clients and the shared servicing worker.
+
+    ``alkahest_clients`` is the live map ``chain_probe`` updates in place, so
+    it is held here rather than copied; readiness reads the probe's results.
+    """
     registry = build_storefront_settlement_registry()
     settlement_config = registry.resolve(
         storefront_config.settlement_config_mapping(),
@@ -304,7 +310,7 @@ def build_api_credit_settlement_composition(
     )
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
-        "clients": dict(alkahest_clients),
+        "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": next(iter(storefront_config.CHAINS), None),
@@ -312,6 +318,8 @@ def build_api_credit_settlement_composition(
         # could pay the seller, whatever clients are composed.
         "wallet": {"address": seller_wallet_address},
     }
+    if chain_probe is not None:
+        resources["chain_probe"] = chain_probe
     mechanism_clients: dict[str, Any] = {}
     for registration in registry.ordered_registrations(
         settlement_config, role="seller"

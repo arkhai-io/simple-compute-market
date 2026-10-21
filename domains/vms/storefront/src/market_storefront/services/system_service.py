@@ -66,6 +66,18 @@ def _default_lifecycle_provider() -> dict[str, dict[str, Any]]:
     return {name: loop.to_dict() for name, loop in lifecycle.snapshot().items()}
 
 
+async def _default_settlement_provider() -> list[dict[str, Any]] | None:
+    """Each composed mechanism's readiness, as its registration projects it.
+
+    Readiness reads the Alkahest chain probe's last results and calls no chain,
+    so a status read never waits on one.
+    """
+    composition = _container.resolved_settlement_composition
+    if composition is None:
+        return None
+    return [status.safe_projection() for status in await composition.readiness()]
+
+
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     """Which pre-shape listings carried a seller's close or pause, and to which
     shape-bearing successor: the listing a seller should reopen or resume."""
@@ -99,6 +111,9 @@ class SystemService:
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
         lifecycle_provider: Callable[[], dict[str, dict[str, Any]]] | None = None,
+        settlement_provider: (
+            Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
+        ) = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
@@ -123,6 +138,7 @@ class SystemService:
             pool_override_status_provider or _default_pool_override_status_provider
         )
         self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
+        self._settlement_provider = settlement_provider or _default_settlement_provider
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -259,6 +275,10 @@ class SystemService:
                 result["lifecycle"] = self._lifecycle_provider()
             except Exception:
                 result["lifecycle"] = None
+            try:
+                result["settlement"] = await self._settlement_provider()
+            except Exception:
+                result["settlement"] = None
 
         return result
 

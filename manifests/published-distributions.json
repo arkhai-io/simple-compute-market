@@ -17,14 +17,14 @@
       "dist": "arkhai-kit-settlement-runtime"
     },
     {
-      "key": "kit-alkahest",
-      "path": "kit/alkahest",
-      "dist": "arkhai-kit-alkahest"
-    },
-    {
       "key": "kit-config",
       "path": "kit/config",
       "dist": "arkhai-kit-config"
+    },
+    {
+      "key": "kit-alkahest",
+      "path": "kit/alkahest",
+      "dist": "arkhai-kit-alkahest"
     },
     {
       "key": "kit-policy",

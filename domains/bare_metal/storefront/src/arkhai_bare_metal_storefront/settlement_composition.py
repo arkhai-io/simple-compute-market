@@ -156,6 +156,16 @@ class BareMetalStorefrontSettlementComposition:
     def enabled_mechanisms(self) -> tuple[str, ...]:
         return self.config.priority
 
+    @property
+    def chain_clients(self) -> Mapping[str, Any]:
+        """The Alkahest chain clients, as the live map the chain probe updates.
+
+        The map itself, even while empty, so a client the probe rebuilds after
+        startup reaches every holder.
+        """
+        clients = self.resources.get("clients")
+        return clients if isinstance(clients, Mapping) else {}
+
     def arkhai_payments_stage(self) -> PaymentSellerStage | None:
         return self.payments_stage
 

@@ -72,8 +72,9 @@ A storefront composing Alkahest MUST probe each configured chain apart from read
 evaluation, in its `alkahest-chain-probe` lifecycle loop, which the Alkahest kit supplies
 and the storefront registers beside its other loops, with the pause and explicit step
 every storefront loop has: reading the chain's identity and the code at each contract
-address its address configuration requires, at most once per chain per configured probe
-interval, with every call bounded by a timeout. Alkahest readiness MUST read each chain's
+address its address configuration requires, the loop's timer probing each chain once per
+configured probe interval and an explicit step probing at once, with every call bounded by
+a timeout. Alkahest readiness MUST read each chain's
 last probe result and MUST NOT call a chain itself. A chain not yet probed since start
 MUST read as a reachability blocker. A result MUST NOT expire while the loops are held. A
 chain whose client could not be constructed MUST be probed, and its client rebuilt, at

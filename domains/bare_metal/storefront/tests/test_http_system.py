@@ -5,10 +5,12 @@ import dataclasses
 import functools
 import logging
 import sqlite3
+from datetime import datetime, timezone
 
 import httpx
 import pytest
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from market_alkahest import AlkahestChainProbe, ProbedChain
 from core_storefront.multi_registry_client import RegistryAuthorityTrust
 from fastapi.testclient import TestClient
 from market_identity import Eip191Signer, Identity, TrustedIdentitySet
@@ -934,6 +936,7 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
         site_projections=_sited_runtime(
             str(tmp_path / "unused.db"), _sites(site_a=1)
         ).site_projections,
+        alkahest_chain_probe=_probe(_Rpc(), _Clock()),
         loop_controller_factory=held_loop_controller,
     )
     app = _app(runtime)
@@ -943,12 +946,14 @@ async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> N
         routes = runtime.loops.step_routes()
 
     assert started == [
+        "alkahest_chain_probe",
         "negotiation_watchdog",
         "publication",
         "settlement_servicing",
         "site_projection_poller",
     ]
     assert routes == {
+        "alkahest-chain-probe": "alkahest_chain_probe",
         "negotiation-watchdog": "negotiation_watchdog",
         "publication": "publication",
         "settlement-servicing": "settlement_servicing",
@@ -1141,3 +1146,90 @@ async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(
     assert status.extra.get("pool_overrides") is None
     assert administrator.settlement_manual_required == 0
     assert refused.value.status_code in (401, 403)
+
+
+class _Rpc:
+    """The chain's JSON-RPC endpoint, the boundary the probe calls: refusing
+    connections until ``answering`` is set."""
+
+    def __init__(self) -> None:
+        self.answering = False
+
+    def __call__(self, rpc_url, method, params, timeout):
+        if not self.answering:
+            raise ConnectionRefusedError("connection refused")
+        return hex(31337) if method == "eth_chainId" else "0x6080"
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+def _probe(rpc: _Rpc, clock: _Clock) -> AlkahestChainProbe:
+    return AlkahestChainProbe(
+        [ProbedChain(name="anvil", rpc_url="http://anvil:8545", chain_id=31337)],
+        json_rpc=rpc,
+        required_addresses=lambda _chain: {"escrow": "0x" + "11" * 20},
+        clock=clock,
+    )
+
+
+async def test_a_storefront_whose_chain_refuses_is_unready_until_a_stepped_probe_reaches_it(
+    tmp_path,
+) -> None:
+    """Spec scenario "A storefront starts with its chain down": Alkahest is
+    unready with the reachability blocker until a stepped probe reaches the
+    chain, then ready, with no restart; status reports the probe's result."""
+    rpc, clock = _Rpc(), _Clock()
+    probe = _probe(rpc, clock)
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"),
+        settlement_composition=alkahest_composition(
+            SELLER_SIGNER,
+            wallet="0x" + "33" * 20,
+            chain_clients={"anvil": object()},
+            chain_probe=probe,
+            # The probe stands in for the chain's address book here, so the
+            # section names none for readiness to load.
+            section={"address_config_path": None},
+        ),
+        alkahest_chain_probe=probe,
+        loop_controller_factory=held_loop_controller,
+    )
+    app = _app(runtime)
+
+    def alkahest(status: HealthResponse) -> dict:
+        (item,) = [m for m in status.settlement if m["mechanism"] == "alkahest.v1"]
+        return item
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            unprobed = alkahest(await admin.get_system_status())
+            await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+            refused = alkahest(await admin.get_system_status())
+            # A step probes at once, with no interval to wait out.
+            rpc.answering = True
+            await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+            ready = alkahest(await admin.get_system_status())
+            loops = (await admin.get_system_status()).lifecycle
+
+    assert [(b["code"], b["kind"]) for b in unprobed["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert unprobed["public_details"]["chain_probe"] == {"anvil": None}
+    assert [(b["code"], b["kind"]) for b in refused["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
+    assert refused["public_details"]["chain_probe"]["anvil"]["result"] == (
+        "alkahest.chain_unreachable"
+    )
+    assert ready["ready"] is True
+    assert ready["public_details"]["chain_probe"]["anvil"] == {
+        "result": "reachable",
+        "probed_at": clock.now.isoformat(),
+    }
+    assert loops["alkahest_chain_probe"]["last_outcome"]["trigger"] == "step"

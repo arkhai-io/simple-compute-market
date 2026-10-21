@@ -13,7 +13,13 @@ from typing import Any
 from core_storefront.auth import AuthError
 from core_storefront.identity_authority import IdentityAuthorityError
 from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
-from market_alkahest import ReleaseModelError, create_alkahest_registration
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    AlkahestChainProbe,
+    ProbedChain,
+    ReleaseModelError,
+    create_alkahest_registration,
+)
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
 from market_contact_exchange import (
@@ -44,6 +50,7 @@ from market_storefront_kit import (
     NegotiationWatchdogPolicy,
     StorefrontLoopController,
     TradingPause,
+    alkahest_client_constructor,
     build_alkahest_clients,
 )
 
@@ -252,7 +259,14 @@ class BareMetalStorefrontRuntime:
     source_confirmation_clock: Callable[[], datetime] = field(
         default=_utc_now, repr=False, compare=False
     )
+    #: The live Alkahest client map, which ``alkahest_chain_probe`` updates in
+    #: place as it rebuilds a client; every consumer holds this one map.
     chain_clients: Mapping[str, Any] = field(default_factory=dict)
+    #: Each configured chain's last probe result, which Alkahest readiness
+    #: reads; None while no Alkahest section is configured.
+    alkahest_chain_probe: AlkahestChainProbe | None = field(
+        default=None, repr=False, compare=False
+    )
     chain_config_paths: Mapping[str, str | None] = field(default_factory=dict)
     introduction_delivery: Any | None = field(default=None, repr=False)
     escrow_verifier: Callable[..., Awaitable[int]] = field(
@@ -518,7 +532,7 @@ class BareMetalStorefrontRuntime:
             db=self.db,
             seller_wallet=self.seller_evm_address or None,
             chain_clients=(
-                composition.resources.get("clients") or {}
+                composition.chain_clients
                 if composition is not None
                 else {}
             ),
@@ -728,6 +742,17 @@ class BareMetalStorefrontRuntime:
             name: loop.to_dict() for name, loop in self.loops.snapshot().items()
         }
         report["publication_derivation"] = self.publication_derivation.latest()
+        # Readiness reads the chain probe's last results and calls no chain.
+        report["settlement"] = (
+            [
+                status.safe_projection()
+                for status in await self.settlement_composition.readiness(
+                    clauses=self.publication_clauses
+                )
+            ]
+            if self.settlement_composition is not None
+            else None
+        )
         return report
 
     def _disclosures(self) -> dict[str, dict[str, object]]:
@@ -741,13 +766,10 @@ class BareMetalStorefrontRuntime:
         return self.contact_exchange.disclosures()
 
 
-def _build_chain_clients(
-    chains: Mapping[str, ChainSettings],
-    *,
-    private_key: str,
-    build_clients: Callable[..., Mapping[str, Any]],
-) -> tuple[dict[str, Any], dict[str, str | None]]:
-    """The Alkahest chain clients for ``[Chains]``, signing with the wallet's key."""
+def _alkahest_client_policy(
+    chains: Mapping[str, ChainSettings], *, private_key: str
+) -> AlkahestClientPolicy:
+    """What the Alkahest chain clients for ``[Chains]`` are built from."""
     alkahest_chains = tuple(
         AlkahestChain(
             name=name,
@@ -757,14 +779,23 @@ def _build_chain_clients(
         for name, chain in chains.items()
     )
     missing = ("wallet.private_key",) if alkahest_chains and not private_key else ()
-    clients = build_clients(
-        AlkahestClientPolicy(
-            private_key=private_key,
-            chains=alkahest_chains,
-            missing_requirements=missing,
-        ),
-        logger=logger,
+    return AlkahestClientPolicy(
+        private_key=private_key,
+        chains=alkahest_chains,
+        missing_requirements=missing,
     )
+
+
+def _build_chain_clients(
+    chains: Mapping[str, ChainSettings],
+    *,
+    private_key: str,
+    build_clients: Callable[..., Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, str | None]]:
+    """The Alkahest chain clients for ``[Chains]``, signing with the wallet's key."""
+    policy = _alkahest_client_policy(chains, private_key=private_key)
+    alkahest_chains = policy.chains
+    clients = build_clients(policy, logger=logger)
     return dict(clients), {
         chain.name: chain.address_config_path for chain in alkahest_chains
     }
@@ -799,6 +830,9 @@ def build_runtime_from_configuration(
     credential: str | None = None,
     domain: MarketDomainContract | None = None,
     build_chain_clients: Callable[..., Mapping[str, Any]] = build_alkahest_clients,
+    build_chain_client: Callable[
+        [AlkahestClientPolicy], Callable[[str], Any] | None
+    ] = alkahest_client_constructor,
     site_clients: SiteClientFactories = SiteClientFactories(),
 ) -> BareMetalStorefrontRuntime:
     """Compose the runtime from the storefront's configuration files.
@@ -808,8 +842,9 @@ def build_runtime_from_configuration(
     until the configuration is known to publish: the startup refusal runs
     before the signer, the settlement composition, or the database.
     ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
-    the chains the storefront settles on, and ``site_clients`` each site's
-    clients, the boundary to the site authorities.
+    the chains the storefront settles on, ``build_chain_client`` the
+    constructor the chain probe rebuilds a missing client with, and
+    ``site_clients`` each site's clients, the boundary to the site authorities.
 
     The service-peer trust is built here and holds nothing until the server
     starts and ``seed_service_peer_trust`` seeds and loads it.
@@ -865,6 +900,21 @@ def build_runtime_from_configuration(
         chain_clients, chain_config_paths = _build_chain_clients(
             active.chains, private_key=private_key, build_clients=build_chain_clients
         )
+        alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
+        # The probe owns the client map from here: the composition and the
+        # runtime below are both handed this one dict, which it updates in place.
+        chain_probe: AlkahestChainProbe | None = AlkahestChainProbe(
+            [
+                ProbedChain.from_config(name, chain)
+                for name, chain in active.chains.items()
+            ],
+            build_client=build_chain_client(
+                _alkahest_client_policy(active.chains, private_key=private_key)
+            ),
+            clients=chain_clients,
+            interval_seconds=alkahest_section.probe_interval_seconds,
+            rpc_timeout_seconds=alkahest_section.rpc_timeout_seconds,
+        )
     else:
         stale = [name for name, present in supplied.items() if present]
         if stale:
@@ -873,6 +923,7 @@ def build_runtime_from_configuration(
                 "Alkahest section: " + ", ".join(stale)
             )
         chain_clients, chain_config_paths = {}, {}
+        chain_probe = None
     settlement_composition = BareMetalStorefrontSettlementComposition.from_raw_config(
         settlement_config,
         resources={
@@ -881,6 +932,7 @@ def build_runtime_from_configuration(
             "wallet": seller_evm_address or None,
             "wallet_ready": bool(seller_evm_address),
             "clients": chain_clients,
+            **({"chain_probe": chain_probe} if chain_probe is not None else {}),
             "chains": {
                 name: chain.model_dump(exclude_none=True)
                 for name, chain in active.chains.items()
@@ -952,6 +1004,7 @@ def build_runtime_from_configuration(
         seller_evm_address=seller_evm_address,
         settlement_composition=settlement_composition,
         chain_clients=chain_clients,
+        alkahest_chain_probe=chain_probe,
         chain_config_paths=chain_config_paths,
         site_bindings=site_bindings,
         service_peer_trust=service_peer_trust,
