@@ -16,7 +16,7 @@ Helm v4.3.0 (`helm version --short`), the release `tests.yml` pins in Section 5.
 Establishes which render tests fail before the fix, and why (design "Corrections" 3;
 cadence step 1). Changes no code.
 
-- [ ] 1.1 **Decision gate.** On the branch as planned, with both loader environments
+- [x] 1.1 **Decision gate.** On the branch as planned, with both loader environments
       present (`make init-storefront`; `make -C domains/bare_metal/storefront init`) and
       Helm v4.3.0 on `PATH`, run `make -C helm test-render` and record in `design.md`,
       under a new `## Implementation findings`, every failing test by file and name and
@@ -24,6 +24,24 @@ cadence step 1). Changes no code.
       any other. The eight tests that set a `null` are named in "Corrections" 3. If any
       failure has another cause, stop and ask the owner whether it belongs to this change
       before Section 2 starts; do not fix it here. Evidence: the record.
+      — Recorded in `design.md` "Implementation findings", "The failing set before the
+      fix". `make -C helm test-render` (chart render tests, both loader interpreters set):
+      every `test-render.sh` assertion passes; 13 Python render tests fail — 10 on a
+      surviving `null` (6 storefront, 2 bare-metal, 2 topology: ten tests set a `null`,
+      not eight), and 3 on Helm 4.3.0 wording a schema refusal differently from what the
+      test asserts. After `make dist`, the loader environments were created by
+      `make test-storefront` and `make -C domains/bare_metal/storefront test` (each
+      reinits first; 448 unit and integration tests and 438 tests passed), since this
+      step may not run the `init` targets. The step may not run `helm version`, so this
+      run's Helm release is not recorded; Section 5's printed version names the Helm of
+      its own run only.
+      Gate answered: the owner chose (a); the three wording failures belong to this
+      change, fixed in 4.5 (`design.md` "Implementation findings").
+
+Notes: no code changed. `make test` on the same commit stops at its last suite,
+`test-deployment-packaging`, on `make -C helm test-render` with the same failures;
+every suite before it, `test-release-tooling` included, passes. End-to-end: none; the
+section changes nothing deployed.
 
 ## 2. `kit/config`: the generator accepts `null` wherever it accepts a key
 
@@ -145,6 +163,14 @@ the scenarios "An overlay removes a defaulted setting", "… a value the release
         pass unchanged.
       Break the helper once (stop it dropping a `null` agent) and confirm a test fails,
       then restore it.
+      Amended after 1.1: ten existing tests set a `null` — six in the storefront chart's
+      tests, two in the bare-metal chart's, two in the topology's — and each passes
+      unchanged. The three tests 1.1 recorded as failing on Helm 4's wording of a
+      schema refusal (bare-metal `test_a_stated_port_must_be_a_number_equal_to_the_charts`
+      and `test_the_retired_values_shape_is_refused_naming_each_key`; storefront
+      `test_an_agent_is_named_by_its_key_alone`) assert the key their refusal names
+      rather than a whole message, still asserting a non-zero exit (owner's decision at
+      1.1).
 - [ ] 4.6 Verification: `make -C helm test-render` with both loader interpreters set
       (chart render tests and the chart-to-loader checks), every test Section 1 recorded
       as failing now passing; `make test`. End-to-end: `make validate-helm`'s Helm

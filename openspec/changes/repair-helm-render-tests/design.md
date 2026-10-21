@@ -187,6 +187,58 @@ Validation: `make -C helm test-render` with both loader interpreters set, `kit/c
 unit tests, both storefronts' values-schema drift tests, `make test`,
 `make check-packaging`, and `make validate-helm`, which this change unblocks.
 
+## Implementation findings
+
+### The failing set before the fix
+
+`make -C helm test-render` on `9fe51bf3e`, after `make dist`, with both loader
+environments present (each reinitialized against those wheels by its storefront's test
+target). The step could not run `helm version`, so the Helm's release is not recorded for
+this run: its refusals are worded by Helm 4's schema validator, and they are the
+refusals the design recorded under v4.3.0, but that is not proof of the release. Every
+umbrella assertion in `test-render.sh` passes; thirteen Python render tests fail,
+matching the thirteen first reported.
+
+Ten fail because a `null` survives into a values schema (`got null`). The last column
+names the path the refusal named; a test whose loop stops at its first failing case is
+recorded by that case.
+
+| File | Test | The refused `null` |
+|---|---|---|
+| `helm/charts/storefront/tests/test_render.py` | `test_stated_values_are_rendered_as_stated` | `internalRegistryTrust` |
+| same | `test_a_differently_spelled_section_is_read_for_release_checks` | `config.Identity`, `config.Settlement` |
+| same | `test_release_disagreements_are_refused_naming_them` | `internalRegistryTrust`, its "trust missing" case; its later "service peer" case, which nulls `config.Identity.service_peers.provisioning_default`, did not run |
+| same | `test_release_owned_keys_are_matched_in_any_spelling` | `internalRegistryTrust` |
+| same | `test_typed_fields_are_accepted_in_any_spelling` | `config.Identity.service_peers`, `config.Settlement.priority` (it also nulls `config.Identity.principal`, which the generated schema already accepts as `null`) |
+| same | `test_a_null_removes_an_agent` | the agent `bob` |
+| `helm/charts/bare-metal-storefront/tests/test_render.py` | `test_an_umbrella_release_keeps_a_registry_and_sites_the_config_states` | `internalRegistryTrust` |
+| same | `test_an_umbrella_releases_parts_that_disagree_are_refused` | `internalRegistryTrust` ("requires internalRegistryTrust") |
+| `helm/tests/test_release_topology.py` | `test_the_smoke_profile_carries_only_what_the_release_states` | `storefront.agents.bob.internalRegistryTrust` |
+| same | `test_one_release_running_both_storefronts_on_its_provisioning_service_is_refused` | `bare-metal-storefront.internalRegistryTrust` |
+
+So ten tests set a `null`, six of them in the storefront chart's tests, not the eight and
+four "Corrections" 3 counted; the plan's 4.5 names "the four existing tests that set a
+`null`" in the storefront chart, which are these six.
+
+Three fail for another cause: each asserts a message the render's refusal does not
+contain, while the values schema refuses the same value for the same key in other words.
+The asserted wording is presumably an earlier Helm's schema message; which Helm, and
+whether that refusal came from the schema or a template, is not recorded.
+
+| File | Test | Asserted | The refusal this run printed |
+|---|---|---|---|
+| `helm/charts/bare-metal-storefront/tests/test_render.py` | `test_a_stated_port_must_be_a_number_equal_to_the_charts` | `config.port` | `at '/config/port': got string, want integer` |
+| same | `test_the_retired_values_shape_is_refused_naming_each_key` | `Additional property siteBindingsSecret is not allowed` | `at '': additional properties 'siteBindingsSecret' not allowed` |
+| `helm/charts/storefront/tests/test_render.py` | `test_an_agent_is_named_by_its_key_alone` | `agents.bob.name` | `at '/agents/bob/name': false schema` |
+
+None involves a `null`, and none was in the plan. At task 1.1's gate the owner decided
+they belong to this change (option (a)): each test asserts the key its refusal names
+rather than a whole message, so it holds however the pinned Helm words a schema refusal;
+no chart changes. Rejected: (b), leaving them to another change, under which
+`make -C helm test-render` could not pass and this change could not meet its acceptance
+boundary. The plan's task 4.5 carries the fix, and its count of the tests that set a
+`null` is corrected to the ten above; "Corrections" 3 undercounted them.
+
 ## Open questions
 
 None.
