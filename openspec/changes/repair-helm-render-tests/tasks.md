@@ -49,7 +49,7 @@ Delivers the generator form of D2: a definition in which a key's value may be `n
 wherever the key is accepted, a refused key staying refused. Touches `kit/config` only;
 no storefront uses it yet.
 
-- [ ] 2.1 `kit/config/src/market_config/values_schema.py`: add one public function that
+- [x] 2.1 `kit/config/src/market_config/values_schema.py`: add one public function that
       takes a finished definition and returns a copy in which every schema reached as a
       mapping key's value — under `properties`, `patternProperties`, or
       `additionalProperties`, at every depth, including inside the combinators listed in
@@ -60,7 +60,20 @@ no storefront uses it yet.
       `type` where one is stated — over wrapping every field, so a reader of the
       definition finds a field where it was. Describe the function in the module
       docstring's list of what the definition does, as current behaviour.
-- [ ] 2.2 `kit/config/tests/unit/test_values_schema.py` (unit): over a definition built
+      — `accepting_null(definition)`. A key's schema is widened by extending its
+      `type` where it states one and nothing that applies to every type
+      (`const`, `enum`, a combinator); an `anyOf` alone gains a `null` branch;
+      anything else is wrapped in `anyOf: [schema, {"type": "null"}]`; a schema that
+      already accepts `null` is left as it is; a schema with `$ref` is wrapped, since
+      its siblings are ignored. Every combinator in `_COMBINATORS` and `items` is
+      recursed into without widening the branch or item itself: the keys they type
+      accept `null` (under `not` and `if`, as under `properties`, a widened key's
+      schema reads `null` as absence), while a `null` list element stays refused.
+      This reads 2.1's "every schema of an array's items keep their meaning" as the
+      item schema itself, so that keys inside list elements are removable at any
+      depth, as the delta requires; Section 4's helpers drop `null` keys inside list
+      elements to match. The result shares nothing with its input. No import added.
+- [x] 2.2 `kit/config/tests/unit/test_values_schema.py` (unit): over a definition built
       from the module's existing test models, the function accepts `null` for a typed
       field, a typed section, a key of an open section, a delivery instance, and a key
       under `additionalProperties`; a secret field, a role-inapplicable field, a retired
@@ -68,10 +81,34 @@ no storefront uses it yet.
       unchanged; array item schemas are unchanged; the input definition is not mutated.
       Break the function once (leave refused keys out of its skip) and confirm a test
       fails, then restore it.
-- [ ] 2.3 Verification: `make dist`, then `make -C kit/config test` (unit), and
+      — Unit tests under "null removal", structural (the kit has no JSON Schema
+      validator; Section 3's drift tests validate with `Draft7Validator`): typed
+      section and field, open section, settlement mechanism and `priority`, a
+      delivery instance named for its sink and one under `additionalProperties`, a
+      key under `dependencies`; refused keys (secret, role-inapplicable, retired,
+      misspelled `sink`) stay `false`; an `Optional` field unchanged; a list's item
+      schema not widened while its keys are; each widening form (an `anyOf` alone,
+      `enum` or `oneOf` beside a type, `$ref`, `not`, an already-null `enum`, `{}`);
+      keys under `not`, `if`, and `then`; root and input untouched, and no result
+      sharing a node with its input or another result. With the refused-key skip
+      removed, two tests failed; restored.
+- [x] 2.3 Verification: `make dist`, then `make -C kit/config test` (unit), and
       `make test-kits`. No dependency or lock changes; if one proves necessary, run
       `make lock PROJECTS="kit/config"` and `make check-packaging` here.
       End-to-end: none; the generator runs only when a storefront writes its schemas.
+      — After `make dist`: `make -C kit/config test` (unit): 256 passed.
+      `make test-kits` (each kit's unit and library integration suites): 22 suites,
+      none failing. No dependency or lock change.
+      `make test` (before the fresh-context fixes, which touch only `kit/config`): every
+      suite passes up to `test-deployment-packaging`, which fails on
+      `make -C helm test-render` with Section 1's thirteen failures, as expected before
+      Sections 3–4. End-to-end confirmed: none.
+
+Notes: the fresh-context check found keys inside list elements left null-refusing
+against the delta's "at any depth"; fixed by recursing into `items` (2.1's note). It also
+found a shared `{"type": "null"}` node and unhandled `$ref`; both fixed. Declined: a key
+refused by a schema other than `false` (`{"not": {}}`) would be widened; the generator
+refuses keys only with `false`, which is the plan's definition of a refused key.
 
 ## 3. Both storefronts accept `null` in the definitions they write
 

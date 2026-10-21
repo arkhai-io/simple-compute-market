@@ -16,7 +16,11 @@ definition that:
 * types a plugin section, such as ``[Delivery]``, instance by instance from the
   settings models the service passes in, so a secret plugin setting is refused
   like any other;
-* refuses each retired key the service names, in any spelling.
+* refuses each retired key the service names, in any spelling;
+* once the service passes it through :func:`accepting_null`, accepts ``null``
+  wherever it accepts a key, at any depth, because a values file's ``null``
+  removes the key it names, while a refused key stays refused as ``null`` and a
+  ``null`` list element stays refused.
 
 A service keeps only what is its own: the sections it types, the plugins it
 installs, the keys it has retired, and the schema files it writes: those of the
@@ -351,6 +355,122 @@ def config_definition(
     for dotted in retired_keys:
         _retire(definition, dotted.split("."), dotted)
     return definition
+
+
+# Keywords whose value maps keys to the schema each key's value meets;
+# ``additionalProperties`` is one schema for every other key.
+_KEYED = ("properties", "patternProperties")
+# Keywords that constrain a value whatever its type, so a schema stating one
+# cannot accept ``null`` by naming it among its types. Beside ``$ref`` every
+# other keyword is ignored, so a type extended there would change nothing.
+_ANY_TYPE = (
+    "const", "enum", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "$ref"
+)
+
+
+def _null() -> dict[str, Any]:
+    return {"type": "null"}
+
+
+def _accepts_null(schema: Any) -> bool:
+    """Whether ``null`` meets ``schema``, read through the keywords that test it.
+
+    A reference is not followed, so a schema making one is taken not to accept
+    ``null``; widening it then adds a branch that may be redundant, never one
+    that refuses.
+    """
+    if isinstance(schema, bool):
+        return schema
+    if not isinstance(schema, Mapping) or "$ref" in schema:
+        return False
+    stated = schema.get("type")
+    if stated is not None and "null" not in ([stated] if isinstance(stated, str) else stated):
+        return False
+    if "const" in schema and schema["const"] is not None:
+        return False
+    if "enum" in schema and None not in schema["enum"]:
+        return False
+    if not all(_accepts_null(branch) for branch in schema.get("allOf", ())):
+        return False
+    if "anyOf" in schema and not any(_accepts_null(b) for b in schema["anyOf"]):
+        return False
+    if "oneOf" in schema and sum(_accepts_null(b) for b in schema["oneOf"]) != 1:
+        return False
+    if "not" in schema and _accepts_null(schema["not"]):
+        return False
+    if "if" in schema:
+        branch = "then" if _accepts_null(schema["if"]) else "else"
+        return _accepts_null(schema.get(branch, True))
+    return True
+
+
+def _or_null(schema: Any) -> Any:
+    """``schema`` accepting ``null`` too, in the form that keeps it readable."""
+    if _accepts_null(schema):
+        return schema
+    if not isinstance(schema, Mapping):
+        return {"anyOf": [schema, _null()]}
+    if "type" in schema and not any(key in schema for key in _ANY_TYPE):
+        stated = schema["type"]
+        types = [stated] if isinstance(stated, str) else list(stated)
+        return {**schema, "type": [*types, "null"]}
+    if set(schema) == {"anyOf"}:
+        return {"anyOf": [*schema["anyOf"], _null()]}
+    return {"anyOf": [schema, _null()]}
+
+
+def _keys_accept_null(node: Any) -> Any:
+    """Make every schema ``node`` reaches as a key's value accept ``null``.
+
+    Under ``properties``, ``patternProperties``, and ``additionalProperties`` a
+    key's value is checked only when the key is present, so a schema widened to
+    accept ``null`` reads a ``null`` key as an absent one, inside ``not`` and
+    ``if`` as much as outside them. A combinator's branches and an array's item
+    schemas describe a value rather than a key's: they are not widened, so a
+    ``null`` list element stays refused, but the keys they type are. A refused
+    key (``false``) is not widened.
+    """
+    if isinstance(node, list):
+        return [_keys_accept_null(item) for item in node]
+    if not isinstance(node, Mapping):
+        return copy.deepcopy(node)
+    result: dict[str, Any] = {}
+    for keyword, value in node.items():
+        if keyword in _KEYED and isinstance(value, Mapping):
+            result[keyword] = {
+                key: _or_null(_keys_accept_null(schema)) if schema is not False else False
+                for key, schema in value.items()
+            }
+        elif keyword == "additionalProperties" and isinstance(value, Mapping):
+            result[keyword] = _or_null(_keys_accept_null(value))
+        elif keyword in (*_COMBINATORS, "items"):
+            # A ``dependencies`` list names the keys another key requires and is
+            # copied as it is; its schemas, like every combinator's, apply to the
+            # same object, whose own keys they type.
+            result[keyword] = (
+                {key: _keys_accept_null(entry) for key, entry in value.items()}
+                if keyword == "dependencies" and isinstance(value, Mapping)
+                else _keys_accept_null(value)
+            )
+        else:
+            result[keyword] = copy.deepcopy(value)
+    return result
+
+
+def accepting_null(definition: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``definition`` that accepts ``null`` wherever it accepts a key.
+
+    A values file's ``null`` removes the key it names; the schema has to let the
+    ``null`` through for the chart to remove it. Every schema reached as a key's
+    value, at any depth, inside every combinator and every list element's keys,
+    also accepts ``null``: a type is extended where one is stated, so each field
+    reads as it did. A key
+    the definition refuses stays refused, so refusing a secret or retired key
+    never depends on the value a values file gives it. The definition's own
+    root is left as it is: whether the whole configuration may be ``null`` is
+    the chart's to say.
+    """
+    return _keys_accept_null(definition)
 
 
 def render(schema: Mapping[str, Any], definition: Mapping[str, Any], *, name: str) -> str:
