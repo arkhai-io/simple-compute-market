@@ -5,8 +5,9 @@
 credential validation, fee policy, hold release, disputes, and cash operations;
 this kit persists no settlement state and runs no background worker.
 
-The JSON Schema and test vectors are vendored from the recorded upstream
-commit in [`schema/SOURCE.md`](schema/SOURCE.md). `src/market_arkhai_payments/models.py`
+The JSON Schema and test vectors are the payments service's published wire
+contract, vendored and identified by the content hashes recorded in
+[`schema/SOURCE.md`](schema/SOURCE.md). `src/market_arkhai_payments/models.py`
 is generated from that schema with `python scripts/generate_models.py`.
 
 ## Seller option and mandate
@@ -138,7 +139,9 @@ cannot create a second reverse event.
 `market_arkhai_payments.fixtures` provides `build_signed_receipt`, which signs a
 receipt for a given mandate with an injected signer using the verifier's own
 framing, and `FakePaymentsClient`, an in-memory stand-in for `PaymentsClient`
-that tests inject through a stage's or approval's `client_for_owner`. The
+that tests inject through a stage's or approval's `client_for_owner`. Both
+take a `livemode`, default `false`, that the receipts they sign carry, so a
+test can play a live service against a stage configured for either mode. The
 kit's unit suite proves the receipt fixture reproduces the published vector
 byte for byte, which is why tests never sign receipts any other way.
 

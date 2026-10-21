@@ -43,9 +43,11 @@ Touches `kit/arkhai-payments` (schema, vectors, generated models, receipt verifi
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
 - [x] `docs/development/DEPLOYMENT_AND_CONFIG.md`
+- [x] `docs/development/TESTING.md`
 
 ### Knowledge to promote
 
 - Receipt verification binds the signed `livemode` to the role's configured expectation and fails closed on a mismatch — `openspec/specs/market-composition/spec.md`, through this change's delta.
 - `[Settlement.arkhai_payments].livemode` and its `false` default — `openspec/specs/settlement-configuration/spec.md`, through this change's delta.
+- The receipt fixture and `FakePaymentsClient` take the `livemode` they sign, so tests vary the mode like any other receipt property — `docs/development/TESTING.md#payment-receipts-in-tests`.
 - Setting `livemode` on upgrade, and switching mode as a cutover that drains or refunds open payment deals first — `docs/development/DEPLOYMENT_AND_CONFIG.md`'s Arkhai payments settings.

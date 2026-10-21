@@ -89,6 +89,23 @@ def test_a_declined_confirmation_approves_nothing():
     assert fake.count("approve") == 0
 
 
+@pytest.mark.parametrize(
+    "configured,signed,verifies",
+    [(True, True, True), (True, False, False), (None, True, False)],
+    ids=["live-accepts-live", "live-refuses-test", "default-refuses-live"],
+)
+def test_an_approval_receipt_verifies_only_in_the_configured_mode(configured, signed, verifies):
+    fake = FakePaymentsClient(signer=SERVICE, livemode=signed)
+    terms = agreement()
+    approval = _approval(fake) if configured is None else _approval(fake, livemode=configured)
+    if verifies:
+        txid = approval.approve(agreement_bytes(terms), _seller_data(terms))
+        assert txid == _seller_data(terms)["transaction_id"]
+    else:
+        with pytest.raises(ReceiptVerificationError):
+            approval.approve(agreement_bytes(terms), _seller_data(terms))
+
+
 def test_an_approval_receipt_from_another_key_is_refused():
     fake = FakePaymentsClient(signer=IMPOSTOR)
     terms = agreement()
