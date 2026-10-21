@@ -335,6 +335,17 @@ storefront starts. The chart MUST match every key it reads or writes as the
 storefront's loader matches it, without regard to case, and MUST refuse a
 configuration that states one key in two spellings at any depth.
 
+A chart that runs several agents MUST key them by agent name, never list them. A
+`null` in a values file MUST remove what it names — an agent, a value of an agent, or
+a key at any depth of an agent's configuration — whether or not the Helm release's
+merge removed it, so a removed key reaches no template, and the agent renders as it
+would had the key never been stated; a `null` is never rendered as a value. An agent
+map that names no agent once its `null`s are removed MUST be refused at render, as an
+empty agent map is refused by the values schema, and so MUST an agent that states no
+port or no identity once its `null`s are removed, naming the agent and the missing
+value. A key the
+values schema refuses MUST stay refused when its value is `null`.
+
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
 
@@ -395,6 +406,65 @@ retired key, rather than passed through as keys the storefront ignores.
 #### Scenario: A values file uses the retired shape
 
 - **WHEN** an agent's values use a retired key such as `seller` or `storefrontDomains`
+- **THEN** rendering fails naming the key
+
+#### Scenario: An overlay removes an agent
+
+- **WHEN** a values file sets to `null` an agent an earlier values file defines
+- **THEN** no workload, Service, ConfigMap, Secret, or volume is rendered for that agent
+- **AND** the release's other agents render as they would without it
+
+#### Scenario: An overlay removes the only agent
+
+- **WHEN** a values file sets to `null` the only agent an earlier values file defines,
+  through the umbrella chart or the storefront chart alone
+- **THEN** rendering fails naming the empty agent map
+
+#### Scenario: An overlay removes a defaulted setting
+
+- **WHEN** a values file sets to `null`, at any depth, a key of an agent's
+  configuration that the storefront defaults and the chart does not add
+- **THEN** the rendered configuration omits the key and the storefront applies its own
+  default
+
+#### Scenario: An overlay removes a value the release knows
+
+- **WHEN** a values file sets to `null` a key of an agent's configuration that the
+  chart adds when it is absent, such as `db_path`, `registry.urls`, or `port`
+- **THEN** the rendered configuration carries the release's value, as when the agent's
+  configuration omits the key
+
+#### Scenario: An overlay removes a required setting
+
+- **WHEN** a values file sets to `null` a setting the storefront requires and the chart
+  does not add
+- **THEN** the chart renders the configuration without it and the storefront refuses
+  it at startup
+
+#### Scenario: An overlay removes a chart-level agent value
+
+- **WHEN** a values file sets to `null` an agent's `component`, `configMapName`,
+  runtime `secret`, or Alkahest address book, or a key under either of the last two
+- **THEN** the agent renders as it would had the value never been stated: its name as
+  the component, the generated ConfigMap name, no runtime overlay or address book, and
+  for a key under them its default, or none mounted where the key names the Secret or
+  ConfigMap to mount
+
+#### Scenario: An overlay removes an agent's port or identity
+
+- **WHEN** a values file sets an agent's `port` or `identity` to `null`
+- **THEN** rendering fails naming the agent and the missing value
+
+#### Scenario: An overlay removes internal-registry trust
+
+- **WHEN** a values file sets an agent's `internalRegistryTrust` to `null` while the
+  agent uses the internal registry
+- **THEN** rendering fails naming the missing internal-registry trust, not the `null`
+
+#### Scenario: A refused key stays refused as null
+
+- **WHEN** a values file sets a key the values schema refuses, such as a wallet's
+  private key, to `null` in an agent's configuration
 - **THEN** rendering fails naming the key
 
 ### Requirement: A storefront reads chart-rendered configuration between its file and its overlay

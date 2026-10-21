@@ -34,7 +34,7 @@ Until it is fixed:
   charts' schemas and the umbrella's storefront definition are regenerated. A key the
   schema refuses stays refused even as `null`.
 - CI pins Helm v4.3.0, and `helm/scripts/test-render.sh` prints the Helm version it runs.
-- State: **design reviewed; ready for planning.**
+- State: **implementation and pre-closeout reviews complete; closeout proceeds on the owner's validation waiver recorded in `design.md`.**
 
 ## Capabilities
 
