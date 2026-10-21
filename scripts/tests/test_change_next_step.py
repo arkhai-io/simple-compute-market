@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+import change_clone as clones
 from change_workflow.log import log_path, note_orchestrator, note_round, record_outcome
 from find_change import change_directory
 
@@ -109,9 +112,16 @@ FIX = ["scripts/change_next_step.py"]
 RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
 
 
+# The change is worked in the checkout the computation runs in, with no clone,
+# unless a test says otherwise.
+HERE = {"branch": lambda _: f"feat/{CHANGE}", "workspace": lambda _: None,
+        "clone": lambda *_: None}
+
+
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX) -> dict:
     return nxt.compute(root, CHANGE, head=lambda _: HEAD, view=lambda _: None,
-                       uncommitted=lambda *_: uncommitted, changed_since=lambda *_: changed)
+                       uncommitted=lambda *_: uncommitted, changed_since=lambda *_: changed,
+                       **HERE)
 
 
 def _check(root: Path, tasks: str) -> None:
@@ -836,7 +846,7 @@ def test_an_open_round_view_waits_for_the_owner_before_anything_else(tmp_path: P
     view = rounds.View(CHANGE, "feat/x", "a" * 40, HEAD)
 
     result = nxt.compute(root, CHANGE, head=lambda _: HEAD, view=lambda _: view,
-                         uncommitted=lambda *_: False)
+                         uncommitted=lambda *_: False, **HERE)
 
     assert (result["step"], result["round_view"]) == ("owner", CHANGE)
     assert "make round-done" in result["reason"]
@@ -869,7 +879,7 @@ def test_an_unknown_change_is_unclassified(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in design")
 
     assert nxt.compute(root, "missing", head=lambda _: HEAD, view=lambda _: None,
-                       uncommitted=lambda *_: False)["step"] == "unclassified"
+                       uncommitted=lambda *_: False, **HERE)["step"] == "unclassified"
 
 
 def test_a_malformed_log_is_unclassified(tmp_path: Path) -> None:
@@ -885,7 +895,7 @@ def test_the_command_prints_the_result(tmp_path: Path,
                                        capsys: pytest.CaptureFixture[str]) -> None:
     root = _repository(tmp_path, "ready for design")
 
-    assert nxt.main([CHANGE], root=root) == 0
+    assert nxt.main([CHANGE], root=root, **HERE) == 0
     assert json.loads(capsys.readouterr().out)["step"] == "design"
     assert nxt.main(["missing"], root=root) == 1
 
@@ -895,7 +905,7 @@ def test_plain_prints_the_result_as_lines(tmp_path: Path,
     root = _repository(tmp_path, "in design")
     run = _log(root, "design", {**QUESTION, "denials": [{"tool_name": "Bash"}]})
 
-    assert nxt.main([CHANGE, "--plain"], root=root) == 0
+    assert nxt.main([CHANGE, "--plain"], root=root, **HERE) == 0
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "step: owner" and lines[1].startswith("reason: the design step ended")
@@ -913,7 +923,8 @@ def _git(cwd: Path, *args: str) -> str:
 def test_a_round_view_opened_and_closed_in_git_is_seen_and_then_not(tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])
-    _git(root, "init", "-q", "-b", "feat/x")
+    # The change's own branch, so the computation finds the change worked here.
+    _git(root, "init", "-q", "-b", f"feat/{CHANGE}")
     _git(root, "config", "user.email", "test@example.invalid")
     _git(root, "config", "user.name", "Test")
     _git(root, "add", ".")
@@ -1413,3 +1424,387 @@ def test_an_external_implementation_review_counts_for_the_round(tmp_path: Path) 
     _record(root, "02-implementation-external.md")
 
     assert _next(root)["step"] == "triage"
+
+
+# A change in its own clone: routed to its clone from the workspace, and in the
+# clone held to its bootstrap and read beside the owner's view of the round.
+
+WORKSPACE = Path("/the/workspace")
+
+
+def _bootstrap(state: str) -> nxt.Bootstrap:
+    return nxt.Bootstrap(state, None if state == "absent" else Path("/clone/.git/log"))
+
+
+def _from_workspace(root: Path, *, clone: Path | None = None, bootstrap: str = "succeeded",
+                    branch: str | None = "dev", view=None, change: str = CHANGE) -> dict:
+    """The computation run in the workspace, whose branch is `branch`."""
+    return nxt.compute(root, change, head=lambda _: HEAD, view=lambda _: view,
+                       uncommitted=lambda *_: False, changed_since=lambda *_: FIX,
+                       branch=lambda _: branch, workspace=lambda _: None,
+                       clone=lambda *_: clone, bootstrap=lambda _: _bootstrap(bootstrap))
+
+
+def _in_clone(root: Path, *, bootstrap: str = "succeeded", view=None) -> dict:
+    """The computation run in the change's clone, `root`, beside the workspace's view."""
+    return nxt.compute(root, CHANGE, head=lambda _: HEAD,
+                       view=lambda checkout: view if checkout == WORKSPACE else None,
+                       uncommitted=lambda *_: False, changed_since=lambda *_: FIX,
+                       branch=lambda _: f"feat/{CHANGE}", workspace=lambda _: WORKSPACE,
+                       clone=lambda workspace, _: root if workspace == WORKSPACE else None,
+                       bootstrap=lambda _: _bootstrap(bootstrap))
+
+
+def test_a_change_with_no_clone_and_no_records_names_its_clone(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for design")
+
+    result = _from_workspace(root)
+
+    assert result["step"] == "clone"
+    assert result["arguments"] == {"CHANGE": CHANGE, "BRANCH": f"feat/{CHANGE}", "FROM": "dev"}
+    assert f"make change-clone CHANGE={CHANGE} BRANCH=feat/{CHANGE} FROM=dev" in (
+        result["reason"])
+
+
+def test_a_change_whose_records_are_in_the_workspace_goes_to_the_owner(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _record(root, f"01-{KIND}.md", triage="Passed.")
+
+    result = _from_workspace(root)
+
+    assert result["step"] == "owner"
+    assert "check out" in result["reason"] and "into a clone by hand" in result["reason"]
+    assert result["routes"] == ["work it in the workspace", "move it into a clone by hand"]
+
+
+def test_a_change_whose_clone_exists_is_computed_in_the_clone(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    clone = tmp_path / "work.changes" / CHANGE
+
+    result = _from_workspace(root, clone=clone)
+
+    assert (result["step"], result["clone"]) == ("in-clone", str(clone))
+
+
+def test_a_change_with_a_clone_is_computed_there_while_the_workspace_has_its_branch(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    clone = tmp_path / "work.changes" / CHANGE
+
+    # The owner checked the branch out in the workspace to commit an edit on it.
+    result = _from_workspace(root, clone=clone, branch=f"feat/{CHANGE}")
+
+    assert (result["step"], result["clone"]) == ("in-clone", str(clone))
+
+
+def test_an_unfinished_clone_names_the_clone_again(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+
+    result = _from_workspace(root, clone=tmp_path / "clone", bootstrap="absent")
+
+    assert (result["step"], result["arguments"]) == ("clone", {"CHANGE": CHANGE})
+
+
+def test_an_unknown_change_is_unclassified_wherever_it_is_computed(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "ready for design")
+
+    assert _from_workspace(root, change="missing")["step"] == "unclassified"
+
+
+def test_a_change_worked_in_the_workspace_routes_as_before(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md")
+
+    assert _from_workspace(root, branch=f"feat/{CHANGE}")["step"] == "triage"
+
+
+def test_the_owners_branch_decision_counts_as_the_change_being_here(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md")
+    _decide(root, "worked on the shared branch", by="owner", branch="feat/shared",
+            change=CHANGE)
+
+    assert _from_workspace(root, branch="feat/shared")["step"] == "triage"
+
+
+def test_a_clone_view_in_the_workspace_sends_the_change_to_its_clone(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    view = rounds.View(CHANGE, f"feat/{CHANGE}", "b" * 40, HEAD, clone="/the/clone",
+                       returns_to="dev")
+
+    # The workspace has the branch checked out to show the round: the change is
+    # still worked in its clone.
+    result = _from_workspace(root, branch=f"feat/{CHANGE}", view=view)
+
+    assert (result["step"], result["clone"]) == ("in-clone", "/the/clone")
+
+
+def test_another_changes_view_in_place_still_holds_a_change_with_no_clone(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    _record(root, f"01-{KIND}.md")
+    view = rounds.View("other-change", "feat/other-change", "b" * 40, HEAD)
+
+    result = _from_workspace(root, branch="feat/other-change", view=view)
+
+    assert (result["step"], result["round_view"]) == ("owner", "other-change")
+
+
+def test_a_clone_of_another_change_computes_nothing_for_this_one(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+
+    result = nxt.compute(root, CHANGE, head=lambda _: HEAD, view=lambda _: None,
+                         uncommitted=lambda *_: False, branch=lambda _: "feat/other",
+                         workspace=lambda _: WORKSPACE, clone=lambda *_: None,
+                         bootstrap=lambda _: _bootstrap("succeeded"))
+
+    assert result["step"] == "owner" and str(WORKSPACE) in result["reason"]
+
+
+@pytest.mark.parametrize("state,phase,expected", [
+    ("running", "in design", "triage"),
+    ("running", "in planning", "plan"),
+    ("running", "in implementation", "wait"),
+    ("failed", "in design", "owner"),
+    ("failed", "in implementation", "owner"),
+    ("absent", "in implementation", "clone"),
+    ("succeeded", "in implementation", "implement"),
+])
+def test_the_bootstrap_holds_implementation_and_validation(tmp_path: Path, state: str,
+                                                           phase: str, expected: str) -> None:
+    root = _repository(tmp_path, phase)
+    if phase == "in design":
+        _record(root, f"01-{KIND}.md")
+    elif phase == "in implementation":
+        _round(root, [[2]])
+
+    result = _in_clone(root, bootstrap=state)
+
+    assert result["step"] == expected
+    if state == "failed":
+        assert "/clone/.git/log" in result["reason"] and "make change-clone" in result["reason"]
+        assert result["environmental"] is True
+    if expected == "wait":
+        assert "bootstrap" in result["reason"] and result["waits"]["step"] == "implement"
+
+
+def test_a_running_bootstrap_holds_validation_and_closeout(tmp_path: Path) -> None:
+    validating = _repository(tmp_path / "validating", "in implementation")
+    _round(validating, [[2]])
+    _check(validating, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    closing = _repository(tmp_path / "closing", "ready for closeout")
+
+    held = [_in_clone(root, bootstrap="running") for root in (validating, closing)]
+
+    assert [(r["step"], r["waits"]["step"]) for r in held] == [
+        ("wait", "validate-and-review"), ("wait", "closeout")]
+
+
+def test_a_running_bootstrap_does_not_hold_a_design_step_after_a_return(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    returned = _log(root, "implement", {"outcome": "returned", "message": "Needs a decision.",
+                                        "return_to": "design", "evidence": "the notes"},
+                    sections=[2])
+    _decide(root, "return to design confirmed", by="owner", resolves=returned["seq"],
+            next_step="design")
+
+    assert _in_clone(root, bootstrap="running")["step"] == "design"
+
+
+def _committed_round(root: Path, *records: str) -> None:
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    for name in records:
+        _record(root, name, text=_validation() if name.endswith("validation.md") else "x")
+
+
+def _clone_view(root: Path) -> "rounds.View":
+    return rounds.View(CHANGE, f"feat/{CHANGE}", "b" * 40, HEAD, clone=str(root))
+
+
+def test_a_round_in_a_clone_starts_validation_and_review_beside_the_reading(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+
+    result = _in_clone(root)
+
+    assert (result["step"], result["kind"], result["reading"]) == (
+        "validate-and-review", "implementation", True)
+    assert result["workspace"] == str(WORKSPACE)
+
+
+def test_an_open_view_does_not_hold_validation_or_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "02-validation.md")
+
+    result = _in_clone(root, view=_clone_view(root))
+
+    assert (result["step"], result["kind"]) == ("review", "implementation")
+    assert "reading" not in result
+
+
+def test_triage_waits_for_the_owners_reading(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "02-validation.md", "03-implementation.md")
+
+    reading = _in_clone(root, view=_clone_view(root))
+    unread = _in_clone(root)
+
+    assert reading["step"] == "owner" and "round-done" in reading["reason"]
+    assert reading["round_view"] == CHANGE
+    assert (unread["step"], unread["workspace"]) == ("round-view", str(WORKSPACE))
+
+
+def test_a_view_left_open_after_the_owners_answer_names_round_done_alone(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "02-validation.md", "03-implementation.md",
+                     "04-implementation-owner.md")
+
+    result = _in_clone(root, view=_clone_view(root))
+
+    assert result["step"] == "owner" and "is saved" in result["reason"]
+    assert "NN-implementation-owner.md" not in result["reason"]
+
+
+def test_an_earlier_rounds_view_is_closed_before_this_round_is_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    note_round(log_path(root, CHANGE), [[2]], "owner", commit="c" * 40)
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    earlier = rounds.View(CHANGE, f"feat/{CHANGE}", "b" * 40, HEAD, clone=str(root))
+    this_round = rounds.View(CHANGE, f"feat/{CHANGE}", "c" * 40, HEAD, clone=str(root))
+
+    stale = _in_clone(root, view=earlier)
+    current = _in_clone(root, view=this_round)
+
+    assert stale["step"] == "owner" and "earlier round" in stale["reason"]
+    assert (current["step"], "reading" in current) == ("validate-and-review", False)
+
+
+def test_triage_starts_once_the_owner_record_review_and_validation_exist(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root, "02-validation.md", "03-implementation.md",
+                     "04-implementation-owner.md")
+
+    assert _in_clone(root)["step"] == "triage"
+
+
+def test_an_open_view_holds_triage_and_nothing_else(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _round(root, [[2]])
+    _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _record(root, "02-implementation-owner.md", triage="Not a gate.")
+    _record(root, "03-validation.md", text=_validation(), triage="Not a gate.")
+    _record(root, "04-implementation.md", triage="Passed.")
+
+    result = _in_clone(root, view=_clone_view(root))
+
+    assert (result["step"], result["round"]) == ("owner", ["3"])
+
+
+def test_a_change_in_the_workspace_keeps_the_reading_first(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+
+    assert _from_workspace(root, branch=f"feat/{CHANGE}")["step"] == "round-view"
+
+
+# The owner's waiver of another design review after a return.
+
+def test_the_owners_waiver_after_a_return_names_planning(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in design")
+    returned = _log(root, "plan", {"outcome": "returned", "message": "Needs a decision.",
+                                   "return_to": "design", "evidence": "the notes"})
+    _decide(root, "return to design confirmed", by="owner", resolves=returned["seq"],
+            next_step="design")
+    _log(root, "design", FINISHED)
+    before = _next(root)
+
+    waiver = _decide(root, "waive another design review", by="owner", next_step="plan",
+                     status="in design")
+
+    assert (before["step"], before["kind"]) == ("review", "design")
+    assert _next(root)["step"] == "plan"
+    # The design phase's own rule names planning on the waiver, as the directive does.
+    computation = nxt.Computation(root, CHANGE, head=lambda _: HEAD, view=lambda _: None,
+                                  **HERE)
+    computation.run()
+    assert computation._design("in design")["step"] == "plan"
+    assert waiver["next"] == "plan" and "resolves" not in waiver
+
+
+@pytest.mark.parametrize("outcome,expected", [
+    ({"outcome": "stopped", "message": "In design.", "reason": "status", "denials": []},
+     "the plan step stopped"),
+    (FINISHED, "left the change in design"),
+])
+def test_planning_that_ran_on_the_waiver_is_not_run_again(tmp_path: Path, outcome: dict,
+                                                           expected: str) -> None:
+    root = _repository(tmp_path, "in design")
+    returned = _log(root, "plan", {"outcome": "returned", "message": "Needs a decision.",
+                                   "return_to": "design", "evidence": "the notes"})
+    _decide(root, "return to design confirmed", by="owner", resolves=returned["seq"],
+            next_step="design")
+    _log(root, "design", FINISHED)
+    _decide(root, "waive another design review", by="owner", next_step="plan",
+            status="in design")
+    planned = _log(root, "plan", outcome)
+
+    result = _next(root)
+
+    assert result["step"] == "owner" and expected in result["reason"]
+    assert result.get("seq", planned["seq"]) == planned["seq"]
+
+
+# The clone found by `clone_of` and the workspace's view read through the clone's
+# `workspace` remote, in real Git repositories.
+
+def _commit_all(repo: Path, message: str = "commit") -> str:
+    _git(repo, "add", "--all")
+    _git(repo, "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def test_a_clone_and_the_workspaces_view_are_read_from_git(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
+    work = _repository(tmp_path / "work", "in implementation")
+    shutil.rmtree(_reviews(work))
+    (work / ".gitignore").write_text("reviews/\n.claude/settings.local.json\n", "utf-8")
+    _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(tmp_path / "origin.git"))
+    _git(work, "init", "-q", "-b", "dev")
+    _commit_all(work, "the change's proposal and plan")
+    _git(work, "remote", "add", "origin", str(tmp_path / "origin.git"))
+    _git(work, "push", "-q", "origin", "dev")
+
+    def spawned(command, cwd: Path, log: Path, status: Path) -> int:
+        status.write_text("0\n", "utf-8")
+        return os.getpid()
+
+    clone = clones.create(work, CHANGE, spawn=spawned).clone
+    base = _git(clone, "rev-parse", "HEAD")
+    note_round(log_path(clone, CHANGE), [[2]], "owner", commit=base)
+    _check(clone, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
+    _commit_all(clone, "section 2")
+
+    from_workspace = nxt.compute(work, CHANGE)
+    committed = nxt.compute(clone, CHANGE)
+    _record(clone, "01-validation.md", text=_validation(_git(clone, "rev-parse", "HEAD")))
+    _record(clone, "02-implementation.md")
+    unread = nxt.compute(clone, CHANGE)
+    rounds.start(work, CHANGE, runs=lambda _: [])
+    reading = nxt.compute(clone, CHANGE)
+
+    assert (from_workspace["step"], from_workspace["clone"]) == ("in-clone", str(clone))
+    assert (committed["step"], committed["reading"], committed["workspace"]) == (
+        "validate-and-review", True, str(work.resolve()))
+    assert unread["step"] == "round-view"
+    assert (reading["step"], reading["round_view"]) == ("owner", CHANGE)

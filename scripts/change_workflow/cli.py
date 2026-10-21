@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
+from check_change_index import index_rows
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
 from change_workflow.log import (branch_decisions, last_entries, log_path, note_orchestrator,
                                  note_round, read_log)
@@ -190,7 +191,10 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                                      # A branch decision is about the change whose
                                      # log holds it, which is where steps look.
                                      change=args.decided_change
-                                     or (args.change if args.branch else None))
+                                     or (args.change if args.branch else None),
+                                     status=next((row.status for row in
+                                                  index_rows(wrapper.root)
+                                                  if row.name == args.change), None))
             print(json.dumps(line, ensure_ascii=False))
     except StepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

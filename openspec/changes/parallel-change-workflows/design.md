@@ -381,14 +381,17 @@ The bootstrap is in one of three states: running, while its recorded process is
 alive; succeeded, its exit status 0; failed, a non-zero exit status, or a dead
 process that recorded none. The computation routes each: an absent or incomplete
 clone names `clone`; while the bootstrap runs, design and planning go on and
-implementation and validation wait; a failed bootstrap goes to the owner as an
+implementation and validation wait — with them every later step, triage and
+closeout included, since each runs suites or packaging; a failed bootstrap goes to
+the owner, in any phase, as an
 environmental failure naming its log, and rerunning `make change-clone` restarts
 it; a succeeded one lets the change proceed. A failed bootstrap is not retried by
 itself: `make init` failing is almost always the environment, and a silent retry
 would hide it.
 
-Design proceeds meanwhile; the computation holds implementation and validation
-until the bootstrap has succeeded. From then on the session drives every step with
+Design proceeds meanwhile; the computation holds implementation, validation, and
+every later step until the bootstrap has succeeded, though not a design or plan
+step named in a later phase, as after a confirmed return. From then on the session drives every step with
 `make -C <clone> <step> UNATTENDED=1`, so the wrapper's root, the log, the
 transcripts, and the step sessions are the clone's. Taking a step over is
 `cd <clone> && claude --resume <session>`. Rejected: the owner running

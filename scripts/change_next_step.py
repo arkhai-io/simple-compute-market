@@ -11,11 +11,19 @@ log, and whether a round view is open, and prints one JSON object:
   (with the `sections` of each session of the plan's next round, to be recorded
   `by: plan` as it starts), `implement` (with its `sections`), `round-view`,
   `validate`, `review` (with its `kind`), `validate-and-review`, `triage`,
-  `closeout`, or `archive-cleanup`;
+  `closeout`, or `archive-cleanup`; for a change in its own clone, a `round-view`,
+  or a validation or review that runs beside the owner's reading (`reading`),
+  names the `workspace` the reading takes place in;
+- `{"step": "clone", "arguments": …}` when the change's clone is to be created,
+  or finished, with `make change-clone` and those arguments;
+  `{"step": "in-clone", "clone": …}` when the change is worked in its clone, where
+  this computation and every step are run; `{"step": "wait", …}` while the
+  clone's bootstrap runs and the step named would need it;
 - `{"step": "owner", "reason": …}` when only the owner can move the change on: a
   question to answer, a returned step to decide, a round the plan does not map, a
-  validation that did not pass, a prerequisite to land; for a waiting run, its
-  `seq` — a question or a stop is resumed by it;
+  validation that did not pass, a prerequisite to land, a failed bootstrap, a
+  change whose records are in the workspace but whose branch is not; for a waiting
+  run, its `seq` — a question or a stop is resumed by it;
 - `{"step": "done", …}` for an archived change;
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
@@ -25,7 +33,16 @@ what comes after it. A review's triage file records under `## Next` whether the
 change advances or another review round runs, and the change advances on that
 token and the conditions each phase sets — a passing validation of the round's
 fix commit, of `HEAD` before closeout, and of a closeout correction that changed
-more than documentation — without the owner. Where the log and the files
+more than documentation — without the owner.
+
+A change is computed where it is worked: in the checkout that has its branch
+checked out — its own name's branch, or one the owner's decision says it is
+worked on — or in its own clone. Run anywhere else, the computation names the
+clone, to compute there or to create, or the owner, for a change whose records
+are in this workspace and so cannot simply be cloned. In a clone, implementation
+and later steps wait for the clone's bootstrap, and the owner reads a round in
+the workspace beside its validation and review, the workspace's view read
+through the clone's `workspace` remote. Where the log and the files
 disagree — a status set by hand — the files decide the step, and the result
 carries a `disagreement` saying so. A
 task list whose tasks sit under another section's heading is not routed on
@@ -48,11 +65,15 @@ from typing import Any, Callable, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from change_clone import (ABSENT as BOOTSTRAP_ABSENT, DEFAULT_FROM,  # noqa: E402
+                          FAILED as BOOTSTRAP_FAILED, RUNNING as BOOTSTRAP_RUNNING, Bootstrap,
+                          bootstrap_state, clone_of, default_branch, workspace_of)
 from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from round_view import RoundError, View, open_view  # noqa: E402
 from change_workflow.common import ORCHESTRATOR, StepError  # noqa: E402
-from change_workflow.log import log_path, read_log  # noqa: E402
+from change_workflow.log import (branch_decisions, log_path, read_log,  # noqa: E402
+                                 redesigned_after_return)
 from change_workflow.records import (RECORD_PATH, ChangedSince, changed_since,  # noqa: E402
                                      latest_validation, validation_problem, validation_result)
 
@@ -189,6 +210,11 @@ class State:
     log: list[dict[str, Any]] = field(default_factory=list)
     view: View | None = None
     head: str | None = None
+    # Set when this checkout is the change's clone: the workspace it is a clone
+    # of, that workspace's open view of this change's round, and its bootstrap.
+    workspace: Path | None = None
+    workspace_view: View | None = None
+    bootstrap: Bootstrap | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -202,6 +228,9 @@ class State:
             "last_log_lines": self.log[-3:],
             "round_view": self.view.change if self.view else None,
             "head": self.head,
+            "workspace": str(self.workspace) if self.workspace else None,
+            "workspace_round_view": bool(self.workspace_view),
+            "bootstrap": self.bootstrap.state if self.bootstrap else None,
         }
 
 
@@ -270,6 +299,14 @@ def _open_view(root: Path) -> View | None:
         return open_view(root)
     except RoundError:
         return None
+
+
+def _current_branch(root: Path) -> str | None:
+    branch = subprocess.run(["git", "branch", "--show-current"], cwd=root,
+                            capture_output=True, text=True)
+    if branch.returncode != 0:
+        return None
+    return branch.stdout.strip() or None
 
 
 def _phase(status: str) -> str | None:
@@ -351,17 +388,38 @@ class Computation:
                  head: Callable[[Path], str | None] = _git_head,
                  view: Callable[[Path], View | None] = _open_view,
                  uncommitted: Callable[[Path, Path], bool] | None = None,
-                 changed_since: ChangedSince = changed_since) -> None:
+                 changed_since: ChangedSince = changed_since,
+                 branch: Callable[[Path], str | None] = _current_branch,
+                 workspace: Callable[[Path], Path | None] = workspace_of,
+                 clone: Callable[[Path, str], Path | None] = clone_of,
+                 bootstrap: Callable[[Path], Bootstrap] = bootstrap_state) -> None:
         self.root = root
         self.state = State(change)
         self._head = head
         self._view = view
         self._uncommitted = uncommitted or _uncommitted
         self._changed_since = changed_since
+        self._branch = branch
+        self._workspace = workspace
+        self._clone = clone
+        self._bootstrap = bootstrap
 
     def run(self) -> Result:
         state = self.state
         state.view = self._view(self.root)
+        try:
+            state.directory = change_directory(self.root, state.change)
+        except ChangeNotFound as exc:
+            return self.unclassified(str(exc))
+        state.row = next((row for row in index_rows(self.root) if row.name == state.change),
+                         None)
+        state.log = read_log(log_path(self.root, state.change))
+        if is_archived(self.root, state.directory) and (
+                state.row is None or state.row.status == "archived"):
+            return {"step": "done", "reason": "archived" if state.row else
+                    "archived, and its index row pruned"}
+        if located := self.locate():
+            return located
         if state.view is not None:
             # While a view is open the branch sits at the round's base, so nothing
             # else about the change can be read until it closes.
@@ -369,31 +427,128 @@ class Computation:
                 f"a round view of {state.view.change} is open: save the owner's notes on "
                 "the round as the next NN-implementation-owner.md, then run "
                 "`make round-done`", round_view=state.view.change)
-        try:
-            state.directory = change_directory(self.root, state.change)
-        except ChangeNotFound as exc:
-            return self.unclassified(str(exc))
-        state.row = next((row for row in index_rows(self.root) if row.name == state.change),
-                         None)
         state.notes = state.row.notes if state.row else ""
         state.records = read_records(state.directory / "reviews")
         tasks = state.directory / TASKS_FILE
         state.tasks = tasks.read_text("utf-8") if tasks.is_file() else ""
         state.sections = read_sections(tasks)
-        state.log = read_log(log_path(self.root, state.change))
         state.head = self._head(self.root)
         if state.row is None:
-            if is_archived(self.root, state.directory):
-                return {"step": "done", "reason": "archived, and its index row pruned"}
             return self.unclassified(f"{INDEX} has no row for {state.change}")
+        if state.workspace is not None:
+            if held := self.bootstrap_held():
+                return held
         result = self.route()
         if result.get("step") not in ("owner", "unclassified", "done"):
+            if waiting := self.bootstrapping(result):
+                return waiting
             if disagreement := self.disagreement():
                 result["disagreement"] = disagreement
         return result
 
     def unclassified(self, reason: str) -> Result:
         return {"step": "unclassified", "reason": reason, "read": self.state.summary()}
+
+    # Where the change is worked.
+
+    def locate(self) -> Result | None:
+        """Where to compute the change, when it is not this checkout: its clone; a
+        clone to create or finish; or the owner, for a change whose records are
+        here though its branch is not. None when the change is worked here.
+
+        The change is here when this checkout has its branch checked out — its own
+        name's branch, or one the owner's decision says it is worked on — or, in a
+        clone, when this is the clone of it. A workspace showing a round from a
+        clone has the branch checked out for reading only, so that change is in
+        its clone. In a clone, the workspace's view of the change is read through
+        the clone's `workspace` remote.
+        """
+        state = self.state
+        view = state.view
+        if view is not None and view.clone and view.change == state.change:
+            return self.in_clone(Path(view.clone),
+                                 "its round is open in this workspace's view")
+        workspace = self._workspace(self.root)
+        if workspace is not None:
+            clone = self._clone(workspace, state.change)
+            if clone is None or clone.resolve() != self.root.resolve():
+                return _owner(f"this checkout is a clone, but not {state.change}'s: compute "
+                              f"its next step in the owner's workspace, {workspace}")
+            state.workspace = workspace
+            workspace_view = self._view(workspace)
+            state.workspace_view = (workspace_view if workspace_view
+                                    and workspace_view.change == state.change else None)
+            return None
+        # A clone first, whatever this checkout has checked out: the owner may have
+        # the branch of a change in a clone checked out to commit on it, or left it
+        # so after a round's reading.
+        clone = self._clone(self.root, state.change)
+        if clone is not None:
+            if self._bootstrap(clone).state == BOOTSTRAP_ABSENT:
+                return self.clone_step(f"{clone} was left unfinished",
+                                       {"CHANGE": state.change})
+            return self.in_clone(clone, "it is worked in its own clone")
+        branch = self._branch(self.root)
+        if branch and (branch == default_branch(state.change)
+                       or branch_decisions(state.log, branch, state.change)):
+            return None
+        if view is not None:
+            # This checkout's branch is another change's, moved to show its round.
+            return None
+        reviews = state.directory / "reviews" if state.directory else None
+        if reviews is not None and reviews.is_dir() and any(reviews.iterdir()):
+            return _owner(
+                f"{state.change}'s branch is not checked out here, but its records are in "
+                "this workspace's reviews/, which a clone would start without: check out "
+                f"its branch here and go on in the workspace, or move it into a clone by "
+                "hand as docs/agents/change-workflow.md describes",
+                routes=["work it in the workspace", "move it into a clone by hand"])
+        return self.clone_step(
+            f"{state.change}'s branch is checked out neither here nor in a clone of its own",
+            {"CHANGE": state.change, "BRANCH": default_branch(state.change),
+             "FROM": DEFAULT_FROM})
+
+    def in_clone(self, clone: Path, why: str) -> Result:
+        return {"step": "in-clone", "clone": str(clone),
+                "reason": f"{self.state.change} is computed in its clone, {clone}, since "
+                          f"{why}: run this computation and every step there"}
+
+    def clone_step(self, why: str, arguments: dict[str, str]) -> Result:
+        command = " ".join(["make change-clone",
+                            *(f"{name}={value}" for name, value in arguments.items())])
+        return {"step": "clone", "arguments": arguments,
+                "reason": f"{why}: run `{command}` in the owner's workspace"}
+
+    def bootstrap_held(self) -> Result | None:
+        """In a clone, a bootstrap never started, or one that failed, ahead of any
+        step: the first is an unfinished clone, the second the owner's to remedy."""
+        state = self.state
+        state.bootstrap = self._bootstrap(self.root)
+        if state.bootstrap.state == BOOTSTRAP_ABSENT:
+            return self.clone_step("this clone's bootstrap was never started, so its "
+                                   "creation is unfinished", {"CHANGE": state.change})
+        if state.bootstrap.state == BOOTSTRAP_FAILED:
+            # Not retried by itself: `make init` failing is almost always the
+            # environment, and a silent retry would hide it.
+            return _owner(f"the clone's bootstrap, `make init`, failed — an environmental "
+                          f"failure; its log is {state.bootstrap.log}, and `make change-clone "
+                          f"CHANGE={state.change}` in the workspace restarts it",
+                          environmental=True, log=str(state.bootstrap.log))
+        return None
+
+    def bootstrapping(self, result: Result) -> Result | None:
+        """The step `result` names, held while the clone's bootstrap runs, unless it
+        is a design or planning step, which need no environment: design and plan
+        themselves, and a review or triage of the design phase."""
+        state = self.state
+        if state.bootstrap is None or state.bootstrap.state != BOOTSTRAP_RUNNING:
+            return None
+        phase = _phase(state.row.status if state.row else "")
+        if result.get("step") in ("design", "plan") or phase in ("design", "planning"):
+            return None
+        return {"step": "wait", "waits": result,
+                "reason": f"the clone's bootstrap, `make init`, is still running (log: "
+                          f"{state.bootstrap.log}); {result['step']} waits for it"}
 
     def route(self) -> Result:
         state = self.state
@@ -455,6 +610,21 @@ class Computation:
         last = self.last(("design", "review", "triage"))
         if last and last.get("step") == "design":
             if last.get("outcome") == "finished":
+                if waiver := self.waived_design_review(last):
+                    planned = next((e for e in reversed(self.state.log)
+                                    if e.get("step") == "plan" and e["seq"] > waiver["seq"]),
+                                   None)
+                    if planned is None:
+                        return {"step": "plan",
+                                "reason": f"the owner waived another design review after "
+                                          f"the return (seq {waiver['seq']})"}
+                    # Planning ran on the waiver and the change is still in design: it
+                    # did not take the change on, so the owner decides, never a rerun.
+                    if waiting := _waiting(planned):
+                        return {**waiting, "seq": planned["seq"]}
+                    return _owner(f"planning ran on the owner's waiver (seq "
+                                  f"{planned['seq']}) but left the change in design: the "
+                                  "files decide, so the status is the owner's to correct")
                 return {"step": "review", "kind": "design",
                         "reason": "the design discussion finished; its design review is next"}
             return {"step": "design", "reason": "in design"}
@@ -556,27 +726,69 @@ class Computation:
                       "sessions; the plan maps none", round=open_ids)
 
     def _round(self, current: dict[str, Any], work: list[Section]) -> Result:
-        """The round's sections are checked: its view, validation, review, and
-        triage, then what its triage records."""
-        mine = [r for r in self.state.records if r.number > current.get("after", 0)]
+        """The round's sections are checked: its reading, validation, review, and
+        triage, then what its triage records.
+
+        A change worked in this checkout is read first, since its view moves the
+        branch its own steps run on. A change in its own clone is read in the
+        owner's workspace while its validation and review run in the clone, so the
+        reading holds triage alone: triage is named once the owner record, the
+        review, and the validation all exist and the workspace's view is closed.
+        """
+        state = self.state
+        mine = [r for r in state.records if r.number > current.get("after", 0)]
         kinds = {r.review_kind or r.kind for r in mine}
-        if not kinds & {"implementation-owner", "implementation", "validation"}:
+        in_clone = state.workspace is not None
+        if not in_clone and not kinds & {"implementation-owner", "implementation",
+                                         "validation"}:
             return {"step": "round-view",
                     "reason": "the round's sections are committed; the owner reads the round"}
+        unread = in_clone and "implementation-owner" not in kinds
+        view = state.workspace_view if in_clone else None
+        # A view the owner left open over an earlier round, following its fixes, is
+        # not this round's reading; this round's needs it closed first.
+        started = current.get("commit")
+        if view is not None and started and view.base != started:
+            if unread:
+                return _owner("a view of an earlier round is open in the workspace: run "
+                              "`make round-done` there, so this round can be read over its "
+                              "own base", round_view=state.change,
+                              workspace=str(state.workspace))
+            view = None
+        viewing = view is not None
         missing = [kind for kind in ("validation", "implementation") if kind not in kinds]
-        if missing == ["validation", "implementation"]:
-            return {"step": "validate-and-review", "kind": "implementation",
-                    "reason": "the round has no validation or implementation review"}
-        if missing == ["validation"]:
-            return {"step": "validate", "reason": "the round has no validation"}
-        if missing == ["implementation"]:
-            return {"step": "review", "kind": "implementation",
-                    "reason": "the round has no implementation review"}
+        if missing:
+            result: Result = (
+                {"step": "validate-and-review", "kind": "implementation",
+                 "reason": "the round has no validation or implementation review"}
+                if missing == ["validation", "implementation"]
+                else {"step": "validate", "reason": "the round has no validation"}
+                if missing == ["validation"]
+                else {"step": "review", "kind": "implementation",
+                      "reason": "the round has no implementation review"})
+            if unread and not viewing:
+                result.update(reading=True, workspace=str(state.workspace))
+                result["reason"] += ("; the owner reads the round in the workspace beside "
+                                     "them")
+            return result
         # A validation that passed, or was inconclusive, has no finding: the fix
         # commit's validation alone opens no triage, though one opened for the
         # round's other records triages it beside them.
         untriaged = [r for r in mine if not r.triaged]
         if any(not r.needs_no_triage for r in untriaged):
+            if viewing:
+                return _owner(("the owner is reading the round in the workspace: save their "
+                               "answer as this clone's next NN-implementation-owner.md, then "
+                               "run `make round-done` in the workspace, before triage")
+                              if unread else
+                              ("the owner's answer on the round is saved, and its view is "
+                               "still open in the workspace: run `make round-done` there "
+                               "before triage"),
+                              round_view=state.change, workspace=str(state.workspace))
+            if unread:
+                return {"step": "round-view", "workspace": str(state.workspace),
+                        "reason": "the round's validation and review are in, and the owner "
+                                  "reads the round in the workspace before triage"}
             return {"step": "triage", "reason": ", ".join(r.path.name for r in untriaged)
                                                 + " have no triage"}
         review = governing([r for r in mine if r.review_kind == "implementation"])
@@ -740,6 +952,18 @@ class Computation:
             result["kind"] = kind
         return result
 
+    def waived_design_review(self, design: dict[str, Any]) -> dict[str, Any] | None:
+        """The owner's waiver of another design review, recorded after `design`, the
+        finished design run that followed a confirmed return, if there is one: a
+        decision directing planning and naming no run."""
+        log = self.state.log
+        if not redesigned_after_return(log):
+            return None
+        return next((entry for entry in reversed(log)
+                     if entry.get("outcome") == ORCHESTRATOR and entry.get("by") == "owner"
+                     and entry.get("next") == "plan" and entry.get("resolves") is None
+                     and entry["seq"] > design["seq"]), None)
+
     def not_advancing(self, review: Record) -> Result | None:
         """The step while `review`'s triage records neither token: the triage, while
         it has no `## Next`, or the owner, for a legacy gate not passed or a
@@ -867,14 +1091,14 @@ def plain(result: Result) -> str:
     return "\n".join(f"{key}: {shown[key]}" for key in keys)
 
 
-def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
+def main(argv: Sequence[str] | None = None, root: Path = ROOT, **seams: Any) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
     as_text = "--plain" in args
     args = [arg for arg in args if arg != "--plain"]
     if len(args) != 1:
         print("usage: change_next_step.py <change> [--plain]", file=sys.stderr)
         return 2
-    result = compute(root, args[0])
+    result = compute(root, args[0], **seams)
     print(plain(result) if as_text else json.dumps(result, ensure_ascii=False, default=str))
     return 1 if result["step"] == "unclassified" else 0
 

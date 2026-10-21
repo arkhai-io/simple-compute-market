@@ -316,7 +316,7 @@ owner's design-review waiver after a return (D3, D6, D8's 36 R1; requirements
 orchestrating session advances one change"). Touches `scripts/change_next_step.py`,
 `scripts/change_workflow/log.py`, and their tests.
 
-- [ ] 3.1 Clone routing (D6): for a change whose branch is checked out neither in
+- [x] 3.1 Clone routing (D6): for a change whose branch is checked out neither in
       the computing checkout nor in a clone (1.3), the result is `clone`, naming the
       `make change-clone` arguments; unless the workspace holds the change's
       `reviews/` (37 F1), when the result is `owner`, naming both routes — check out
@@ -324,25 +324,75 @@ orchestrating session advances one change"). Touches `scripts/change_next_step.p
       per `docs/agents/change-workflow.md` (4.5). For a change whose clone exists,
       run in the workspace, the result names the clone's directory, from which the
       session runs the computation and every step.
-- [ ] 3.2 Bootstrap routing (D6): an incomplete clone names `clone`; while the
+      Note: a clone `clone_of` finds is looked for first, whatever the workspace
+      has checked out — the owner may have the branch checked out to commit on it
+      — as the round view tells the cases apart (D2). Otherwise "checked out in the
+      computing checkout" is its own name's branch, `feat/<change>`, or a branch
+      the owner's decision in the change's log says it is worked on
+      (`branch_decisions`, as each step's branch check reads it); in a clone, it is
+      the clone `clone_of` finds for the change. The results are
+      `{"step": "clone", "arguments": {CHANGE, BRANCH, FROM}}` and
+      `{"step": "in-clone", "clone": <dir>}`, new step names the orchestrating
+      skill learns in 4.1. The workspace holding the change's records means a
+      non-empty `reviews/`. A change whose directory this checkout lacks stays
+      `unclassified`, as `make orchestrate` already refuses it. A workspace showing
+      a clone's round has the change's branch checked out only for reading, so
+      its view of that change routes to the clone; another change's view in place
+      holds a change with no clone as before. An archived change is `done` before
+      any routing, so a merged change seen from `dev` is not sent to a clone. In a
+      clone of another change, the result is `owner`, naming the workspace.
+- [x] 3.2 Bootstrap routing (D6): an incomplete clone names `clone`; while the
       bootstrap is `running`, design and planning steps are named and
       implementation and validation steps wait, the result saying so; `failed` is
       `owner`, an environmental failure naming its log and that `make change-clone`
       restarts it; `succeeded` routes as today. A change with no clone routes as
       today.
-- [ ] 3.3 The round of three records (D3): for a change in a clone, once a round's
+      Note: incomplete is a clone `clone_of` finds whose bootstrap is `absent`,
+      routed `clone` with the change alone as argument; a clone directory
+      `clone_of` rejects (killed before its checkout) also routes `clone`, with
+      the full arguments, which `make change-clone` then finishes. In design and
+      planning every step is named while the bootstrap runs, and so is a design or
+      plan step in a later phase (a confirmed return); any other step in
+      implementation and closeout is held as `{"step": "wait", "waits": <the
+      step>}` — triage, closeout, and archive cleanup too, since each runs suites
+      or packaging (D6 now says so). A failed bootstrap goes to the owner whatever
+      the phase (`environmental`, `log`), so design does not run on beside a
+      failure nobody has seen.
+- [x] 3.3 The round of three records (D3): for a change in a clone, once a round's
       sections are committed, the result is `validate-and-review` together with the
       owner's reading — the session opens the view in the workspace and starts both
       in the clone — and triage is named only once the owner record, the review,
       and the validation exist. The view's state is read from the workspace through
       the clone's `workspace` remote, so an open view there holds triage and nothing
       else. A change without a clone keeps the reading first.
-- [ ] 3.4 The waiver after a return (36 R1): `note … orchestrator --next plan`,
+      Note: the reading rides on whichever of validation and review is missing,
+      as `reading: true` and the `workspace`, while no owner record exists and no
+      view is open; with both in and no owner record, the result is `round-view`
+      with the `workspace`; with a view of the change open where triage would be
+      named, the result is `owner`, to save the answer in the clone and close the
+      view (or, with the answer already saved, only to close it). Past triage an
+      open view holds nothing, so the next round or the pre-closeout review is
+      named with it open; but a view whose base is not the current round's
+      recorded commit is an earlier round's, and while the current round is
+      unread the result is `owner`, to close it first. The delta scenario "The
+      orchestrating session restarts during a round view" now says the view is
+      closed before triage, and before any other step only for a change without a
+      clone, as D3 allows validation and the review beside the reading.
+- [x] 3.4 The waiver after a return (36 R1): `note … orchestrator --next plan`,
       `by: owner`, naming no run, is accepted once the change is `in design` and the
       latest design run finished after a confirmed return; any other `next` other
       than `review` and `archive-cleanup` still names the run it resolves. `_design`
       honours that direction and names planning rather than a design review.
-- [ ] 3.5 Verification. Unit, over fixture changes and logs, in
+      Note: `note_orchestrator` takes the change's `status`, which the command
+      line reads from the index row; `redesigned_after_return(entries)` in
+      `change_workflow/log.py` is the shared test, used by `_design` as well, which
+      names planning for an owner's `next: plan` line with no run after the
+      finished design run, once: after a plan run that followed the waiver, a
+      waiting one (a stop, a question) is brought to the owner with its `seq`, and
+      a finished one that left the change in design goes to the owner, so
+      planning is never rerun by itself — the plan skill's entry check refuses the
+      status `in design` today (section 4's handoff below).
+- [x] 3.5 Verification. Unit, over fixture changes and logs, in
       `scripts/tests/test_change_next_step.py` and
       `scripts/tests/test_change_workflow_log.py`: a change with no clone and no
       records (`clone`); one with records in the workspace (`owner`, both routes);
@@ -353,6 +403,56 @@ orchestrating session advances one change"). Touches `scripts/change_next_step.p
       Repository level: the clone found by `clone_of` and the workspace's view read
       through the remote. `uv run --no-project --with pytest pytest -q
       scripts/tests`; `make test`. No end-to-end scenario covers it.
+      Evidence: `scripts/tests/test_change_next_step.py`, unit with the location
+      seams injected (`branch`, `workspace`, `clone`, `bootstrap`, beside `head`
+      and `view`): a change with no clone and no records (`clone`, with its
+      arguments and command), one whose records are in the workspace (`owner`, both
+      routes), one whose clone exists (`in-clone`), the same with the workspace on
+      the change's branch, an unfinished clone (`clone`), an unknown change
+      (`unclassified`), a change worked in the workspace and one on the owner's
+      shared branch routing as before, a clone's view in the workspace sending its
+      change to the clone, another change's view in place still holding a change
+      with no clone, a clone of another change; the bootstrap running in design,
+      planning, and implementation (`wait`, naming the step it holds), and holding
+      validation with review and closeout, but not a design step after a return;
+      failed in design and implementation, absent and succeeded in
+      implementation; in a clone, a committed round naming validation and review
+      with the reading, an open view not holding them, triage held for the
+      reading and then named `round-view`, a view left open after the answer
+      naming `make round-done` alone, an earlier round's view to be closed first,
+      triage once all three records exist, an open view holding nothing past
+      triage; a change in the workspace keeping the reading first; planning named
+      after the waiver, by the directive and by `_design` (called directly), and a
+      plan run after the waiver, stopped or finished in design, going to the
+      owner rather than rerun. A clone directory `clone_of` rejects is not tested
+      at this level (its `clone` result is the no-clone one). Repository level, in
+      the same file (real Git, a workspace with a bare `origin`, its clone made by
+      `change_clone.create`, the view opened by `round_view.start`): from the
+      workspace `in-clone` naming the clone, then in the clone the round's
+      validation and review with the reading, `round-view` once both records
+      exist, and `owner` while the workspace's view is open. The existing tests
+      now inject the change as worked here (`HERE`); the round-view test's
+      repository uses the change's own branch. `scripts/tests/test_change_workflow_log.py`,
+      unit: the waiver accepted after a finished redesign, refused by the
+      orchestrator, outside `in design`, with no return, with the design not
+      finished, and with the design before the return; the command line reading
+      the status from the index. `uv run --no-project --with pytest pytest -q
+      scripts/tests`: 1201 passed after the fresh-context check's fixes. `make
+      test`, before those fixes, which touched only `scripts/change_next_step.py`
+      and its tests: every suite passed, the script tests' 1194 among them, up to
+      `make -C helm test-render`, which failed on the same Helm schema error
+      wording as in sections 1 and 2; nothing under `helm/` changed. `make
+      check-packaging` and `make check-comment-hygiene`: passed. `make
+      check-change`: only the citations of the scripts sections 5, 7, and 8
+      create. Real computation on this change, in this workspace, before its last
+      implement run stopped: `implement`, sections 1–3; since, the owner for
+      that stopped run. No end-to-end scenario covers it.
+      Handoff: section 4 teaches the orchestrating skill the results `clone`,
+      `in-clone`, and `wait`, the `reading` and `workspace` fields, and the owner
+      result for a clone's open view; `change-plan`'s entry check reads a waiver
+      from the design triage's `## Next` and the ledger, and must also accept the
+      orchestrator's waiver line with the status still `in design` (4.1 records
+      it; no task of 4.2 names that check, so section 4 should).
 
 ## 4. The skills, the step table, and the contributor guide for clones
 

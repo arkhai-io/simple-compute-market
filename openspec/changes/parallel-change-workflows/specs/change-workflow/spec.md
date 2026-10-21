@@ -365,7 +365,8 @@ for.
 - **WHEN** an orchestrating session is started while a round view of the change is
   open
 - **THEN** it waits for the owner's answer on the round, saves it as the change's
-  next owner record, and closes that view before computing any other step
+  next owner record, and closes that view before triage, and, for a change worked
+  in the owner's workspace without a clone, before computing any other step
 
 #### Scenario: A review's triage has nothing for the owner
 
