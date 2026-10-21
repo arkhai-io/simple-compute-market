@@ -327,12 +327,13 @@ unforward:
 
 ## Scale every release's Deployments and StatefulSets in $(NAMESPACE) back to the
 ## replica counts its installed manifest states (CHANGE=<change> for a change's
-## validation namespace, which validation leaves scaled to zero). The counts come
-## from `helm get manifest`, so nothing is rendered from the checkout and no
-## release changes.
+## validation namespace, which validation leaves scaled to zero), or only those
+## of the releases RESUME_RELEASES names. The counts come from `helm get
+## manifest`, so nothing is rendered from the checkout and no release changes.
+RESUME_RELEASES ?=
 resume:
 	@set -e; \
-	releases="$$(helm list --namespace $(NAMESPACE) --short)"; \
+	releases="$(or $(RESUME_RELEASES),$$(helm list --namespace $(NAMESPACE) --short))"; \
 	workloads=""; \
 	for release in $$releases; do \
 		manifest="$$(helm get manifest "$$release" --namespace $(NAMESPACE))"; \

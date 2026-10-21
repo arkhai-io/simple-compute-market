@@ -16,6 +16,13 @@
     },
     "createSecret": {"const": false},
     "secretName": {"type": "string", "minLength": 1},
+    "scenarios": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markers": {"type": "string"}
+      }
+    },
     "seller": {"$ref": "#/definitions/publicPrincipal"},
     "buyer": {"$ref": "#/definitions/buyerRuntime"}
   },

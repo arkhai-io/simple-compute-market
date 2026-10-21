@@ -991,8 +991,8 @@ HELM_CONTEXT ?= docker-desktop
 validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
 	@python3 scripts/validate_slice.py local
 
-validate-helm: round-view-closed ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
-	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there (CHANGE=<change> HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
 
 check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@python3 scripts/check_push_ready.py check

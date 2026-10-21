@@ -886,7 +886,7 @@ namespace"). Touches `scripts/validate_slice.py`, the root `Makefile`'s
 `validate-helm`, a new tracked `helm/validation-capacity.toml`, the e2e-tests
 chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
 
-- [ ] 6.1 `validate_slice.py helm --change <change>` (and `make validate-helm
+- [x] 6.1 `validate_slice.py helm --change <change>` (and `make validate-helm
       CHANGE=`): build with `IMAGE_SUFFIX=-<change>`; deploy into the change's
       namespace only; scale its workloads to zero when a crashed run left any up;
       delete the release's volume claims and `arkhai-buyer-profiles`, waiting until
@@ -895,17 +895,91 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       back to uninstall and install when the upgrade is refused, said in the step's
       detail. The retained-volume check runs only for `default`. The preflight
       checks for `cast` (D4).
-- [ ] 6.2 Scenarios as a pod in the namespace from the change's `e2e-tests` image,
+      Note: one flow for both namespaces — without `--change` the part runs in
+      `default` on bare tags, with no image overlay and the retained-volume
+      refusal first; with it, in `change_namespace.namespace(change)`. `make
+      validate-helm` passes `--change "$(CHANGE)"` whenever `CHANGE` is set, so a
+      validation started as `make validate CHANGE=<change>` runs in the change's
+      namespace through `MAKEFLAGS` even before the skill names it (section 7).
+      Every `make -C helm` call names its namespace — `CHANGE=<change>`, beside
+      which `helm/Makefile` refuses an inherited `NAMESPACE`, or `CHANGE=
+      NAMESPACE=default` — so neither a step's `CHANGE` nor a `NAMESPACE` in
+      `MAKEFLAGS` can redirect it, and the release and its test volumes are read
+      from `helm/Makefile` (`RELEASE`, `TEST_VOLUMES`). Every workload, pod,
+      resource, and memory read of the namespace is scoped to the release
+      (`app.kubernetes.io/instance=<RELEASE>`), so a `default` run leaves an
+      owner's other release there, such as the bare-metal seller's, alone; after
+      a `default` run the owner's release keeps `scenarios.markers`, so its next
+      `helm test` also runs the scenario pod. The preflight no longer runs `check-local-secrets`, since
+      `topology-secrets` creates the Secrets (and in `default` replaces them with
+      the same development values). The release is replaced as: workloads read
+      and any above zero scaled to zero by name (`kubectl scale --replicas=0
+      <kind/name>…`, the step's detail naming them), the release's pods deleted
+      (its test pods outlive their runs and mount the buyer-profile volume, and a
+      claim is deleted only once no pod uses it), the release's labelled claims
+      and the test volumes deleted (`--wait=false`), both waited for, then
+      `topology-secrets`, then `make -C helm deploy` with `EXTRA_VALUES` naming
+      `local-values.yaml`, the change's `images.json`, and `scenarios.json` (both
+      written into the attempt's directory; a path with a space would split). An
+      upgrade the chart refuses is told from one that failed by its log (`field is
+      immutable`): the deploy step becomes a warning naming the line, then
+      `undeploy`, the release's own volumes waited for again (the test volume
+      `topology-secrets` has just recreated empty stays), and `install`. Since a
+      Helm release under server-side apply may not restore a count scaled
+      outside it, `make -C helm resume RESUME_RELEASES=<RELEASE>` follows every
+      deploy (`resume` gained `RESUME_RELEASES`, limiting it to the releases
+      named, so a `default` run never brings an owner's other release up), then
+      each workload's `kubectl rollout status` (a scaled-up Deployment's
+      `Available` condition can still be true from before). Port-forwards, the
+      port probes, and their steps are gone from the part.
+- [x] 6.2 Scenarios as a pod in the namespace from the change's `e2e-tests` image,
       with the release's `test-config` ConfigMap's `helm` profile as the
       `e2e-deal-test` pod has it, selecting `HELM_SCENARIOS`; its log and exit
       status collected into the attempt's directory. No port-forward and no
       localhost port is used (D4).
-- [ ] 6.3 After the scenarios, always: the namespace's peak memory in
+      Note: a Helm test hook in the e2e-tests chart,
+      `templates/tests/e2e-scenarios-test.yaml` (`<release>-e2e-tests-e2e-scenarios`),
+      rendered only when the new `scenarios.markers` value (schema: a string) is
+      set; its environment, mounts, and volumes are the deal test's, copied rather
+      than shared so the deal test's render is untouched, and a render test holds
+      them equal. Validation sets the markers through `scenarios.json`, runs `helm
+      test <release> --filter name=<pod> --timeout 30m`, then keeps `kubectl logs`
+      of the pod as `scenarios.log` and its container's exit code as
+      `scenarios.exit` and in `summary.json`'s `evidence.scenarios`; the step
+      passes only on the pod's own exit status of 0, since `helm test` passes when
+      its filter matches no test, so a non-zero or unreadable status fails it even
+      when `helm test` passed; a pod with no exit status, as after `helm test`
+      timed out, is deleted, since scaling the workloads down would not stop it.
+      Every read is bounded (120 s), so no hung read holds the scale-down. Whether
+      `contracts` and `e2e_alkahest_escrow_codecs` pass with the `helm` profile in
+      the cluster is the cluster run's to show (6.5).
+- [x] 6.3 After the scenarios, always: the namespace's peak memory in
       `summary.json`, every pod's log and the namespace's events copied into the
       attempt's directory, the other namespaces' replica counts and the rendered
       requests and limits beside the previous validation's, then the namespace's
       workloads scaled to zero, objects and volumes kept (D4, 26 F2).
-- [ ] 6.4 The capacity preflight (D4, 17 F3): `helm/validation-capacity.toml` holds
+      Note: it runs in a `finally` once the namespace's release has been touched,
+      whether the deploy or the scenarios passed; while the checkout is no longer
+      the commit it keeps no evidence and only scales down, and an unexpected
+      error keeping evidence is a warning that still lets it scale down. "Peak"
+      is the largest of the release's sampled usage, summed over its containers
+      from `metrics.k8s.io` (each read bounded by `--request-timeout=10s`),
+      sampled only once the release came up: when it is ready, every 15 s while the
+      scenarios run (a thread around the `helm test` step), and after them
+      (`summary.json`'s `memory.peak_bytes` and `samples_bytes`), which section 8.4
+      writes as the figure. The evidence is `pods/<pod>.log`, a restarted
+      container's `pods/<pod>.previous.log`, `pods.json` (each pod's status, where
+      a container killed at its own limit shows `OOMKilled`), `events.log`,
+      `node-events.log` (the nodes' events from every namespace, where a node out
+      of memory is recorded), `evidence.other_namespaces` and
+      `other_namespaces_at_start` (each other namespace's workloads of the release
+      with their replicas, at the end and at the preflight, bracketing the run
+      rather than catching the moment of a failure), and `resources.txt` (each
+      workload's containers' rendered `resources`), compared with the latest
+      earlier validation's in the same namespace (`evidence.resources.previous`,
+      `changed`). A read or an evidence command that fails is a warning, not a
+      failure, and its evidence key is then empty.
+- [x] 6.4 The capacity preflight (D4, 17 F3): `helm/validation-capacity.toml` holds
       the memory one release needs, when, and from which change it was measured,
       with a reader and writer in `validate_slice.py`; the preflight counts the
       namespaces with workloads above zero replicas, adds its own, and compares that
@@ -913,6 +987,21 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       would not fit failing the part as environmental with its remedy; it warns and
       goes on with no figure, and when `metrics-server` is missing. It reserves
       nothing. The file starts with no figure.
+      Note: `read_capacity` and `write_capacity` (a `[release]` table of
+      `memory_bytes`, `measured_at`, `change`, under a header saying what the
+      figure is and that a merge conflict keeps the later `measured_at`); a figure
+      missing a field or not positive is refused when read, and one not positive
+      when written, so a figure no preflight could read is never recorded. A
+      failed read of the other namespaces with no figure is part of the warning.
+      The namespaces counted are those
+      other than the run's own with a workload of the validation release
+      (`app.kubernetes.io/instance=<RELEASE>`) above zero replicas, so system
+      namespaces are not; allocatable memory is summed over nodes, read with
+      `memory_bytes`, a Kubernetes quantity parser. The failure's detail begins
+      `environmental:`, names the running namespaces, and gives the remedy;
+      section 7.1 teaches the skill to read it. `metrics-server` is detected by
+      `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes`. Both checks run
+      before anything is built.
 - [ ] 6.5 Verification. Unit, with the injected runner and reader: each step's
       commands for a change; a crashed run scaled down before its volumes are
       deleted; the upgrade's fallback; the scenario pod's log and status collected;
@@ -924,6 +1013,145 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       cluster, recorded here with its namespace, tags, and scenario pod. End to
       end: the Helm scenarios `contracts` and `e2e_alkahest_escrow_codecs`, run by
       that validation in the namespace.
+      Evidence so far: `scripts/tests/test_validate_slice.py`, the script's
+      orchestration against a fake at the subprocess boundary — the plan's
+      "unit", though TESTING.md would call orchestration mocked at its external
+      boundary integration — with the runner and reader injected (a fake
+      checkout, daemon, and cluster recording every command and read, its workload
+      and resource reads and its `resume` honouring the release selector; the
+      out-of-band test volume deleted, optionally still listed for a look, and
+      recreated by `topology-secrets`), 76 passed: for a change, every command in
+      order — the
+      suffixed build, the render checks with `CHANGE=`, the release's pods, both
+      volume deletions, `topology-secrets`, the deploy naming the three values
+      files, `resume`, each rollout, `helm test` of the scenario pod, its log,
+      every pod's log, the pod statuses, the namespace's and the nodes' events,
+      and the scale to zero by name; the overlay's storefront and e2e-tests tags
+      and scenario markers; every `kubectl` and `helm` command run naming the
+      change's namespace but the one read of the nodes' events, every `kubectl`
+      read naming it too or reading the nodes, the metrics source, or the
+      release's workloads across namespaces, every metrics read of pods naming
+      it, every `make -C helm` call and setting read naming the change, and
+      another namespace's workload untouched; `default` on bare tags with no image
+      overlay, every `make -C helm` call naming `CHANGE= NAMESPACE=default`, and
+      an owner's other release there, at zero or up, neither scaled, resumed
+      (`resume` names the release alone), nor listed in the resources; a crashed
+      run's workload scaled down, named, before the
+      volumes are deleted, and none when nothing is up; the pods deleted before
+      the volumes, the deploy waiting for the release's volumes and for a test
+      volume still listed at the first look, and stopping when a volume outlives
+      the wait; a refused upgrade (its log naming an immutable selector) becoming
+      a warning naming the line, then `undeploy`, the release's volumes alone
+      waited for again (the recreated test volume left), `install`, and `resume`;
+      a deploy failing otherwise not falling back, yet the evidence kept and the
+      workload it left up scaled down; the scenario pod's log (its contents) and
+      exit status in `scenarios.log`, `scenarios.exit`, and the written
+      `summary.json`; a pod with no exit status deleted; a failing scenario run,
+      a pod exiting non-zero, and a passed `helm test` whose pod has no exit
+      status each failing the step, the evidence kept and the release scaled to
+      zero for the first two; an evidence command that fails, the scenario log
+      among them, warned and its key empty; a failed read of the rendered
+      resources leaving the other evidence kept; an unexpected error keeping evidence warned and the release still
+      scaled down and the summary written; no memory sampled when the deploy
+      failed; a passing run's pod logs and statuses, both events
+      files, the other namespaces' workloads at the start and the end, the
+      resources, and the larger of two different memory samples as the peak in
+      `summary.json`; memory sampled while the scenario run blocks until the
+      sampler has sampled twice, the peak taken from those samples; a restarted
+      container's previous log kept; the resources compared with the latest of two
+      earlier validations in the same namespace and not another namespace's, and
+      found unchanged when equal; a commit made after `resume` keeping no
+      evidence and running no scenarios yet still scaling down, and one made
+      during the build touching no cluster; the preflight stopping before any
+      command without `cast`, Docker, or a Ready node, warning with no figure (no
+      allocatable read) and without a metrics source (no memory recorded),
+      passing when two releases fit and failing as environmental, naming the
+      running namespaces and the remedy, when three would not; the retained-volume
+      refusal in `default` alone; the capacity file written and read back, the
+      tracked one holding no figure, three malformed ones refused, two figures
+      not positive not written, and seven memory quantities; the command line
+      refusing a name that is not a change. Not shown: the `MAKEFLAGS` route is
+      shown by `helm/Makefile`'s own tests (section 5) and the runs' arguments,
+      not by a real `make`; the sampler's period is a real timer, which the test
+      outwaits through a condition rather than a sleep.
+      `helm/tests/test_scenario_pod.py`, chart render test, 4 passed in `make -C
+      helm test-render`: no scenario pod without markers, the pod a test hook
+      running `pytest -m "<markers>"`, its environment, mounts, volumes, and image
+      the deal test's, and a non-string or unknown `scenarios` key refused by the
+      schema. `uv run --no-project --with pytest pytest -q scripts/tests`: 1321
+      passed after the second check's fixes. `make check-packaging`: passed. `make check-change`: only the
+      citations of the scripts sections 7 and 8 create. `make test`: every suite
+      passed up to `make -C helm test-render`, which failed the same thirteen
+      render tests as in section 5 and no other; the new render tests pass there.
+      The fresh-context check of the diff found, and this section fixed: the
+      refused upgrade's fallback waited for the test volume `topology-secrets`
+      had just recreated, so it could never install; the release's test pods,
+      which outlive their runs and mount that volume, were not deleted before it;
+      a `NAMESPACE` inherited through `MAKEFLAGS` could redirect a `default` run's
+      `make -C helm` calls; the evidence lacked pod statuses, previous logs, and
+      the nodes' events, which a memory failure is read from; memory was sampled
+      only at rest; `cannot patch` matched failures that are not refusals; a
+      scenario pod still running was left up; two comments named archive cleanup,
+      which writes nothing yet; and six evidence claims went beyond their tests
+      (now as above), and the `scenarios` schema had no refusal test. Declined:
+      passing `--context` on every `kubectl` and `helm` call, which the part
+      never did and which concerns any change in the context mid-run rather than
+      this section; and that `resume` would bring up a second release a person
+      installed in the change's namespace on its kept volumes, and the
+      preflight would count that namespace once — validation installs only the
+      one release there. A second check, after those fixes, found and this
+      section fixed: a `default` run scaled, resumed, and waited on every workload
+      in the namespace, an owner's other release included (now scoped to the
+      release); evidence commands that failed were silent; the preflight dropped
+      a failed read when no figure was recorded; memory was sampled after a
+      release that never came up, which could record a figure of zero, and the
+      writer accepted one; an unexpected exception keeping evidence skipped the
+      scale-down; metrics reads had no timeout; and three evidence claims went
+      beyond their tests (reads not checked for their namespace, the exit-5 run's
+      evidence, and failed evidence commands), now tested. Declined: the
+      sampler's real period, since production needs a timer and the test waits on
+      a condition; the scenario test's place under `helm/tests/`, since it needs
+      the umbrella's `test-config` and local values. A third check found, and
+      this section fixed: `resume` in a `default` run brought up every release
+      there (now `RESUME_RELEASES`, with section 5's target test of it); a
+      passed `helm test` with no readable exit status passed the step, though it
+      passes when no test pod matched; one failed read lost two pieces of
+      evidence; the scenario log failed silently; reads were unbounded, so a hung
+      one could hold the scale-down; and the claims that the fake's reads honour
+      the selector and that the other release is not resumed went beyond their
+      tests, now narrowed or tested. Declined: that a `default` run's
+      `topology-secrets` rewrites the bare-metal release's Secrets — they are
+      the same development values that target always writes there, and
+      DEPLOYMENT_AND_CONFIG's "Release topology" says it creates or replaces
+      them. After those fixes: `uv run --no-project --with pytest pytest -q
+      scripts/tests`, 1326 passed; `make -C helm test-render`, the same thirteen
+      failures; `make test`, every suite passed up to that one, as before;
+      `make check-packaging`, passed; `make check-change`, only the citations of
+      the scripts sections 7 and 8 create.
+      Not run: the `make validate-helm CHANGE=parallel-change-workflows` on the
+      development cluster, and so the end-to-end scenarios in the namespace. This
+      step may run no `docker`, `kubectl`, `helm`, or `make validate-*`, and the
+      Helm part stops at `make -C helm test-render` until the unowned render fix
+      named at the head of this section is merged in from `dev`. The task stays
+      unchecked until that run is recorded here; the unit tests do not show that
+      a real Helm release restores the counts, that the cluster recreates the
+      deleted claims, or that the two scenarios pass from the `helm` profile.
+      Handoff: section 7.1's skill still describes the forwarded run (its steps,
+      "the port-forwards stopped and their ports free", the retained-volume
+      refusal for every run); it should read the capacity step's `environmental:`
+      detail, the `metrics` and `capacity` warnings, `pods.json`'s
+      `OOMKilled`, `node-events.log`, and `evidence.resources.changed` when it
+      classifies a memory failure, and `evidence.scenarios` for the scenario
+      run. 7.2's two-validation check can read each clone's `summary.json`
+      (`namespace`, `evidence`) and `images.json`. Section 8.4 writes the figure
+      from `summary.json`'s `memory.peak_bytes` through `write_capacity`, and
+      its `CapacityFigure`. The permanent `change-workflow` spec's "Validation
+      observes a committed slice" still gives "port-forwards" as what validation
+      may stop, and its architecture's "Validation observes a committed slice"
+      describes the forwarded release in `default`; the delta modifies neither,
+      so closeout (10.9) must rewrite the architecture section, as it plans, and
+      the requirement's example needs a MODIFIED delta or the example left as a
+      true one (validation still stops the scenario pod it started).
 
 ## 7. Validation's skill and two validations side by side
 

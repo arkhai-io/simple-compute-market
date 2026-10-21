@@ -355,6 +355,22 @@ def test_resume_restores_the_replica_counts_every_release_states(tmp_path: Path)
     ]
 
 
+def test_resume_of_named_releases_leaves_the_others(tmp_path: Path) -> None:
+    log = tmp_path / "kubectl.log"
+    _fake_kubectl(tmp_path, log)
+    helm_log = _fake_helm(tmp_path, {"arkhai-node-operator": RELEASE_ONE,
+                                     "arkhai-bare-metal-seller": RELEASE_TWO})
+
+    resumed = _make("resume", "CHANGE=pilot", "RESUME_RELEASES=arkhai-node-operator",
+                    path=tmp_path)
+
+    assert resumed.returncode == 0, resumed.stderr
+    assert helm_log.read_text().splitlines() == [
+        f"get manifest arkhai-node-operator --namespace {NAMESPACE}"]
+    assert log.read_text().splitlines() == [
+        f"scale --namespace {NAMESPACE} deployment/arkhai-node-operator-registry --replicas=1"]
+
+
 @pytest.mark.parametrize("manifests", [{}, {"arkhai-node-operator": "---\nkind: Service\n"}])
 def test_resume_of_a_namespace_stating_no_workloads_fails(tmp_path: Path,
                                                           manifests: dict[str, str]) -> None:
