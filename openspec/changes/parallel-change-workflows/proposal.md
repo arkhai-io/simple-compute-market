@@ -165,11 +165,15 @@ earlier run of the same ref, not of another branch.
   and the principles the owner stated (the branch is the guard against unfinished
   work, only `dev` being protected; conflicts in workflow files are the
   orchestrating session's, conflicts in code the owner's and then implementation's)
-  — `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended
-  runs only", "Pushing is guarded, never repaired", and "Validation observes a
-  committed slice".
-- The `Owed by validation:` line, `ALLOW`, and the merge hand-off —
-  `docs/agents/change-workflow.md`.
+  — `openspec/specs/change-workflow/architecture.md`: the dispatch list and the
+  comparison under "Validation observes a committed slice"; evidence owed by
+  validation under "Sections are slices, sessions are the owner's"; the commit
+  rules and the branch as the guard under "Pushing is guarded, never repaired"; a
+  grant for a fresh run under "Restrictions bind unattended runs only"; merges and
+  the conflict tiers under "The orchestrator relays and routes".
+- The `Owed by validation:` line and the record's `## CI` —
+  `docs/agents/change-workflow.md`, "Skills" and "Reviews"; `ALLOW`, the commit
+  rules, and the merge hand-off — its "Orchestrating a change".
 - How clones are created, read, taken over, and removed, and where history lives —
   `docs/agents/change-workflow.md` and `AGENTS.md`'s change-workflow section.
 - Validation namespaces, per-change image tags with fixed rather than commit tags,

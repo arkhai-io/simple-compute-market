@@ -659,7 +659,9 @@ refuses, naming the list, any workflow its script does not list. The list holds
 A companion fetch, reusing `scripts/fetch-e2e-logs.py`'s `--workflow` and
 `--after-run`, waits for the run of `HEAD` newer than the run recorded before the
 dispatch and downloads the named jobs' logs. Adding a workflow to the list is a
-tracked change the owner makes. The validate step's table gains the two targets.
+tracked change the owner makes. The fetch and the comparison (D16) run as
+validation's `ci` part, `make validate-ci`, which the validate step's `make
+validate-*` rule already allows, so its table gains `make run-ci` alone.
 
 Three workflows that accept a dispatch publish — `publish-pypi.yml`,
 `publish-npm.yml`, `release-cli.yml` — so a plan line naming one would publish from

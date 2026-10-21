@@ -1,6 +1,9 @@
 Sections follow the design's implementation cadence: clones and reading (1–4),
-Helm isolation (5–7), history and teardown (8), the pilot's evidence and the
-containerization decision (9), then closeout (10). Within each round, scripts come
+Helm isolation (5–7), history and teardown, CI evidence, grants and commit rules
+(8, 8A, 8B), the pilot's evidence and the containerization decision (9), then
+closeout (10). Sections 8A and 8B, and the amendments to 8.4, 8.5, 9.1, and the
+closeout, were planned after the change returned to design from implementation
+and its design was settled again (D14–D21, 78 F2). Within each round, scripts come
 before the skills and documents that call them. Every script is tested in
 `scripts/tests/` with an injected command runner, at unit level, except where a
 real Git repository is the lowest level that proves the behaviour (repository
@@ -1238,12 +1241,17 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       change's namespace and its `-<change>` images; archive cleanup writes the
       figure from the change's latest validation's `summary.json` into
       `helm/validation-capacity.toml` with when and from which change, through the
-      writer of 6.4 (D4, 37 F3).
+      writer of 6.4, when that validation measured memory; when its `memory` is
+      empty, it writes nothing, leaves any recorded figure as it is, and reports
+      that it recorded none (D4, 37 F3, 78 F2; replanned against the reviewed
+      design: the figure is conditional on a measurement).
 - [ ] 8.5 `change-archive-cleanup`: after its commit and the pull-request draft,
-      write the capacity figure and commit it, tear the namespace and images down,
-      push, then run `make change-history` as its last act; the draft's notes say
+      write the capacity figure when the latest validation measured one and commit
+      it, tear the namespace and images down, push, then run `make change-history`
+      as its last act; with no measurement, its report and the draft say that no
+      figure was recorded, for want of a metrics source; the draft's notes say
       that a conflict over `helm/validation-capacity.toml` keeps the later recorded
-      time (D4, D11, 37 F3). `docs/agents/change-workflow.md` and `AGENTS.md`'s
+      time (D4, D11, 37 F3, 78 F2; replanned likewise). `docs/agents/change-workflow.md` and `AGENTS.md`'s
       "Change workflow" say the owner's workspace holds the history of every
       cleaned-up change, and the guide gains clone removal.
 - [ ] 8.6 `.claude/change-steps.toml` (the orchestrator's, as the preamble says): archive
@@ -1255,9 +1263,166 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       refused and named, nothing overwritten; removal refused for each missing
       condition and run after the synchronization; `--records` finding the
       checkout's, then the workspace's. Unit: teardown's commands; the figure
-      written with its time and change. `uv run --no-project --with pytest pytest -q
+      written with its time and change; with an empty measurement, nothing written
+      and a recorded figure left as it was (78 F2). `uv run --no-project --with pytest pytest -q
       scripts/tests`; `make check-agent-skills`; a fresh-context read of the changed
       skills against D11 and the delta's clone requirement; `make test`. No
+      end-to-end scenario covers it.
+
+## 8A. Evidence only a push produces, owed by validation
+
+Delivers D14–D18 (requirements "Implementation sections and sessions" and
+"Validation observes a committed slice"): a plan names push-only evidence as owed
+by validation; validation dispatches each owed workflow from a fixed list, judges
+the owed jobs, and compares every other failure with a `dev` run the branch
+contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
+`scripts/validate_slice.py`, the root `Makefile`, `.claude/change-steps.toml`,
+`.agents/skills/` (`change-plan`, `change-implement`, `change-validate`,
+`change-closeout`), `docs/agents/change-workflow.md`, and `scripts/tests/`.
+
+- [ ] 8A.1 `scripts/ci_evidence.py`: the dispatchable list (`tests.yml`) and
+      `dispatch <workflow>`, which refuses a workflow not on the list, naming the
+      list, records the newest run of the workflow on the branch and prints its ID,
+      and runs `gh workflow run <workflow> --ref <branch>`; `make run-ci
+      WORKFLOW=<file>` runs it (D15).
+- [ ] 8A.2 The fetch: `scripts/fetch-e2e-logs.py --workflow <file>` downloads the
+      run's whole log (`gh run view --log`) and, for a workflow other than
+      `e2e.yml`, asks for none of the end-to-end lanes' artifacts, so a missing one
+      is not warned about (D15).
+- [ ] 8A.3 The comparison in `scripts/ci_evidence.py`, over the fetched logs: each
+      job's failures — every pytest short-summary line, `FAILED <id> - <type>:
+      <message>`, as the test ID and the exception type; for a job printing none,
+      the failing step and its error lines; the baseline — the latest completed run
+      of the same workflow on `dev` whose head commit is an ancestor of the
+      validated commit (`git merge-base --is-ancestor`), its log fetched the same
+      way; and each failure classed `inherited` when the baseline's same job shows
+      the same test ID with the same exception type, `new` when it does not, and
+      `uncomparable` when there is no baseline or the job printed no short summary
+      on either side (D16, 78 F1, 83 F1).
+- [ ] 8A.4 Validation's `ci` part: `validate_slice.py ci --workflow <file>
+      --after-run <id>` (`make validate-ci WORKFLOW=<file> CI_AFTER_RUN=<id>`,
+      which the validate step's `make validate-*` rule already allows) writes an
+      attempt under `.snapshot/validation/<short commit>/ci/<attempt>/` like the
+      other parts: the run and its conclusion, the baseline run and its commit,
+      each job's result and log, and 8A.3's classes, in `summary.json`; a run that
+      is cancelled, never listed, or not fetched is reported as producing no
+      evidence. Judging the owed observations is the validating agent's, from the
+      job logs (D15, D16).
+- [ ] 8A.5 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
+      validate gains `Bash(make run-ci *)` (D15).
+- [ ] 8A.6 `change-validate`: read every `Owed by validation:` line of a section
+      whose tasks are all checked at `HEAD`; with none, the part is `ci not owed`;
+      otherwise, per workflow, `make run-ci` once the push is done, then `make
+      validate-ci`, beside the pipeline; judge each named job and its observation,
+      a failed job or absent observation a `V<n>`; take `inherited` failures as
+      already failing on `dev`, diagnose `new` ones like any failure and
+      `uncomparable` ones as of unknown cause; a run with no evidence is
+      environmental, put to the owner with its remedy; the record's `Parts` line
+      gains `ci <result>`, its header a `**CI:**` line, and its body `## CI`, as
+      D16's example shows; `tasks.md` is never edited (D14, D16, D17).
+- [ ] 8A.7 `change-plan`: a section's verification names only evidence an
+      implementation session can produce, and evidence only a push produces on an
+      `Owed by validation:` line — workflow, job, what the job must show — beside
+      `End-to-end:`; a workflow not on `scripts/ci_evidence.py`'s list cannot be
+      owed and is a design question. `change-implement`: before a section's last
+      task is checked, confirm or correct its `Owed by validation:` lines, and a
+      verification that demands push-only evidence is checked on the section's own
+      evidence, that evidence named as owed by validation in the notes.
+      `change-closeout`: the end-to-end part records the owed observations from the
+      latest passing validation's `## CI`, as it records the pipeline run (D14,
+      D18).
+- [ ] 8A.8 `docs/agents/change-workflow.md`: in "Skills", `make run-ci` and `make
+      validate-ci` beside the pipeline targets; in "Reviews", the `Owed by
+      validation:` line and the record's `## CI` (D14, D16).
+- [ ] 8A.9 Verification. Unit, with an injected runner, in
+      `scripts/tests/test_ci_evidence.py`: a listed workflow dispatched on the
+      branch and a publishing one refused, naming the list, nothing run; parsing
+      short-summary lines; a baseline chosen as the newest `dev` run whose commit
+      the branch contains, skipping a newer one it does not; each of the delta's
+      scenarios — "Owed CI evidence beside jobs that fail on `dev`", "A job not owed
+      fails only on the branch", "A new failure in a job that already fails on
+      `dev`", "A test that fails on `dev` fails another way on the branch", "No
+      `dev` run of the branch's code" — as classes over fixture logs. Unit, in
+      `scripts/tests/test_fetch_e2e_logs.py`: a `tests.yml` fetch asks for no lane
+      artifact. Unit, in `scripts/tests/test_validate_slice.py`: the `ci` part's
+      summary, and a cancelled run reported as no evidence. `uv run --no-project
+      --with pytest pytest -q scripts/tests`; `make check-agent-skills`; a
+      fresh-context read of the changed skills against D14–D18 and the delta's two
+      modified requirements; `make test`. End-to-end: none of `e2e-tests/`; the
+      part is exercised by this round's validation, which this line owes.
+      Owed by validation: `tests.yml`, job `release · deployment contracts` — the
+      job passes, and the record's `## CI` names the baseline `dev` run and its
+      commit, and classes every failure of the jobs not owed.
+
+## 8B. Grants for a fresh run, and the commit and merge rules
+
+Delivers D19 and D20 (requirements "Unattended runs are held to their step's
+permissions", "Implementation sections and sessions", "An orchestrating session
+advances one change"): a one-run grant reaches a fresh run through `ALLOW`; a
+returning step commits its partial work; the orchestrating session commits
+maintenance, instructions, and merges of `dev`, and hands code conflicts to the
+owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
+`scripts/change_workflow/wrapper.py`, `scripts/change_next_step.py`, the root
+`Makefile`, `.claude/change-steps.toml`, `.agents/skills/` (`change-orchestrate`,
+`change-implement`, `change-triage`, `change-plan`, `change-closeout`),
+`docs/agents/change-workflow.md`, and `scripts/tests/`.
+
+- [ ] 8B.1 `run_change_step.py run` takes `--allow`, repeatable; for `run` and
+      `resume`, each value is split on `;` and empty parts dropped; `Wrapper.run`
+      takes `granted`, passes it on the command line, and records it as `granted`
+      on the run's line, as `resume` does (D19).
+- [ ] 8B.2 The root `Makefile`: every unattended step target — `design`, `plan`,
+      `implement`, `triage`, `validate`, `closeout`, `archive-cleanup` — passes
+      `ALLOW` to `run` as `--allow`; `implement` passes `ARGUMENTS` as `--arguments`
+      (D19, D20.3).
+- [ ] 8B.3 The next-step computation: while the checkout's Git directory holds
+      `MERGE_HEAD`, it names `owner`, "a merge is in progress", before any other
+      routing (D20.3).
+- [ ] 8B.4 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
+      the preamble's "a rule the owner grants for one resumed run" becomes "for one
+      run, fresh or resumed" (D19).
+- [ ] 8B.5 Partial work on a return (D20 rule 2): `change-implement` §4 commits
+      what the section has as work in progress, checks no task for it, records the
+      handoff, pushes, and returns; a stop leaves its work uncommitted, and a guard's
+      refusal or a moved `HEAD` commits nothing. `change-triage`, `change-plan`,
+      and `change-closeout` say the same of their returns.
+- [ ] 8B.6 The merge mode of `change-implement` (D20.3): invoked with no sections
+      and an argument naming a merge's conflicted files, it resolves them, runs the
+      suites of the sections owning those files, concludes the merge with `git
+      commit`, pushes, and finishes, checking no task.
+- [ ] 8B.7 `change-orchestrate` (D19, D20): a grant is passed to a fresh run as
+      `ALLOW='<rule>;<rule>'` on its step's target and to a resumed run as
+      `--allow`, so a stop met inside a round's window is recovered either way;
+      the closed-step leftover commit is replaced by bringing leftover work to the
+      owner, committing it only on their word; it commits workflow maintenance, what
+      the owner instructs, and merges of `dev` on the owner's word, never while a
+      step runs, a round view is open, or between a round's sections being
+      committed and its triage; it resolves conflicts in the index, change
+      documents, the step table, and skills itself, and brings a code conflict to
+      the owner, starting, when the owner does not rule on it, `make implement
+      CHANGE=<change> UNATTENDED=1 ARGUMENTS='resolve the merge conflicts in
+      <files>'` after recording the owner's decision; "Never commit the change's own
+      feature work" becomes "never write the change's feature work of your own
+      accord".
+- [ ] 8B.8 `docs/agents/change-workflow.md`: in "Orchestrating a change", grants
+      for a fresh or resumed run with `ALLOW`, the commit rules (each step commits
+      and pushes its own work; partial work only on a return), and merges of `dev`
+      with the conflict hand-off (D19, D20).
+- [ ] 8B.9 Verification. Unit, in `scripts/tests/test_run_change_step.py` and
+      `scripts/tests/test_change_workflow_wrapper.py`: `run --allow` passes the
+      rules and records `granted`; `ALLOW`-style `a;b` splits into two rules for
+      `run` and `resume`; the step's next run has no grant — the delta's scenario
+      "The owner grants rules before a fresh run". Unit, in
+      `scripts/tests/test_change_next_step.py`: `MERGE_HEAD` present names the
+      owner whatever the change's state. Unit, in a Makefile dry-run test beside
+      `scripts/tests/test_run_change_step.py`'s: `ALLOW` and `ARGUMENTS` reach the
+      command line, each rule its own `--allow`. `uv run --no-project --with pytest
+      pytest -q scripts/tests`; `make check-agent-skills`; a fresh-context read of
+      the changed skills against D19, D20, and the delta's orchestrator and
+      permissions requirements, with its scenarios "A merge of `dev` conflicts in
+      a skill and in code", "A merge is asked for during a round's window", "A
+      closed step leaves tracked work uncommitted", "A step stops at its session's
+      limit", and "The plan's premise fails mid-section"; `make test`. No
       end-to-end scenario covers it.
 
 ## 9. The pilot's evidence and the containerization decision
@@ -1271,7 +1436,9 @@ only.
       this change's round-2 validation, with both namespaces, tags, and scenario
       pods; a round of it read in the owner's workspace, with any commit made during
       the view and what `round-done` did with it; its archive cleanup's history copy
-      and the capacity figure that cleanup wrote; each merge of this branch into the
+      and the capacity figure that cleanup wrote, or that it wrote none for want of
+      a metrics source (78 F2; replanned against the reviewed design); each merge of
+      this branch into the
       pilot's and its conflicts; every denial and `orchestrator` line the clones
       produced. Clone removal is not among them: it runs after the pilot merges,
       which follows this change, so 8.7 is its evidence.
@@ -1293,10 +1460,10 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
 - [ ] 10.2 Import placement — confirm: no function-local import added in the files
       this change added or touched under `scripts/`; one that should move returns
       the change to implementation.
-- [ ] 10.3 Documentation compliance: re-check D1–D11 against
+- [ ] 10.3 Documentation compliance: re-check D1–D11 and D14–D21 against
       `openspec/README.md`'s placement rules.
-- [ ] 10.4 Narrative compression of sections 1–9's notes, moving any rationale not
-      yet in `design.md` there first.
+- [ ] 10.4 Narrative compression of the notes of sections 1–9, 8A and 8B included,
+      moving any rationale not yet in `design.md` there first.
 - [ ] 10.5 Roadmap currency: no goal in `docs/development/ROADMAP.md` covers
       contributor workflow; record that, or update it.
 - [ ] 10.6 Campaign index currency: this change's row `in closeout`, under
@@ -1307,18 +1474,22 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
       CHANGE=parallel-change-workflows`, and `make check-agent-skills`.
 - [ ] 10.8 End-to-end pipeline: record a passing run on the closeout commit and the
       Helm part's namespace evidence, or an explicit blocker naming its cause and
-      owner. No pipeline scenario exercises the workflow tooling; the pilot
-      (section 9) and the two-validation check (7.3) are its working evidence.
+      owner, and, from the latest passing validation's `## CI`, the owed
+      `tests.yml` observation of 8A.9 with its run and baseline (D18). No pipeline
+      scenario exercises the workflow tooling; the pilot (section 9), the
+      two-validation check (7.3), and round 3's `ci` part are its working evidence.
 - [ ] 10.9 Promotion, completing the design-promotion record:
       - `openspec/specs/change-workflow/spec.md` — written by the archive (10.11):
         "Each change is worked in its own clone" and "Each Helm validation is
-        isolated in its change's namespace" added; "Triage of an implementation
-        round", "An orchestrating session advances one change", and "Unattended
-        runs are held to their step's permissions" modified. By hand: the Purpose
-        paragraph gains clones, and "Evidence" gains `scripts/change_clone.py`
-        (`make change-clone`, `make change-clone-remove`),
+        isolated in its change's namespace" added; "Implementation sections and
+        sessions", "Validation observes a committed slice", "Triage of an
+        implementation round", "An orchestrating session advances one change", and
+        "Unattended runs are held to their step's permissions" modified. By hand:
+        the Purpose paragraph gains clones, and "Evidence" gains
+        `scripts/change_clone.py` (`make change-clone`, `make change-clone-remove`),
         `scripts/change_history.py` (`make change-history`),
-        `scripts/change_namespace.py`, `scripts/check_parallel_validation.py`, and
+        `scripts/change_namespace.py`, `scripts/check_parallel_validation.py`,
+        `scripts/ci_evidence.py` (`make run-ci`, `make validate-ci`), and
         `helm/validation-capacity.toml`.
       - `openspec/specs/change-workflow/architecture.md` — a new "A change is worked
         in its own clone" (D1: why clones rather than branch switching, worktrees,
@@ -1330,13 +1501,23 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         tooling refuses rather than taking silent risks with the owner's
         uncommitted work); "Validation observes a committed slice" rewritten for the
         change's namespace (D4: fixed per-change rather than commit tags, the
-        upgrade from zero, the advisory capacity figure); "Pushing is guarded, never
-        repaired" for each step pushing its own work (D8); "The orchestrator relays
-        and routes" for its workflow maintenance (D8); a new "History lives in the
+        upgrade from zero, the advisory capacity figure, written only when measured,
+        78 F2) and for the `ci` part (D15–D17: no publishing workflow dispatchable,
+        the owed jobs judged, every other failure compared by test ID and exception
+        type with a `dev` run the branch contains, and why); "Sections are slices,
+        sessions are the owner's" for evidence owed by validation (D14, D18);
+        "Pushing is guarded, never repaired" for each step committing and pushing
+        its own work, why the steps once did not, and the branch as the guard
+        against unfinished work, only `dev` protected (D8, D20 rules 1–5);
+        "Restrictions bind unattended runs only" for a grant for one run, fresh or
+        resumed, through `ALLOW` (D19); "The orchestrator relays and routes" for its
+        workflow maintenance, the owner's instructions, merges of `dev`, and the
+        conflict tiers (D8, D20 rule 6, D20.1–D20.3); a new "History lives in the
         owner's workspace" (D11); "Current limits" rewritten (one orchestrating
         session per change; the container per change, as 9.3 decided; side work
         chosen to stay clear of the critical-path goal's files, D9).
-      - `docs/agents/change-workflow.md` — already written in sections 4 and 8;
+      - `docs/agents/change-workflow.md` — already written in sections 4, 8, 8A,
+        and 8B;
         "Skills" gains `make change-clone`, `make change-clone-remove`, and `make
         change-history`; "The review directory" says where a cleaned-up change's
         history lives.
