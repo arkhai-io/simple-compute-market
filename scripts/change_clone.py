@@ -209,9 +209,20 @@ def bootstrap_state(clone: Path, alive: Callable[[int], bool] = _alive) -> Boots
     return Bootstrap(FAILED, log)
 
 
-# The status goes through a temporary file, so a status read is never half-written.
-_SUPERVISOR = ('log=$1; status=$2; shift 2; "$@" >"$log" 2>&1; code=$?; '
+# The supervisor records its own process before the command starts, so no
+# interruption of the process that spawned it leaves a bootstrap running unrecorded
+# for a rerun to start a second time. The record and the status each go through a
+# temporary file, so neither is ever read half-written.
+_SUPERVISOR = ('log=$1; status=$2; record=$3; fields=$4; shift 4; '
+               'printf \'{"pid": %s, %s\\n\' "$$" "$fields" >"$record.$$.tmp" '
+               '&& mv "$record.$$.tmp" "$record"; '
+               '"$@" >"$log" 2>&1; code=$?; '
                'printf "%s\\n" "$code" >"$status.tmp" && mv "$status.tmp" "$status"')
+
+
+def _record_fields(command: Sequence[str], log: Path) -> dict[str, object]:
+    return {"command": list(command), "log": str(log),
+            "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def _spawn(command: Sequence[str], cwd: Path, log: Path, status: Path) -> int:
@@ -219,8 +230,11 @@ def _spawn(command: Sequence[str], cwd: Path, log: Path, status: Path) -> int:
     # make's flags, as a sub-make of it.
     environment = {key: value for key, value in os.environ.items()
                    if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES")}
+    # The record sits beside the status, in the clone's Git directory.
+    record = status.with_name(BOOTSTRAP)
+    fields = json.dumps(_record_fields(command, log))[1:]
     process = subprocess.Popen(["sh", "-c", _SUPERVISOR, "sh", str(log), str(status),
-                                *command], cwd=cwd, env=environment,
+                                str(record), fields, *command], cwd=cwd, env=environment,
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, start_new_session=True)
     return process.pid
@@ -228,14 +242,19 @@ def _spawn(command: Sequence[str], cwd: Path, log: Path, status: Path) -> int:
 
 def start_bootstrap(clone: Path, command: Sequence[str] = BOOTSTRAP_COMMAND,
                     spawn: Spawn = _spawn) -> Bootstrap:
-    """Start the bootstrap, forgetting a failed one's status first."""
+    """Start the bootstrap, forgetting a failed one's record and status first."""
     status = _git_path(clone, BOOTSTRAP_STATUS)
     log = _git_path(clone, BOOTSTRAP_LOG)
+    record = _git_path(clone, BOOTSTRAP)
     status.unlink(missing_ok=True)
+    record.unlink(missing_ok=True)
     pid = spawn(command, clone, log, status)
-    _git_path(clone, BOOTSTRAP).write_text(json.dumps({
-        "pid": pid, "command": list(command), "log": str(log),
-        "started": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}), "utf-8")
+    if not record.is_file():
+        # The supervisor has not run yet, or the spawn is one that writes no
+        # record; the pid is the same either way.
+        aside = record.with_name(f"{BOOTSTRAP}.{os.getpid()}.tmp")
+        aside.write_text(json.dumps({"pid": pid, **_record_fields(command, log)}), "utf-8")
+        aside.replace(record)
     return bootstrap_state(clone)
 
 

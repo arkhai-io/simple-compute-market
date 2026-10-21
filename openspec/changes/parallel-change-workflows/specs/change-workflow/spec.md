@@ -193,7 +193,9 @@ verbatim as a review record and triaged like any review: the triaging agent MUST
 state its own position on each point rather than carry it out as an instruction, and
 each disposition MUST be logged to the intervention ledger. Accepted fixes MUST pass
 the checks a section passes before they are committed, and the commit MUST be
-validated again. The owner MUST be able to read a round as one set of changes from the
+validated again, unless, after a pre-closeout review, it changes only paths under
+`openspec/` and `docs/`. A triage of any kind MUST commit the tracked edits its
+dispositions made, with a fix or alone, and push them. The owner MUST be able to read a round as one set of changes from the
 commit the previous round ended on to the round's commit, without any commit being
 changed to show it. For a change worked in its own clone, the reading MUST take place
 in the owner's workspace, on that workspace's copy of the change's branch, and MUST
@@ -221,7 +223,10 @@ owner makes on the change's branch while reading MUST reach the clone only throu
 fast-forward triage makes. A pre-closeout review MUST NOT run, and its triage MUST NOT
 advance the change, unless the latest validation's result is `passed` and it names
 `HEAD`, or a commit from which `HEAD` descends and differs only in changes' intervention
-ledgers and review records, except where the owner overrides it.
+ledgers and review records, except where the owner overrides it. Once a pre-closeout
+review's triage has run, a commit from which `HEAD` differs only in paths under
+`openspec/` and `docs/` MUST be accepted in the same way, since closeout's own checks
+read them again.
 
 #### Scenario: The owner's note is contradicted by the files
 
@@ -241,6 +246,19 @@ ledgers and review records, except where the owner overrides it.
 - **WHEN** the latest validation passed for a commit, and the only commit since adds
   a line to a change's intervention ledger
 - **THEN** a pre-closeout review may run without the commit being validated again
+
+#### Scenario: A pre-closeout triage commits only documents
+
+- **WHEN** a pre-closeout review's triage advances the change with no fix, and
+  commits its edits to the change's documents and the index row after the latest
+  validation passed
+- **THEN** closeout starts without the commit being validated again
+
+#### Scenario: An implementation triage commits only documents
+
+- **WHEN** an implementation round's triage commits an edit to the change's task
+  list after the latest validation passed, with no fix
+- **THEN** that commit is validated before the next round or the pre-closeout review
 
 #### Scenario: The owner reads a round committed section by section
 
@@ -272,8 +290,9 @@ ledgers and review records, except where the owner overrides it.
   paths it changed and nothing else, keeping its author and message, names it
   beside its replacement, and leaves the branch at the replacement, the round's own
   commits unchanged
-- **AND** triage presents it like any point and, once disposed of, pulls it into the
-  clone only as a fast-forward, refusing a branch that has diverged
+- **AND** triage pulls it into the clone only as a fast-forward, refusing a branch
+  that has diverged, before presenting it like any point; a commit the owner then
+  rejects is undone among the round's fixes
 
 #### Scenario: The owner commits part of a file the round changed
 
@@ -463,3 +482,85 @@ resumed run. Interactive runs MUST NOT be restricted by the table.
 - **WHEN** an unattended implementation run commits a section
 - **THEN** it pushes that commit through the guarded push of the change's branch, and
   any other push it attempted would be denied
+
+### Requirement: The next step is computed from the files
+
+The next step of a change MUST be computed by a script from the change's index row,
+its reviews and their triage, its tasks, its workflow log, and the state of any open
+round view, and the same
+computation MUST be available to the owner by hand. When the computation fails or
+cannot classify the change's state, the orchestrating session MUST determine what
+happened and either resolve it, when it concerns only routing or recovery, or bring
+it to the owner, when it would decide a finding, settle a design question, or
+change a status; and MUST record what it decided in the workflow log. A review's triage
+MUST record, in its triage file's `## Next`, whether the change advances or another
+review round runs, beginning with the token `Advance` or `Another round`; the
+computation MUST route on that token alone, and MUST treat a triage file without it
+as a triage in progress. An implementation or pre-closeout round MUST advance only
+on a `passed` validation naming its final commit, or a commit from which its final
+commit differs only in changes' records — or, after a pre-closeout review, only in
+paths under `openspec/` and `docs/`; an `inconclusive` validation MUST be brought to
+the owner.
+
+#### Scenario: Reviews await triage
+
+- **WHEN** a change's latest validation and implementation review have no triage
+- **THEN** the computation names triage as the next step
+
+#### Scenario: A status was edited by hand
+
+- **WHEN** a change's status disagrees with its workflow log
+- **THEN** the orchestrating session follows the files and records that it did
+
+#### Scenario: Triage records another round
+
+- **WHEN** a review's triage recorded another round, and a commit after the commit
+  it reviewed changes more than changes' records — after a pre-closeout review,
+  more than paths under `openspec/` and `docs/`
+- **THEN** the computation names the review of the same kind again, an
+  implementation or pre-closeout one once that commit has a passing validation;
+  with no such commit, it names the review again on the same commit
+
+#### Scenario: A triage has not finished
+
+- **WHEN** a review's triage file exists without a `## Next` section
+- **THEN** the computation names the triage, or the run waiting in it, and no
+  review
+
+#### Scenario: A triage file predates `## Next`
+
+- **WHEN** a review's triage file ends with a `## Gate` beginning `Passed`
+- **THEN** the computation reads it as `Advance`; any other legacy gate is brought
+  to the owner
+
+#### Scenario: A closeout correction awaits validation
+
+- **WHEN** a closeout review's triage records `Advance` and its correction changed
+  a path outside `openspec/` and `docs/` since the reviewed commit
+- **THEN** the computation names validation of `HEAD` before archive cleanup
+
+#### Scenario: A documentation correction at closeout
+
+- **WHEN** a closeout review's triage records `Advance` and its correction changed
+  only paths under `openspec/` and `docs/`
+- **THEN** the computation names archive cleanup without a validation
+
+#### Scenario: A round's validation is inconclusive
+
+- **WHEN** an implementation round's triage records `Advance` and the fix commit's
+  validation is `inconclusive`
+- **THEN** the computation names the owner, not the next round
+
+#### Scenario: An implementation round advances
+
+- **WHEN** an implementation round's triage recorded that the change advances, and
+  its fixes are committed
+- **THEN** the computation names validation of the fix commit, and once it passes,
+  the next round or, after the last, the pre-closeout review, without the owner
+
+#### Scenario: A round is recorded after the fact
+
+- **WHEN** a round's sections were implemented and its records written before the
+  round was recorded
+- **THEN** the round is recorded naming the last record before it, and the
+  computation reads the records above that number as the round's

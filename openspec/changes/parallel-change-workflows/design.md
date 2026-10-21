@@ -93,8 +93,10 @@ Rejected:
   denials, transcripts, the workflow log — would need re-establishing there.
 
 A change may still be worked in the owner's workspace with no clone, as before
-this change; the tooling tells the cases apart by whether the change's branch is
-checked out in the current checkout.
+this change; the tooling tells the cases apart by whether a clone of the change
+holds its branch (D2, D6), looked for first, and only then by the branch checked
+out in the current checkout, since the workspace may have a clone's branch checked
+out for reading.
 
 ### D2 — The owner reads a round in their workspace, by the branch's name
 
@@ -114,6 +116,13 @@ checked out in the current checkout.
 4. records where the workspace was, checks out `feat/<change>`, and mixed-resets it
    to the round's base, read from the clone's latest `round` line, so the round
    shows as uncommitted changes exactly as before.
+
+Git overwrites an ignored file wherever a checkout, a fast-forward, or a hard reset
+puts a tracked one, and the cleanliness checks do not see ignored files; so before
+every move of the worktree — opening, refreshing, returning — the view refuses,
+naming them and moving nothing, when an ignored file sits at a path the target
+tracks and the current commit does not (52 F2). A refused opening leaves the
+workspace's branch where it was (52 F4).
 
 Run again while that change's view is open, it moves the view to the branch's new
 head over the same base, so the owner follows triage's fixes; it refuses while the
@@ -370,7 +379,10 @@ next-step computation names `clone`, and the session runs
 4. links `.claude/settings.local.json` to the workspace's, so the owner's local
    permissions have one source;
 5. starts `make init` in the background, recording its state in the clone's Git
-   directory: its process and log while it runs, then its exit status.
+   directory: its process and log while it runs, then its exit status. The
+   bootstrap's own process records itself before `make init` starts, so no
+   interruption of `make change-clone` leaves a bootstrap running unrecorded for a
+   rerun to start again (52 F3).
 
 `make change-clone` is idempotent (17 F5). It inspects the target and finishes
 whatever is missing: it clones into an absent directory, and in a directory that is
@@ -452,6 +464,20 @@ does not remove the clone, since the pull request may need another round.
 - The design step commits its recorded design once the owner says it is settled,
   so the design review reads a committed design. Rejected: the owner committing
   design work by hand; the orchestrating session committing it.
+- A triage of every kind commits and pushes the tracked edits its dispositions made
+  — the change's documents, the ledger, the index row — with its fix commit or, with
+  none, alone, so the next step starts from a clean worktree (52 F1). Once a
+  pre-closeout review's triage has run, a validation clears a `HEAD` that differs
+  from the validated commit only under `openspec/` and `docs/`, as one after a
+  closeout review already does: closeout runs `make check-change` and
+  `make check-packaging` itself, so a triage's commit of documents alone, such as the
+  index row set to `ready for closeout`, needs no hour of pipeline. Before then only
+  changes' records are exempt, since documentation the packaging checks read, such
+  as `docs/development/ARCHITECTURE.toml`, is checked by nothing but the next
+  validation. Rejected: exempting only the index row (a pre-closeout triage's task
+  list or design edit would still be revalidated, though validation tests neither);
+  leaving the index row to closeout (the index would say `in implementation` for a
+  change ready for closeout).
 - The orchestrating session maintains the workflow as well as advancing the
   change: it creates the clone and the branch (D6), and commits skill changes,
   permission changes, and anything else the owner explicitly asks for. It commits

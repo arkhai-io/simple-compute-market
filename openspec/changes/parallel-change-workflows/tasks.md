@@ -128,6 +128,13 @@ clone"). Touches a new `scripts/change_clone.py`, the root `Makefile`, and
       a rerun without `--branch`. The furthest-point rule is promoted with D6
       (10.9). Section 3 must read
       a clone `clone_of` returns whose bootstrap is `absent` as incomplete.
+      Round 1 triage (52 F3): the bootstrap record is now written by the `sh`
+      supervisor itself, its own `$$` with the command, log, and start time, through
+      a temporary file, before the command runs; `start_bootstrap` forgets a failed
+      run's record with its status, and writes the record only when the supervisor
+      has not yet (an injected spawn writes none). So no interruption of
+      `make change-clone` leaves a bootstrap running unrecorded. Evidence: below
+      section 4's round 1 triage note.
 
 ## 2. The round view in the owner's workspace
 
@@ -307,6 +314,18 @@ and dispatch (requirement "Triage of an implementation round"). Touches
       validation allow of `make round-e2e-baseline` still describe the removed
       push and dispatch; sections 4.1, 4.2, 4.4, and 4.5 rewrite them, so this
       round is not validated before section 4 is committed.
+      Round 1 triage (52 F2, 52 F4): before each move of the worktree — the
+      opening's checkout or fast-forward, the refresh's hard reset, and
+      `round-done`'s return — the view lists the paths the target tracks and the
+      current commit does not, and refuses, naming them and moving nothing, when
+      anything sits on disk at one, or under a parent that is no directory (Git
+      overwrites an ignored file there silently); a return so blocked is skipped,
+      the view closed and the workspace left on the change's branch, as for
+      uncommitted edits. A failed checkout on opening, the workspace not moved,
+      now puts back the branch ref it moved (or deletes one it created) before
+      removing the view's state; the earlier note's untested failure path is
+      tested by holding `index.lock`, which fails the checkout but not
+      `update-ref`. Evidence: below section 4's round 1 triage note.
 
 ## 3. The next-step computation for a change in a clone
 
@@ -616,6 +635,61 @@ permissions", "Triage of an implementation round"). Touches `.agents/skills/`
       committing step or validation pushes it. The permanent `change-workflow`
       spec and architecture still describe validation's single push and the
       reading first, until closeout (10.9).
+      Round 1 triage (52 F1, decided B; the owner's wording edits): a triage of
+      every kind commits and pushes what it changed that no fix commit holds
+      (`change-triage`, `docs/agents/change-workflow.md`'s table). Once a
+      pre-closeout review's triage has run, a validation clears a `HEAD` differing
+      from the validated commit only under `openspec/` and `docs/` (D8):
+      `change_workflow/records.py` gains `is_record`, `is_documentation`, and
+      `validation_problem(exempt=)`; `change_next_step.py` passes
+      `is_documentation` after a pre-closeout review, advancing or another round,
+      and its `validated` now reads ancestry through the injected `changed_since`,
+      so two older tests' expected wording names the changed path rather than
+      "not HEAD"; `change_workflow/review.py` exempts documentation for a
+      pre-closeout review once a triaged one exists; `change-closeout`'s entry
+      check and the triage table's pre-closeout row say the same. An
+      implementation triage's commit of documents alone is still validated. The
+      delta gains the triage-commit and closeout-gate sentences, two scenarios,
+      and a MODIFIED "The next step is computed from the files" (its another-round
+      scenario). Wording: D1's last paragraph now says a clone is looked for
+      first; the delta scenario "The owner commits an edit while reading" pulls
+      before presenting.
+      Evidence for the round's fixes (52 F1–F4), all unit or repository level per
+      `TESTING.md`: `test_change_next_step.py` (unit), a pre-closeout triage's
+      document commit going to closeout unvalidated and one with code to
+      validation, another pre-closeout round over documents reviewed again, an
+      implementation triage's document commit validated;
+      `test_change_workflow_review.py` (unit), the next pre-closeout review
+      admitted over a document commit after a triaged one, and refused before any;
+      `test_round_view.py` (repository level), opening by checkout and by
+      fast-forward refused over an ignored file the round tracks, a refresh
+      refused over one the fix tracks, the return skipped over one where `dev`
+      tracks a file, an ignored file elsewhere moving freely, and a failed
+      checkout putting the branch back (absent, and at the base) with no view
+      open, and, over `_in_the_way` directly, a file the target replaces with a
+      directory let through, an ignored file where the target puts a directory
+      refused, and a directory of tracked files the target replaces with a file
+      let through unless it holds an ignored one; `test_change_clone.py`
+      (repository level), the real spawn recording itself while its command runs,
+      nothing else writing, and a rerun leaving it alone. `make test`, before the
+      fresh-context check's fixes: every suite passed, the script tests' 1217
+      among them, up to `make -C helm test-render`, which failed the fifteen
+      render tests 53 V1 names and no other. After those fixes, which touched only
+      scripts, their tests, and documents: `uv run --no-project --with pytest
+      pytest -q scripts/tests`, 1221 passed; `make check-packaging`, `make
+      check-comment-hygiene`, and `make check-agent-skills`, passed; `make
+      check-change`, only the citations of the scripts sections 5, 7, and 8
+      create. The fresh-context check of the diff found no breach of the
+      guidance (no function-local import, no history in comments, nothing
+      private) and the code doing what each disposition says; fixed from it: a
+      directory of tracked files the target replaces with a file was refused;
+      a failed ref restore would have left the view's state behind (the state is
+      now removed first); the computation's documentation comment had lost its
+      constant (moved to `records.py`); the review runner's docstring,
+      `change-review`, `change-triage`'s fix and routing paragraphs, and the
+      delta's "the commit MUST be validated again" still stated the records-only
+      rule; and the parent-path cases were untested. Declined: that the section 5
+      note was missing — the check read the tree before the note was written.
 
 ## 5. Per-change image tags and namespaces in the build and Helm targets
 
@@ -625,6 +699,13 @@ Delivers D4's images, namespace naming, Secrets, and manual access (requirement
 `domains/vms/storefront/Makefile`, `provisioning/compute/service/Makefile`,
 `dev-env/Makefile`, `e2e-tests/Makefile`, `helm/Makefile`, a new
 `scripts/change_namespace.py`, `helm/tests/`, and `scripts/tests/`.
+
+Round 2's Helm evidence (6.5, 7.3, and the pilot's validation beside it) needs
+`make -C helm test-render` to pass: validation 53 found fifteen render tests failing
+on `dev`'s values schema (`got null, want object`), which stops the Helm part before
+it deploys (53 V1). No change owns the failure; the index records it as unowned
+work under the local end-to-end stack campaign. Its fix lands and is merged in from
+`dev` before round 2 is validated.
 
 - [ ] 5.1 `IMAGE_SUFFIX`, empty by default, appended to every image tag the build
       targets write — `build`, `build-dev`, `build-seller`, and each image target the

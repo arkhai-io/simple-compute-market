@@ -963,3 +963,132 @@ def test_a_refresh_is_refused_over_a_commit_made_during_the_view(
     with pytest.raises(rounds.RoundError, match=f"{made[:12]}.*round-done"):
         _start(work)
     assert rounds.open_view(work).head == head
+
+
+# An ignored file where the commit a move goes to tracks one: Git would overwrite
+# it without a word, and holds no copy of it.
+
+MINE = "the owner's own\n"
+
+
+def _ignored(work: Path, path: str) -> None:
+    """An ignored file of the owner's in the workspace, ignored there alone."""
+    with (work / ".git/info/exclude").open("a", encoding="utf-8") as exclude:
+        exclude.write(f"/{path}\n")
+    (work / path).parent.mkdir(parents=True, exist_ok=True)
+    (work / path).write_text(MINE, "utf-8")
+
+
+@pytest.mark.parametrize("on_branch", [False, True], ids=["by checkout", "by fast-forward"])
+def test_opening_is_refused_over_an_ignored_file_the_round_tracks(
+        cloned: tuple[Path, Path, str, str], on_branch: bool) -> None:
+    work, clone, base, _ = cloned
+    _write(clone, {"local.cfg": "tracked\n"})
+    if on_branch:
+        _git(work, "switch", "-q", "-c", BRANCH, base)
+    _ignored(work, "local.cfg")
+
+    with pytest.raises(rounds.RoundError, match="local.cfg; move it aside"):
+        _start(work)
+
+    assert (work / "local.cfg").read_text("utf-8") == MINE
+    assert _git(work, "branch", "--show-current") == (BRANCH if on_branch else "dev")
+    assert _git(work, "rev-parse", "HEAD") == base
+    assert rounds.open_view(work) is None
+    if not on_branch:
+        assert _git(work, "branch", "--list", BRANCH) == ""
+
+
+def test_a_refresh_is_refused_over_an_ignored_file_the_fix_tracks(
+        cloned: tuple[Path, Path, str, str]) -> None:
+    work, clone, base, head = cloned
+    _start(work)
+    _write(clone, {"local.cfg": "tracked\n"}, message="triage's fix")
+    _ignored(work, "local.cfg")
+
+    with pytest.raises(rounds.RoundError, match="local.cfg; move it aside"):
+        _start(work)
+
+    assert (work / "local.cfg").read_text("utf-8") == MINE
+    assert rounds.open_view(work).head == head
+    assert (_git(work, "rev-parse", "HEAD"), _status(work)) == (base, ROUND_STATUS)
+
+
+def test_the_return_is_skipped_over_an_ignored_file_where_it_tracks_one(
+        cloned: tuple[Path, Path, str, str]) -> None:
+    work, _, _, head = cloned
+    _start(work)
+    # The round deleted it; `dev`, where the workspace returns, still tracks it.
+    _ignored(work, "src/gone.py")
+
+    closed = rounds.done(work)
+
+    assert closed.returned_to is None and "src/gone.py" in (closed.stayed or "")
+    assert (work / "src/gone.py").read_text("utf-8") == MINE
+    assert (_git(work, "branch", "--show-current"), _git(work, "rev-parse", "HEAD")) == (
+        BRANCH, head)
+    assert rounds.open_view(work) is None
+
+
+def test_an_ignored_file_where_the_round_tracks_nothing_moves_freely(
+        cloned: tuple[Path, Path, str, str]) -> None:
+    work, _, _, head = cloned
+    _ignored(work, "scratch.txt")
+
+    _start(work)
+    closed = rounds.done(work)
+
+    assert closed.returned_to == "dev"
+    assert (work / "scratch.txt").read_text("utf-8") == MINE
+
+
+def test_a_file_the_target_replaces_with_a_directory_is_not_in_the_way(repo: Path) -> None:
+    current = _write(repo, {"conf": "a file\n"})
+    _git(repo, "rm", "-q", "conf")
+    target = _write(repo, {"conf/x": "now a directory\n"})
+    _git(repo, "checkout", "-q", current)
+
+    assert rounds._in_the_way(repo, current, target) == []
+
+
+def test_an_ignored_file_where_the_target_puts_a_directory_is_in_the_way(repo: Path) -> None:
+    current = _git(repo, "rev-parse", "HEAD")
+    target = _write(repo, {"cfg/x": "tracked\n"})
+    _git(repo, "checkout", "-q", current)
+    _ignored(repo, "cfg")
+
+    assert rounds._in_the_way(repo, current, target) == ["cfg/x"]
+
+
+@pytest.mark.parametrize("ignored", [False, True], ids=["tracked files only", "an ignored file"])
+def test_a_directory_the_target_replaces_with_a_file_is_in_the_way_only_when_it_holds_more(
+        repo: Path, ignored: bool) -> None:
+    current = _write(repo, {"dir/tracked": "1\n"})
+    _git(repo, "rm", "-q", "dir/tracked")
+    target = _write(repo, {"dir": "now a file\n"})
+    _git(repo, "checkout", "-q", current)
+    if ignored:
+        _ignored(repo, "dir/scratch")
+
+    assert rounds._in_the_way(repo, current, target) == (["dir"] if ignored else [])
+
+
+# A refused opening leaves the workspace's branch where it was.
+
+@pytest.mark.parametrize("existing", [False, True], ids=["no branch", "branch at the base"])
+def test_a_failed_checkout_puts_the_branch_back_and_opens_no_view(
+        cloned: tuple[Path, Path, str, str], existing: bool) -> None:
+    work, _, base, _ = cloned
+    if existing:
+        _git(work, "branch", BRANCH, base)
+    # A held index lock fails the checkout; moving a ref takes no index lock.
+    (work / ".git/index.lock").write_text("", "utf-8")
+
+    with pytest.raises(rounds.RoundError, match="checkout"):
+        _start(work)
+
+    assert _git(work, "branch", "--list", BRANCH, "--format=%(objectname)") == (
+        base if existing else "")
+    assert (_git(work, "branch", "--show-current"), _git(work, "rev-parse", "HEAD")) == (
+        "dev", base)
+    assert rounds.open_view(work) is None

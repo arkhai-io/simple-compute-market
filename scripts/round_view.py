@@ -17,8 +17,11 @@ checks the branch out, and resets it to the base. The clone is never touched, so
 the branch every step runs on never moves. Run again while that change's view is
 open, `start` moves the view to the branch's new head over the same base, so the
 owner follows triage's fixes; it refuses while the workspace holds edits or
-commits made during the view. A change with no clone is worked on the checkout's
-own branch, and its view resets that branch in place.
+commits made during the view. Before each move of the worktree — opening,
+refreshing, and returning — it refuses, naming them, files the workspace holds
+untracked where the commit it moves to tracks one: Git overwrites an ignored file
+there without a word. A change with no clone is worked on the checkout's own
+branch, and its view resets that branch in place.
 
 `done` returns the branch to the round's commit, leaving the files as they are,
 so an edit the owner made while reading stays uncommitted on top of it, and then
@@ -215,6 +218,50 @@ def _refuse_unclean(root: Path) -> None:
                          f"round; commit or put them aside first:\n{status}")
 
 
+def _in_the_way(root: Path, current: str, target: str) -> list[str]:
+    """The paths `target` tracks and `current` does not where something already sits
+    on disk, or under a parent that is no directory.
+
+    Git overwrites an ignored file wherever a checkout, a fast-forward, or a hard
+    reset puts a tracked one, and the cleanliness checks do not list ignored files,
+    so nothing else stops a move from destroying one: Git holds no copy of it.
+    """
+    status = _git(root, "diff", "--name-status", "--no-renames", "-z", current, target, "--")
+    fields = [field for field in status.split("\0") if field]
+    changes = list(zip(fields[::2], fields[1::2]))
+    added = [path for kind, path in changes if kind == "A"]
+    # A file `target` removes may be a parent of one it adds; Git replaces it.
+    removed = {path for kind, path in changes if kind == "D"}
+    blocked = []
+    for path in added:
+        parents = [Path(*Path(path).parts[:depth]).as_posix()
+                   for depth in range(1, len(Path(path).parts))]
+        if _occupied(root, path) or any(
+                parent not in removed and os.path.lexists(root / parent)
+                and (os.path.islink(root / parent) or not (root / parent).is_dir())
+                for parent in parents):
+            blocked.append(path)
+    return blocked
+
+
+def _occupied(root: Path, path: str) -> bool:
+    """Whether something untracked sits at `path`: a file or link, or a directory
+    holding an untracked file. A directory of tracked files only, which the target
+    replaces with a file, Git removes itself."""
+    if not os.path.lexists(root / path):
+        return False
+    if os.path.islink(root / path) or not (root / path).is_dir():
+        return True
+    return bool(_git(root, "ls-files", "--others", "-z", "--", path))
+
+
+def _refuse_in_the_way(root: Path, current: str, target: str, move: str) -> None:
+    if blocked := _in_the_way(root, current, target):
+        raise RoundError(f"{move} would overwrite what the workspace holds, untracked, where "
+                         f"{target[:12]} tracks a file: {', '.join(blocked)}; move it aside "
+                         "first. Nothing was moved")
+
+
 def _refuse_runs(root: Path, runs: Runs) -> None:
     if running := runs(root):
         raise RoundError("an unattended run is in progress in this checkout, and the view "
@@ -271,6 +318,12 @@ def _start_in_place(root: Path, change: str, base: str | None, runs: Runs) -> Vi
     return view
 
 
+def _branch_commit(root: Path, branch: str) -> str:
+    """The commit `branch` points at in `root`, or an empty string when it has none."""
+    return subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+                          cwd=root, capture_output=True, text=True).stdout.strip()
+
+
 def _fetch(root: Path, clone: Path, branch: str) -> str:
     """The clone's branch's commit, fetched into the workspace."""
     _git(root, "fetch", "--quiet", "--no-tags", str(clone), f"refs/heads/{branch}")
@@ -284,18 +337,18 @@ def _start_from_clone(root: Path, change: str, clone: Path, base: str | None,
     branch = _git(clone, "branch", "--show-current")
     head = _fetch(root, clone, branch)
     base = _resolve_base(root, _reviews(clone, change), base, head)
-    local = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
-                           cwd=root, capture_output=True, text=True).stdout.strip()
+    local = _branch_commit(root, branch)
     if local and local != head and not _ancestor(root, local, head):
         raise RoundError(f"the workspace's {branch} ({local[:12]}) holds commits the "
                          f"clone's ({head[:12]}) lacks, or has diverged from it; triage "
                          "pulls the owner's commits into the clone. Nothing was moved")
     current = _git(root, "branch", "--show-current")
-    returns_to = current or _git(root, "rev-parse", "HEAD")
+    before = _git(root, "rev-parse", "HEAD")
+    _refuse_in_the_way(root, before, head, f"checking out {branch}")
+    returns_to = current or before
     view = View(change, branch, base, head, clone=str(clone), returns_to=returns_to,
                 detached=not current)
     # Written before the checkout moves, as in place, so the way back is recorded.
-    before = _git(root, "rev-parse", "HEAD")
     _write_state(root, view)
     try:
         if current == branch:
@@ -306,8 +359,15 @@ def _start_from_clone(root: Path, change: str, clone: Path, base: str | None,
     except RoundError:
         if (_git(root, "branch", "--show-current"), _git(root, "rev-parse", "HEAD")) == (
                 current, before):
-            # The checkout did not move, so there is no view to close.
+            # The checkout did not move, so there is no view to close; a branch ref
+            # moved for it goes back, so a refused opening leaves nothing moved.
+            # The state goes first: a failed restore must not leave a view open.
             _git_path(root, STATE).unlink()
+            if current != branch and _branch_commit(root, branch) == head != local:
+                if local:
+                    _git(root, "update-ref", f"refs/heads/{branch}", local, head)
+                else:
+                    _git(root, "update-ref", "-d", f"refs/heads/{branch}", head)
         raise
     _git(root, "reset", "--quiet", "--mixed", "-N", base)
     return view
@@ -344,11 +404,12 @@ def _refresh(root: Path, view: View, runs: Runs) -> View:
     if not _ancestor(root, view.head, new):
         raise RoundError(f"the clone's {view.branch} ({new[:12]}) no longer descends from "
                          f"the view's commit {view.head[:12]}; nothing was moved")
+    _refuse_in_the_way(root, view.head, new, "refreshing the view")
     refreshed = View(**{**asdict(view), "head": new})
-    # The worktree holds exactly the view's commit, checked above, so the hard
-    # reset overwrites no edit of the owner's; only an ignored file where the new
-    # commit adds one would be replaced. The state follows the branch: written
-    # once it is at the new head, before it moves back to the base.
+    # The worktree holds exactly the view's commit, checked above, and nothing
+    # ignored sits where the new commit adds a file, so the hard reset overwrites
+    # nothing of the owner's. The state follows the branch: written once it is at
+    # the new head, before it moves back to the base.
     _git(root, "reset", "--quiet", "--hard", new)
     _write_state(root, refreshed)
     _git(root, "reset", "--quiet", "--mixed", "-N", view.base)
@@ -540,6 +601,12 @@ def _return(root: Path, view: View) -> tuple[str | None, str | None]:
         return None, (f"the workspace stays on {view.branch}, since its uncommitted edits "
                       f"would otherwise be carried onto {view.returns_to}; commit or "
                       f"discard them, then `git checkout {view.returns_to}`")
+    if blocked := _in_the_way(root, _git(root, "rev-parse", "HEAD"),
+                              _git(root, "rev-parse", f"{view.returns_to}^{{commit}}")):
+        return None, (f"the workspace stays on {view.branch}, since checking out "
+                      f"{view.returns_to} would overwrite what it holds, untracked, where "
+                      f"{view.returns_to} tracks a file: {', '.join(blocked)}; move it "
+                      f"aside, then `git checkout {view.returns_to}`")
     target = ["--detach", view.returns_to] if view.detached else [view.returns_to]
     try:
         _git(root, "checkout", "--quiet", *target)

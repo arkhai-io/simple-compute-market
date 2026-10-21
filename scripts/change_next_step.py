@@ -74,8 +74,9 @@ from round_view import RoundError, View, open_view  # noqa: E402
 from change_workflow.common import ORCHESTRATOR, StepError  # noqa: E402
 from change_workflow.log import (branch_decisions, log_path, read_log,  # noqa: E402
                                  redesigned_after_return)
-from change_workflow.records import (RECORD_PATH, ChangedSince, changed_since,  # noqa: E402
-                                     latest_validation, validation_problem, validation_result)
+from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
+                                     is_documentation, is_record, latest_validation,
+                                     validation_problem, validation_result)
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("design", "planning", "implementation", "closeout")
@@ -100,10 +101,6 @@ _PHASE_STEPS = {"design": ("design", "review", "triage"), "planning": ("plan",),
 # What a review's triage file records next, read from its `## Next` token.
 ADVANCE, ANOTHER_ROUND, IN_PROGRESS, OWNER = ("advance", "another round", "in progress",
                                               "owner")
-# Paths a closeout correction may change without a validation: the checks triage
-# runs cover them. A skill or the step table changes behaviour, so `.agents/` and
-# `.claude/` are outside.
-_DOCUMENTATION = ("openspec/", "docs/")
 
 
 def _section_text(text: str, heading: str) -> str | None:
@@ -802,13 +799,14 @@ class Computation:
             return self._pre_closeout()
         return self.next_round(work)
 
-    def another_round(self, review: Record, kind: str) -> Result:
+    def another_round(self, review: Record, kind: str,
+                      exempt: Callable[[str], bool] = is_record) -> Result:
         """The review of `kind` again, after `review`'s triage recorded another round:
         once a fix committed since it is validated, or on the same commit when
-        nothing but changes' records changed."""
-        if self.fixed_since(review):
+        nothing but `exempt` paths changed."""
+        if self.fixed_since(review, exempt):
             if waiting := self.validated(f"{review.triage.name} records another round, and "
-                                         "the fix committed since needs validating"):
+                                         "the fix committed since needs validating", exempt):
                 return waiting
         return {"step": "review", "kind": kind,
                 "reason": f"{review.triage.name} records another round"}
@@ -826,9 +824,12 @@ class Computation:
         review = governing(reviews)
         if waiting := self.not_advancing(review):
             return waiting
+        # From here closeout is next, and its own checks read the documentation, so
+        # a triage's commit of documents alone needs no validation.
         if review.next_token() == ANOTHER_ROUND:
-            return self.another_round(review, "pre-closeout")
-        if waiting := self.validated("closeout needs a passing validation of HEAD"):
+            return self.another_round(review, "pre-closeout", is_documentation)
+        if waiting := self.validated("closeout needs a passing validation of HEAD",
+                                     is_documentation):
             return waiting
         return {"step": "closeout", "reason": f"{review.triage.name} records that the change "
                                               "advances, and HEAD is validated"}
@@ -978,16 +979,18 @@ class Computation:
                           "what follows")
         return None
 
-    def validated(self, why: str) -> Result | None:
+    def validated(self, why: str, exempt: Callable[[str], bool] = is_record) -> Result | None:
         """None when the latest validation passed for `HEAD`, or for an ancestor it
-        differs from only in changes' records. Otherwise validation, when the latest
-        record describes another commit; or the owner, when it describes `HEAD` and
-        did not pass — an `inconclusive` result is missing evidence, never a pass."""
+        differs from only in `exempt` paths, changes' records by default. Otherwise
+        validation, when the latest record describes another commit; or the owner,
+        when it describes `HEAD` and did not pass — an `inconclusive` result is
+        missing evidence, never a pass."""
         head = self.state.head
         reviews = self.state.directory / "reviews"
         if head is None:
             return {"step": "validate", "reason": f"{why}: HEAD cannot be read"}
-        if problem := validation_problem(reviews, head, self.root, require_passed=False):
+        if problem := validation_problem(reviews, head, self.root, self._changed_since,
+                                         require_passed=False, exempt=exempt):
             return {"step": "validate", "reason": f"{why}: {problem}"}
         record = latest_validation(reviews)
         result = validation_result(record) if record else None
@@ -1001,9 +1004,10 @@ class Computation:
                           validation=result)
         return None
 
-    def fixed_since(self, review: Record) -> bool:
-        """Whether `HEAD` changed more than changes' records since `review` read it:
-        a fix the triage accepted has been committed."""
+    def fixed_since(self, review: Record, exempt: Callable[[str], bool] = is_record) -> bool:
+        """Whether `HEAD` changed more than `exempt` paths, changes' records by
+        default, since `review` read it: a fix the triage accepted has been
+        committed."""
         reviewed, head = review.reviewed_commit, self.state.head
         if reviewed is None or head is None or head.startswith(reviewed):
             return False
@@ -1011,7 +1015,7 @@ class Computation:
         if changed is None:
             # Not an ancestor: HEAD is not the reviewed commit, however it moved.
             return True
-        return any(not RECORD_PATH.match(path) for path in changed)
+        return any(not exempt(path) for path in changed)
 
     def changed_outside_documentation(self, review: Record) -> str | None:
         """A path outside `openspec/` and `docs/` that `HEAD` changes since the commit
@@ -1023,7 +1027,7 @@ class Computation:
         if changed is None:
             # Not an ancestor: what HEAD changes since it cannot be told.
             return f"{head[:12]}, which does not descend from {reviewed[:12]},"
-        return next((path for path in changed if not path.startswith(_DOCUMENTATION)), None)
+        return next((path for path in changed if not is_documentation(path)), None)
 
     def untriaged(self, kinds: Sequence[str]) -> str | None:
         for record in reversed(self.state.records):

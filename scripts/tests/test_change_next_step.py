@@ -284,7 +284,7 @@ def test_a_triaged_round_with_fixes_since_its_validation_is_validated_again(
 
     result = _next(root)
 
-    assert result["step"] == "validate" and "not HEAD" in result["reason"]
+    assert result["step"] == "validate" and "also changes scripts/" in result["reason"]
 
 
 def test_a_triaged_round_with_sections_left_waits_for_the_next_round(tmp_path: Path) -> None:
@@ -365,7 +365,7 @@ def test_another_pre_closeout_round_is_validated_then_reviewed_again(tmp_path: P
     _record(root, "04-validation.md", text=_validation(HEAD))
     validated = _next(root)
 
-    assert unvalidated["step"] == "validate" and "not HEAD" in unvalidated["reason"]
+    assert unvalidated["step"] == "validate" and "also changes" in unvalidated["reason"]
     assert (validated["step"], validated["kind"]) == ("review", "pre-closeout")
     assert "another round" in validated["reason"]
 
@@ -502,6 +502,41 @@ def test_a_pre_closeout_triage_that_advances_goes_to_closeout_once_head_is_valid
 
     assert unvalidated["step"] == "validate"
     assert validated["step"] == "closeout"
+
+
+# After a pre-closeout review, closeout's own checks read the documentation, so a
+# triage's commit of documents alone needs no validation; before it, only records.
+DOCUMENTS = ["openspec/changes/README.md", f"openspec/changes/{CHANGE}/specs/x/spec.md",
+             "docs/agents/change-workflow.md"]
+
+
+def test_a_pre_closeout_triages_document_commit_goes_to_closeout_unvalidated(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation", tasks=ALL_WORK_DONE)
+    _record(root, "02-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "03-pre-closeout.md", "Advance", reviewed="e" * 40)
+
+    assert _next(root, changed=DOCUMENTS)["step"] == "closeout"
+    assert _next(root, changed=DOCUMENTS + FIX)["step"] == "validate"
+
+
+def test_another_pre_closeout_round_over_documents_reviews_again_unvalidated(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation", tasks=ALL_WORK_DONE)
+    _record(root, "02-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "03-pre-closeout.md", "Another round", reviewed="e" * 40)
+
+    result = _next(root, changed=DOCUMENTS)
+
+    assert (result["step"], result["kind"]) == ("review", "pre-closeout")
+
+
+def test_an_implementation_triages_document_commit_is_validated(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _advanced_round(root, validated="e" * 40)
+
+    assert _next(root, changed=DOCUMENTS)["step"] == "validate"
+    assert _next(root, changed=RECORDS_ONLY)["step"] == "round"
 
 
 # A closeout triage that advances: archive cleanup, after a validation when a

@@ -78,9 +78,10 @@ the session, and every turn ends with an outcome matching
   `## Next` beginning `Advance` — a file from before `## Next`, ending with a
   `## Gate` beginning `Passed`, reads the same. A row still `in implementation`
   with that triage is accepted when the latest validation record is `passed` and
-  names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and
-  reviews: the triage advanced before its fix commit was validated, so it could
-  not set `ready for closeout`. If either is missing, stop: the change is not
+  names `HEAD`, or an ancestor from which `HEAD` changes only paths under
+  `openspec/` and `docs/`, which this closeout's own checks read again: the triage
+  advanced before its fix commit was validated, so it could not set `ready for
+  closeout`. If either is missing, stop: the change is not
   ready, and whether it advances is recorded in triage.
 - **Where it stopped.** Find the change with `python3 scripts/find_change.py
   <change>`. When it prints a directory under `openspec/changes/archive/` while the

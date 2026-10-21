@@ -257,7 +257,9 @@ remaining failures.
 
 No change owns these yet. Recorded here so the next reader sees them rather
 than rediscovering them. The storefront settlement fault that this table also
-held is now owned by `repair-storefront-alkahest-configuration` above.
+held is now owned by `repair-storefront-alkahest-configuration` above. The Helm
+render failure is recorded here beside `helm-e2e-pipeline-parity`, which owns the
+charts' scenario coverage but starts only after `parallel-change-workflows` merges.
 
 | Item | Origin |
 |---|---|
@@ -266,6 +268,7 @@ held is now owned by `repair-storefront-alkahest-configuration` above.
 | Compose configuration is assembled by hand across a root file, domain files, an identity overlay, and legacy env files, with duplicated paths and per-value TOML workarounds; the Helm charts express the same deployment more coherently. Converging compose onto one source shared with the tests | accepted as follow-up during `repair-storefront-alkahest-configuration` |
 | `domains/vms/storefront/.env.{bob,alice}.docker` carry configuration for a layout that no longer exists, including a stale Alkahest address path | `repair-storefront-alkahest-configuration`, left in place because compose still references them |
 | Four questions about the API-credits capacity topology: a stale ed25519 authority pin, a capacity-site table where the loader expects a string, an `include`-plus-override compose shape, and `kit/config` TOML-parsing `0x` values into integers | inherited from `provide-e2e-development-identities`, carried through `repair-e2e-fixture-drift` |
+| Fifteen Helm render tests (the storefront and bare-metal-storefront charts' `tests/test_render.py`, `helm/tests/test_release_topology.py`) fail `values don't meet the specifications of the schema(s)`, `got null, want object`: a test's `None`, meant to remove a chart default, is validated by the values schema instead of dropping the key. `dev` fails the same step in CI. Likely the Helm release (local v4.3.0; CI's `azure/setup-helm@v4` pins none), not verified. The Helm part of validation stops at `make -C helm test-render`, so no Helm scenario runs until it is fixed | `parallel-change-workflows` validation 53, V1 |
 
 ## Roadmap goal — Sell capacity the marketplace cannot admit against
 

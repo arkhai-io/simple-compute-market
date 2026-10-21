@@ -366,6 +366,37 @@ def test_a_ledger_commit_after_validation_admits_a_pre_closeout_review(tmp_path:
     assert path.name == "04-pre-closeout.md"
 
 
+DOCUMENTS = ["openspec/changes/README.md", f"{RECORDS}/specs/x/spec.md"]
+
+
+def test_a_document_commit_after_a_pre_closeout_triage_admits_the_next_review(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
+                                                       "utf-8")
+    (reviews_of(root) / "04-pre-closeout.md").write_text("x", "utf-8")
+    (reviews_of(root) / "04-pre-closeout.triage.md").write_text("## Next\n\nAnother round\n",
+                                                               "utf-8")
+
+    path = run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                      changed_since=lambda *_: DOCUMENTS,
+                      runner=writing(review_text("pre-closeout")))
+
+    assert path.name == "05-pre-closeout.md"
+
+
+def test_a_document_commit_before_any_pre_closeout_review_needs_validating(
+        tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    (reviews_of(root) / "03-validation.md").write_text(validation_text(VALIDATED, "passed"),
+                                                       "utf-8")
+
+    with pytest.raises(ReviewError, match="specs/x/spec.md"):
+        run_review(CHANGE, "pre-closeout", root=root, head=lambda _: HEAD,
+                   changed_since=lambda *_: DOCUMENTS,
+                   runner=writing(review_text("pre-closeout")))
+
+
 def test_the_owner_may_run_a_pre_closeout_review_unvalidated(tmp_path: Path) -> None:
     root = repository(tmp_path)
 

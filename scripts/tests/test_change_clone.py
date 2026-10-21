@@ -4,7 +4,8 @@ What a clone must get right is Git's own state — its remotes, the branch it ha
 checked out and where that branch tracks, what a rerun leaves alone — so a
 temporary workspace with a bare `origin` is the lowest level that proves it. The
 bootstrap is started through an injected spawn, since `make init` builds every
-environment; the real spawn is exercised once with a command that ends at once.
+environment; the real spawn is exercised with a command that ends at once, and with
+one that runs on while nothing but the spawn itself records it.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -347,6 +349,36 @@ def test_the_real_spawn_records_the_commands_output_and_exit_status(workspace: P
     assert log.read_text("utf-8") == "building\n"
     assert status.read_text("utf-8") == "3\n"
     assert clones.bootstrap_state(clone).state == "failed"
+
+
+def test_the_real_spawn_records_itself_before_its_command_runs(workspace: Path) -> None:
+    clone = _create(workspace).clone
+    log = _git_file(clone, clones.BOOTSTRAP_LOG)
+    status = _git_file(clone, clones.BOOTSTRAP_STATUS)
+    record = _git_file(clone, clones.BOOTSTRAP)
+    for path in (status, record):
+        path.unlink()
+    # Outside the worktree, which a rerun requires clean.
+    ready = _git_file(clone, "bootstrap-ready")
+
+    # The process that spawned it records nothing, as when it is killed at once.
+    pid = clones._spawn(["sh", "-c", f"touch {ready}; sleep 30"], clone, log, status)
+    try:
+        deadline = time.monotonic() + 10
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        recorded = json.loads(record.read_text("utf-8"))
+
+        assert recorded["pid"] == pid and recorded["log"] == str(log)
+        assert clones.bootstrap_state(clone).state == "running"
+        # A rerun leaves it alone rather than starting a second bootstrap.
+        rerun = Spawned()
+        _create(workspace, spawn=rerun)
+        assert rerun.calls == []
+        assert json.loads(record.read_text("utf-8"))["pid"] == pid
+    finally:
+        os.killpg(pid, 15)
+        os.waitpid(pid, 0)
 
 
 # Refusals delete nothing.

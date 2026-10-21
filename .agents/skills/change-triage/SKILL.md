@@ -86,7 +86,8 @@ the session, and every turn ends with an outcome matching
   shows the owner every message and resumes this session with each reply.
 - **The end is an outcome.** Each finding you present (step 3) and the question
   whether another round is merited (step 6) is a `question`. When the dispositions
-  are recorded, the accepted fixes committed and pushed, and `## Next` written,
+  are recorded, the accepted fixes and every tracked edit committed and pushed, and
+  `## Next` written,
   end with `finished`, `next` naming what `## Next` leads to. A triage with
   nothing to dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
   finding whose fix needs code is a `question` naming the correction it needs
@@ -386,7 +387,8 @@ whether the round's accepted fixes merit another review round, while still prese
   The triage records stay in `reviews/`, which is untracked. Then push the commit
   with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
   and report its reasons. The fix commit is validated next (`make validate
-  CHANGE=<change>`), which dispatches the pipeline.
+  CHANGE=<change>`), which dispatches the pipeline — unless, after a pre-closeout
+  review, it changes only paths under `openspec/` and `docs/` (step 6).
 
 Then run `make check-change CHANGE=<change>` and report the result. It validates
 an active change with `openspec validate <change> --strict`, and an archived one —
@@ -414,11 +416,13 @@ What follows is the computation's, from that token
 (`scripts/change_next_step.py`): after a design review, planning; after an
 implementation round, validation of the fix commit, then the next planned round or
 the pre-closeout review, once that validation passed; after a pre-closeout review,
-closeout once validation of `HEAD` passed; after a closeout review, archive
-cleanup, after a validation of `HEAD` when a path outside `openspec/` and `docs/`
-changed since the commit it reviewed. `Another round` leads to the review of the
-same kind again, after the fix commit's validation for an implementation or
-pre-closeout review.
+closeout once a validation clears `HEAD`, which one of an ancestor does when
+`HEAD` changes only paths under `openspec/` and `docs/` since it; after a closeout
+review, archive cleanup, after a validation of `HEAD` when a path outside
+`openspec/` and `docs/` changed since the commit it reviewed. `Another round` leads
+to the review of the same kind again, after the fix commit's validation for an
+implementation or pre-closeout review — for a pre-closeout one, only when the fix
+changed a path outside `openspec/` and `docs/`.
 
 When the triage of a phase-closing review records `Advance`, set the change's
 `Status` in `openspec/changes/README.md`, and rewrite the row's `Notes` in the same
@@ -430,14 +434,18 @@ contradict its status misleads every agent that reads the index — then run
 |---|---|
 | `design` | `ready for planning` |
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
-| `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
+| `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor from which `HEAD` changes only paths under `openspec/` and `docs/`, unless the owner overrides it |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
 
-Whichever `## Next` records, a design review's triage then commits what it
-changed — the change's documents its dispositions edited, `interventions.jsonl`,
-and the index row — as one commit naming the change and the review, and pushes it
-with `make push-branch`, so planning, or the next design review, reads a committed
-design from a clean worktree.
+Whichever `## Next` records, a triage of any kind then commits what it changed
+and no fix commit (step 5) already holds — the change's documents its
+dispositions edited, `interventions.jsonl`, the index row, and any other tracked
+file an `edit` changed — as one commit naming the change and the review, and
+pushes it with `make push-branch`, so the next step reads a committed change from
+a clean worktree. After a pre-closeout review such a commit needs no validation
+when it changes only paths under `openspec/` and `docs/`: closeout's own checks
+read them again. Before then it is validated like any commit, unless it changes
+only changes' ledgers and reviews.
 
 A closeout triage that advances ends triage. Do not release dependents, set the row
 to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh
