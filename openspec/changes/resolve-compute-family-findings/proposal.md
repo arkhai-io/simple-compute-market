@@ -39,8 +39,12 @@ Dead or senderless surfaces — remove each, or give it its caller:
 
 Behaviour that answers wrongly:
 
-- The provisioning service's authentication middleware raises on an authenticated
-  request matching no route contract, so it answers 500 rather than 404 or 405.
+- The provisioning service's authentication middleware answers a request matching no
+  route contract with an unsigned 404, never a 405 for a known path with another method,
+  which a typed client reports as missing response authentication. It is unsigned because
+  no route resolved, so no operation or resource binds a signature; whether a rejection
+  before routing can be signed is this change's to decide. A failure after authentication
+  is answered signed since `unbacked-bare-metal-listings`.
 - VM's operator `create_vm` route checks no guest name against the rules
   provisioning's own names satisfy, so a name whose login exceeds 32 characters
   fails at `useradd`.
@@ -61,7 +65,10 @@ Behaviour that answers wrongly:
   ask each domain's driver which opening to send; one rule for both belongs with
   moving bare metal onto the shell's negotiation routes.
 - The bare-metal Compose wrapper and Helm chart forward no seller negotiation
-  chain, so only the lane's overlay sets one.
+  chain, so only the lane's overlay sets one (to be re-verified: the chart now passes
+  its `config` through to `storefront.json` and, in an umbrella release, derives its
+  registry and the trust it pins, so a chart-deployed bare-metal storefront publishes).
+  Running pipeline scenarios against the charts is `helm-e2e-pipeline-parity`'s.
 - An interrupted contact-exchange reveal is finished only by the buyer retrying,
   though the servicing worker could finish it from the persisted introduction.
 - A seller's EVM address and wallet key are separate inputs nothing checks against
@@ -80,8 +87,10 @@ Placement and test reliability:
 - The site ledger keys reservation idempotency and release-by-escrow on the escrow,
   which hosted deals lack, while jobs correlate on the capacity reservation.
 - Bare metal's listing recheck and publication read each site's projection live,
-  where VM reads the projections its storefront holds; API credits'
-  `credit_quota_guard` could move onto the kit's listing-source verdict.
+  where VM reads the projections its storefront holds; reading held projections is the
+  preferred end state for every storefront. (API credits' move onto the
+  kit's listing-source verdict was `encapsulate-capacity-backing`'s, archived
+  2026-10-14; bare metal's move onto held projections is `share-site-projection-state`'s.)
 - The provisioning service's `db/database.py` and `db/migrations.py` import
   `vm_provisioning_adapter.db` (`AnsiblePoolConfig`, `Base`) and
   `vm_provisioning_adapter.legacy_backfill`. VM table metadata and the legacy VM

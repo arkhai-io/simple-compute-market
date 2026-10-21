@@ -44,54 +44,63 @@
       the VM e2e scenarios. Disclose any suite not run.
 - [ ] 4.2 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 4.3 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both. Read the negotiation path's
+      docstrings directly, since several describe the site being consulted only at
+      acceptance; `negotiation_runtime.py` already uses function-level imports heavily,
+      so check whether the existing reason applies to any added here.
 
 ## 5. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the negotiation
-      path's docstrings directly; several describe the site being consulted only at
-      acceptance.
-- [ ] 5.2 **Import placement.** Review imports this change adds or touches;
-      `negotiation_runtime.py` already uses function-level imports heavily, so check
-      whether the existing reason applies to any added here.
-- [ ] 5.3 **Documentation compliance.** Confirm the verification rule landed in
-      `openspec/specs/negotiation-protocol/spec.md` and that `ARCHITECTURE.md` reflects
-      when the authoritative site is consulted.
+- [ ] 5.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 5.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe, including that `ARCHITECTURE.md` reflects when
+      the authoritative site is consulted.
 - [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      validation evidence, and promotion destinations.
-- [ ] 5.5 **Roadmap currency.** Update Goal 2's gap mapping in
-      `docs/development/ROADMAP.md`. Note that this change is a shared prerequisite and
-      does not belong exclusively to Goal 2.
-- [ ] 5.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 5.7 **Campaign index currency** (part seven, added when
-      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
-      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 5.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+      Expected: Goal 2's gap mapping, noting that this change is a shared prerequisite
+      and does not belong exclusively to Goal 2.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 5.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 5.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
+- [ ] 5.9 **Promotion.** Write the permanent documents this change owes —
+      `docs/development/ARCHITECTURE.md`, "Discovery and negotiation" (when the
+      authoritative site is consulted during a deal's lifecycle) — and complete the
+      design-promotion record below. The `negotiation-protocol` `spec.md`, which the
+      deltas cover, is written by the archive in 5.11, not by hand; the record names it
+      all the same.
+- [ ] 5.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=negotiation-capacity-feasibility-probe` and resolve every
+      match, then `openspec validate negotiation-capacity-feasibility-probe --strict`.
+- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive
+      negotiation-capacity-feasibility-probe -y` merges the deltas into `openspec/specs/` and
+      moves the change under `openspec/changes/archive/`; point the index row at the
+      archived directory, and run `openspec validate --specs --strict`.
 
-- [ ] 5.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=negotiation-capacity-feasibility-probe` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
 ## Design promotion record
 
 | Accepted decision | Permanent location |

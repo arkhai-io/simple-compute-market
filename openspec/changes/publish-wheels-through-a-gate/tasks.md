@@ -221,50 +221,65 @@ resolvable.**
 - [ ] 6.2 Record which distribution versions a promoted product version
   comprises. Nothing in a wheel's filename says which product version it belongs
   to, so the inventory is the only place that binding exists.
+- [ ] 6.3 **Comment hygiene and import placement, before the pre-closeout review.** Run
+  `make check-comment-hygiene` and read the comments this change added for any that
+  narrate the review or migration that introduced them; move each import the change
+  added to module level unless a verified circular import or a recorded lazy-load
+  reason keeps it local. Closeout only confirms both. Read the promotion script and
+  the manifest directly: the target does not catch a comment narrating that this
+  mechanism is temporary, which is the violation this change is most likely to
+  introduce. Check the imports the promotion script and its tests added, verifying
+  each move against the suite rather than a syntax check.
 
 ## 7. Closeout
 
-- [ ] 7.1 **Comment hygiene.** Run `make check-comment-hygiene`. Then read the
-  promotion script and the manifest directly: the target catches change IDs and
-  task numbers mechanically and does not catch a comment narrating that this
-  mechanism is temporary, which is the violation this change is most likely to
-  introduce.
-- [ ] 7.2 **Import placement.** Check imports added by the promotion script and
-  its tests for a real reason to stay local before moving them; verify each move
-  against the suite rather than a syntax check.
-- [ ] 7.3 **Documentation compliance.** Re-check accepted decisions against
-  `openspec/README.md`'s placement rules. Confirm every cited `openspec/`,
-  `docs/`, and `scripts/` path resolves on this branch.
-- [ ] 7.4 **Narrative compression.** Reduce completed-task notes to final
-  behaviour, validation evidence, and unresolved work. The rejected
-  alternatives and the reasoning for all-or-nothing refusal stay in `design.md`.
-- [ ] 7.5 **Roadmap currency.** Update the Package and release readiness
-  campaign summary in `openspec/changes/README.md`. `docs/development/ROADMAP.md`
-  owes nothing: this is a lesser goal and changes no market capability.
-  Recorded as a deliberate disposition.
-- [ ] 7.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 7.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 7.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=publish-wheels-through-a-gate` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 7.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 7.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+- [ ] 7.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+  the comments this change added for any that narrate the review or migration that
+  introduced them, including any in the promotion script and the manifest that
+  narrate this mechanism as temporary. Do not edit code here: anything to rewrite
+  returns the change to implementation.
+- [ ] 7.2 **Import placement — confirm.** Check the imports this change added, in the
+  promotion script and its tests, for any still local without a recorded reason. One
+  that should move returns the change to implementation.
+- [ ] 7.3 **Documentation compliance.** Re-check this change's accepted decisions
+  against `openspec/README.md`'s placement rules, and the permanent documents
+  against the code they describe.
+- [ ] 7.4 **Narrative compression.** Compress completed-task notes to final behavior,
+  material validation evidence, unresolved or deferred work, and
+  permanent-documentation destinations, moving durable rationale into `design.md`
+  first. The rejected alternatives and the reasoning for all-or-nothing refusal stay
+  in `design.md`.
+- [ ] 7.5 **Roadmap currency.** Update the affected goal's current state and gap
+  mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+  Expected disposition: `docs/development/ROADMAP.md` owes nothing, since this is a
+  lesser goal and changes no market capability; record it as a deliberate
+  disposition.
+- [ ] 7.6 **Campaign index currency.** Update this change's row, and its campaign's
+  dependency graph, in `openspec/changes/README.md`, or record that both are
+  unchanged; this includes the Package and release readiness campaign summary.
+  Other rows' `Depends on` are left alone: archive cleanup releases dependents after
+  the closeout gate.
+- [ ] 7.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+  reports (a failure needing a code or lock change returns the change to
+  implementation).
+- [ ] 7.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+  its result, and the scenarios that exercise this change, or an explicit blocker
+  naming its cause and the change that owns it, with the validations it gates
+  treated as unrun.
+- [ ] 7.9 **Promotion.** Write the permanent documents this change owes —
+  `docs/development/RELEASING.md` — and complete the design-promotion record below. A
+  `spec.md` the deltas cover — here `openspec/specs/deployment-state/spec.md` — is
+  written by the archive in 7.11, not by hand; the record names it all the same.
+- [ ] 7.10 **Documentation citations.** After promotion, run
+  `make check-doc-citations CHANGE=publish-wheels-through-a-gate` and resolve every
+  match, then `openspec validate publish-wheels-through-a-gate --strict`.
+- [ ] 7.11 **Archival.** Last, once every other part is checked: `openspec archive
+  publish-wheels-through-a-gate -y` merges the deltas into `openspec/specs/` and moves
+  the change under `openspec/changes/archive/`; point the index row at the archived
+  directory, and run `openspec validate --specs --strict`.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location | State |

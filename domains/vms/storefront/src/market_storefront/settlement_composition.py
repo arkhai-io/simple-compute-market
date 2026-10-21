@@ -6,11 +6,10 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from types import MappingProxyType
 from typing import Any
 
 from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
@@ -23,12 +22,14 @@ from core_storefront.domain_lifecycle import (
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    require_deliverable_release_model,
+)
 from market_arkhai_payments import (
     PaymentSellerStage,
     servicing_stage,
-)
-from market_contact_exchange import (
-    MECHANISM as CONTACT_MECHANISM,
 )
 from market_core import MarketDomainContract
 from market_core.schemas import (
@@ -75,72 +76,6 @@ class VmProjectionContext:
     convergence_owner: str = field(default_factory=lambda: f"alkahest:{uuid.uuid4()}")
 
 
-# Whether settling through each mechanism this storefront composes delivers
-# through VM capacity-backed fulfillment (``fulfill_vm_settlement``). Every
-# composed mechanism has an explicit entry: an unbacked listing may publish only
-# options whose mechanism does not, because a deal that reached VM fulfillment
-# against a listing with no admission authority could only be refused after it
-# was funded.
-VM_MECHANISM_FULFILLS_THROUGH_CAPACITY: Mapping[str, bool] = MappingProxyType(
-    {
-        "alkahest.v1": True,
-        # A payment deal provisions its VM through capacity, like Alkahest.
-        "arkhai.payments.v1": True,
-        # An introduction settles by revealing contacts; nothing is admitted
-        # against capacity, so an unbacked listing may offer it.
-        CONTACT_MECHANISM: False,
-    }
-)
-
-
-class UndeclaredMechanismFulfillmentError(RuntimeError):
-    """A composed mechanism has no declaration of how it is fulfilled."""
-
-
-def mechanism_fulfills_through_capacity(
-    mechanism: str,
-    declarations: Mapping[str, bool],
-) -> bool:
-    """Look up a mechanism's declaration, refusing one the composition lacks."""
-    try:
-        return bool(declarations[mechanism])
-    except KeyError as exc:
-        raise UndeclaredMechanismFulfillmentError(
-            f"settlement mechanism {mechanism!r} has no declaration of whether it "
-            "is fulfilled through VM capacity"
-        ) from exc
-
-
-def admissible_settlement_clauses(
-    clauses: Sequence[Any],
-    *,
-    capacity_backing: str,
-    declarations: Mapping[str, bool],
-) -> tuple[list[Any], list[str]]:
-    """Split a candidate's clauses into those it may publish and dropped mechanisms.
-
-    A capacity-backed candidate keeps every clause. An unbacked one keeps only
-    clauses whose mechanism is not fulfilled through capacity. Each clause names
-    its mechanism under ``mechanism``, whether it is a compiled clause or its
-    serialized form.
-    """
-    kept: list[Any] = []
-    dropped: list[str] = []
-    for clause in clauses:
-        mechanism = (
-            clause.get("mechanism")
-            if isinstance(clause, Mapping)
-            else getattr(clause, "mechanism", None)
-        )
-        if capacity_backing != "unbacked" or not mechanism_fulfills_through_capacity(
-            str(mechanism), declarations
-        ):
-            kept.append(clause)
-        elif str(mechanism) not in dropped:
-            dropped.append(str(mechanism))
-    return kept, dropped
-
-
 @dataclass(frozen=True)
 class VmSettlementComposition:
     domain: MarketDomainContract
@@ -156,9 +91,6 @@ class VmSettlementComposition:
     mechanism_resources: Mapping[str, Any]
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
-    # Injected rather than read from the module constant so a composition that
-    # adds a mechanism states how that mechanism is fulfilled where it adds it.
-    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY
 
     @property
     def seller_stages(self):
@@ -305,30 +237,15 @@ class VmSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
-def build_storefront_publication_clause_compiler() -> Callable[
-    [Mapping[str, Any]], SettlementPublicationClause
-]:
-    registry = build_storefront_settlement_registry()
-    config = registry.resolve(
-        storefront_config.settlement_config_mapping(),
-        role="seller",
-    )
-    return partial(
-        compile_settlement_publication_clause,
-        registry=registry,
-        config=config,
-        role="seller",
-    )
-
-
 def _settlement_plan_obligations(
     *,
     domain: MarketDomainContract,
     context: StorefrontSettlementBuildContext,
     stage: Any,
+    listing: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     artifacts = build_domain_settlement_artifacts(
-        domain, context, build_plan=stage.build_plan
+        domain, context, build_plan=partial(stage.build_plan, listing=listing)
     )
     obligations = artifacts.settlement_plan["obligations"]
     return tuple(dict(item) for item in obligations)
@@ -417,7 +334,7 @@ async def prepare_vm_settlement(
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
     obligations = _settlement_plan_obligations(
-        domain=domain, stage=stage,
+        domain=domain, stage=stage, listing=dict(order),
         context=StorefrontSettlementBuildContext(
             binding=thread_binding.binding,
             negotiation_id=negotiation_id,
@@ -916,13 +833,33 @@ async def preflight_settlement_mechanisms(
     return readiness
 
 
+def require_vm_release_model(
+    domain: MarketDomainContract, settlement_config: SettlementConfig | None = None
+) -> None:
+    """Refuse a configured Alkahest release model ``domain`` cannot deliver.
+
+    A configured section owns the deals accepted under it, enabled or not, so
+    its release model must be one the domain's Alkahest entry declares. With no
+    ``settlement_config``, the storefront's own configuration is resolved.
+    """
+    if settlement_config is None:
+        settlement_config = build_storefront_settlement_registry().resolve(
+            storefront_config.settlement_config_mapping(), role="seller"
+        )
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
+    alkahest_stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    if alkahest_section is not None and alkahest_stage is not None:
+        require_deliverable_release_model(
+            alkahest_section, alkahest_stage.release_models
+        )
+
+
 def build_vm_settlement_composition(
     *,
     domain: MarketDomainContract,
     sqlite_client: Any,
     alkahest_clients: Mapping[str, Any],
     marketplace_signer: Signer,
-    mechanism_fulfillment: Mapping[str, bool] = VM_MECHANISM_FULFILLS_THROUGH_CAPACITY,
 ) -> VmSettlementComposition:
     """Construct the VM runtime from explicit settlement mechanisms."""
     registry_owner = getattr(sqlite_client, "domain_registry", None)
@@ -941,6 +878,8 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
+    require_vm_release_model(domain, settlement_config)
+    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
         "clients": dict(alkahest_clients),
@@ -948,7 +887,6 @@ def build_vm_settlement_composition(
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
     }
-    alkahest_section = settlement_config.mechanism_config("alkahest")
     if alkahest_section is not None and (
         bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
     ):
@@ -1013,9 +951,7 @@ def build_vm_settlement_composition(
         runtime,
         repository,
         worker_id=f"vm-storefront:{storefront_config.AGENT_ID}",
-        interval_seconds=float(
-            getattr(storefront_config.settings, "claims_sweep_interval", 30)
-        ),
+        interval_seconds=storefront_config.settlement_servicing_interval(),
         on_event=on_event,
         on_terminal=on_terminal,
     )
@@ -1095,6 +1031,5 @@ def build_vm_settlement_composition(
         )
         if payments_stage is not None
         else None,
-        mechanism_fulfillment=mechanism_fulfillment,
     )
     return composition

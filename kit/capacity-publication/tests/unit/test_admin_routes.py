@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 
 from market_capacity_publication import (
     CapacityAdminRouteError,
@@ -39,6 +40,7 @@ async def test_reserve_passes_the_claim_and_an_admin_deal_reference() -> None:
     [
         (LookupError("listing has no binding"), 404),
         (CapacityBindingError("site not configured"), 500),
+        (CapacityNotAdmittedError("reserve requires capacity-backed supply"), 409),
         (ConnectionError("refused"), 502),
     ],
 )

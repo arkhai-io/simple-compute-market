@@ -27,6 +27,7 @@ from market_site_client import (
 from arkhai_bare_metal.fixtures.publication_view import (
     validate_bare_metal_publication_view,
 )
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_resource_pools_contracts import PoolCreate
 from market_resource_pools import read_site_declarations
 from market_resource_pools_contracts import resolve_pool_declarations
@@ -127,7 +128,7 @@ class CapacityApi:
 async def _create_pool(provisioning_client, pool_id: str) -> None:
     """A declaration's pool must exist; create it through the operator client."""
     await provisioning_client.pools.create_pool(PoolCreate(
-        id=pool_id, label=pool_id, provider="ansible",
+        id=pool_id, label=pool_id, provider="vm.ansible",
         policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))
@@ -420,7 +421,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
             provider_config={
                 "playbook_path": "playbooks/vm-operations.yaml",
@@ -447,7 +448,7 @@ async def test_site_resource_pools_projection_surfaces_pool_metadata(
 
     assert pool_row["pool_metadata"]["label"] == "Hetzner EU"
     assert pool_row["pool_metadata"]["enabled"] is True
-    assert pool_row["pool_metadata"]["mechanism"] == "ansible"
+    assert pool_row["pool_metadata"]["mechanism"] == "vm.ansible"
     assert pool_row["pool_metadata"]["pool_views"] == {
         "vm.ansible_pool_defaults.v1": {
             "default_vm_ram": 65536,
@@ -485,7 +486,7 @@ async def test_site_resource_pools_projection_surfaces_region_sla_pricing_policy
         PoolCreate(
             id="hetzner-eu",
             label="Hetzner EU",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={
                 "advertisable_modes": [],
                 "capacity_backing": "backed",
@@ -545,7 +546,7 @@ async def test_site_resource_pools_projection_carries_listing_shapes_verbatim(
         PoolCreate(
             id="shaped",
             label="Shaped",
-            provider="ansible",
+            provider="vm.ansible",
             policy_tags={
                 "advertisable_modes": [],
                 "capacity_backing": "backed",
@@ -582,7 +583,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     await provisioning_client.pools.create_pool(PoolCreate(
         id="bare-metal-west",
         label="Bare metal west",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": ["bare_metal", "vm"],
             "advertisable_modes": ["bare_metal"],
@@ -606,7 +607,7 @@ async def test_site_resource_pools_projection_declares_every_pool(
     }
     assert set(resolved) == {"default", "bare-metal-west"}
     assert resolved["bare-metal-west"].advertisable_modes == frozenset({"bare_metal"})
-    assert all(declarations.backed for declarations in resolved.values())
+    assert all(declarations.backing is BACKED for declarations in resolved.values())
 
 
 @pytest.mark.asyncio
@@ -625,7 +626,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     await provisioning_client.pools.create_pool(PoolCreate(
         id="vm-backed",
         label="VM backed",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": ["vm"],
             "advertisable_modes": ["vm"],
@@ -636,7 +637,7 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     await provisioning_client.pools.create_pool(PoolCreate(
         id="broker-unbacked",
         label="Broker",
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "deliverable_modes": [],
             "advertisable_modes": ["vm"],
@@ -665,8 +666,8 @@ async def test_the_projection_carries_both_declarations_as_storefronts_read_them
     reading = read_site_declarations(projection["resource_pools"])
     assert reading.compatibility_rule is False
     assert dict(reading.unresolvable) == {}
-    assert reading.resolved["vm-backed"].backed
-    assert not reading.resolved["broker-unbacked"].backed
+    assert reading.resolved["vm-backed"].backing is BACKED
+    assert reading.resolved["broker-unbacked"].backing is UNBACKED
     assert reading.resolved["broker-unbacked"].advertises("vm")
     assert reading.resolved["broker-unbacked"].enabled
 

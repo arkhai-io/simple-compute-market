@@ -20,23 +20,13 @@
 {{- if $itDigest -}}
   {{- $itImage = printf "%s@%s" $itImageName $itDigest -}}
 {{- end -}}
-{{- if not .Values.agents -}}
-  {{- fail "storefront smoke test requires at least one configured agent" -}}
+{{- $agents := dict -}}
+{{- include "storefront.agents" (dict "root" . "into" $agents) -}}
+{{- $targetName := $tests.targetAgentName | default (first (keys $agents | sortAlpha)) -}}
+{{- if not (hasKey $agents $targetName) -}}
+  {{- fail (printf "storefront smoke test targetAgentName %q did not match any agent" $targetName) -}}
 {{- end -}}
-{{- $targetName := $tests.targetAgentName | default "" -}}
-{{- $targetAgent := first .Values.agents -}}
-{{- if $targetName -}}
-  {{- $found := false -}}
-  {{- range $agent := .Values.agents -}}
-    {{- if eq $agent.name $targetName -}}
-      {{- $targetAgent = $agent -}}
-      {{- $found = true -}}
-    {{- end -}}
-  {{- end -}}
-  {{- if not $found -}}
-    {{- fail (printf "storefront smoke test targetAgentName %q did not match any agent" $targetName) -}}
-  {{- end -}}
-{{- end -}}
+{{- $targetAgent := merge (dict "name" $targetName) (index $agents $targetName) -}}
 {{- $component := $targetAgent.component | default $targetAgent.name -}}
 {{- $agentSecret := $targetAgent.secret | default dict -}}
 {{- $secretName := $tests.secretName | default ($agentSecret.secretName | default "") -}}

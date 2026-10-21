@@ -113,9 +113,6 @@ services:
       # Same convention as the API-credits storefront.
       - ../../kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
       - ${VMS_BOB_STOREFRONT_SECRETS_FILE:?set VMS_BOB_STOREFRONT_SECRETS_FILE}:/etc/arkhai/storefront.secrets.toml:ro
-      # Compute inventory seed CSV — storefront.bob.toml's
-      # seller.resources_csv_path expects this at /app/resources.csv.
-      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
     deploy:
       resources:
         limits:
@@ -168,9 +165,6 @@ services:
     volumes:
       - ${VMS_ALICE_STOREFRONT_CONFIG:-./storefront/storefront.alice.toml}:/etc/arkhai/storefront.toml:ro
       - ../../kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json:/app/alkahest_anvil_addresses.json:ro
-      # Startup still requires a CSV path. Scenario inventory is declared
-      # through Alice's provisioning authority and read from its projections.
-      - ./storefront/src/market_storefront/data/kvm1-machine.csv:/app/resources.csv:ro
     deploy:
       resources:
         limits:

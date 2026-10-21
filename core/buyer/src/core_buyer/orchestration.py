@@ -60,7 +60,11 @@ DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
 BuildEscrowProposalFn = Callable[[dict[str, Any]], Any | None]
 EncodeEscrowProposalFn = Callable[[Any], dict[str, Any]]
 DecodeOpaquePayloadFn = Callable[[dict[str, Any]], Any]
-BuildEscrowTermsFn = Callable[[Any, str | None, int, int], list[Any]]
+# Materialize the seller-accepted escrow proposal into opaque term payloads:
+# (accepted proposal, the selected listing, agreed amount, duration seconds).
+# The listing is passed so the mechanism holds the terms it builds to what the
+# listing advertises, rather than to whatever the proposal names.
+BuildEscrowTermsFn = Callable[[Any, dict[str, Any], int, int], list[Any]]
 CreateEscrowFn = Callable[[list[Any]], list[str]]
 SettlementRecipientFn = Callable[[Any], str | None]
 BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
@@ -936,7 +940,7 @@ def _settle_one(
         try:
             escrows = build_escrow_terms(
                 accepted_proposal,
-                terms.seller_wallet_address,
+                match,
                 terms.agreed_amount,
                 duration_seconds,
             )

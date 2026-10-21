@@ -6,10 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core_storefront.domain_registry import (
-    CAPACITY_BACKING_VALUES,
     StorefrontListingBinding,
     build_storefront_derivation_key,
     canonical_source_envelope,
+)
+from market_resource_pools_contracts.backing import (
+    UnknownCapacityBackingError,
+    capacity_backing,
 )
 
 from arkhai_vms_listings.listing_shapes import resolve_shape
@@ -39,12 +42,12 @@ def prepare_vm_listing_binding(
     # Every derivation path produces a shape; a candidate without a valid one
     # is a programming error, not a default shape to be assumed.
     listing_shape = resolve_shape(candidate.get("listing_shape")).shape
-    capacity_backing = candidate.get("capacity_backing")
-    if capacity_backing not in CAPACITY_BACKING_VALUES:
+    try:
+        backing = capacity_backing(candidate.get("capacity_backing"))
+    except UnknownCapacityBackingError as exc:
         raise ValueError(
-            "VM publication candidate requires an explicit capacity_backing, "
-            f"not {capacity_backing!r}"
-        )
+            f"VM publication candidate requires an explicit capacity_backing: {exc}"
+        ) from exc
     registry = build_vm_storefront_registry()
     registration = registry.resolve_mode("vm")
     # The derivation identity includes the canonical shape, whichever source
@@ -71,7 +74,7 @@ def prepare_vm_listing_binding(
         ),
         source_envelope_json=canonical_source_envelope(source),
         last_reconciled_at=datetime.now(UTC).isoformat(),
-        capacity_backing=capacity_backing,
+        capacity_backing=backing.label,
         pool_id=str(pool_id) if pool_id is not None else None,
         physical_resource_id=(
             str(resource_id) if resource_id is not None else None

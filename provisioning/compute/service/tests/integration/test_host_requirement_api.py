@@ -56,7 +56,7 @@ async def clients(client_and_queue):
         transport=transport,
     ) as compute:
         await provisioning_client.pools.create_pool(PoolCreate(
-            id=POOL, label=POOL, provider="ansible",
+            id=POOL, label=POOL, provider="vm.ansible",
             policy_tags={"advertisable_modes": ["vm"], "capacity_backing": "backed", "deliverable_modes": ["vm"]},
             provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
         ))
@@ -130,7 +130,7 @@ async def test_an_assignment_recorded_with_no_host_is_refused_rather_than_return
                 pool_id=POOL,
                 offering_mode="vm",
                 resource_kind="compute.gpu",
-                provider="ansible",
+                provider="vm.ansible",
                 attributes={},
                 host_id=None,
             ),

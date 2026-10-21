@@ -78,6 +78,23 @@ the same domain semantics.
 Most domains need the surfaces below. Some can be small wrappers around
 shared helpers; others may need dedicated packages and services.
 
+The diagram shows what one domain supplies and where each part plugs in.
+The storefront validates one immutable `MarketDomainContract` carrying the
+domain's codecs and its buyer, storefront, publication, settlement, and
+fulfillment capabilities; the contract reaches a storefront through a
+`market.storefront_contributions` registration, or a one-domain executable
+composes it directly, and the buyer capability reaches the `market` CLI
+through a `market.buyer_domains` registration. A registry filter
+specification and any resource service sit beside the contract. The bottom
+row names the packages that supply each part: the compute domain is one
+family with a shared vocabulary, provisioning capabilities, and provisioning
+service, and two sub-domains, VMs and bare metal, each with its own
+provisioning adapter; API credits stands alone. The diagram's source is
+[`../development/diagrams/domain-anatomy.drawio`](../development/diagrams/domain-anatomy.drawio);
+the SVG beside it is the export and also opens in draw.io.
+
+![What a market domain supplies and the seams it plugs into](../development/diagrams/domain-anatomy.svg)
+
 ### Listing resource schema
 
 The listing's `listing_resource` is domain-defined. The registry stores it as

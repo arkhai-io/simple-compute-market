@@ -14,10 +14,12 @@ from market_storefront.services.vm_fulfillment_service import (
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import Acceptance, AgreementTerms, NegotiationTerms
 from market_storefront.negotiation_runtime import _place_capacity_hold
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 
@@ -51,6 +53,9 @@ async def _place_hold(
             binding=binding,
         ),
         capacity_runtime=capacity,
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
 
 class FakeCapacity:
@@ -83,7 +88,7 @@ def _future() -> str:
     return (datetime.now(timezone.utc) + timedelta(seconds=600)).isoformat()
 
 
-_BINDING = CapacityBinding("site-test", "vm", "pool-test")
+_BINDING = PublicationBinding("site-test", "vm", "pool-test", BACKED)
 
 
 def _hold(**overrides) -> dict:
@@ -416,7 +421,7 @@ async def test_acceptance_hold_pins_to_the_listings_mapped_site(tmp_path):
     _place_capacity_hold's reserve() call, not just that reserve() itself
     honors a site kwarg when given one."""
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-    binding = CapacityBinding("dc-mapped", "vm", "pool-mapped")
+    binding = PublicationBinding("dc-mapped", "vm", "pool-mapped", BACKED)
     capacity = FakeCapacity(
         reserve_result=_hold(site=binding.site_id),
     )
@@ -484,7 +489,7 @@ async def test_acceptance_hold_ttl_is_capped_by_the_listings_mapped_pool_prefere
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {"max_reservation_hold_seconds": 30}
@@ -516,7 +521,7 @@ async def test_acceptance_hold_ttl_unchanged_when_no_pool_preference(tmp_path):
     db = SQLiteClient(db_path=str(tmp_path / "hold.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
     capacity = FakeCapacity(reserve_result=_hold())
 
-    def pool_policy(repository, listing_id):
+    def pool_policy(repository, listing_id, _site_projections):
         assert repository is db
         assert listing_id == "lst-1"
         return {}

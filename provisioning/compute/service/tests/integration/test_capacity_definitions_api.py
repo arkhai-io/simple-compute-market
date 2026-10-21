@@ -95,7 +95,7 @@ async def test_a_refused_import_reports_every_problem_and_applies_nothing(
     second carries a structural problem and is refused for it alone."""
     client, _ = client_and_queue
     await client.pools.create_pool(PoolCreate(
-        id="pool-b", label="Pool B", provider="ansible",
+        id="pool-b", label="Pool B", provider="vm.ansible",
         policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
         provider_config={"playbook_path": "playbooks/vm-operations.yaml"},
     ))

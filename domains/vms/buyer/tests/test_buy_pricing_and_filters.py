@@ -87,7 +87,7 @@ def _build_escrow_proposal():
     return lambda _match: _escrow_proposal()
 
 
-def _stub_build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
+def _stub_build_escrow_terms(proposal, listing, agreed_amount, duration_seconds):
     return [
         EscrowTerms(
             maker="buyer",

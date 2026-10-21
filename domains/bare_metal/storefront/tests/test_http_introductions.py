@@ -34,7 +34,8 @@ from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from loopback import serving
-from source_sites import SourceSites
+from held_loops import held_loop_controller
+from source_sites import SourceSites, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
@@ -86,12 +87,15 @@ def _runtime(
         site_bindings=(
             BareMetalSiteBinding(
                 site_id="site-a",
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer="site-a-peer",
                 authority_url="http://site-a",
             ),
         ),
-        # Openings recheck each listing against the site that published it.
+        # Openings recheck each listing against the projection held for the
+        # site that published it, which startup loads.
         capacity_client=SourceSites(),
+        site_projections=source_projections(),
+        loop_controller_factory=held_loop_controller,
         marketplace_signer=SELLER_SIGNER,
         settlement_composition=(
             BareMetalStorefrontSettlementComposition.from_raw_config(

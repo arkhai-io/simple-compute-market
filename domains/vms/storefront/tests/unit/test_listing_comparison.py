@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from market_resource_pools_contracts.backing import UNBACKED, capacity_backing
+
 from arkhai_vms_listings.listing_comparison import (
     BACKING_DISAGREES,
     BACKING_UNDISCLOSED,
@@ -30,8 +32,8 @@ def _compare(stored=None, fresh=None, stored_terms=None, fresh_terms=None, **kw)
         stored_terms=stored_terms or dict(_TERMS),
         fresh_resource=fresh or dict(_RESOURCE),
         fresh_terms=fresh_terms or dict(_TERMS),
-        binding_backing=kw.get("binding_backing", "unbacked"),
-        source_backing=kw.get("source_backing", "unbacked"),
+        binding_backing=capacity_backing(kw.get("binding_backing", "unbacked")),
+        source_backing=capacity_backing(kw.get("source_backing", "unbacked")),
     )
 
 
@@ -78,7 +80,7 @@ def test_a_refresh_keeps_stored_identity_and_takes_fresh_terms():
     refreshed = refreshed_listing_resource(
         stored_resource=stored,
         fresh_resource=fresh,
-        binding_backing="unbacked",
+        binding_backing=UNBACKED,
     )
 
     assert refreshed["sla"] == 99.9

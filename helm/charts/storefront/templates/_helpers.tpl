@@ -98,9 +98,69 @@ Argument: dict with `root` and `agent`.
 {{- end }}
 
 {{/*
-Per-agent fullname: {fullname}-{agent.name}.
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and every agent and every
+key under one comes from the parent or an overlay. So the chart removes them
+itself before any template reads an agent, and an agent renders as it would had
+the removed key never been stated. See openspec/specs/deployment-state/spec.md,
+"A storefront chart passes service configuration through".
+
+`storefront.dropNulls`: remove, in place, every key whose value is `null` from the
+mapping `.`, at every depth, inside list elements too. A list element is a value
+rather than a key, so a `null` element stays.
+*/}}
+{{- define "storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`storefront.agents`: the chart's agents with every `null` removed, set by name into
+the mapping `into`: a `null` agent is dropped, and each other agent is a copy with
+its `null` keys removed at every depth. An agent map naming no agent once they are
+removed is refused, as the values schema refuses an empty one: a release running no
+storefront agent disables the storefront instead. An agent stating no port or no
+identity, once its nulls are removed, is refused naming it: the chart has neither to
+default to, and every agent's container, probes, Service, and credential use them.
+Argument: dict with `root` (the chart root) and `into` (an empty dict).
+*/}}
+{{- define "storefront.agents" -}}
+{{- $into := .into -}}
+{{- range $name, $entry := (.root.Values.agents | default dict) -}}
+  {{- if not (kindIs "invalid" $entry) -}}
+    {{- $agent := deepCopy $entry -}}
+    {{- include "storefront.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $into $name $agent -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $into -}}
+  {{- fail "storefront agents names no agent once its nulls are removed; a release runs at least one, or sets the umbrella's storefront.enabled false to run none" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Per-agent fullname: {fullname}-{agent.name}, the agent's name being its key
+under agents:.
 Used as the Deployment / Service / Secret object name.
-Argument: dict with `root` (the chart root) and `agent` (one entry from agents:).
+Argument: dict with `root` (the chart root) and `agent` (one agent, with its
+name).
 */}}
 {{- define "storefront.agentFullname" -}}
 {{- printf "%s-%s" (include "storefront.fullname" .root) .agent.name | trunc 63 | trimSuffix "-" -}}
@@ -138,6 +198,19 @@ the agent fullname.
 {{- else -}}
 {{- printf "%s-config" (include "storefront.agentFullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+{{- end }}
+
+{{/*
+The agent's Alkahest address book, as JSON for fromJson: `configMapName` (empty
+mounts nothing), `key`, and `mountPath`, each defaulted where the agent's
+alkahestAddressBook does not state it.
+*/}}
+{{- define "storefront.agentAddressBook" -}}
+{{- $book := .alkahestAddressBook | default dict -}}
+{{- toJson (dict
+  "configMapName" ($book.configMapName | default "")
+  "key" ($book.key | default "alkahest_addresses.json")
+  "mountPath" ($book.mountPath | default "/etc/arkhai/alkahest")) -}}
 {{- end }}
 
 {{/*
@@ -247,14 +320,14 @@ storefront's loader reads them. Returns "true" or "".
 Render the per-agent public storefront document, `storefront.json`.
 
 The agent's `config` is the storefront's own configuration and passes through
-unchanged: the chart supplies no service default and does not validate the
-service's settings, which the storefront does at startup. The chart adds only
-what the release knows — the agent's port, its Service URL, the internal
-registry and provisioning URLs, a default capacity site, and the database path
-under the persistence mount — and, except for the port, only where the
-configuration does not state it. It refuses a release whose parts disagree.
-See openspec/specs/deployment-state/spec.md, "A storefront chart passes
-service configuration through".
+with its `null` keys removed (`storefront.agents` removes them). The chart
+supplies no service default and does not validate the service's settings, which
+the storefront does at startup. The chart adds only what the release knows — the
+agent's port, its Service URL, the internal registry and provisioning URLs, a
+default capacity site, and the database path under the persistence mount — and,
+except for the port, only where the configuration does not state it. It refuses
+a release whose parts disagree. See openspec/specs/deployment-state/spec.md, "A
+storefront chart passes service configuration through".
 
 Keys are matched case-insensitively at every level, as the storefront's loader
 matches them, so a check cannot be bypassed by spelling a key differently, and
@@ -339,16 +412,11 @@ Argument: dict with `root` (chart root) and `agent`.
   {{- $_ := set $cfg $capacityKey $capacity -}}
 {{- end -}}
 
-{{- /* Trust in the release's provisioning service is stated, then checked. */ -}}
+{{- /* Trust in the release's provisioning service is stated, then checked:
+every capacity site it serves is verified against that site's service peer,
+which must include the release's provisioning principal. */ -}}
 {{- if eq $provisioningURL (trimSuffix "/" $internalProvisioningURL) -}}
   {{- $active := $root.Values.global.provisioningIdentity -}}
-  {{- $provisioningIdentity := include "storefront.foldedMap" (dict "doc" $provisioning "name" "identity") | fromJson -}}
-  {{- $principalsKey := include "storefront.foldedKey" (dict "doc" $provisioningIdentity "name" "principals") -}}
-  {{- $provisioningPrincipals := list -}}
-  {{- if $principalsKey -}}{{- $provisioningPrincipals = index $provisioningIdentity $principalsKey -}}{{- end -}}
-  {{- if not (include "storefront.includesPrincipal" (dict "principals" $provisioningPrincipals "principal" $active)) -}}
-    {{- fail (printf "storefront agent %s config provisioning.identity.principals must include the release's provisioning principal" $agent.name) -}}
-  {{- end -}}
   {{- $internalSites := list -}}
   {{- range $siteID, $siteURL := (index $capacity $sitesKey) -}}
     {{- if eq (trimSuffix "/" (toString $siteURL)) $provisioningURL -}}
@@ -390,12 +458,6 @@ reads it directly from identity.credentialSecret.
 {{- $agent := .agent -}}
 # Rendered by the storefront helm chart (Secret overlay — sensitive only).
 # Deep-merged on top of storefront.json at runtime by dynaconf.
-
-{{- if $agent.secret.resourcesCsvInline }}
-resources_csv_inline = """
-{{ $agent.secret.resourcesCsvInline }}
-"""
-{{- end }}
 
 {{- if $agent.secret.registryAuthToken }}
 

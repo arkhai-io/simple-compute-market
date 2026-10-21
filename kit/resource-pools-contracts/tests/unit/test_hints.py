@@ -3,12 +3,11 @@ from __future__ import annotations
 import pytest
 
 import market_resource_pools_contracts
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_EXCEEDS_DELIVERABLE,
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
-    CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
     DEPRECATED_LISTING_MODE_POLICY_TAG,
     INVALID_ADVERTISABLE_MODES,
@@ -320,7 +319,7 @@ def _tags(**overrides):
     tags = {
         DELIVERABLE_MODES_POLICY_TAG: ["vm"],
         ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
-        CAPACITY_BACKING_POLICY_TAG: CAPACITY_BACKED,
+        CAPACITY_BACKING_POLICY_TAG: BACKED.label,
     }
     for key, value in overrides.items():
         if value is _ABSENT:
@@ -386,10 +385,10 @@ class TestAdvertisableModes:
 
 
 class TestCapacityBacking:
-    @pytest.mark.parametrize("value", [CAPACITY_BACKED, CAPACITY_UNBACKED])
+    @pytest.mark.parametrize("value", [BACKED.label, UNBACKED.label])
     def test_recognized_values_are_valid(self, value):
         tags = _tags(**{CAPACITY_BACKING_POLICY_TAG: value})
-        if value == CAPACITY_UNBACKED:
+        if value == UNBACKED.label:
             tags[DELIVERABLE_MODES_POLICY_TAG] = []
 
         assert pool_declaration_problems(tags) == ()
@@ -461,19 +460,19 @@ class TestCrossTagRules:
     def test_unbacked_pool_advertises_without_any_delivery_proof(self):
         tags = {
             ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"],
-            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+            CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
         }
 
         assert pool_declaration_problems(tags) == ()
         assert resolve_pool_declarations(tags) == PoolDeclarations(
-            frozenset({"vm", "bare_metal"}), CAPACITY_UNBACKED,
+            frozenset({"vm", "bare_metal"}), UNBACKED,
         )
 
     def test_unbacked_pool_that_delivers_is_refused(self):
         tags = {
             DELIVERABLE_MODES_POLICY_TAG: ["vm"],
             ADVERTISABLE_MODES_POLICY_TAG: ["vm"],
-            CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+            CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
         }
 
         assert _codes(tags) == {(DELIVERABLE_MODES_POLICY_TAG, UNBACKED_POOL_DELIVERS)}
@@ -500,8 +499,8 @@ class TestResolvePoolDeclarations:
     def test_valid_declarations_resolve(self):
         resolved = resolve_pool_declarations(_tags())
 
-        assert resolved == PoolDeclarations(frozenset({"vm"}), CAPACITY_BACKED)
-        assert resolved.backed is True
+        assert resolved == PoolDeclarations(frozenset({"vm"}), BACKED)
+        assert resolved.backing is BACKED
 
     def test_absence_is_reported_distinctly_and_never_defaulted(self):
         with pytest.raises(MissingPoolDeclarationError) as exc_info:
@@ -521,7 +520,7 @@ class TestResolvePoolDeclarations:
             {ADVERTISABLE_MODES_POLICY_TAG: ["vm", "bare_metal"]},
             {DELIVERABLE_MODES_POLICY_TAG: "vm"},
             {
-                CAPACITY_BACKING_POLICY_TAG: CAPACITY_UNBACKED,
+                CAPACITY_BACKING_POLICY_TAG: UNBACKED.label,
                 DELIVERABLE_MODES_POLICY_TAG: ["vm"],
             },
         ],
@@ -583,6 +582,72 @@ class TestListingShapesHint:
     def test_malformed_values_are_refused_with_their_location(self, value, fragment):
         problems = market_resource_pools_contracts.validate_listing_shapes({"listing_shapes": value})
         assert problems and any(fragment in problem for problem in problems), problems
+
+    def test_inline_constraints_are_accepted(self):
+        tags = {"listing_shapes": {"vm": [
+            {"gpu": {"model": "H100", "count": {"offer": 1, "min": 1, "max": 4}},
+             "cpu": {"count": 16},
+             "memory": {"gib": {"max": 512}}},
+            {"gpu": {"model": "H100", "count": {"offer": 8, "min": 4}}},
+        ]}}
+        assert market_resource_pools_contracts.validate_listing_shapes(tags) == []
+
+    @pytest.mark.parametrize(
+        ("constraint", "fragment"),
+        [
+            ({"offer": 2, "min": 4, "max": 2}, "min 4 is above max 2"),
+            ({"offer": 1, "max": 0}, "max must be a positive integer"),
+            ({"offer": 1, "min": -1}, "min must be a positive integer"),
+            ({"offer": 8, "max": 4}, "offer 8 lies outside its own range"),
+            ({}, "must state at least one of"),
+            ({"offer": 1, "step": 2}, "unknown constraint keys 'step'"),
+        ],
+    )
+    def test_a_malformed_constraint_is_refused_with_its_location(self, constraint, fragment):
+        tags = {"listing_shapes": {"vm": [
+            self.SHAPE,
+            {"gpu": {"model": "H100", "count": constraint}},
+        ]}}
+        problems = market_resource_pools_contracts.validate_listing_shapes(tags)
+        assert any(
+            problem.startswith("listing_shapes.vm[1].gpu.count:") and fragment in problem
+            for problem in problems
+        ), problems
+
+    def test_a_constraint_on_a_field_a_domain_calls_an_attribute_is_accepted(self):
+        # Whether a field is a quantity is the reading domain's to judge.
+        tags = {"listing_shapes": {"vm": [{"gpu": {"count": 1, "model": {"max": 4}}}]}}
+        assert market_resource_pools_contracts.validate_listing_shapes(tags) == []
+
+    def test_one_base_shape_with_different_constraints_is_refused_naming_both(self):
+        tags = {"listing_shapes": {"vm": [
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}},
+            self.SHAPE,
+            {"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}},
+        ]}}
+        problems = market_resource_pools_contracts.validate_listing_shapes(tags)
+        assert len(problems) == 1, problems
+        assert problems[0].startswith("listing_shapes.vm[0, 2].gpu.count:"), problems
+        assert "different constraints" in problems[0]
+
+    def test_an_identical_shape_stated_twice_is_accepted(self):
+        constrained = {"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}}
+        tags = {"listing_shapes": {"vm": [constrained, self.SHAPE, constrained, self.SHAPE]}}
+        assert market_resource_pools_contracts.validate_listing_shapes(tags) == []
+
+    def test_a_scalar_and_its_offer_mapping_are_the_same_statement(self):
+        tags = {"listing_shapes": {"vm": [
+            {"gpu": {"model": "H100", "count": 1}},
+            {"gpu": {"model": "H100", "count": {"offer": 1}}},
+        ]}}
+        assert market_resource_pools_contracts.validate_listing_shapes(tags) == []
+
+    def test_lists_of_different_modes_are_judged_apart(self):
+        tags = {"listing_shapes": {
+            "vm": [{"gpu": {"model": "H100", "count": {"offer": 1, "max": 4}}}],
+            "container": [{"gpu": {"model": "H100", "count": {"offer": 1, "max": 8}}}],
+        }}
+        assert market_resource_pools_contracts.validate_listing_shapes(tags) == []
 
     def test_raw_read_returns_the_mode_list_unvalidated(self):
         tags = {"listing_shapes": {"vm": [{"anything": {"x": 1}}], "container": [self.SHAPE]}}

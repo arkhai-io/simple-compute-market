@@ -8,45 +8,32 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import httpx
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
+from market_capacity_publication import SiteProjectionState
 from market_identity import Signer
 from market_policy.listing_source import ListingSourceVerdict
 
 import market_storefront.container as _container
-from market_storefront.services.listing_identity_carryover import carryover_report
-from market_storefront.settlement_composition import (
-    build_storefront_publication_clause_compiler,
+from market_storefront import lifecycle
+from market_storefront.services.capacity_client import site_projection_status
+from market_storefront.services.listing_cardinality_explanations import (
+    listing_cardinality_mode_explanations,
 )
+from market_storefront.services.listing_identity_carryover import carryover_report
 from market_storefront.negotiation_runtime import load_storefront_chain
 from market_storefront.utils.config import (
     AGENT_ID,
     CHAINS,
-    ESCROW_TEMPLATES,
     get_evm_wallet_address,
     settings,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _default_projection_status_provider() -> dict[str, Any]:
-    """Real production source for per-site projection load state.
-
-    A plain module-level function, not a bound import at class-body scope,
-    so it is only ever resolved when actually called — a caller that never
-    exercises `include_registry=True` pays no import cost, and a test can
-    substitute a fake via the constructor without patching this module.
-    """
-    from market_storefront.services.site_projection_cache import (
-        projection_status_summary,
-    )
-
-    return projection_status_summary()
 
 
 def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
@@ -56,9 +43,8 @@ def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
     producer predating the pool declarations, which pools and members are
     unresolvable and held, which members declare no GPU count or no resource
     type, which pools state shapes the VM vocabulary cannot read, which stated
-    shapes no member is feasible for, which pools publish nothing because
-    their listings claim an attribute no member declares, and which fields
-    each pool still takes from its legacy storefront override row.
+    shapes no member is feasible for, and which pools publish nothing because
+    their listings claim an attribute no member declares.
     """
     from arkhai_vms_listings.reconciler import derivation_reports
 
@@ -74,25 +60,16 @@ async def _default_pool_override_status_provider() -> list[dict[str, Any]] | Non
     return await service.statuses()
 
 
+def _default_lifecycle_provider() -> dict[str, dict[str, Any]]:
+    """Every lifecycle loop's controller state and the outcome of its last
+    cycle, by loop name, from the process's one loop controller."""
+    return {name: loop.to_dict() for name, loop in lifecycle.snapshot().items()}
+
+
 def _default_listing_identity_carryover_provider() -> dict[str, Any]:
     """Which pre-shape listings carried a seller's close or pause, and to which
     shape-bearing successor: the listing a seller should reopen or resume."""
     return carryover_report()
-
-
-def _default_listing_cardinality_mode_explanation_provider() -> (
-    dict[str, dict[str, str]]
-):
-    """Real production source for per-site, per-pool
-    listing_cardinality_mode operator notices. Same lazy-resolution and
-    constructor-injection rationale as `_default_projection_status_provider`,
-    immediately above.
-    """
-    from market_storefront.services.site_projection_cache import (
-        listing_cardinality_mode_explanations,
-    )
-
-    return listing_cardinality_mode_explanations()
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +85,7 @@ class SystemService:
         *,
         sqlite_client,
         marketplace_signer: Signer,
+        site_projections: SiteProjectionState,
         agent_id: str | None = None,
         projection_status_provider: Callable[[], dict[str, Any]] | None = None,
         listing_cardinality_mode_explanation_provider: (
@@ -120,16 +98,19 @@ class SystemService:
         pool_override_status_provider: (
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
+        lifecycle_provider: Callable[[], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
-        self._projection_status_provider = (
-            projection_status_provider or _default_projection_status_provider
+        # Both read the storefront's one projection state unless a caller
+        # supplies its own report.
+        self._projection_status_provider = projection_status_provider or partial(
+            site_projection_status, site_projections
         )
         self._listing_cardinality_mode_explanation_provider = (
             listing_cardinality_mode_explanation_provider
-            or _default_listing_cardinality_mode_explanation_provider
+            or partial(listing_cardinality_mode_explanations, site_projections)
         )
         self._publication_derivation_provider = (
             publication_derivation_provider or _default_publication_derivation_provider
@@ -141,6 +122,7 @@ class SystemService:
         self._pool_override_status_provider = (
             pool_override_status_provider or _default_pool_override_status_provider
         )
+        self._lifecycle_provider = lifecycle_provider or _default_lifecycle_provider
 
     # ------------------------------------------------------------------
     # Health / connectivity checks
@@ -248,11 +230,6 @@ class SystemService:
                 for name, chain in CHAINS.items()
             }
             try:
-                resources = await self._db.list_resources()
-                result["resource_count"] = len(resources)
-            except Exception:
-                result["resource_count"] = None
-            try:
                 result["site_projections"] = self._projection_status_provider()
             except Exception:
                 result["site_projections"] = None
@@ -278,6 +255,10 @@ class SystemService:
                 result["pool_overrides"] = await self._pool_override_status_provider()
             except Exception:
                 result["pool_overrides"] = None
+            try:
+                result["lifecycle"] = self._lifecycle_provider()
+            except Exception:
+                result["lifecycle"] = None
 
         return result
 
@@ -321,91 +302,6 @@ class SystemService:
             return "ok"
         # Surface the most recent non-ok result (all are non-ok here).
         return results[-1]
-
-    # Canonical bind-mount target for the inventory CSV inside a container.
-    # When neither csv_inline nor csv_path is set explicitly,
-    # ``seed_resources_if_empty`` auto-discovers a file at this path. Lets
-    # the canonical compose deploy work with no resources_csv_path setting
-    # in the TOML.
-    _DEFAULT_CSV_PATH = "/app/resources.csv"
-
-    async def seed_resources_if_empty(
-        self,
-        *,
-        csv_inline: str | None = None,
-        csv_path: str | None = None,
-    ) -> dict:
-        """Seed the resources table on startup if it is empty.
-
-        Source priority (matches provisioning service pattern):
-          1. ``csv_inline`` — raw CSV content delivered via config injection
-             (Helm Secret ``resources_csv_inline``). Used when the CSV must not
-             be baked into the container image.
-          2. ``csv_path`` — path to a CSV file on disk (compose / local dev).
-          3. Auto-discovery of ``/app/resources.csv`` — the canonical
-             container bind-mount target. Skipped silently when the file
-             doesn't exist, so local-dev outside a container is unaffected.
-
-        Seeding is skipped when the resources table already has rows, so that
-        operator changes made via the import API are not overwritten on pod
-        restart. To force a clobber regardless of table state, use
-        ``POST /api/v1/admin/portfolio/resources/import``.
-
-        Returns a dict with keys:
-          seeded         — True if the CSV was imported, False if skipped.
-          imported_count — number of rows written (0 when seeded=False).
-          source         — human-readable description of the data source used.
-        """
-        existing = await self._db.list_resources()
-        if existing:
-            logger.info(
-                "[RESOURCE SEED] Skipping — %d resource(s) already in DB",
-                len(existing),
-            )
-            return {
-                "seeded": False,
-                "imported_count": len(existing),
-                "source": "already_populated",
-            }
-
-        if csv_inline:
-            report = await self._db.upsert_resources_from_csv_content(
-                csv_content=csv_inline,
-                source_label="resources_csv_inline (config)",
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = "resources_csv_inline (config)"
-        elif csv_path:
-            report = await self._db.upsert_resources_from_csv(
-                csv_path=csv_path,
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = csv_path
-        elif os.path.exists(self._DEFAULT_CSV_PATH):
-            report = await self._db.upsert_resources_from_csv(
-                csv_path=self._DEFAULT_CSV_PATH,
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-            source = f"{self._DEFAULT_CSV_PATH} (auto-discovered)"
-        else:
-            logger.info(
-                "[RESOURCE SEED] No resource source configured — starting with empty inventory"
-            )
-            return {"seeded": False, "imported_count": 0, "source": None}
-
-        imported = report.get("imported_count", 0)
-        failed = report.get("failed_count", 0)
-        if failed:
-            logger.warning(
-                "[RESOURCE SEED] %d row(s) failed to import from %s",
-                failed,
-                source,
-            )
-        logger.info("[RESOURCE SEED] Imported %d resource(s) from %s", imported, source)
-        return {"seeded": True, "imported_count": imported, "source": source}
 
     def negotiation_strategy_check(self) -> str:
         """Probe the configured negotiation chain. Returns a viability string.

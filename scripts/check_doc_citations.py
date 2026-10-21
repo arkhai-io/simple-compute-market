@@ -1,8 +1,11 @@
 """Reject a documentation citation whose target is absent or tombstoned.
 
-`AGENTS.md` requires that every `openspec/`, `docs/`, `tools/`, `scripts/`
-and `e2e-tests/` path cited by a document resolve on the branch, and treats
-an unresolvable citation as a blocking defect rather than a stale link.
+`AGENTS.md` requires that every `openspec/`, `docs/`, `tools/`, `scripts/`,
+`e2e-tests/` and `.agents/` path cited by a document resolve on the branch, and
+treats an unresolvable citation as a blocking defect rather than a stale link.
+`.agents/` holds the shared skills and the files they cite, such as the outcome
+schema; the harness skill directories mirror it through links, so it alone is
+checked.
 
 The existence test this replaces could not fail on a rename-to-tombstone,
 which is the most likely broken citation in a renaming change: a tombstoned
@@ -14,9 +17,13 @@ pass on files the prune then deletes.
 
 Run over permanent documentation and over every unarchived change. Archived
 changes are excluded: they are a record of what was true when they were
-archived, and their citations are allowed to have moved on. A change's own
-closeout runs this before it is archived, which is when its citations are
-still expected to hold.
+archived, and their citations are allowed to have moved on. Scoped to one
+change by name, the check finds it active or archived, since closeout archives
+a change before its review; once it is archived, a citation of the change's own
+unarchived path resolves against its archive directory, so the archive move
+itself is never reported. A change's `reviews/` are excluded too:
+review records are untracked working notes, never part of the branch, so a
+citation in one is not a citation the branch makes.
 """
 
 from __future__ import annotations
@@ -27,10 +34,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from tombstones import is_tombstone  # noqa: E402
 
 #: Directories whose paths `AGENTS.md` requires to resolve when cited.
-CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests")
+CITED_ROOTS = ("openspec", "docs", "tools", "scripts", "e2e-tests", ".agents")
 
 #: Suffixes worth checking. A citation without one is usually a directory or
 #: prose, and directories are checked separately below.
@@ -41,18 +49,25 @@ CITED_SUFFIXES = ("py", "md", "toml", "yml", "yaml", "json", "sh", "mk")
 #: first suffix match so `a/b.py` is not swallowed into `a/b.py.bak`.
 CITATION = re.compile(
     r"(?<![\w./-])((?:%s)/[\w./-]+?\.(?:%s))(?![\w/-])"
-    % ("|".join(CITED_ROOTS), "|".join(CITED_SUFFIXES))
+    % ("|".join(map(re.escape, CITED_ROOTS)), "|".join(CITED_SUFFIXES))
 )
+
+
+def _change_documents(directory: Path) -> list[Path]:
+    return sorted(
+        path for path in directory.glob("**/*.md")
+        if "reviews" not in path.relative_to(directory).parts
+    )
 
 
 def documents(root: Path, change: str | None = None) -> list[Path]:
     """Documents to check.
 
-    With ``change``, only that change's own documents. A change's closeout
-    owes the citations it wrote, and gating it on the whole repository's
-    documentation debt would make one team's stale runbook block everyone
-    else's archival -- which turns a useful check into one people route
-    around.
+    With ``change``, only that change's own documents, active or archived. A
+    change's closeout owes the citations it wrote, and gating it on the whole
+    repository's documentation debt would make one team's stale runbook block
+    everyone else's archival -- which turns a useful check into one people
+    route around.
 
     Without ``change``, every permanent document plus every unarchived
     change, which is the repository-wide view.
@@ -60,12 +75,10 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
 
     changes = root / "openspec" / "changes"
     if change is not None:
-        directory = changes / change
-        if not directory.is_dir():
-            raise SystemExit(
-                "no such unarchived change: %s" % directory.as_posix()
-            )
-        return sorted(directory.glob("**/*.md"))
+        try:
+            return _change_documents(change_directory(root, change))
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
 
     found: list[Path] = []
     for pattern in ("openspec/specs/**/*.md", "docs/**/*.md"):
@@ -74,7 +87,7 @@ def documents(root: Path, change: str | None = None) -> list[Path]:
     for change in sorted(p for p in changes.iterdir() if p.is_dir()):
         if change.name == "archive":
             continue
-        found.extend(sorted(change.glob("**/*.md")))
+        found.extend(_change_documents(change))
     return found
 
 
@@ -83,11 +96,21 @@ def unresolvable(
 ) -> list[tuple[str, str, str]]:
     """Every citation that is absent or points at a tombstone."""
 
+    own: tuple[str, Path] | None = None
+    if change is not None:
+        try:
+            directory = change_directory(root, change)
+        except ChangeNotFound as exc:
+            raise SystemExit(str(exc)) from exc
+        if is_archived(root, directory):
+            own = (f"openspec/changes/{change}/", directory)
     problems: list[tuple[str, str, str]] = []
     for document in documents(root, change):
         text = document.read_text(encoding="utf-8", errors="ignore")
         for cited in sorted(set(CITATION.findall(text))):
             target = root / cited
+            if own and cited.startswith(own[0]):
+                target = own[1] / cited[len(own[0]):]
             if not target.exists():
                 problems.append(("absent", cited, document.as_posix()))
             elif target.is_file() and is_tombstone(target):

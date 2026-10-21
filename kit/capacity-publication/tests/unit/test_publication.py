@@ -3,13 +3,13 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 
 from core_storefront.sqlite_client import SellerClosedListingError
 from market_capacity_publication import (
+    PublicationBinding,
     BoundListing,
-    CapacityBinding,
     CapacityBindingError,
-    UnbackedBinding,
     PublicationCandidate,
     PublicationRuntime,
     ReconciliationPlan,
@@ -78,7 +78,7 @@ def runtime(repository, hooks):
 
 
 def candidate(listing_id="listing-1", binding=None):
-    binding = binding or CapacityBinding("site-a", "vm", "pool-a")
+    binding = binding or PublicationBinding("site-a", "vm", "pool-a", BACKED)
     return PublicationCandidate(
         listing_id=listing_id,
         binding=binding,
@@ -96,7 +96,7 @@ def candidate(listing_id="listing-1", binding=None):
 @pytest.mark.asyncio
 async def test_publish_requires_exact_durable_site_and_mode_binding():
     repository = Repository()
-    expected = CapacityBinding("site-a", "vm", "pool-a")
+    expected = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": expected})
 
     result = await runtime(repository, hooks).publish(candidate())
@@ -106,14 +106,14 @@ async def test_publish_requires_exact_durable_site_and_mode_binding():
 
     with pytest.raises(CapacityBindingError, match="does not match"):
         await runtime(repository, hooks).publish(
-            candidate(binding=CapacityBinding("site-b", "vm", "pool-a"))
+            candidate(binding=PublicationBinding("site-b", "vm", "pool-a", BACKED))
         )
 
 
 @pytest.mark.asyncio
 async def test_candidate_codec_must_project_exact_offering_mode():
     repository = Repository()
-    binding = CapacityBinding("site-a", "bare_metal", "pool-a")
+    binding = PublicationBinding("site-a", "bare_metal", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
 
     with pytest.raises(CapacityBindingError, match="advertised offering mode"):
@@ -123,7 +123,7 @@ async def test_candidate_codec_must_project_exact_offering_mode():
 @pytest.mark.asyncio
 async def test_reconciliation_owns_close_then_reopen_mechanics():
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"close-me": binding, "reopen-me": binding})
     publication = runtime(repository, hooks)
 
@@ -148,7 +148,7 @@ async def test_reconciliation_owns_close_then_reopen_mechanics():
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_a_seller_close_closed_and_continues():
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"withdrawn": binding, "restorable": binding})
     repository.statuses = {"withdrawn": "closed", "restorable": "closed"}
     repository.closed_by = {"withdrawn": "seller", "restorable": "reconciliation"}
@@ -168,7 +168,7 @@ async def test_reconciliation_leaves_a_seller_close_closed_and_continues():
 @pytest.mark.asyncio
 async def test_seller_reopen_is_named_to_the_repository():
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
     repository.statuses = {"listing-1": "closed"}
     repository.closed_by = {"listing-1": "seller"}
@@ -185,7 +185,7 @@ async def test_reopen_without_a_known_reopener_is_refused_before_any_write(
     reopened_by,
 ):
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
 
     with pytest.raises(ValueError, match="reopened_by"):
@@ -199,7 +199,7 @@ async def test_reopen_without_a_known_reopener_is_refused_before_any_write(
 @pytest.mark.asyncio
 async def test_reconciliation_rejects_conflicting_plan():
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
 
     with pytest.raises(ValueError, match="cannot close and reopen"):
@@ -214,7 +214,7 @@ async def test_reconciliation_rejects_conflicting_plan():
 @pytest.mark.asyncio
 async def test_unbacked_listing_publishes_under_its_own_binding():
     repository = Repository()
-    binding = UnbackedBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", UNBACKED)
     hooks = Hooks({"listing-1": binding})
 
     await runtime(repository, hooks).publish(candidate(binding=binding))
@@ -225,18 +225,18 @@ async def test_unbacked_listing_publishes_under_its_own_binding():
 @pytest.mark.asyncio
 async def test_backing_mismatch_with_durable_binding_is_refused():
     repository = Repository()
-    hooks = Hooks({"listing-1": UnbackedBinding("site-a", "vm", "pool-a")})
+    hooks = Hooks({"listing-1": PublicationBinding("site-a", "vm", "pool-a", UNBACKED)})
 
     with pytest.raises(CapacityBindingError, match="does not match"):
         await runtime(repository, hooks).publish(
-            candidate(binding=CapacityBinding("site-a", "vm", "pool-a"))
+            candidate(binding=PublicationBinding("site-a", "vm", "pool-a", BACKED))
         )
 
 
 @pytest.mark.asyncio
 async def test_seller_close_records_its_reason():
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
 
     await runtime(repository, hooks).close(
@@ -250,7 +250,7 @@ async def test_seller_close_records_its_reason():
 @pytest.mark.parametrize("closed_by", [None, "", "operator"])
 async def test_close_without_a_known_reason_is_refused_before_any_write(closed_by):
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
 
     with pytest.raises(ValueError, match="closed_by"):
@@ -293,7 +293,7 @@ class _RecordingRegistry:
 async def test_reopen_marks_the_listing_open_at_every_registry():
     """A registry keeps a republished listing's status, so reopen sets it."""
     repository = Repository()
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     hooks = Hooks({"listing-1": binding})
     registry = _RecordingRegistry()
     publication = PublicationRuntime(
@@ -332,7 +332,7 @@ def _enabled_runtime(repository, hooks, registry):
 @pytest.mark.asyncio
 async def test_a_failed_local_close_is_raised_before_any_registry_is_told():
     repository = Repository(fail_updates={"listing-1"})
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     registry = _RecordingRegistry()
 
     with pytest.raises(RuntimeError, match="database is locked"):
@@ -347,7 +347,7 @@ async def test_a_failed_local_close_is_raised_before_any_registry_is_told():
 @pytest.mark.asyncio
 async def test_reconciliation_records_a_failed_close_and_continues():
     repository = Repository(fail_updates={"stuck"})
-    binding = CapacityBinding("site-a", "vm", "pool-a")
+    binding = PublicationBinding("site-a", "vm", "pool-a", BACKED)
     registry = _RecordingRegistry()
     hooks = Hooks({"stuck": binding, "stale": binding})
 

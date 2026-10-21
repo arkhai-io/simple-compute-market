@@ -19,3 +19,15 @@ def test_the_parked_settlement_count_is_absent_when_not_reported():
 
     assert status.settlement_manual_required is None
     assert "settlement_manual_required" not in status.extra
+
+
+def test_the_lifecycle_loops_are_read_when_reported():
+    loops = {"publication": {"name": "publication", "state": "running", "last_outcome": None}}
+    status = HealthResponse.from_dict({"status": "ok", "lifecycle": loops})
+
+    assert status.lifecycle == loops
+    assert "lifecycle" not in status.extra
+
+
+def test_the_lifecycle_loops_are_absent_when_not_reported():
+    assert HealthResponse.from_dict({"status": "ok"}).lifecycle is None

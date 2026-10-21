@@ -9,9 +9,11 @@ state and wallet configuration for each target environment.
 ## Quick start
 
 ```bash
-# 1. First build/init and install the full stack
+# 1. First build/init and install the full stack. A local cluster uses the
+#    local overlay, so uninstalling discards the release's state
+#    (docs/development/DEPLOYMENT_AND_CONFIG.md, "Stateful service persistence").
 make build
-make deploy
+make -C helm deploy-local
 
 # 2. Run tests against local Anvil node.
 make test ACTIVE_PROFILES=local

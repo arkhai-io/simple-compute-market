@@ -1,19 +1,24 @@
-"""One bare-metal publication run: derive, publish, reconcile, and converge.
+"""One bare-metal publication cycle: derive, publish, reconcile, and converge.
 
-A run fetches every configured site's resource-pool projection through that
-site's own client, reads each pool's declarations and region (see
+A cycle reads every configured site's resource-pool projection from the
+storefront's held projection state and fetches no site: the state's poller
+keeps it current. It accepts each held generation's bare-metal views as this
+domain reads them, reads each pool's declarations and region (see
 ``site_reading``), and classifies every bare-metal resource (see
 ``arkhai_bare_metal.storefront_publication``). Candidates are published,
 refreshed, or reopened; listings whose resource is unavailable or withdrawn
-close; listings at a site whose projection could not be read, or in a pool
-whose declarations do not resolve, are held. Every run then converges each
-registry on its listings' local status.
+close; listings at a site whose projection is not held or whose generation this
+domain refuses, in a pool whose declarations do not resolve, or in a pool that
+resolves no settlement clause or no positive maximum lease duration, are held. Every cycle then
+converges each registry the storefront publishes to on its listings' local
+status.
 
-Sites are fetched one by one rather than through the aggregate capacity
-client, whose snapshot omits a site it could not reach: an unreachable site
-is unknown, not empty, and must hold its listings rather than delist them.
-See openspec/specs/storefront-publication/spec.md, "A site whose projection
-is not held holds its listings".
+A held generation may be stale -- its site's latest poll failed -- and the
+cycle derives from it all the same, because holding a site's listings through
+an outage is publication's job. A site holding no generation is unknown, not
+empty, and holds its listings rather than delisting them. See
+openspec/specs/storefront-publication/spec.md, "A site whose projection is not
+held holds its listings".
 
 The capacity-publication kit's cycle driver runs the synchronous core
 publication runner in a worker thread and returns each callback to the event
@@ -23,15 +28,17 @@ loop for the storefront's own async persistence and the kit publication runtime.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from arkhai_bare_metal import (
+    BACKING_CHANGED,
     BARE_METAL_OFFERING_MODE,
     CANDIDATE,
     HELD,
@@ -56,15 +63,22 @@ from core_storefront.publication_runner import (
     PublicationSourceSelection,
 )
 from core_storefront.sqlite_client import SellerClosedListingError
+from core_storefront.site_projections import ProjectionCacheView
 from market_capacity_publication import (
+    RESOURCE_POOL,
     BoundListing,
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    SiteProjectionState,
+    backing_changed,
     converge_registries,
 )
 from market_identity import Identity
+from market_storefront_kit import LifecycleRouteError
+from market_resource_pools_contracts.backing import capacity_backing
 
+from .listing_binding import bare_metal_listing_binding
 from .publication_service import (
     BareMetalPublicationHooks,
     RegistryClientFactory,
@@ -73,8 +87,8 @@ from .publication_service import (
 )
 from .pool_overrides import (
     BareMetalPoolOverride,
+    positive_lease_bound,
     read_bare_metal_pool_overrides,
-    record_accepted_generation,
 )
 from .site_reading import SitePoolReading, read_site_pools
 from .sqlite_client import SQLiteClient
@@ -88,6 +102,61 @@ PayloadBuilder = Callable[[dict[str, Any]], Awaitable[PublicationPayload]]
 # Why reconciliation closes a listing, as the report names it.
 CLOSE_SOURCE_GONE = "source_gone"
 CLOSE_UNAVAILABLE = "unavailable"
+
+
+class BareMetalPublicationError(LifecycleRouteError):
+    """A publication cycle the storefront cannot compose, and why.
+
+    Its text names what is missing -- the site projection state, a registry,
+    the settlement configuration -- and never a configured value, so a recorded
+    cycle outcome carries it. A step answers it as 503: the storefront cannot
+    publish until it is composed with what it names.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(503, detail)
+
+
+def _no_stage(_stage: str) -> None:
+    return None
+
+
+# Each derivation action a site's summary lists, by the summary's name for it.
+_DERIVATION_ACTIONS = {"hold": "holds", "refuse": "refusals", "report": "reports"}
+
+#: One site's derivation summary: its holds, refusals, and reports, each the
+#: cycle report's entry without its action and site.
+SiteDerivation = dict[str, list[dict[str, Any]]]
+
+
+class PublicationDerivation:
+    """The latest publication cycle's derivation, per configured site.
+
+    For each site the cycle read: every hold (a site whose projection is not
+    held or whose generation this domain refuses, and each pool or resource held
+    for its declarations, region, rates, override, settlement clauses, or lease
+    bound), every pool
+    refused, and every report, each with its reason. A site that derived cleanly
+    is present with empty lists, so status tells it from a site no cycle has
+    read. The publication step clears it as each cycle starts, and the cycle
+    records it once its compose stage has read every site, so a cycle that fails
+    before then reports none; a preview neither clears nor records. What status
+    reports is therefore always the derivation of the cycle whose outcome the
+    publication loop last recorded, or nothing.
+    """
+
+    def __init__(self) -> None:
+        self._latest: dict[str, SiteDerivation] = {}
+
+    def clear(self) -> None:
+        self._latest = {}
+
+    def record(self, summary: Mapping[str, SiteDerivation]) -> None:
+        self._latest = copy.deepcopy(dict(summary))
+
+    def latest(self) -> dict[str, SiteDerivation]:
+        """Each site's summary from the latest cycle; empty before any cycle."""
+        return copy.deepcopy(self._latest)
 
 
 def build_bare_metal_publication_selection(
@@ -145,32 +214,51 @@ def _stored_resource(stored: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class BareMetalPublicationCycle:
-    """One run of bare-metal publication over every configured site."""
+    """One cycle of bare-metal publication over every configured site.
+
+    ``site_projections`` is the storefront's one held projection state and
+    ``site_ids`` its configured sites. ``publication_clauses`` and
+    ``default_max_duration_seconds`` are the configured terms a pool's override
+    replaces. ``enter_stage`` names each stage the
+    cycle reaches -- ``compose``, ``run``, ``converge`` -- for the loop
+    controller's record of a failed cycle, and ``derivation`` receives each
+    site's derivation summary once compose has read every site.
+    """
 
     def __init__(
         self,
         *,
         sqlite_client: SQLiteClient,
         registry: StorefrontDomainRegistry,
-        site_clients: Mapping[str, Any],
+        site_projections: SiteProjectionState,
+        site_ids: Sequence[str],
         registry_client_factory: RegistryClientFactory,
-        registry_url: str,
+        registry_urls: Sequence[str],
         storefront_url: str,
         seller_principal: Identity,
         build_payload: PayloadBuilder,
-        configured_max_duration_seconds: int | None = None,
+        publication_clauses: Sequence[Any],
+        default_max_duration_seconds: int | None = None,
+        enter_stage: Callable[[str], None] = _no_stage,
+        derivation: PublicationDerivation | None = None,
     ) -> None:
         self._db = sqlite_client
-        self._configured_max_duration = configured_max_duration_seconds
+        # A configured bound that is absent or not positive bounds nothing, so
+        # a pool relying on it is held rather than published unbounded.
+        self._default_max_duration = positive_lease_bound(default_max_duration_seconds)
+        self._publication_clauses = tuple(publication_clauses)
         self._registry = registry
-        self._site_clients = dict(site_clients)
+        self._site_projections = site_projections
+        self._site_ids = tuple(site_ids)
+        self._enter_stage = enter_stage
+        self._derivation = derivation
         self._storefront_url = storefront_url
         self._seller_principal = seller_principal
         self._payload_builder = build_payload
         self._runtime = build_publication_runtime(
             sqlite_client,
             registry_client_factory,
-            registry_url=registry_url,
+            registry_urls=registry_urls,
             storefront_url=storefront_url,
         )
         self._hooks = BareMetalPublicationHooks(sqlite_client)
@@ -189,23 +277,32 @@ class BareMetalPublicationCycle:
     # -- run -------------------------------------------------------------
 
     async def run(self, *, dry_run: bool = False) -> dict[str, Any]:
-        """Run one pass; with ``dry_run``, report what it would do and do none of it.
+        """Run one cycle; with ``dry_run``, report what it would do and do none of it.
 
-        A dry run reads the sites, the stored listings, and the registries as a
-        pass would, and writes nothing: no accepted generation, listing,
-        binding, close, publication, or registry repair. Its report names each
-        open, close, refresh, reopen, and hold the pass would make.
+        A dry run reads the held projections, the stored listings, and the
+        registries as a cycle would, and writes nothing: no listing, binding,
+        close, publication, or registry repair. Its report names each open,
+        close, refresh, reopen, and hold the cycle would make.
         """
         self._dry_run = dry_run
         self.report.dry_run = dry_run
-        # Read once, before any site, so every site in a run sees one view.
+        self._enter_stage("compose")
+        # Read once, before any site, so every site in a cycle sees one view.
         self._overrides = await asyncio.to_thread(
             read_bare_metal_pool_overrides,
             self._db.db_path,
-            configured_max_duration_seconds=self._configured_max_duration,
+            configured_max_duration_seconds=self._default_max_duration,
         )
-        for site_id in sorted(self._site_clients):
-            await self._classify_site(site_id)
+        # Every site's held generation is read together, with nothing awaited
+        # between, so one cycle reads one generation of each site.
+        held = {
+            site_id: self._site_projections.view(site_id, RESOURCE_POOL)
+            for site_id in self._site_ids
+        }
+        for site_id in sorted(held):
+            self._classify_site(site_id, held[site_id])
+        if self._derivation is not None and not dry_run:
+            self._derivation.record(self._site_derivations())
         selection = build_bare_metal_publication_selection(
             self._registry,
             open_keys=self._open_keys,
@@ -214,6 +311,7 @@ class BareMetalPublicationCycle:
             record_published=self._record_published,
             reopen_existing=self._reopen_existing,
         )
+        self._enter_stage("run")
         result = await self._driver.run(
             selection.build_sources(),
             db_path=self._db.db_path,
@@ -227,21 +325,48 @@ class BareMetalPublicationCycle:
             logger.warning(
                 "bare-metal candidate %s failed: %s", _source_of(candidate), reason
             )
+        self._enter_stage("converge")
         await converge_registries(self._runtime, self.report)
         return self.report.as_dict()
 
-    async def _classify_site(self, site_id: str) -> None:
-        """Fetch, accept, and classify one site, or hold it as unknown."""
-        try:
-            response = await self._site_clients[site_id].resource_pool_projection()
-        except Exception as exc:
+    def _site_derivations(self) -> dict[str, SiteDerivation]:
+        """Every configured site's holds, refusals, and reports so far."""
+        summary: dict[str, SiteDerivation] = {
+            site_id: {name: [] for name in _DERIVATION_ACTIONS.values()}
+            for site_id in self._site_ids
+        }
+        for item in self.report.actions:
+            name = _DERIVATION_ACTIONS.get(item["action"])
+            site_id = item.get("site_id")
+            site = summary.get(site_id) if isinstance(site_id, str) else None
+            if name is None or site is None:
+                continue
+            site[name].append(
+                {key: value for key, value in item.items() if key not in ("action", "site_id")}
+            )
+        return summary
+
+    def _classify_site(self, site_id: str, view: ProjectionCacheView[Any]) -> None:
+        """Accept and classify one site's held generation, or hold the site."""
+        if view.value is None or view.identity is None:
             logger.warning(
-                "bare-metal site %s projection is unavailable: %s", site_id, exc
+                "bare-metal site %s projection is not held (%s): %s",
+                site_id,
+                view.state.value,
+                view.last_error or "no poll has loaded it",
             )
             self.report.record(
-                "hold", site_id=site_id, reason="site_projection_unknown", error=str(exc)
+                "hold",
+                site_id=site_id,
+                reason="site_projection_unknown",
+                **({"error": view.last_error} if view.last_error else {}),
             )
             return
+        response = {
+            "revision": view.identity.revision,
+            "digest": view.identity.digest,
+            "resource_pools": list(view.value),
+        }
         try:
             generation = trusted_bare_metal_projection(
                 site_id=site_id, projection=response
@@ -255,17 +380,6 @@ class BareMetalPublicationCycle:
             )
             return
         pools = response["resource_pools"]
-        if not self._dry_run:
-            await asyncio.to_thread(
-                record_accepted_generation,
-                self._db.db_path,
-                site_id=site_id,
-                revision=generation.revision,
-                digest=generation.digest,
-                pool_ids=[
-                    str(pool.get("pool_id")) for pool in pools if pool.get("pool_id")
-                ],
-            )
         site_overrides = {
             pool_id: override
             for (override_site, pool_id), override in self._overrides.items()
@@ -288,6 +402,7 @@ class BareMetalPublicationCycle:
         classification = classify_bare_metal_resources(
             generation,
             pool_admission=reading.admission,
+            pool_backings=reading.backings,
             pool_regions=reading.regions,
             pool_asking_rates=reading.published_asking_rates(),
         )
@@ -326,7 +441,12 @@ class BareMetalPublicationCycle:
                     reason="publication_capabilities_ignored",
                 )
         self._report_unpublished_rates(site_id, reading, classification)
+        unpublishable = self._hold_unbounded_pools(
+            site_id, reading, site_overrides
+        ) | self._hold_pools_without_clauses(site_id, reading, site_overrides)
         for candidate in classification.candidates:
+            if candidate["pool_id"] in unpublishable:
+                continue
             override = site_overrides.get(candidate["pool_id"])
             if override is not None:
                 _apply_override(candidate, override)
@@ -337,6 +457,79 @@ class BareMetalPublicationCycle:
                 candidate["shape_digest"],
             )
             self._candidates.append(candidate)
+
+    def _hold_unbounded_pools(
+        self,
+        site_id: str,
+        reading: SitePoolReading,
+        site_overrides: Mapping[str, BareMetalPoolOverride],
+    ) -> set[str]:
+        """Hold each admitted pool whose maximum lease duration resolves to nothing.
+
+        A pool's bound is its override's maximum, else the configured default;
+        one that is absent or not positive leaves its listings nothing to
+        publish as their maximum, so they are held -- neither published,
+        refreshed, nor closed -- and the pool is reported.
+        """
+        unbounded: set[str] = set()
+        for pool_id, admission in sorted(reading.admission.items()):
+            if admission != POOL_ADMITTED:
+                continue
+            override = site_overrides.get(pool_id)
+            stated = override.max_duration_seconds if override is not None else None
+            bound = stated if stated is not None else self._default_max_duration
+            if positive_lease_bound(bound) is not None:
+                continue
+            unbounded.add(pool_id)
+            self._held_pools.add((site_id, pool_id))
+            self.report.record(
+                "hold", site_id=site_id, pool_id=pool_id, reason="pool_lease_bound_missing"
+            )
+            logger.warning(
+                "bare-metal pool %s at %s resolves no positive maximum lease "
+                "duration from its override or [pricing].default_max_duration_seconds; "
+                "its listings are held",
+                pool_id,
+                site_id,
+            )
+        return unbounded
+
+    def _hold_pools_without_clauses(
+        self,
+        site_id: str,
+        reading: SitePoolReading,
+        site_overrides: Mapping[str, BareMetalPoolOverride],
+    ) -> set[str]:
+        """Hold each admitted pool that resolves no settlement clause.
+
+        A pool's clauses are its override's, else the configured ones; with
+        none, no settlement option can be built for its listings, so they are
+        held -- neither published, refreshed, nor closed -- and the pool is
+        reported, as a pool with no lease bound is.
+        """
+        unclaused: set[str] = set()
+        for pool_id, admission in sorted(reading.admission.items()):
+            if admission != POOL_ADMITTED:
+                continue
+            override = site_overrides.get(pool_id)
+            stated = override.clauses if override is not None else None
+            if (stated if stated is not None else self._publication_clauses):
+                continue
+            unclaused.add(pool_id)
+            self._held_pools.add((site_id, pool_id))
+            self.report.record(
+                "hold",
+                site_id=site_id,
+                pool_id=pool_id,
+                reason="pool_settlement_clauses_missing",
+            )
+            logger.warning(
+                "bare-metal pool %s at %s resolves no settlement clause from its "
+                "override or [pricing].settlements; its listings are held",
+                pool_id,
+                site_id,
+            )
+        return unclaused
 
     def _report_pools(self, site_id: str, reading: SitePoolReading) -> None:
         """Record every pool-level reason a site's pools publish nothing."""
@@ -428,9 +621,7 @@ class BareMetalPublicationCycle:
 
     def _open_keys(self, _db_path: str) -> set[str]:
         bindings = self._await(
-            self._db.list_open_bare_metal_listing_bindings(
-                site_ids=tuple(self._site_clients)
-            )
+            self._db.list_open_bare_metal_listing_bindings(site_ids=self._site_ids)
         )
         return {binding.derivation_key for binding in bindings}
 
@@ -678,14 +869,20 @@ class BareMetalPublicationCycle:
             "demands": demands,
             "max_duration_seconds": max_duration_seconds,
         }
+        binding = await bare_metal_listing_binding(self._db, listing_id)
+        if binding is None:
+            raise RuntimeError(f"listing {listing_id!r} has no complete binding")
         comparison = compare_bare_metal_listing(
+            backing_changed=backing_changed(
+                binding, capacity_backing(listing_resource["capacity_backing"])
+            ),
             stored_resource=_stored_resource(stored),
             stored_terms=listing_terms(stored),
             fresh_resource=fresh_resource,
             fresh_terms=fresh_terms,
         )
         is_open = stored.get("status") == "open"
-        if comparison.outcome == IDENTITY_CHANGED:
+        if comparison.outcome in (IDENTITY_CHANGED, BACKING_CHANGED):
             logger.warning(
                 "bare-metal listing %s no longer matches its Physical Resource in %s; %s",
                 listing_id,
@@ -696,7 +893,7 @@ class BareMetalPublicationCycle:
                 self.report.record(
                     "close",
                     listing_id=listing_id,
-                    reason=IDENTITY_CHANGED,
+                    reason=comparison.outcome,
                     fields=list(comparison.differing_fields),
                 )
             elif is_open:
@@ -705,7 +902,7 @@ class BareMetalPublicationCycle:
                     self.report.record(
                         "close",
                         listing_id=listing_id,
-                        reason=IDENTITY_CHANGED,
+                        reason=comparison.outcome,
                         fields=list(comparison.differing_fields),
                     )
                 else:
@@ -716,20 +913,30 @@ class BareMetalPublicationCycle:
                 self.report.record(
                     "refuse",
                     listing_id=listing_id,
-                    reason=IDENTITY_CHANGED,
+                    reason=comparison.outcome,
                     fields=list(comparison.differing_fields),
                 )
             return {"status": REOPEN_UNCHANGED}
         if is_open and comparison.outcome == UNCHANGED:
             return {"status": REOPEN_UNCHANGED}
         if self._dry_run:
+            action = "refresh" if is_open else "reopen"
             self.report.record(
-                "refresh" if is_open else "reopen",
+                action,
                 listing_id=listing_id,
                 fields=list(comparison.differing_fields),
                 status="dry_run",
             )
-            return {"status": "dry_run", "listing_id": listing_id}
+            logger.info(
+                "bare-metal listing %s would be %s (dry run): %s",
+                listing_id,
+                "refreshed" if is_open else "reopened",
+                list(comparison.differing_fields),
+            )
+            # The preview changes nothing, so the driver is told the listing is
+            # unchanged, which it skips; it counts `published` and `disabled` as
+            # published and any other status as a failed candidate.
+            return {"status": REOPEN_UNCHANGED}
 
         await self._db.update_listing(
             listing_id=listing_id,
@@ -803,5 +1010,8 @@ def _persisted_resource(
 
 __all__ = [
     "BareMetalPublicationCycle",
+    "BareMetalPublicationError",
+    "PublicationDerivation",
+    "SiteDerivation",
     "build_bare_metal_publication_selection",
 ]

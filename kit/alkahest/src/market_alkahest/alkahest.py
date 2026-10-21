@@ -34,6 +34,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Protocol, runtime_checkable
 
+from market_alkahest.release_authorization import (
+    ReleaseConditionError,
+    authorized_release_condition,
+    selected_release_condition,
+)
+from market_alkahest.schemas import EscrowTerms, RateValue, compute_rate_total
+
 NETWORK_ANVIL = "anvil"
 NETWORK_BASE_SEPOLIA = "base_sepolia"
 NETWORK_ETHEREUM_SEPOLIA = "ethereum_sepolia"
@@ -603,17 +610,14 @@ def encode_recipient_demand(recipient_address: str) -> bytes:
 #   - which on-chain contract address holds the arbiter
 #   - how the buyer should encode the demand bytes for it
 #
-# ``build_payment_obligation_data`` delegates both to the codec, so adding
-# a new arbiter (e.g. TrustedOracleArbiter) only requires writing a codec
-# + registering it — neither the buyer's escrow construction nor the
-# seller's verification needs to know about the new kind.
+# Materialization resolves a release condition's codec from its arbiter's
+# address, so adding a new arbiter (e.g. TrustedOracleArbiter) only requires
+# writing a codec + registering it — neither the buyer's escrow construction
+# nor the seller's verification needs to know about the new kind.
 #
-# The seller's verifier doesn't consult codecs at all: it dict-compares
-# the chain-read obligation_data against the buyer-built one. Both sides
-# call the same builder with the same inputs, so the demand bytes match
-# bytewise. Codec-aware verification (e.g. "decode demand and report the
-# *recipient address* that didn't match") is a UX nicety we can add later;
-# the structural check is already covered.
+# The seller's verifier dict-compares the chain-read obligation_data against
+# the obligation both sides materialize from the same inputs, so the demand
+# bytes match bytewise.
 
 
 @dataclass(frozen=True, init=False)
@@ -668,9 +672,9 @@ class ArbiterCodec(Protocol):
     ``_ARBITER_CODECS``; the buyer's builder looks one up by ``kind``
     (today: ``"recipient"``) and delegates the arbiter parts of
     obligation_data construction to it. Both sides — buyer at escrow
-    creation, seller via the shared ``build_payment_obligation_data``
-    helper — go through the same codec, so demand bytes match
-    bytewise across the wire and dict-compare verification passes.
+    creation, seller at verification — go through the same codec, so
+    demand bytes match bytewise across the wire and dict-compare
+    verification passes.
     """
 
     kind: str
@@ -751,91 +755,6 @@ def known_arbiter_kinds() -> list[str]:
     return sorted(_ARBITER_CODECS)
 
 
-def build_payment_obligation_data(
-    *,
-    demands: list[dict[str, Any]] | None = None,
-    recipient: str | None = None,
-    seller_wallet: str | None = None,
-    agreed_amount: int,
-    duration_seconds: int,
-    token_contract_address: str,
-    chain_name: str,
-    addr_config_path: str | None = None,
-    arbiter_kind: str = "recipient_arbiter",
-) -> dict[str, Any]:
-    """Canonical obligation_data for an ERC20 + arbiter-kind payment escrow.
-
-    Both the buyer (at escrow creation) and the seller (at verification)
-    call this helper with the negotiated inputs and the chain config, so
-    they produce identical expected obligation_data. Any divergence
-    between sides means a misconfiguration somewhere — wrong token,
-    wrong chain config, wrong amount, wrong arbiter kind — and the
-    seller's verifier flags it before any provisioning side-effect.
-
-    Returns the literal ``ERC20EscrowObligation.ObligationData`` struct:
-
-        {arbiter: <kind-specific address for chain_name>,
-         demand:  "0x" + <kind-specific demand bytes>,
-         token:   token_contract_address,
-         amount:  agreed_amount}
-
-    ``agreed_amount`` is the absolute payment total in base units of
-    ``token_contract_address`` — already multiplied out from any per-hour
-    rate during negotiation. The middleware chain owns price math; this
-    helper just wires obligation bytes.
-
-    The arbiter address and demand bytes are produced by the registered
-    ``ArbiterCodec`` matching ``arbiter_kind``.
-    """
-    if demands:
-        if len(demands) > 1:
-            raise ValueError(
-                "payment obligation demands[] is a deprecated proposal alias "
-                "and may contain at most one selected demand"
-            )
-        first = demands[0]
-        if not isinstance(first, dict):
-            raise ValueError("demands entries must be objects")
-        arbiter_address = first.get("arbiter")
-        if not isinstance(arbiter_address, str) or not arbiter_address:
-            raise ValueError("demands[0].arbiter is required")
-        demand_data = first.get("demand_data")
-        if not isinstance(demand_data, dict):
-            raise ValueError("demands[0].demand_data must be an object")
-        resolved_kind = address_to_slot(
-            chain_name,
-            arbiter_address,
-            config_path=addr_config_path,
-        )
-        if not resolved_kind:
-            raise ValueError(
-                f"Cannot resolve arbiter codec for demand arbiter "
-                f"{arbiter_address!r} on chain {chain_name!r}"
-            )
-        codec = get_arbiter_codec(resolved_kind)
-        demand_bytes = codec.encode_demand_data(demand_data)
-    else:
-        effective_recipient = recipient or seller_wallet
-        if not effective_recipient:
-            raise ValueError(
-                "recipient or demands must be supplied to build payment obligation data"
-            )
-        codec = get_arbiter_codec(arbiter_kind)
-        agreement = AgreementContext(
-            recipient=effective_recipient,
-            agreed_amount=int(agreed_amount),
-            duration_seconds=duration_seconds,
-        )
-        arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
-        demand_bytes = codec.encode_demand(agreement)
-    return {
-        "arbiter": arbiter_address,
-        "demand": "0x" + demand_bytes.hex(),
-        "token": token_contract_address,
-        "amount": int(agreed_amount),
-    }
-
-
 def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
     """Set a materialized obligation field.
 
@@ -901,6 +820,80 @@ def _set_obligation_field(data: dict[str, Any], field: str, value: Any) -> None:
         )
 
 
+def _encode_release_condition(
+    chain_name: str,
+    condition: Any,
+    *,
+    config_path: str | None,
+) -> tuple[str, str]:
+    """The obligation's ``arbiter`` and hex ``demand`` for one release condition.
+
+    ``condition`` is a demand mapping or model (``arbiter``, ``demand_data``).
+    The arbiter's codec is resolved from its deployed address on ``chain_name``,
+    so an arbiter the chain's address book does not name cannot be encoded.
+    Raises ``ReleaseConditionError``. Private: a caller reaches an encoded
+    condition only through ``encode_authorized_release_condition``.
+    """
+    if hasattr(condition, "model_dump"):
+        condition = condition.model_dump(exclude_none=True)
+    if not isinstance(condition, dict):
+        raise ReleaseConditionError(
+            "release_condition_unreadable: a release condition must be an object"
+        )
+    arbiter = condition.get("arbiter")
+    if not isinstance(arbiter, str) or not arbiter:
+        raise ReleaseConditionError(
+            "release_condition_unreadable: the release condition names no arbiter"
+        )
+    demand_data = condition.get("demand_data")
+    if not isinstance(demand_data, dict):
+        raise ReleaseConditionError(
+            "release_condition_unreadable: the release condition's demand_data "
+            "must be an object"
+        )
+    try:
+        kind = address_to_slot(chain_name, arbiter, config_path=config_path)
+    except ValueError as exc:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: arbiter {arbiter!r} on chain "
+            f"{chain_name!r} cannot be resolved: {exc}"
+        ) from exc
+    if not kind:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: {arbiter!r} is no arbiter the "
+            f"address book of chain {chain_name!r} names"
+        )
+    try:
+        demand = get_arbiter_codec(kind).encode_demand_data(demand_data)
+    except ValueError as exc:
+        raise ReleaseConditionError(
+            f"release_condition_unreadable: the {kind} demand cannot be encoded: {exc}"
+        ) from exc
+    return arbiter, "0x" + demand.hex()
+
+
+def encode_authorized_release_condition(
+    listing: Any,
+    *,
+    chain_name: str,
+    selected: Any = None,
+    config_path: str | None,
+) -> tuple[str, str]:
+    """The ``arbiter`` and hex ``demand`` of the condition ``listing`` authorizes.
+
+    ``selected`` is the condition a proposal names, if any; it must be one the
+    listing authorizes on ``chain_name``, and with none the listing's
+    authorized condition is used (``authorized_release_condition``). The
+    condition encoded is always the listing's own form of it. Raises
+    ``ReleaseConditionError`` before anything is encoded when the listing
+    authorizes no condition there, or not the one selected.
+    """
+    condition = authorized_release_condition(
+        listing, chain_name=chain_name, selected=selected
+    )
+    return _encode_release_condition(chain_name, condition, config_path=config_path)
+
+
 def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
     if not kind:
         return False
@@ -914,12 +907,12 @@ def _codec_kind_uses_scalar_amount(kind: str | None) -> bool:
 def materialize_escrow_terms_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
-) -> list[Any]:
-    """Convert the seller-accepted proposal into concrete ``EscrowTerms``.
+) -> list[EscrowTerms]:
+    """Convert a negotiated proposal into concrete ``EscrowTerms``.
 
     Negotiation messages remain proposal-shaped, but the final agreement is
     the exact on-chain obligation data. Literal fields and concrete proposal
@@ -927,13 +920,25 @@ def materialize_escrow_terms_from_proposal(
     has not already placed a concrete value in ``fields``. ``agreed_amount``
     is authoritative for the flat ``amount`` field because proposals can carry
     stale round amounts while settlement receives the final negotiated total.
+
+    The obligation's ``arbiter`` and ``demand`` are the release condition
+    ``listing`` authorizes on the proposal's chain, and nothing else: a
+    condition the proposal selects must be one the listing authorizes, a
+    proposal selecting none takes the listing's, and an ``arbiter`` or
+    ``demand`` stated among the escrow's fields is overwritten. ``listing`` is
+    the listing the proposal was negotiated against, a mapping or model
+    carrying its ``demands``. A listing authorizing none, a selection it does
+    not authorize, and a condition the codecs cannot encode raise
+    ``ReleaseConditionError`` before any obligation data is built.
     """
-    from market_alkahest.schemas import (
-        EscrowTerms,
-        RateValue,
-        accepted_demands,
-        accepted_recipient_address,
-        compute_rate_total,
+    # The release condition is the one the listing authorizes, and nothing
+    # else: an arbiter or demand stated among the escrow's fields, or a
+    # recipient implied by them, is never a condition of the obligation.
+    arbiter, demand = encode_authorized_release_condition(
+        listing,
+        chain_name=proposal.chain_name,
+        selected=selected_release_condition(proposal),
+        config_path=addr_config_path,
     )
 
     literal_fields = dict(getattr(proposal, "literal_fields", None) or {})
@@ -977,51 +982,7 @@ def materialize_escrow_terms_from_proposal(
     ):
         obligation_data["amount"] = int(agreed_amount)
 
-    demands = accepted_demands(proposal)
-    if demands:
-        if len(demands) > 1:
-            raise ValueError(
-                "proposal demands[] is deprecated and may contain at most one "
-                "selected demand; listing demands[] remains the allowed-options list"
-            )
-        first = demands[0]
-        arbiter_address = first.get("arbiter")
-        if not isinstance(arbiter_address, str) or not arbiter_address:
-            raise ValueError("demands[0].arbiter is required")
-        demand_data = first.get("demand_data")
-        if not isinstance(demand_data, dict):
-            raise ValueError("demands[0].demand_data must be an object")
-        resolved_kind = address_to_slot(
-            proposal.chain_name,
-            arbiter_address,
-            config_path=addr_config_path,
-        )
-        if not resolved_kind:
-            raise ValueError(
-                f"Cannot resolve arbiter codec for demand arbiter "
-                f"{arbiter_address!r} on chain {proposal.chain_name!r}"
-            )
-        codec = get_arbiter_codec(resolved_kind)
-        obligation_data["arbiter"] = arbiter_address
-        obligation_data["demand"] = "0x" + codec.encode_demand_data(demand_data).hex()
-    elif "arbiter" not in obligation_data or "demand" not in obligation_data:
-        recipient = accepted_recipient_address(proposal) or seller_wallet_address
-        if not recipient:
-            raise ValueError(
-                "Escrow proposal must carry demands, arbiter+demand literals, "
-                "or a recipient fallback"
-            )
-        codec = get_arbiter_codec("recipient_arbiter")
-        agreement = AgreementContext(
-            recipient=recipient,
-            agreed_amount=int(agreed_amount or obligation_data.get("amount") or 0),
-            duration_seconds=duration_seconds,
-        )
-        obligation_data["arbiter"] = codec.resolve_address(
-            proposal.chain_name,
-            config_path=addr_config_path,
-        )
-        obligation_data["demand"] = "0x" + codec.encode_demand(agreement).hex()
+    obligation_data["arbiter"], obligation_data["demand"] = arbiter, demand
 
     return [EscrowTerms(
         maker="buyer",
@@ -1035,7 +996,7 @@ def materialize_escrow_terms_from_proposal(
 def materialize_escrow_terms_payload_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
@@ -1043,7 +1004,7 @@ def materialize_escrow_terms_payload_from_proposal(
     """Materialize proposal terms as JSON-serializable payload dicts."""
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=seller_wallet_address,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,

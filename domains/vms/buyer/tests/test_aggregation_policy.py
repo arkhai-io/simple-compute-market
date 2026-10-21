@@ -94,7 +94,7 @@ def _build_escrow_proposal():
     return lambda _match: _escrow_proposal()
 
 
-def _build_escrow_terms_stub(proposal, seller_wallet, agreed_amount, duration_seconds):
+def _build_escrow_terms_stub(proposal, listing, agreed_amount, duration_seconds):
     """Stub builder for aggregation tests — escrow terms aren't the point here."""
     return [EscrowTerms(
         maker="buyer",

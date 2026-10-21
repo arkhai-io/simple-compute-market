@@ -44,15 +44,16 @@ from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_registry,
 )
 from arkhai_bare_metal_storefront.settlement import build_bare_metal_settlement_plan
-from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from loopback import serving
+from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from seeded_threads import seed_thread
 from settlement_compositions import ChainClient, EscrowOnChain, alkahest_composition
-from source_sites import SourceSites
+from site_trust import seeded_sites
+from source_sites import SourceSites, loaded_source_projections
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -542,6 +543,7 @@ class _FulfillmentSite:
 class _CapacityClient:
     def __init__(self) -> None:
         self.site_client = _FulfillmentSite()
+        self.site_names = ["site-a"]
         self.reservation_sites = {}
         self.reserve_calls = []
         self.commit_calls = []
@@ -823,18 +825,17 @@ async def test_http_fulfillment_restarts_on_recorded_site_and_redacts_result(
         tearing_down = buyer.teardown(negotiation_id)
 
     restarted_capacity = _CapacityClient()
+    restarted_db = SQLiteClient(path, domain=runtime.domain)
+    # The site's callback verifies against its service peer, seeded as startup
+    # seeds it.
+    bindings, trust = seeded_sites(restarted_db.db_path, {"site-a": SITE_SIGNER.identity})
     restarted = replace(
         runtime,
-        db=SQLiteClient(path, domain=runtime.domain),
+        db=restarted_db,
         capacity_client=restarted_capacity,
         fulfillment_client=_ProvisioningClient(torn_down=True),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                authority_url="http://site-a",
-                authority_principal=SITE_SIGNER.identity,
-            ),
-        ),
+        site_bindings=bindings,
+        service_peer_trust=trust,
     )
     with serving(_app(restarted)) as base_url:
         buyer = _fulfillment_client(base_url)
@@ -928,7 +929,17 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
         chain_config_paths={"anvil": str(anvil_address_book_path())},
         escrow_verifier=verifier,
         capacity_client=SourceSites(),
+        # The opening rechecks the listing against the projection held for its
+        # site, loaded as startup loads it.
+        site_projections=await loaded_source_projections(),
     )
+    condition = {
+        "chain_name": "anvil",
+        "arbiter": get_recipient_arbiter(
+            "anvil", config_path=str(anvil_address_book_path())
+        ),
+        "demand_data": {"recipient": runtime.seller_evm_address},
+    }
     await db.upsert_bare_metal_listing(
         listing_id="listing-1",
         status="open",
@@ -955,6 +966,9 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
                 "rates": [{"field": "amount", "per": "hour", "value": "100"}],
             }
         ],
+        # The release condition the plan settles under, which the buyer selects:
+        # the development chain's recipient arbiter paying the seller wallet.
+        demands=[condition],
     )
     opened = await runtime.negotiation_runtime.start(
         repository=db,
@@ -967,6 +981,7 @@ async def test_verify_registers_exactly_the_committed_plan(tmp_path) -> None:
             "escrow_address": ESCROW_ADDRESS,
             "fields": {"amount": "100", "token": TOKEN},
             "literal_fields": {"token": TOKEN},
+            "demand": condition,
             "expiration_unix": int(time.time()) + 3600,
         },
         terms={

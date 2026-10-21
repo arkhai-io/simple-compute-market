@@ -1,8 +1,10 @@
 """Asking rates through the bare-metal storefront app and its typed clients.
 
-The real app, database, and composition run; publication is the administrator's
-step route. Each site and the registry are the in-process doubles the cycle
-tests use, standing where this codebase wraps those services. A declared rate
+The real app, database, held projection state, and composition run, the loops
+held from the start; publication is the administrator's step route, after a
+``site-projections`` step wherever the site changed. Each site and the registry
+are the in-process doubles the cycle tests use, standing where this codebase
+wraps those services. A declared rate
 and a storefront override are each read back as the published listing a buyer
 fetches, and each refreshes the same listing in place.
 """
@@ -11,7 +13,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import os
 
 import httpx
 import pytest
@@ -20,15 +21,17 @@ from market_pool_overrides import PoolOverrideClient
 from storefront_client import StorefrontClient
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
-from arkhai_bare_metal_storefront.pool_overrides import configured_max_duration_seconds
 from arkhai_bare_metal_storefront.publication import BareMetalPublicationCycle
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
+from held_loops import held_loop_controller
 from test_http_system import ADMIN_SIGNER, SELLER_SIGNER, _app, _runtime
 from test_publication_cycle import (
+    CONFIGURED_CLAUSES,
     REGISTRY_URL,
     RecordingRegistries,
     Site,
+    projections_over,
     Terms,
     _priced,
     _rate,
@@ -49,22 +52,29 @@ class _Sites:
 
 
 @contextlib.asynccontextmanager
-async def _storefront(tmp_path, site: Site):
+async def _storefront(tmp_path, site: Site, *, default_max_duration_seconds: int | None = 3600):
+    """The running app over ``site``, its database under ``tmp_path``.
+
+    ``default_max_duration_seconds`` is the configured
+    ``[pricing].default_max_duration_seconds``; the runtime reads it when it is
+    composed, so a configuration change is a second storefront over the same
+    database, as a restart is.
+    """
     registries = RecordingRegistries()
 
     def cycle(runtime):
         return BareMetalPublicationCycle(
             sqlite_client=runtime.db,
             registry=build_bare_metal_storefront_registry(domain=get_market_domain_contract()),
-            site_clients={SITE: site},
+            site_projections=runtime.site_projections,
+            site_ids=[SITE],
             registry_client_factory=registries,
-            registry_url=REGISTRY_URL,
+            registry_urls=(REGISTRY_URL,),
             storefront_url=runtime.storefront_url,
             seller_principal=runtime.seller_principal,
             build_payload=Terms(),
-            # Read when each step composes its cycle, as the production
-            # composition reads it from the process environment.
-            configured_max_duration_seconds=configured_max_duration_seconds(os.environ),
+            publication_clauses=CONFIGURED_CLAUSES,
+            default_max_duration_seconds=runtime.default_max_duration_seconds,
         )
 
     runtime = dataclasses.replace(
@@ -72,12 +82,16 @@ async def _storefront(tmp_path, site: Site):
         site_bindings=(
             BareMetalSiteBinding(
                 site_id=SITE,
-                authority_principal=SELLER_SIGNER.identity,
+                service_peer=f"{SITE}-peer",
                 authority_url="http://site-a",
             ),
         ),
         capacity_client=_Sites(site),
+        # The storefront's held projection of the site, which startup loads.
+        site_projections=projections_over({SITE: site}),
+        loop_controller_factory=held_loop_controller,
         publication_cycle_factory=cycle,
+        default_max_duration_seconds=default_max_duration_seconds,
     )
     app = _app(runtime)
     async with app.router.lifespan_context(app):
@@ -138,6 +152,7 @@ async def test_an_unreadable_rate_holds_the_listing_a_buyer_reads(tmp_path):
         listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
 
         site.serve(_priced({**_rate("11.00"), "period": "month"}))
+        await admin.admin_run_lifecycle_cycle("site-projections")
         report = await admin.admin_run_lifecycle_cycle("publication")
         held = await public.get_listing(listing_id)
 
@@ -146,23 +161,49 @@ async def test_an_unreadable_rate_holds_the_listing_a_buyer_reads(tmp_path):
     assert held.listing_resource["asking_rate"]["amount"] == "12.50"
 
 
-async def test_a_bound_conflict_after_the_write_holds_rather_than_fails(tmp_path, monkeypatch):
-    """An override minimum accepted while no maximum was configured; the
-    configured maximum then falls below it. The next step holds the pool instead
-    of publishing an unordered pair or failing the run."""
-    monkeypatch.delenv("BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS", raising=False)
+async def test_a_bound_conflict_after_the_write_holds_rather_than_fails(tmp_path):
+    """An override minimum accepted under one configured maximum; the storefront
+    then restarts with a configured maximum below it. The next step holds the
+    pool instead of publishing an unordered pair or failing the run."""
     site = Site(_priced(_rate("12.50")))
-    async with _storefront(tmp_path, site) as (admin, public):
+    async with _storefront(tmp_path, site, default_max_duration_seconds=10800) as (admin, _):
         listing_id = _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
         await PoolOverrideClient(admin).put_pool_override(
             {"site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
              "terms": {"min_duration_seconds": 7200}}
         )
 
-        monkeypatch.setenv("BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS", "3600")
+    async with _storefront(tmp_path, site, default_max_duration_seconds=3600) as (
+        admin,
+        public,
+    ):
         report = await admin.admin_run_lifecycle_cycle("publication")
         held = await public.get_listing(listing_id)
 
     assert _holds(report) == {"pool_override_terms_conflict"}
     assert held.status == "open"
     assert "min_duration_seconds" not in held.listing_resource
+
+
+async def test_a_pool_resolving_no_lease_bound_is_held_through_the_running_app(tmp_path):
+    """With no configured maximum, the step reports the pool held for its lease
+    bound and publishes nothing for it; an override stating a maximum then lets
+    the next step publish it. Spec scenario: "A bare-metal pool resolves no
+    lease bound"."""
+    site = Site(_priced(_rate("12.50")))
+    async with _storefront(tmp_path, site, default_max_duration_seconds=None) as (
+        admin,
+        public,
+    ):
+        held = await admin.admin_run_lifecycle_cycle("publication")
+        await PoolOverrideClient(admin).put_pool_override(
+            {"site_id": SITE, "pool_id": "pool-1", "offering_mode": "bare_metal",
+             "terms": {"max_duration_seconds": 7200}}
+        )
+        listing = await public.get_listing(
+            _listing_id(await admin.admin_run_lifecycle_cycle("publication"))
+        )
+
+    assert _holds(held) == {"pool_lease_bound_missing"}
+    assert [item for item in held["actions"] if item["action"] == "publish"] == []
+    assert listing.status == "open"

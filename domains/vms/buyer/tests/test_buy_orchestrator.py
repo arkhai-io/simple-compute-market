@@ -162,8 +162,8 @@ def _stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds):
     )
 
 
-def _build_escrow_terms_ok(proposal, seller_wallet, agreed_amount, duration_seconds):
-    return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
+def _build_escrow_terms_ok(proposal, listing, agreed_amount, duration_seconds):
+    return [_stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)]
 
 
 def _run_buy_with_legacy_hooks(
@@ -458,12 +458,12 @@ def test_happy_path_drives_to_ready():
         },
     ]
 
-    build_calls: list[tuple[EscrowProposal, str, int, int]] = []
+    build_calls: list[tuple[EscrowProposal, dict, int, int]] = []
     create_calls: list[list[EscrowTerms]] = []
 
-    def _build_escrow_terms(proposal, seller_wallet, agreed_amount, duration_seconds):
-        build_calls.append((proposal, seller_wallet, agreed_amount, duration_seconds))
-        return [_stub_escrow_terms(seller_wallet, agreed_amount, duration_seconds)]
+    def _build_escrow_terms(proposal, listing, agreed_amount, duration_seconds):
+        build_calls.append((proposal, listing, agreed_amount, duration_seconds))
+        return [_stub_escrow_terms(_SELLER_WALLET, agreed_amount, duration_seconds)]
 
     def _create_escrow(escrows):
         create_calls.append(escrows)
@@ -491,20 +491,17 @@ def test_happy_path_drives_to_ready():
     assert result.agreed_amount == 50
     assert result.negotiation_id == "neg-1"
 
-    # build_escrow_terms received the proposal echoed by the seller +
-    # the negotiated agreement.
+    # build_escrow_terms received the proposal echoed by the seller, the
+    # listing it was negotiated against, and the negotiated agreement.
     assert len(build_calls) == 1
-    captured_proposal, captured_seller, captured_price, captured_duration = build_calls[
+    captured_proposal, captured_listing, captured_price, captured_duration = build_calls[
         0
     ]
     assert captured_proposal.chain_name == "anvil"
     assert captured_proposal.escrow_address == _ESCROW_ADDR
     assert captured_proposal.fields["token"] == _TOKEN
-    assert (captured_seller, captured_price, captured_duration) == (
-        _SELLER_WALLET,
-        50,
-        7200,
-    )
+    assert captured_listing["listing_id"] == "seller-1"
+    assert (captured_price, captured_duration) == (50, 7200)
     # create_escrow received the canonical EscrowTerms list.
     assert len(create_calls) == 1
     assert len(create_calls[0]) == 1

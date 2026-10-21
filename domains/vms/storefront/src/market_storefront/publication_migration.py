@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import copy
-import csv
-import io
-import json
 import os
 import re
 import stat
@@ -52,7 +49,7 @@ _THREE_DECIMAL_CURRENCIES = frozenset({"bhd", "jod", "kwd", "omr", "tnd"})
 @dataclass(frozen=True, slots=True)
 class PublicationMigrationResult:
     path: Path
-    kind: Literal["toml", "csv"]
+    kind: Literal["toml"]
     changed: bool
     written: bool
     actions: tuple[str, ...]
@@ -360,127 +357,6 @@ def migrate_publication_config(
     )
     return PublicationMigrationResult(
         config_path, "toml", True, True, (action,), (), backup_path
-    )
-
-
-def migrate_publication_csv(
-    path: str | os.PathLike[str],
-    *,
-    storefront_config: Mapping[str, Any],
-    check: bool = False,
-    write: bool = False,
-    backup: bool = False,
-    clause_compiler: Callable[[Mapping[str, Any]], SettlementPublicationClause]
-    | None = None,
-) -> PublicationMigrationResult:
-    """Migrate only rows whose legacy pricing has one exact interpretation."""
-
-    _mode(check=check, write=write, backup=backup)
-    csv_path = Path(path)
-    source_stat, original = _read_regular(csv_path)
-    try:
-        text = original.decode("utf-8")
-    except UnicodeError as exc:
-        raise SettlementMigrationValidationError("inventory CSV is not UTF-8") from exc
-    reader = csv.DictReader(io.StringIO(text, newline=""))
-    if reader.fieldnames is None:
-        raise SettlementMigrationValidationError("inventory CSV has no header")
-    rows = list(reader)
-    fieldnames = list(reader.fieldnames)
-    if "settlements" not in fieldnames:
-        fieldnames.append("settlements")
-
-    mechanism, context, context_conflicts = _legacy_context(storefront_config)
-    actions: list[str] = []
-    conflicts: list[str] = []
-    for index, row in enumerate(rows, start=2):
-        existing = (row.get("settlements") or "").strip()
-        legacy_accepted_escrows = (row.get("accepted_escrows") or "").strip()
-        if legacy_accepted_escrows:
-            conflicts.append(
-                f"row {index}: accepted_escrows requires manual settlement clauses"
-            )
-        if existing:
-            try:
-                parsed = json.loads(existing)
-                if not isinstance(parsed, list):
-                    raise ValueError("settlements must be an array")
-                if clause_compiler is None:
-                    raise ValueError("a resolved seller clause compiler is required")
-                for value in parsed:
-                    if not isinstance(value, Mapping):
-                        raise ValueError("each settlement clause must be an object")
-                    compiled = clause_compiler(value)
-                    if not isinstance(compiled, SettlementPublicationClause):
-                        raise TypeError(
-                            "seller clause compiler returned an invalid clause"
-                        )
-            except (ValueError, TypeError) as exc:
-                conflicts.append(f"row {index}: settlements is invalid: {exc}")
-            continue
-        if legacy_accepted_escrows:
-            continue
-        if (
-            not (row.get("min_price") or "").strip()
-            and not (row.get("token") or "").strip()
-        ):
-            continue
-        if context_conflicts or mechanism is None:
-            conflicts.append(f"row {index}: {context_conflicts[0]}")
-            continue
-        try:
-            clause = _clause_for_legacy_price(
-                mechanism=mechanism,
-                context=context,
-                min_price=row.get("min_price"),
-                token=row.get("token"),
-            )
-            if clause_compiler is None:
-                raise ValueError("a resolved seller clause compiler is required")
-            clause = clause_compiler(clause.model_dump(mode="json"))
-            if not isinstance(clause, SettlementPublicationClause):
-                raise TypeError("seller clause compiler returned an invalid clause")
-        except (ValueError, TypeError) as exc:
-            conflicts.append(f"row {index}: {exc}")
-            continue
-        row["settlements"] = json.dumps(
-            [clause.model_dump(mode="json", exclude_defaults=True)],
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        actions.append(f"row {index}: settlements <- {mechanism}")
-
-    if conflicts:
-        if write:
-            raise SettlementMigrationValidationError("; ".join(conflicts))
-        return PublicationMigrationResult(
-            csv_path, "csv", bool(actions), False, tuple(actions), tuple(conflicts)
-        )
-    if not actions:
-        return PublicationMigrationResult(csv_path, "csv", False, False, (), ())
-
-    output = io.StringIO(newline="")
-    writer = csv.DictWriter(
-        output,
-        fieldnames=fieldnames,
-        lineterminator="\r\n" if "\r\n" in text else "\n",
-    )
-    writer.writeheader()
-    writer.writerows(rows)
-    candidate = output.getvalue().encode("utf-8")
-    if check:
-        return PublicationMigrationResult(
-            csv_path, "csv", True, False, tuple(actions), ()
-        )
-    backup_path = atomic_write_with_backup(
-        csv_path,
-        original=original,
-        candidate=candidate,
-        original_stat=source_stat,
-    )
-    return PublicationMigrationResult(
-        csv_path, "csv", True, True, tuple(actions), (), backup_path
     )
 
 

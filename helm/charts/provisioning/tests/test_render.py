@@ -21,7 +21,7 @@ _POOLS = {
         {
             "id": "default",
             "label": "Default Pool",
-            "provider": "ansible",
+            "provider": "vm.ansible",
             "provider_config": {"playbook_path": "playbooks/vm-operations.yaml"},
         }
     ]

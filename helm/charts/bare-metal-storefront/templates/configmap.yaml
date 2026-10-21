@@ -1,0 +1,14 @@
+{{/*
+The public storefront document, storefront.json, mounted beside the optional
+Secret overlay, storefront.secrets.toml, at /etc/arkhai/; the storefront merges
+the two at startup, the overlay winning.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bare-metal-storefront.configMapName" . }}
+  labels:
+    {{- include "bare-metal-storefront.labels" . | nindent 4 }}
+data:
+  storefront.json: |
+    {{- include "bare-metal-storefront.configDocument" . | nindent 4 }}

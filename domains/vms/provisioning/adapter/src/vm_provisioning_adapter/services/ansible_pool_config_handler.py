@@ -23,7 +23,7 @@ _UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
 
 
 class AnsiblePoolConfigHandler:
-    provider = "ansible"
+    provider = "vm.ansible"
 
     def __init__(self, settings: Any | None = None) -> None:
         # Settings carry the key that decrypts a relay's admission token. The
@@ -79,7 +79,7 @@ class AnsiblePoolConfigHandler:
                 PoolConfigValidationProblem(
                     path="playbook_path",
                     code="required_field",
-                    message="provider_config.playbook_path is required for provider='ansible'",
+                    message="provider_config.playbook_path is required for provider='vm.ansible'",
                 )
             )
         if not isinstance(requirement_delegate, str) or not requirement_delegate.strip():
@@ -87,7 +87,7 @@ class AnsiblePoolConfigHandler:
                 PoolConfigValidationProblem(
                     path="requirement_delegate",
                     code="required_field",
-                    message="provider_config.requirement_delegate is required for provider='ansible'",
+                    message="provider_config.requirement_delegate is required for provider='vm.ansible'",
                 )
             )
         elif requirement_delegate not in registered_requirement_delegate_names():
@@ -258,12 +258,3 @@ class AnsiblePoolConfigHandler:
             new_relay_id=normalized["relay_id"],
         )
         row.relay_id = normalized["relay_id"]
-
-    def delete_config(self, db: Session, pool_id: str) -> None:
-        row = (
-            db.query(AnsiblePoolConfig)
-            .filter(AnsiblePoolConfig.pool_id == pool_id)
-            .one_or_none()
-        )
-        if row is not None:
-            db.delete(row)

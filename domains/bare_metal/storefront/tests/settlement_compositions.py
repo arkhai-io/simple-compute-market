@@ -110,17 +110,21 @@ def alkahest_composition(
     chain_clients: Mapping[str, Any],
     enabled: bool = True,
     escrow: Any | None = None,
+    section: Mapping[str, Any] | None = None,
+    chains: Mapping[str, Any] | None = None,
 ) -> BareMetalStorefrontSettlementComposition:
     """Alkahest settlement over ``chain_clients``, the chain boundary's doubles.
 
     ``escrow`` stands in for the Alkahest mechanism client the registration
     would build over those chain clients; without it, the registration builds
-    the real one.
+    the real one. ``section`` replaces settings of the configured Alkahest
+    section, and ``chains`` the chains' configuration, which otherwise names
+    only an RPC URL for each chain client.
     """
     raw = {
         "schema_version": 1,
         "priority": ["alkahest.v1"] if enabled else [],
-        "alkahest": {**ALKAHEST_SECTION, "enabled": enabled},
+        "alkahest": {**ALKAHEST_SECTION, **dict(section or {}), "enabled": enabled},
     }
     alkahest = create_alkahest_registration()
     if escrow is not None:
@@ -142,6 +146,10 @@ def alkahest_composition(
             "wallet": wallet,
             "wallet_ready": True,
             "clients": dict(chain_clients),
-            "chains": {name: {"rpc_url": "http://anvil:8545"} for name in chain_clients},
+            "chains": (
+                dict(chains)
+                if chains is not None
+                else {name: {"rpc_url": "http://anvil:8545"} for name in chain_clients}
+            ),
         },
     )

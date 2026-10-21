@@ -1,10 +1,10 @@
 """Each registered loop step reports a loop name the lifecycle controller knows.
 
-A loop's name is spelled where `startup.py` registers it, where the loop body
-gates on it, and in what its step reports. The first two are covered by
-`test_loop_gate_wiring.py`; this covers the third, which had already drifted
-once -- a route named an engine that no longer existed and reported a name
-nothing used any more.
+A loop's name is spelled where `lifecycle_steps.py` registers its timer, which
+the controller gates under, and in what its step reports. The first is covered
+by `test_loop_gate_wiring.py`; this covers the second, which had already
+drifted once -- a route named an engine that no longer existed and reported a
+name nothing used any more.
 
 The response name is load-bearing, not cosmetic: a caller advances a loop and
 then reads the loop states to see whether it is held, and a reported name that
@@ -16,13 +16,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from market_storefront_kit import LifecycleRouteError
 
 # `server` first: it and the admin controller import each other, and importing
 # the controller from a cold interpreter hits that cycle part-way. The app module
 # resolves it, which is the order every other test here gets by importing
 # through the app.
 from market_storefront import lifecycle, server  # noqa: F401
+import market_storefront.container as container
 from market_storefront.controllers import admin_controller  # noqa: F401 - registers the steps
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 def _loop_names() -> set[str]:
@@ -74,42 +77,49 @@ class TestStepsReportRegisteredNames:
         assert raised.value.status_code == 503
 
     async def test_fulfillment_resume(self, monkeypatch):
-        calls = {"n": 0}
+        """The step is the timer's whole cycle: it resumes unfinished
+        deliveries, then advances accepted payment deals."""
+        calls: list[str] = []
 
-        async def _sweep(*, sqlite_client):
-            calls["n"] += 1
+        class _Deliveries:
+            async def list_incomplete_vm_deliveries(self, *, limit):
+                calls.append("resume")
+                return []
 
-        import market_storefront.container as container
+        class _Payments:
+            async def reconcile_once(self):
+                calls.append("payments")
 
-        monkeypatch.setattr(container, "resolved_sqlite_client", object(), raising=False)
+        monkeypatch.setattr(container, "resolved_sqlite_client", _Deliveries())
         monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.resume_incomplete_fulfillments_once",
-            _sweep,
+            container,
+            "resolved_settlement_composition",
+            SimpleNamespace(payments_coordinator=_Payments()),
         )
         result = await _advance("fulfillment-resume")
 
         assert result["loop"] == lifecycle.FULFILLMENT_RESUME
-        assert calls["n"] == 1
+        assert calls == ["resume", "payments"]
 
     async def test_site_projections(self, monkeypatch):
-        async def _load(_client):
-            return None
-
-        import market_storefront.container as container
-
-        monkeypatch.setattr(container, "resolved_sqlite_client", object(), raising=False)
+        """The step runs the poller's cycle on the injected state: every family
+        of every site is polled once, and the per-site state proves it landed."""
+        site = FakeProjectionSite(resource_pools=[], capacity_buckets=[])
         monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.load_site_projections",
-            _load,
-        )
-        monkeypatch.setattr(
-            "market_storefront.lifecycle_steps.projection_status_summary",
-            lambda: {"default": {"capacity_buckets": {"state": "loaded"}}},
+            container, "resolved_site_projections", site_projection_state({"default": site})
         )
         result = await _advance("site-projections")
 
         assert result["loop"] == lifecycle.SITE_PROJECTION_POLLER
-        assert result["sites"], "the pull's per-site state is what proves it landed"
+        assert result["sites"]["default"]["resource_pool"]["state"] == "loaded"
+        assert result["sites"]["default"]["capacity_bucket"]["state"] == "loaded"
+        assert site.snapshots == {"resource_pool": 1, "capacity_bucket": 1}
+
+    async def test_site_projections_before_composition_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr(container, "resolved_site_projections", None)
+        with pytest.raises(LifecycleRouteError) as raised:
+            await _advance("site-projections")
+        assert raised.value.status_code == 503
 
     async def test_negotiation_watchdog(self, monkeypatch):
         calls = {"n": 0}
@@ -156,8 +166,11 @@ class TestPublicationRoutes:
     @pytest.mark.parametrize("dry_run", [True, False])
     async def test_each_route_runs_exactly_the_timers_cycle(self, monkeypatch, dry_run):
         calls: list[bool] = []
+        state = site_projection_state({"default": FakeProjectionSite(resource_pools=[])})
+        monkeypatch.setattr(container, "resolved_site_projections", state)
 
-        async def _cycle(*, dry_run):
+        async def _cycle(*, dry_run, site_projections):
+            assert site_projections is state, "the cycle reads the composed state"
             calls.append(dry_run)
             return {"loop": "publication", "dry_run": dry_run, "actions": [], "counts": {}}
 
@@ -170,3 +183,11 @@ class TestPublicationRoutes:
 
         assert calls == [dry_run]
         assert result["loop"] == lifecycle.PUBLICATION
+
+    @pytest.mark.parametrize("dry_run", [True, False])
+    async def test_before_composition_each_route_is_unavailable(self, monkeypatch, dry_run):
+        monkeypatch.setattr(container, "resolved_site_projections", None)
+        loops = lifecycle.controller()
+        with pytest.raises(LifecycleRouteError) as raised:
+            await (loops.dry_run("publication") if dry_run else loops.run_cycle("publication"))
+        assert raised.value.status_code == 503

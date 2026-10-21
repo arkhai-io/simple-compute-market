@@ -6,9 +6,9 @@ composition root wires it, and it is driven only through the canonical
 ``[pricing].settlements`` — so each publication cycle compiles its clauses through
 the request path a deployed storefront runs. The external boundaries are replaced
 where this codebase wraps them: the capacity site is the in-memory fake the other
-storefront suites use, the site projection is supplied as the projection poller
-would hold it, and the settlement composition is a double standing where the
-mechanism clients would.
+storefront suites use, the storefront's projection state is built over fake sites
+serving the harness's pool lists, and the settlement composition is a double
+standing where the mechanism clients would.
 
 The settings select both compute domains, as a combined storefront does, so every
 cycle rebuilds the two-registration registry a deployed loop builds.
@@ -17,8 +17,9 @@ cycle rebuilds the two-registration registry a deployed loop builds.
 from __future__ import annotations
 
 import contextlib
+from types import SimpleNamespace
 from copy import deepcopy
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,11 +27,6 @@ from unittest.mock import patch
 
 import httpx
 from core_storefront import multi_registry_client
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from fastapi import FastAPI
 from market_config.config_loader import ChainConfig
 from market_capacity_publication.capacity_remote import reset_site_event_cursors
@@ -42,6 +38,7 @@ import market_policy.negotiation_thread as thread_store
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import ContactExchangeClient
 from market_core.schemas import RateValue, derive_settlement_option_id
+from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
 from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
@@ -55,6 +52,9 @@ from market_storefront.middleware import admin_identity
 # tests rely on; importing a controller first leaves it partially initialized.
 import market_storefront.server  # noqa: F401  (import order, see above)
 from market_storefront.server import build_pool_override_service
+from market_storefront.services.publication_terms import (
+    parse_configured_admissibility_default,
+)
 import market_storefront.negotiation_runtime as negotiation_runtime
 from market_storefront.contact_exchange import build_vm_contact_exchange
 from market_storefront.controllers.admin_controller import router as admin_router
@@ -69,22 +69,23 @@ from market_storefront.controllers.negotiate_controller import router as negotia
 from market_storefront.controllers.system_controller import router as system_router
 from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 from market_storefront.middleware.service_peer_auth import (
-    initialize_service_peer_identities,
     service_peer_callback_middleware,
 )
-from market_storefront.services import site_projection_cache
 from market_storefront.services.listing_service import ListingService
+from market_storefront.services.publication_loop import wake_publication_loop
 from market_storefront.services.system_service import SystemService
 from market_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
 from market_storefront.utils import config as storefront_config
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
+    FakeProjectionSite,
     FakeSite,
     capacity_runtime_over_sites,
+    site_projection_state,
 )
 
 SITE = "site-a"
@@ -99,7 +100,9 @@ REGISTRY_SIGNER = Ed25519Signer(b"\x73" * 32)
 SERVICE_SIGNER = Ed25519Signer(b"\x74" * 32)
 _ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
-_WALLET = "0x" + "33" * 20
+#: The storefront's configured seller wallet; a development value, never used
+#: on a public network.
+SELLER_WALLET = "0x" + "33" * 20
 _TOKEN = "0x" + "22" * 20
 _ESCROW_ADDRESS = "0x" + "11" * 20
 
@@ -185,7 +188,9 @@ class SettlementCompositionDouble:
     mechanism clients, yields one accepted escrow and its exact option per Alkahest clause; a
     contact-exchange clause, which needs no client, is built by the real
     registry, and so is acceptance. ``mechanism_fulfillment`` is the per-test
-    declaration of which mechanisms VM fulfils through capacity.
+    declaration of which mechanisms VM fulfils through capacity, exposed as the
+    ``fulfils_through_capacity`` of each seller stage, as the real stage table
+    declares it.
     """
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
@@ -193,7 +198,10 @@ class SettlementCompositionDouble:
         self.settlement_config = self.configuration_registry.resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-        self.mechanism_fulfillment = dict(mechanism_fulfillment)
+        self.seller_stages = {
+            mechanism: SimpleNamespace(fulfils_through_capacity=fulfils)
+            for mechanism, fulfils in mechanism_fulfillment.items()
+        }
 
     async def _registry_options(self, resources, clauses) -> list[dict[str, Any]]:
         contact = [clause for clause in clauses or () if clause.mechanism == CONTACT_MECHANISM]
@@ -332,6 +340,35 @@ class RecordingRegistries:
         ]
 
 
+@contextlib.contextmanager
+def recorded_registries() -> Iterator[RecordingRegistries]:
+    """Configure the two test registries, each pinned to its authority, with
+    ``RecordingRegistries`` standing for their client.
+
+    A storefront publishes to every configured registry, so a test that
+    publishes, closes, or reopens a listing needs registries to reach.
+    """
+    recording = RecordingRegistries()
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(replaced_setting("registry.urls", list(REGISTRY_URLS)))
+        stack.enter_context(
+            replaced_setting(
+                "registry.authorities",
+                {
+                    url: {
+                        "authority": f"registry-{index}",
+                        "principals": [REGISTRY_SIGNER.identity.model_dump(mode="json")],
+                    }
+                    for index, url in enumerate(REGISTRY_URLS)
+                },
+            )
+        )
+        stack.enter_context(
+            patch.object(multi_registry_client, "MultiRegistryClient", recording)
+        )
+        yield recording
+
+
 def pool(
     pool_id: str,
     *,
@@ -370,62 +407,41 @@ def pool(
     )
 
 
-class HarnessProjectionClient:
-    """The poller's view of the harness's pool list, as the site would serve it.
+class HarnessProjectionSite(FakeProjectionSite):
+    """The harness's pool list as its site serves it to the projection state.
 
-    Tests edit the list in place; a refresh re-reads it rather than failing, and
-    ``snapshots`` counts refreshes so a test can assert one happened. With a
-    ``site``, each refresh also writes that fake site's live availability into
+    Tests edit the list in place, and the storefront holds it as of its last
+    poll or refresh, as it holds any site's projection. With a ``site``, each
+    resource-pool fetch also writes that fake site's live availability into
     every member it holds, so a reservation there reaches the storefront exactly
-    when the storefront refreshes the site, and never otherwise.
+    when the storefront refreshes the site, and never otherwise. Its
+    capacity-bucket family is derived from the same list. ``failing``
+    fails every call, as a site mid-outage does.
     """
 
     def __init__(self, pools: list[dict[str, Any]], site: "FakeSite | None" = None) -> None:
-        self.pools = pools
+        super().__init__(resource_pools=pools, derive_buckets=True)
         self.site = site
-        self.snapshots = 0
-        #: On: a refresh reaches the site and fails, as it would mid-outage.
-        self.failing = False
 
-    async def version(self) -> ProjectionIdentity:
-        return ProjectionIdentity(revision=1, digest="publication")
+    @property
+    def pools(self) -> list[dict[str, Any]]:
+        return self.resource_pools
 
-    async def snapshot(self) -> tuple[ProjectionIdentity, list[dict[str, Any]]]:
-        self.snapshots += 1
-        if self.failing:
-            raise RuntimeError("site projection unavailable")
-        if self.site is not None:
+    def _write_availability(self) -> None:
+        if self.site is not None and not self.failing:
             for projected in self.pools:
                 for member in projected.get("resources") or []:
                     resource_id = member.get("physical_resource_id")
                     if resource_id in self.site.resources:
                         member["available"] = self.site.available_dimensions(resource_id)
-        return await self.version(), self.pools
 
+    async def resource_pool_projection(self) -> dict[str, Any]:
+        self._write_availability()
+        return await super().resource_pool_projection()
 
-def _projection_caches(client: HarnessProjectionClient):
-    resource_pools = ProjectionCache(client=client)
-    resource_pools._value = client.pools
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(revision=1, digest="publication")
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
-
-
-@contextlib.contextmanager
-def _replaced_setting(key: str, value: Any):
-    settings = storefront_config.settings
-    original = deepcopy(settings.get(key))
-    settings.set(key, deepcopy(value), merge=False)
-    try:
-        yield
-    finally:
-        if original is None:
-            settings.unset(key, force=True)
-        else:
-            settings.set(key, original, merge=False)
+    async def capacity_bucket_projection(self) -> dict[str, Any]:
+        self._write_availability()
+        return await super().capacity_bucket_projection()
 
 
 @dataclass
@@ -438,13 +454,16 @@ class PublicationApp:
     site: FakeSite
     buyer: StorefrontClient | None = None
     registries: RecordingRegistries | None = None
-    projection: HarnessProjectionClient | None = None
+    projection: HarnessProjectionSite | None = None
     site_b: FakeSite | None = None
     pools_b: list[dict[str, Any]] | None = None
-    projection_b: HarnessProjectionClient | None = None
+    projection_b: HarnessProjectionSite | None = None
     service: StorefrontClient | None = None
     app: FastAPI | None = None
     contact_exchange: Any = None
+    site_projections: Any = None
+    #: One entry per publication wake the projection state raised.
+    wakes: list[None] | None = None
 
     def set_settlement_clauses(self, clauses: list[dict[str, Any]]) -> None:
         """Replace `[pricing].settlements`, the storefront-wide durable terms."""
@@ -459,9 +478,10 @@ async def publication_app(
     *,
     mechanism_fulfillment: Mapping[str, bool] | None = None,
     negotiation: bool = False,
-    registries: bool = False,
     second_site: bool = False,
     contacts: Mapping[str, Mapping[str, str]] | None = None,
+    admissibility_default: Mapping[str, Any] | None = None,
+    unreachable_sites: Collection[str] = (),
 ) -> AsyncIterator[PublicationApp]:
     """Run the VM storefront app for publication tests.
 
@@ -469,20 +489,29 @@ async def publication_app(
     under which an unbacked listing has no settlement option it may publish.
     ``negotiation`` adds the negotiation route, its runtime, and a buyer client,
     so a listing the loop published can be negotiated in the same app.
-    ``registries`` enables registry publication to two registries, recorded by
-    ``RecordingRegistries``; otherwise publication records locally only.
+    Publication goes to two registries, recorded by ``RecordingRegistries``, as
+    a storefront always publishes to every configured registry.
     ``second_site`` configures ``SITE_B`` after ``SITE``, with its own fake site,
     pool list, and projection cache; ``SITE`` stays the home site.
     ``contacts`` composes contact exchange, keyed by site, as the lifespan composes
     it: the real registry builds its options and acceptance, a real settlement
     runtime over the app's database drives its obligation, and the introduction
     routes are mounted. Implies ``negotiation``.
+    ``admissibility_default`` is configured as ``[admissibility.defaults.vm]``
+    and parsed as the lifespan parses it, so publication, reconciliation, and the
+    override write check all judge against it.
+    ``unreachable_sites`` fail their projections from the first load, as sites
+    a restarting storefront cannot reach; a test clears ``failing`` to bring
+    one back. A second app over the same ``tmp_path`` reopens the first's
+    database, which is how a test restarts the storefront.
     """
     negotiation = negotiation or contacts is not None
     pools: list[dict[str, Any]] = []
-    projection = HarnessProjectionClient(pools)
+    projection = HarnessProjectionSite(pools)
     pools_b: list[dict[str, Any]] = []
-    projection_b = HarnessProjectionClient(pools_b)
+    projection_b = HarnessProjectionSite(pools_b)
+    projection.failing = SITE in unreachable_sites
+    projection_b.failing = SITE_B in unreachable_sites
     # Each app has a fresh fake site whose events restart at version one, while
     # the capacity-event cursor is process-wide; a cursor left by an earlier app
     # would skip this site's first events.
@@ -497,83 +526,36 @@ async def publication_app(
         )
     }
     with contextlib.ExitStack() as stack:
-        recording = RecordingRegistries() if registries else None
-        stack.enter_context(
-            settings_overrides(
-                enable_registry_discovery=registries,
-                **{
-                    "capacity.use_site_projection_for_listings": True,
-                    "wallet.address": _WALLET,
-                },
-            )
-        )
+        recording = stack.enter_context(recorded_registries())
+        stack.enter_context(settings_overrides(**{"wallet.address": SELLER_WALLET}))
         # Replaced rather than overridden: an override merges into the test
         # configuration's own values, which would append to its lists.
-        stack.enter_context(_replaced_setting("storefront_domains", STOREFRONT_DOMAINS))
+        stack.enter_context(replaced_setting("storefront_domains", STOREFRONT_DOMAINS))
         stack.enter_context(
-            _replaced_setting(
+            replaced_setting(
                 "settlement",
                 contact_settlement(contacts) if contacts is not None else SETTLEMENT,
             )
         )
+
         stack.enter_context(
-            _replaced_setting(
-                "registry.urls", list(REGISTRY_URLS) if registries else []
-            )
+            replaced_setting("pricing.settlements", [settlement_clause()])
         )
-        if registries:
+        if admissibility_default is not None:
+            # Replaced at its root: unsetting a dotted key leaves the table behind.
             stack.enter_context(
-                _replaced_setting(
-                    "registry.authorities",
-                    {
-                        url: {
-                            "authority": f"registry-{index}",
-                            "principals": [
-                                REGISTRY_SIGNER.identity.model_dump(mode="json")
-                            ],
-                        }
-                        for index, url in enumerate(REGISTRY_URLS)
-                    },
+                replaced_setting(
+                    "admissibility", {"defaults": {"vm": admissibility_default}}
                 )
             )
-        stack.enter_context(
-            _replaced_setting("pricing.settlements", [settlement_clause()])
-        )
         stack.enter_context(patch.dict(storefront_config.CHAINS, chains, clear=True))
         stack.enter_context(patch.object(negotiation_runtime, "CHAINS", chains))
-        if recording is not None:
-            stack.enter_context(
-                patch.object(multi_registry_client, "MultiRegistryClient", recording)
-            )
-        stack.enter_context(
-            patch.dict(
-                site_projection_cache._caches,
-                {
-                    SITE: _projection_caches(projection),
-                    **({SITE_B: _projection_caches(projection_b)} if second_site else {}),
-                },
-                clear=True,
-            )
-        )
+
         stack.enter_context(
             patch.object(
                 admin_identity,
                 "get_administrator_configs",
                 lambda: {"operator": _ADMINISTRATORS},
-            )
-        )
-        # The provisioning service's callbacks authenticate as a service peer
-        # trusted for the home site.
-        stack.enter_context(
-            patch(
-                "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
-                return_value={
-                    "provisioning": (
-                        "service",
-                        SITE,
-                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
-                    )
-                },
             )
         )
         registry = storefront_config.storefront_domain_registry()
@@ -595,13 +577,30 @@ async def publication_app(
         capacity = capacity_runtime_over_sites(
             {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
+            # Bound to the projection state built below, as the root binds it.
+            site_projections=lambda: site_projections,
         )
+        # The storefront's one projection state, over the harness's sites,
+        # loaded as startup loads it. Each wake is recorded, then raised as
+        # production raises it.
+        wakes: list[None] = []
+
+        def wake() -> None:
+            wakes.append(None)
+            wake_publication_loop()
+
+        site_projections = site_projection_state(
+            {SITE: projection, **({SITE_B: projection_b} if second_site else {})},
+            on_resource_pool_change=wake,
+        )
+        await site_projections.poll_once()
         registration = registry.resolve_mode("vm")
         listings = ListingService(
             registry=registry,
             binding=registration.binding,
             domain=registration.contract,
             capacity_runtime=capacity,
+            site_projections=site_projections,
             sqlite_client=db,
             marketplace_signer=TEST_MARKETPLACE_SIGNER,
             alkahest_clients={},
@@ -613,38 +612,40 @@ async def publication_app(
                 "resolved_sqlite_client",
                 "resolved_listing_service",
                 "resolved_capacity_runtime",
+                "resolved_site_projections",
                 "resolved_domain_registry",
                 "resolved_marketplace_signer",
                 "resolved_system_service",
                 "resolved_pool_override_service",
+                "resolved_admissibility_default",
                 "resolved_contact_exchange",
+                "resolved_service_peer_trust",
             )
         }
         container.resolved_sqlite_client = db
         container.resolved_listing_service = listings
         container.resolved_capacity_runtime = capacity
+        container.resolved_site_projections = site_projections
         container.resolved_domain_registry = registry
         container.resolved_marketplace_signer = TEST_MARKETPLACE_SIGNER
         container.resolved_system_service = SystemService(
-            sqlite_client=db, marketplace_signer=TEST_MARKETPLACE_SIGNER
+            sqlite_client=db,
+            marketplace_signer=TEST_MARKETPLACE_SIGNER,
+            site_projections=site_projections,
+        )
+        container.resolved_admissibility_default = (
+            parse_configured_admissibility_default()
         )
         container.resolved_pool_override_service = build_pool_override_service(
-            sqlite_client=db, capacity_runtime=capacity
+            sqlite_client=db,
+            capacity_runtime=capacity,
+            site_projections=site_projections,
+            admissibility_default=container.resolved_admissibility_default,
         )
         routers: tuple[Any, ...] = ()
         if negotiation:
             previous["resolved_negotiation_runtime"] = getattr(
                 container, "resolved_negotiation_runtime", None
-            )
-            stack.enter_context(
-                settings_overrides(
-                    **{
-                        "provisioning.identity.principals": [
-                            BUYER_SIGNER.identity.model_dump(mode="json"),
-                            TEST_MARKETPLACE_SIGNER.identity.model_dump(mode="json"),
-                        ],
-                    }
-                )
             )
             thread_store.get_thread_store(
                 sqlite_client=db,
@@ -656,6 +657,7 @@ async def publication_app(
                     registry=registry,
                     binding=registration.binding,
                     capacity_runtime=capacity,
+                    site_projections=site_projections,
                     accepted_obligation_dispatch=(
                         composition.accepted_obligation_dispatch()
                         if contacts is not None
@@ -681,7 +683,20 @@ async def publication_app(
             routers = (*routers, introductions_router)
         try:
             admin_identity.initialize_administrator_identities(db.db_path)
-            initialize_service_peer_identities(db.db_path)
+            # The provisioning service's callbacks authenticate as a service
+            # peer trusted for the home site, seeded as the lifespan seeds it.
+            service_peer_trust = ServicePeerTrust(
+                db.db_path,
+                {
+                    "provisioning": (
+                        "service",
+                        SITE,
+                        TrustedIdentitySet(identities=(SERVICE_SIGNER.identity,)),
+                    )
+                },
+            )
+            service_peer_trust.seed()
+            container.resolved_service_peer_trust = service_peer_trust
             app = FastAPI()
             for router in (
                 system_router,
@@ -736,6 +751,8 @@ async def publication_app(
                     service,
                     app,
                     contact_exchange,
+                    site_projections,
+                    wakes,
                 )
         finally:
             reset_site_event_cursors()

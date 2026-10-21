@@ -64,15 +64,30 @@ def pyproject_problems(pyproject: Path, root: Path) -> list[str]:
     target = build.get("targets", {}).get("wheel", {})
     extra = sorted(k for k in build if k != "targets") + sorted(k for k in target if k != "packages")
     packages = target.get("packages", [])
-    match = _PACKAGE.fullmatch(packages[0]) if len(packages) == 1 else None
-    if extra or not match:
+    if extra or not (len(packages) == 1 and _PACKAGE.fullmatch(packages[0])):
         problems.append(
             f"{where}: the wheel target must be exactly packages = [\"src/<package>\"]"
             + (f" (also sets {', '.join(extra)})" if extra else "")
         )
-    elif not (pyproject.parent / packages[0] / "__init__.py").is_file():
+    elif wheel_package(pyproject.parent, declared) is None:
         problems.append(f"{where}: {packages[0]} is not a package")
     return problems
+
+
+def wheel_package(project: Path, declared: dict) -> str | None:
+    """The one import package a distribution's wheel builds, or None.
+
+    The wheel target must name exactly one ``src/<package>`` and that
+    directory must be a package. The architecture check reads projects
+    through this same rule, so the two checks cannot disagree about which
+    projects can be read.
+    """
+    target = declared.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {}).get("wheel", {})
+    packages = target.get("packages", [])
+    match = _PACKAGE.fullmatch(packages[0]) if len(packages) == 1 else None
+    if not match or not (project / packages[0] / "__init__.py").is_file():
+        return None
+    return match.group(1)
 
 
 def editable_problems(root: Path) -> list[str]:

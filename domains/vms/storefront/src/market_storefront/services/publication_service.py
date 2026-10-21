@@ -8,6 +8,7 @@ from typing import Any
 from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.reconciler import (
+    ReconciliationScope,
     closed_available_listing_ids,
     stale_open_listing_ids,
 )
@@ -21,6 +22,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
+import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import BASE_URL_OVERRIDE, settings
@@ -53,7 +55,6 @@ class VmPublicationHooks:
 
 def _make_registry_client():
     from core_storefront.multi_registry_client import MultiRegistryClient
-    import market_storefront.container as container
     from market_storefront.utils.config import get_registry_authorities
 
     signer = container.resolved_marketplace_signer
@@ -78,7 +79,9 @@ def build_publication_runtime(
     return PublicationRuntime(
         repository=sqlite_client,
         hooks=VmPublicationHooks(sqlite_client),
-        enabled=settings.enable_registry_discovery,
+        # Always on: a storefront with no registry to publish to refuses to
+        # start, so publication never runs without one.
+        enabled=True,
         registry_urls=tuple(settings.registry.urls),
         registry_client_factory=registry_client_factory,
         listing_request_factory=ListingRequest,
@@ -96,7 +99,7 @@ async def _candidate(sqlite_client: Any, value: Listing | dict) -> PublicationCa
     # The published backing is always the binding's, on every path that
     # publishes, so a listing never discloses a category its binding does not
     # record and no stored payload can be republished without one.
-    listing.listing_resource.capacity_backing = binding.capacity_backing
+    listing.listing_resource.capacity_backing = binding.backing.label
     return PublicationCandidate(listing.listing_id, binding, listing)
 
 
@@ -144,25 +147,25 @@ async def close_stale_compute_listings_after_capacity_change(
     db_path: str,
     *,
     sqlite_client: Any,
-    home_site: str,
     configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
-    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_pool_projection: dict[str, list[dict]],
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Let VM semantics choose stale candidates; kit executes each close.
 
-    Availability reconciliation: only capacity-backed listings are considered.
+    Availability reconciliation: only listings whose backing availability
+    bounds are considered.
     """
     ids = stale_open_listing_ids(
         db_path,
-        home_site=home_site,
         configured_sites=configured_sites,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
-        backed_only=True,
+        scope=ReconciliationScope.AVAILABILITY,
         shape_feasible=vm_shape_feasibility(),
+        admissibility_default=container.resolved_admissibility_default,
     )
     bound_items: list[BoundListing] = []
     for listing_id in ids:
@@ -184,10 +187,9 @@ async def reopen_available_compute_listings_after_capacity_change(
     db_path: str,
     *,
     sqlite_client: Any,
-    home_site: str,
     configured_sites: Collection[str],
     member_availability: dict[tuple[str, str], int] | None = None,
-    site_pool_projection: dict[str, list[dict]] | None = None,
+    site_pool_projection: dict[str, list[dict]],
     site_capacity_buckets: dict[str, list[dict]] | None = None,
 ) -> list[str]:
     """Let VM semantics choose available candidates; kit executes reopen/publish."""
@@ -195,12 +197,12 @@ async def reopen_available_compute_listings_after_capacity_change(
         return []
     ids = closed_available_listing_ids(
         db_path,
-        home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
         shape_feasible=vm_shape_feasibility(),
         configured_sites=configured_sites,
+        admissibility_default=container.resolved_admissibility_default,
     )
     candidates: list[PublicationCandidate[Listing]] = []
     for listing_id in ids:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import Any
 
 from arkhai_bare_metal.domain_runtime import market_domain
 from core_storefront import StorefrontSettlementBuildContext
@@ -24,14 +26,16 @@ from .settlement_composition import SELLER_STAGES
 def _build_settlement_from_context(
     *,
     context: StorefrontSettlementBuildContext,
+    listing: Mapping[str, Any],
 ) -> dict[str, object]:
+    """Adapt the plan builder to the common context and the negotiated listing."""
     return build_bare_metal_settlement_plan(
         proposal=context.proposal,
+        listing=listing,
         agreed_amount=context.agreed_amount,
         duration_seconds=context.duration_seconds,
         buyer_principal=context.buyer_principal,
         seller_principal=context.seller_principal,
-        seller_wallet_address=context.seller_wallet_address,
         chain_config_paths=context.chain_config_paths,
     )
 

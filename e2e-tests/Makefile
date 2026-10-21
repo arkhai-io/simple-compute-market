@@ -57,10 +57,11 @@ test:
 test-unit: reinit ## Unit tests only; no stack or external services
 	.venv/bin/pytest tests/unit $(PYTEST_ARGS)
 
+# MODULE is a pytest marker expression, so it may be `a or b`.
 test-module:
 	ACTIVE_PROFILES=$(ACTIVE_PROFILES) \
 	CONFIG_DIRECTORY=$(CONFIG_DIRECTORY) \
-	.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+	.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 test-container-module:
 	docker run --rm -it \
@@ -69,7 +70,7 @@ test-container-module:
 		-e CONFIG_DIRECTORY=/app/config \
 		-v $(CONFIG_DIRECTORY):/app/config:ro \
 		$(IMAGE_NAME):$(IMAGE_TAG) \
-		.venv/bin/pytest -m $(MODULE) $(PYTEST_ARGS)
+		.venv/bin/pytest -m "$(MODULE)" $(PYTEST_ARGS)
 
 # -----------------------------------------------------------------------
 # Tests — buyer machine (in-network, realistic two-machine topology)
@@ -89,10 +90,13 @@ test-container-module:
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
 # The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
-# stays here; `multi_registry` reads VM's two registries.
+# stays here; `multi_registry` reads VM's two registries;
+# `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
+# the dev chain's own deployments.
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
-              or e2e_listing_shapes or e2e_vm_introduction
+              or e2e_listing_shapes or e2e_vm_introduction \
+              or e2e_non_erc20_settlement
 # The API-credit lane's scenarios. The payment deal is blocked without a
 # payments target and skips naming it.
 E2E_APICREDITS_MODULE ?= e2e_credits_deal or e2e_credits_payment_deal
@@ -217,9 +221,10 @@ e2e-vm-logs:
 	@cd .. && docker compose --env-file "$(E2E_VMS_ENV)" $(E2E_VMS_COMPOSE) logs --no-color
 
 # Bare-metal lane: one site, the bare-metal storefront, its registry, and the
-# dev chain. Every value comes from `make e2e-bare-metal-dev-env`, which
-# generates the publication deadlines at each run; see
-# compose.bare-metal-local.yml.
+# dev chain. Every stack value comes from `make e2e-bare-metal-dev-env`, which
+# names the storefront's development configuration files
+# (domains/bare_metal/storefront/storefront.dev.toml and its secrets overlay);
+# see compose.bare-metal-local.yml.
 E2E_BARE_METAL_ENV ?= $(CURDIR)/../.e2e-bare-metal.env
 E2E_BARE_METAL_PROJECT := simple-market-bare-metal
 E2E_BARE_METAL_COMPOSE := -p $(E2E_BARE_METAL_PROJECT) \

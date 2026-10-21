@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 
 def test_config_path_file_exists(monkeypatch, tmp_path, runner, app):
     import market_storefront.groups.config as config_group
@@ -256,6 +258,81 @@ def test_config_set_rejects_legacy_path_with_exact_migration_command(
     assert STOREFRONT_MIGRATION_COMMAND in result.output
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "resources_csv_path",
+        "RESOURCES_CSV_INLINE",
+        "Escrow_Templates.usdc.chain_name",
+        "capacity.Use_Site_Projection_For_Listings",
+    ],
+)
+def test_config_set_refuses_a_retired_inventory_key_naming_the_upgrade_guide(
+    monkeypatch, runner, app, key
+):
+    import market_storefront.groups.config as config_group
+
+    monkeypatch.setattr(
+        config_group,
+        "write_user_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired edit reached writer")
+        ),
+    )
+
+    result = runner.invoke(app, ["config", "set", key, "x"])
+
+    assert result.exit_code == 2
+    assert "was removed" in result.output
+    assert "Upgrading from CSV inventory" in result.output
+
+
+@pytest.mark.parametrize(
+    ("key", "named"),
+    [
+        (
+            "claims_sweep_interval",
+            "claims_sweep_interval was renamed settlement_servicing_interval_seconds",
+        ),
+        ("CLAIMS_SWEEP_INTERVAL", "settlement_servicing_interval_seconds"),
+        ("enable_registry_discovery", "enable_registry_discovery was removed"),
+        ("provisioning.identity.principals", "provisioning.identity was removed"),
+    ],
+)
+def test_config_set_refuses_a_renamed_or_removed_key_naming_what_replaces_it(
+    monkeypatch, runner, app, key, named
+):
+    import market_storefront.groups.config as config_group
+
+    monkeypatch.setattr(
+        config_group,
+        "write_user_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("retired edit reached writer")
+        ),
+    )
+
+    result = runner.invoke(app, ["config", "set", key, "30"])
+
+    assert result.exit_code == 2
+    assert named in result.output
+
+
+def test_config_set_accepts_other_capacity_keys(monkeypatch, tmp_path, runner, app):
+    import market_storefront.groups.config as config_group
+
+    cfg = tmp_path / "storefront.toml"
+    doc: dict = {}
+    monkeypatch.setattr(config_group, "storefront_config_file", lambda: cfg)
+    monkeypatch.setattr(config_group, "load_user_config", lambda path: doc)
+    monkeypatch.setattr(config_group, "write_user_config", lambda written, path: path)
+
+    result = runner.invoke(app, ["config", "set", "capacity.poll_interval_seconds", "5"])
+
+    assert result.exit_code == 0, result.output
+    assert doc == {"capacity": {"poll_interval_seconds": 5}}
+
+
 _PAYMENTS_SETTLEMENT = """[Settlement]
 schema_version = 1
 priority = ["arkhai.payments.v1"]
@@ -296,25 +373,3 @@ def test_settlement_migration_refuses_stripe_with_its_removal(monkeypatch, tmp_p
 
     assert result.exit_code != 0
     assert "was removed" in result.output
-
-
-def test_publication_migration_compiles_a_payment_clause():
-    import tomllib
-
-    from market_storefront.groups.config import _seller_publication_clause_compiler
-
-    compile_clause = _seller_publication_clause_compiler(tomllib.loads(_PAYMENTS_SETTLEMENT))
-    clause = compile_clause(
-        {
-            "mechanism": "arkhai.payments.v1",
-            "asset": "USD/2",
-            "rate": "200",
-            "per": "hour",
-            "mechanism_input": {
-                "payee_account": "22222222-2222-4222-8222-222222222222",
-                "asset": "USD/2",
-            },
-        }
-    )
-
-    assert clause.mechanism == "arkhai.payments.v1"

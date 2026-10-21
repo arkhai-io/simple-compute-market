@@ -7,7 +7,8 @@ the tags at all:
 
 - A generation containing pools, none of which carries either the advertisement
   or the backing declaration, comes from a producer that predates them. Every
-  pool in it reads as capacity-backed, with its delivery declaration serving as
+  pool in it reads with the backing such a producer's pools were written under
+  (``legacy_producer_backing``), with its delivery declaration serving as
   advertisement authorization. That reproduces the contract that applied before
   the declarations existed; it is not a default applied to a pool that omitted
   something.
@@ -30,9 +31,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from market_resource_pools_contracts.backing import (
+    CapacityBacking,
+    legacy_producer_backing,
+)
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     PoolDeclarationError,
     declared_deliverable_modes,
@@ -47,13 +51,9 @@ POOL_ENABLEMENT_UNDECLARED = "pool_enablement_undeclared"
 class ResolvedPool:
     """A pool whose declarations resolved."""
 
-    capacity_backing: str
+    backing: CapacityBacking
     advertisable_modes: frozenset[str]
     enabled: bool
-
-    @property
-    def backed(self) -> bool:
-        return self.capacity_backing == CAPACITY_BACKED
 
     def advertises(self, offering_mode: str) -> bool:
         return offering_mode in self.advertisable_modes
@@ -120,7 +120,9 @@ def read_site_declarations(pools: Sequence[Mapping[str, Any]]) -> SiteDeclaratio
             except ValueError:
                 unresolvable[pool_id] = ("invalid_deliverable_modes",)
                 continue
-            resolved[pool_id] = ResolvedPool(CAPACITY_BACKED, advertisable, enabled)
+            resolved[pool_id] = ResolvedPool(
+                legacy_producer_backing(), advertisable, enabled,
+            )
             continue
         try:
             declarations = resolve_pool_declarations(tags)
@@ -128,7 +130,7 @@ def read_site_declarations(pools: Sequence[Mapping[str, Any]]) -> SiteDeclaratio
             unresolvable[pool_id] = tuple(problem.code for problem in exc.problems)
             continue
         resolved[pool_id] = ResolvedPool(
-            str(declarations.capacity_backing),
+            declarations.backing,
             frozenset(declarations.advertisable_modes),
             enabled,
         )

@@ -11,9 +11,10 @@ from pathlib import Path
 import os
 import subprocess
 
+import httpx
 import typer
 from market_identity import TrustedIdentitySet
-from storefront_client import SyncStorefrontClient
+from storefront_client import StorefrontClientError, SyncStorefrontClient
 
 # parents[2]: market_storefront -> src -> storefront
 STOREFRONT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +36,31 @@ def _find_repo_root() -> Path:
 
 
 REPO_ROOT = _find_repo_root()
+
+#: What a command that calls the storefront reports and exits on, rather than
+#: a traceback: the storefront's refusal, or no storefront answering at all.
+STOREFRONT_FAILURES: tuple[type[Exception], ...] = (
+    StorefrontClientError,
+    httpx.TransportError,
+)
+
+
+def storefront_failure_message(exc: Exception) -> str:
+    """The line a command prints for one of ``STOREFRONT_FAILURES``.
+
+    A request no storefront answered names the scheme, host, and port it was
+    sent to and the transport error's type.
+    """
+    if not isinstance(exc, httpx.TransportError):
+        return f"Storefront error: {exc}"
+    try:
+        url = exc.request.url
+    except RuntimeError:
+        origin = "the storefront URL"
+    else:
+        port = f":{url.port}" if url.port is not None else ""
+        origin = f"{url.scheme}://{url.host}{port}"
+    return f"Storefront error: no storefront answered at {origin} ({type(exc).__name__})"
 
 
 def resolve_storefront_url(

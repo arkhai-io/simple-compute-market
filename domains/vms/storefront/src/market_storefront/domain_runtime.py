@@ -48,17 +48,22 @@ _REQUIRED_VM_STOREFRONT_CAPABILITIES = frozenset(
 def _build_vm_settlement_plan(
     *,
     context: StorefrontSettlementBuildContext,
+    listing: Mapping[str, Any],
 ):
-    """Adapt the VM plan builder to the common selected-domain context."""
+    """Adapt the VM plan builder to the common selected-domain context.
+
+    ``listing`` is the listing the deal was negotiated against, whose release
+    conditions authorize the escrow's; the seller stage binds it.
+    """
 
     return build_vm_accepted_artifacts(
         proposal=context.proposal,
+        listing=listing,
         agreed_amount=context.agreed_amount,
         duration_seconds=context.duration_seconds,
         buyer_principal=context.buyer_principal,
         seller_principal=context.seller_principal,
         uses_scalar_amount=context.uses_scalar_amount,
-        seller_wallet_address=context.seller_wallet_address,
         chain_config_paths=context.chain_config_paths,
     )
 

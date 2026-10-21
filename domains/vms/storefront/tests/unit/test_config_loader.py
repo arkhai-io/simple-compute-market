@@ -36,7 +36,7 @@ def test_settings_toml_provides_baseline_defaults():
     assert s.registry.discovery_timeout == 5.0
     assert s.provisioning.service_url == "http://localhost:8085"
     assert s.provisioning.timeout == 3600
-    assert list(s.provisioning.identity.principals) == []
+    assert s.provisioning.get("identity") is None
     # Default policy chain ends in "bisection" (not "rl") — prevents
     # silent RL failures when torch is unavailable.
     assert s.negotiation.policies == [
@@ -48,10 +48,8 @@ def test_settings_toml_provides_baseline_defaults():
     assert list(s.pricing.settlements) == []
     packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
     assert "storefront_domains" not in packaged
-    # On by default -- the projection path has parity with the local-table
-    # path it supersedes. A staged/canary rollout sets this false
-    # explicitly rather than relying on a default that no longer matches.
-    assert s.capacity.use_site_projection_for_listings is True
+    # Listings derive only from site projections; no setting selects a source.
+    assert "use_site_projection_for_listings" not in packaged.get("capacity", {})
 
 
 def test_structured_settlement_publication_defaults_are_validated() -> None:
@@ -122,20 +120,6 @@ def test_structured_publication_defaults_reject_partial_or_secret_input() -> Non
         agent_config.settlement_publication_defaults(source)
 
 
-def test_use_site_projection_for_listings_can_still_be_disabled_explicitly(
-    tmp_path,
-    monkeypatch,
-):
-    """The default flip doesn't remove the ability to opt back out for a
-    staged/canary rollout -- an explicit override still wins."""
-    monkeypatch.setenv(
-        "STOREFRONT_CAPACITY__USE_SITE_PROJECTION_FOR_LISTINGS",
-        "false",
-    )
-    cfg = _build_isolated(tmp_path, [])
-    assert cfg.capacity.use_site_projection_for_listings is False
-
-
 def test_public_identity_defaults_do_not_include_secret_or_wallet_values():
     s = agent_config.settings
     assert s.identity.principal.scheme == ""
@@ -195,7 +179,7 @@ def test_public_administrator_binding_is_scheme_tagged():
     }
 
 
-def test_public_provisioning_authorities_and_service_peer_bindings_are_structured():
+def test_service_peer_bindings_are_structured():
     current = create_signer("ed25519", b"\x03" * 32).identity
     next_authority = create_signer("ed25519", b"\x06" * 32).identity
     principals = [
@@ -203,7 +187,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
         next_authority.model_dump(mode="json"),
     ]
     source = Dynaconf(environments=False)
-    source.set("provisioning.identity.principals", principals)
     source.set(
         "identity.service_peers",
         {
@@ -216,7 +199,6 @@ def test_public_provisioning_authorities_and_service_peer_bindings_are_structure
     )
 
     trust = TrustedIdentitySet(identities=(current, next_authority))
-    assert agent_config.get_provisioning_authorities(source) == trust
     assert agent_config.get_service_peer_configs(source) == {
         "provisioning_default": ("service", "default", trust)
     }
@@ -237,6 +219,48 @@ def test_service_peer_binding_rejects_missing_site():
 
     with pytest.raises(ValueError, match="site_id"):
         agent_config.get_service_peer_configs(source)
+
+
+def test_the_servicing_interval_is_read_from_its_key():
+    packaged = tomllib.loads(agent_config._DEFAULTS_FILE.read_text())
+    assert packaged["settlement_servicing_interval_seconds"] == 30
+    assert "claims_sweep_interval" not in packaged
+    assert agent_config.settlement_servicing_interval(Dynaconf(environments=False)) == 30.0
+
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", 2)
+    assert agent_config.settlement_servicing_interval(source) == 2.0
+
+
+@pytest.mark.parametrize("spelling", ["claims_sweep_interval", "CLAIMS_SWEEP_INTERVAL"])
+def test_the_retired_servicing_interval_is_not_read_as_the_interval(spelling):
+    """The startup refusal names the old key with its replacement
+    (tests/unit/test_startup_refusal.py); the loader never reads it in its
+    place."""
+    source = Dynaconf(environments=False)
+    source.set(spelling, 5)
+    assert agent_config.settlement_servicing_interval(source) == 30.0
+
+
+@pytest.mark.parametrize("value", [0, -1, "soon", True, 1e11, 1e-7])
+def test_an_unusable_servicing_interval_is_refused_by_its_key(value):
+    source = Dynaconf(environments=False)
+    source.set("settlement_servicing_interval_seconds", value)
+    with pytest.raises(ValueError, match=r"^\[settlement_servicing_interval_seconds\] ") as refused:
+        agent_config.settlement_servicing_interval(source)
+    assert refused.value.__context__ is None
+
+
+@pytest.mark.parametrize("value", [0, -1, 1e11])
+def test_an_unusable_retention_sweep_interval_is_refused_by_its_key(value):
+    with pytest.raises(
+        ValueError, match=r"^\[Settlement\.contact\.retention_sweep_interval_seconds\] "
+    ):
+        agent_config.introduction_retention_sweep_interval(value)
+
+
+def test_a_retention_sweep_interval_is_read_as_seconds():
+    assert agent_config.introduction_retention_sweep_interval(3600) == 3600.0
 
 
 # ---------------------------------------------------------------------------

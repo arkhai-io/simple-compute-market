@@ -6,6 +6,7 @@ them as an administrator, or as the site, would, over the production app.
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 
 import httpx
@@ -26,7 +27,9 @@ from test_http_settlement import (
     _ProvisioningClient,
 )
 
-from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
+from held_loops import held_loop_controller
+from site_trust import seeded_sites
+from source_sites import SourceSite, source_projections
 
 
 def _client(app, signer, role: str) -> StorefrontClient:
@@ -39,7 +42,11 @@ def _client(app, signer, role: str) -> StorefrontClient:
     )
 
 
-async def _runtime(tmp_path, *, verifier=None, provisioning=None):
+# A second site authority's development key; never used on any public network.
+SITE_B_SIGNER = Eip191Signer(bytes.fromhex("56" * 32))
+
+
+async def _runtime(tmp_path, *, verifier=None, provisioning=None, authorities=None):
     async def accept(**_kwargs):
         return 1
 
@@ -47,17 +54,17 @@ async def _runtime(tmp_path, *, verifier=None, provisioning=None):
         str(tmp_path / "storefront.db"), verifier or accept
     )
     capacity = _CapacityClient()
+    # The site's callbacks verify against its service peer, seeded as startup
+    # seeds it.
+    bindings, trust = seeded_sites(
+        runtime.db.db_path, authorities or {"site-a": SITE_SIGNER.identity}
+    )
     runtime = replace(
         runtime,
         capacity_client=capacity,
         fulfillment_client=provisioning or _ProvisioningClient(),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                authority_url="http://site-a",
-                authority_principal=SITE_SIGNER.identity,
-            ),
-        ),
+        site_bindings=bindings,
+        service_peer_trust=trust,
     )
     return runtime, negotiation_id, capacity
 
@@ -183,6 +190,28 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
     assert refused.value.status_code == 409
 
 
+async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:
+    runtime, _negotiation_id, capacity = await _runtime(tmp_path)
+    # A binding recorded unbacked: bare metal publishes none today, so the
+    # durable record is written directly past its immutability trigger.
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
+        conn.execute(
+            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
+            "WHERE listing_id='listing-1'"
+        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            with pytest.raises(StorefrontClientError) as refused:
+                await admin.admin_reserve_capacity(
+                    required_attributes={}, listing_id="listing-1"
+                )
+
+    assert refused.value.status_code == 409
+    assert capacity.reserve_calls == []
+
+
 async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> None:
     runtime, _negotiation_id, _capacity = await _runtime(tmp_path)
     impostor = Eip191Signer(bytes.fromhex("55" * 32))
@@ -197,9 +226,44 @@ async def test_only_the_named_sites_authority_may_report_a_release(tmp_path) -> 
             with pytest.raises(StorefrontClientError) as other_site:
                 await site.notify_capacity_released("reservation-a", site_id="site-b")
 
+    # An impostor fails the site's authentication; the site's own report of a
+    # reservation the storefront does not hold is not found; and a report naming
+    # an unconfigured site is refused with the trust's reason, before any handler.
     assert forged.value.status_code == 403
     assert unknown.value.status_code == 404
     assert other_site.value.status_code == 403
+    assert "exactly one configured service peer" in str(other_site.value)
+
+
+async def test_one_configured_sites_authority_cannot_report_anothers_release(
+    tmp_path,
+) -> None:
+    """Two configured sites, each with its own peer. Site B's authority signing a
+    report that names site A fails site A's authentication (403); signing one
+    that names itself authenticates, and the reservation, held at site A, is
+    then not found as site B's (404)."""
+    runtime, negotiation_id, _capacity = await _runtime(
+        tmp_path,
+        authorities={"site-a": SITE_SIGNER.identity, "site-b": SITE_B_SIGNER.identity},
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_B_SIGNER, "service") as site_b:
+            with pytest.raises(StorefrontClientError) as as_site_a:
+                await site_b.notify_capacity_released("reservation-a", site_id="site-a")
+            with pytest.raises(StorefrontClientError) as as_itself:
+                await site_b.notify_capacity_released("reservation-a", site_id="site-b")
+        async with _client(app, SITE_SIGNER, "service") as site_a:
+            released = await site_a.notify_capacity_released("reservation-a", site_id="site-a")
+
+    assert as_site_a.value.status_code == 403
+    assert as_itself.value.status_code == 404
+    assert "belongs to another site" in str(as_itself.value)
+    assert released == {"capacity_reservation_id": "reservation-a", "state": "released"}
 
 
 async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(
@@ -224,3 +288,36 @@ async def test_a_recorded_release_is_a_stage_event_and_a_refused_one_is_not(
     assert released[0].data["capacity_reservation_id"] == "reservation-a"
     assert released[0].data["negotiation_id"] == negotiation_id
     assert released[0].data["site_id"] == "site-a"
+
+
+async def test_a_reserve_and_a_release_refresh_no_held_projection(tmp_path) -> None:
+    """Bare metal reconciles nothing inline, so neither the administrator's
+    reserve nor the site's capacity-released callback refreshes the projection
+    it holds of the site: the poller's next cycle sees the change."""
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path)
+    site = SourceSite()
+    runtime = replace(
+        runtime,
+        site_projections=source_projections(site),
+        loop_controller_factory=held_loop_controller,
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        loaded = site.calls
+        confirmed = runtime.site_projections.view("site-a", "resource_pool").fetched_at
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            await admin.admin_reserve_capacity(required_attributes={}, listing_id="listing-1")
+        async with _buyer(app) as buyer:
+            await buyer.settle_evm(
+                ESCROW_UID, negotiation_id=negotiation_id, buyer_evm_address=BUYER
+            )
+        async with _client(app, SITE_SIGNER, "service") as reporting_site:
+            released = await reporting_site.notify_capacity_released(
+                "reservation-a", site_id="site-a"
+            )
+        after = runtime.site_projections.view("site-a", "resource_pool").fetched_at
+
+    assert released["state"] == "released"
+    assert site.calls == loaded
+    assert after == confirmed
+

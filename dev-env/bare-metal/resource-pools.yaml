@@ -1,5 +1,6 @@
 # Development fixture, not for a real site. Authoritative imports require the
-# default pool; it offers nothing. Scenarios declare their own pools through the
+# default pool; a fresh database creates it from this document, and it offers
+# nothing. Scenarios declare their own pools through the
 # operator API. Startup reconciles this document only when it changes, so those
 # pools survive restarts.
 pools:

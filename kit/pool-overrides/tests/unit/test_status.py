@@ -6,7 +6,6 @@ import pytest
 
 from market_pool_overrides import (
     OVERRIDE_APPLIED,
-    OVERRIDE_INACTIVE,
     OVERRIDE_ORPHANED,
     OVERRIDE_SITE_UNCONFIGURED,
     OVERRIDE_UNKNOWN,
@@ -17,9 +16,8 @@ from market_pool_overrides import (
 @pytest.mark.parametrize(
     ("site_id", "projection", "state"),
     [
-        ("site-a", None, OVERRIDE_INACTIVE),
-        # Local-table derivation applies no override, whatever its site.
-        ("site-zz", None, OVERRIDE_INACTIVE),
+        # A storefront that knows no site's projection judges nothing.
+        ("site-a", {}, OVERRIDE_UNKNOWN),
         ("site-zz", {"site-a": []}, OVERRIDE_SITE_UNCONFIGURED),
         ("site-b", {"site-a": [{"pool_id": "gpu"}]}, OVERRIDE_UNKNOWN),
         ("site-a", {"site-a": [{"pool_id": "other"}]}, OVERRIDE_ORPHANED),

@@ -42,11 +42,13 @@ def _thread() -> dict:
             {"settlement": {"mechanism": "alkahest.v1"}}
         ).encode(),
         "buyer_principal": _BUYER.model_dump(mode="json"),
-        "buyer_escrow_proposal": {
-            "chain_name": "anvil",
-            "escrow_address": "0x" + "11" * 20,
-            "fields": {"token": "0x" + "22" * 20},
-            "expiration_unix": 1_900_000_000,
+        "settlement_data": {
+            "accepted_escrow_proposal": {
+                "chain_name": "anvil",
+                "escrow_address": "0x" + "11" * 20,
+                "fields": {"token": "0x" + "22" * 20},
+                "expiration_unix": 1_900_000_000,
+            },
         },
         "provision_terms": make_vm_provision_terms(
             duration_seconds=3600,
@@ -148,3 +150,20 @@ async def test_settlement_start_passes_only_persisted_inputs_to_coordinator(
         chain_name="anvil",
         request=None,
     )
+
+
+def test_the_accepted_escrow_proposal_is_never_the_buyers_opening() -> None:
+    """Settlement reads the proposal the seller accepted under the listing's
+    release condition; a thread recording only the buyer's opening is refused."""
+    stage = build_vm_storefront_domain().settlement.seller_stages["alkahest.v1"]
+    accepted = _thread()
+    opening_only = {
+        **{key: value for key, value in accepted.items() if key != "settlement_data"},
+        "buyer_escrow_proposal": accepted["settlement_data"]["accepted_escrow_proposal"],
+    }
+
+    assert stage.accepted_proposal(accepted) == (
+        accepted["settlement_data"]["accepted_escrow_proposal"]
+    )
+    with pytest.raises(ValueError, match="no persisted accepted escrow proposal"):
+        stage.accepted_proposal(opening_only)

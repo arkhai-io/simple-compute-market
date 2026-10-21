@@ -1,4 +1,8 @@
-"""The family client signs every request and verifies every response."""
+"""The family client signs every request and verifies every response.
+
+Every signer seed here (a repeated byte) is a deterministic development key that
+must never be used on a public network.
+"""
 
 import json
 import time
@@ -22,6 +26,7 @@ from market_identity import (
 from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningAuthenticationError,
+    SyncComputeProvisioningClient,
 )
 from compute_provisioning_contracts import (
     resolve_provisioning_route,
@@ -279,6 +284,119 @@ async def test_client_exact_retry_fresh_signs_and_changed_reuse_fails_closed(
 
     assert seen[0]["x-market-timestamp"] != seen[1]["x-market-timestamp"]
     assert seen[0]["x-market-signature"] != seen[1]["x-market-signature"]
+
+
+async def _call(client, request_id):
+    """One signed lease read, through either client variant."""
+
+    response = client.authenticated_request(
+        "GET", "/api/v1/contract/leases/reservation-1", request_id=request_id
+    )
+    if isinstance(client, ComputeProvisioningClient):
+        return await response
+    return response
+
+
+async def _close(client):
+    closed = client.close()
+    if isinstance(client, ComputeProvisioningClient):
+        await closed
+
+
+def _client(variant, *, caller, expected_authorities, transport):
+    client_type = (
+        ComputeProvisioningClient if variant == "async" else SyncComputeProvisioningClient
+    )
+    return client_type(
+        "http://provisioner",
+        signer=caller,
+        caller_role="seller",
+        expected_authorities=expected_authorities,
+        transport=transport,
+    )
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_a_trust_provider_is_read_per_response_so_a_rotation_reaches_a_live_client(
+    variant,
+):
+    """One client follows a rotation from overlap to retirement, never rebuilt."""
+    caller = Ed25519Signer(b"\x11" * 32)
+    old_authority = Ed25519Signer(b"\x12" * 32)
+    new_authority = Eip191Signer(b"\x22" * 32)
+    serving = [old_authority]
+    trusted = [TrustedIdentitySet(identities=(old_authority.identity,))]
+    reads = []
+
+    def provider():
+        reads.append(trusted[0])
+        return trusted[0]
+
+    def handler(request):
+        return _signed_transport(caller, serving[0]).handler(request)
+
+    client = _client(
+        variant,
+        caller=caller,
+        expected_authorities=provider,
+        transport=httpx.MockTransport(handler),
+    )
+    assert await _call(client, "before-rotation") == {"ok": True}
+    trusted[0] = TrustedIdentitySet(
+        identities=(new_authority.identity, old_authority.identity)
+    )
+    assert await _call(client, "overlap-old") == {"ok": True}
+    serving[0] = new_authority
+    assert await _call(client, "overlap-new") == {"ok": True}
+
+    trusted[0] = TrustedIdentitySet(identities=(new_authority.identity,))
+    assert await _call(client, "retired-new") == {"ok": True}
+    serving[0] = old_authority
+    with pytest.raises(ComputeProvisioningAuthenticationError, match="wrong_principal"):
+        await _call(client, "retired-old")
+    await _close(client)
+
+    assert len(reads) == 5
+
+
+@pytest.mark.parametrize("variant", ("async", "sync"))
+@pytest.mark.asyncio
+async def test_a_failing_trust_provider_fails_the_response_closed(variant):
+    caller = Ed25519Signer(b"\x11" * 32)
+    authority = Ed25519Signer(b"\x12" * 32)
+
+    def unavailable():
+        raise RuntimeError("durable identity state is unavailable")
+
+    def not_a_set():
+        return None
+
+    for name, provider, expected in (
+        ("unavailable", unavailable, "could not be resolved"),
+        ("not-a-set", not_a_set, "no trusted identity set"),
+    ):
+        client = _client(
+            variant,
+            caller=caller,
+            expected_authorities=provider,
+            transport=_signed_transport(caller, authority),
+        )
+        with pytest.raises(ComputeProvisioningAuthenticationError, match=expected) as excinfo:
+            await _call(client, f"provider-{name}")
+        await _close(client)
+        assert excinfo.value.status_code == 200
+
+
+def test_expected_authorities_must_be_a_trusted_set_or_a_provider():
+    caller = Ed25519Signer(b"\x11" * 32)
+    with pytest.raises(TypeError, match="callable returning one"):
+        SyncComputeProvisioningClient(
+            "http://provisioner",
+            signer=caller,
+            caller_role="seller",
+            expected_authorities=(caller.identity,),
+        )
 
 
 @pytest.mark.asyncio

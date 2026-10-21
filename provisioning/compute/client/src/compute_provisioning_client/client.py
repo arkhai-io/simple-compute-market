@@ -49,9 +49,9 @@ from compute_provisioning_contracts import (
     VersionResponse,
 )
 from market_core import VersionedEnvelope
-from market_identity import EMPTY_BODY, RotationRequest, Signer, TrustedIdentitySet
+from market_identity import EMPTY_BODY, RotationRequest, Signer
 
-from .base import SigningBase, multipart_descriptor, wire_query
+from .base import AuthorityTrust, SigningBase, multipart_descriptor, wire_query
 from .errors import (
     ComputeProvisioningError,
     ComputeProvisioningJobError,
@@ -329,7 +329,7 @@ class ComputeProvisioningClient(SigningBase):
         base_url: str,
         signer: Signer,
         caller_role: str,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -616,7 +616,7 @@ class SyncComputeProvisioningClient(SigningBase):
         base_url: str,
         signer: Signer,
         caller_role: str,
-        expected_authorities: TrustedIdentitySet,
+        expected_authorities: AuthorityTrust,
         *,
         timeout: float = 60.0,
         transport: httpx.BaseTransport | None = None,

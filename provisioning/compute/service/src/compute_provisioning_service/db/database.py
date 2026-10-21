@@ -1,4 +1,6 @@
-from sqlalchemy import create_engine, Engine
+from pathlib import Path
+
+from sqlalchemy import create_engine, Engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -36,12 +38,26 @@ def create_session_factory(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _has_existing_pool_or_host_state(engine: Engine) -> bool:
+    with engine.connect() as connection:
+        tables = set(inspect(connection).get_table_names())
+        return any(
+            connection.execute(text(query)).first() is not None
+            for table, query in (
+                ("resource_pools", "SELECT 1 FROM resource_pools LIMIT 1"),
+                ("hosts", "SELECT 1 FROM hosts LIMIT 1"),
+            )
+            if table in tables
+        )
+
+
 def run_migrations(
     engine: Engine,
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
     default_host_id: str | None = None,
+    pool_definitions_path: Path | None = None,
 ) -> None:
     """Create all tables and apply versioned migrations.
 
@@ -54,10 +70,14 @@ def run_migrations(
     migrations haven't been applied. See ARCHITECTURE.md § Schema Migration
     Execution.
     """
+    # Pool and host rows require legacy bootstrap/backfill; schema tables alone
+    # may be left by an interrupted first migration. With neither kind of state,
+    # a mounted document creates the default before inventory is admitted.
+    seed_default_pool = pool_definitions_path is None or _has_existing_pool_or_host_state(engine)
+
     # Resource-pool tables must be created before VM's: ansible_pool_configs
     # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
     # resolution during create_all needs the referenced table to exist.
-    from sqlalchemy import inspect
     from market_fulfillment.db import Base as FulfillmentBase
     from market_resource_pools.db import Base as PoolsBase
     from market_site.db import Base as SiteBase
@@ -86,5 +106,6 @@ def run_migrations(
         default_playbook_path=default_playbook_path,
         default_inventory_group=default_inventory_group,
         default_host_id=default_host_id,
+        seed_default_pool=seed_default_pool,
     )
     SiteBase.metadata.create_all(bind=engine)

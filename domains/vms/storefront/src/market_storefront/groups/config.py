@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
-import tomllib
 import typer
 from dynaconf import Dynaconf
 from market_config.config_loader import (
@@ -34,12 +33,15 @@ from market_config.settlement_migration import (
     migrate_settlement_config,
     reject_legacy_settlement_path,
 )
-from market_settlement_runtime import SettlementPublicationClause, SettlementRole
+from market_settlement_runtime import SettlementRole
 
 from market_storefront.publication_migration import (
     format_publication_migration_result,
     migrate_publication_config,
-    migrate_publication_csv,
+)
+from market_storefront.retired_settings import (
+    retired_setting,
+    retired_setting_explanation,
 )
 
 config_app = typer.Typer(no_args_is_help=True)
@@ -69,39 +71,6 @@ def _installed_settlement_mechanisms() -> dict[str, str]:
     from market_storefront.settlement_registry import installed_settlement_mechanisms
 
     return installed_settlement_mechanisms()
-
-
-def _seller_publication_clause_compiler(
-    document: Mapping[str, Any],
-) -> Callable[[Mapping[str, Any]], SettlementPublicationClause]:
-    from market_settlement_runtime import compile_settlement_publication_clause
-
-    from market_storefront.settlement_registry import (
-        build_storefront_settlement_registry,
-    )
-
-    registry = build_storefront_settlement_registry()
-    settlement = document.get("Settlement", document.get("settlement", {}))
-    if not isinstance(settlement, Mapping):
-        raise SettlementMigrationError("Settlement must be a table")
-    try:
-        resolved = registry.resolve(settlement, role="seller")
-    except (TypeError, ValueError) as exc:
-        raise SettlementMigrationError(
-            f"invalid seller settlement configuration: {exc}"
-        ) from exc
-
-    def compile_clause(
-        raw: Mapping[str, Any],
-    ) -> SettlementPublicationClause:
-        return compile_settlement_publication_clause(
-            raw,
-            registry=registry,
-            config=resolved,
-            role="seller",
-        )
-
-    return compile_clause
 
 
 @config_app.command("path")
@@ -168,6 +137,11 @@ def config_set(
     except SettlementMigrationError as exc:
         typer.secho(str(exc), err=True, fg=typer.colors.RED)
         raise typer.Exit(2) from exc
+    retired = retired_setting(key)
+    if retired is not None:
+        # Written, the key would refuse the schema or startup, or never be read.
+        typer.secho(retired_setting_explanation(retired), err=True, fg=typer.colors.RED)
+        raise typer.Exit(2)
     coerced: object = value
     low = value.strip().lower()
     if low in ("true", "false"):
@@ -228,11 +202,6 @@ def config_migrate(
         "--backup",
         help="Create the required same-directory backup in write mode.",
     ),
-    inventory: str | None = typer.Option(
-        None,
-        "--inventory",
-        help="Resource CSV to migrate when --scope publication is selected.",
-    ),
     legacy_contribution: str | None = typer.Option(
         None,
         "--legacy-contribution",
@@ -282,10 +251,6 @@ def config_migrate(
             "--legacy-offering-mode, --legacy-domain, and "
             "--legacy-contract-version"
         )
-    if scope == "settlement" and inventory is not None:
-        raise typer.BadParameter("--inventory applies only to --scope publication")
-    if scope == "storefront-domains" and inventory is not None:
-        raise typer.BadParameter("--inventory applies only to --scope publication")
     try:
         if scope == "settlement":
             result = migrate_settlement_config(
@@ -300,27 +265,13 @@ def config_migrate(
             )
             lines = format_migration_result(result)
         elif scope == "publication":
-            if inventory is None:
-                result = migrate_publication_config(
-                    storefront_config_file(),
-                    check=check,
-                    write=write,
-                    backup=backup,
-                    validator=_validate_settlement_candidate,
-                )
-            else:
-                config_path = storefront_config_file()
-                config_document = tomllib.loads(config_path.read_text(encoding="utf-8"))
-                result = migrate_publication_csv(
-                    inventory,
-                    storefront_config=config_document,
-                    check=check,
-                    write=write,
-                    backup=backup,
-                    clause_compiler=_seller_publication_clause_compiler(
-                        config_document
-                    ),
-                )
+            result = migrate_publication_config(
+                storefront_config_file(),
+                check=check,
+                write=write,
+                backup=backup,
+                validator=_validate_settlement_candidate,
+            )
             lines = format_publication_migration_result(result)
         else:
             from market_core import ContractVersion, DomainIdentity
@@ -403,15 +354,11 @@ _INIT_USER_TEMPLATE = """\
 # log_level = "INFO"                           # DEBUG | INFO | WARNING | ERROR
 # log_file_path = "/var/log/arkhai/agent.log"
 
-# resources_csv_path = "/app/resources.csv"    # auto-seed inventory on first boot from this CSV.
-                                                # Mutually exclusive with resources_csv_inline.
-
 
 # ---------------------------------------------------------------------------
 # Discovery / lifecycle
 # ---------------------------------------------------------------------------
 
-# enable_registry_discovery = true
 # max_discovery_agents = 10
 # enable_order_retry = true
 # order_retry_interval = 300
@@ -463,11 +410,6 @@ _INIT_USER_TEMPLATE = """\
 # poll_interval = 15
 # preflight_timeout = 30                        # how long startup waits for /health to come up
 # fail_on_unreachable = true                    # set false in dev when service comes up later
-# Public response authority overlap for the provisioning service:
-# [provisioning.identity]
-# principals = [
-#   { scheme = "ed25519", identifier = "<service-public-key>" },
-# ]
 
 [fulfillment.failure_policy]
 # actions = ["release_capacity", "emit_event"] # valid actions: release_capacity, emit_event,
@@ -509,6 +451,15 @@ _INIT_USER_TEMPLATE = """\
 # default_max_duration_seconds = 86400         # advertised lease ceiling; 0/unset = unlimited
 # publish_priceless = false                    # allow rows without an explicit negotiation floor; settlement
                                                 # publication still requires complete typed clauses.
+
+# [admissibility.defaults.vm.gpu]              # the shapes this storefront will sell: `min` and `max`
+# count = { min = 1, max = 16 }                # per quantity, no `offer`. Fills each bound a listing's
+# [admissibility.defaults.vm.memory]           # own inline constraints leave unstated (a listing may
+# gib = { max = 512 }                          # replace one, even wider); a listing whose offer falls
+                                                # outside its resolved range is not published, and the
+                                                # default generator yields only counts this admits.
+                                                # Unset = no limit; a table the storefront cannot read
+                                                # stops startup.
 """
 
 

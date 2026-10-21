@@ -1,25 +1,23 @@
 """Every loop the storefront registers is held by a pause within its bound.
 
-The kit controller's tests prove the mechanism against synthetic loops. They
-cannot prove that a production loop uses it. Two properties have to hold for
-each loop the storefront registers: it acknowledges its gate under the name
-`startup.py` registers it as, and it waits between cycles through the
-controller, so a pause requested during its interval reaches the gate at once.
-A loop that reads the flag without acknowledging, gates under a drifted name,
-or sleeps its interval instead fails the same observable way: a pause cannot
-report it `paused` within the pause's bounded wait.
+The kit controller's tests prove its timer against synthetic loops. They cannot
+prove that the storefront's loops use it. Every loop but the capacity-event
+pollers is registered with the controller over its step, so the controller's
+timer gates, runs the step through the one cycle boundary an operator's step
+takes, and waits through the controller; what is left to prove here is the
+registration: startup registers every loop under the name its step reports,
+with the interval it is configured with, and a pause requested between cycles
+reaches each one at once however long that interval is.
 
-So each case drives a loop's real coroutine with its work stubbed and its
-interval set far longer than any test would wait, and asserts the pause reports
-it `paused` well inside the controller's own bound. Work is synchronized with
-events; nothing here waits on time.
+So the timers run the storefront's real steps over collaborators injected
+through the container, with every interval set far longer than any test waits,
+and the pause must report each loop `paused` well inside the controller's own
+bound. Work is synchronized with events the collaborators set; nothing here
+waits on time.
 
-The negotiation watchdog and the settlement servicing sweep live in `kit/` and
-are composed with an injected gate and wait, so they are covered through that
-composition. Capacity polling's per-site fan-out lives in
-`kit/capacity-publication`, so the storefront holds no task per site; the
-per-site cases assert against declared gate names, and that each site
-acknowledges for itself.
+Capacity polling's per-site fan-out lives in `kit/capacity-publication`, so the
+storefront holds no task per site; the per-site cases assert against declared
+gate names, and that each site acknowledges for itself.
 """
 
 from __future__ import annotations
@@ -31,38 +29,126 @@ from types import SimpleNamespace
 
 import pytest
 
-from core_storefront.app_startup import StorefrontBackgroundTask
+import market_storefront.container as container
 from market_storefront import lifecycle
+from market_storefront import lifecycle_steps
+from market_storefront import startup
+from market_storefront.services.publication_loop import wake_publication_loop
+from tests._settings_overrides import settings_overrides
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
-#: Far longer than any test waits. A loop that sleeps this instead of waiting
-#: through the controller cannot be reported paused within `_PROMPTLY`.
-_LONG_INTERVAL = 3600.0
+#: Far longer than any test waits. A loop that slept this instead of waiting
+#: through the controller could not be reported paused within `_PROMPTLY`.
+_LONG_INTERVAL = 3600
 
 #: Well inside the controller's own quiescence bound, so a loop that is only
 #: reported paused once that bound expires fails here rather than passing late.
 _PROMPTLY = 1.0
 
+#: The timer loops startup registers on the controller while contact exchange
+#: is not composed: every loop but the capacity-event pollers' fan-out.
+_TIMED_LOOPS = {
+    lifecycle.NEGOTIATION_WATCHDOG,
+    lifecycle.SETTLEMENT_SERVICING,
+    lifecycle.FULFILLMENT_RESUME,
+    lifecycle.SITE_PROJECTION_POLLER,
+    lifecycle.PUBLICATION,
+}
+
 
 @pytest.fixture(autouse=True)
 async def _clean_registry():
-    lifecycle.reset_for_tests()
+    await lifecycle.reset_for_tests()
     yield
-    handles = list(lifecycle.controller()._handles.values())
-    lifecycle.reset_for_tests()
-    await asyncio.gather(*handles, return_exceptions=True)
+    await lifecycle.reset_for_tests()
+
+
+@pytest.fixture
+def long_intervals():
+    """Every configured loop interval far longer than any test waits."""
+    with settings_overrides(
+        negotiation_watchdog_interval=_LONG_INTERVAL,
+        settlement_servicing_interval_seconds=_LONG_INTERVAL,
+        fulfillment_resume_sweep_interval=_LONG_INTERVAL,
+        **{
+            "capacity.poll_interval": _LONG_INTERVAL,
+            "capacity.publication_interval_seconds": _LONG_INTERVAL,
+        },
+    ):
+        yield
+
+
+class _Cycles:
+    """The capacity runtime a publication cycle reads first, marking each cycle.
+
+    It names no site, so a cycle goes straight to converging registries, which
+    fails over the absent database; a failed cycle is recorded and its timer
+    carries on to its interval, which is all these cases need.
+    """
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.count = 0
+
+    @property
+    def site_ids(self) -> tuple[str, ...]:
+        self.count += 1
+        self.started.set()
+        return ()
+
+    #: The sites the capacity-event fan-out polls; none unless a case names some.
+    sites: tuple[str, ...] = ()
+
+    async def poll_events(self, *, interval_seconds, paused=None, wait=None, record=None):
+        """The capacity-event fan-out: each site gates and waits as the kit's
+        pollers do, and stays at its gate once held. It never returns."""
+        gates = [paused(site) for site in self.sites]
+        while True:
+            if any([gate() for gate in gates]):
+                await asyncio.Event().wait()
+            await wait(_LONG_INTERVAL)
+
+
+@pytest.fixture
+def collaborators(monkeypatch):
+    """The container the steps read: a projection site marking its first poll,
+    a capacity runtime marking each publication cycle, and nothing else, so
+    the remaining steps fail fast and wait out their intervals."""
+    first_poll = asyncio.Event()
+
+    class _Site(FakeProjectionSite):
+        async def _snapshot(self, family, key):
+            first_poll.set()
+            return await super()._snapshot(family, key)
+
+    site = _Site(resource_pools=[], capacity_buckets=[])
+    cycles = _Cycles()
+    monkeypatch.setattr(
+        container, "resolved_site_projections", site_projection_state({"default": site})
+    )
+    monkeypatch.setattr(container, "resolved_capacity_runtime", cycles)
+    monkeypatch.setattr(container, "resolved_sqlite_client", None)
+    monkeypatch.setattr(container, "resolved_contact_exchange", None)
+    return SimpleNamespace(site=site, first_poll=first_poll, publication=cycles)
 
 
 @asynccontextmanager
 async def _registered(coro_factory, name: str):
-    """Run a loop body as a registered loop under the name `startup.py` uses.
+    """Run a fan-out's task under the name startup registers it as, with the
+    step its route runs, as `register_vm_loops` does.
 
     Cancellation is how the loop ends in this test, never how a pause works:
     these loops are not cancelled in production. It is only the test's way of
     reclaiming a coroutine designed never to return.
     """
-    task = lifecycle.start_registered_loop(
-        StorefrontBackgroundTask(name=name, task_factory=coro_factory)
+    lifecycle.register_fan_out(
+        name,
+        route="capacity-events",
+        step=lifecycle_steps.capacity_events_step,
+        run=coro_factory,
+        children=lambda: (),
     )
+    task = lifecycle.start_loops()[name]
     try:
         yield task
     finally:
@@ -74,240 +160,93 @@ async def _paused_promptly() -> dict[str, str]:
     return await asyncio.wait_for(lifecycle.controller().pause(), timeout=_PROMPTLY)
 
 
-class TestRegisteredNamesAreTheGatedNames:
-    def test_startup_registers_exactly_the_named_loops(self):
-        """The constants are the contract between registration and gating.
+class TestStartupRegistersEveryLoopOnTheController:
+    def test_startup_starts_no_loop_body_of_its_own(self):
+        """Every loop, the capacity pollers' fan-out included, is registered on
+        the controller and started by `start_loops`; startup starts no task."""
+        source = open(startup.__file__).read()
+        assert "StorefrontBackgroundTask" not in source
+        assert "start_loops()" in source
 
-        If a loop is added without a constant, the two ends can disagree again
-        and nothing else in this file will notice, because it only checks the
-        loops it knows to check.
-        """
-        from market_storefront import startup
-
-        source = (startup.__file__ and open(startup.__file__).read()) or ""
-        for constant in (
-            "NEGOTIATION_WATCHDOG",
-            "SETTLEMENT_SERVICING",
-            "FULFILLMENT_RESUME",
-            "CAPACITY_EVENTS_POLLER",
-            "SITE_PROJECTION_POLLER",
-            "PUBLICATION",
-        ):
-            assert f"name={constant}" in source, (
-                f"{constant} is no longer used to register its loop; a literal "
-                "name here can drift from the one the loop body gates under"
-            )
-
-
-class TestEachProductionLoopIsHeldWithinItsInterval:
-    async def test_negotiation_watchdog(self, monkeypatch):
-        """Composed as `startup.py` composes it, and held during its startup
-        delay as well as its interval.
-
-        The delay holds the sweep, not the gate: a watchdog unobservable for its
-        startup window would miss the first pause of an end-to-end run.
-        """
-        from market_storefront_kit import negotiation_watchdog as nw
-
-        swept: list[int] = []
-
-        async def _sweep(_repository, _policy, **_kwargs):
-            swept.append(1)
-            return 0
-
-        monkeypatch.setattr(nw, "sweep_stale_negotiations", _sweep)
-        policy = nw.NegotiationWatchdogPolicy(
-            timeout_seconds=1800.0,
-            interval_seconds=_LONG_INTERVAL,
-            initial_delay_seconds=30.0,
-        )
-        name = lifecycle.NEGOTIATION_WATCHDOG
-        async with _registered(
-            partial(
-                nw.run_negotiation_watchdog,
-                object(),
-                policy,
-                paused=lifecycle.loop_gate(name),
-                wait=lifecycle.idle,
-            ),
-            name,
-        ):
-            states = await _paused_promptly()
-
-        assert states == {name: "paused"}
-        assert not swept, "the startup delay no longer holds the sweep"
-
-    async def test_settlement_servicing(self):
-        from market_settlement_runtime.servicing import SettlementServicingWorker
-
-        class _Repo:
-            async def list_due_settlement_obligations(self, **_kwargs):
-                return []
-
-        worker = SettlementServicingWorker(
-            runtime=object(),
-            repository=_Repo(),
-            worker_id="test",
-            interval_seconds=_LONG_INTERVAL,
-        )
-        name = lifecycle.SETTLEMENT_SERVICING
-        async with _registered(
-            partial(worker.run, paused=lifecycle.loop_gate(name), wait=lifecycle.idle),
-            name,
-        ):
-            states = await _paused_promptly()
-
-        assert states == {name: "paused"}
-
-    async def test_fulfillment_resume(self, monkeypatch):
-        from market_storefront.services import fulfillment_resume_runtime as frr
-
-        swept: list[int] = []
-        first = asyncio.Event()
-
-        async def _sweep(**_kwargs):
-            swept.append(1)
-            first.set()
-            return 0
-
-        monkeypatch.setattr(frr, "resume_incomplete_fulfillments_once", _sweep)
-        # A stand-in settings object rather than an attribute on the dynaconf
-        # singleton: the loop reads its interval with a `getattr` default, so the
-        # key is absent from the real settings, and monkeypatch restores an
-        # absent attribute by deleting it -- which dynaconf rejects for a key it
-        # never held.
-        monkeypatch.setattr(
-            "market_storefront.utils.config.settings",
-            SimpleNamespace(fulfillment_resume_sweep_interval=_LONG_INTERVAL),
-        )
-        name = lifecycle.FULFILLMENT_RESUME
-        async with _registered(partial(frr.fulfillment_resume_loop, object()), name):
-            await asyncio.wait_for(first.wait(), timeout=_PROMPTLY)
-            states = await _paused_promptly()
-
-        assert states == {name: "paused"}
-        assert swept == [1], "a held loop swept again"
-
-    async def test_fulfillment_resume_survives_a_failing_sweep(self, monkeypatch):
-        """A raising cycle must not end the loop.
-
-        Nothing restarts one, so a single bad sweep would otherwise stop escrow
-        convergence for the life of the process. Each pause and resume lets the
-        loop through one more cycle, so the second failure is observed without
-        waiting on its interval.
-        """
-        from market_storefront.services import fulfillment_resume_runtime as frr
-
-        failures: list[int] = []
-        failed = asyncio.Event()
-
-        async def _always_fails(**_kwargs):
-            failures.append(1)
-            failed.set()
-            raise RuntimeError("sweep failed")
-
-        monkeypatch.setattr(frr, "resume_incomplete_fulfillments_once", _always_fails)
-        monkeypatch.setattr(
-            "market_storefront.utils.config.settings",
-            SimpleNamespace(fulfillment_resume_sweep_interval=_LONG_INTERVAL),
-        )
-        name = lifecycle.FULFILLMENT_RESUME
-        async with _registered(partial(frr.fulfillment_resume_loop, object()), name):
-            await asyncio.wait_for(failed.wait(), timeout=_PROMPTLY)
-            await _paused_promptly()
-            failed.clear()
-            await lifecycle.controller().resume()
-            await asyncio.wait_for(failed.wait(), timeout=_PROMPTLY)
-
-        assert len(failures) == 2, "the loop stopped after a failing sweep"
-
-    async def test_site_projection_poller(self, monkeypatch):
-        from market_storefront.services import site_projection_cache as spc
-
-        loads: list[int] = []
-        first = asyncio.Event()
-
-        async def _load(_client):
-            loads.append(1)
-            first.set()
-
-        monkeypatch.setattr(spc, "load_site_projections", _load)
-        monkeypatch.setattr(
-            "market_storefront.utils.config.settings",
-            SimpleNamespace(capacity=SimpleNamespace(poll_interval=_LONG_INTERVAL)),
-        )
-        name = lifecycle.SITE_PROJECTION_POLLER
-        async with _registered(partial(spc.site_projection_poller_loop, object()), name):
-            await asyncio.wait_for(first.wait(), timeout=_PROMPTLY)
-            states = await _paused_promptly()
-
-        assert states == {name: "paused"}
-        assert loads == [1], "a held poller pulled projections again"
-
-    async def test_publication_loop_gates_before_any_cycle(self):
-        """Held from the start, the publication loop reaches its gate and runs no cycle."""
-        from market_storefront.services.publication_loop import publication_loop
-
-        cycles: list[bool] = []
-
-        async def _cycle(*, dry_run):
-            cycles.append(dry_run)
-            return {}
-
+    async def test_startup_registers_and_starts_every_loop(
+        self, long_intervals, collaborators
+    ):
+        """Held from the start, so no loop runs a cycle here."""
         lifecycle.controller().request_pause(True)
-        async with _registered(partial(publication_loop, _cycle), lifecycle.PUBLICATION):
-            await asyncio.wait_for(lifecycle.await_quiescence(), timeout=_PROMPTLY)
-            states = lifecycle.loop_states()
+        collaborators.publication.sites = ("default",)
+        # A development site URL on a reserved domain; nothing is called there.
+        with settings_overrides(**{"capacity.sites": {"default": "http://site.invalid:8081"}}):
+            startup._start_lifecycle_loops()
+        await asyncio.wait_for(lifecycle.await_quiescence(), timeout=_PROMPTLY)
 
-        assert states == {lifecycle.PUBLICATION: "paused"}
-        assert cycles == []
-
-    async def test_a_pause_during_the_idle_wait_reaches_the_gate(self):
-        """A pause issued between cycles reaches the loop's gate at once.
-
-        The pause wakes the idle wait, so it never waits on the loop's interval,
-        which is far longer than any pause should take.
-        """
-        from market_storefront.services.publication_loop import publication_loop
-
-        cycles: list[bool] = []
-        first_cycle = asyncio.Event()
-
-        async def _cycle(*, dry_run):
-            cycles.append(dry_run)
-            first_cycle.set()
-            return {}
-
-        async with _registered(partial(publication_loop, _cycle), lifecycle.PUBLICATION):
-            await asyncio.wait_for(first_cycle.wait(), timeout=_PROMPTLY)
-            states = await _paused_promptly()
-
-        assert states[lifecycle.PUBLICATION] == "paused"
-        assert cycles == [False]
-
-    async def test_a_projection_change_wakes_the_idle_loop(self):
-        """A site's declaration change starts the next cycle without its interval."""
-        from market_storefront.services.publication_loop import (
-            publication_loop,
-            wake_publication_loop,
+        assert set(lifecycle.registered_loop_names()) == {
+            *_TIMED_LOOPS,
+            lifecycle.CAPACITY_EVENTS_POLLER,
+        }
+        snapshot = lifecycle.snapshot()
+        assert {name: snapshot[name].state for name in _TIMED_LOOPS} == dict.fromkeys(
+            _TIMED_LOOPS, "paused"
         )
+        # The fan-out's task is started with the timers, and each configured
+        # site's poller is declared before its first cycle.
+        assert snapshot[lifecycle.CAPACITY_EVENTS_POLLER].state == "paused"
+        assert lifecycle.capacity_site_loop_name("default") in snapshot
+        assert all(snapshot[name].last_outcome is None for name in _TIMED_LOOPS)
+        assert collaborators.site.snapshots == {"resource_pool": 0, "capacity_bucket": 0}
 
-        cycles: list[bool] = []
-        ran = asyncio.Event()
 
-        async def _cycle(*, dry_run):
-            cycles.append(dry_run)
-            ran.set()
-            return {}
+class TestEachLoopIsHeldWithinItsInterval:
+    async def test_a_pause_during_the_idle_wait_reaches_every_gate(
+        self, long_intervals, collaborators
+    ):
+        """The poller and publication run their first cycle on starting, the
+        others are in their first interval; a pause then holds every one within
+        the bound, and none runs again."""
+        startup._start_lifecycle_loops()
+        await asyncio.wait_for(collaborators.first_poll.wait(), timeout=_PROMPTLY)
+        await asyncio.wait_for(collaborators.publication.started.wait(), timeout=_PROMPTLY)
 
-        async with _registered(partial(publication_loop, _cycle), lifecycle.PUBLICATION):
-            await asyncio.wait_for(ran.wait(), timeout=_PROMPTLY)
-            ran.clear()
-            wake_publication_loop()
-            await asyncio.wait_for(ran.wait(), timeout=_PROMPTLY)
+        states = await _paused_promptly()
 
-        assert cycles == [False, False]
+        assert {name: states[name] for name in _TIMED_LOOPS} == dict.fromkeys(
+            _TIMED_LOOPS, "paused"
+        )
+        assert collaborators.site.snapshots == {"resource_pool": 1, "capacity_bucket": 1}, (
+            "a held poller polled again"
+        )
+        assert collaborators.publication.count == 1, "a held publication loop ran again"
 
+    async def test_a_failing_cycle_is_recorded_and_the_loop_keeps_running(
+        self, long_intervals, collaborators
+    ):
+        """Publication's first cycle fails over the absent database; the
+        controller records it in the stage it failed in and the loop runs on."""
+        startup._start_lifecycle_loops()
+        await asyncio.wait_for(collaborators.publication.started.wait(), timeout=_PROMPTLY)
+        await _paused_promptly()
+
+        loop = lifecycle.snapshot()[lifecycle.PUBLICATION]
+        assert loop.state == "paused"
+        assert loop.last_outcome is not None
+        assert loop.last_outcome.trigger == "timer"
+        assert not loop.last_outcome.completed
+        assert loop.last_outcome.stage == "converge"
+
+    async def test_a_projection_change_wakes_the_publication_timer(
+        self, long_intervals, collaborators
+    ):
+        """A site's declaration change starts the next cycle without its interval."""
+        startup._start_lifecycle_loops()
+        await asyncio.wait_for(collaborators.publication.started.wait(), timeout=_PROMPTLY)
+        collaborators.publication.started.clear()
+
+        wake_publication_loop()
+        await asyncio.wait_for(collaborators.publication.started.wait(), timeout=_PROMPTLY)
+
+        assert collaborators.publication.count == 2
+
+
+class TestCapacityEventPollers:
     async def test_capacity_events_poller(self, monkeypatch):
         """The aggregate keeps gating under its own name after starting its fan-out.
 
@@ -322,11 +261,13 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
         started = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 started.set()
                 await asyncio.Event().wait()
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         name = lifecycle.CAPACITY_EVENTS_POLLER
         async with _registered(partial(cc.capacity_events_poller_loop, object()), name):
             # The fan-out starts only once the aggregate has passed its first
@@ -351,7 +292,9 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
         started = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 gates = [paused(site) for site in ("site-a", "site-b")]
                 started.set()
                 while True:
@@ -359,7 +302,7 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
                         gate()
                     await wait(_LONG_INTERVAL)
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         async with _registered(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,
@@ -387,7 +330,9 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
         declared = asyncio.Event()
 
         class _Runtime:
-            async def poll_events(self, *, interval_seconds, paused=None, wait=None):
+            async def poll_events(
+                self, *, interval_seconds, paused=None, wait=None, record=None
+            ):
                 gate_a = paused("site-a")
                 # site-b's gate is bound -- so it is declared and waited on --
                 # but never consulted, standing in for a cycle still in flight.
@@ -397,7 +342,7 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
                     gate_a()
                     await wait(_LONG_INTERVAL)
 
-        monkeypatch.setattr(cc, "build_capacity_runtime", lambda _f: _Runtime())
+        monkeypatch.setattr(container, "resolved_capacity_runtime", _Runtime())
         async with _registered(
             partial(cc.capacity_events_poller_loop, object()),
             lifecycle.CAPACITY_EVENTS_POLLER,
@@ -413,3 +358,43 @@ class TestEachProductionLoopIsHeldWithinItsInterval:
             "a site that never reached its gate must not be reported as stopped "
             "on the strength of another site's acknowledgement"
         )
+
+
+class TestIntroductionRetention:
+
+    async def test_the_sweep_is_registered_while_contact_exchange_is_composed(
+        self, long_intervals, collaborators, monkeypatch
+    ):
+        retention = SimpleNamespace(
+            policy=SimpleNamespace(sweep_interval_seconds=_LONG_INTERVAL)
+        )
+        monkeypatch.setattr(
+            container,
+            "resolved_contact_exchange",
+            SimpleNamespace(retention=lambda: retention),
+        )
+        lifecycle.controller().request_pause(True)
+        startup._start_lifecycle_loops()
+        await asyncio.wait_for(lifecycle.await_quiescence(), timeout=_PROMPTLY)
+
+        assert set(lifecycle.registered_loop_names()) == {
+            *_TIMED_LOOPS,
+            lifecycle.CAPACITY_EVENTS_POLLER,
+            lifecycle.INTRODUCTION_RETENTION,
+        }
+        assert lifecycle.loop_states()[lifecycle.INTRODUCTION_RETENTION] == "paused"
+
+    async def test_an_unusable_sweep_interval_refuses_startup_by_its_key(
+        self, long_intervals, collaborators, monkeypatch
+    ):
+        """Checked before any loop registers, so none starts."""
+        retention = SimpleNamespace(policy=SimpleNamespace(sweep_interval_seconds=10**11))
+        monkeypatch.setattr(
+            container,
+            "resolved_contact_exchange",
+            SimpleNamespace(retention=lambda: retention),
+        )
+        with pytest.raises(ValueError, match="retention_sweep_interval_seconds"):
+            startup._start_lifecycle_loops()
+
+        assert lifecycle.registered_loop_names() == []

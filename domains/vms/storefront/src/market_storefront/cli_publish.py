@@ -22,10 +22,14 @@ from market_identity import TrustedIdentitySet
 from rich import box
 from rich.console import Console
 from rich.table import Table
-from storefront_client import StorefrontClientError, SyncStorefrontClient
+from storefront_client import SyncStorefrontClient
 
+from .cli_common import (
+    STOREFRONT_FAILURES,
+    resolve_storefront_url,
+    storefront_failure_message,
+)
 from .cli_common import admin_client as _admin_client
-from .cli_common import resolve_storefront_url
 
 PUBLICATION_LOOP = "publication"
 
@@ -124,6 +128,6 @@ def register(app: typer.Typer) -> None:
                 console.print(f"Closed {len(closed)} listing(s).")
                 return
             _print_cycle(console, run_cycle(base_url, dry_run=dry_run))
-        except StorefrontClientError as exc:
-            typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+        except STOREFRONT_FAILURES as exc:
+            typer.secho(storefront_failure_message(exc), err=True, fg=typer.colors.RED)
             raise typer.Exit(code=1) from exc

@@ -1,0 +1,121 @@
+# The bare-metal storefront's configuration in the local end-to-end lane
+# (`make -C e2e-tests test-e2e-bare-metal`), mounted as its storefront.toml.
+#
+# Every principal, address, and URL below is a well-known deterministic
+# development value: the Anvil accounts dev-env/identities/README.md assigns in
+# "The bare-metal lane", and the lane's own Compose service names. None of them
+# may be used on a public network. Signing material is not here:
+# ARKHAI_IDENTITY_CREDENTIAL arrives through the lane's identity environment
+# file, and the wallet key through the secrets overlay the lane mounts
+# (dev-env/identities/bare-metal.storefront.secrets.toml).
+
+base_url = "http://bare-metal-storefront:8000"
+# The port `serve` binds: the packaged default, stated because
+# domains/bare_metal/compose.yml's port mapping and healthcheck name it.
+port     = 8000
+
+# Timer-loop intervals, shortened for this stack only. A scenario holds the
+# storefront's loops and advances each one deliberately; shorter intervals
+# change nothing about what a loop does, only how soon a timer cycle comes
+# round once the loops are resumed. Production keeps the shipped values.
+negotiation_watchdog_interval         = 2
+settlement_servicing_interval_seconds = 2
+payment_reconciliation_interval       = 2
+
+# The storefront's principal: Anvil account 2, which also signs as its seller
+# wallet below.
+[Identity.principal]
+scheme     = "eip191"
+identifier = "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+
+# Anvil account 6, a different principal from the storefront's own: the seller
+# publishes and the administrator operates.
+[Identity.administrators.operator]
+principals = [
+  { scheme = "eip191", identifier = "0x976ea74026e726554db657fa54763abd0c3a0aa9" },
+]
+
+# The lane's one site authority, Anvil account 0: the service peer its one site
+# is bound to. Startup seeds it into the storefront's durable identity state,
+# which then owns its principals: the site's responses and callbacks verify
+# against them, and they rotate through the storefront's identity routes.
+[Identity.service_peers.bare_metal_e2e_site]
+role       = "service"
+site_id    = "bare-metal-e2e"
+principals = [
+  { scheme = "eip191", identifier = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266" },
+]
+
+[capacity]
+placement     = "fill_first"
+poll_interval = 1
+# How long a confirmed projection poll lets the opening recheck confirm a
+# listing, widened for this stack only. A scenario that holds the loops keeps
+# trading, and with the shipped window -- three poll intervals -- a round it
+# sends more than a few seconds after its last `site-projections` step would be
+# refused as retryable. An hour covers any one scenario's run; production keeps
+# the shipped window. A development value.
+source_confirmation_seconds = 3600
+
+[capacity.sites]
+bare-metal-e2e = "http://bare-metal-provisioning:8081"
+
+[registry]
+urls = ["http://bare-metal-registry:8080"]
+
+# The lane's registry, Anvil account 3.
+[registry.authorities."http://bare-metal-registry:8080"]
+authority  = "bare-metal-registry"
+principals = [
+  { scheme = "eip191", identifier = "0x90f79bf6eb2c4f870365e785982e1f101e93b906" },
+]
+
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1", "contact-exchange.v1"]
+
+[Settlement.alkahest]
+enabled = true
+# The dev chain's address book, which compose.bare-metal-local.yml mounts.
+address_config_path = "/app/alkahest_anvil_addresses.json"
+oracle_gated = false
+trusted_oracle_addresses = []
+interruptible = false
+interruptible_oracle_addresses = []
+
+# Contact exchange is enabled so the introduction scenario can offer it through
+# a pool override; the publication clauses below stay Alkahest-only, so no
+# other listing changes. The seller contact is a development value on a
+# reserved domain. A 5-second retention window lets the scenario watch an
+# introduction expire; the day-long sweep interval keeps the timer out of the
+# way of the steps the scenario takes itself.
+[Settlement.contact]
+enabled = true
+contact_payload = { email = "seller@bare-metal-e2e.invalid" }
+retention_seconds = 5
+retention_sweep_interval_seconds = 86400
+
+[Settlement.contact.profiles.default]
+channel = "email"
+terms = "Development introduction; no commercial terms."
+
+# The seller wallet's address, Anvil account 2; its key is in the secrets overlay.
+[Wallet]
+address = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+
+[Chains.anvil]
+rpc_url = "ws://anvil:8545"
+alkahest_address_config_path = "/app/alkahest_anvil_addresses.json"
+
+[pricing]
+# The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.
+settlements = [
+  { mechanism = "alkahest.v1", asset = "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0", rate = "10", per = "hour", mechanism_input = { chain = "anvil", escrow_kind = "erc20_escrow_obligation_default" } },
+]
+default_max_duration_seconds = 86400
+
+[negotiation]
+# A seller chain ending in `bisection`, which counters an opening below the
+# listed rate where the default chain would exit, so the lane's deal negotiates
+# an open thread.
+policies = ["escrow_shape_guard", "bisection"]

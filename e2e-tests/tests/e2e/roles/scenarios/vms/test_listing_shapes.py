@@ -26,6 +26,12 @@ scenario proves the cross-service path from that declaration to discovery:
    override's per-unit rates -- which the registry carries in the existing
    option fields, while the family rates are served only by the storefront.
    Deleting the override restores the hint's flat rate.
+8. The pool restates its shape with inline constraints -- `gpu.count`
+   `{offer: 1, max: 4}` and a `memory.gib` maximum but no memory offer. One
+   cycle publishes the base shape alone: one GPU and no `ram_gb`, since a
+   constraint without an offer commits nothing. Neither the storefront's listing
+   nor the registry's carries a constraint: what a seller would also sell stays
+   the storefront's own policy.
 
 The listing's terms and region come from the pool's own `pricing` and `region`
 hints, so the scenario does not depend on the storefront's configured defaults.
@@ -45,6 +51,7 @@ from dataclasses import dataclass
 
 import pytest
 from market_pool_overrides import SyncPoolOverrideClient, pool_override_statuses
+from market_resource_pools_contracts import PoolUpdate
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
@@ -75,6 +82,12 @@ SHAPE = {
     "storage": {"gib": 100},
 }
 PUBLISHED = {"gpu_count": 1, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100}
+#: The hint restated with inline constraints: one GPU offered of up to four, and
+#: memory bounded without an offer. Its base shape is the GPU family alone.
+CONSTRAINED_SHAPE = {
+    "gpu": {"count": {"offer": 1, "max": 4}, "model": GPU_MODEL},
+    "memory": {"gib": {"max": 512}},
+}
 #: The storefront's own shape for the pool: the hint's, with half the memory.
 OVERRIDE_SHAPE = {**SHAPE, "memory": {"gib": 16}}
 
@@ -139,6 +152,8 @@ class ShapeState:
     site_id: str | None = None
     overridden: bool = False
     shape_priced: bool = False
+    override_cleared: bool = False
+    constrained: bool = False
 
 
 @pytest.fixture(scope="module")
@@ -456,3 +471,75 @@ class TestStage07_ShapePricing:
         listing = storefront_admin_client.get_listing(listing_id)
         assert _listing_rate(listing) == FLAT_RATE
         assert listing.extra.get("rate_structure") is None
+
+    def test_07c_no_override_is_left_for_the_pool(self, storefront_admin_client, shape_state):
+        """Stages 06 and 07 each delete the override they wrote; stage 08 needs the
+        hint to be authoritative whatever became of them, so this stage removes any
+        override left behind and confirms none is stored."""
+        require_state(shape_state, "site_id")
+        overrides = SyncPoolOverrideClient(storefront_admin_client)
+        overrides.delete_pool_override(shape_state.site_id, E2E_LISTING_SHAPES_POOL_ID, "vm")
+        assert overrides.list_pool_overrides(
+            site_id=shape_state.site_id, pool_id=E2E_LISTING_SHAPES_POOL_ID
+        ).overrides == []
+        shape_state.override_cleared = True
+
+
+def _carries_no_constraint(value) -> bool:
+    """No mapping anywhere in a published listing holds a constraint's keys."""
+    if isinstance(value, dict):
+        return not value.keys() & {"offer", "min", "max"} and all(
+            _carries_no_constraint(item) for item in value.values()
+        )
+    if isinstance(value, list):
+        return all(_carries_no_constraint(item) for item in value)
+    return True
+
+
+class TestStage08_ShapeConstraints:
+    def test_08a_the_pool_states_its_shape_with_constraints(
+        self, resource_pool_client, storefront_admin_client, shape_state
+    ):
+        require_state(shape_state, "declared", "override_cleared")
+        tags = dict(resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID).policy_tags)
+        resource_pool_client.patch_pool(
+            E2E_LISTING_SHAPES_POOL_ID,
+            PoolUpdate(policy_tags={**tags, "listing_shapes": {"vm": [CONSTRAINED_SHAPE]}}),
+        )
+        # The site stores the constraints verbatim.
+        assert resource_pool_client.get_pool(E2E_LISTING_SHAPES_POOL_ID).policy_tags[
+            "listing_shapes"
+        ] == {"vm": [CONSTRAINED_SHAPE]}
+        refresh_storefront_projections(storefront_admin_client)
+        shape_state.constrained = True
+
+    def test_08b_one_cycle_publishes_the_base_shape_and_no_constraint(
+        self, storefront_admin_client, registry_client, shape_state
+    ):
+        require_state(shape_state, "constrained")
+        cycle = advance_storefront(storefront_admin_client, "publication")
+        this_pool = [
+            action for action in cycle.get("actions") or []
+            if (action.get("source") or {}).get("pool_id") == E2E_LISTING_SHAPES_POOL_ID
+        ]
+
+        listings = _pool_listings(storefront_admin_client)
+        assert len(listings) == 1, (
+            f"expected one listing for the constrained shape, got {listings}; "
+            f"the cycle's actions for this pool: {this_pool}"
+        )
+        ((listing_id, resource),) = listings.items()
+        assert (resource["gpu_count"], resource["gpu_model"]) == (1, GPU_MODEL), resource
+        for omitted in ("ram_gb", "vcpu_count", "disk_gb"):
+            assert resource.get(omitted) is None, resource
+        assert _carries_no_constraint(resource), resource
+
+        published = {
+            str(row.id): row
+            for row in registry_client.list_listings(status="open", limit=200).listings
+        }
+        assert listing_id in published, sorted(published)
+        registered = published[listing_id].listing_resource
+        assert registered.get("gpu_count") == 1 and registered.get("ram_gb") is None, registered
+        assert _carries_no_constraint(registered), registered
+        log.info("[08b] %s publishes the constrained shape's base shape", listing_id)

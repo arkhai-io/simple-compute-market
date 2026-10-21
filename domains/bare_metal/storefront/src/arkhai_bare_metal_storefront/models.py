@@ -9,7 +9,7 @@ from arkhai_bare_metal import (
     BareMetalResult,
     BareMetalReceipt,
 )
-from core_storefront.models.system_models import ProjectionFamilyStatus
+from core_storefront.models.system_models import LoopStatus, ProjectionFamilyStatus
 from market_identity import Identity
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
@@ -58,7 +58,6 @@ class BareMetalHealthResponse(BaseModel):
     paused: bool | None = None
     principal: Identity
     sites: list[dict[str, object]] = Field(default_factory=list)
-    resource_count: int | None = None
     # Reported per site and outside ``checks``: one site's projection being
     # unavailable is not a storefront-wide degradation.
     site_projections: dict[str, dict[str, ProjectionFamilyStatus]] | None = None
@@ -75,6 +74,12 @@ class BareMetalHealthResponse(BaseModel):
     # from its installed contract wheel; on the status an administrator or a
     # configured site's authority reads.
     provisioning_contract_version: str | None = None
+    # Every lifecycle loop by name, its controller state and the outcome of its
+    # last cycle, whether its timer or an operator's step ran it; on status.
+    lifecycle: dict[str, LoopStatus] | None = None
+    # Each configured site's holds, refusals, and reports, each with its reason,
+    # from the latest publication cycle; on status, and empty before any cycle.
+    publication_derivation: dict[str, dict[str, list[dict[str, object]]]] | None = None
 
 
 class BareMetalFulfillmentResponse(BaseModel):

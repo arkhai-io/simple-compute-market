@@ -23,11 +23,43 @@ A domain package MUST own the listing, message, terms, materialization, receipt,
 - **THEN** its deterministic codecs and reference semantics can be installed without modifying core orchestration
 
 ### Requirement: From-below kit dependencies
-Kit and domain concept modules MUST NOT depend on core composition packages; role implementations MAY depend on both the relevant core role and domain/kit contracts.
+Every package MUST depend only on packages in its own layer or a lower one, without a cycle inside a layer, and only on packages whose scope is a subset of its own. Layer, kind, and scope MUST be read from the package's path and name, never inferred from its imports. Any import and any declared internal distribution is a dependency. One repository-wide check MUST hold these rules over every project, and every divergence it reports MUST be an owned exception that expires with its cause.
 
 #### Scenario: Architecture boundary tests run
-- **WHEN** imports are checked for core, kit, and domain concept packages
-- **THEN** core has no domain imports and from-below modules have no upward composition imports
+- **WHEN** the repository architecture check runs over every project outside the tooling paths
+- **THEN** every project is classified by layer, kind, and scope, and every dependency a rule forbids is reported unless an owned exception row excuses it
+
+#### Scenario: A lower layer depends on a higher one
+- **WHEN** a kit or specialization imports a composition, at module level, inside a function, under `TYPE_CHECKING`, or behind `try`
+- **THEN** the architecture check fails and names the importing file and line and the imported distribution
+
+#### Scenario: Packages in one layer import each other
+- **WHEN** two packages in the same layer depend on each other directly or through others in that layer
+- **THEN** the architecture check fails and names the cycle
+
+#### Scenario: A package knows a scope it is not placed in
+- **WHEN** a package depends on one whose scope is not a subset of its own, such as a domain composition declaring a sibling domain's contribution without importing it
+- **THEN** the architecture check fails and names the dependency and the scope elements it adds
+
+#### Scenario: A package imports an internal distribution it does not declare
+- **WHEN** a project's source imports a repository distribution its `pyproject.toml` does not declare
+- **THEN** the architecture check fails and names the importing file and line
+
+#### Scenario: A package imports a plugin
+- **WHEN** any package imports a package that registers into a plugin entry-point group
+- **THEN** the architecture check fails, while a declaration that installs the plugin passes
+
+#### Scenario: A light kind depends outside its kind allowlist
+- **WHEN** a contracts or client package depends on a distribution its kind allowlist does not name
+- **THEN** the architecture check fails and names the dependency
+
+#### Scenario: An exception outlives its cause
+- **WHEN** an exception row's edge is gone, or the edge no longer breaks the rule the row names
+- **THEN** the architecture check fails and names the row and its owning change
+
+#### Scenario: An override outlives its cause
+- **WHEN** an override row's project now classifies the same from its path alone, or the row grants a scope element none of the project's dependencies uses
+- **THEN** the architecture check fails and names the row
 
 ### Requirement: Role-owned executable composition
 The buyer executable MUST be core-owned and load domain plugins, and registry behavior MUST be core-owned and schema-configured. VM, bare-metal, and API-credit storefront executables and the VM provisioning executable are domain-owned composition roots. Each storefront contribution MUST provide one validated `MarketDomainContract` plus its domain-owned runtime builder without importing another domain implementation.
@@ -295,7 +327,18 @@ declared to the controller by name so that a pause waits for it.
 A registration MUST bind the loop's name to the step that runs exactly one cycle of
 it, and MAY bind a read-only preview of that cycle. The step MUST invoke the same
 operation the loop's timer invokes, so a manual cycle cannot exercise behaviour the
-timer does not. A loop with no timer MAY register a step alone.
+timer does not. A loop MUST register in one of two forms: a timer loop, whose timer
+the controller runs over its step, or a fan-out, whose task a composed kit runtime
+owns and which runs independent per-child cycles, each child under its own declared
+name. A fan-out MUST register with its step and the names of its children, and each
+child MUST be declared as the fan-out's child when it registers, so status lists every
+child before its first cycle; a child the fan-out's task reaches later MUST be declared
+then. A name registered in one form MUST be refused in the other. A storefront MAY
+register a loop's step before the loop itself, so every step is invocable from the
+moment the storefront serves, but a step registration runs no loop. Starting the
+registered loops MUST be the only way a loop's task starts, and it MUST start every
+registered timer and fan-out together; it MUST name every fan-out's children before
+starting any task, so a fan-out whose children cannot be named leaves no loop started.
 
 One pause MUST hold every registered loop at a cycle boundary without cancelling it:
 a cycle either completes or never starts, and loop-local state survives the pause.
@@ -332,6 +375,18 @@ The loop pause MUST be process-local. A restarted storefront MUST resume its loo
   requested
 - **THEN** the loop reaches its gate without waiting out the interval and performs no
   further work until resumed or stepped
+
+#### Scenario: A fan-out's children are listed before their first cycle
+
+- **WHEN** a storefront registers its capacity-event fan-out for its configured sites
+- **THEN** status lists each site's poller before the fan-out starts, and starting the
+  storefront's loops starts the fan-out's task with the timers
+
+#### Scenario: A name is registered in both forms
+
+- **WHEN** a loop name registered as a timer loop is registered as a fan-out, or the
+  reverse
+- **THEN** the second registration is refused and the first stands
 
 #### Scenario: An unregistered loop is stepped
 
@@ -413,21 +468,26 @@ binding lookup hooks. The kit MUST NOT import a concrete domain, provider, or
 deployed service, and a composing domain MUST NOT retain a parallel capacity or
 publication lifecycle.
 
-Every capacity-backed publication candidate MUST carry one exact durable
-`CapacityBinding(site_id, offering_mode, source_id)`: trusted `site_id`,
-pool-declared `offering_mode`, and opaque domain-owned `source_id`. The public
-offer's mode MUST equal the binding's
-mode. Reservation, commit, release, close, reopen, and restart recovery MUST
-reload and compare the same binding and MUST NOT infer a home site, default an
-offering mode, choose an authority from response data, or fan out after a
-binding is recorded.
+Every publication candidate MUST carry one exact durable
+`PublicationBinding(site_id, offering_mode, source_id, backing)`: trusted
+`site_id`, pool-declared `offering_mode`, opaque domain-owned `source_id`, and the
+backing delegate its pool's declared label selects. Every domain MUST build it from
+the durable listing binding through the kit's one constructor, never from a
+published payload. The public offer's mode MUST equal the binding's mode.
+Reservation, commit, release, lease truncation, close, reopen, and restart recovery
+MUST reload and compare the same binding and MUST NOT infer a home site, default an
+offering mode, choose an authority from response data, or fan out after a binding
+is recorded. Every storefront capacity effect MUST go through the kit's capacity
+effects, whose guard is the binding's backing delegate, whether a domain composes the
+kit's capacity runtime or its own aggregate capacity client.
 
 #### Scenario: A domain publishes a capacity-backed candidate
 
 - **WHEN** the domain derives a schema-valid candidate from a trusted site
   projection
 - **THEN** the kit publishes it only after the domain hook confirms that its
-  exact site, source, and advertised offering mode equal durable local state
+  exact site, source, advertised offering mode, and backing equal durable local
+  state
 
 #### Scenario: An authenticated seller creates a capacity-backed listing
 
@@ -450,19 +510,27 @@ binding is recorded.
   capacity delta
 - **THEN** the kit obtains exact site-keyed projections, asks the domain hooks
   for the affected candidates, and executes deterministic close-before-reopen
-  reconciliation
+  reconciliation over the listings whose backing is reconciled by availability
 
 #### Scenario: Recovery loses an in-memory routing cache
 
 - **WHEN** commit, release, or fulfillment resumes after restart
-- **THEN** the effect is sent only to the site in the persisted binding, and a
-  missing or unconfigured binding fails closed without authority fan-out
+- **THEN** the effect is sent only to the site in the persisted binding, through
+  the kit's capacity effects, and a missing or unconfigured binding fails closed
+  without authority fan-out
 
 #### Scenario: A pool cannot deliver the advertised mode
 
 - **WHEN** a candidate's selected Resource Pool does not declare the candidate
   offering mode or its listing codec projects another mode
 - **THEN** publication is rejected before registry or capacity effects
+
+#### Scenario: Two bindings differ only in backing
+
+- **WHEN** a supplied binding equals a persisted binding in site, mode, and source
+  but carries a different backing
+- **THEN** the two are unequal, and the kit refuses to publish, close, or reopen
+  under the persisted binding
 
 ### Requirement: Pre-terms mechanism dispatch is registration-owned
 
@@ -512,12 +580,17 @@ command assembly.
 
 ### Requirement: Arkhai payment request and receipt authentication
 
-Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
+Headless calls to the Arkhai payments service MUST authenticate with WorkOS user-scoped API keys issued for the caller's Arkhai account. Arkhai payment receipts MUST use the service's Ed25519 `arkhai.payments.receipt.v1` signature framing and be verified through the identity kit. A receipt MUST verify only when its signed `livemode` equals the verifying role's configured `livemode`: a test-mode receipt never proves a live payment, and a live receipt never satisfies a test deployment. Marketplace registry, storefront, and negotiation request authentication MUST remain on their existing contracts and MUST NOT become a cross-repository source dependency.
 
 #### Scenario: Arkhai payment request is authenticated
 
 - **WHEN** a buyer or seller kit calls the Arkhai payments service
 - **THEN** the request uses the owner's WorkOS user-scoped API credential, and the caller verifies a returned receipt with the published signature contract rather than copying marketplace request-signing code
+
+#### Scenario: A receipt from the other mode proves nothing
+
+- **WHEN** a buyer or seller stage receives a correctly signed receipt for the accepted mandate whose signed `livemode` differs from the stage's configured `livemode`
+- **THEN** the receipt does not verify, the stage produces no verified settlement evidence, and delivery or issuance stays blocked
 
 ### Requirement: Arkhai payments registers as a peer settlement mechanism
 
@@ -729,6 +802,198 @@ the standard library and the capability-shape foundation kit.
 - **WHEN** the bare-metal storefront's import boundary is checked
 - **THEN** it imports the compute-family package and no VM package
 
+### Requirement: Capability shape admissibility is owned by one kit
+
+A foundation kit SHALL own the admissibility of capability shapes, depending only on the
+capability-shape kit and the standard library, so storefronts, buyers, and pool
+administration can all depend on it. It SHALL be the only reader of a shape constraint:
+every other caller SHALL hold a parsed declaration and a resolved policy as opaque
+values, and SHALL obtain a stated listing shape's base shape from the kit rather than by
+reading its constraints.
+
+The kit SHALL expose two groups of operations.
+
+**Declaration handling**, each given a tier label that every problem it returns, and
+every problem resolution later returns about it, SHALL carry:
+
+- splitting a stated listing shape into its base shape and either its declaration or its
+  constraint problems. Without a schema it SHALL check structure only; given a domain's
+  capability schema it SHALL also check that every constrained path is a quantity field
+  the schema defines. The kit SHALL know no family or field name. It SHALL read the base
+  shape first: a constraint that leaves the base shape unreadable under the schema SHALL
+  be reported as a base-shape problem with no declaration, and only a constraint error
+  on a readable base shape SHALL be a constraint problem.
+- splitting a stated list of listing shapes entry by entry, and reporting each base shape
+  that two entries state with different constraints, naming each conflicting entry,
+  without needing a schema. Entries identical in base shape and constraints SHALL
+  collapse to one. No caller SHALL compare two entries itself.
+- parsing a constraint-only declaration, which states no offer.
+- resolving declarations given highest tier first, with a schema, into a resolved policy
+  or every problem found. Each constraint form SHALL own its merge rule. An empty range
+  SHALL be a problem naming each tier's conflicting value.
+
+**Evaluation on a resolved policy**, neither returning unconditional bounds:
+
+- a check of a whole shape that returns every problem found, empty when the shape is
+  admissible, each problem naming every `family.field` path it involves, a code, a
+  message, and its tier. A shape malformed under the policy's schema SHALL be reported
+  as problems; the schema's required fields SHALL NOT be checked.
+- the values one dimension may take given a partial shape: those for which the partial
+  shape, with that dimension set to the value, can still be completed to an admissible
+  shape. Dimensions the partial shape does not state are free; a value it states for the
+  requested dimension is ignored; an empty partial shape is valid. A dimension that is
+  not a quantity the schema defines, or a partial shape malformed under the schema,
+  SHALL raise an error carrying every problem.
+
+The returned values SHALL be an opaque set answering membership, emptiness, the greatest
+admissible value not above a given value, the least not below it, and its minimum and
+maximum, where an absent maximum means unbounded. An empty set SHALL report itself
+empty and contain no value, and each of its value-returning accessors SHALL answer
+nothing. No operation SHALL return a range for a dimension independent of the rest of a
+shape. An answer SHALL be valid only for the partial shape it was computed
+from. Fixing dimensions one at a time, in any order, each to a value from the current
+answer SHALL never leave a later answer empty and SHALL end at an admissible shape.
+
+A shape SHALL be admissible exactly when it can be completed to an admissible shape, so
+a dimension a shape omits never makes it inadmissible by its absence.
+
+#### Scenario: A shape outside one bound
+
+- **WHEN** a shape states a quantity above the resolved maximum for that field
+- **THEN** the check returns one problem naming that field's path and the tier that set
+  the maximum, and no problem for any field within its bounds
+
+#### Scenario: A shape inside every bound
+
+- **WHEN** every quantity a shape states lies within its field's resolved bounds
+- **THEN** the check returns no problems
+
+#### Scenario: A shape omits a bounded field
+
+- **WHEN** a resolved policy bounds a field with a minimum and a shape does not state
+  that field
+- **THEN** the shape is admissible
+
+#### Scenario: Admissible values are requested for one dimension
+
+- **WHEN** the values for a bounded dimension are requested with a partial shape whose
+  stated dimensions are admissible
+- **THEN** the answer contains exactly the resolved range for that dimension and answers
+  the greatest admissible value not above a requested one
+
+#### Scenario: The partial shape is already inadmissible
+
+- **WHEN** the values for one dimension are requested with a partial shape that states
+  another dimension outside its bounds
+- **THEN** the answer is empty
+
+#### Scenario: Values are requested for a field that is not a quantity
+
+- **WHEN** the values are requested for an attribute, or for a path the schema does not
+  define
+- **THEN** the request raises an error naming the path, and no empty answer is returned
+
+#### Scenario: Values are requested from an empty partial shape
+
+- **WHEN** the values for a bounded dimension are requested with a partial shape stating
+  nothing
+- **THEN** the answer is that dimension's resolved range
+
+#### Scenario: A counter-shape is built one dimension at a time
+
+- **WHEN** a policy fixes each dimension in turn to a value from the current answer for
+  that dimension
+- **THEN** no answer along the way is empty and the resulting shape has no problems
+
+#### Scenario: Tiers merge per field
+
+- **WHEN** a higher tier bounds only the maximum of a field and a lower tier bounds its
+  minimum and maximum
+- **THEN** the resolved policy takes the higher tier's maximum and the lower tier's
+  minimum
+
+#### Scenario: A higher tier omits a lower tier's bound
+
+- **WHEN** a lower tier bounds a field and a higher tier states nothing for it
+- **THEN** the resolved policy keeps the lower tier's bound
+
+#### Scenario: Tiers merge to an empty range
+
+- **WHEN** a lower tier states a minimum above a higher tier's maximum for one field
+- **THEN** resolution returns a problem naming the field and both tiers with their
+  values, and no policy
+
+#### Scenario: The kit is used by a domain it does not know
+
+- **WHEN** declarations and shapes are expressed in a schema with no compute vocabulary
+- **THEN** every operation behaves as for any other schema, and the kit imports nothing
+  beyond the capability-shape kit and the standard library
+
+### Requirement: Shape constraints are stated inline and strictly
+
+A stated listing shape SHALL be able to give any quantity field a constraint mapping in
+place of its scalar value. The mapping SHALL hold `offer`, `min`, `max`, or any of them
+but not none; each SHALL be a positive integer, `min` SHALL NOT be above `max`, and an
+`offer` SHALL lie within the field's own `min` and `max`. A plain scalar SHALL be
+shorthand for a mapping holding only `offer`. The listing's base shape SHALL hold each
+field's offer and SHALL omit a field whose mapping states none. An offer without `min`
+or `max` SHALL NOT constrain the field. A constraint-only declaration SHALL use the same
+field syntax without `offer`. Under the `min`/`max` merge rule, for each field's `min`
+and `max` the highest tier stating it SHALL win, and a tier that does not state one SHALL
+leave a lower tier's value in place. The admissible region SHALL be the intersection of
+every constraint. A key the kit does not define SHALL make the shape's constraints
+unreadable rather than be ignored.
+
+#### Scenario: A field carries an unknown key
+
+- **WHEN** a constraint mapping holds a key other than `offer`, `min`, and `max`
+- **THEN** splitting returns a constraint problem naming the path and no declaration
+
+#### Scenario: A constraint names an attribute
+
+- **WHEN** a shape is split with a domain's schema and gives a constraint mapping to a
+  field the schema defines as an attribute, or does not define
+- **THEN** splitting returns a constraint problem naming that path
+
+#### Scenario: An offer lies outside its own range
+
+- **WHEN** a constraint mapping states an `offer` above its `max` or below its `min`
+- **THEN** splitting returns a constraint problem, with or without a schema
+
+#### Scenario: A constraint mapping is empty
+
+- **WHEN** a field's constraint mapping states no key
+- **THEN** splitting returns a constraint problem naming the path
+
+#### Scenario: A field constrains without offering
+
+- **WHEN** a shape gives `memory.gib` only a `max`
+- **THEN** the base shape omits `memory.gib`, and the policy bounds a shape that states it
+
+#### Scenario: An offer alone does not constrain
+
+- **WHEN** a shape states `cpu.count` as a plain scalar and no tier bounds it
+- **THEN** the base shape states that count, and a shape stating any other count is
+  admissible on that field
+
+#### Scenario: A constraint removes a required field from the base shape
+
+- **WHEN** a shape is split with a schema that requires a field, and the shape gives that
+  field a constraint mapping with no `offer`
+- **THEN** splitting returns a base-shape problem naming the field as required, and no
+  declaration
+
+#### Scenario: A list states one base shape with different constraints
+
+- **WHEN** a stated list is split, with or without a schema, and two entries share a base
+  shape but differ in their constraints
+- **THEN** the split reports that base shape as conflicting, naming both entries
+
+#### Scenario: A list repeats an identical entry
+
+- **WHEN** a stated list holds two entries identical in base shape and constraints
+- **THEN** the split yields that entry once and reports no problem
+
 ### Requirement: Storefront deal controls are kit-owned route services
 
 The storefront's deal controls MUST be framework-free route services in the kit that
@@ -813,13 +1078,93 @@ mount its rule routes under its own prefix; job draining and waiting MUST stay s
 - **WHEN** a scenario installs a VM mock rule
 - **THEN** it matches VM jobs only and never a bare-metal job
 
+### Requirement: Per-site projection state is kit-owned and held once per process
+
+The storefront-side capacity and publication kit MUST own per-site projection state: for
+every site a storefront's aggregate capacity client names, the resource-pool and
+capacity-bucket projections, their poller, a per-site refresh, the poller's cycle on demand,
+the drift check a topology-sensitive error triggers, and a per-site, per-family status. A
+storefront that derives listings from site projections MUST compose exactly one instance per
+process, built by its composition root and injected into every
+consumer; the kit MUST NOT keep that state at module level, and a domain MUST NOT keep a
+projection cache of its own. The poller MUST run as a loop registered with the storefront's
+loop controller, and its step MUST run exactly the poller's cycle. The state MUST be
+domain-neutral: it holds whatever generation a site serves, and a domain's acceptance rules
+for a generation apply when that domain reads it. It MUST run one operation at a time on a
+site's family, including its version check, so a caller arriving during an operation waits for
+it and a failed operation never replaces a confirmation that completed after it began.
+
+#### Scenario: Two consumers read one site
+
+- **WHEN** a storefront's publication cycle and its opening recheck both read one site's
+  resource-pool projection
+- **THEN** both read the same held generation from the one instance their composition root
+  built, and neither fetches the site
+
+#### Scenario: The projection step is run while held
+
+- **WHEN** an operator runs one cycle of the site-projection loop while the loops are held
+- **THEN** exactly the poller's cycle runs, waking publication if a resource-pool
+  generation changed, and the loops remain held
+
+#### Scenario: One domain refuses a generation
+
+- **WHEN** a site serves a generation one domain's acceptance rule refuses
+- **THEN** the state holds that generation, the refusing domain holds that site's listings,
+  and any other reader of the state still reads it
+
+### Requirement: A loop records each cycle's outcome with the controller
+
+A storefront loop whose cycle can fail MUST record each cycle's outcome with the kit loop
+controller, whether its timer or an operator's step ran the cycle: when it finished,
+whether it completed, and, for a failure, the stage that failed and its error. Each
+invocation MUST record exactly one terminal outcome, including one that raised, and a
+preview MUST record none; a step cancelled while it waits for the loop's lock records a
+cancelled outcome naming no stage, because no stage began. A recorded error MUST carry the exception's type and MUST carry its
+message only when the storefront's own configuration or publication error raised it, so no
+credential, secret, or private URL reaches status. The controller MUST be the one place a loop's cycle runs: a loop
+registers its step and its interval, the controller's timer runs the step through the same
+operation an operator's step does, and that operation holds the loop's lock, so the timer and a
+step never run a cycle concurrently. A kit runtime that fans one loop out into independent
+per-site cycles MUST serialize each site's cycle and that site's step instead, and MUST record
+each site's timer cycle with the controller under that site's own loop name.
+The controller MUST report, in one snapshot, every loop's state and the last outcome each loop
+recorded, for a storefront's system status to read; a loop that has exited or been cancelled
+MUST remain distinguishable from a running loop whose last cycle failed.
+
+#### Scenario: A stepped cycle fails
+
+- **WHEN** an operator steps the publication loop and the cycle fails
+- **THEN** the controller's snapshot reports that cycle as failed with its error, as it
+  would for a timer-run cycle
+
+#### Scenario: A step is requested while the timer's cycle runs
+
+- **WHEN** an operator steps a loop whose timer cycle is in progress
+- **THEN** the step runs after that cycle completes, never alongside it, and each records its
+  own outcome
+
+#### Scenario: One site's capacity-event feed fails
+
+- **WHEN** one site's capacity-event poller cycle fails while another site's succeeds
+- **THEN** the controller's snapshot reports the failing site's loop with that cycle failed, by
+  its error's type, and the other site's loop with its own outcome
+
+#### Scenario: A cycle fails on an unexpected exception
+
+- **WHEN** a publication cycle raises an exception that is not one of the storefront's own
+  errors, with a message naming a site URL
+- **THEN** the recorded outcome names the failing stage and the exception's type, and not its
+  message
+
 ## Evidence
 
-- Import boundaries: `core/tests/unit/test_carrier_purity.py` and `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
+- Layer, scope, and kind rules over every project: `make check-architecture`, `docs/development/ARCHITECTURE.toml`, `scripts/architecture.py`, and `scripts/tests/test_architecture.py`; VM concept-module and contract-construction guardrails: `domains/vms/storefront/tests/unit/test_architecture_imports.py`.
 - Core CLI fallback and shipped plugin contracts: `core/buyer/tests/unit/test_cli.py`, `domains/vms/buyer/tests/test_plugin_export.py`, and `domains/apicredits/buyer/tests/test_plugin_export.py`.
 - Distribution entry points: `core/buyer/pyproject.toml`, `domains/vms/buyer/pyproject.toml`, and `domains/apicredits/buyer/pyproject.toml`.
 - Frozen storefront registry, startup discovery, record-bound lifecycle carriers, and exact-object resolution: `core/storefront/tests/unit/test_domain_registry.py`, `test_domain_plugins.py`, `test_app_composition.py`, and `test_domain_lifecycle.py`.
 
-- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py` and `test_import_boundary.py`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
+- One schema-driven flattening of family-grouped capability shapes, its canonical digest, and its standard-library-only boundary: `kit/capability-shape/tests/unit/test_capability_shape.py`, with its empty `allowed-dependencies` in `kit/capability-shape/pyproject.toml`; the VM family schema against `DIMENSION_KEYS`: `domains/vms/domain/tests/test_capability_shapes.py` and `test_schema.py`.
 - The schema-driven inverse of flattening: `kit/capability-shape/tests/unit/test_capability_shape.py`.
-- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py` and `test_import_boundary.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and `domains/bare_metal/tests/test_import_boundary.py`.
+- Capability shape admissibility — splitting, list-level conflicts, labelled resolution, evaluation, the opaque value set, the one-dimension-at-a-time guarantee as a property test, and neutrality against a synthetic schema: `kit/capability-admissibility/tests/unit/test_admissibility.py`; its dependency on the shape kit and the standard library alone is its package allowlist, held by `make check-architecture`.
+- One compute-family capability schema bound by both compute domains: `domains/compute/tests/test_capability_schema.py`, `domains/vms/domain/tests/test_compute_requirements.py`, and the compute vocabulary's `allowed-dependencies` and the sibling-domain scope rule, both held by `make check-architecture`.

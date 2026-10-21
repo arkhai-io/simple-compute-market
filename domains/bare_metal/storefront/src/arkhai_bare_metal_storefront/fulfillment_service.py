@@ -21,8 +21,14 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleRequest,
 )
 from core_storefront import StorefrontFulfillmentContext
+from market_capacity_publication import (
+    CapacityBindingError,
+    CapacityEffects,
+    PublicationBinding,
+)
 from market_core import VersionedEnvelope
 from market_identity import Identity
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 from market_core import SettlementEvidence
 from .settlement_evidence import EvidencePayload
 from .settlement_stages import SettlementRequestError
@@ -30,6 +36,7 @@ from .settlement_stages import SettlementRequestError
 from .access_delivery import active_access_delivery, ssh_endpoint
 from .claims import ClaimAttributesMissing, whole_machine_claim
 from .lease_window import committed_lease_window
+from .listing_binding import bare_metal_listing_binding
 
 if TYPE_CHECKING:
     from .sqlite_client import SQLiteClient
@@ -55,6 +62,27 @@ class BareMetalFulfillmentService:
     capacity_client: Any
     fulfillment_client: Any
     read_verified_evidence: Callable[..., Awaitable[SettlementEvidence]]
+
+    async def _effect(
+        self,
+        effect: Callable[[CapacityEffects, PublicationBinding], Awaitable[Any]],
+        context: Mapping[str, Any],
+    ) -> Any:
+        """Run one capacity effect through the kit's guard, with the listing's binding.
+
+        The effect acts at the binding's site, which must be the site the
+        accepted deal recorded; a listing no admission authority stands behind
+        is refused before any site call.
+        """
+        binding = await bare_metal_listing_binding(self.db, str(context["listing_id"]))
+        if binding is None or binding.site_id != str(context["site_id"]):
+            raise BareMetalFulfillmentError(
+                "accepted bare-metal agreement disagrees with its listing binding"
+            )
+        try:
+            return await effect(CapacityEffects(self.capacity_client), binding)
+        except (CapacityNotAdmittedError, CapacityBindingError) as exc:
+            raise BareMetalFulfillmentError(str(exc)) from exc
 
     async def _owned_context(
         self,
@@ -214,14 +242,17 @@ class BareMetalFulfillmentService:
             except ClaimAttributesMissing as exc:
                 raise BareMetalFulfillmentError(str(exc)) from exc
             claim["resource_id"] = str(context["physical_resource_id"])
-            reserved = recovered or await self.capacity_client.reserve(
-                site=str(context["site_id"]),
-                claim=claim,
-                deal_ref={
-                    "negotiation_id": negotiation_id,
-                    "escrow_uid": settlement_ref,
-                },
-                lease_duration_seconds=terms.duration_seconds,
+            reserved = recovered or await self._effect(
+                lambda effects, binding: effects.reserve(
+                    binding,
+                    claim=claim,
+                    deal_ref={
+                        "negotiation_id": negotiation_id,
+                        "escrow_uid": settlement_ref,
+                    },
+                    lease_duration_seconds=terms.duration_seconds,
+                ),
+                context,
             )
             if reserved is None:
                 raise BareMetalFulfillmentError(
@@ -286,15 +317,19 @@ class BareMetalFulfillmentService:
         # window unchanged.
         lease_start = datetime.now(timezone.utc)
         committed_window = committed_lease_window(
-            await self.capacity_client.commit(
-                capacity_reservation_id=str(reservation_id),
-                lease_start_utc=lease_start.isoformat(),
-                lease_end_utc=(
-                    lease_start + timedelta(seconds=terms.duration_seconds)
-                ).isoformat(),
-                idempotency_ref=settlement_ref,
-                deal_ref={"escrow_uid": settlement_ref},
-                site_id=str(context["site_id"]),
+            await self._effect(
+                lambda effects, binding: effects.commit(
+                    binding,
+                    resource_id=None,
+                    capacity_reservation_id=str(reservation_id),
+                    lease_start_utc=lease_start.isoformat(),
+                    lease_end_utc=(
+                        lease_start + timedelta(seconds=terms.duration_seconds)
+                    ).isoformat(),
+                    idempotency_ref=settlement_ref,
+                    deal_ref={"escrow_uid": settlement_ref},
+                ),
+                context,
             )
         )
         materialization = await self.db.load_bare_metal_materialization(

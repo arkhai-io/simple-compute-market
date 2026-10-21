@@ -9,7 +9,7 @@ allocation.
 Release is the allocator's primitive here; when it runs is the site ledger's
 release decision, asserted where that decision is made.
 
-External boundary: SQLAlchemy against in-memory SQLite. The uniqueness
+External boundary: SQLAlchemy against file-backed SQLite. The uniqueness
 constraint is the thing under test, so the real engine enforces it rather than
 a fake agreeing with the code.
 """
@@ -19,11 +19,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from compute_provisioning_service.db.database import run_migrations
+from compute_provisioning_service.db.database import create_db_engine, run_migrations
 from vm_provisioning_adapter.db import Relay, RelayPortLease
 from vm_provisioning_adapter.services.relay_port_allocator import (
     RelayPortAllocator,
@@ -35,18 +33,19 @@ _INVENTORY_GROUP = "kvm_hosts"
 
 
 @pytest.fixture
-def session_factory():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+def session_factory(tmp_path):
+    engine = create_db_engine(
+        f"sqlite:///{tmp_path / 'relay-ports.db'}", is_sqlite=True
     )
     run_migrations(
         engine,
         default_playbook_path=_PLAYBOOK_PATH,
         default_inventory_group=_INVENTORY_GROUP,
     )
-    return sessionmaker(bind=engine)
+    try:
+        yield sessionmaker(bind=engine)
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
@@ -69,6 +68,66 @@ def _relay(session_factory, relay_id="site-a", addr="10.0.0.9", start=6100, coun
 
 
 class TestAllocation:
+    def test_allocation_joins_the_callers_transaction(self, allocator, session_factory):
+        _relay(session_factory)
+        with session_factory() as writer:
+            relay = writer.get(Relay, "site-a")
+            relay.label = "accepted"
+            writer.flush()
+            lease = allocator.allocate_in_session(
+                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            )
+            assert allocator.held_ports("site-a") == []
+            writer.rollback()
+        assert allocator.held_ports("site-a") == []
+
+        with session_factory() as writer:
+            relay = writer.get(Relay, "site-a")
+            assert relay.label is None
+            relay.label = "accepted"
+            writer.flush()
+            lease = allocator.allocate_in_session(
+                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+            )
+            writer.commit()
+        assert allocator.held_ports("site-a") == [lease.remote_port]
+        with session_factory() as reader:
+            assert reader.get(Relay, "site-a").label == "accepted"
+
+    def test_a_stale_port_read_retries_without_rolling_back_the_caller(
+        self, allocator, session_factory
+    ):
+        _relay(session_factory)
+        held = allocator.allocate(
+            relay_id="site-a", owner_kind="fulfillment", owner_id="cr-1"
+        )
+
+        class StalePortAllocator(RelayPortAllocator):
+            """One stale scan result, followed by fresh reads of durable state."""
+
+            stale = True
+
+            def _lowest_free(self, db, relay_id, window):
+                if self.stale:
+                    self.stale = False
+                    return held.remote_port
+                return super()._lowest_free(db, relay_id, window)
+
+        with session_factory() as writer:
+            relay = writer.get(Relay, "site-a")
+            relay.label = "accepted"
+            writer.flush()
+            lease = StalePortAllocator(session_factory).allocate_in_session(
+                writer, relay_id="site-a", owner_kind="fulfillment", owner_id="cr-2"
+            )
+            writer.commit()
+
+        assert lease.remote_port != held.remote_port
+        original = allocator.find_active_lease(owner_kind="fulfillment", owner_id="cr-1")
+        assert original == held
+        with session_factory() as reader:
+            assert reader.get(Relay, "site-a").label == "accepted"
+
     def test_a_port_comes_from_the_relays_window(self, allocator, session_factory):
         _relay(session_factory, start=6100, count=10)
         lease = allocator.allocate(
@@ -317,4 +376,3 @@ class TestReconciliation:
         assert allocator.reconcile(
             is_owner_released=lambda kind, owner: True, grace=timedelta(hours=1)
         ) == 1
-

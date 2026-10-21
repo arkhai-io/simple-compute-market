@@ -16,6 +16,12 @@ from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 
 #: The verdict the negotiation runtime supplies for a listing its source supports.
 MATCHES = ListingSourceVerdict("matches")
+#: The release condition the listings below advertise, which a buyer selects.
+CONDITION = {
+    "chain_name": "base",
+    "arbiter": "0x" + "44" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
 
 
 def _listing(**overrides):
@@ -139,10 +145,11 @@ async def test_policy_applies_shared_listed_price_after_domain_guards() -> None:
         "escrow_address": accepted["escrow_address"],
         "literal_fields": dict(accepted["literal_fields"]),
         "fields": {"amount": "100"},
+        "demand": CONDITION,
     }
 
     result = await default_seller_round_hook()(
-        listing=_listing(accepted_escrows=[accepted]),
+        listing=_listing(accepted_escrows=[accepted], demands=[CONDITION]),
         message=_message(),
         history=_history(proposal),
         seller_reference_amount=100,
@@ -196,6 +203,7 @@ def _escrow(amount: str) -> dict:
         "escrow_address": _ACCEPTED["escrow_address"],
         "literal_fields": dict(_ACCEPTED["literal_fields"]),
         "fields": {"amount": amount},
+        "demand": CONDITION,
     }
 
 
@@ -237,7 +245,7 @@ async def test_a_round_without_a_source_verdict_is_rejected() -> None:
 @pytest.mark.asyncio
 async def test_the_default_chain_exits_below_the_listed_rate() -> None:
     result = await default_seller_round_hook()(
-        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        listing=_listing(accepted_escrows=[_ACCEPTED], demands=[CONDITION]),
         message=_message(),
         history=_history(_escrow("80")),
         seller_reference_amount=100,
@@ -250,7 +258,7 @@ async def test_the_default_chain_exits_below_the_listed_rate() -> None:
 @pytest.mark.asyncio
 async def test_a_bisection_chain_counters_below_the_listed_rate() -> None:
     result = await default_seller_round_hook(["escrow_shape_guard", "bisection"])(
-        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        listing=_listing(accepted_escrows=[_ACCEPTED], demands=[CONDITION]),
         message=_message(),
         history=_history(_escrow("80")),
         seller_reference_amount=100,
@@ -259,3 +267,18 @@ async def test_a_bisection_chain_counters_below_the_listed_rate() -> None:
 
     assert result.decision.action == "counter"
     assert result.chain_label == "has_matching_inventory_guard,escrow_shape_guard,bisection"
+
+
+@pytest.mark.asyncio
+async def test_the_default_chain_rejects_a_listing_advertising_no_condition() -> None:
+    """The escrow-shape guard refuses before the price is judged."""
+    result = await default_seller_round_hook()(
+        listing=_listing(accepted_escrows=[_ACCEPTED]),
+        message=_message(),
+        history=_history(_escrow("100")),
+        seller_reference_amount=100,
+        listing_source=MATCHES,
+    )
+
+    assert result.decision.action == "reject"
+    assert result.decision.reason.startswith("release_condition_not_advertised")

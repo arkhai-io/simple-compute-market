@@ -89,7 +89,7 @@ def _fulfillment(factory, reservation_id: str, *, metadata: dict, state=_State.a
                 fulfillment_id=f"f-{reservation_id}",
                 market="vms",
                 scheduling_requirements={},
-                provider="ansible",
+                provider="vm.ansible",
                 provider_metadata=metadata,
                 state=state.value,
             )

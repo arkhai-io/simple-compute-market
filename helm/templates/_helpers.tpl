@@ -232,6 +232,60 @@ runtime Deployments keep their chart-specific config mechanisms.
 {{- end }}
 
 {{/*
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it, so a storefront agent or the bare-metal storefront's `config` is read here
+with every `null` removed, by the rules the storefront charts apply to their own
+values; the umbrella cannot include their helpers, since a disabled subchart's
+templates are not rendered. See openspec/specs/deployment-state/spec.md, "A
+storefront chart passes service configuration through".
+
+`arkhai.dropNulls`: remove, in place, every key whose value is `null` from the
+mapping `.`, at every depth, inside list elements too; a `null` list element stays.
+*/}}
+{{- define "arkhai.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "arkhai.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "arkhai.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`arkhai.storefrontAgents`: the VM storefront's agents with every `null` removed,
+set by name into the mapping `into`: a `null` agent is dropped and each other agent
+copied without its `null` keys. An agent map naming no agent once they are removed,
+or an agent stating no port or no identity, is refused, as the storefront chart
+refuses it.
+Argument: dict with `root` (the chart root) and `into` (an empty dict).
+*/}}
+{{- define "arkhai.storefrontAgents" -}}
+{{- $into := .into -}}
+{{- range $name, $entry := (.root.Values.storefront.agents | default dict) -}}
+  {{- if not (kindIs "invalid" $entry) -}}
+    {{- $agent := deepCopy $entry -}}
+    {{- include "arkhai.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
+    {{- $_ := set $into $name $agent -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $into -}}
+  {{- fail "storefront.agents names no agent once its nulls are removed; a release runs at least one, or sets storefront.enabled false to run none" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 The key under which a storefront agent's pass-through config mapping `doc`
 holds `name` (lowercase), in whatever spelling it was written, or "". The
 storefront's loader matches keys case-insensitively, so these reads do too.
