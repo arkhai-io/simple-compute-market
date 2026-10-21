@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from jsonschema import Draft7Validator
 from market_config.values_schema import any_case, stale_files
 from market_delivery import RESERVED_SECTION_KEYS
 
@@ -86,7 +87,7 @@ def test_the_durations_carry_their_bounds_from_the_shared_type() -> None:
     capacity = _field(values_schema.storefront_config_definition(), "capacity")
 
     poll = _field(capacity, "poll_interval")
-    assert poll["type"] == "number"
+    assert poll["type"] == ["number", "null"]
     assert poll["exclusiveMinimum"] == 0
     assert poll["maximum"] > 0
 
@@ -121,6 +122,43 @@ def test_delivery_states_the_settings_the_vm_chart_does() -> None:
         assert _field(delivery, name) == _field(vm_delivery, name), name
     for sink in ("apprise", "file", "smtp", "webhook"):
         assert _field(delivery, sink)["additionalProperties"] is False
+
+
+def _refusals(config: dict) -> list[str]:
+    validator = Draft7Validator(values_schema.storefront_config_definition())
+    return [error.message for error in validator.iter_errors(config)]
+
+
+def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates() -> None:
+    """A values file's ``null`` removes the key it names, so the definition lets
+    it through wherever the key is accepted."""
+    for config in (
+        {"Settlement": None, "capacity": None},
+        {"Wallet": {"address": None}, "capacity": {"poll_interval": None}},
+        {"Settlement": {"priority": None, "alkahest": None}},
+        {"Delivery": {"enabled": ["audit"], "audit": None, "file": None}},
+        {"Identity": {"service_peers": {"site": {"principals": [{"scheme": None}]}}}},
+    ):
+        assert not _refusals(config), config
+
+
+def test_a_refused_key_stays_refused_as_null() -> None:
+    """A secret, and a key the storefront does not read, are refused whatever
+    their value; the storefront keeps no retired-key catalogue, its closed
+    document refusing every key it does not read."""
+    # Each pair is refused with the key stated as null and accepted without it,
+    # so the refusal is that key's.
+    for refused, accepted in (
+        ({"Wallet": {"private_key": None}}, {"Wallet": {}}),
+        ({"wallet": {"PRIVATE_KEY": None}}, {"wallet": {}}),
+        ({"negotiation_timeout": None}, {}),
+        (
+            {"Delivery": {"enabled": ["hook"], "hook": {"sink": "webhook", "url": None}}},
+            {"Delivery": {"enabled": ["hook"], "hook": {"sink": "webhook"}}},
+        ),
+    ):
+        assert _refusals(refused), refused
+        assert not _refusals(accepted), accepted
 
 
 def test_the_definition_carries_no_defaults_references_or_markers() -> None:

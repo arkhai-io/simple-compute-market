@@ -221,6 +221,12 @@ def test_delivery_states_the_settings_the_bare_metal_chart_does(definition) -> N
         assert _field(_delivery(definition), name) == _field(_section(bare_metal, "Delivery"), name), name
 
 
+def _sink_named(name: str) -> dict:
+    """The ``sink`` key's schema in a table typed for ``name``: that name, or a
+    ``null`` removing the key."""
+    return {"anyOf": [{"const": name}, {"type": "null"}]}
+
+
 def test_secret_sink_settings_are_refused_however_the_instance_is_named(definition) -> None:
     delivery = _delivery(definition)
     assert _withheld(_field(delivery, "webhook"), "url", "headers")
@@ -231,14 +237,47 @@ def test_secret_sink_settings_are_refused_however_the_instance_is_named(definiti
     webhook = next(
         choice
         for choice in choices["anyOf"]
-        if choice["patternProperties"].get("^sink$") == {"const": "webhook"}
+        if choice["patternProperties"].get("^sink$") == _sink_named("webhook")
     )
     assert _withheld(webhook, "url")
 
 
 def test_a_table_named_for_a_sink_may_state_no_other(definition) -> None:
     webhook = _field(_delivery(definition), "webhook")
-    assert webhook["patternProperties"]["^sink$"] == {"const": "webhook"}
+    assert webhook["patternProperties"]["^sink$"] == _sink_named("webhook")
+
+
+def _refusals(definition: dict, config: dict) -> list[str]:
+    return [error.message for error in Draft7Validator(definition).iter_errors(config)]
+
+
+def test_a_null_removing_a_section_a_field_or_a_delivery_instance_validates(definition) -> None:
+    """A values file's ``null`` removes the key it names, so the definition lets
+    it through wherever the key is accepted."""
+    for config in (
+        {"Settlement": None, "registry": None},
+        {"Wallet": {"address": None}, "Identity": {"service_peers": None}},
+        {"Settlement": {"priority": None, "alkahest": None}},
+        {"Delivery": {"enabled": ["audit"], "audit": None, "file": None}},
+        {"Identity": {"service_peers": {"site": {"principals": [{"scheme": None}]}}}},
+    ):
+        assert not _refusals(definition, config), config
+
+
+def test_a_refused_key_stays_refused_as_null(definition) -> None:
+    # Each pair is refused with the key stated as null and accepted without it,
+    # so the refusal is that key's.
+    for refused, accepted in (
+        ({"Wallet": {"private_key": None}}, {"Wallet": {}}),
+        ({"wallet": {"PRIVATE_KEY": None}}, {"wallet": {}}),
+        ({"claims_sweep_interval": None}, {}),
+        (
+            {"Delivery": {"enabled": ["hook"], "hook": {"sink": "webhook", "url": None}}},
+            {"Delivery": {"enabled": ["hook"], "hook": {"sink": "webhook"}}},
+        ),
+    ):
+        assert _refusals(definition, refused), refused
+        assert not _refusals(definition, accepted), accepted
 
 
 def test_an_instance_of_an_unshipped_sink_stays_open(definition) -> None:

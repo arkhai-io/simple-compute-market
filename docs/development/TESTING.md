@@ -708,6 +708,12 @@ asserts on the manifests it produces, or on its refusal to produce them. It is a
 static configuration test, like `e2e-tests/tests/unit/`'s image-pin and stack
 checks: it needs Helm, not a cluster.
 
+The supported Helm is the release pinned in
+[`.github/workflows/tests.yml`](../../.github/workflows/tests.yml).
+`helm/scripts/test-render.sh` prints `helm version --short` before its first
+render, so each render log names the Helm it ran. The script does not enforce
+the pin; a render step's result is recorded for the version it reports.
+
 **What they cover:** what a deployment's manifests contain for a given set of
 values — which documents render into a ConfigMap, which files mount, which
 settings the chart derives — and which values the chart's schema refuses. This
@@ -773,8 +779,12 @@ schema carries a definition generated from that storefront's typed configuration
 models (`make helm-values-schema`, which runs each storefront's generator in its own
 environment). The generator is `kit/config`'s, with its own unit tests over small
 model sets; each storefront supplies only its sections, settlement registrations,
-and discovered delivery sinks, and writes only its own chart's schema. Each
-storefront's drift test is its own unit test —
+and discovered delivery sinks, and writes only its own chart's schema. Both
+storefronts opt into the generator's `accepting_null` form: the definition accepts
+`null` wherever it accepts a key, at every depth, including keys inside list
+elements, so the chart can remove it before rendering. A refused key stays
+refused as `null`; the transformation does not widen array item schemas to
+accept null elements. Each storefront's drift test is its own unit test —
 `domains/vms/storefront/tests/unit/test_values_schema.py` and
 `domains/bare_metal/storefront/tests/test_values_schema.py` — so `make test` fails
 when a model or settlement registration changes without regenerating; it runs in
@@ -786,9 +796,9 @@ and accepts.
 binaries are served from `get.helm.sh`. An environment that cannot reach it can
 use a redistribution such as the npm package `helm-binary-linux`, which ships
 one binary with no install scripts. Such a copy is unverified and may be an
-older release, so treat its results as a local check: inspect the package before
-running it, keep it out of the repository, and rely on the pinned Helm of the
-release environment for anything recorded as evidence.
+older release: inspect the package before running it and keep it out of the
+repository. The supported release is the one CI pins above; the render log
+records whichever version actually ran.
 
 ## Cross-Language Contract Conformance
 

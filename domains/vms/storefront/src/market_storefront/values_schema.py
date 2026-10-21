@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from market_config.values_schema import (
+    accepting_null,
     config_definition,
     main as generator_main,
     model_fragment,
@@ -67,7 +68,11 @@ _DELIVERY_SETTINGS: dict[str, Any] = {
 
 
 def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
-    """Return the generated definition for an agent's ``config``."""
+    """Return the generated definition for an agent's ``config``.
+
+    It accepts ``null`` wherever it accepts a key, since a values file's ``null``
+    removes the key; a key it refuses stays refused.
+    """
     sinks, _warnings = discover_sink_settings_models()
     sections: dict[str, Any] = {
         "delivery": sink_typed_section(
@@ -80,7 +85,7 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
         ),
         "wallet": model_fragment(WalletConfigDeclaration, role=role),
     }
-    return config_definition(sections, retired=RETIRED_KEYS)
+    return accepting_null(config_definition(sections, retired=RETIRED_KEYS))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

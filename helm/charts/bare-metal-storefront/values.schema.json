@@ -106,10 +106,24 @@
       }
     },
     "internalRegistryTrust": {
-      "$ref": "#/definitions/registryAuthority"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/registryAuthority"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "config": {
-      "$ref": "#/definitions/storefrontServiceConfig"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/storefrontServiceConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "persistence": {
       "type": "object",
@@ -308,40 +322,64 @@
       "patternProperties": {
         "^[bB][aA][sS][eE]_[uU][rR][lL]$": {
           "minLength": 1,
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "^[dD][bB]_[pP][aA][tT][hH]$": {
           "minLength": 1,
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "^[pP][oO][rR][tT]$": {
           "maximum": 65535,
           "minimum": 1,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "^[nN][eE][gG][oO][tT][iI][aA][tT][iI][oO][nN]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
           "exclusiveMinimum": 0,
           "maximum": 62135596800.0,
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "^[nN][eE][gG][oO][tT][iI][aA][tT][iI][oO][nN]_[wW][aA][tT][cC][hH][dD][oO][gG]_[iI][nN][tT][eE][rR][vV][aA][lL]$": {
           "exclusiveMinimum": 0,
           "maximum": 62135596800.0,
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]_[sS][eE][rR][vV][iI][cC][iI][nN][gG]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
           "exclusiveMinimum": 0,
           "maximum": 62135596800.0,
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "^[pP][aA][yY][mM][eE][nN][tT]_[rR][eE][cC][oO][nN][cC][iI][lL][iI][aA][tT][iI][oO][nN]_[iI][nN][tT][eE][rR][vV][aA][lL]$": {
           "exclusiveMinimum": 0,
           "maximum": 62135596800.0,
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "^[iI][dD][eE][nN][tT][iI][tT][yY]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[pP][rR][iI][nN][cC][iI][pP][aA][lL]$": {
               "anyOf": [
@@ -350,16 +388,26 @@
                   "type": "object",
                   "patternProperties": {
                     "^[sS][cC][hH][eE][mM][eE]$": {
-                      "enum": [
-                        "eip191",
-                        "ed25519"
-                      ],
-                      "type": "string"
+                      "anyOf": [
+                        {
+                          "enum": [
+                            "eip191",
+                            "ed25519"
+                          ],
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                       "maxLength": 128,
                       "minLength": 1,
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   }
                 },
@@ -371,7 +419,10 @@
             "^[aA][dD][mM][iI][nN][iI][sS][tT][rR][aA][tT][oO][rR][sS]$": {
               "additionalProperties": {
                 "additionalProperties": false,
-                "type": "object",
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "patternProperties": {
                   "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                     "items": {
@@ -379,38 +430,63 @@
                       "type": "object",
                       "patternProperties": {
                         "^[sS][cC][hH][eE][mM][eE]$": {
-                          "enum": [
-                            "eip191",
-                            "ed25519"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "eip191",
+                                "ed25519"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       }
                     },
                     "maxItems": 2,
                     "minItems": 1,
-                    "type": "array"
+                    "type": [
+                      "array",
+                      "null"
+                    ]
                   }
                 }
               },
-              "type": "object"
+              "type": [
+                "object",
+                "null"
+              ]
             },
             "^[sS][eE][rR][vV][iI][cC][eE]_[pP][eE][eE][rR][sS]$": {
               "additionalProperties": {
                 "additionalProperties": false,
-                "type": "object",
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "patternProperties": {
                   "^[rR][oO][lL][eE]$": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "^[sS][iI][tT][eE]_[iI][dD]$": {
                     "minLength": 1,
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                     "items": {
@@ -418,48 +494,79 @@
                       "type": "object",
                       "patternProperties": {
                         "^[sS][cC][hH][eE][mM][eE]$": {
-                          "enum": [
-                            "eip191",
-                            "ed25519"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "eip191",
+                                "ed25519"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       }
                     },
                     "maxItems": 2,
                     "minItems": 1,
-                    "type": "array"
+                    "type": [
+                      "array",
+                      "null"
+                    ]
                   }
                 }
               },
-              "type": "object"
+              "type": [
+                "object",
+                "null"
+              ]
             }
           }
         },
         "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": {
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "additionalProperties": false,
           "patternProperties": {
             "^[sS][cC][hH][eE][mM][aA]_[vV][eE][rR][sS][iI][oO][nN]$": {
-              "type": "integer"
+              "type": [
+                "integer",
+                "null"
+              ]
             },
             "^[pP][rR][iI][oO][rR][iI][tT][yY]$": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string"
               }
             },
             "^[aA][lL][kK][aA][hH][eE][sS][tT]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[eE][nN][aA][bB][lL][eE][dD]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[aA][dD][dD][rR][eE][sS][sS]_[cC][oO][nN][fF][iI][gG]_[pP][aA][tT][hH]$": {
                   "anyOf": [
@@ -472,41 +579,65 @@
                   ]
                 },
                 "^[oO][rR][aA][cC][lL][eE]_[gG][aA][tT][eE][dD]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[tT][rR][uU][sS][tT][eE][dD]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
                   "items": {
                     "type": "string"
                   },
-                  "type": "array"
+                  "type": [
+                    "array",
+                    "null"
+                  ]
                 },
                 "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[iI][nN][tT][eE][rR][rR][uU][pP][tT][iI][bB][lL][eE]_[oO][rR][aA][cC][lL][eE]_[aA][dD][dD][rR][eE][sS][sS][eE][sS]$": {
                   "items": {
                     "type": "string"
                   },
-                  "type": "array"
+                  "type": [
+                    "array",
+                    "null"
+                  ]
                 },
                 "^[pP][rR][oO][bB][eE]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "exclusiveMinimum": 0,
                   "maximum": 62135596800.0,
-                  "type": "number"
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 },
                 "^[rR][pP][cC]_[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "exclusiveMinimum": 0,
                   "maximum": 62135596800.0,
-                  "type": "number"
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 }
               }
             },
             "^[aA][rR][kK][hH][aA][iI]_[pP][aA][yY][mM][eE][nN][tT][sS]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[eE][nN][aA][bB][lL][eE][dD]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[sS][eE][rR][vV][iI][cC][eE]_[uU][rR][lL]$": {
                   "anyOf": [
@@ -525,16 +656,26 @@
                       "type": "object",
                       "patternProperties": {
                         "^[sS][cC][hH][eE][mM][eE]$": {
-                          "enum": [
-                            "eip191",
-                            "ed25519"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "eip191",
+                                "ed25519"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       }
                     },
@@ -576,60 +717,102 @@
                   ]
                 },
                 "^[dD][eE][vV][eE][lL][oO][pP][mM][eE][nN][tT]_[aA][uU][tT][hH]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 }
               }
             },
             "^[cC][oO][nN][tT][aA][cC][tT]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[eE][nN][aA][bB][lL][eE][dD]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[cC][oO][nN][tT][aA][cC][tT]_[pP][aA][yY][lL][oO][aA][dD]$": {
                   "additionalProperties": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "type": "object"
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 },
                 "^[oO][rR][iI][gG][iI][nN][sS]$": {
                   "additionalProperties": {
                     "additionalProperties": false,
-                    "type": "object",
+                    "type": [
+                      "object",
+                      "null"
+                    ],
                     "patternProperties": {
                       "^[cC][oO][nN][tT][aA][cC][tT]_[pP][aA][yY][lL][oO][aA][dD]$": {
                         "additionalProperties": {
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         },
                         "minProperties": 1,
-                        "type": "object"
+                        "type": [
+                          "object",
+                          "null"
+                        ]
                       }
                     }
                   },
-                  "type": "object"
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 },
                 "^[pP][rR][oO][fF][iI][lL][eE][sS]$": {
                   "additionalProperties": {
                     "additionalProperties": false,
-                    "type": "object",
+                    "type": [
+                      "object",
+                      "null"
+                    ],
                     "patternProperties": {
                       "^[cC][hH][aA][nN][nN][eE][lL]$": {
                         "maxLength": 128,
                         "minLength": 1,
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^[tT][eE][rR][mM][sS]$": {
                         "maxLength": 4000,
                         "minLength": 1,
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       }
                     }
                   },
-                  "type": "object"
+                  "type": [
+                    "object",
+                    "null"
+                  ]
                 },
                 "^[rR][eE][tT][eE][nN][tT][iI][oO][nN]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -639,12 +822,18 @@
                     {
                       "const": "indefinite",
                       "type": "string"
+                    },
+                    {
+                      "type": "null"
                     }
                   ]
                 },
                 "^[rR][eE][tT][eE][nN][tT][iI][oO][nN]_[sS][wW][eE][eE][pP]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "exclusiveMinimum": 0,
-                  "type": "integer"
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 }
               }
             }
@@ -652,22 +841,34 @@
         },
         "^[rR][eE][gG][iI][sS][tT][rR][yY]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[uU][rR][lL][sS]$": {
               "items": {
                 "type": "string"
               },
-              "type": "array"
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "^[aA][uU][tT][hH][oO][rR][iI][tT][iI][eE][sS]$": {
               "additionalProperties": {
                 "additionalProperties": false,
-                "type": "object",
+                "type": [
+                  "object",
+                  "null"
+                ],
                 "patternProperties": {
                   "^[aA][uU][tT][hH][oO][rR][iI][tT][yY]$": {
                     "minLength": 1,
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "^[pP][rR][iI][nN][cC][iI][pP][aA][lL][sS]$": {
                     "items": {
@@ -675,51 +876,85 @@
                       "type": "object",
                       "patternProperties": {
                         "^[sS][cC][hH][eE][mM][eE]$": {
-                          "enum": [
-                            "eip191",
-                            "ed25519"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "eip191",
+                                "ed25519"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "^[iI][dD][eE][nN][tT][iI][fF][iI][eE][rR]$": {
                           "maxLength": 128,
                           "minLength": 1,
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         }
                       }
                     },
                     "maxItems": 2,
                     "minItems": 1,
-                    "type": "array"
+                    "type": [
+                      "array",
+                      "null"
+                    ]
                   }
                 }
               },
-              "type": "object"
+              "type": [
+                "object",
+                "null"
+              ]
             }
           }
         },
         "^[cC][aA][pP][aA][cC][iI][tT][yY]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[sS][iI][tT][eE][sS]$": {
               "additionalProperties": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
-              "type": "object"
+              "type": [
+                "object",
+                "null"
+              ]
             },
             "^[pP][lL][aA][cC][eE][mM][eE][nN][tT]$": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "^[pP][oO][lL][lL]_[iI][nN][tT][eE][rR][vV][aA][lL]$": {
               "exclusiveMinimum": 0,
               "maximum": 62135596800.0,
-              "type": "number"
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "^[pP][uU][bB][lL][iI][cC][aA][tT][iI][oO][nN]_[iI][nN][tT][eE][rR][vV][aA][lL]_[sS][eE][cC][oO][nN][dD][sS]$": {
               "exclusiveMinimum": 0,
               "maximum": 62135596800.0,
-              "type": "number"
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "^[sS][oO][uU][rR][cC][eE]_[cC][oO][nN][fF][iI][rR][mM][aA][tT][iI][oO][nN]_[sS][eE][cC][oO][nN][dD][sS]$": {
               "anyOf": [
@@ -737,14 +972,20 @@
         },
         "^[pP][rR][iI][cC][iI][nN][gG]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[sS][eE][tT][tT][lL][eE][mM][eE][nN][tT][sS]$": {
               "items": {
                 "additionalProperties": true,
                 "type": "object"
               },
-              "type": "array"
+              "type": [
+                "array",
+                "null"
+              ]
             },
             "^[dD][eE][fF][aA][uU][lL][tT]_[mM][aA][xX]_[dD][uU][rR][aA][tT][iI][oO][nN]_[sS][eE][cC][oO][nN][dD][sS]$": {
               "anyOf": [
@@ -760,27 +1001,45 @@
         },
         "^[nN][eE][gG][oO][tT][iI][aA][tT][iI][oO][nN]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[pP][oO][lL][iI][cC][iI][eE][sS]$": {}
           }
         },
         "^[dD][eE][lL][iI][vV][eE][rR][yY]$": {
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[eE][nN][aA][bB][lL][eE][dD]$": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string"
               }
             },
             "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
-              "type": "number"
+              "type": [
+                "number",
+                "null"
+              ]
             },
             "^[oO][rR][iI][gG][iI][nN][sS]$": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": {
-                "type": "array",
+                "type": [
+                  "array",
+                  "null"
+                ],
                 "items": {
                   "type": "string"
                 }
@@ -788,7 +1047,10 @@
             },
             "^[aA][pP][pP][rR][iI][sS][eE]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -803,17 +1065,30 @@
                 },
                 "^[uU][rR][lL][sS]$": false,
                 "^[tT][iI][tT][lL][eE]$": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^sink$": {
-                  "const": "apprise"
+                  "anyOf": [
+                    {
+                      "const": "apprise"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[cC][oO][mM][mM][aA][nN][dD]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -830,20 +1105,36 @@
                   "items": {
                     "type": "string"
                   },
-                  "type": "array"
+                  "type": [
+                    "array",
+                    "null"
+                  ]
                 },
                 "^[sS][eE][nN][dD]$": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^sink$": {
-                  "const": "command"
+                  "anyOf": [
+                    {
+                      "const": "command"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[fF][iI][lL][eE]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -857,17 +1148,30 @@
                   ]
                 },
                 "^[pP][aA][tT][hH]$": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^sink$": {
-                  "const": "file"
+                  "anyOf": [
+                    {
+                      "const": "file"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[sS][mM][tT][pP]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -882,26 +1186,41 @@
                 },
                 "^[hH][oO][sS][tT]$": {
                   "minLength": 1,
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^[pP][oO][rR][tT]$": {
                   "maximum": 65535,
                   "minimum": 1,
-                  "type": "integer"
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
                 },
                 "^[sS][eE][nN][dD][eE][rR]$": {
                   "minLength": 1,
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^[rR][eE][cC][iI][pP][iI][eE][nN][tT][sS]$": {
                   "items": {
                     "type": "string"
                   },
                   "minItems": 1,
-                  "type": "array"
+                  "type": [
+                    "array",
+                    "null"
+                  ]
                 },
                 "^[sS][tT][aA][rR][tT]_[tT][lL][sS]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^[uU][sS][eE][rR][nN][aA][mM][eE]$": {
                   "anyOf": [
@@ -915,17 +1234,30 @@
                 },
                 "^[pP][aA][sS][sS][wW][oO][rR][dD]$": false,
                 "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^sink$": {
-                  "const": "smtp"
+                  "anyOf": [
+                    {
+                      "const": "smtp"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             },
             "^[wW][eE][bB][hH][oO][oO][kK]$": {
               "additionalProperties": false,
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "patternProperties": {
                 "^[tT][iI][mM][eE][oO][uU][tT]_[sS][eE][cC][oO][nN][dD][sS]$": {
                   "anyOf": [
@@ -941,20 +1273,36 @@
                 "^[uU][rR][lL]$": false,
                 "^[hH][eE][aA][dD][eE][rR][sS]$": false,
                 "^[sS][eE][nN][dD]$": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "^[sS][iI][gG][nN]$": {
-                  "type": "boolean"
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 },
                 "^sink$": {
-                  "const": "webhook"
+                  "anyOf": [
+                    {
+                      "const": "webhook"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
               }
             }
           },
           "additionalProperties": {
-            "type": "object",
+            "type": [
+              "object",
+              "null"
+            ],
             "patternProperties": {
               "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
             },
@@ -978,10 +1326,20 @@
                       },
                       "^[uU][rR][lL][sS]$": false,
                       "^[tT][iI][tT][lL][eE]$": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^sink$": {
-                        "const": "apprise"
+                        "anyOf": [
+                          {
+                            "const": "apprise"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
@@ -1005,13 +1363,26 @@
                         "items": {
                           "type": "string"
                         },
-                        "type": "array"
+                        "type": [
+                          "array",
+                          "null"
+                        ]
                       },
                       "^[sS][eE][nN][dD]$": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^sink$": {
-                        "const": "command"
+                        "anyOf": [
+                          {
+                            "const": "command"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
@@ -1032,10 +1403,20 @@
                         ]
                       },
                       "^[pP][aA][tT][hH]$": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^sink$": {
-                        "const": "file"
+                        "anyOf": [
+                          {
+                            "const": "file"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
@@ -1057,26 +1438,41 @@
                       },
                       "^[hH][oO][sS][tT]$": {
                         "minLength": 1,
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^[pP][oO][rR][tT]$": {
                         "maximum": 65535,
                         "minimum": 1,
-                        "type": "integer"
+                        "type": [
+                          "integer",
+                          "null"
+                        ]
                       },
                       "^[sS][eE][nN][dD][eE][rR]$": {
                         "minLength": 1,
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^[rR][eE][cC][iI][pP][iI][eE][nN][tT][sS]$": {
                         "items": {
                           "type": "string"
                         },
                         "minItems": 1,
-                        "type": "array"
+                        "type": [
+                          "array",
+                          "null"
+                        ]
                       },
                       "^[sS][tT][aA][rR][tT]_[tT][lL][sS]$": {
-                        "type": "boolean"
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
                       },
                       "^[uU][sS][eE][rR][nN][aA][mM][eE]$": {
                         "anyOf": [
@@ -1090,10 +1486,20 @@
                       },
                       "^[pP][aA][sS][sS][wW][oO][rR][dD]$": false,
                       "^[sS][uU][bB][jJ][eE][cC][tT]_[pP][rR][eE][fF][iI][xX]$": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^sink$": {
-                        "const": "smtp"
+                        "anyOf": [
+                          {
+                            "const": "smtp"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
@@ -1116,13 +1522,26 @@
                       "^[uU][rR][lL]$": false,
                       "^[hH][eE][aA][dD][eE][rR][sS]$": false,
                       "^[sS][eE][nN][dD]$": {
-                        "type": "string"
+                        "type": [
+                          "string",
+                          "null"
+                        ]
                       },
                       "^[sS][iI][gG][nN]$": {
-                        "type": "boolean"
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
                       },
                       "^sink$": {
-                        "const": "webhook"
+                        "anyOf": [
+                          {
+                            "const": "webhook"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "^(?:SINK|SINk|SInK|SInk|SiNK|SiNk|SinK|Sink|sINK|sINk|sInK|sInk|siNK|siNk|sinK)$": false
                     }
@@ -1149,10 +1568,16 @@
         },
         "^[wW][aA][lL][lL][eE][tT]$": {
           "additionalProperties": false,
-          "type": "object",
+          "type": [
+            "object",
+            "null"
+          ],
           "patternProperties": {
             "^[aA][dD][dD][rR][eE][sS][sS]$": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "^[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]$": false
           }
@@ -1160,11 +1585,17 @@
         "^[cC][hH][aA][iI][nN][sS]$": {
           "additionalProperties": {
             "additionalProperties": false,
-            "type": "object",
+            "type": [
+              "object",
+              "null"
+            ],
             "patternProperties": {
               "^[rR][pP][cC]_[uU][rR][lL]$": {
                 "minLength": 1,
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "^[cC][hH][aA][iI][nN]_[iI][dD]$": {
                 "anyOf": [
@@ -1188,7 +1619,10 @@
               }
             }
           },
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ]
         }
       }
     }

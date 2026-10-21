@@ -64,14 +64,14 @@ and both are stated, they are one identity. */ -}}
   {{- end -}}
 {{- end -}}
 {{- $bareMetal := index .Values "bare-metal-storefront" | default dict -}}
+{{- $bareMetalConfig := deepCopy ($bareMetal.config | default dict) -}}
+{{- include "arkhai.dropNulls" $bareMetalConfig -}}
 {{- if .Values.storefront.enabled -}}
 {{- /* A release running the VM storefront: provisioning calls back one of its
 agents and must trust that agent's signer, and the smoke tests target an agent
 and the registry it publishes to. */ -}}
-{{- $agents := .Values.storefront.agents | default dict -}}
-{{- if not $agents -}}
-  {{- fail "helm test config requires at least one storefront agent" -}}
-{{- end -}}
+{{- $agents := dict -}}
+{{- include "arkhai.storefrontAgents" (dict "root" . "into" $agents) -}}
 {{- $provisioningTargetName := .Values.provisioning.storefront.agentName -}}
 {{- $provisioningStorefrontFound := false -}}
 {{- $provisioningStorefrontTrusted := false -}}
@@ -101,7 +101,7 @@ would have its requests refused and its callbacks sent here. Its config states
 no sites when the bare-metal chart derives `default` on that service. */ -}}
 {{- if and $bareMetal.enabled .Values.provisioning.enabled -}}
   {{- $releaseProvisioning := printf "http://%s:%d" .Values.global.provisioning.host (int .Values.global.provisioning.port) -}}
-  {{- $bareMetalCapacity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "capacity") | fromJson -}}
+  {{- $bareMetalCapacity := include "arkhai.storefrontConfigSection" (dict "doc" $bareMetalConfig "name" "capacity") | fromJson -}}
   {{- $bareMetalSitesKey := include "arkhai.storefrontConfigKey" (dict "doc" $bareMetalCapacity "name" "sites") -}}
   {{- $bindsReleaseProvisioning := not $bareMetalSitesKey -}}
   {{- if $bareMetalSitesKey -}}
@@ -184,7 +184,7 @@ states one. */ -}}
 storefront, such as a seller release publishing to another release's registry:
 its provisioning service calls the bare-metal storefront back, so it must trust
 that storefront's signer. No VM agent or registry is the smoke tests' target. */ -}}
-{{- $bareMetalIdentity := include "arkhai.storefrontConfigSection" (dict "doc" ($bareMetal.config | default dict) "name" "identity") | fromJson -}}
+{{- $bareMetalIdentity := include "arkhai.storefrontConfigSection" (dict "doc" $bareMetalConfig "name" "identity") | fromJson -}}
 {{- $bareMetalPrincipal := include "arkhai.storefrontConfigSection" (dict "doc" $bareMetalIdentity "name" "principal") | fromJson -}}
 {{- $bareMetalScheme := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "scheme") -}}
 {{- $bareMetalIdentifier := include "arkhai.storefrontConfigValue" (dict "doc" $bareMetalPrincipal "name" "identifier") -}}

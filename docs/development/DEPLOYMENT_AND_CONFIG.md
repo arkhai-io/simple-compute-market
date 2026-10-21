@@ -161,17 +161,39 @@ them; `--raw` prints each public file and never the overlay.
 because Helm merges maps key by key and replaces lists whole: an overlay states
 only what it changes in one agent, and `null` removes a key or an agent. A list
 is refused by the values schema, naming the map, and so is a `name` inside an
-entry, whose key is its name. The storefront subchart ships no agent, since Helm
-cannot remove a subchart's default from a parent's values; the umbrella's
-`values.yaml` declares Bob, and a values file that replaces Bob with an agent of
-its own states `bob: null` beside it. The same holds for any chart value that
-overlays change per entry: key it, do not list it.
+entry, whose key is its name. The storefront subchart ships no agent; the
+umbrella's `values.yaml` declares Bob, and a values file that replaces Bob with
+an agent of its own states `bob: null` beside it. The same holds for any chart
+value that overlays change per entry: key it, do not list it.
+
+The supported Helm is the release pinned in
+[`.github/workflows/tests.yml`](../../.github/workflows/tests.yml). That release
+removes a parent's `null` for a subchart key only where the subchart's own
+defaults define the key. The charts remove remaining null-valued keys themselves,
+before any template reads an agent, so removal does not depend on Helm's merge.
+A `null` assigned to a mapping key in a values file removes that key, at any
+depth of an agent, including keys inside list elements; it never sets that
+setting to `None`. Null list elements keep their item schema's meaning.
+A removed key renders as if it had never been stated: the storefront applies
+its default, or the chart adds a release-derived value where it normally would.
+A required service setting the chart does not derive remains absent, and the
+storefront refuses it at startup. To set a value to `None` where the storefront
+accepts it, use the storefront's own file or the Secret overlay instead.
+
+Removing every agent is refused at render; set `storefront.enabled: false` to
+run none. Removing an agent's `port` or `identity` is also refused, naming the
+agent and missing value, since the chart has neither to default to. Removing
+`component` or `configMapName` uses the chart's default; removing a runtime
+`secret` or address book mounts none, as does removing its Secret or ConfigMap
+name. Other removed keys under those values take their defaults. A key the
+values schema refuses, including a secret or retired key, stays refused as
+`null`.
 
 Each agent entry carries the storefront's own configuration
 in `config`, in the storefront's own key names, and the chart renders it
-unchanged into `storefront.json`. A setting or settlement mechanism the
-storefront gains deploys through values alone. Keys may be spelled in any case,
-as the storefront's loader reads them; a key stated in two spellings is refused
+into `storefront.json` with its null-valued keys removed. A setting or settlement
+mechanism the storefront gains deploys through values alone. Keys may be spelled
+in any case, as the storefront's loader reads them; a key stated in two spellings is refused
 at render. The chart adds only what the release knows, and except for the port
 only where `config` does not state it:
 
@@ -1254,7 +1276,7 @@ The bare-metal storefront reads its configuration as every storefront does: `$XD
 
 `[Settlement]` is the strict shared settlement root. A configured Alkahest section, enabled or disabled, requires the seller's public address (`[Wallet].address`), at least one chain (`[Chains.<name>]`, its `rpc_url` and optional `alkahest_address_config_path`), and the wallet key (`[Wallet].private_key`, in the Secret overlay only). Disabled sections still service accepted obligations. Those inputs supplied with no Alkahest section are refused. Payments-only configuration supplies none of them and constructs no Alkahest wallet, chain, or RPC client; its payment credentials remain behind the secret boundary. The storefront delivers the `recipient` and `oracle_gated` release models and refuses to start configured as `interruptible`. Publication additionally requires authenticated registry trust, exact typed clauses, freshly confirmed site projections for its source checks, and a maximum lease duration per pool.
 
-The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered unchanged into `storefront.json` in a ConfigMap; `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
+The Compose wrapper mounts the operator's `storefront.toml` and the Secret overlay and reads the identity credential from its own environment file. The Helm chart, `helm/charts/bare-metal-storefront`, is the storefront chart's agent shape with one agent's keys at its top level: `config` rendered into `storefront.json` in a ConfigMap with null-valued keys removed (see "Storefront agents: pass-through configuration"); `secret` naming an existing Secret whose key is mounted as `storefront.secrets.toml`; `identity.credentialSecret`; `alkahestAddressBook` mounting an existing ConfigMap read-only; `port`, which the container, probes, and Service share; persistence; and scheduling. The pod's environment carries only `XDG_CONFIG_HOME` and the credential, and service links are off. The chart derives only what the release knows, and only where `config` states none: `port` always (a different stated value refused), `base_url` as the Service's URL, `db_path` under `persistence.mountPath`, and, in an umbrella release, the internal registry's URL with the chart-level `internalRegistryTrust` under it and `[capacity.sites]` as `{default: <provisioning URL>}`. A site bound to the release's provisioning service must have a role-`service` peer naming `global.provisioningIdentity`, which the chart checks and never adds. Installed alone, with no umbrella globals, it derives the first three only and refuses `internalRegistryTrust`. Its values schema is closed: the top level refuses every value it does not know, retired ones by name, and `config` is typed by a definition generated from the storefront's settings models, each section closed, so a misspelled or secret key is refused at render. A key stated in two spellings is refused at render too, since the loader would merge them silently. The chart validates no service semantics; the storefront's startup refusal does.
 
 The selected-site authority owns inventory, executor routing, provisioning credentials, and teardown. The payments authority owns financial state. Buyer, storefront, site, and payment credentials retain their separate authority boundaries.
 
