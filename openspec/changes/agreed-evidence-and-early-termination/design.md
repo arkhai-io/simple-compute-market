@@ -191,7 +191,7 @@ sequenceDiagram
     R-->>B: listings: VM shape, arkhai.payments.v1 option with early_termination clause
     B->>S: signed proposal: VM terms incl. ssh_public_key, chosen option
     S-->>B: signed acceptance: negotiated Agreement bytes, plus mandate derived from them (mandate.deal = sha256(JCS(Agreement)))
-    B->>B: verify mandate is the derivation of the Agreement; keep acceptance as evidence
+    B->>B: verify mandate is the derivation of the Agreement, keep acceptance as evidence
     B->>P: approve mandate (+ Agreement attachment)
     P-->>B: signed receipt, transaction id
     end
