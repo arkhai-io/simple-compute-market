@@ -155,16 +155,12 @@ class BareMetalSettleStatusResponse(BaseModel):
 
 
 class BareMetalVerifyEscrowRequest(BaseModel):
-    """An administrator's dry-run check of an escrow against a listing's terms."""
+    """An administrator's dry-run check of an escrow against the plan the
+    accepted negotiation it names committed."""
 
     model_config = ConfigDict(extra="forbid")
 
-    seller_wallet: str = Field(min_length=1)
-    # Base units in the uint256 domain, as a decimal-digit string.
-    agreed_price: str = Field(pattern=r"^[0-9]+$")
-    agreed_duration_seconds: int = Field(gt=0)
-    listing_id: str = Field(min_length=1)
-    chain_name: str = Field(default="anvil", min_length=1)
+    negotiation_id: str = Field(min_length=1)
 
 
 class BareMetalVerifyEscrowResponse(BaseModel):

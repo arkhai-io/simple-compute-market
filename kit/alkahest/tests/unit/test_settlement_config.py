@@ -727,8 +727,8 @@ def test_alkahest_rate_beyond_uint256_is_refused(monkeypatch) -> None:
         _build_alkahest_option(monkeypatch, str(2**256), 0)
 
 
-def test_registration_owns_settlement_verification() -> None:
-    from market_alkahest import verify_escrow_for_settlement
+def test_registration_verifies_settlement_against_the_accepted_plan() -> None:
+    from market_alkahest import verify_escrow_against_plan
 
     registration = create_alkahest_registration()
-    assert registration.settlement_verifier is verify_escrow_for_settlement
+    assert registration.settlement_verifier is verify_escrow_against_plan

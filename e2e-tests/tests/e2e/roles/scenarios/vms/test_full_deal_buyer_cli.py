@@ -987,33 +987,30 @@ class TestStage08i_BuyerCliInitiatesSettle:
 
 class TestStage07b_VerifyEscrow:
     def test_07b_storefront_verifies_on_chain_escrow(
-        self, storefront_admin_client, seller_wallet, deal_state: DealState
+        self, storefront_admin_client, deal_state: DealState
     ):
         """POST /api/v1/admin/settle/{uid}/verify → valid=True (dry-run).
 
-        Exercises getRecordFromChain in isolation: reads the escrow from chain
-        and confirms token, amount, and seller recipient match. No DB writes.
+        Reads the escrow from chain and confirms it is the obligation the
+        accepted negotiation's committed settlement plan names, exactly as
+        settle verifies it. No DB writes.
         """
         require_state(
             deal_state,
             "real_escrow_uid",
-            "seller_listing_id",
-            "agreed_amount",
+            "negotiation_id",
             "_alkahest_configured",
         )
 
         result = storefront_admin_client.verify_settle(
             deal_state.real_escrow_uid,
-            seller_wallet=seller_wallet,
-            agreed_price=deal_state.agreed_amount,
-            agreed_duration_seconds=DURATION_HOURS * 3600,
-            listing_id=deal_state.seller_listing_id,
+            negotiation_id=deal_state.negotiation_id,
         )
         assert result.get("valid") is True, (
             f"Storefront could not verify on-chain escrow {deal_state.real_escrow_uid}.\n"
             f"reason={result.get('reason')!r}\n"
-            "Check that the token address, amount, arbiter, and seller wallet "
-            "all match what was set at escrow creation time."
+            "Check that the escrow funds the obligation the accepted settlement "
+            "plan names: its token, amount, arbiter, demand, and expiry."
         )
         log.info("[07b] Storefront verified escrow %s: valid=True", deal_state.real_escrow_uid)
 

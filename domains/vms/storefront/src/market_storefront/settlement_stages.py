@@ -61,7 +61,7 @@ from market_storefront.services.vm_job_spec_service import (
 from market_storefront.utils import config
 from market_storefront.utils.escrow_verification import (
     EscrowVerificationError,
-    verify_escrow_for_settlement,
+    verify_escrow_against_plan,
 )
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,31 @@ class PaymentSettleResult:
     payload: dict[str, Any] = field(default_factory=dict)
 
 
+def accepted_alkahest_proposal(
+    thread: Mapping[str, Any], *, mechanism: str
+) -> dict[str, Any]:
+    """The escrow proposal an accepted Alkahest deal recorded.
+
+    It names the chain and escrow contract the buyer funds; the escrow itself is
+    checked against the deal's committed settlement plan. Raises ``ValueError``
+    when the accepted Agreement does not select ``mechanism`` or recorded none.
+    """
+    raw = thread.get("agreement_bytes")
+    if not isinstance(raw, bytes):
+        raise ValueError("accepted Agreement bytes are unavailable")
+    agreement = json.loads(raw)
+    selected = agreement.get("settlement")
+    if not isinstance(selected, Mapping) or selected.get("mechanism") != mechanism:
+        raise ValueError("accepted Agreement does not select Alkahest")
+    # Only the accepted proposal carries the release condition the seller
+    # authorized; the buyer's opening is not a substitute for it.
+    data = thread.get("settlement_data") or {}
+    proposal = data.get("accepted_escrow_proposal")
+    if not isinstance(proposal, dict) or "chain_name" not in proposal:
+        raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
+    return proposal
+
+
 @dataclass(frozen=True)
 class VmAlkahestSellerStage:
     # Whether a deal through this entry settles from the accepted Agreement
@@ -101,9 +126,9 @@ class VmAlkahestSellerStage:
     # publication drops such a stage's options from an unbacked listing.
     fulfils_through_capacity: bool = field(kw_only=True)
     # The Alkahest release models this entry can deliver, from
-    # market_alkahest.RELEASE_MODELS. Composition refuses a configured
-    # [Settlement.alkahest] model outside them, so a listing never advertises
-    # a release condition its deal could not honour.
+    # market_alkahest.RELEASE_MODELS. A configured [Settlement.alkahest] model
+    # outside them makes Alkahest unready, so a listing never advertises a
+    # release condition its deal could not honour.
     release_models: frozenset[str] = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
@@ -197,19 +222,17 @@ class VmAlkahestSellerStage:
             or proposal.escrow_address != source["escrow_address"]
         ):
             raise ValueError("Alkahest source differs from accepted settlement")
-        facts = evidence.evidence["delivery"]["payload"]
-        index = await verify_escrow_for_settlement(
+        # Recovery rechecks the escrow against the plan committed at acceptance,
+        # as settlement verified it, not the listing recorded with the evidence.
+        index = await verify_escrow_against_plan(
             escrow_uid=evidence.settlement_ref,
-            seller_wallet=config.get_evm_wallet_address(),
-            agreed_price=int(thread["agreed_price"]),
-            agreed_duration_seconds=facts["duration_seconds"],
-            listing=facts["order"],
+            settlement_plan=thread.get("settlement_plan"),
             alkahest_client=client,
             chain_name=chain_name,
+            escrow_address=proposal.escrow_address,
             alkahest_address_config_path=config.CHAINS[
                 chain_name
             ].alkahest_address_config_path,
-            escrow_proposal=proposal,
         )
         if index != source["obligation_index"]:
             raise ValueError("Alkahest recovered obligation changed")
@@ -296,20 +319,7 @@ class VmAlkahestSellerStage:
         return {"accepted_escrow_proposal": artifacts["accepted_escrow_proposal"]}
 
     def accepted_proposal(self, thread: Mapping[str, Any]) -> dict[str, Any]:
-        raw = thread.get("agreement_bytes")
-        if not isinstance(raw, bytes):
-            raise ValueError("accepted Agreement bytes are unavailable")
-        agreement = json.loads(raw)
-        selected = agreement.get("settlement")
-        if not isinstance(selected, Mapping) or selected.get("mechanism") != self.mechanism:
-            raise ValueError("accepted Agreement does not select Alkahest")
-        # Only the accepted proposal carries the release condition the seller
-        # authorized; the buyer's opening is not a substitute for it.
-        data = thread.get("settlement_data") or {}
-        proposal = data.get("accepted_escrow_proposal")
-        if not isinstance(proposal, dict) or "chain_name" not in proposal:
-            raise ValueError("accepted negotiation has no persisted accepted escrow proposal")
-        return proposal
+        return accepted_alkahest_proposal(thread, mechanism=self.mechanism)
 
     async def start(
         self,

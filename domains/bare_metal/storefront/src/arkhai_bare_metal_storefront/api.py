@@ -1225,7 +1225,7 @@ async def system_status(request: Request) -> BareMetalHealthResponse:
 async def admin_verify_settlement(
     escrow_uid: str, body: BareMetalVerifyEscrowRequest, request: Request
 ) -> BareMetalVerifyEscrowResponse:
-    """Read the escrow from chain against a listing's terms, writing nothing."""
+    """Read the escrow from chain against an accepted deal's plan, writing nothing."""
     runtime = _runtime(request)
     await _admin(
         request=request,

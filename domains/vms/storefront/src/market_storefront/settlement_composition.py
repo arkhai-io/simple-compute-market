@@ -16,9 +16,7 @@ from arkhai_vms import VmProvisionTerms, normalize_vm_provision_terms
 from core_storefront.domain_lifecycle import (
     StorefrontFulfillmentContext,
     StorefrontFulfillmentPorts,
-    StorefrontSettlementBuildContext,
     StorefrontSettlementFulfillmentInput,
-    build_domain_settlement_artifacts,
     fulfill_domain,
 )
 from core_storefront.stage_log import stage_event
@@ -239,20 +237,6 @@ class VmSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
-def _settlement_plan_obligations(
-    *,
-    domain: MarketDomainContract,
-    context: StorefrontSettlementBuildContext,
-    stage: Any,
-    listing: Mapping[str, Any],
-) -> tuple[dict[str, Any], ...]:
-    artifacts = build_domain_settlement_artifacts(
-        domain, context, build_plan=partial(stage.build_plan, listing=listing)
-    )
-    obligations = artifacts.settlement_plan["obligations"]
-    return tuple(dict(item) for item in obligations)
-
-
 async def prepare_vm_settlement(
     *,
     domain: MarketDomainContract,
@@ -316,44 +300,31 @@ async def prepare_vm_settlement(
         raise ValueError(
             f"chain {accepted_chain!r} is not configured on this storefront"
         )
+    # The deal settles under the plan committed when it was accepted, which
+    # is what the buyer funded; a listing changed since cannot change it.
+    plan = thread.get("settlement_plan")
+    raw_obligations = plan.get("obligations") if isinstance(plan, Mapping) else None
+    if not isinstance(raw_obligations, list) or not raw_obligations:
+        raise ValueError(
+            f"Negotiation {negotiation_id} has no committed settlement plan"
+        )
+    obligations = tuple(dict(item) for item in raw_obligations)
     # Escrow verification reads the attestation off the chain through the
     # alkahest client's escrow codecs, so it takes the chain client the
     # mechanism adapter resolves rather than the adapter itself — the same
     # object the admin dry-run and the resume sweep pass.
-    obligation_index = await escrow_verification.verify_escrow_for_settlement(
+    obligation_index = await escrow_verification.verify_escrow_against_plan(
         escrow_uid=escrow_uid,
-        seller_wallet=storefront_config.get_evm_wallet_address(),
-        agreed_price=int(thread["agreed_price"]),
-        agreed_duration_seconds=provision.duration_seconds,
-        listing=order,
+        settlement_plan=plan,
         alkahest_client=mechanism_client.chain_client(accepted_chain),
         chain_name=accepted_chain,
+        escrow_address=proposal.escrow_address,
         alkahest_address_config_path=chain.alkahest_address_config_path,
-        escrow_proposal=proposal,
     )
     if not isinstance(obligation_index, int):
         raise ValueError("escrow verification did not identify an exact obligation")
 
     buyer_principal = Identity.model_validate(thread.get("buyer_principal"))
-    obligations = _settlement_plan_obligations(
-        domain=domain, stage=stage, listing=dict(order),
-        context=StorefrontSettlementBuildContext(
-            binding=thread_binding.binding,
-            negotiation_id=negotiation_id,
-            listing_id=str(listing_id),
-            site_id=thread_binding.site_id,
-            proposal=proposal,
-            agreed_amount=int(thread["agreed_price"]),
-            duration_seconds=provision.duration_seconds,
-            buyer_principal=buyer_principal,
-            seller_principal=local_principal,
-            seller_wallet_address=storefront_config.get_evm_wallet_address(),
-            chain_config_paths={
-                name: config.alkahest_address_config_path
-                for name, config in storefront_config.CHAINS.items()
-            },
-        ),
-    )
     if obligation_index < 0 or obligation_index >= len(obligations):
         raise ValueError(
             f"verified obligation index {obligation_index} is outside the accepted plan"

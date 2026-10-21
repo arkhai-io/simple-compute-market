@@ -294,9 +294,9 @@ class AdminController:
         """End an interruptible deal's capacity lease early.
 
         This is the provider-control-plane half of spot interruption.
-        It validates that the deal came from an interruptible listing,
-        finds the live capacity reservation, and truncates that lease to
-        the interruption timestamp. The splitter declaration remains a
+        It validates that the deal's committed settlement plan made it
+        interruptible, finds the live capacity reservation, and truncates
+        that lease to the interruption timestamp. The splitter declaration remains a
         separate settlement action until the on-chain helper is wired.
         """
         escrow = await self._db.load_escrow(escrow_uid=escrow_uid)
@@ -320,7 +320,7 @@ class AdminController:
         thread = await self._db.load_negotiation_thread_row(
             negotiation_id=escrow["negotiation_id"]
         )
-        if not self._deal_is_interruptible(listing=listing, thread=thread):
+        if not self._deal_is_interruptible(thread=thread):
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -611,38 +611,18 @@ class AdminController:
                 dt = dt.astimezone(timezone.utc)
         return dt.strftime("%Y-%m-%d %H:%M")
 
-    def _deal_is_interruptible(
-        self,
-        *,
-        listing: dict[str, Any],
-        thread: dict[str, Any] | None,
-    ) -> bool:
-        listing_resource = self._json_object(listing.get("listing_resource"))
-        if listing_resource.get("interruptible") is True:
-            return True
+    def _deal_is_interruptible(self, *, thread: dict[str, Any] | None) -> bool:
+        """Whether the deal's committed plan made it interruptible.
 
-        proposal = (thread or {}).get("buyer_escrow_proposal")
-        if not isinstance(proposal, dict):
-            return False
-        try:
-            from arkhai_vms_settlement.proposals import proposal_is_splitter_gated
-
-            from market_storefront.utils.config import CHAINS
-
-            chain_config_paths = {
-                name: chain.alkahest_address_config_path
-                for name, chain in CHAINS.items()
-            }
-            return proposal_is_splitter_gated(
-                proposal,
-                chain_config_paths=chain_config_paths,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[ADMIN] Could not inspect splitter posture for proposal: %s",
-                exc,
-            )
-            return False
+        Acceptance records the interruptible term when the escrow it accepted
+        is splitter-gated, so the deal's terms decide, never the listing as it
+        now stands or the chain address configuration as it is now.
+        """
+        plan = self._json_object((thread or {}).get("settlement_plan"))
+        service_terms = plan.get("service_terms")
+        return isinstance(service_terms, dict) and isinstance(
+            service_terms.get("interruptible"), dict
+        )
 
     async def _find_live_reservation_for_escrow(
         self,

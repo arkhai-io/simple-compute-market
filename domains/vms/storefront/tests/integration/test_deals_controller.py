@@ -98,9 +98,28 @@ async def client(tmp_path):
         yield c, db
 
 
+async def _commit_plan(db, *, service_terms: dict) -> None:
+    await db.commit_settlement_plan(
+        negotiation_id="neg-hb-1",
+        settlement_plan={
+            "obligations": [],
+            "buyer_principal": BUYER.identity.model_dump(mode="json"),
+            "seller_principal": SELLER.identity.model_dump(mode="json"),
+            "service_terms": service_terms,
+        },
+        buyer_principal=BUYER.identity,
+        seller_principal=SELLER.identity,
+    )
+
+
 @pytest.mark.asyncio
 async def test_ed25519_heartbeat_round_trip(client):
     c, db = client
+    # The cadence the deal was accepted under, not the storefront's setting.
+    await _commit_plan(
+        db,
+        service_terms={"heartbeat": {"schema": "vms.heartbeat.v1", "interval_seconds": 45}},
+    )
     body = _body()
     headers, timestamp = _signed_headers(
         signer=BUYER,
@@ -120,13 +139,32 @@ async def test_ed25519_heartbeat_round_trip(client):
     assert payload["seller_principal"] == SELLER.identity.model_dump(mode="json")
     assert payload["heartbeat_count"] == 1
     assert payload["sent_at_unix"] == float(timestamp)
-    assert payload["next_expected_by_unix"] > float(timestamp)
+    assert payload["next_expected_by_unix"] == float(timestamp) + 45
 
     stored = await db.latest_heartbeat(ESCROW_UID)
     assert stored["buyer_principal"] == BUYER.identity.model_dump(mode="json")
     assert stored["seller_principal"] == SELLER.identity.model_dump(mode="json")
     assert stored["payload"]["schema"] == "vms.heartbeat.v1"
     assert stored["payload"]["status"] == "healthy"
+
+
+@pytest.mark.asyncio
+async def test_a_deal_whose_plan_has_no_heartbeat_term_expects_none(client):
+    """A deal that is not oracle-gated records the heartbeat and expects none."""
+    c, db = client
+    await _commit_plan(db, service_terms={})
+    body = _body()
+    headers, _timestamp = _signed_headers(
+        signer=BUYER, body=body, request_id="heartbeat-no-term"
+    )
+
+    response = await c.post(
+        f"/api/v1/deals/{ESCROW_UID}/heartbeat", json=body, headers=headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["heartbeat_count"] == 1
+    assert response.json()["next_expected_by_unix"] is None
 
 
 @pytest.mark.asyncio

@@ -499,6 +499,15 @@ obligation rather than a listing, and the three domains call it; bare metal's ac
 builds its plan from the listing record the opening authorized. Planning confirms the
 smaller acceptance question.
 
+Settled in implementation (Section 7): the kit's form matches the escrow to one of the
+committed plan's Alkahest obligations on the accepted proposal's chain and escrow
+contract, and is the registration's settlement verifier. Bare metal records the
+opening's listing record and continues every round, acceptance and force-accept among
+them, against it, with the current record's status: the runtime builds acceptance from
+the record it resolved, so that record is the one continuation resolves. The dry-run
+verify request names only the negotiation, since the plan determines every term the
+request used to carry.
+
 Every other reader of a deal's settlement terms after acceptance reads the same plan:
 
 - VM's administrator dry-run verify checks an escrow against the committed plan of the
@@ -976,8 +985,10 @@ Promoted at closeout:
   stages; the `alkahest-chain-probe` loop in each storefront's row of the loop table, and
   `listing-seed` in the API-credit row.
 - The `storefront-publication` architecture companion: bare-metal candidates, delivery
-  terms, the one-unit commitment, the recheck, the site-derivation log, and the no-option
-  close or hold.
+  terms, the one-unit commitment, the recheck, the site-derivation log, the no-option
+  close or hold, and a bare-metal negotiation continuing, accepting, and force-accepting
+  against the listing record its opening authorized (decision 16's Section 7
+  paragraph).
 - The `physical-provisioning` and `resource-pool-management` companions where their
   passages describe the view contract, the resource pass's pool context, and the
   delegate's operations.

@@ -1,13 +1,19 @@
 """Pre-settlement on-chain escrow verification.
 
-The seller's storefront calls ``verify_escrow_for_settlement`` before any
-provisioning side-effect. It reads the EAS attestation by uid via
-alkahest-py's ``client.erc20.escrow.default.get_obligation(uid)`` and asserts
-the on-chain obligation_data dict-matches what the seller expects: the
-obligation materialized from the thread's proposal under the release
-condition the listing authorizes, the same inputs the buyer used. A legacy
-thread with no proposal expects a recipient condition paying the seller's
-wallet, without consulting the listing.
+The seller's storefront calls ``verify_escrow_against_plan`` before any
+provisioning side-effect. It reads the EAS attestation by uid through the
+escrow contract's codec and asserts the on-chain obligation_data dict-matches
+one obligation of the settlement plan committed when the deal was accepted.
+The plan, not the listing as it stands now, is what the buyer funded: a seller
+who changes release policy, wallet, or address book afterwards cannot make a
+correctly funded escrow fail verification.
+
+``verify_escrow_for_settlement`` is the form that materializes the expected
+obligation from a proposal under the release condition a listing authorizes.
+It reads the listing as it stands rather than what was committed, so no
+settlement path verifies through it. A legacy thread with no proposal
+expects a recipient condition paying the seller's wallet, without consulting
+the listing. Both forms share the codec lookup and the comparison below.
 
 Verification is two-phase:
 
@@ -21,11 +27,10 @@ Verification is two-phase:
    hard-coded checks; adding new arbiter / escrow kinds only requires
    registering their codecs, not changing this verifier.
 
-The expected ``expiration_unix`` doesn't participate in dict-compare —
-it's buyer-clock-stamped at escrow creation and the seller can't
-reproduce it without the buyer publishing the value. Step 7 makes the
-buyer publish the full EscrowTerms via the negotiation protocol so this
-check can become exact-equal.
+An expected obligation that carries an ``expiration_unix`` — every plan
+obligation and every proposal-materialized one — must also match the
+attestation's expiration time exactly; only the legacy path, which has no
+agreed expiry to compare, skips it.
 
 On any mismatch raises ``EscrowVerificationError``. The caller maps that
 to HTTP 400 — settlement aborts before any DB side effect or chain
@@ -41,6 +46,11 @@ import time
 from typing import Any
 
 from market_alkahest import alkahest as _codecs
+from market_alkahest.plans import (
+    ALKAHEST_MECHANISM,
+    SettlementPlan,
+    settlement_obligation_to_escrow_terms,
+)
 from market_alkahest.schemas import (
     accepted_recipient_address,
     accepted_token_address,
@@ -292,6 +302,184 @@ def _legacy_recipient_obligation_data(
     }
 
 
+def _escrow_codec(
+    chain_name: str, escrow_address: str, config_path: str | None
+) -> Any:
+    """The codec of the escrow contract at ``escrow_address`` on ``chain_name``."""
+    try:
+        return _codecs.get_escrow_codec_for(
+            chain_name, escrow_address, config_path=config_path
+        )
+    except ValueError as exc:
+        raise EscrowVerificationError(
+            f"Cannot resolve escrow codec for proposal "
+            f"(chain={chain_name!r}, address={escrow_address!r}): {exc}"
+        ) from exc
+
+
+async def _match_on_chain(
+    *,
+    escrow_uid: str,
+    alkahest_client: Any,
+    get_obligation_fn: Any,
+    candidates: list[tuple[int, dict[str, Any], int | None]],
+    now_unix: int | None,
+) -> int:
+    """Read the escrow and return the index of the one candidate it matches.
+
+    Each candidate is ``(index, normalized obligation_data, expiration_unix)``;
+    an expiration of ``None`` is not compared. Raises
+    ``EscrowVerificationError`` naming the first candidate's differences when
+    none matches.
+    """
+    try:
+        decoded = await get_obligation_fn(alkahest_client, escrow_uid)
+    except Exception as exc:
+        raise EscrowVerificationError(
+            f"Failed to read escrow {escrow_uid} from chain: {exc}"
+        ) from exc
+
+    att = decoded["attestation"]
+    obligation = decoded["data"]
+
+    # Attestation envelope checks (independent of obligation_data shape).
+    if att.revocation_time:
+        raise EscrowVerificationError(
+            f"Escrow {escrow_uid} is revoked (revocation_time={att.revocation_time})"
+        )
+
+    now = int(now_unix) if now_unix is not None else int(time.time())
+    if att.expiration_time and int(att.expiration_time) <= now:
+        raise EscrowVerificationError(
+            f"Escrow {escrow_uid} expired at {att.expiration_time} (now={now})"
+        )
+    if not att.expiration_time:
+        # The EAS contract treats expiration_time=0 as "never expires";
+        # for escrow obligations we always want a deadline so a stale
+        # escrow can be reclaimed. Reject the no-expiry shape.
+        raise EscrowVerificationError(
+            f"Escrow {escrow_uid} has no expirationTime — refusing to settle"
+        )
+    actual = _read_chain_obligation_data(obligation)
+
+    # Match the decoded escrow to one exact expected obligation, so no
+    # position is assumed when a plan holds several.
+    for index, candidate, candidate_expiration in candidates:
+        expiration_matches = (
+            candidate_expiration is None
+            or int(att.expiration_time) == candidate_expiration
+        )
+        if actual == candidate and expiration_matches:
+            logger.info(
+                "[ESCROW_VERIFY] escrow=%s ok: fields=%s arbiter=%s exp=%s",
+                escrow_uid,
+                sorted(actual),
+                actual.get("arbiter"),
+                att.expiration_time,
+            )
+            return index
+
+    _, expected, expected_expiration = candidates[0]
+    diffs = []
+    for key in sorted(set(actual) | set(expected)):
+        chain_value = actual.get(key, _ABSENT)
+        expected_value = expected.get(key, _ABSENT)
+        if chain_value != expected_value:
+            diffs.append(
+                f"{key}: chain={_shown(chain_value)} "
+                f"expected={_shown(expected_value)}"
+            )
+    if (
+        expected_expiration is not None
+        and int(att.expiration_time) != expected_expiration
+    ):
+        diffs.append(
+            "expiration_time: "
+            f"chain={att.expiration_time!r} expected={expected_expiration!r}"
+        )
+    raise EscrowVerificationError(
+        f"Escrow {escrow_uid} obligation_data mismatch: " + "; ".join(diffs)
+    )
+
+
+def _codec_reader(codec: Any) -> Any:
+    async def read(client: Any, uid: str) -> Any:
+        return await codec.get_obligation(client, uid)
+
+    return read
+
+
+async def verify_escrow_against_plan(
+    *,
+    escrow_uid: str,
+    settlement_plan: Any,
+    alkahest_client: Any,
+    chain_name: str,
+    escrow_address: str,
+    alkahest_address_config_path: str | None,
+    now_unix: int | None = None,
+    get_obligation_fn: Any = None,
+) -> int:
+    """Read the on-chain escrow and assert it is one obligation of the plan.
+
+    ``settlement_plan`` is the plan committed when the deal was accepted, as
+    the negotiation thread stores it. The escrow is read through the codec of
+    its contract, ``escrow_address`` on ``chain_name`` (the accepted
+    proposal's), and must equal, obligation data and expiry, one of the plan's
+    Alkahest obligations on that contract. Returns that obligation's index in
+    the plan, which identifies it to the settlement runtime.
+
+    Nothing is re-derived from the listing, the seller's wallet, or the release
+    policy: those may have changed since acceptance, and the buyer funded the
+    plan. The address configuration is read only to find the escrow
+    contract's codec.
+
+    Raises ``EscrowVerificationError`` on any mismatch, or when the plan holds
+    no Alkahest obligation on that contract.
+    """
+    if alkahest_client is None:
+        raise EscrowVerificationError(
+            "AlkahestClient not configured — cannot verify escrow on chain"
+        )
+    try:
+        plan = SettlementPlan.model_validate(settlement_plan)
+    except Exception as exc:
+        raise EscrowVerificationError(
+            f"the accepted settlement plan cannot be read: {exc}"
+        ) from exc
+    target = escrow_address.lower()
+    candidates: list[tuple[int, dict[str, Any], int | None]] = []
+    for index, obligation in enumerate(plan.obligations):
+        if obligation.mechanism != ALKAHEST_MECHANISM:
+            continue
+        terms = settlement_obligation_to_escrow_terms(obligation)
+        if terms.chain_name != chain_name or terms.escrow_contract.lower() != target:
+            continue
+        candidates.append(
+            (
+                index,
+                _normalize_obligation_data(terms.obligation_data),
+                int(terms.expiration_unix),
+            )
+        )
+    if not candidates:
+        raise EscrowVerificationError(
+            "the accepted settlement plan holds no obligation on escrow "
+            f"{escrow_address!r} of chain {chain_name!r}"
+        )
+    if get_obligation_fn is None:
+        get_obligation_fn = _codec_reader(
+            _escrow_codec(chain_name, escrow_address, alkahest_address_config_path)
+        )
+    return await _match_on_chain(
+        escrow_uid=escrow_uid,
+        alkahest_client=alkahest_client,
+        get_obligation_fn=get_obligation_fn,
+        candidates=candidates,
+        now_unix=now_unix,
+    )
+
+
 async def verify_escrow_for_settlement(
     *,
     escrow_uid: str,
@@ -374,7 +562,7 @@ async def verify_escrow_for_settlement(
     effective_recipient = seller_wallet
     _codec = None
     expected_obligation_raw: dict[str, Any] | None = None
-    expected_candidates: list[tuple[dict[str, Any], int | None]] = []
+    expected_candidates: list[tuple[int, dict[str, Any], int | None]] = []
     if escrow_proposal is not None:
         _addr = (escrow_proposal.escrow_address or "").lower()
         # The buyer may leave the escrow contract unpinned — a zero-address
@@ -386,18 +574,11 @@ async def verify_escrow_for_settlement(
         if _unpinned:
             effective_escrow_kind = escrow_kind
         else:
-            try:
-                _codec = _codecs.get_escrow_codec_for(
-                    escrow_proposal.chain_name,
-                    escrow_proposal.escrow_address,
-                    config_path=alkahest_address_config_path,
-                )
-            except ValueError as exc:
-                raise EscrowVerificationError(
-                    f"Cannot resolve escrow codec for proposal "
-                    f"(chain={escrow_proposal.chain_name!r}, "
-                    f"address={escrow_proposal.escrow_address!r}): {exc}"
-                ) from exc
+            _codec = _escrow_codec(
+                escrow_proposal.chain_name,
+                escrow_proposal.escrow_address,
+                alkahest_address_config_path,
+            )
             effective_escrow_kind = _codec.kind
         proposal_recipient = accepted_recipient_address(escrow_proposal)
         if proposal_recipient:
@@ -427,10 +608,11 @@ async def verify_escrow_for_settlement(
                 ) from exc
             expected_candidates = [
                 (
+                    index,
                     _normalize_obligation_data(term.obligation_data),
                     int(term.expiration_unix),
                 )
-                for term in expected_terms
+                for index, term in enumerate(expected_terms)
             ]
     else:
         effective_escrow_kind = escrow_kind
@@ -445,12 +627,7 @@ async def verify_escrow_for_settlement(
                     f"Cannot read escrow {escrow_uid}: {exc}"
                 ) from exc
 
-        assert _codec is not None
-
-        async def _get_obligation(client: Any, uid: str) -> Any:
-            return await _codec.get_obligation(client, uid)
-
-        get_obligation_fn = _get_obligation
+        get_obligation_fn = _codec_reader(_codec)
 
     if (
         not expected_candidates
@@ -482,79 +659,17 @@ async def verify_escrow_for_settlement(
             ) from exc
     if expected_obligation_raw is not None:
         expected_candidates.append(
-            (_normalize_obligation_data(expected_obligation_raw), None)
-        )
-
-    # Read the on-chain attestation + obligation.
-    try:
-        decoded = await get_obligation_fn(alkahest_client, escrow_uid)
-    except Exception as exc:
-        raise EscrowVerificationError(
-            f"Failed to read escrow {escrow_uid} from chain: {exc}"
-        ) from exc
-
-    att = decoded["attestation"]
-    obligation = decoded["data"]
-
-    # Attestation envelope checks (independent of obligation_data shape).
-    if att.revocation_time:
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} is revoked (revocation_time={att.revocation_time})"
-        )
-
-    now = int(now_unix) if now_unix is not None else int(time.time())
-    if att.expiration_time and int(att.expiration_time) <= now:
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} expired at {att.expiration_time} (now={now})"
-        )
-    if not att.expiration_time:
-        # The EAS contract treats expiration_time=0 as "never expires";
-        # for escrow obligations we always want a deadline so a stale
-        # escrow can be reclaimed. Reject the no-expiry shape.
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} has no expirationTime — refusing to settle"
-        )
-    actual = _read_chain_obligation_data(obligation)
-
-    # Match the decoded escrow to one exact plan obligation. This removes
-    # positional assumptions while retaining the legacy single-candidate path.
-    matched_index: int | None = None
-    for index, (candidate, candidate_expiration) in enumerate(expected_candidates):
-        expiration_matches = (
-            candidate_expiration is None
-            or int(att.expiration_time) == candidate_expiration
-        )
-        if actual == candidate and expiration_matches:
-            matched_index = index
-            break
-    if matched_index is None:
-        expected, expected_expiration = expected_candidates[0]
-        diffs = []
-        for key in sorted(set(actual) | set(expected)):
-            chain_value = actual.get(key, _ABSENT)
-            expected_value = expected.get(key, _ABSENT)
-            if chain_value != expected_value:
-                diffs.append(
-                    f"{key}: chain={_shown(chain_value)} "
-                    f"expected={_shown(expected_value)}"
-                )
-        if (
-            expected_expiration is not None
-            and int(att.expiration_time) != expected_expiration
-        ):
-            diffs.append(
-                "expiration_time: "
-                f"chain={att.expiration_time!r} expected={expected_expiration!r}"
+            (
+                len(expected_candidates),
+                _normalize_obligation_data(expected_obligation_raw),
+                None,
             )
-        raise EscrowVerificationError(
-            f"Escrow {escrow_uid} obligation_data mismatch: " + "; ".join(diffs)
         )
 
-    logger.info(
-        "[ESCROW_VERIFY] escrow=%s ok: fields=%s arbiter=%s exp=%s",
-        escrow_uid,
-        sorted(actual),
-        actual.get("arbiter"),
-        att.expiration_time,
+    return await _match_on_chain(
+        escrow_uid=escrow_uid,
+        alkahest_client=alkahest_client,
+        get_obligation_fn=get_obligation_fn,
+        candidates=expected_candidates,
+        now_unix=now_unix,
     )
-    return matched_index

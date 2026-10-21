@@ -645,6 +645,61 @@ async def test_a_countering_seller_negotiates_over_rounds_to_acceptance(tmp_path
     assert negotiation_calls == 0
 
 
+@pytest.mark.parametrize("acceptance", ["buyer", "force_accept"])
+async def test_acceptance_builds_its_plan_from_the_record_the_opening_authorized(
+    tmp_path, acceptance
+) -> None:
+    """The listing is refreshed in place between the opening and acceptance,
+    its release condition now paying another recipient; acceptance, by the
+    buyer or forced by an administrator, builds the plan from the record the
+    opening authorized, so the escrow the buyer funds is the one it opened on."""
+    built: list[dict] = []
+
+    def recording_builder(**kwargs):
+        built.append(dict(kwargs["listing"]))
+        return {
+            "settlement_plan": {
+                "buyer_principal": kwargs["buyer_principal"].model_dump(mode="json"),
+                "seller_principal": kwargs["seller_principal"].model_dump(mode="json"),
+                "obligations": [],
+            },
+        }
+
+    site = SourceSite()
+    runtime = replace(
+        _countering_runtime(str(tmp_path / "storefront.db"), site),
+        plan_builder=recording_builder,
+    )
+    await _insert_listing(runtime)
+    opened_against = await runtime.db.load_listing(listing_id="listing-1")
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            opened = await _open_countered(buyer)
+            await _insert_listing(
+                runtime, demands=[_recipient_condition(BUYER_RECIPIENT)]
+            )
+            if acceptance == "buyer":
+                accepted = await buyer.negotiate_continue(
+                    opened["negotiation_id"], action="accept"
+                )
+                action = accepted["action"]
+            else:
+                async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+                    forced = await admin.force_accept_negotiation(
+                        "listing-1", opened["negotiation_id"], amount=95
+                    )
+                action = forced.action
+
+    refreshed = await runtime.db.load_listing(listing_id="listing-1")
+    assert refreshed["demands"] != opened_against["demands"]
+    assert action == "accept"
+    (listing,) = built
+    assert listing["demands"] == opened_against["demands"]
+    assert listing["status"] == "open"
+
+
 async def test_force_accept_records_terms_and_plan_and_reserves_nothing(tmp_path) -> None:
     site = SourceSite()
     runtime = _countering_runtime(str(tmp_path / "storefront.db"), site)

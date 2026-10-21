@@ -12,6 +12,7 @@ from .chain_probe import (
 from .claim_hooks import AlkahestConditionalEscrowClient
 from .escrow_verification import (
     EscrowVerificationError,
+    verify_escrow_against_plan,
     verify_escrow_for_settlement,
 )
 from .fulfillment_publisher import (
@@ -59,5 +60,6 @@ __all__ = [
     "publication_release_conditions",
     "release_conditions",
     "require_deliverable_release_model",
+    "verify_escrow_against_plan",
     "verify_escrow_for_settlement",
 ]

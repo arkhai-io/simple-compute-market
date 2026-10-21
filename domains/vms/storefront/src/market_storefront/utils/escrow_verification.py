@@ -10,5 +10,6 @@ from market_alkahest.escrow_verification import (  # noqa: F401
     _normalize_obligation_data,
     _plain_attestation_request,
     _read_chain_obligation_data,
+    verify_escrow_against_plan,
     verify_escrow_for_settlement,
 )

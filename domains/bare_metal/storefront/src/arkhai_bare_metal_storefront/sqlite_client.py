@@ -340,6 +340,56 @@ class SQLiteClient(CoreSQLiteClient):
             normalize=self._market_domain.codecs.message,
         )
 
+    async def save_bare_metal_opening_listing(
+        self, *, negotiation_id: str, listing_record: Mapping[str, Any]
+    ) -> None:
+        """Record the listing record a negotiation's opening was authorized against.
+
+        Written once: a repeated write for the same negotiation keeps the first.
+        """
+        encoded = json.dumps(
+            dict(listing_record),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+            default=str,
+        )
+
+        def _save() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO bare_metal_opening_listings("
+                        "negotiation_id, listing_json) VALUES (?, ?)",
+                        (negotiation_id, encoded),
+                    )
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_save)
+
+    async def load_bare_metal_opening_listing(
+        self, *, negotiation_id: str
+    ) -> dict[str, Any] | None:
+        """The listing record the negotiation's opening was authorized against."""
+
+        def _load() -> str | None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                row = conn.execute(
+                    "SELECT listing_json FROM bare_metal_opening_listings "
+                    "WHERE negotiation_id = ?",
+                    (negotiation_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            return None if row is None else str(row[0])
+
+        raw = await asyncio.to_thread(_load)
+        return None if raw is None else json.loads(raw)
+
     async def save_bare_metal_terms(
         self,
         *,

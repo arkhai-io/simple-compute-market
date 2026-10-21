@@ -6,6 +6,7 @@ them as an administrator, or as the site, would, over the production app.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 
@@ -17,6 +18,7 @@ from storefront_client.client import StorefrontClientError
 from test_http_settlement import (
     ADMIN_SIGNER,
     BUYER,
+    ESCROW_ADDRESS,
     ESCROW_UID,
     SELLER_SIGNER,
     SITE_SIGNER,
@@ -69,9 +71,11 @@ async def _runtime(tmp_path, *, verifier=None, provisioning=None, authorities=No
     return runtime, negotiation_id, capacity
 
 
-async def test_verify_reads_the_escrow_against_a_listing_and_writes_nothing(
+async def test_verify_reads_the_escrow_against_the_accepted_plan_and_writes_nothing(
     tmp_path,
 ) -> None:
+    """The dry run checks the escrow as settlement does: against the plan the
+    accepted negotiation committed, on its proposal's chain and contract."""
     calls = []
 
     async def verifier(**kwargs):
@@ -82,36 +86,48 @@ async def test_verify_reads_the_escrow_against_a_listing_and_writes_nothing(
     app = _app(runtime)
     async with app.router.lifespan_context(app):
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
-            valid = await admin.verify_settle(
-                ESCROW_UID,
-                seller_wallet="0x3333333333333333333333333333333333333333",
-                agreed_price=100,
-                agreed_duration_seconds=3600,
-                listing_id="listing-1",
-            )
-            unknown_chain = await admin.verify_settle(
-                ESCROW_UID,
-                seller_wallet="0x3333333333333333333333333333333333333333",
-                agreed_price=100,
-                agreed_duration_seconds=3600,
-                listing_id="listing-1",
-                chain_name="mainnet",
-            )
+            valid = await admin.verify_settle(ESCROW_UID, negotiation_id=negotiation_id)
             with pytest.raises(StorefrontClientError) as missing:
-                await admin.verify_settle(
-                    ESCROW_UID,
-                    seller_wallet="0x3333333333333333333333333333333333333333",
-                    agreed_price=100,
-                    agreed_duration_seconds=3600,
-                    listing_id="no-such-listing",
-                )
+                await admin.verify_settle(ESCROW_UID, negotiation_id="no-such-negotiation")
 
+    thread = await runtime.db.load_negotiation_thread_row(negotiation_id=negotiation_id)
     assert valid == {"escrow_uid": ESCROW_UID, "valid": True, "reason": None}
-    assert unknown_chain["valid"] is False
     assert missing.value.status_code == 404
-    assert len(calls) == 1 and calls[0]["agreed_price"] == 100
+    (call,) = calls
+    assert call["settlement_plan"] == thread["settlement_plan"]
+    assert (call["chain_name"], call["escrow_address"]) == ("anvil", ESCROW_ADDRESS)
     assert await runtime.db.load_escrow(escrow_uid=ESCROW_UID) is None
     assert (await runtime.settlement_runtime.get_status(negotiation_id)).obligations == []
+
+
+async def test_verify_of_a_deal_on_a_chain_with_no_client_is_not_valid(tmp_path) -> None:
+    calls = []
+
+    async def verifier(**kwargs):
+        calls.append(kwargs)
+        return 1
+
+    runtime, negotiation_id, _capacity = await _runtime(tmp_path, verifier=verifier)
+    # State no route can produce: a deal accepted on a chain this storefront
+    # holds no Alkahest client for.
+    with sqlite3.connect(runtime.db.db_path) as conn:
+        (raw,) = conn.execute(
+            "SELECT buyer_escrow_proposal FROM negotiation_threads WHERE negotiation_id = ?",
+            (negotiation_id,),
+        ).fetchone()
+        proposal = {**json.loads(raw), "chain_name": "mainnet"}
+        conn.execute(
+            "UPDATE negotiation_threads SET buyer_escrow_proposal = ? WHERE negotiation_id = ?",
+            (json.dumps(proposal), negotiation_id),
+        )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            result = await admin.verify_settle(ESCROW_UID, negotiation_id=negotiation_id)
+
+    assert result["valid"] is False
+    assert "'mainnet'" in result["reason"]
+    assert calls == []
 
 
 async def test_evaluate_previews_the_reservation_settlement_would_make(tmp_path) -> None:

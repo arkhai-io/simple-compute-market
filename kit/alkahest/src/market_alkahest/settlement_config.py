@@ -33,7 +33,7 @@ from .chain_probe import (
     DEFAULT_TIMEOUT_SECONDS,
 )
 from .claim_hooks import AlkahestConditionalEscrowClient
-from .escrow_verification import verify_escrow_for_settlement
+from .escrow_verification import verify_escrow_against_plan
 
 ALKAHEST_MECHANISM_ID = "alkahest.v1"
 ALKAHEST_CONFIG_KEY = "alkahest"
@@ -762,7 +762,9 @@ def create_alkahest_registration(
         preflight=alkahest_preflight,
         client_factory=alkahest_client_factory,
         option_builder=alkahest_option_builder,
-        settlement_verifier=verify_escrow_for_settlement,
+        # A deal's escrow is verified against the plan committed when it was
+        # accepted, never the listing as it now stands.
+        settlement_verifier=verify_escrow_against_plan,
         command_group=command_group,
         clause_fields=(
             SettlementClauseField(

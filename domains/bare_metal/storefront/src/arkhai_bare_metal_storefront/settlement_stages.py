@@ -353,8 +353,9 @@ async def verify_alkahest(
             "Alkahest settlement is not configured", status_code=503
         )
     existing = await service.db.load_escrow(escrow_uid=escrow_uid)
-    terms, listing = await service.physical_terms(thread, request.negotiation_id)
-    agreed_amount = thread["agreed_price"]
+    # The machine the deal delivers must still be the one its listing names;
+    # what the escrow must fund is the committed plan's, checked below.
+    await service.physical_terms(thread, request.negotiation_id)
     if request.buyer_evm_address is None:
         raise SettlementRequestError("Alkahest settlement requires buyer_evm_address")
     proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
@@ -442,16 +443,13 @@ async def verify_alkahest(
     try:
         matched_index = await service.verify_escrow(
             escrow_uid=escrow_uid,
-            seller_wallet=service.seller_wallet or "",
-            agreed_price=int(agreed_amount),
-            agreed_duration_seconds=terms.duration_seconds,
-            listing=listing,
+            settlement_plan=committed,
             alkahest_client=client,
             chain_name=proposal.chain_name,
+            escrow_address=proposal.escrow_address,
             alkahest_address_config_path=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
-            escrow_proposal=proposal,
         )
     except SettlementRequestError:
         raise
@@ -609,20 +607,18 @@ async def revalidate_alkahest(
             f"settlement chain {proposal.chain_name!r} is unavailable",
             status_code=503,
         )
-    terms, listing = await service.physical_terms(thread, record["negotiation_id"])
+    await service.physical_terms(thread, record["negotiation_id"])
     try:
+        # Against the plan committed at acceptance, as settlement verified it.
         matched_index = await service.verify_escrow(
             escrow_uid=record["settlement_ref"],
-            seller_wallet=service.seller_wallet,
-            agreed_price=int(thread["agreed_price"]),
-            agreed_duration_seconds=terms.duration_seconds,
-            listing=listing,
+            settlement_plan=thread.get("settlement_plan"),
             alkahest_client=client,
             chain_name=proposal.chain_name,
+            escrow_address=proposal.escrow_address,
             alkahest_address_config_path=service.chain_config_paths.get(
                 proposal.chain_name,
             ),
-            escrow_proposal=proposal,
         )
     except SettlementRequestError:
         raise

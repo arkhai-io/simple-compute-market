@@ -706,7 +706,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     async def attest(payload, escrow_uid):
         attested.append((json.loads(payload), escrow_uid))
         return "0xfulfill"
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
     client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
     completed = asyncio.Event()
@@ -723,7 +723,10 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     projection = await project_progress(db, progress, owner=_BUYER_PRINCIPAL)
     assert projection["tenant_credentials"]["secret"] == "ak_new.s3cret"
     assert len(verified) == 1
-    assert int(verified[0]["agreed_price"]) == 300
+    # Verified against the plan the negotiation committed at acceptance.
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    assert verified[0]["settlement_plan"] == thread["settlement_plan"]
+    assert verified[0]["escrow_address"] == "0x" + "11" * 20
     assert all(call["escrow_uid"] == "0xdeal" for call in verified)
     assert issued[0].negotiation_id == neg_id
     escrow = await db.load_escrow(escrow_uid="0xdeal")
@@ -748,6 +751,70 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     assert len(issued) == 1
 
 
+async def test_a_listing_changed_since_acceptance_settles_against_the_committed_plan(
+    settled_db, monkeypatch,
+):
+    """The seller rewrites the listing's release condition and its wallet after
+    acceptance; settlement still verifies and registers the plan it committed,
+    which re-deriving from the listing would no longer authorize."""
+    db, neg_id = settled_db
+    from apicredits_storefront import settlement_stages
+    from apicredits_storefront.utils import config as config_module
+
+    committed = (await db.load_negotiation_thread_row(negotiation_id=neg_id))[
+        "settlement_plan"
+    ]
+    listing = await db.load_listing(listing_id="L-tok")
+    # Development values standing for a changed release policy and wallet.
+    monkeypatch.setattr(config_module.settings.wallet, "address", "0x" + "44" * 20)
+    await upsert_bound_listing(
+        db,
+        listing_id="L-tok",
+        status="open",
+        created_at=datetime.now().isoformat(),
+        updated_at=datetime.now().isoformat(),
+        listing_resource=dict(_OFFER),
+        accepted_escrows=listing["accepted_escrows"],
+        demands=[{
+            "chain_name": "anvil",
+            "arbiter": "0x" + "33" * 20,
+            "demand_data": {"recipient": "0x" + "44" * 20},
+        }],
+        fulfillment_resource=None,
+        max_duration_seconds=None,
+        storefront_url="http://seller:8002",
+        seller_principal=_SELLER_PRINCIPAL,
+    )
+    verified = []
+
+    async def verify(**kwargs):
+        verified.append(kwargs)
+        return 0
+
+    async def issue(self, request):
+        return _issuance_result(request)
+
+    async def attest(_payload, _escrow_uid):
+        return "0xfulfill"
+
+    monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
+    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
+    completed = asyncio.Event()
+    runtime, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    await coordinator.start(
+        escrow_uid="0xchanged", negotiation_id=neg_id,
+        mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
+        chain_name="anvil", request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=5)
+
+    assert [call["settlement_plan"] for call in verified] == [committed]
+    registered = await runtime.get_status(neg_id)
+    assert [record.obligation for record in registered.obligations] == committed[
+        "obligations"
+    ]
+
+
 async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailable(
     settled_db, monkeypatch,
 ):
@@ -770,7 +837,7 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
     async def attest(_payload, _escrow_uid):
         return "0xfulfill"
 
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    monkeypatch.setattr(settlement_stages, "verify_escrow_against_plan", verify)
     monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
     completed = asyncio.Event()
     _, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
@@ -800,7 +867,7 @@ async def test_ready_progress_recovers_into_shared_servicing(
 
     monkeypatch.setattr(
         escrow_verification,
-        "verify_escrow_for_settlement",
+        "verify_escrow_against_plan",
         fake_verify,
     )
     assert await db.insert_escrow(
@@ -850,7 +917,7 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
 
     monkeypatch.setattr(
         escrow_verification,
-        "verify_escrow_for_settlement",
+        "verify_escrow_against_plan",
         fake_verify,
     )
     _, _, coordinator = _build_settlement_composition(db)

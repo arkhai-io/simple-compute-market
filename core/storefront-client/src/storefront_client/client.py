@@ -1716,31 +1716,17 @@ class StorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return await self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,
@@ -3048,31 +3034,17 @@ class SyncStorefrontClient(_StorefrontClientBase):
         self,
         escrow_uid: str,
         *,
-        seller_wallet: str,
-        agreed_price: int,
-        agreed_duration_seconds: int,
-        listing_id: str,
-        chain_name: str = "anvil",
+        negotiation_id: str,
         request_id: str | None = None,
     ) -> dict:
         """POST /api/v1/admin/settle/{escrow_uid}/verify.
 
-        Reads the escrow from chain on ``chain_name`` and confirms it
-        matches the supplied terms. Returns dict with valid=True/False
-        and reason on failure. No DB writes.
-
-        ``agreed_price`` is base units in the uint256 domain, sent as a
-        decimal-digit string: this body is canonicalized for signing and an
-        18-decimal amount has no JSON number form. It was typed ``float``,
-        which no amount in this protocol is.
+        Reads the escrow from chain and confirms it matches the settlement
+        plan the accepted negotiation ``negotiation_id`` committed, as settle
+        verifies it. Returns dict with valid=True/False and reason on failure.
+        No DB writes.
         """
-        body = {
-            "seller_wallet": seller_wallet,
-            "agreed_price": str(int(agreed_price)),
-            "agreed_duration_seconds": agreed_duration_seconds,
-            "listing_id": listing_id,
-            "chain_name": chain_name,
-        }
+        body = {"negotiation_id": negotiation_id}
         return self._authenticated_post(
             f"/api/v1/admin/settle/{escrow_uid}/verify",
             body,

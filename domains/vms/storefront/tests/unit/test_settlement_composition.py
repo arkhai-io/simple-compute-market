@@ -73,7 +73,9 @@ async def _persist_accepted_negotiation(
     negotiation_id: str,
     listing_id: str,
     proposal: dict | None,
+    obligations: list[dict] | None = None,
 ) -> StorefrontThreadBinding:
+    """An accepted VM negotiation, committing a plan of ``obligations`` if given."""
     registration = db.domain_registry.resolve_mode("vm")
     timestamp = datetime.now().isoformat()
     pool_id = f"pool-{listing_id}"
@@ -173,6 +175,18 @@ async def _persist_accepted_negotiation(
         agreement_bytes=agreement.model_dump_json(exclude_none=True).encode(),
         settlement_data={"accepted_escrow_proposal": proposal},
     )
+    if obligations is not None:
+        await db.commit_settlement_plan(
+            negotiation_id=negotiation_id,
+            settlement_plan={
+                "obligations": obligations,
+                "buyer_principal": _BUYER.model_dump(mode="json"),
+                "seller_principal": _SELLER.model_dump(mode="json"),
+                "service_terms": {},
+            },
+            buyer_principal=_BUYER,
+            seller_principal=_SELLER,
+        )
     await db.update_negotiation_thread_terminal(
         negotiation_id=negotiation_id,
         terminal_state="success",
@@ -258,13 +272,11 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         "expiration_unix": 1_900_000_000,
     }
     obligations = [_obligation(0), _obligation(1)]
-    build_contexts = []
-    build_listings = []
+    builds = []
 
     def build_plan(*, context, listing):
-        build_contexts.append(context)
-        build_listings.append(listing)
-        return {"settlement_plan": {"obligations": obligations}}
+        builds.append((context, listing))
+        raise AssertionError("settlement rebuilt the plan from the listing")
 
     domain = build_vm_storefront_domain()
     assert domain.settlement is not None
@@ -283,10 +295,14 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
         negotiation_id="neg-1",
         listing_id="listing-1",
         proposal=proposal,
+        obligations=obligations,
     )
+    committed = (await db.load_negotiation_thread_row(negotiation_id="neg-1"))[
+        "settlement_plan"
+    ]
     verify = AsyncMock(return_value=1)
     monkeypatch.setattr(
-        "market_storefront.utils.escrow_verification.verify_escrow_for_settlement",
+        "market_storefront.utils.escrow_verification.verify_escrow_against_plan",
         verify,
     )
     monkeypatch.setattr(
@@ -322,17 +338,12 @@ async def test_prepare_pins_the_exact_verified_obligation(tmp_path, monkeypatch)
     )
     assert projection_context.obligation_index == 1
     assert prepared.fulfillment_input.thread_binding == thread_binding
-    assert len(build_contexts) == 1
-    build_context = build_contexts[0]
-    assert build_context.binding == thread_binding.binding
-    assert build_context.negotiation_id == thread_binding.negotiation_id
-    assert build_context.listing_id == thread_binding.listing_id
-    assert build_context.site_id == thread_binding.site_id
-    assert build_context.buyer_principal == _BUYER
-    assert build_context.seller_principal == _SELLER
-    # The plan is rebuilt against the listing the deal was negotiated against.
-    assert [listing["listing_id"] for listing in build_listings] == ["listing-1"]
+    # The plan committed at acceptance is verified and settled; nothing is
+    # rebuilt from the listing as it now stands.
+    assert builds == []
     verify.assert_awaited_once()
+    assert verify.await_args.kwargs["settlement_plan"] == committed
+    assert verify.await_args.kwargs["escrow_address"] == proposal["escrow_address"]
     assert verify.await_args.kwargs["alkahest_client"] is chain_client, (
         "escrow verification reads the chain through the alkahest client's "
         "escrow codecs; the mechanism adapter does not carry them"
@@ -379,7 +390,7 @@ async def test_prepare_requires_agreement_mechanism_before_verification(db, monk
         conn.execute("UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id='neg-1'",
                      (json.dumps(agreement).encode(),))
     verify = AsyncMock()
-    monkeypatch.setattr("market_storefront.utils.escrow_verification.verify_escrow_for_settlement", verify)
+    monkeypatch.setattr("market_storefront.utils.escrow_verification.verify_escrow_against_plan", verify)
     with pytest.raises(ValueError, match="settlement_mechanism_required"):
         await prepare_vm_settlement(
             domain=db.domain_registry.resolve_mode("vm").contract,

@@ -204,12 +204,12 @@ class AdminSettleController:
     @admin_settle_router.post(
         "/{escrow_uid}/verify",
         response_model=VerifyEscrowResponse,
-        summary="Verify an on-chain escrow matches expected terms (dry-run, no DB writes)",
+        summary="Verify an on-chain escrow funds an accepted deal's plan (dry-run, no DB writes)",
     )
     async def verify_escrow(
         self, escrow_uid: str, body: VerifyEscrowRequest
     ) -> VerifyEscrowResponse:
-        """Read the escrow from chain and confirm it matches caller-supplied terms.
+        """Read the escrow from chain and confirm it funds the named deal's committed plan.
 
         No DB writes. Returns valid=True/False.
         """

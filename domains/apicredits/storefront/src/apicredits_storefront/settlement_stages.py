@@ -11,7 +11,7 @@ from typing import Any
 
 from market_alkahest import AlkahestConditionalEscrowClient, create_alkahest_registration
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
-from market_alkahest.escrow_verification import verify_escrow_for_settlement
+from market_alkahest.escrow_verification import verify_escrow_against_plan
 from market_alkahest.txlock import chain_tx_lock
 from market_arkhai_payments import create_arkhai_payments_registration
 from market_core import SettlementEvidence
@@ -318,28 +318,11 @@ async def _prepare_alkahest_settlement(
         if isinstance(proposal_raw, dict)
         else None
     )
-    # Verification and the plan below materialize the escrow under the release
-    # condition the listing authorizes; the kit refuses any other.
-    matched_index = await verify_escrow_for_settlement(
-        escrow_uid=escrow_uid,
-        seller_wallet=settings.wallet.address or "",
-        agreed_price=int(thread["agreed_price"]),
-        agreed_duration_seconds=0,
-        listing=order,
-        alkahest_client=mechanism_client,
-        chain_name=chain_name,
-        alkahest_address_config_path=chain.alkahest_address_config_path,
-        escrow_proposal=proposal,
-    )
-
-    accepted = build_api_credit_accepted_artifacts(
-        proposal=proposal,
-        agreed_amount=int(thread["agreed_price"]),
-        buyer_principal=buyer_principal,
-        seller_principal=seller_principal,
-        listing=order,
-    )
-    plan = accepted.get("settlement_plan")
+    if proposal is None:
+        raise ValueError(f"Negotiation {negotiation_id} recorded no escrow proposal")
+    # The deal settles under the plan committed when it was accepted, which is
+    # what the buyer funded; a listing or wallet changed since cannot change it.
+    plan = thread.get("settlement_plan")
     obligations_raw = plan.get("obligations") if isinstance(plan, dict) else None
     if not isinstance(obligations_raw, list) or not obligations_raw:
         raise ValueError(
@@ -353,18 +336,21 @@ async def _prepare_alkahest_settlement(
             raise ValueError("settlement obligation payer principal mismatch")
         if obligation.get("claimant_principal") != expected_claimant:
             raise ValueError("settlement obligation claimant principal mismatch")
+    matched_index = await verify_escrow_against_plan(
+        escrow_uid=escrow_uid,
+        settlement_plan=plan,
+        alkahest_client=mechanism_client,
+        chain_name=chain_name,
+        escrow_address=proposal.escrow_address,
+        alkahest_address_config_path=chain.alkahest_address_config_path,
+    )
     if not isinstance(matched_index, int) or not 0 <= matched_index < len(obligations):
         raise ValueError(
             f"Verified obligation index {matched_index!r} is outside the accepted plan"
         )
 
-    proposal_chain = proposal.chain_name if proposal is not None else None
-    escrow_address = proposal.escrow_address if proposal is not None else None
-    if proposal_chain is None or escrow_address is None:
-        accepted_escrows = order.get("accepted_escrows") or []
-        if accepted_escrows and isinstance(accepted_escrows[0], dict):
-            proposal_chain = proposal_chain or accepted_escrows[0].get("chain_name")
-            escrow_address = escrow_address or accepted_escrows[0].get("escrow_address")
+    proposal_chain = proposal.chain_name
+    escrow_address = proposal.escrow_address
 
     return PreparedSettlement(
         agreement_ref=negotiation_id,

@@ -439,6 +439,17 @@ def build_bare_metal_negotiation_runtime(
         record = await repository.load_listing(listing_id=listing_id)
         if record is None:
             raise NegotiationStateError(f"listing {listing_id!r} is gone")
+        # The negotiation continues, and is accepted, against the record its
+        # opening was authorized against, so a listing refreshed in place since
+        # cannot change the escrow the buyer funds. The record carries the
+        # current status, so a reader of its lifecycle sees the listing as it
+        # now is rather than as it was at the opening. A thread with no
+        # recorded opening record continues against the current record.
+        opened = await repository.load_bare_metal_opening_listing(
+            negotiation_id=negotiation_id
+        )
+        if opened is not None:
+            record = {**opened, "status": record.get("status")}
         return ResolvedNegotiation(
             listing_id=listing_id,
             listing=listing_of(record),
@@ -757,6 +768,10 @@ def build_bare_metal_negotiation_runtime(
         require_domain(copied.binding)
         await repository.save_bare_metal_message(
             negotiation_id=opening.negotiation_id, message=opening.terms.decoded
+        )
+        await repository.save_bare_metal_opening_listing(
+            negotiation_id=opening.negotiation_id,
+            listing_record=opening.listing_record,
         )
 
     async def persist_artifacts(

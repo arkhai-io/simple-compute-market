@@ -984,7 +984,7 @@ Delivers settle verification, and every other post-acceptance reader, on the com
 plan"). Touches `kit/alkahest`, `core/storefront`'s settle models, `core/storefront-client`,
 and the three storefronts.
 
-- [ ] 7.1 `kit/alkahest/src/market_alkahest/escrow_verification.py`: a verification form
+- [x] 7.1 `kit/alkahest/src/market_alkahest/escrow_verification.py`: a verification form
       taking the accepted obligation (from the committed plan, through
       `escrow_terms_from_settlement_plan`) rather than a listing, sharing the codec lookup
       and the comparison, expiry included, with the listing form; registered as the
@@ -992,24 +992,73 @@ and the three storefronts.
       `kit/alkahest/tests/unit/test_native_escrow_verification.py` (unit): a plan whose
       listing has since changed release policy, wallet, or address book verifies; an escrow
       differing from the plan does not (D16).
-- [ ] 7.2 VM `settlement_composition.py` `prepare_vm_settlement` verifies and builds its
+      Done. `verify_escrow_against_plan(escrow_uid, settlement_plan, alkahest_client,
+      chain_name, escrow_address, alkahest_address_config_path)` matches the escrow to
+      one of the plan's Alkahest obligations on that chain and escrow contract
+      (`settlement_obligation_to_escrow_terms` per obligation, so its index is the
+      plan's), obligation data and expiry exactly, and returns that index. It and
+      `verify_escrow_for_settlement` share `_escrow_codec` and `_match_on_chain` (the
+      chain read, the envelope checks, the comparison, the diff). The address book is
+      read only for the escrow contract's codec. The registration's
+      `settlement_verifier` is the plan form; the package exports both. Unit tests
+      (`make -C kit test-alkahest` 360): an escrow funding the committed plan verifies;
+      after the listing's condition pays another wallet, and separately after the
+      address book moves the arbiter, the plan still verifies while the listing form
+      refuses the same escrow, naming `release_condition_not_authorized` and the
+      arbiter respectively; an escrow differing in amount, recipient, or expiry does
+      not verify and the error names the field; a plan with no obligation on the
+      escrow's contract refuses. **Correction:** no test changes the release model
+      itself (recipient to oracle-gated, say); the plan form reads no listing, so the
+      wallet and arbiter cases stand for any listing change.
+- [x] 7.2 VM `settlement_composition.py` `prepare_vm_settlement` verifies and builds its
       obligations from `thread["settlement_plan"]`, as `failure_actions.py`'s refund does;
       `settlement_stages.py` `AlkahestStage.recover_evidence` re-derives from the plan, not
       the evidence's stored `order` (D16).
-- [ ] 7.3 VM heartbeat and interrupt: `controllers/deals_controller.py` reads the cadence
+      Done. A thread with no committed plan refuses settlement; `_settlement_plan_obligations`,
+      which rebuilt the plan from the listing, is gone. The listing is still loaded for
+      the deal's delivery facts and fulfillment input, which this section does not
+      change. `accepted_alkahest_proposal(thread, mechanism=)` is now a module function
+      in `settlement_stages.py`, so the dry-run reads the accepted proposal exactly as
+      settlement does; the stage's `accepted_proposal` calls it. VM's
+      `settlement_stages.py` also carries Section 6's release-model comment correction
+      (see Section 6's notes).
+- [x] 7.3 VM heartbeat and interrupt: `controllers/deals_controller.py` reads the cadence
       from the committed plan's `service_terms.heartbeat.interval_seconds`, and a plan with
       no heartbeat term (a deal that is not oracle-gated) reports no expected heartbeat;
       `controllers/admin_controller.py` `_deal_is_interruptible` reads the plan's
       `interruptible` term, never the current listing or chain address configuration (the
       listing is still loaded for its capacity binding) (D16).
-- [ ] 7.4 Bare metal `settlement_stages.py` `verify_alkahest` and `revalidate_alkahest`
+      Done. The heartbeat answers `next_expected_by_unix: null` for a plan with no
+      positive heartbeat interval. The `heartbeat_interval_seconds` setting is still
+      read at acceptance, where the plan's term is written.
+- [x] 7.4 Bare metal `settlement_stages.py` `verify_alkahest` and `revalidate_alkahest`
       verify against the committed plan. Acceptance builds its plan from the listing record
       the opening authorized: today every round reloads the listing and `build_artifacts`
       re-authorizes against the reloaded record, and no snapshot of the opening's record is
       kept, so `negotiation_runtime.py`'s `persist_opening` persists the authorized record
       with the opening and acceptance (`build_artifacts`, force-accept included) builds from
       it (D16).
-- [ ] 7.5 VM administrator dry-run verify: `VerifyEscrowRequest`
+      Done. Both call the runtime's `escrow_verifier` (the registration's plan form) with
+      the thread's committed plan and the accepted proposal's chain and contract; both
+      still call `physical_terms`, which checks the machine the deal delivers against
+      its listing, and no longer pass the listing to verification.
+      - `persist_opening` saves the opening's `listing_record` in a new table,
+        `bare_metal_opening_listings` (migration `bare-metal-storefront-0015-opening-listings`,
+        one row per negotiation, written once; `save_`/`load_bare_metal_opening_listing`).
+      - **Differed:** acceptance reads it through `resolve_continuation`, which returns
+        the opening's record with the current record's `status`, since
+        `build_artifacts` is synchronous and takes the record the runtime resolved, and
+        force-accept resolves the same way. So every continuation round, not only
+        acceptance, reads the opening's record: the seller's reference amount and the
+        Agreement's listing hash come from it as well, consistent with the escrow the
+        opening pinned under it. The record carries the current `status`, and the
+        listing-source check still reads the current source. **Correction:** the
+        runtime checks that a listing is live and unpaused only at the opening, never on
+        continuation, so carrying the current status preserves no check, and no test
+        closes or pauses a listing mid-negotiation. A thread with no recorded opening
+        record continues against the current record. Recorded in `design.md` decision
+        16, and named among the `storefront-publication` companion's promotions there.
+- [x] 7.5 VM administrator dry-run verify: `VerifyEscrowRequest`
       (`core/storefront/.../models/settle_models.py`) gains `negotiation_id`, as
       `EvaluateSettleRequest` has, since the escrow row exists only at settle;
       `services/admin_settle_service.py` loads that accepted deal's committed plan and
@@ -1018,9 +1067,23 @@ and the three storefronts.
       `settlement_admin_routes.verify`, `BareMetalVerifyEscrowRequest`) does the same; e2e
       Stage07b (`helpers/compute_deal_stages.py`, `vms/test_full_deal_buyer_cli.py`) names
       the negotiation (D16).
-- [ ] 7.6 API credits `settlement_stages.py` `_prepare_alkahest_settlement` verifies and
+      Done. **Differed:** the request is `negotiation_id` alone. Its former fields
+      (`seller_wallet`, `agreed_price`, `agreed_duration_seconds`, `listing_id`,
+      `chain_name`) are removed rather than kept beside it, since the plan determines
+      every one and a field the dry-run ignored could disagree with what settlement
+      verifies; the chain and escrow contract come from the accepted proposal, as at
+      settle. `verify_settle(escrow_uid, *, negotiation_id)` on both clients. A
+      negotiation not accepted answers 404; a deal not settled by Alkahest, or on a
+      chain the storefront does not configure, is `valid: false` with the reason. VM's
+      unused `Uint256Amount` import in `settle_models.py` went with the fields.
+- [x] 7.6 API credits `settlement_stages.py` `_prepare_alkahest_settlement` verifies and
       builds against the committed plan rather than `order` (D16).
-- [ ] 7.7 Tests: VM `tests/unit/test_settlement_composition.py`,
+      Done. A thread with no recorded escrow proposal now refuses settlement (it was
+      verified through the listing form's legacy path), and the chain and escrow
+      address come from the proposal, the fallback to the listing's first accepted
+      escrow going with it. The obligations' principals are checked before the chain
+      read.
+- [x] 7.7 Tests: VM `tests/unit/test_settlement_composition.py`,
       `unit/services/test_admin_settle_service.py`, `unit/test_interrupt_deal_admin.py`,
       `unit/test_heartbeat_gated_listings.py` (unit); VM
       `tests/integration/test_settle_controller.py` and `test_deals_controller.py`
@@ -1030,14 +1093,131 @@ and the three storefronts.
       and `tests/test_deal_controls.py` (application integration): a listing refreshed after
       the opening does not change the accepted plan, and settle verifies against it. API
       credits `tests/unit/test_settlement_fulfillment.py` (unit) (D16).
-- [ ] 7.8 Versions: `arkhai-kit-alkahest`, `arkhai-core-storefront`,
+      Done.
+      - VM unit:
+        - `test_settlement_composition.py`: `prepare_vm_settlement` verifies the
+          committed plan (the verifier, replaced, receives it and the accepted contract)
+          and registers its obligations, and a plan builder that fails if called is never
+          called, so nothing is rebuilt from the listing;
+        - `services/test_admin_settle_service.py`: the dry-run refuses an unaccepted
+          negotiation, passes the committed plan, chain, contract, and address book to the
+          verifier, maps its refusal to `valid: false`, and refuses a deal not settled by
+          Alkahest;
+        - `test_interrupt_deal_admin.py`: a deal whose plan carries the interruptible
+          term is interrupted though its listing is not marked interruptible, and one
+          whose plan lacks it, or that has no plan, is refused though the listing is.
+        - `test_heartbeat_gated_listings.py` needed no change: it covers the plan's
+          heartbeat and interruptible terms at acceptance, which this section reads.
+      - VM application integration:
+        - `test_settle_controller.py`, through `StorefrontClient`, with the Alkahest
+          client, the chain boundary, replaced by one answering as the SDK decodes an
+          ERC-20 escrow, and a plan materialized from a real proposal against the
+          development address book: after the listing is rewritten to pay another wallet,
+          an escrow funding the committed plan is valid and an underfunded one is not,
+          naming the amount; an unknown negotiation is 404; a chain the storefront
+          configures but holds no Alkahest client for is `valid: false`; nothing is
+          written.
+        - This shows the dry-run verifying the plan; that it and settlement agree rests
+          on both calling `verify_escrow_against_plan` with the same accepted proposal
+          and plan, which the unit tests above show, not on one test running both.
+        - **Not delivered:** the planned application-integration case of a deal
+          settling after its listing changed. VM has no integration test of settle
+          through the typed client at all, and building one is beyond this section;
+          settle after a listing change is shown only by the unit test above, in which
+          the plan builder fails if called.
+        - `test_deals_controller.py`: the cadence is the committed plan's (45 s, not the
+          setting), and a plan with no heartbeat term expects none. This file drives the
+          route with raw signed requests, as it already did; the heartbeat route has no
+          typed client method.
+      - Bare metal application integration:
+        - `test_http_negotiation.py`: the listing is rewritten in place between a
+          countered opening and its acceptance, by the buyer and by force-accept; the
+          plan builder receives the record the opening authorized, still open.
+        - `test_http_settlement.py`: every verification call, at settle and at status and
+          fulfillment recovery, receives the thread's committed plan; the settle call's
+          contract is asserted, and recovery's only on its last call, and no test asserts
+          the listing is absent from the call, though the plan form takes none;
+          `test_verify_registers_exactly_the_committed_plan` (unchanged) shows settle
+          registering that plan.
+        - `test_deal_controls.py`: the dry-run, through `StorefrontClient`, verifies the
+          committed plan on the proposal's chain and contract, refuses an unknown
+          negotiation 404, and writes nothing; a deal accepted on a chain with no
+          Alkahest client is `valid: false` naming the chain, without a chain read.
+      - API credits unit, `test_settlement_fulfillment.py`: settlement verifies the
+        committed plan; after the listing's release condition and the seller wallet
+        change, a deal still settles, the verifier receiving the committed plan and the
+        runtime registering its obligations.
+- [x] 7.8 Versions: `arkhai-kit-alkahest`, `arkhai-core-storefront`,
       `arkhai-core-storefront-client` (and the exact pin in `provisioning/compute/service`),
       the three storefronts, `arkhai-e2e-tests`; `make lock`.
-- [ ] 7.9 **Verify.** `make -C kit test-alkahest`; `make test-core`; `make
+      Bumped: VM storefront 0.20.0 (its exact pin on bare metal moved), bare-metal
+      storefront 0.20.0, API-credit storefront 0.14.0, `arkhai-e2e-tests` 0.3.0, whose
+      floor on `arkhai-core-storefront-client` rises to 0.27.0 for the new
+      `verify_settle`; `make lock`. **Not bumped:** `arkhai-kit-alkahest` (0.10.0),
+      `arkhai-core-storefront` (0.16.0), and `arkhai-core-storefront-client` (0.27.0)
+      were each bumped earlier on this branch and are unreleased, so the provisioning
+      service's exact pin is unchanged; the same policy as 5.5, for the round's triage
+      to settle.
+- [x] 7.9 **Verify.** `make -C kit test-alkahest`; `make test-core`; `make
       test-storefront`, `make test-bare-metal`, `make test-apicredits`; `make test-e2e-unit`;
       `make test`; `make check-packaging`. End-to-end: `e2e_deal` and
       `e2e_deal_buyer_cli` (Stage07b's dry-run and settle), `e2e_non_erc20_settlement`,
       `e2e_bare_metal_mock_deal`, and `e2e_credits_deal` settle against the plan.
+      Results:
+      - `make -C kit test-alkahest` 360 passed.
+      - `make test-core` passed (its four projects 123, 134, 217 with 2 skipped, 62).
+      - `make test-storefront`: unit 1107 passed; integration 449 passed with the same
+        two environmental `test_alkahest.py` failures (no Node.js or Anvil here).
+      - `make test-bare-metal` (storefront 445), `make test-apicredits` (storefront 216),
+        `make test-e2e-unit` (38): all passed.
+      - `make test`: not run whole. Beside the suites above, the changed packages are
+        `kit/alkahest`, whose other dependants (the buyers) import nothing this section
+        changed, and `core/storefront-client`, whose `verify_settle` only the
+        storefronts' tests and the e2e stages call.
+      - `make check-packaging` passed; `make check-change` fails only on the two
+        citations Sections 13 and 22 create.
+      - End-to-end, unrun: `e2e_deal` and `e2e_deal_buyer_cli` run Stage07b's dry-run
+        with the new request and settle; `e2e_non_erc20_settlement` and
+        `e2e_credits_deal` settle. Each exercises the plan form once deployed; the
+        pipeline run is the evidence. **Correction:** `e2e_bare_metal_mock_deal` does
+        not settle at this commit. Its buyer opens with the escrow contract unpinned (the
+        shared Stage05b with no selection, and Stage12b, pass no escrow address, so the
+        client sends the zero address), the committed plan's obligation names the zero
+        address as its contract, and the plan form finds no codec for it: Stage07b's
+        dry-run answers `valid: false` and settle 400. Section 8, which refuses an
+        unpinned opening and pins the lane's openings, is what makes it settle again,
+        so this commit alone would fail the bare-metal lane.
+
+Section 7 notes (handoff):
+
+- **The listing form of verification has no production caller now.** Every domain
+  settles, recovers, and previews through `verify_escrow_against_plan`. The listing form
+  stays because the task keeps it and its tests read the release-authorization rules
+  through it; Section 8 removes its default-kind branch, and whether the form stays at
+  all is a question for the round's triage.
+- **A deal accepted with its escrow contract unpinned cannot be verified now.** The
+  listing form resolved such an escrow's codec from the chain's default kind; the plan
+  form looks the codec up from the plan's contract, the zero address, and finds none
+  (7.9's correction). That is what decision 18 intends for new deals, which Section 8
+  refuses at the opening, but neither decision says what becomes of an unpinned deal
+  accepted, and perhaps funded, before this release: it can now only wait for reclaim.
+  Every bare-metal lane deal opened this way, so the case is real. Left for the round's
+  triage: accept it as a disposable-state cutover, or resolve such a deal's codec from
+  its plan.
+- **The fresh-context review's findings this section declined:** moving
+  `accepted_alkahest_proposal` out of `settlement_stages.py` into a leaf module (the
+  dry-run service importing the stage module is no boundary breach, and the move is
+  churn); and making the opening record's write atomic with the opening's other writes
+  (a lost write falls back to the current record, as a thread opened before the
+  migration does, and `persist_opening` writes through the same repository).
+- **Bare metal's continuation reads the opening's record** (7.4's differed note). If the
+  round's review prefers acceptance alone to read it, the runtime's `Acceptance` would
+  need a domain-supplied record, a `kit/negotiation-runtime` change no task names.
+- **A new bare-metal migration**, `bare-metal-storefront-0015-opening-listings`, adds a
+  table and changes nothing else, so rolling back leaves it unread.
+- **The dry-run request lost fields**: an older caller of `verify_settle` sending the
+  terms is refused 422. The only callers are the storefronts' tests and the e2e
+  Stage07b, all updated.
 
 ## 8. An escrow proposal naming no escrow contract is refused
 

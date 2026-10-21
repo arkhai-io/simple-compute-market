@@ -3,7 +3,7 @@
 The kit owns the routes' contracts, refusals, and wait semantics
 (``market_settlement_runtime.SettlementAdminRouteService`` and
 ``market_capacity_publication.CapacityAdminRouteService``); this module supplies
-what is bare metal's own: how an escrow is read against a listing's terms, what
+what is bare metal's own: how an escrow is read against an accepted deal's plan, what
 fulfillment settlement would start, when a settlement is terminal, how a listing
 is reserved administratively, and what a site's capacity-released callback
 records. Verify and evaluate write nothing.
@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
+from market_core.schemas import EscrowProposal
 from market_identity import Identity
 from market_settlement_runtime import SettlementAdminRouteService
 
@@ -56,11 +57,20 @@ def settlement_admin_routes(
     """Verify, evaluate, and wait, over this storefront's settlements."""
 
     async def verify(escrow_uid: str, request: Mapping[str, Any]) -> dict[str, Any]:
-        listing = await runtime.db.load_listing(listing_id=str(request["listing_id"]))
-        if listing is None:
-            raise LookupError(f"listing {request['listing_id']!r} not found")
+        # Checked as settlement verifies it: against the plan the accepted deal
+        # committed, on the chain and escrow contract its proposal names.
+        negotiation_id = str(request["negotiation_id"])
+        thread = await runtime.db.load_negotiation_thread_row(
+            negotiation_id=negotiation_id
+        )
+        if thread is None or thread.get("terminal_state") != "success":
+            raise LookupError(f"accepted negotiation {negotiation_id!r} not found")
+        try:
+            proposal = EscrowProposal.model_validate(thread.get("buyer_escrow_proposal"))
+        except (TypeError, ValueError):
+            return {"valid": False, "reason": "the accepted deal recorded no escrow proposal"}
         composition = runtime.settlement_composition
-        chain_name = str(request.get("chain_name") or "")
+        chain_name = proposal.chain_name
         clients = (
             composition.chain_clients
             if composition is not None and composition.configures(ALKAHEST_MECHANISM)
@@ -72,12 +82,10 @@ def settlement_admin_routes(
         try:
             await runtime.escrow_verifier(
                 escrow_uid=escrow_uid,
-                seller_wallet=str(request["seller_wallet"]),
-                agreed_price=int(request["agreed_price"]),
-                agreed_duration_seconds=int(request["agreed_duration_seconds"]),
-                listing=listing,
+                settlement_plan=thread.get("settlement_plan"),
                 alkahest_client=client,
                 chain_name=chain_name,
+                escrow_address=proposal.escrow_address,
                 alkahest_address_config_path=runtime.chain_config_paths.get(chain_name),
             )
         except Exception as exc:

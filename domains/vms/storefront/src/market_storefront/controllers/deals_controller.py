@@ -12,6 +12,8 @@ domain's (``vms.heartbeat.v1``).
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi_utils.cbv import cbv
@@ -58,7 +60,6 @@ class DealsController:
             VmHeartbeatError,
             validate_vm_heartbeat_payload,
         )
-        from market_storefront.utils.config import settings
 
         auth = await buyer_auth.deal_heartbeat_auth(escrow_uid, body, request)
         if auth.exact_retry:
@@ -130,12 +131,32 @@ class DealsController:
             count=count,
             status=payload.get("status"),
         )
-        cadence = float(getattr(settings, "heartbeat_interval_seconds", 60))
+        cadence = _committed_heartbeat_interval(thread)
         return DealHeartbeatResponse(
             deal_ref=escrow_uid,
             buyer_principal=body.buyer_principal,
             seller_principal=body.seller_principal,
             sent_at_unix=record["sent_at_unix"],
             heartbeat_count=count,
-            next_expected_by_unix=record["sent_at_unix"] + cadence,
+            next_expected_by_unix=(
+                record["sent_at_unix"] + cadence if cadence is not None else None
+            ),
         )
+
+
+def _committed_heartbeat_interval(thread: Mapping[str, Any] | None) -> float | None:
+    """The heartbeat cadence the deal's committed plan assumes, if it has one.
+
+    The oracle's evidence window is fixed by the plan the deal was accepted
+    under, so the current setting cannot move it; a plan with no heartbeat
+    term, a deal that is not oracle-gated, expects no heartbeat.
+    """
+    plan = (thread or {}).get("settlement_plan")
+    service_terms = plan.get("service_terms") if isinstance(plan, Mapping) else None
+    heartbeat = (
+        service_terms.get("heartbeat") if isinstance(service_terms, Mapping) else None
+    )
+    interval = heartbeat.get("interval_seconds") if isinstance(heartbeat, Mapping) else None
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+        return None
+    return float(interval)
