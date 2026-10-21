@@ -38,6 +38,19 @@ Evidence:
 
 End-to-end: confirmed as planned — no scenario exercises the mode check.
 
+**Round 1 fixes** (`reviews/02-implementation-external.triage.md`, against `dac2d57b`). They correct two statements above: section 3 now also touches `domains/vms/storefront/examples/README.md` and two bare-metal test files, not `kit/arkhai-payments` only; and file-level tests now load `livemode` from a storefront and a buyer file, within the limits stated below.
+
+- 02 F1: the VM payment smoke command in `domains/vms/storefront/examples/README.md` names no wheel. The payments wheel's `--with` asked for 0.2.0, which `make dist` no longer builds; the VM buyer wheel's `--with` was also unneeded — the storefront's dev group and lock carry `arkhai-vms-buyer`, and `payment_smoke.py` does not import it — and would have gone stale at the next buyer bump. The command ran to completion without either (`pending` with zero deliveries, `provisioning`, `ready` with one delivery, zero escrow rows).
+- 02 F2: `tests/test_buyer.py`'s `test_a_polled_receipt_is_verified_apart_from_the_approval_receipt` serves a live receipt on approval and a test-mode one on poll; a live-configured approval refuses it at the transaction receipt. With `buyer.py`'s polled-receipt check removed, it is the one kit test that fails (1 failed, 91 passed); before it, removing that check failed nothing.
+- 02 F3: `domains/bare_metal/storefront/tests/test_config_loader.py`'s `test_the_payments_mode_in_the_files_reaches_the_composed_stage` writes the payments section in `storefront.json` and `livemode = true` in an operator's `storefront.toml`, loads the settings, and composes them with `from_raw_config(settings.settlement)` — the composition the runtime builds, not the runtime builder itself — into a stage expecting live receipts; undeclared, it expects test mode. `domains/bare_metal/buyer/tests/test_buyer_composition.py`'s `test_the_payments_mode_in_the_file_reaches_the_loaded_config` proves a buyer TOML's `livemode` reaches the loaded `BareMetalBuyerConfig.arkhai_payments`; it does not prove what the `buy` command composes from it. The other two domains have no file-level case.
+
+Evidence:
+- Payments kit unit suite: passed, 92 tests. Bare-metal buyer `test_buyer_composition.py` (unit): passed, 13. Bare-metal storefront `test_config_loader.py` cases (unit, the real loader over written files): passed.
+- `make check-packaging`: passed. `make -k test`: every suite passed except the two known environmental gaps — `domains/vms/storefront`'s `test_alkahest.py` (no local Alkahest chain) and `test-deployment-packaging`'s Helm render step (no `helm`). The F3 buyer test and the F2 test were narrowed after that run (an explicit `livemode=False`, and the buyer assertion reduced to the loaded config); the kit and bare-metal buyer suites were rerun on the final tree and passed.
+- Fresh-context compliance check: no violation of layering, dependency declarations, comments, test level, fixture marking, or documentation placement. It found that the buyer test's approval construction proved nothing beyond the loaded config and its comment claimed `buy`'s behaviour (narrowed), that the storefront evidence should name the composition rather than the runtime (worded so above), that the VM buyer wheel's `--with` was unneeded (removed on the owner's word), and that this note must correct section 3's earlier statements (done above). Nothing was declined.
+
+End-to-end: unchanged — no scenario exercises the mode check.
+
 ## 4. Closeout
 
 The closeout task of `openspec/README.md#plan-closeout-requirements`, in its order. It edits documentation only; a part needing code returns the change to implementation.

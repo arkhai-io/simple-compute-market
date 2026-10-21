@@ -14,7 +14,7 @@ from market_arkhai_payments import (
     mandate_policy_for_agreement,
     transaction_id,
 )
-from market_arkhai_payments.fixtures import FakePaymentsClient
+from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 
 from payment_terms import (
     BUYER,
@@ -104,6 +104,29 @@ def test_an_approval_receipt_verifies_only_in_the_configured_mode(configured, si
     else:
         with pytest.raises(ReceiptVerificationError):
             approval.approve(agreement_bytes(terms), _seller_data(terms))
+
+
+def test_a_polled_receipt_is_verified_apart_from_the_approval_receipt():
+    class PolledInTestMode(FakePaymentsClient):
+        """Approves with a live receipt, then serves a test-mode one when polled."""
+
+        def approve(self, mandate, **kwargs):
+            self.approved_mandate = mandate
+            return super().approve(mandate, **kwargs)
+
+        def poll(self, transaction, **kwargs):
+            self.serve(
+                build_signed_receipt(
+                    signer=SERVICE, mandate=self.approved_mandate, livemode=False
+                )
+            )
+            return super().poll(transaction, **kwargs)
+
+    fake = PolledInTestMode(signer=SERVICE, livemode=True)
+    terms = agreement()
+    with pytest.raises(ReceiptVerificationError, match="transaction receipt"):
+        _approval(fake, livemode=True).approve(agreement_bytes(terms), _seller_data(terms))
+    assert fake.count("approve") == 1
 
 
 def test_an_approval_receipt_from_another_key_is_refused():
