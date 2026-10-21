@@ -195,7 +195,9 @@ unit tests, both storefronts' values-schema drift tests, `make test`,
 environments present (each reinitialized against those wheels by its storefront's test
 target). The step could not run `helm version`, so the Helm's release is not recorded for
 this run: its refusals are worded by Helm 4's schema validator, and they are the
-refusals the design recorded under v4.3.0, but that is not proof of the release. Every
+refusals the design recorded under v4.3.0, but that is not proof of the release. Once
+the owner granted it, `helm version --short` reported `v4.3.0+gbec5b06` for the Helm on
+`PATH` during Section 3, the binary unchanged since this run. Every
 umbrella assertion in `test-render.sh` passes; thirteen Python render tests fail,
 matching the thirteen first reported.
 
@@ -238,6 +240,35 @@ no chart changes. Rejected: (b), leaving them to another change, under which
 `make -C helm test-render` could not pass and this change could not meet its acceptance
 boundary. The plan's task 4.5 carries the fix, and its count of the tests that set a
 `null` is corrected to the ten above; "Corrections" 3 undercounted them.
+
+### Typed fields a chart `null` cannot set to `None`
+
+None found among the fields the typed models generate. A chart `null` now removes a
+typed field, so the storefront applies its default; that differs from stating `None`
+only for a field whose type admits `None` and whose effective default is not `None`.
+
+- Every model field typed to admit `None` defaults to `None` in its model: VM's
+  `Identity.principal`; bare metal's `Identity.principal`,
+  `capacity.source_confirmation_seconds`, `pricing.default_max_duration_seconds`,
+  `negotiation.policies`, `Chains.<name>.chain_id` and `.alkahest_address_config_path`,
+  and `Delivery`; Alkahest's `address_config_path`; Arkhai payments' `service_url`,
+  `service_identity`, `dispute_authority`, `api_key_env`, and `fee_bps`; the delivery
+  kit's `timeout_seconds`; and the SMTP sink's `username`. Bare metal's packaged
+  `settings.toml` states none of its own.
+- One effective default is not the model's: VM's declarations type the section but do
+  not parse it at runtime, and VM's packaged `settings.toml` states
+  `[Identity.principal]` with an empty scheme and identifier. Removing it therefore
+  yields that placeholder, where `None` read as an empty table; both are refused at
+  startup as "identity.principal is required and must be canonical", so the outcome
+  is the same.
+- Every other typed field has a type that refuses `None`, so `None` was never a value
+  an operator could set through the chart for it.
+
+Not checked: keys no typed field generates — VM's open root and untyped sections
+(`capacity`, `pricing`, `negotiation`, `provisioning`, and `registry` apart from
+`auth`), values typed `Any` such as `pricing.settlements[*]`, and instances of sinks the
+schema does not type. Their schema accepted `null` already, which rendered as `None`
+where Helm kept it; after Section 4 the chart removes them instead, as D2 settles.
 
 ## Open questions
 

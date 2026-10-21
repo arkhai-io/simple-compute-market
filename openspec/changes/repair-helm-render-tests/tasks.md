@@ -37,6 +37,8 @@ cadence step 1). Changes no code.
       its own run only.
       Gate answered: the owner chose (a); the three wording failures belong to this
       change, fixed in 4.5 (`design.md` "Implementation findings").
+      Correction: VM's 448 were its integration suite; its unit suite passed too
+      (1101). The Helm on `PATH` is v4.3.0 (`helm version --short`, granted later).
 
 Notes: no code changed. `make test` on the same commit stops at its last suite,
 `test-deployment-packaging`, on `make -C helm test-render` with the same failures;
@@ -117,7 +119,7 @@ chart and the umbrella, and the bare-metal storefront's in its chart, each accep
 `null` where it accepts a key. Touches the two storefronts' `values_schema.py`, their
 drift tests, and the three schema files the generators write.
 
-- [ ] 3.1 `domains/vms/storefront/src/market_storefront/values_schema.py` and
+- [x] 3.1 `domains/vms/storefront/src/market_storefront/values_schema.py` and
       `domains/bare_metal/storefront/src/arkhai_bare_metal_storefront/values_schema.py`:
       apply Section 2's function to the definition each builds, as the last step of
       `storefront_config_definition` (D2). Reinit both environments against the rebuilt
@@ -126,21 +128,63 @@ drift tests, and the three schema files the generators write.
       which rewrites `storefrontServiceConfig` in `helm/charts/storefront/values.schema.json`,
       `helm/values.schema.json`, and `helm/charts/bare-metal-storefront/values.schema.json`.
       Commit the regenerated files.
-- [ ] 3.2 `domains/vms/storefront/tests/unit/test_values_schema.py` and
+      — Both apply `accepting_null` last. The environments were reinit by each
+      storefront's test target (the step may not run `reinit` under `-C`), and the
+      owner ran `make helm-values-schema`, which this step was denied; the three
+      files are regenerated.
+- [x] 3.2 `domains/vms/storefront/tests/unit/test_values_schema.py` and
       `domains/bare_metal/storefront/tests/test_values_schema.py` (unit): with
       `Draft7Validator`, as the VM test already uses it, a `config` setting a typed
       section, a typed field, and a delivery instance to `null` validates; a wallet's
       private key and a retired key stated as `null` are refused. Adjust any existing
       structural assertion the new form moves without weakening what it asserts. The drift
       tests pass against the committed schemas.
-- [ ] 3.3 Record in `design.md` "Implementation findings" every typed field of either
+      — Unit, validating with `Draft7Validator` over each storefront's generated
+      definition: a `null` section, field, delivery instance, and key inside a list
+      element validate; a wallet private key in two spellings, a retired key (VM's
+      `claims_sweep_interval`; for bare metal, which keeps no retired catalogue, a key
+      it does not read, `negotiation_timeout`), and a secret sink setting stay refused
+      as `null`. Moved assertions: a typed sink table's `^sink$` is now
+      `anyOf: [const, null]`; bare metal's `poll_interval` type is
+      `["number", "null"]`. The bare-metal storefront gained `jsonschema>=4.0` in its
+      `dev` group, relocked with `make lock PROJECTS="domains/bare_metal/storefront"`.
+      The drift tests pass against the regenerated files.
+- [x] 3.3 Record in `design.md` "Implementation findings" every typed field of either
       storefront's configuration models that the definition now accepts as `null` and
       whose default is not `None` — the fields an operator cannot set to `None` through
       chart values (D2) — or that there is none. A finding, not a decision: the design
       settled that a `null` means removal.
-- [ ] 3.4 Verification: `make test-storefront` and `make test-bare-metal` (unit and
+      — None found; recorded in `design.md` "Typed fields a chart `null` cannot set to
+      `None`": every model field whose type admits `None` defaults to `None`; VM's
+      `Identity.principal` takes its packaged `settings.toml` placeholder instead,
+      which startup refuses as it refuses `None`; every other typed field's type
+      refuses `None`. Keys no typed field generates (untyped sections, `Any` values,
+      untyped sink instances) were not checked and are listed there.
+- [x] 3.4 Verification: `make test-storefront` and `make test-bare-metal` (unit and
       library integration), with `make helm-values-schema` leaving no diff.
       End-to-end: none; a schema file is read only by Helm at render.
+      — `make test-storefront` (VM unit and integration): passed, 1103 unit and 448
+      integration. `make test-bare-metal` (domain, storefront 440, buyer, provisioning
+      adapter): passed. In place of rerunning `make helm-values-schema`, which this
+      step may not run, each storefront's drift tests run its generator's `check`,
+      which compares the parsed `storefrontServiceConfig` of each committed file (not
+      its text or other definitions), and pass. `make check-packaging` passes after the relock.
+      `make test`: every suite passes up to `test-deployment-packaging`, which fails on
+      the same thirteen render tests; two of them now get past the generated schema
+      and fail in the template instead (`test_a_differently_spelled_section_…` and
+      `test_typed_fields_…`, on the duplicate-spelling check, since the surviving
+      `null` key still counts as a spelling), as expected until Section 4's helper
+      drops it. End-to-end confirmed: none.
+
+Notes: `make helm-values-schema` is outside the unattended implement step's
+permissions; the owner ran it. Each refusal test pairs the config refused with the key
+stated as `null` with the same config accepted without the key, since jsonschema reports
+a `false` schema under `patternProperties` at the parent's path, not the key's. The
+fresh-context check's evidence findings are fixed (the 3.3 record, VM's counts);
+the section's header does not name the bare-metal `pyproject.toml` and `uv.lock`, which
+3.2's note discloses. The VM generator prints a `UserWarning` that
+`agent_id` is unset when run outside a configured storefront; it does not affect the
+definition.
 
 ## 4. The charts absorb a `null`
 

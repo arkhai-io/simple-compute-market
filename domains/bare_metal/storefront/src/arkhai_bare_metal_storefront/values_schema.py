@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from market_config.values_schema import (
+    accepting_null,
     any_case,
     main as generator_main,
     model_fragment,
@@ -59,7 +60,9 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
 
     The settings model types the whole document; its two open mappings,
     ``[Settlement]`` and ``[Delivery]``, which the settlement and delivery kits
-    read, are typed here by what those kits register and discover.
+    read, are typed here by what those kits register and discover. It accepts
+    ``null`` wherever it accepts a key, since a values file's ``null`` removes the
+    key; a key it refuses stays refused.
     """
     definition = model_fragment(BareMetalStorefrontSettings, role=role)
     sinks, _warnings = discover_sink_settings_models()
@@ -70,7 +73,7 @@ def storefront_config_definition(role: str = ROLE) -> dict[str, Any]:
     fields[any_case("delivery")] = sink_typed_section(
         sinks, sink_key=SINK_KEY, section_fields=DELIVERY_SETTINGS, role=role
     )
-    return definition
+    return accepting_null(definition)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
