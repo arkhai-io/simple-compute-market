@@ -721,6 +721,9 @@
                 "^[dD][eE][vV][eE][lL][oO][pP][mM][eE][nN][tT]_[aA][uU][tT][hH]$": {
                   "type": "boolean"
                 },
+                "^[lL][iI][vV][eE][mM][oO][dD][eE]$": {
+                  "type": "boolean"
+                },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
                   "type": "boolean"
                 }
