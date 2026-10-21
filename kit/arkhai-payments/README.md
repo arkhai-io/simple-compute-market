@@ -40,10 +40,10 @@ Receipts carry a signed `livemode`, true only from a live payments service.
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
 commits to the exact JSON object using RFC 8785, creates one `once` part, and
 returns a generated `Mandate`. The generated models also carry the contract's
-`rate` parts, which the kit never derives or settles. The hold is the time from acceptance to start,
-plus the service duration and the option window. The fixed nonce is
-`arkhai.payments.v1`; repeated derivation for the same inputs gives the same
-transaction ID. Mandate approval expires at `accepted_at + window`.
+`rate` parts, which the kit never derives or settles. The hold is the time from
+acceptance to start, plus the service duration and the option window. The fixed
+nonce is `arkhai.payments.v1`; repeated derivation for the same inputs gives the
+same transaction ID. Mandate approval expires at `accepted_at + window`.
 
 Domains do not assemble mandates themselves. The seller returns
 `PaymentSellerStage.settlement_data(agreement)`, one `{mandate, transaction_id}`
@@ -140,9 +140,11 @@ cannot create a second reverse event.
 `market_arkhai_payments.fixtures` provides `build_signed_receipt`, which signs a
 receipt for a given mandate with an injected signer using the verifier's own
 framing, and `FakePaymentsClient`, an in-memory stand-in for `PaymentsClient`
-that tests inject through a stage's or approval's `client_for_owner`. Both
-take a `livemode`, default `false`, that the receipts they sign carry, so a
-test can play a live service against a stage configured for either mode. The
+that tests inject through a stage's or approval's `client_for_owner`.
+`build_signed_receipt` signs in the `livemode` it is given, default `false`;
+the fake's own `livemode` applies only to the receipts it signs on approval,
+and a receipt handed to `serve()` keeps the mode it was signed with. So a test
+can play a live service against a stage configured for either mode. The
 kit's unit suite proves the receipt fixture reproduces the published vector
 byte for byte, which is why tests never sign receipts any other way.
 

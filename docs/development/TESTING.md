@@ -673,10 +673,11 @@ payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate)) 
 payments.serve(None)                                                              # 202 pending
 ```
 
-A receipt's signed mode is one of those properties. `build_signed_receipt` and
-`FakePaymentsClient` each take the `livemode` they sign, default `False`, the mode
-of a test or development service; a stage configured for one mode is tested with a
-receipt signed in the other:
+A receipt's signed mode is one of those properties. `build_signed_receipt` signs in
+the `livemode` it is given, default `False`, the mode of a test or development
+service. `FakePaymentsClient`'s own `livemode` applies only to the receipts it signs
+on approval; a receipt handed to `serve()` keeps the mode it was signed with. A stage
+configured for one mode is tested with a receipt signed in the other:
 
 ```python
 payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
