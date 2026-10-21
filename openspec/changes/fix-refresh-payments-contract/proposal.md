@@ -18,7 +18,8 @@ None.
 
 ### Modified Capabilities
 
-None recorded yet. Whether the expected-mode check and its configuration become normative requirements, and in which specifications, is under the design review's triage.
+- `settlement-configuration`: `[Settlement.arkhai_payments]` carries the expected `livemode`, default `false`.
+- `market-composition`: an Arkhai receipt verifies only when its signed `livemode` matches the verifying role's configuration.
 
 ## Dependencies and Related Changes
 
@@ -38,10 +39,13 @@ Touches `kit/arkhai-payments` (schema, vectors, generated models, receipt verifi
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
-- [ ] Existing subsystem specification — pending the design review's triage
+- [x] Existing subsystem specification — `settlement-configuration`, `market-composition`
 - [ ] New subsystem specification
 - [ ] No permanent documentation change
+- [x] `docs/development/DEPLOYMENT_AND_CONFIG.md`
 
 ### Knowledge to promote
 
-- Receipt verification binds the signed `livemode` to the caller's configured expectation and fails closed on a mismatch — destination decided in triage.
+- Receipt verification binds the signed `livemode` to the role's configured expectation and fails closed on a mismatch — `openspec/specs/market-composition/spec.md`, through this change's delta.
+- `[Settlement.arkhai_payments].livemode` and its `false` default — `openspec/specs/settlement-configuration/spec.md`, through this change's delta.
+- Setting `livemode` on upgrade, and switching mode as a cutover that drains or refunds open payment deals first — `docs/development/DEPLOYMENT_AND_CONFIG.md`'s Arkhai payments settings.

@@ -13,3 +13,15 @@ Landed in `064d8365`. `examples/local_e2e.py` passed against a development-mode 
 - [x] 2.2 Regenerate the storefront Helm values schemas so they carry `livemode`.
 
 Landed in `9983720a` and `01b1f6de`. Conflicts were confined to pins and locks; after relocking, the locks differ from `dev` only in the payments kit version, and `check-locks` passed repository-wide. `check-architecture` passed. Unit and integration suites: `test-arkhai-payments`, `test-apicredits`, `test-vms-buyer`, and `e2e-tests` unit passed; `test-bare-metal` passed once the values schemas were regenerated; `test-storefront` passed except `tests/integration/test_alkahest.py`'s two tests, which need a local Alkahest test chain (Node.js, Rust, Foundry) absent from the environment that ran them. The end-to-end pipeline has not run.
+
+## 3. Prove the configured mode reaches verification
+
+- [ ] 3.1 Give `FakePaymentsClient` a `livemode` option, default `False`, that the receipts it signs carry, so existing tests are unchanged (01 F2).
+- [ ] 3.2 In the kit's `tests/test_seller.py` and `tests/test_buyer.py`, add for each stage: configured for live mode, it accepts a live receipt; configured for live mode, it refuses a test-mode receipt and produces no verified evidence. Live-service qualification stays with the payments service's own end-to-end tests (01 F2).
+- [ ] 3.3 Correct the kit README's provenance sentence: the schema and vectors are vendored from the payments service's published wire contract and identified by the content hashes in `schema/SOURCE.md`, which records no upstream commit (01 F4).
+
+## 4. Closeout
+
+The full closeout task is planning's. Accepted in the design review's triage:
+
+- [ ] 4.x Promotion writes `livemode` into `docs/development/DEPLOYMENT_AND_CONFIG.md`'s Arkhai payments settings: it must be set to `true` on upgrade for a live service; its `false` default refuses live receipts; and switching mode, origin, or identity is a cutover that drains or refunds open payment deals first (01 F3).

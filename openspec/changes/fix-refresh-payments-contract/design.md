@@ -21,4 +21,5 @@ This change was implemented before it had a change directory: the work landed as
 ## Risks / Trade-offs
 
 - **[A live deployment upgrades without setting `livemode = true`]** → it refuses every receipt, failing closed; the seller quickstart shows the setting.
+- **[An operator switches mode while payment deals are open]** → every receipt check, including the stored-receipt revalidation at restart, compares with the current `livemode`, and switching mode in practice also switches the service origin and receipt identity. A deal accepted under the old mode then stays pending against a service that never saw its transaction, or its stored receipt revalidates as invalid, so it never reaches delivery. That fails closed, but it is a cutover: operators drain or refund open payment deals before changing mode, origin, or identity. The operator reference states this (01 F3).
 - **[The vendored contract drifts from the service again]** → the content hashes in `schema/SOURCE.md` make a stale copy detectable; refreshing is replacing both files, restoring the neutral `$id`, recording the hashes, and regenerating.
