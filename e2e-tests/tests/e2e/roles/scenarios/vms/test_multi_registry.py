@@ -109,6 +109,7 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     refresh_storefront_projections,
 )
 from tests.e2e.roles.helpers.compute_deal import pause_storefront
+from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
 from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for
 
 log = logging.getLogger(__name__)
@@ -352,6 +353,20 @@ def _registry_client(url: str) -> SyncRegistryClient:
         api_key=_REGISTRY_B_TOKEN if url == _REGISTRY_B else None,
         timeout=5.0,
     )
+
+
+def _escrow_named_by(listing_id: str) -> dict:
+    """The escrow an opening for ``listing_id`` names, read from registry A,
+    where both sellers publish: its contract, literal fields, and the release
+    condition the listing advertises."""
+    with _registry_client(_REGISTRY_A) as client:
+        _option, escrow = alkahest_opening(client.get_listing(listing_id))
+    return {
+        "chain_name": escrow["chain_name"],
+        "escrow_address": escrow["escrow_address"],
+        "literal_fields": escrow["literal_fields"],
+        "demands": [escrow["demand"]],
+    }
 
 
 def _registry_authority(url: str) -> RegistryAuthority:
@@ -741,6 +756,7 @@ class TestStage06a_NegotiateWithBob:
                     },
                 },
                 token=DEMAND_RESOURCE["token"]["contract_address"],
+                **_escrow_named_by(mr_state.bob_listing_id),
             )
         finally:
             buyer_to_bob.close()
@@ -796,6 +812,7 @@ class TestStage06b_NegotiateWithAlice:
                     },
                 },
                 token=DEMAND_RESOURCE["token"]["contract_address"],
+                **_escrow_named_by(mr_state.alice_listing_id),
             )
         finally:
             buyer_to_alice.close()

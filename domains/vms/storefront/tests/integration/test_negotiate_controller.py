@@ -56,6 +56,8 @@ _SELLER_SIGNER = Ed25519Signer(b"\x22" * 32)
 _EXPECTED_PUBLISHERS = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
 _TOKEN = "0x0000000000000000000000000000000000000001"
 _RECIPIENT = "0x" + "33" * 20
+#: The escrow contract seeded listings accept unless a test names another.
+_ESCROW = "0x" + "11" * 20
 
 
 def _recipient_condition(recipient: str) -> dict:
@@ -73,6 +75,11 @@ def _recipient_condition(recipient: str) -> dict:
 #: paying the seller wallet the fixture configures. A buyer naming a pinned
 #: escrow selects it, as the buyer builds its proposal from the listing.
 _AUTHORIZED = [_recipient_condition(_RECIPIENT)]
+
+#: An opening's escrow carrier for a seeded listing: its escrow, token, and
+#: release condition, so the round's guards pass and a refusal under test is
+#: that test's own.
+_PINNED = {"token": _TOKEN, "escrow_address": _ESCROW, "demands": _AUTHORIZED}
 
 
 def _vm_provision(duration_seconds: int = 3600) -> dict:
@@ -403,6 +410,7 @@ class TestNegotiateNew:
                 listing_id="",
                 initial_amount=8000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         # missing listing_id can't be tested via client (required param);
         # test that a nonexistent listing returns 404 below.
@@ -414,6 +422,7 @@ class TestNegotiateNew:
                 listing_id="ghost-listing",
                 initial_amount=8000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         assert "404" in str(exc_info.value)
 
@@ -504,6 +513,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-zero-duration",
                 initial_amount=8000,
                 provision_terms=_vm_provision(0),
+                **_PINNED,
             )
         assert "400" in str(exc_info.value)
         assert "incompatible_provision_terms" in str(exc_info.value)
@@ -523,6 +533,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-closed",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -541,6 +552,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-empty",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -563,6 +575,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-taken",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -582,7 +595,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-priceless",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
-                token=_TOKEN,
+                **_PINNED,
             )
         msg = str(exc_info.value)
         assert "409" in msg
@@ -670,6 +683,7 @@ class TestNegotiateNew:
                 listing_id="neg-listing-rtx",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
         assert "409" in str(exc_info.value)
         assert "no_matching_declaration" in str(exc_info.value)
@@ -780,6 +794,7 @@ class TestUnbackedListingNegotiation:
                 listing_id="neg-listing-unbacked-shrunk",
                 initial_amount=5000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
 
         assert "no_matching_declaration" in str(exc_info.value)
@@ -898,6 +913,7 @@ class TestSourceConfirmationWindow:
             settlement_selection=await _selection(db, "neg-window"),
             initial_amount=4000,
             provision_terms=_vm_provision(),
+            **_PINNED,
         )
         with settings_overrides(**{"capacity.source_confirmation_seconds": 60}):
             async with _admin_client() as admin:
@@ -941,6 +957,7 @@ class TestSourceConfirmationWindow:
                 settlement_selection=await _selection(db, "neg-unbacked-stale"),
                 initial_amount=4000,
                 provision_terms=_vm_provision(),
+                **_PINNED,
             )
 
         assert refused.value.status_code == 503
@@ -962,6 +979,7 @@ class TestAcceptanceRechecksTheSource:
             settlement_selection=await _selection(db, listing_id),
             initial_amount=4000,
             provision_terms=_vm_provision(),
+            **_PINNED,
         )
         assert opened["action"] == "counter"
         return opened["negotiation_id"]
@@ -1102,25 +1120,36 @@ class TestReleaseConditionAuthorization:
         assert "release_condition" in str(refused.value)
         self._nothing_accepted(db)
 
-    async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
-        self, client, db
+    @pytest.mark.parametrize(
+        "guarded",
+        [
+            pytest.param(True, id="default chain, with the shape guard"),
+            pytest.param(False, id="a seller policy accepting as proposed"),
+        ],
+    )
+    async def test_an_opening_naming_no_escrow_contract_is_refused(
+        self, client, db, guarded
     ):
-        """Under the default seller chain the shape guard finds no escrow
-        address to compare and skips, so materialization alone refuses the
-        buyer's condition."""
+        """With the shape guard the round is refused by name. A seller without
+        it accepts at once, and VM's Alkahest stage refuses the acceptance
+        through the kit's pinned-escrow check before building any plan, so
+        nothing is recorded either way."""
         c, db = client
         await _upsert_bound_listing(
             db, "rc-unpinned", demands=[_recipient_condition(_RECIPIENT)]
         )
 
         with pytest.raises(StorefrontClientError) as refused:
+            if not guarded:
+                self._without_seller_policy()
             await self._open(
                 c, db, "rc-unpinned",
-                demands=[_recipient_condition(_BUYER_RECIPIENT)],
+                escrow_address="0x" + "00" * 20,
+                demands=[_recipient_condition(_RECIPIENT)],
             )
 
         assert refused.value.status_code == 409
-        assert "release_condition" in str(refused.value)
+        assert "escrow_contract_unpinned" in str(refused.value)
         self._nothing_accepted(db)
 
     async def _open_selecting_only(self, c, db, listing_id: str):

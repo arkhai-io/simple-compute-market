@@ -581,7 +581,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-1",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -602,7 +602,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-2",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -660,7 +660,7 @@ class TestEvaluateNegotiate:
             "ghost-listing",
             proposal={
                 "chain_name": "anvil",
-                "escrow_address": "0x" + "0" * 40,
+                "escrow_address": "0x" + "11" * 20,
                 "fields": {"amount": 1000, "token": "0x" + "a" * 40},
                 "expiration_unix": 2000000000,
             },
@@ -682,7 +682,7 @@ class TestEvaluateNegotiate:
                 "neg-eval-no-thread",
                 proposal={
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {"amount": 5000, "token": "0x" + "a" * 40},
                     "expiration_unix": 2000000000,
                 },
@@ -702,7 +702,7 @@ class TestEvaluateNegotiate:
             json={
                 "proposal": {
                     "chain_name": "anvil",
-                    "escrow_address": "0x" + "0" * 40,
+                    "escrow_address": "0x" + "11" * 20,
                     "fields": {
                         "amount": 1000,
                         "token": "0x" + "a" * 40,

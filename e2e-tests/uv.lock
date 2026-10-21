@@ -154,7 +154,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -167,7 +167,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -242,7 +242,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.20.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.21.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -358,7 +358,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-e2e-tests"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -608,19 +608,19 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.1"
+version = "0.5.2"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.5.2-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-policy"
-version = "0.5.0"
+version = "0.6.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
@@ -628,7 +628,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_kit_policy-0.5.0-py3-none-any.whl" },
+    { path = "arkhai_kit_policy-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -788,7 +788,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-listings"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -799,7 +799,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_vms_listings-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_vms_listings-0.7.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -812,7 +812,7 @@ pools = [
 
 [[package]]
 name = "arkhai-vms-negotiation"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-kit-alkahest" },
@@ -820,7 +820,7 @@ dependencies = [
     { name = "arkhai-vms-listings" },
 ]
 wheels = [
-    { path = "arkhai_vms_negotiation-0.4.1-py3-none-any.whl" },
+    { path = "arkhai_vms_negotiation-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -849,7 +849,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.20.0"
+version = "0.21.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -899,7 +899,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.20.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.21.0-py3-none-any.whl" },
 ]
 
 [[package]]

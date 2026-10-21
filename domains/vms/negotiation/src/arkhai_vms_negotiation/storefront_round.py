@@ -21,8 +21,8 @@ from arkhai_vms_negotiation.policies import (
 )
 from market_policy.listing_source import ListingSourceVerdict
 from market_policy.scalar_policies import (
+    pinned_proposal,
     selected_settlement_artifact,
-    selecting_proposal,
 )
 from market_policy.negotiation_middleware import (
     NegotiationContext,
@@ -136,11 +136,13 @@ _RL_POLICY_NAMES = {"rl", "erc20_rl", "native_token_rl", "erc1155_rl"}
 
 
 def _prepend_default_guards(policy_names: list[str]) -> list[str]:
-    out = list(policy_names)
-    for guard in reversed(_DEFAULT_GUARDS):
-        if guard not in out:
-            out.insert(0, guard)
-    return out
+    # The default guards run first, in their own order, wherever an operator
+    # names one: an opening selecting nothing the listing offers is priced at
+    # zero, and only these guards refuse it before a decider could accept it.
+    return [
+        *_DEFAULT_GUARDS,
+        *(name for name in policy_names if name not in _DEFAULT_GUARDS),
+    ]
 
 
 def _policy_names_need_rl(policy_names: list[str]) -> bool:
@@ -198,6 +200,10 @@ def _direction_from_strategy_label(strategy: str) -> str:
     raise ValueError(f"Unknown order strategy {strategy!r}")
 
 
+def _listing_dict(listing: Any) -> dict[str, Any]:
+    return listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
+
+
 def _selected_option(listing: Any, proposal: Any) -> Any:
     """The accepted escrow or settlement option ``proposal`` selects, or None.
 
@@ -207,10 +213,7 @@ def _selected_option(listing: Any, proposal: Any) -> Any:
     """
     if not isinstance(proposal, Mapping):
         return None
-    listing_dict = (
-        listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
-    )
-    return selected_settlement_artifact(listing_dict, proposal)
+    return selected_settlement_artifact(_listing_dict(listing), proposal)
 
 
 def _seller_reference_amount(
@@ -229,10 +232,12 @@ def _seller_reference_amount(
     fixed-precision decimal context holds, and rounding there would silently
     change the amount the seller negotiates from.
 
-    A proposal selecting nothing the listing offers is priced from nothing: its
-    reference amount is zero, never another entry's rate, and the round's
-    escrow-shape and selection guards, which every VM chain runs, refuse it for
-    its own reason, as plan materialization does at acceptance.
+    ``proposal`` is the buyer's pinned opening, the one an acceptance settles.
+    One selecting nothing the listing offers is priced from no entry and has
+    reference amount zero, never another entry's rate or the floor, and the
+    guards the default round hook composes into every chain refuse it for its
+    own reason at the opening: the escrow-shape guard an escrow the listing does
+    not accept, the opening guard a selection matching no option.
     """
     selected = _selected_option(listing, proposal)
     if selected is None:
@@ -275,16 +280,19 @@ async def _run_default_seller_round_policy(
         if item.sender == "them":
             their_proposal = item.proposal
             break
+    # What is priced, and whether it is bargained by amount, is the pinned
+    # opening's: an acceptance settles that opening whatever a counter names.
+    pinned = pinned_proposal(history)
     uses_scalar_amount = proposal_uses_scalar_amount(
         listing_dict if isinstance(listing_dict, dict) else {},
-        their_proposal,
+        pinned,
     )
     reference_amount = (
         _seller_reference_amount(
             listing,
             requested_duration_seconds,
             default_min_price=default_min_price,
-            proposal=selecting_proposal(history),
+            proposal=pinned,
         )
         if uses_scalar_amount else 0
     )

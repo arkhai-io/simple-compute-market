@@ -97,6 +97,35 @@ BUYER_MAX_PRICE = 12 * 10**18
 E2E_LEASE_EXPIRY_BACKDATE = timedelta(minutes=1)
 
 
+def alkahest_opening(listing: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A listing's one Alkahest option, and the escrow an opening for it names.
+
+    The escrow is the contract the option's accepted escrow is on, its literal
+    fields, and the release condition the listing advertises on that chain, as
+    a buyer deriving its proposal from the option names them: a storefront
+    refuses an escrow naming no contract, and its shape guard one selecting no
+    advertised condition.
+    """
+    (option,) = [
+        dict(entry)
+        for entry in listing.settlement_options
+        if dict(entry)["mechanism"] == "alkahest.v1"
+    ]
+    escrow = option["params"]["accepted_escrow"]
+    chain = escrow["chain_name"]
+    condition = next(
+        dict(demand)
+        for demand in listing.demands
+        if dict(demand).get("chain_name") in (None, chain)
+    )
+    return option, {
+        "chain_name": chain,
+        "escrow_address": escrow["escrow_address"],
+        "literal_fields": dict(escrow.get("literal_fields") or {}),
+        "demand": condition,
+    }
+
+
 def _expired_lease_end() -> str:
     """A lease end the watchdog reads as expired but still inside its grace."""
     return (
@@ -652,8 +681,8 @@ class Stage04a_PrimaryRegistryPublish:
 
 class Stage05a_EvaluateNegotiate:
     def test_05a_evaluate_negotiate_would_not_exit(
-        self, storefront_admin_client, buyer_principal, deal_driver: ComputeDealDriver,
-        deal_state: ComputeDealState,
+        self, storefront_admin_client, registry_client, buyer_principal,
+        deal_driver: ComputeDealDriver, deal_state: ComputeDealState,
     ):
         """POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True (dry-run).
 
@@ -666,11 +695,13 @@ class Stage05a_EvaluateNegotiate:
             "_negotiation_strategy_viable",
         )
 
+        _option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
             proposal={
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "0" * 40,
+                **escrow,
                 "fields": {
                     # Decimal-digit string: the request body is
                     # canonicalized for signing, and a base-unit
@@ -735,14 +766,11 @@ class Stage05b_NegotiationStartsAndVisible:
         deal_state._escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
 
         # The listing's one Alkahest option, which the domain's opening names
-        # where its storefront needs the selection stated explicitly.
-        (alkahest_option,) = [
-            dict(option)
-            for option in registry_client.get_listing(
-                deal_state.seller_listing_id
-            ).settlement_options
-            if dict(option)["mechanism"] == "alkahest.v1"
-        ]
+        # where its storefront needs the selection stated explicitly, and the
+        # escrow every opening names.
+        alkahest_option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
 
         resp = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
@@ -754,6 +782,10 @@ class Stage05b_NegotiationStartsAndVisible:
             # supplied later.
             provision_terms=deal_driver.provision_terms(),
             token=DEAL_TOKEN["contract_address"],
+            chain_name=escrow["chain_name"],
+            escrow_address=escrow["escrow_address"],
+            literal_fields=escrow["literal_fields"],
+            demands=[escrow["demand"]],
             settlement_selection=deal_driver.opening_selection(
                 alkahest_option, deal_state._escrow_expiration_unix
             ),

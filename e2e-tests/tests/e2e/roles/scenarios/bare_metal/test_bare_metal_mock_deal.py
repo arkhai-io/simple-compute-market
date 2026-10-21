@@ -73,6 +73,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     Stage10b_LeaseCycleBeginsTeardown,
     Stage11a_TeardownDispatch,
     Stage11b_TeardownCompletion,
+    alkahest_opening,
 )
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.helpers.escrow import create_buyer_escrow, read_string_obligation
@@ -383,19 +384,26 @@ class TestStage12a_PublicationReopensTheListing:
 
 class TestStage12b_SecondDealAccepted:
     def test_12b_a_second_negotiation_is_accepted(
-        self, storefront_client, storefront_admin_client, deal_driver,
+        self, storefront_client, storefront_admin_client, registry_client, deal_driver,
         deal_state: BareMetalDealState,
     ):
         require_state(deal_state, "_listing_reopened")
         # The second deal's jobs run as a buyer's would, with no gate held.
         deal_driver.disarm_gates()
         deal_state._second_escrow_expiration_unix = int(time.time()) + ESCROW_TTL_SECONDS
+        _option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
         opened = storefront_client.negotiate_new(
             listing_id=deal_state.seller_listing_id,
             initial_amount=BUYER_INITIAL_PRICE,
             escrow_expiration_unix=deal_state._second_escrow_expiration_unix,
             provision_terms=deal_driver.provision_terms(),
             token=DEAL_TOKEN["contract_address"],
+            chain_name=escrow["chain_name"],
+            escrow_address=escrow["escrow_address"],
+            literal_fields=escrow["literal_fields"],
+            demands=[escrow["demand"]],
         )
         negotiation_id = opened.get("negotiation_id") if isinstance(opened, dict) else None
         assert negotiation_id, opened

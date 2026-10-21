@@ -27,6 +27,7 @@ from market_alkahest.proposals import (
     escrow_proposal_from_accepted_entry,
     selected_release_condition,
 )
+from market_alkahest.release_authorization import require_pinned_escrow
 from market_arkhai_payments import (
     MandatePolicyError,
     PaymentSettlementData,
@@ -39,6 +40,7 @@ from market_core.schemas import (
     EscrowProposal,
 )
 from market_identity import Identity
+from market_policy.scalar_policies import is_escrow_proposal
 
 import market_storefront.container as _container
 from market_storefront.failure_actions import (
@@ -152,6 +154,11 @@ class VmAlkahestSellerStage:
         entry = option.get("params", {}).get("accepted_escrow")
         if not isinstance(entry, Mapping):
             raise ValueError("selected Alkahest option has no accepted escrow")
+        # The escrow funded is the option's, so an escrow carrier the buyer
+        # sends beside its selection is never materialized; one naming no
+        # contract is still refused, as materializing it would be.
+        if is_escrow_proposal(context.proposal):
+            require_pinned_escrow(context.proposal)
         # The escrow settles under the listing's authorized condition, and a
         # condition the buyer's proposal selects beside its option must be that
         # one: the selection names the option, never the condition.

@@ -117,10 +117,10 @@ def extract_unit_price_from_order(
     artifact advertises no rate the listing is a hidden reserve for it and the
     floor is ``[seller.pricing].default_min_price``. With no rate and no floor
     there is nothing to negotiate against and the negotiation is refused. No
-    other entry ever stands in for the one selected, so a proposal selecting
-    nothing the listing offers is refused here (``ValueError``). See
-    openspec/specs/negotiation-protocol/spec.md, "The seller's reference amount
-    is the selected option's rate".
+    other entry ever stands in for the one selected, and a proposal selecting
+    nothing the listing offers is priced from no rate and no floor, so it is
+    refused. See openspec/specs/negotiation-protocol/spec.md, "The seller's
+    reference amount is the selected option's rate".
     """
     selected = selected_settlement_artifact(order, proposal)
     selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
@@ -132,7 +132,8 @@ def extract_unit_price_from_order(
         advertised = _primary_rate_value(selected)
     else:
         raise ValueError(
-            "the proposal selects no settlement option or accepted escrow the listing offers"
+            f"Listing {order.get('listing_id')}: the proposal selects no settlement "
+            "option the listing offers, so nothing prices it."
         )
     if advertised is not None:
         return advertised

@@ -801,12 +801,9 @@ class TestVerifyProposalDispatch:
         assert captured["recipient"] == RECIPIENT
 
     @pytest.mark.asyncio
-    async def test_unpinned_zero_address_falls_back_to_default_kind(
-        self, patched_codec_lookup
-    ):
-        """A zero-address proposal (escrow contract unpinned during
-        negotiation) resolves the codec from the default escrow_kind rather
-        than erroring — the buyer escrows against the chain's default kind."""
+    async def test_a_zero_address_proposal_is_refused(self, patched_codec_lookup):
+        """A proposal naming no escrow contract has none to read the escrow
+        at; no default kind stands in for it."""
         seams, captured = _build_seams_capturing_token()
         proposal = EscrowProposal(
             chain_name=CHAIN,
@@ -815,20 +812,21 @@ class TestVerifyProposalDispatch:
             literal_fields={"token": TOKEN},
             expiration_unix=1_800_000_000,
         )
-        await verify_escrow_for_settlement(
-            escrow_uid="0xdead",
-            seller_wallet=SELLER,
-            agreed_price=1000,
-            agreed_duration_seconds=3600,
-            listing=_good_listing(),
-            alkahest_client=_DUMMY_CLIENT,
-            chain_name=CHAIN,
-            alkahest_address_config_path=CONFIG_PATH,
-            escrow_proposal=proposal,
-            now_unix=1_700_000_000,
-            **seams,
-        )
-        assert captured["token"] == TOKEN
+        with pytest.raises(EscrowVerificationError, match="escrow_contract_unpinned"):
+            await verify_escrow_for_settlement(
+                escrow_uid="0xdead",
+                seller_wallet=SELLER,
+                agreed_price=1000,
+                agreed_duration_seconds=3600,
+                listing=_good_listing(),
+                alkahest_client=_DUMMY_CLIENT,
+                chain_name=CHAIN,
+                alkahest_address_config_path=CONFIG_PATH,
+                escrow_proposal=proposal,
+                now_unix=1_700_000_000,
+                **seams,
+            )
+        assert captured == {}
 
     @pytest.mark.asyncio
     async def test_ignores_legacy_fields_token(self, patched_codec_lookup):

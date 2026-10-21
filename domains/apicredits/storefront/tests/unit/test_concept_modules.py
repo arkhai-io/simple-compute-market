@@ -165,7 +165,9 @@ def test_unit_price_hidden_reserve_falls_back_then_refuses():
     ],
 )
 def test_a_proposal_selecting_nothing_is_priced_from_no_entry(proposal):
-    """Not from the listing's first accepted escrow, nor from the floor."""
+    """Not from the listing's first accepted escrow, nor from the floor: the
+    extractor refuses it, and the round prices it at zero for its guards to
+    refuse."""
     with pytest.raises(ValueError, match="selects no settlement option"):
         extract_unit_price_from_order(
             _listing(rate="250"), default_min_price="7", proposal=proposal
@@ -173,6 +175,31 @@ def test_a_proposal_selecting_nothing_is_priced_from_no_entry(proposal):
     assert (
         _seller_reference_amount(
             _listing(rate="250"), 2, default_min_price="7", proposal=proposal
+        )
+        == 0
+    )
+
+
+def test_a_selection_matching_no_option_is_refused_by_pricing():
+    unknown = {
+        "settlement_selection": {
+            "mechanism": "example.rated.v1",
+            "option_id": "f" * 64,
+            "expiration_unix": 2_000_000_000,
+        }
+    }
+    with pytest.raises(ValueError, match="does not exact-match"):
+        _seller_reference_amount(
+            _listing(rate="250"), 2, default_min_price="7", proposal=unknown
+        )
+
+
+def test_a_listing_accepting_no_escrow_prices_an_escrow_from_no_entry():
+    listing = _listing(rate="250")
+    listing["accepted_escrows"] = []
+    assert (
+        _seller_reference_amount(
+            listing, 2, default_min_price="7", proposal=_SELECTS_ESCROW
         )
         == 0
     )

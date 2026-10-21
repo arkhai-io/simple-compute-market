@@ -26,9 +26,9 @@ from arkhai_apicredits.listings.pricing import (
 )
 from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
+    pinned_proposal,
     proposal_uses_scalar_amount,
     selected_settlement_artifact,
-    selecting_proposal,
 )
 from market_policy.seller_round import SellerRoundResult
 from market_policy.negotiation_middleware import (
@@ -103,10 +103,15 @@ def _load_chain(
             getattr(negotiation_config, "policy_mode", "") or ""
         ).strip() or _DEFAULT_TERMINAL
         policy_names = [policy_mode]
-    for guard in reversed(_DEFAULT_GUARDS):
-        if guard not in policy_names:
-            policy_names.insert(0, guard)
-    return load_negotiation_chain(policy_names)
+    # The default guards run first, in their own order, wherever an operator
+    # names one: an opening selecting no accepted escrow is priced at zero, and
+    # only these guards refuse it before a decider could accept it.
+    return load_negotiation_chain(
+        [
+            *_DEFAULT_GUARDS,
+            *(name for name in policy_names if name not in _DEFAULT_GUARDS),
+        ]
+    )
 
 
 def _seller_reference_amount(
@@ -119,15 +124,18 @@ def _seller_reference_amount(
     """quantity × the per-credit rate of the option ``proposal`` selects, exactly.
 
     The unit is a base-unit rate or a rational floor, and a long amount must not
-    round through a fixed-precision decimal context. An escrow proposal selecting
-    no accepted escrow the listing offers, or a round with no selecting proposal,
-    is priced from nothing: its reference amount is zero, never another entry's
-    rate, and the round's escrow-shape guard, which every API-credit chain runs,
-    refuses it for its own reason, as plan materialization does at acceptance.
+    round through a fixed-precision decimal context. ``proposal`` is the buyer's
+    pinned opening, the one an acceptance settles. An opening that selects no
+    accepted escrow and is not a selection, or no opening at all, has reference
+    amount zero rather than another entry's rate, and the guards every seller
+    chain runs first refuse it for its own reason: the escrow-shape guard an
+    escrow the listing does not accept, the opening guard a missing amount. A
+    selection matching no option is refused here.
     """
     selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
-    if not isinstance(selection, Mapping) and (
-        selected_settlement_artifact(dict(listing), proposal) is None
+    if (
+        not isinstance(selection, Mapping)
+        and selected_settlement_artifact(dict(listing), proposal) is None
     ):
         return 0
     unit = extract_unit_price_from_order(
@@ -169,13 +177,16 @@ async def _run_seller_round(
         if item.sender == "them":
             their_proposal = item.proposal
             break
-    uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, their_proposal)
+    # What is priced, and whether it is bargained by amount, is the pinned
+    # opening's: an acceptance settles that opening whatever a counter names.
+    pinned = pinned_proposal(history)
+    uses_scalar_amount = proposal_uses_scalar_amount(listing_dict, pinned)
     reference_amount = (
         _seller_reference_amount(
             listing_dict,
             requested_quantity,
             default_min_price=default_min_price,
-            proposal=selecting_proposal(history),
+            proposal=pinned,
         )
         if uses_scalar_amount
         else 0

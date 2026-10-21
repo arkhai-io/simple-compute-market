@@ -168,7 +168,7 @@ def test_sync_client_rejects_legacy_or_incompatible_envelope_before_http(legacy)
 
 @pytest.mark.parametrize(
     "escrow_address",
-    [pytest.param("", id="omitted"), pytest.param(None, id="none")],
+    [pytest.param("", id="empty"), pytest.param(None, id="omitted")],
 )
 def test_an_escrow_opening_naming_no_escrow_contract_is_refused_before_http(escrow_address):
     """A storefront refuses an escrow naming no contract, so the client never

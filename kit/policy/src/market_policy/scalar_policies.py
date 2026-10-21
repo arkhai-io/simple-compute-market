@@ -663,22 +663,18 @@ def escrow_contract_unpinned(proposal: Mapping[str, Any]) -> bool:
     return not digits or set(digits) <= {"0"}
 
 
-def selecting_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
-    """The buyer's latest proposal that selects something the seller can price.
+def pinned_proposal(history: list[NegotiationRound]) -> dict[str, Any] | None:
+    """The buyer's opening proposal, which every acceptance of the thread settles.
 
-    That is a proposal carrying a ``settlement_selection`` or an escrow. A
-    counter carrying only ``fields`` changes the amount, not what is being
-    bought, so the option a buyer is negotiating is the one its latest selecting
-    proposal named. None when the buyer has sent none.
+    A seller prices the option this proposal selects in every round: a counter
+    may change the amount, but whatever else it names is not what an acceptance
+    settles, so it never changes what the seller negotiates from. None when the
+    buyer has sent nothing, or when its opening carried no proposal.
     """
-    for round_ in reversed(history):
-        proposal = round_.proposal
-        if round_.sender != "them" or not isinstance(proposal, Mapping):
-            continue
-        if isinstance(proposal.get("settlement_selection"), Mapping) or is_escrow_proposal(
-            proposal
-        ):
-            return dict(proposal)
+    for round_ in history:
+        if round_.sender == "them":
+            proposal = round_.proposal
+            return dict(proposal) if isinstance(proposal, Mapping) else None
     return None
 
 
@@ -776,7 +772,11 @@ def buyer_counter_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Validate and canonicalize buyer counter-round negotiation content."""
+    """Validate and canonicalize buyer counter-round negotiation content.
+
+    Whether the round bargains an amount is read from the buyer's pinned
+    opening, which an acceptance settles, never from what a counter names.
+    """
     if not history:
         return None, context
     latest = history[-1]
@@ -787,7 +787,10 @@ def buyer_counter_guard(
     pinned = context.our_escrow_proposal
     proposal = latest.proposal if isinstance(latest.proposal, dict) else None
     proposal_for_scalar = proposal or pinned
-    uses_scalar_amount = proposal_uses_scalar_amount(listing, proposal_for_scalar)
+    opening = pinned_proposal(history)
+    uses_scalar_amount = proposal_uses_scalar_amount(
+        listing, opening if opening is not None else proposal_for_scalar
+    )
     context.intermediate["uses_scalar_amount"] = uses_scalar_amount
 
     raw_amount = _amount_from_proposal(proposal_for_scalar)
@@ -832,12 +835,15 @@ def escrow_shape_guard(
     A round whose proposal carries no escrow (none, only ``fields``, or only a
     settlement selection) passes. An escrow proposal naming no escrow contract
     (no address, or the zero address) is refused whatever the listing accepts.
-    Otherwise a listing accepting no escrow passes, and the escrow must be one
-    the listing accepts, with its literal fields, and the release condition the
-    proposal selects must be one the listing advertises on the proposal's
-    chain; a listing advertising none refuses. This is the early, explained
-    refusal: the seller's plan materialization refuses an unpinned contract and
-    holds the release condition to the listing whether or not this guard runs.
+    Otherwise the escrow must be one the listing accepts (a listing accepting
+    none refuses every escrow), its literal fields must equal that entry's, and
+    the release condition the proposal selects must be one the listing
+    advertises on the proposal's chain; a listing advertising none refuses. The
+    seller prices an escrow the listing does not accept from no entry, so this
+    refusal is what stops a negotiation against it. It is also the early,
+    explained refusal: the seller's plan materialization refuses an unpinned
+    contract and holds the release condition to the listing whether or not
+    this guard runs.
     """
     proposal = _peer_proposal(history)
     if not is_escrow_proposal(proposal):
@@ -855,10 +861,6 @@ def escrow_shape_guard(
         )
 
     listing = context.listing or {}
-    accepted = _loads_json_list(listing.get("accepted_escrows"))
-    if not accepted:
-        return None, context
-
     proposal_literal = proposal.get("literal_fields") or {}
 
     matched = _accepted_escrow_for_proposal(listing, proposal)
@@ -1292,8 +1294,8 @@ __all__ = [
     "_amount_from_proposal",
     "escrow_contract_unpinned",
     "is_escrow_proposal",
+    "pinned_proposal",
     "selected_settlement_artifact",
-    "selecting_proposal",
     "NegotiationAmountError",
     "format_wire_amount",
     "parse_wire_amount",

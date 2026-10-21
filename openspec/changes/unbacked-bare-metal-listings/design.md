@@ -596,6 +596,19 @@ The rationale is the wire, not the clients: no buyer in this repository sends an
 proposal, but the protocol admitted one, and anything the wire admits must be handled
 whichever client sent it.
 
+Settled in implementation (Section 8): a proposal selecting nothing the listing offers is
+priced from no entry and no floor. VM and API credits give an escrow proposal selecting
+nothing reference amount zero, and the escrow-shape guard refuses it at the opening as an
+escrow the listing does not accept, which now includes any escrow against a listing
+accepting none. A selection matching no option is priced at zero in VM, where its opening
+guard refuses it, and refused by API credits' pricing. A zero reference is safe only if a
+guard refuses before any decider, so both domains run their default guards first, in their
+fixed order, wherever an operator's chain names one. Bare metal, whose guard a seller may
+omit, refuses such a proposal in pricing before any policy. Every domain prices the buyer's
+pinned opening, which acceptance settles, and reads from it whether the round bargains an
+amount, as `negotiation-protocol` already requires, so a counter naming another option
+cannot change what the seller negotiates from.
+
 Rejected: resolving an unpinned proposal to the listing's single entry on its chain, with
 or without kit enforcement, which keeps an inferred input in the settlement path; adding
 only a token check, which leaves first-entry pricing.

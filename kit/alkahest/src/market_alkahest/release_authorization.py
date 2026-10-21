@@ -35,9 +35,9 @@ class ReleaseConditionError(ValueError):
 class UnpinnedEscrowError(ReleaseConditionError):
     """An escrow proposal names no escrow contract to fund.
 
-    An escrow is funded, priced, and verified at the contract its proposal names,
-    so a proposal naming none (no address, or the zero address) has nothing to
-    settle at and is refused, whatever release condition it selects. It is a
+    An escrow proposal states the contract its escrow is to be funded at, so a
+    proposal naming none (no address, or the zero address) states no escrow to
+    settle and is refused, whatever release condition it selects. It is a
     ``ReleaseConditionError`` so every caller translating that family refuses it
     the same way. The message starts with ``escrow_contract_unpinned``.
     """

@@ -54,13 +54,27 @@ def seller_policy_names(configured: Any = None) -> list[str]:
     ]
 
 
+# The status probe's synthetic listing: placeholder values that name no real
+# contract or party. The shape guard refuses an escrow naming no contract, one
+# its listing does not accept, and a condition its listing does not advertise,
+# so the probe's opening names this listing's escrow and condition.
+_PROBE_ESCROW = {"chain_name": "probe", "escrow_address": "0x" + "11" * 20}
+_PROBE_CONDITION = {
+    "chain_name": "probe",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+_PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDITION]}
+
+
 def seller_chain_check(configured: Any = None) -> str:
     """Whether the configured seller chain decides a round, as status reports it.
 
-    Runs the chain against a synthetic round-zero proposal with no listing and
-    a matching listing-source verdict, so only the chain itself is judged. A
-    chain that exits or rejects here would refuse every buyer. The values are
-    the ones every storefront's status reports for this check:
+    Runs the chain against a synthetic round-zero proposal on a synthetic
+    listing accepting it and a matching listing-source verdict, so only the
+    chain itself is judged. A chain that exits or rejects here would refuse
+    every buyer. The values are the ones every storefront's status reports for
+    this check:
 
     - ``chain[N] (count=N)``: the chain decided without exiting;
     - ``chain[N] (exit_on_probe: <reason>)``: it exited or rejected;
@@ -74,12 +88,10 @@ def seller_chain_check(configured: Any = None) -> str:
                 round_number=0,
                 sender="them",
                 action="initial",
-                # The zero escrow address keeps the shape guard's carve-out
-                # applicable, so the probe needs no listing's accepted escrows.
                 proposal={
-                    "chain_name": "probe",
-                    "escrow_address": "0x" + "00" * 20,
+                    **_PROBE_ESCROW,
                     "fields": {"amount": 10_000},
+                    "demand": _PROBE_CONDITION,
                     "expiration_unix": 4_102_444_800,
                 },
             )
@@ -87,6 +99,7 @@ def seller_chain_check(configured: Any = None) -> str:
         context = NegotiationContext(
             direction="maximize",
             our_reference_amount=10_000,
+            listing=_PROBE_LISTING,
             listing_source=ListingSourceVerdict("matches"),
         )
         decision, _context = run_negotiation_chain_with_context(chain, history, context)

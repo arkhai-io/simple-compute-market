@@ -185,6 +185,30 @@ def test_buyer_counter_guard_still_rejects_scalar_counter_without_amount() -> No
     assert decision.reason == "counter_missing_amount"
 
 
+def test_buyer_counter_guard_reads_scalar_bargaining_from_the_opening() -> None:
+    """A counter selecting an unpriced option cannot make a bargained opening
+    take-it-or-leave-it: an acceptance settles the opening."""
+    opening = _selection_proposal(_SCALAR_OPTION, fields={"amount": 100})
+    context = _context()
+    context.our_escrow_proposal = dict(opening)
+    history = [
+        NegotiationRound(round_number=0, sender="them", action="initial", proposal=opening),
+        NegotiationRound(
+            round_number=1, sender="us", action="counter", proposal={"fields": {"amount": "120"}}
+        ),
+        NegotiationRound(
+            round_number=2,
+            sender="them",
+            action="counter",
+            proposal=_selection_proposal(_NON_SCALAR_OPTION),
+        ),
+    ]
+    decision, out = buyer_counter_guard(history, context)
+    assert out.intermediate["uses_scalar_amount"] is True
+    assert decision is not None
+    assert decision.reason == "counter_missing_amount"
+
+
 # -- selected_settlement_artifact ---------------------------------------------
 
 _ESCROW_A = {"chain_name": "anvil", "escrow_address": "0x" + "aa" * 20, "rates": []}

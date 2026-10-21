@@ -18,7 +18,7 @@ from market_policy.negotiation_middleware import (
 from market_policy.scalar_policies import (
     accept_exact_listing_middleware,
     escrow_shape_guard,
-    selecting_proposal,
+    pinned_proposal,
 )
 
 _ESCROW = "0x" + "11" * 20
@@ -128,12 +128,27 @@ def test_the_guard_refuses_a_condition_the_listing_does_not_advertise(proposal) 
             _listing(), {"settlement_selection": {"option_id": "x"}}, id="selection only"
         ),
         pytest.param(_listing(), {"fields": {"amount": "5"}}, id="fields only"),
-        pytest.param({}, _proposal(), id="listing accepts no escrow"),
     ],
 )
 def test_the_guard_passes_what_carries_no_escrow_to_compare(listing, proposal) -> None:
     """Nothing to compare; materialization still holds the release condition."""
     assert _run(escrow_shape_guard, listing, proposal) is None
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [
+        pytest.param({}, id="no accepted escrows"),
+        pytest.param({"accepted_escrows": []}, id="an empty list"),
+        pytest.param({"accepted_escrows": "[]"}, id="empty stored JSON text"),
+    ],
+)
+def test_the_guard_refuses_an_escrow_a_listing_accepting_none_is_offered(listing) -> None:
+    """The seller prices such an escrow from no entry, so the guard stops it."""
+    decision = _run(escrow_shape_guard, listing, _proposal(demand=_condition()))
+
+    assert decision is not None and decision.action == "reject"
+    assert decision.reason.startswith("escrow_not_in_accepted_set")
 
 
 @pytest.mark.parametrize(
@@ -165,25 +180,34 @@ def test_the_guard_refuses_an_escrow_naming_no_contract(listing, proposal) -> No
     assert decision.reason.startswith("escrow_contract_unpinned")
 
 
-def test_the_selecting_proposal_is_the_latest_naming_an_option() -> None:
-    """A counter carrying only fields keeps the option its buyer selected."""
+def test_the_pinned_proposal_is_the_buyers_opening() -> None:
+    """Neither a counter naming another escrow or option nor the seller's own
+    rounds change the proposal an acceptance settles."""
     opening = _proposal()
     history = [
         NegotiationRound(round_number=0, sender="them", action="initial", proposal=opening),
         NegotiationRound(
-            round_number=1, sender="us", action="counter", proposal={"fields": {"amount": "9"}}
+            round_number=1,
+            sender="us",
+            action="counter",
+            proposal=_proposal(escrow_address="0x" + "33" * 20, fields={"amount": "9"}),
         ),
         NegotiationRound(
-            round_number=2, sender="them", action="counter", proposal={"fields": {"amount": "7"}}
+            round_number=2,
+            sender="them",
+            action="counter",
+            proposal={"settlement_selection": {"option_id": "x"}, "fields": {"amount": "1"}},
         ),
     ]
-    selection = {"settlement_selection": {"option_id": "x"}, "fields": {}}
 
-    assert selecting_proposal(history) == opening
-    assert selecting_proposal(
-        [*history, NegotiationRound(round_number=3, sender="them", action="counter", proposal=selection)]
-    ) == selection
-    assert selecting_proposal(history[1:]) is None
+    assert pinned_proposal(history) == opening
+    assert pinned_proposal(history[1:2]) is None
+    assert pinned_proposal([]) is None
+    # An opening carrying no proposal pins none; no later counter stands in.
+    empty_opening = NegotiationRound(
+        round_number=0, sender="them", action="initial", proposal=None
+    )
+    assert pinned_proposal([empty_opening, *history[1:]]) is None
 
 
 @pytest.mark.parametrize("demands", _NO_CONDITION_ON_THE_CHAIN)

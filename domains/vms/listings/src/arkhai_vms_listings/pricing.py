@@ -47,7 +47,8 @@ def extract_initial_price_from_order(
     proposal selects. The seller negotiates from that option's advertised rate,
     in its own asset's base units, so a hosted selection on a listing that also
     offers Alkahest is never priced against the Alkahest rate, and no other
-    entry of the listing ever stands in for it.
+    entry of the listing ever stands in for it. A proposal selecting nothing is
+    priced from no rate and no floor, so None refuses.
 
     When the option advertises no rate the listing is a hidden reserve and the
     floor is the storefront's configured ``default_min_price``, in base units per
@@ -63,9 +64,12 @@ def extract_initial_price_from_order(
     if isinstance(order, dict):
         order = Listing.model_validate(order)
 
-    advertised = (
-        primary_rate_value(selected_option) if selected_option is not None else None
-    )
+    if selected_option is None:
+        raise ValueError(
+            f"Listing {order.listing_id}: the buyer's proposal selects no "
+            "settlement option the listing offers, so nothing prices it."
+        )
+    advertised = primary_rate_value(selected_option)
     if advertised is not None:
         return advertised
 

@@ -747,8 +747,7 @@ async def test_evaluate_negotiate_reports_what_negotiate_new_refuses(tmp_path) -
     assert threads.count == 0
 
 
-#: An escrow proposal may leave its contract unpinned; the storefront client
-#: sends the zero address when the buyer names none.
+#: The zero address, which names no escrow contract.
 _UNPINNED = "0x" + "0" * 40
 
 
@@ -762,54 +761,45 @@ async def _open_unpinned(buyer: StorefrontClient, amount: int) -> dict:
         initial_amount=amount,
         provision_terms=_opening()["provision_terms"],
         token=TOKEN,
+        escrow_address=_UNPINNED,
         proposal_fields={"token": TOKEN},
     )
 
 
-async def test_an_unpinned_opening_below_the_listed_rate_exits_under_the_default_chain(
-    tmp_path,
-) -> None:
-    runtime = _runtime(str(tmp_path / "storefront.db"))
-    await _insert_listing(runtime)
+@pytest.mark.parametrize(
+    "policies",
+    [
+        pytest.param(None, id="default chain"),
+        pytest.param(["listed_price"], id="a chain without the shape guard"),
+    ],
+)
+async def test_an_opening_naming_no_escrow_contract_is_refused(tmp_path, policies) -> None:
+    """Refused by name whatever the seller's chain, even at the listed rate,
+    which the seller would otherwise accept, and nothing is recorded."""
+    amount = 100
+    runtime = _materializing_runtime(str(tmp_path / "storefront.db"), policies=policies)
+    await _insert_listing(runtime, demands=[_recipient_condition(SELLER_WALLET)])
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
         async with _typed(app, ADMIN_SIGNER, "admin") as admin:
             preview = await admin.evaluate_negotiate(
                 "listing-1",
-                proposal=_unpinned_proposal(1),
+                proposal=_unpinned_proposal(amount),
                 buyer_principal=BUYER_SIGNER.identity,
                 provision_terms=_opening()["provision_terms"],
             )
-        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
-            opened = await _open_unpinned(buyer, 1)
+            async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+                with pytest.raises(StorefrontClientError) as refused:
+                    await _open_unpinned(buyer, amount)
+            threads = await admin.list_negotiations("listing-1")
 
-    # Priced from the listing's accepted escrow, 100 for the hour, not from
-    # nothing: the default chain accepts only at or above it.
-    assert (preview.decision, preview.our_reference_amount) == ("exit", 100)
-    assert opened["action"] == "exit"
-
-
-async def test_an_unpinned_opening_below_the_listed_rate_is_countered(tmp_path) -> None:
-    runtime = _countering_runtime(str(tmp_path / "storefront.db"), SourceSite())
-    await _insert_listing(runtime)
-    app = _app(runtime)
-
-    async with app.router.lifespan_context(app):
-        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
-            preview = await admin.evaluate_negotiate(
-                "listing-1",
-                proposal=_unpinned_proposal(80),
-                buyer_principal=BUYER_SIGNER.identity,
-                provision_terms=_opening()["provision_terms"],
-            )
-        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
-            opened = await _open_unpinned(buyer, 80)
-
-    assert (preview.decision, preview.our_reference_amount) == ("counter", 100)
-    assert opened["action"] == "counter"
-    assert 80 < int(opened["proposal"]["fields"]["amount"]) <= 100
-    assert int(opened["proposal"]["fields"]["amount"]) == preview.decision_amount
+    assert preview.refused is True
+    assert "escrow_contract_unpinned" in (preview.decision_reason or "")
+    assert refused.value.status_code == 409
+    assert "escrow_contract_unpinned" in str(refused.value)
+    assert threads.count == 0
+    _nothing_accepted(runtime)
 
 
 async def test_a_pinned_escrow_the_listing_does_not_accept_is_refused(tmp_path) -> None:
@@ -838,8 +828,8 @@ async def test_a_pinned_escrow_the_listing_does_not_accept_is_refused(tmp_path) 
                     proposal_fields={"token": TOKEN},
                 )
 
-    # The fallback prices an unpinned proposal only; a pinned one the listing
-    # does not offer is the guard's refusal, in the preview and the opening.
+    # Nothing prices a contract the listing does not offer; it is refused, in
+    # the preview and the opening.
     assert preview.refused is True
     assert "escrow_not_in_accepted_set" in (preview.decision_reason or "")
     assert refused.value.status_code == 409
@@ -1115,39 +1105,20 @@ async def test_a_listing_authorizing_no_condition_accepts_none(tmp_path) -> None
     _nothing_accepted(runtime)
 
 
-async def test_a_proposal_naming_no_escrow_address_is_still_held_to_the_listing(
-    tmp_path,
-) -> None:
-    """The default chain's shape guard finds no escrow address to compare and
-    skips, so materialization alone refuses the buyer's condition."""
-    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
-    await _insert_listing(runtime, demands=[_recipient_condition(SELLER_WALLET)])
-    app = _app(runtime)
-
-    async with app.router.lifespan_context(app):
-        with pytest.raises(StorefrontClientError) as refused:
-            await _open_at_the_listed_rate(
-                app,
-                escrow_address=_UNPINNED,
-                demands=[_recipient_condition(BUYER_RECIPIENT)],
-            )
-
-    assert refused.value.status_code == 409
-    assert "release_condition" in str(refused.value)
-    _nothing_accepted(runtime)
-
-
 async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
     tmp_path,
 ) -> None:
-    """An unpinned opening naming no condition, as the lane's buyer sends it."""
-    runtime = _materializing_runtime(str(tmp_path / "storefront.db"))
+    """Without the shape guard, which refuses a pinned escrow selecting no
+    advertised condition, materialization settles one under the listing's."""
+    runtime = _materializing_runtime(
+        str(tmp_path / "storefront.db"), policies=["listed_price"]
+    )
     authorized = _recipient_condition(SELLER_WALLET)
     await _insert_listing(runtime, demands=[authorized])
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        accepted = await _open_at_the_listed_rate(app, escrow_address=_UNPINNED)
+        accepted = await _open_at_the_listed_rate(app)
 
     assert accepted["action"] == "accept"
     (obligation,) = accepted["settlement_plan"]["obligations"]
@@ -1168,7 +1139,7 @@ async def test_a_condition_no_escrow_can_be_settled_under_refuses_the_round(
 
     async with app.router.lifespan_context(app):
         with pytest.raises(StorefrontClientError) as refused:
-            await _open_at_the_listed_rate(app, escrow_address=_UNPINNED)
+            await _open_at_the_listed_rate(app, demands=[_recipient_condition("")])
 
     assert refused.value.status_code == 409
     assert "release_condition_unreadable" in str(refused.value)

@@ -112,6 +112,7 @@ from tests.e2e.roles.helpers.compute_deal import (
     pause_storefront,
     wait_for_stage_event,
 )
+from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
     _signer,
@@ -701,7 +702,8 @@ class TestStage04a_PrimaryRegistryPublish:
 
 class TestStage05a_EvaluateNegotiate:
     def test_05a_evaluate_negotiate_would_not_exit(
-        self, storefront_admin_client, buyer_config, deal_state: DealState
+        self, storefront_admin_client, registry_client, buyer_config,
+        deal_state: DealState,
     ):
         """POST /api/v1/admin/listings/{id}/evaluate-negotiate → would_negotiate=True (dry-run).
 
@@ -711,11 +713,13 @@ class TestStage05a_EvaluateNegotiate:
         """
         require_state(deal_state, "seller_listing_id", "resume_confirmed")
 
+        _option, escrow = alkahest_opening(
+            registry_client.get_listing(deal_state.seller_listing_id)
+        )
         result = storefront_admin_client.evaluate_negotiate(
             deal_state.seller_listing_id,
             proposal={
-                "chain_name": "anvil",
-                "escrow_address": "0x" + "0" * 40,
+                **escrow,
                 "fields": {
                     # Decimal-digit string: the request body is
                     # canonicalized for signing, and a base-unit

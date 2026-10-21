@@ -33,6 +33,7 @@ Usage (async)::
         resp = await client.negotiate_new(
             listing_id="listing-id",
             initial_amount=100,
+            escrow_address="0x...",
             provision_terms={...},
         )
 """

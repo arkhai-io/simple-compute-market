@@ -402,10 +402,11 @@ the three storefronts' composition, loops, and status.
       it. Confirmed: an HTTP `rpc_url` builds without contacting the RPC, and a websocket
       one connects at construction, so only a websocket chain's client is missing while it
       is unreachable. A test pins that behaviour against the installed SDK
-      (`kit/storefront/tests/unit/test_zz_sdk_construction_probe.py`). It connects to a
-      refused loopback port, so it is not a pure unit test, and its name is left from a
-      scratch probe; this session could neither rename nor move files (`mv` and `git mv`
-      were refused). **For triage:** move it to `tests/integration/` under a permanent name.
+      (`kit/storefront/tests/integration/test_alkahest_sdk_construction.py`). It connects
+      to a refused loopback port, so it is not a pure unit test: it was written in
+      `tests/unit/` under a scratch name and moved, with Section 8, to the kit's new
+      `tests/integration/`, which the kit's `make test` and `testpaths` now run beside
+      `tests/unit/`.
 - [x] 4.5 VM (`src/server.py`, `settlement_composition.py`, `lifecycle_steps.py`,
       `services/listing_service.py`), bare metal (`src/runtime.py`, `lifecycle_steps.py`,
       `settlement_composition.py`), and API credits (`src/server.py`,
@@ -1228,46 +1229,272 @@ bare-metal seller lifecycle"). Touches `kit/policy`, `kit/alkahest`,
 `core/storefront-client`, the three storefronts' pricing, and the tests and scenarios that
 opened unpinned.
 
-- [ ] 8.1 `kit/policy/src/market_policy/scalar_policies.py`: `escrow_shape_guard` refuses an
+- [x] 8.1 `kit/policy/src/market_policy/scalar_policies.py`: `escrow_shape_guard` refuses an
       escrow proposal whose escrow address is empty or zero with a named reason, and still
       passes a negotiation carrying no escrow proposal; `_accepted_escrow_for_proposal`
       loses its zero-address case. Tests in `kit/policy/tests/unit/test_escrow_shape_guard.py`
       (unit): the "unpinned escrow" case inverted (D18).
-- [ ] 8.2 `kit/alkahest`: `proposals.py` `authorize_escrow_proposal` and `alkahest.py`
+      Done. An escrow proposal is one stating a `chain_name` or an `escrow_address`
+      (`is_escrow_proposal`), whether or not it also carries a selection; one naming no
+      contract (`escrow_contract_unpinned`: missing, empty, or all-zero digits) is refused
+      as `escrow_contract_unpinned`, before and whatever the listing accepts. A round
+      carrying none (no proposal, fields only, selection only) passes. The module's
+      `_ZERO_ADDRESS` went, with VM's `arkhai_vms_negotiation.policies` re-export of it.
+      **Also changed:** an escrow proposal against a listing accepting no escrow is refused
+      as `escrow_not_in_accepted_set` rather than passed, since the seller prices it from no
+      entry (8.3; recorded in design D18). **Added:** `pinned_proposal(history)`, the
+      buyer's opening, which VM and API credits now price from in every round (8.3), as
+      `negotiation-protocol` requires and as acceptance settles; `buyer_counter_guard`
+      reads from it whether the round bargains an amount. Unit (`make -C kit test-policy`
+      92): the four unpinned shapes (zero, empty, no address, zero beside a selection) are
+      refused against a listing accepting the escrow and one accepting none; an escrow
+      against a listing accepting none (absent, empty, empty JSON text) is refused;
+      selection-only and fields-only rounds pass; `pinned_proposal` is the opening whatever
+      a later counter or the seller's own round names, and None for an opening carrying
+      none; a counter selecting an unpriced option after a bargained opening is still
+      scalar and refused as `counter_missing_amount` (`test_selection_scalar.py`).
+- [x] 8.2 `kit/alkahest`: `proposals.py` `authorize_escrow_proposal` and `alkahest.py`
       `materialize_escrow_terms_from_proposal` refuse an unpinned proposal through the
       existing `ReleaseConditionError` family, which every caller already translates, with
       its own code; `escrow_verification.py`'s default-kind branch goes. Tests in
       `test_release_authorization.py` and `test_native_escrow_verification.py` (unit) (D18).
-- [ ] 8.3 First-entry pricing goes: VM `storefront_round.py` (`_selected_option`,
+      Done. `release_authorization.py` gains `UnpinnedEscrowError(ReleaseConditionError)`
+      (message `escrow_contract_unpinned: …`) and `require_pinned_escrow`, which both entry
+      points call first; `proposals` exports the error. The listing form of verification
+      refuses an unpinned proposal as `EscrowVerificationError` before any chain read, and
+      reads every proposal's escrow through its own contract's codec; `escrow_kind` remains
+      only for a legacy thread with no proposal. Unit (`make -C kit test-alkahest` 396), all
+      in `test_release_authorization.py`: four unpinned shapes refused by
+      `authorize_escrow_proposal` whatever condition they select, including the listing's
+      own; by each of the five materializers called directly; and by the listing form's
+      verification without reading the chain. Four `test_escrow_kind_codec.py` cases that
+      materialized at the zero address now use a development address the book does not
+      name, which keeps what they tested (no codec decides the amount).
+      `test_native_escrow_verification.py` needed no change.
+- [x] 8.3 First-entry pricing goes: VM `storefront_round.py` (`_selected_option`,
       `_seller_reference_amount`) and `domains/vms/listings/.../pricing.py`; API credits
       `pricing.py`'s first-escrow and first-option fallbacks; bare metal
       `negotiation_runtime.py` `_priced_acceptance`'s chain-blind fallback (D18).
-- [ ] 8.4 `core/storefront-client/src/storefront_client/client.py` `_negotiate_new_proposal`
+      Done, in three shapes, because the domains run their guards at different points:
+      - **VM and API credits** price from the buyer's pinned opening (8.1's helper), never
+        from another entry's rate or the floor. An escrow proposal selecting nothing the
+        listing offers has reference amount zero: their pricing runs before the policy
+        chain, and every default chain of theirs composes the escrow-shape guard, which
+        then refuses it at the opening by its own reason (`escrow_contract_unpinned`,
+        `escrow_not_in_accepted_set`, the latter now including a listing accepting none);
+        a raised pricing error would have pre-empted it. A selection matching no option is
+        priced at zero in VM, whose opening guard refuses it, and refused by API credits'
+        extractor as before. Every round prices the pinned opening, which round zero
+        checked, and reads from it whether the round bargains an amount, so a counter
+        naming another option or escrow changes neither, and acceptance settles the same
+        opening. A zero reference is safe only if a guard refuses before any decider, so
+        both domains now put their default guards first in their fixed order wherever an
+        operator's chain names one; before, a named guard kept the operator's position,
+        and VM's shipped `settings.toml` chain put `accept_unpriced_selection` ahead of
+        the shape guard. `extract_initial_price_from_order` takes
+        `selected_option` as a required argument and refuses None;
+        `extract_unit_price_from_order` refuses a proposal selecting nothing; neither falls
+        back to the floor for one, which applies only to a selected option advertising no
+        rate. Its unused `_accepted_escrows` reader went.
+      - **Bare metal**'s guard is a configurable default, so its opening refuses before
+        any policy: `_priced_acceptance` raises `escrow_contract_unpinned` (through the
+        kit's `require_pinned_escrow`) or `escrow_not_in_accepted_set`, 409.
+        `_matching_acceptance` serves the continuation's reference amount, read on every
+        resumed round including exit, where an unmatched escrow prices from nothing
+        rather than refusing, so a buyer can always leave.
+      - Unit: VM `test_extract_initial_price.py` and API credits `test_concept_modules.py`
+        name the escrow each case selects, and a parametrized case shows no proposal, an
+        unpinned one, an unlisted one, and (VM) another chain's are priced at zero with a
+        floor configured, and refused by the extractors themselves; a listing accepting no
+        escrow prices a pinned escrow at zero; a selection matching no option is priced at
+        zero in VM and refused by API credits' pricing. VM's `TestRoundReference` runs
+        hand-built rounds through `_run_default_seller_round_policy` and its default chain:
+        on a two-escrow listing, a counter naming the second, amountless escrow, with an
+        amount or without, keeps the opening's reference and scalar bargaining and is not
+        accepted; an opening naming an escrow the listing does not accept is priced at zero
+        and refused as `escrow_not_in_accepted_set`. No test runs those rounds through
+        `NegotiationRuntime` or the typed client, and no API-credit test runs a round
+        through its hook and chain; the guard-order change has no test of its own beyond
+        the suites still passing.
+      - **Also changed:** both compute storefronts' negotiation-strategy status probes
+        (`system_service.py`, bare metal `negotiation.py`) used the zero address to slip
+        past the guard with no listing; they now open with a placeholder contract and
+        condition on a synthetic listing that accepts and advertises them, since the
+        guard refuses both an unpinned escrow and one a listing does not accept.
+- [x] 8.4 `core/storefront-client/src/storefront_client/client.py` `_negotiate_new_proposal`
       no longer fills a zero escrow address or token for an escrow opening, which would
       build exactly the refused shape: an escrow opening requires its escrow address, and a
       caller with no escrow uses the selection-only opening. Tests in
       `core/storefront-client/tests/test_negotiate_new_payload.py` (unit) (D18).
-- [ ] 8.5 Callers that opened unpinned move to a pinned or selection-only opening: VM
+      Done: an escrow opening with no `escrow_address` raises `ValueError` before any
+      request, and the token appears only when given; the chain and expiry defaults stay.
+      Both clients' `negotiate_new` docstrings say so, and the module's usage example names
+      an address. Unit (`make -C core/storefront-client test` 65): an empty or omitted
+      address is refused before HTTP; an opening given no token names none; the legacy-envelope refusal now matches
+      the envelope's own message, so it cannot pass on the address refusal instead.
+      An explicit zero address still reaches the server, which is how 8.6 tests the
+      server's refusal through the typed client.
+- [x] 8.5 Callers that opened unpinned move to a pinned or selection-only opening: VM
       `tests/unit/test_escrow_fields_policy.py`, `unit/test_escrow_verification.py`,
       `integration/test_negotiate_controller.py`, `integration/test_listings_api.py`; bare
       metal `tests/test_http_negotiation.py` (its `_UNPINNED` cases become refusals); e2e
       `helpers/compute_deal_stages.py` (the opening and the evaluate-negotiate dry-run),
       `vms/test_full_deal_buyer_cli.py`, `vms/test_multi_registry.py`,
       `vms/test_non_erc20_settlement.py`, `bare_metal/test_bare_metal_mock_deal.py` (D18).
-- [ ] 8.6 Application integration through `StorefrontClient`: in VM's
+      Done.
+      - **A second carve-out surfaced.** With its escrow pinned, the guard also requires
+        the proposal to select one of the listing's advertised conditions
+        (`selected_demand_not_allowed` otherwise); the unpinned openings had skipped that
+        check too. So every pinned opening names the listing's condition as well as its
+        contract and literal fields, as a buyer deriving its proposal from the option
+        does (`escrow_proposal_from_accepted_entry`).
+      - VM: `test_escrow_fields_policy.py` (the zero-address pass becomes a refusal);
+        `test_escrow_verification.py` (the default-kind fallback becomes a refusal before
+        any read); `test_order_pause_state.py`, not in the plan: the retryable-source test
+        opened unpinned, so the fixture listing gains a condition and the test names it;
+        `test_negotiate_controller.py`'s openings take `_PINNED` (the seeded listing's
+        escrow, token, and condition), so each refusal under test is its own;
+        `test_listings_api.py`'s dry-runs name the seeded listing's escrow and no
+        condition, which they need not, because those tests patch the chain to bisection
+        alone and no guard runs.
+      - Bare metal `test_http_negotiation.py`: the two unpinned pricing tests became 8.6's
+        refusal; the plan-materialization test of an opening naming no condition now runs
+        without the guard, which is the only way such an opening reaches materialization;
+        the unreadable-condition test selects the listing's (unreadable) condition.
+      - e2e: `compute_deal_stages.py` gains `alkahest_opening(listing)`, the listing's
+        Alkahest option and the escrow an opening names (contract, literal fields, the
+        listing's condition on its chain), read from the registry's copy; Stage05a's
+        dry-run and Stage05b's opening use it, as do bare metal's Stage12b,
+        `test_full_deal_buyer_cli.py`'s Stage05a dry-run, and `test_multi_registry.py`'s
+        two openings (through registry A). `test_non_erc20_settlement.py` already
+        opened pinned with its condition and needed no change.
+- [x] 8.6 Application integration through `StorefrontClient`: in VM's
       `tests/integration/test_negotiate_controller.py` and bare metal's
       `tests/test_http_negotiation.py`, an unpinned escrow opening is refused naming the
       reason, with the seller's guard composed and with it omitted (the kit chokepoint
       refuses it) (D18).
-- [ ] 8.7 Versions: `arkhai-kit-policy` (and the exact pin in `kit/negotiation-runtime`),
+      Done.
+      - Bare metal: an opening at the zero address at the listed rate, under the default
+        chain and under `["listed_price"]` alone: the dry-run reports it refused naming
+        `escrow_contract_unpinned`, the opening is 409 naming it, no thread is listed,
+        and nothing is accepted. By the code, the refusal under either chain is the
+        opening's pricing, through the kit's check, before any policy, so bare metal's
+        shape guard never sees an opening's escrow; the test asserts the refusal and its
+        reason, not which of the two checks produced it.
+      - The kit chokepoint itself (`authorize_escrow_proposal` and the materializers) is
+        evidenced by 8.2's unit tests only; neither domain's application test reaches it
+        with an unpinned proposal, since each refuses earlier.
+      - VM: an opening at the zero address under the default chain, and under a seller
+        hook that accepts as proposed, is 409 naming `escrow_contract_unpinned`, with no
+        Agreement or plan recorded.
+      - **Differed:** VM's Alkahest entry funds the escrow its selected option names, so
+        the buyer's carrier beside the selection was never materialized, and without the
+        guard the zero-address opening was accepted against the option's real contract.
+        `VmAlkahestSellerStage.accepted_artifacts` now runs the kit's
+        `require_pinned_escrow` over an escrow carrier the buyer sends, so the acceptance
+        is refused as materializing it would be. The carrier is still not compared with
+        the option's entry; a pinned carrier naming another contract is accepted against
+        the option's, as before.
+- [x] 8.7 Versions: `arkhai-kit-policy` (and the exact pin in `kit/negotiation-runtime`),
       `arkhai-kit-alkahest`, `arkhai-core-storefront-client`, `arkhai-vms-listings`,
       the three storefronts, `arkhai-e2e-tests`; `make lock`.
-- [ ] 8.8 **Verify.** `make -C kit test-policy test-alkahest test-negotiation-runtime`;
+      Bumped: `arkhai-kit-policy` 0.6.0; `arkhai-kit-negotiation-runtime` 0.5.2, whose
+      exact pin on policy moved and whose exact pins in the three storefronts moved with
+      it; `arkhai-vms-listings` 0.7.0 (`extract_initial_price_from_order`'s argument is
+      required); `arkhai-vms-negotiation` 0.5.0 and `arkhai-apicredits-domain` 0.7.0, not
+      in the plan but both changed, with policy floors at 0.6.0; VM storefront 0.21.0 (its
+      exact pin on bare metal moved), bare-metal storefront 0.21.0, API-credit storefront
+      0.15.0, with floors on the packages above; `arkhai-e2e-tests` 0.3.1; `make lock`.
+      **Not bumped:** `arkhai-kit-alkahest` and `arkhai-core-storefront-client`, already
+      bumped and unreleased on this branch (7.8's policy); `arkhai-kit-storefront`, whose
+      wheel is unchanged (only its test layout and `testpaths` moved).
+- [x] 8.8 **Verify.** `make -C kit test-policy test-alkahest test-negotiation-runtime`;
       `make test-core`; `make test-vms-domain`, `make test-storefront`, `make
       test-bare-metal`, `make test-apicredits`; `make test-e2e-unit`; `make test`; `make
       check-packaging`. End-to-end: `e2e_deal`, `multi_registry`,
       `e2e_non_erc20_settlement`, and `e2e_bare_metal_mock_deal` open
       pinned and negotiate as before.
+      Results, on the branch merged with dev's Helm render repair:
+      - `make -C kit test-policy test-alkahest test-negotiation-runtime`: 89, 396, 61
+        passed; `make -C kit/storefront test` 127 passed, the moved SDK test among them.
+      - `make test-core` passed (123, 134, 217 with 2 skipped, 65).
+      - `make test-vms-domain` 53 and `make test-vms-buyer` 202 passed.
+      - `make test-storefront`: unit 1113 passed; integration 450 passed with the two
+        environmental `test_alkahest.py` failures (no Node.js or Anvil here).
+      - `make test-bare-metal` (storefront 448) and `make test-apicredits` (storefront
+        219) passed; `make test-e2e-unit` 38 passed, which parses `compute_deal_stages.py`.
+      - After the fresh-context checks' fixes (`make dist` first): `make -C kit test-policy
+        test-negotiation-runtime` 92, 61, and `test-alkahest` 396; `make test-core` (123,
+        134, 217 with 2 skipped, 65); `make test-vms-domain` 53; `make test-vms-buyer` 202;
+        `make test-storefront` unit 1119 (1 skipped), integration 450 with the same two
+        environmental failures; `make test-bare-metal` storefront 446 (the
+        unpinned-opening test lost its amount parameter); `make test-apicredits` storefront
+        221; `make check-packaging` passed; `make check-change` fails only on the same two
+        citations. `make test-e2e-unit` was not rerun: no e2e file changed after its run.
+      - **Also changed by the fixes:** both compute storefronts' negotiation-strategy status
+        probes now run against a synthetic listing accepting their placeholder escrow and
+        advertising its condition, since the guard refuses an escrow against a listing
+        accepting none; `docs/configuration.md`'s `escrow_shape_guard` and `bisection` rows
+        describe the refusals and the selected option's floor.
+      - `make test`: not run whole, as in Section 7; the suites above cover every project
+        whose code or locks changed.
+      - The changed e2e scenario modules were not byte-compiled: `python3 -m py_compile`
+        was refused here, and no lane runs locally.
+      - `make check-packaging` passed; `make check-change` fails only on the two citations
+        Sections 13 and 22 create.
+      - End-to-end, unrun: `e2e_deal` (Stage05a, Stage05b), `e2e_deal_buyer_cli` (its
+        Stage05a), `multi_registry` (06a, 06b), and `e2e_bare_metal_mock_deal` (the
+        shared Stage05a and Stage05b, and Stage12b) now open pinned with the listing's
+        condition; `e2e_non_erc20_settlement` is unchanged. Bare metal's lane also needs
+        this section to settle at all (Section 7's correction to 7.9). The pipeline run is
+        the evidence.
+
+Section 8 notes (handoff):
+
+- **Decision 18's premise was wrong.** It says no buyer in this repository sends an
+  unpinned proposal; the client filled the zero address for any caller naming none, and
+  every bare-metal lane deal, the shared stages, and the multi-registry openings sent one.
+  The outcome the decision chose (refuse) is unaffected; the round's triage may want the
+  rationale corrected.
+- **The zero address was a second carve-out.** Pinned, an escrow proposal must also
+  select one of the listing's advertised conditions, which the unpinned openings had
+  skipped; every opening this section pinned names the listing's condition.
+- **Pricing differs by domain on purpose** (8.3): VM and API credits price an unselected
+  escrow proposal at zero and let their always-composed guard refuse it; bare metal, whose
+  guard a seller may omit, refuses it before policy. The design records it under D18.
+- **What the fresh-context checks caught in pricing.** The first draft priced at zero on a
+  listing accepting no escrow, where the guard then passed the proposal, so a negotiation
+  ran against a zero reference; a second draft priced it from the floor, which the
+  permanent spec forbids (the floor applies only to a selected option without a rate).
+  The resolution is the guard refusing an escrow against a listing accepting none. The
+  checks also caught that pricing from the buyer's latest selecting proposal let a
+  counter change the option priced while acceptance settled the opening, which
+  `negotiation-protocol` already forbids ("the buyer's pinned proposal"); every round
+  now prices the pinned opening. Before this section VM and API credits priced the
+  latest buyer proposal, with the same exposure. A third check caught the scalar
+  switch still following the latest proposal and operator-named guards running after a
+  decider; both are fixed (8.3).
+- **Not rechecked:** the third check's fixes (default guards first in fixed order, and
+  `buyer_counter_guard` reading scalar bargaining from the opening) had no fourth
+  fresh-context check; the round's implementation review is the next reader.
+- **Declined from the third check:** removing VM's two guard tests in
+  `test_escrow_fields_policy.py` as duplicates of the kit's, since each replaced an
+  existing VM test that asserted the old pass and the file is VM's check of the guard it
+  re-exports; sharing the two storefronts' probe constants, which would need a kit for
+  six lines; a typed-client application test of the pinned reference, left to the
+  round's review.
+- **Declined from the fresh-context check:** the unpinned-escrow predicate exists twice,
+  `kit/policy`'s `escrow_contract_unpinned` and `kit/alkahest`'s `require_pinned_escrow`,
+  because the scope rule forbids the mechanism-neutral policy kit from importing the
+  Alkahest kit and the guard must not depend on it; and the design-promotion record is
+  completed for the whole change at closeout, as the plan's closeout task says.
+- **VM checks the buyer's carrier beside a selection only for a contract** (8.6's
+  differed note): a carrier naming a contract other than the option's is still accepted
+  against the option's.
+- **Accepted unpinned deals** remain Section 7's open question for triage: they can no
+  longer verify, and this section removes the last path that accepted them.
+- **`kit/storefront` now has `tests/integration/`**, holding Section 4's SDK
+  construction test, moved with `git mv` under a permanent name.
 
 ## 9. A buyer funds only what it derives
 

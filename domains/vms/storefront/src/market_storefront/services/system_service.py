@@ -35,6 +35,19 @@ from market_storefront.utils.config import (
 
 logger = logging.getLogger(__name__)
 
+# The negotiation-strategy probe's synthetic listing: placeholder values that
+# name no real contract or party. The shape guard refuses an escrow naming no
+# contract, one its listing does not accept, and a condition its listing does
+# not advertise, so the probe's opening names this listing's escrow and
+# condition.
+_PROBE_ESCROW = {"chain_name": "probe", "escrow_address": "0x" + "11" * 20}
+_PROBE_CONDITION = {
+    "chain_name": "probe",
+    "arbiter": "0x" + "22" * 20,
+    "demand_data": {"recipient": "0x" + "33" * 20},
+}
+_PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDITION]}
+
 
 def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
     """Per-site report of what the latest derivation could not publish.
@@ -327,7 +340,8 @@ class SystemService:
         """Probe the configured negotiation chain. Returns a viability string.
 
         Runs the chain against a synthetic round-0 input (buyer matching
-        seller price exactly, no listing context) and reports whether the
+        seller price exactly, on a synthetic listing accepting the probe's
+        escrow and condition) and reports whether the
         terminal middleware would accept/counter (viable) or exit (broken
         config). Guard middlewares fire first; their veto produces
         ``exit_on_probe`` with the guard's reason — operator can read the
@@ -355,13 +369,10 @@ class SystemService:
                     # Minimal structurally-valid opening proposal: the VM
                     # opening guard validates the full EscrowProposal shape
                     # (chain_name/escrow_address/expiration_unix required).
-                    # The zero escrow address keeps the shape guard's legacy
-                    # carve-out applicable, so the probe needs no
-                    # accepted-escrows context on a listing.
                     proposal={
-                        "chain_name": "probe",
-                        "escrow_address": "0x" + "00" * 20,
+                        **_PROBE_ESCROW,
                         "fields": {"amount": 10_000},
+                        "demand": _PROBE_CONDITION,
                         "expiration_unix": 4_102_444_800,  # 2100-01-01
                     },
                 )
@@ -369,6 +380,7 @@ class SystemService:
             context = NegotiationContext(
                 direction="maximize",
                 our_reference_amount=10_000,
+                listing=_PROBE_LISTING,
                 # The probe exercises the strategy, not a listing: no source is
                 # checked, so the inventory guard is given a matching verdict.
                 listing_source=ListingSourceVerdict("matches"),
