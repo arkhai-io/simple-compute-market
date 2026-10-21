@@ -51,7 +51,7 @@ dependencies = [
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
     "arkhai-apicredits-buyer>=0.5.0",
-    "arkhai-kit-arkhai-payments>=0.2.0",
+    "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-policy>=0.4.0",
 ]
 

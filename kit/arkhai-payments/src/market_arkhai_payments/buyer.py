@@ -122,6 +122,7 @@ class PaymentApproval:
             self.config.service_identity,
             mandate=data.mandate,
             agreement_json=dict(agreement),
+            livemode=self.config.livemode,
         ):
             raise ReceiptVerificationError(
                 f"payments {label} receipt does not prove the accepted Agreement"

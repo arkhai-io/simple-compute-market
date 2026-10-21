@@ -38,9 +38,18 @@ _PLACEHOLDER_PROOF = {"scheme": "ed25519", "value": "A" * 86}
 class FakePaymentsClient:
     """Records calls and answers like the payments service for one transaction."""
 
-    def __init__(self, *, signer: Signer | None = None, observed_at: int = 1_800_000_100) -> None:
+    def __init__(
+        self,
+        *,
+        signer: Signer | None = None,
+        observed_at: int = 1_800_000_100,
+        livemode: bool = False,
+    ) -> None:
         self.signer = signer
         self.observed_at = observed_at
+        # The mode the receipts this fake signs on approval carry: false plays a
+        # test or development payments service, true a live one.
+        self.livemode = livemode
         self.receipt: SignedReceipt | None = None
         self.attachments: list[dict[str, Any]] = []
         self.owners: list[str] = []
@@ -86,7 +95,9 @@ class FakePaymentsClient:
         if self.signer is None and self.receipt is None:
             raise AssertionError("FakePaymentsClient needs a signer or a served receipt to approve")
         if self.signer is not None:
-            self.receipt = build_signed_receipt(signer=self.signer, mandate=mandate)
+            self.receipt = build_signed_receipt(
+                signer=self.signer, mandate=mandate, livemode=self.livemode
+            )
         if agreement is not None:
             self._store_attachment(agreement)
         assert self.receipt is not None
@@ -201,6 +212,7 @@ class FakePaymentsClient:
                     "events": [],
                     "attachments": list(self.attachments),
                     "issuer": receipt["receipt"]["issuer"],
+                    "livemode": receipt["receipt"]["livemode"],
                 },
                 "proof": _PLACEHOLDER_PROOF,
             }

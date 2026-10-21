@@ -11,7 +11,7 @@ dependencies = [
     "arkhai-core-storefront>=0.14.0",
     "arkhai-kit-capacity-publication==0.10.1",
     "arkhai-kit-alkahest>=0.8.0",
-    "arkhai-kit-arkhai-payments>=0.2.0",
+    "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-config>=0.4.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-policy>=0.5.0",
