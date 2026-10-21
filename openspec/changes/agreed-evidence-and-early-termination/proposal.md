@@ -1,76 +1,76 @@
 ## Why
 
-Seller-initiated interruption ships in part: an interruptible VM listing, a storefront admin endpoint that shortens the capacity lease, and Alkahest splitter plumbing. The money side returns `splitter_declaration_pending`, and nothing describes what an interruption *is* in terms the rest of the system can reason about. Three gaps follow from that:
+Seller-initiated interruption ships in part: an interruptible VM listing, a storefront admin endpoint that shortens the capacity lease, and Alkahest splitter plumbing whose money side returns `splitter_declaration_pending`. Bare metal separately has a buyer teardown route. Nothing describes what happens after an agreement is committed in terms both payment mechanisms and every domain can share:
 
-- Seller reclaim ("spot" in the cloud sense), buyer early stop, and payer funding exhaustion are treated as different features, although they are one lifecycle event with different permitted initiators.
-- It is undefined which parts of a deal belong to the market protocol and which are private dealings between buyer and seller after agreement. The settlement receipt, the fulfillment result (SSH endpoint), and the buyer's SSH key each travel at a different stage with no stated rule for why.
-- An agreement does not state how a dispute about it would be decided: which evidence counts, who produces it, and what happens when nobody submits any. Each settlement mechanism answers this implicitly — an Alkahest arbiter and demand, an `arkhai.payments.v1` mandate's authorities and holds, buyer-signed heartbeats — but the agreement does not say so as a rule.
-
-This change fixes the model first: what the agreement must contain, where the protocol ends, and how early termination fits in. It then plans the code changes needed to realize it.
+- Seller reclaim, buyer stop, funding exhaustion, and exceptional ends such as failed hardware are handled as separate features, and the hosted and Alkahest paths diverge.
+- It is undefined which steps are protocol and which are dealings between the parties after commitment.
+- An agreement does not state how a dispute about it is decided, and the evidence a dispute would need is not kept.
 
 ## What Changes
 
-- **Protocol boundary.** The market protocol covers discovery, negotiation to a mutually authenticated agreement, and settlement. Everything the parties exchange after that — access details, action handles, notices, evidence — is outside the protocol unless a dispute brings it before an arbiter. Core gains no interruption or other post-agreement lifecycle verb.
-- **The agreement is the demand.** An agreement contains everything needed to decide a dispute about it, in the form `arbitrate(demand, evidence)`. For each clause it names the evaluator, the evidence regime that evaluator accepts (for example a trusted metering gateway that retains records, an oracle declaration, or peer signatures that a party submits in its own interest), and the outcome when no evidence is submitted.
-- **Clauses must be enforceable when agreed.** A clause is admissible only if its regime can produce evidence that decides it, and both parties confirm at negotiation that they can take part in the regime it names.
-- **Early termination is one clause family.** It records the permitted initiators (seller reclaim, buyer stop, payer exhaustion), the notice period, the rule for settling used and unused service, and the evidence that proves an early end. Spot and interruptible offerings are parameter choices within it. A mechanism that cannot settle a partial term is not offered with this clause.
-- **One storefront operation executes an early end.** "End service at T" accepts every trigger, shortens the capacity lease through the site authority, and calls a mechanism-neutral early-end operation on the settlement mechanism. Each half is retried and resumed independently.
-- **Ending early is a party action.** It is sent with the initiator's own credentials to the authority the agreement names, whose record is authoritative. The operator interrupt route is not the parties' interface.
-- **Worst case first, cooperative defaults.** Each party's safety depends only on the authority's record and its own records, with exposure bounded by the agreed terms; for example, the seller watches the authority at a cadence derived from the settlement rule. Our implementations still send courtesy notices, but these are hints that trigger a check of the authority, never a second path to the same result.
-- **Commitment follows the mechanism.** Hosted approval, on-chain funding, or exchanged signed messages, each binding one canonical agreement digest. Alkahest demands gain that digest.
-- **Dispute data is one case payload.** The agreement digest is the root, and every evidence item uses one envelope, so a future dispute authority receives a single self-contained case instead of reconciling mechanism-specific stores.
-- **Hosted first, decentralizable always.** The hosted payments mechanism is the production path and is implemented completely first. Alkahest is maintained so that a neutral trustless alternative remains possible for every managed component. Its seller-as-oracle behavior is trusted, not secure. New decisions are tested on whether a neutral arbiter (a third-party oracle or a signature-based arbiter) could implement them.
-- **The post-agreement exchange is minimal and placed by rule.** After agreement and funding, buyer and seller make one exchange: the buyer sends the funding reference and the information the seller needs; the seller replies, possibly asynchronously, with access details and action handles. Information goes in the agreement when it must be binding and is known in advance; in a receipt or result when it is created later; and after acceptance when it must not be disclosed before commitment.
+- **The protocol is what a party must do to continue:** discovery, negotiation, and the mechanism's commitment act. Everything after commitment is lifecycle, visible to arbitration only through evidence. Settle moves out of core as the buyer's `commit` handoff.
+- **The committed agreement is the mechanism's:** Alkahest's arbiter and `DemandData`, the hosted payments mandate, or a countersigned Agreement. The buyer verifies it is the derivation of the negotiated terms before committing. There is no universal agreement digest.
+- **Clauses name their adjudicator.** For deals through the official Arkhai registry the default is optimistic, Arkhai-adjudicated; a deferred dispute authority automates some cases later.
+- **An early-termination clause in each settlement option's `params`.** Entitlements per initiator are the mechanism's stop authorities; exceptional ends are disputes, conceded by the seller in the cooperative case; buyer stops settle through the seller's declared exposure; notice is posted at the authority. The listing-wide interruptible flag is replaced by a registry field derived from options.
+- **One lifecycle interface on each side of the mechanism.** A mechanism-neutral event model (`commit`, `start`, `notice`, `stop`, `dispute`, `concede`), a buyer half and a seller half, and adapters per mechanism and per arbiter or oracle. A new kit holds the neutral layer; the seller's own capability is seller-authenticated routes the CLI, strategy runner, and admin route call.
+- **The authority's record decides.** Parties act at the authority with their own credentials; funds move only after a seller action that begins service; courtesy notices are hints.
+- **End service at T** consumes lifecycle events: a maximum-term lease as backstop, terminate when *T* has passed, truncate at full precision otherwise. Bare metal's teardown route becomes a caller.
+- **Each party keeps its evidence:** commitment envelopes always, other records by regime, in a store separate from replay state. A dispute is one exportable case payload.
+- **Hosted first; a neutral trustless alternative stays possible.** Alkahest is at the user's own risk until a specialized arbiter exists.
 
 ## Capabilities
 
 ### New Capabilities
 
-None.
+- `deal-lifecycle`: the lifecycle event model, the early-termination clause codec, the buyer and seller halves and their routes, the evidence store, the dispute case payload, and end service.
 
 ### Modified Capabilities
 
-- `negotiation-protocol`: agreements name an evaluator, evidence regime, and default outcome per clause; regime participation is checked before acceptance; the seller's acceptance is authenticated.
-- `settlement-servicing`: a mechanism-neutral early-end operation beside collect and reclaim, implemented per mechanism or declared unsupported.
-- `settlement-configuration`: a mechanism declares whether it can settle a partial term, and which evidence regimes it supports.
-- `storefront-publication`: listings advertise the early-termination clause and its parameters.
-- `vm-storefront-fulfillment` and `fulfillment`: the storefront's end-service operation; lease truncation stays distinct from proven teardown.
-- `introduction-delivery`: possibly a delivery target for buyer-side notices (open question).
+- `negotiation-protocol`: the protocol ends at commitment; the settle route leaves core; the buyer verifies the committed form against the negotiated terms (modifies the exact-release-condition requirement); acceptance envelopes are kept.
+- `buyer-orchestration`: the `commit` handoff replaces settle; buyer stop, dispute, and read through the buyer half.
+- `settlement-servicing`: lifecycle adapters resolve through the role table, not the escrow-client port; "Signed heartbeat evidence" is modified to keep signatures.
+- `settlement-configuration`: option builders emit the clause only where the part shape and arbiter can end early; stop and start authorities derive from entitlements.
+- `storefront-publication`: listings carry the clause per option; the listing-wide flag is removed.
+- `registry-discovery` and `cli-query-language`: a filterable field derived from options.
+- `vm-storefront-fulfillment`: "Full settlement convergence ownership" is modified, since end service writes the lease.
+- `site-capacity`: terminate versus truncate under end service, at full precision.
 
 ## Dependencies and Related Changes
 
-- `automate-seller-spot` is seller-only and splitter-specific. Once this change is accepted it should be rescoped to the seller-decision runner and its decision evidence, with splitter execution becoming the Alkahest implementation of the early-end operation.
-- `spot-deals-through-arkhai-payments` (in design) is the hosted production path for VM interruptible deals: a rate part with `until: stop`, teardown by the signed funded-through time or on a stop, and stops issued for seller preemption and buyer cancellation. Under D13 it is the first implementation of this change's model. This change does not duplicate it. Two points must be reconciled with it: notice periods (it forbids future-dated stops) and the settlement point of a stop (D5).
-- `replace-polling-with-authenticated-push` covers provisioning-to-storefront delivery only; buyer-side notices are not covered there.
-- Payer funding exhaustion on hosted payments is `spot-deals-through-arkhai-payments`' rate parts; issue #269 tracks the same.
-- The hosted payments service may need notice support and initiator-dependent settlement terms (open in design). Stops by authorized accounts, cause recording, funding exhaustion, the deal digest, and signed snapshots already exist.
+- `spot-deals-through-arkhai-payments` depends on this change and implements the hosted rate part against its kit, with the amendments recorded in its proposal.
+- `automate-seller-spot` depends on both and is rescoped to the strategy runner.
+- `version-accepted-artifacts`: exact stored bytes for the evidence store.
+- `move-escrow-into-alkahest`: the Alkahest adapter is ordered with it.
+- The hosted payments contract must provide the items in design.md, "Dependencies on the hosted payments service", vendored through `kit/arkhai-payments/schema/SOURCE.md`; SCM must verify snapshot proofs before reading snapshot state as evidence.
+- Issue #269 tracks hosted rate parts.
 
 ## Non-Goals
 
-- Building a mechanical dispute authority or a managed metering gateway. They are deferred and will be built together. Until then the Alkahest splitter oracle is the seller itself. This change defines the agreement contents and the dispute case format such an authority will consume.
-- Adding post-agreement messages to the core protocol.
+- An automated dispute authority, a managed metering gateway, or a specialized Alkahest arbiter.
+- Lease extension (top-up).
+- Delivering courtesy notices to buyer-supplied webhooks.
 - Preemption between reservations inside the site authority (`pools-6-fair-scheduling-policy`).
-- Choosing seller interruption strategy; that remains in `automate-seller-spot`.
+- Choosing seller interruption strategy (`automate-seller-spot`).
+- Merging the VM and bare-metal domains.
 
 ## Impact
 
-Design phase; not yet planned. Expected impact, to be confirmed by the code audit that follows:
-
-- **Wire:** additive fields in domain terms and settlement options for clause evaluator, regime, and default outcome; versioned where they change a signed body.
-- **Persistence:** a durable early-end record per deal, independent of stage events.
-- **Packaging:** the end-service operation and early-end mechanism contract belong in shared kit, not the VM domain, so bare metal can use them.
+- **Wire:** the clause inside option `params` changes option IDs, so listings re-derive them on republish; the settle route moves. There is no backwards-compatibility promise.
+- **Persistence:** an evidence store per commitment reference, and lifecycle records per deal.
+- **Packaging:** a new `kit/deal-lifecycle`; adapters in `kit/arkhai-payments` and `kit/alkahest`; storefronts and the buyer client bind the kit.
 
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md`
 - [x] Existing subsystem specification
-- [ ] New subsystem specification
+- [x] New subsystem specification
 - [ ] No permanent documentation change
 
 ### Knowledge to promote
 
-- Protocol boundary and the agreement-as-demand model → `docs/development/ARCHITECTURE.md` (core role contracts and major flows).
-- Clause evaluator, regime, default outcome, and regime-participation checks → `openspec/specs/negotiation-protocol/spec.md`.
-- Early-end operation and per-mechanism support → `openspec/specs/settlement-servicing/spec.md` and `architecture.md`; mechanism declarations → `openspec/specs/settlement-configuration/spec.md`.
-- End-service operation and its independent halves → `openspec/specs/vm-storefront-fulfillment/spec.md` and `openspec/specs/fulfillment/spec.md`.
-- Information placement rule → `docs/development/ARCHITECTURE.md`.
+- D1 protocol boundary, D2 mechanism-defined commitment, D12 worst-case rule, D13 neutral-alternative test, D14 information placement → `docs/development/ARCHITECTURE.md` ("Authority boundaries", major flows).
+- D4 adjudicator and admissibility → `openspec/specs/negotiation-protocol/spec.md`.
+- D5 clause, D6 lifecycle interface, D7 authority record, D8 end service, D9 evidence store, D10 case payload → the new `deal-lifecycle` capability's `spec.md` and `architecture.md`.
+- D5 option-level clause emission → `openspec/specs/settlement-configuration/spec.md` and `openspec/specs/storefront-publication/spec.md`.
+- D6 role-table adapters and D11 optimistic adjudication → `openspec/specs/settlement-servicing/architecture.md` ("Capacity coupling" and "Current limits" are modified).
+- D8 lease primitives → `openspec/specs/site-capacity/spec.md` and `openspec/specs/vm-storefront-fulfillment/spec.md`.
