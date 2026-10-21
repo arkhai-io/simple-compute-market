@@ -20,7 +20,9 @@ when zerotier_network is unset in the storefront config — entrypoint.sh is alr
 fail-soft on daemon startup and the Python runtime skips all ZeroTier paths
 when zerotier_network is absent.
 */}}
-{{- range $name, $entry := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
 {{- /* An agent states no runtime overlay by omitting `secret`. */}}
 {{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 {{- $addressBook := include "storefront.agentAddressBook" $agent | fromJson }}

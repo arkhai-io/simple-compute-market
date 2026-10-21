@@ -7,6 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CHART_DIR="$SCRIPT_DIR/.."
 RELEASE="${RELEASE:-arkhai-test}"
 
+# Every render log names the Helm that produced it, so its results and the
+# wording of its refusals are read against that Helm. The supported Helm is the
+# release .github/workflows/tests.yml pins.
+echo "helm $(helm version --short)"
+
 DEFAULT_RENDERED="$(mktemp)"
 PAYMENTS_RENDERED="$(mktemp)"
 EVM_RENDERED="$(mktemp)"

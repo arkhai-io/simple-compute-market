@@ -90,6 +90,7 @@ allow = [
   # the worktree, so the step creates them as well as editing them.
   "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
   "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
+  "Bash(helm version*)",
 ]
 deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
@@ -118,6 +119,8 @@ allow = [
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)",
+  "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
+  "Bash(helm version*)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
 
@@ -130,6 +133,7 @@ allow = [
   "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
   "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)",
+  "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
 ]
 deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
 
