@@ -342,6 +342,25 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
       this archival task itself. Reviews moved with the change and remain local.
       The index links the archive and stays in closeout for the closeout review.
 
+### Closeout review 48 corrections
+
+- 48 F1: corrected the permanent deployment-state requirement, archived delta and
+  design wording to scope removal to null-valued mapping keys. List elements keep
+  their item schema's meaning. This corrects closeout 6.3/6.9's overbroad contract
+  statement without changing runtime behavior.
+- 48 F2: on the owner's direction, removed the false Helm limitation from the
+  comment in `helm/charts/storefront/values.yaml`. This corrects 6.1's confirmation:
+  triage 43 had left that known comment outside its scope. No template logic changed.
+- The owner accepted both corrections and chose Advance rather than another
+  closeout review. The existing validation waiver remains in effect: no new
+  tests, packaging build, Helm deployment or pipeline run is claimed.
+- `make check-change CHANGE=repair-helm-render-tests`: passed all six static
+  checks — comment hygiene, agent skills, documentation citations, task list,
+  change index, and pinned strict OpenSpec validation of all permanent specs.
+  Diff review against `f2a1b4375`: only the six planned files changed; YAML data
+  unchanged; permanent requirement matches the archived delta; all completed task
+  history preserved. No additional finding or further fix was needed.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |

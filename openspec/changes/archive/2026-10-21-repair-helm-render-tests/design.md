@@ -67,9 +67,11 @@ broken without a diagnosis.
 
 ### D2. The charts absorb a null; `null` removal stays the idiom
 
-`null` in a values file removes what it names — an agent, an agent's value, or a key at
-any depth of its configuration — and the charts make that true whatever the Helm
-release's merge did:
+`null` assigned to a mapping key in a values file removes that key — an agent, an
+agent's value, or a key at any depth of its configuration, including mapping keys
+inside list elements — and the charts make that true whatever the Helm release's
+merge did. List elements retain their item schema's meaning; normalization does not
+remove a null list element:
 
 - One recursive helper drops nulls from each agent before any template reads it. Every
   reader of an agent reads through it: the storefront chart's `configmap`, `deployment`,
@@ -110,7 +112,8 @@ release's merge did:
   charts' schemas and the umbrella's storefront definition are regenerated with
   `make helm-values-schema`, and each storefront's drift test holds the result.
 
-A `null` always means removal, never a value. The generated definition accepts `null` for
+A `null` assigned to a mapping key means removal, never a mapping value. The
+generated definition accepts `null` for
 optional typed fields today; after this change the chart removes such a key and the
 storefront applies its own default, unless the chart derives it. A typed field whose default is not `None` therefore
 cannot be set to `None` through chart values; the Secret overlay or the storefront's own
@@ -163,8 +166,10 @@ validation tooling alone.
 ### D5. `null` removal is a `deployment-state` requirement
 
 "A storefront chart passes service configuration through" is modified: agents are a map
-keyed by name, and a `null` removes what it names whatever the Helm release's merge did,
-so a removed key never reaches a template or the rendered configuration. The rule stated
+keyed by name, and a `null` assigned to a mapping key removes that key whatever the
+Helm release's merge did, so an agent renders as if the key had never been stated.
+List elements retain their item schema's meaning; normalization does not remove
+null list elements. The rule stated
 only in `DEPLOYMENT_AND_CONFIG.md` is behaviour implementations must satisfy, which
 `openspec/README.md` places in `spec.md`. The Helm pin and the printed version are test
 conventions and stay in `TESTING.md`.
@@ -594,3 +599,26 @@ The campaign graph does not contain this repair and stays unchanged.
 | Roadmap | No affected goal or gap; `docs/development/ROADMAP.md` unchanged |
 | Campaign index | `openspec/changes/README.md#unblocking-work--the-local-end-to-end-stack`; archive link with status `in closeout`, no graph or dependent-row changes |
 | Validation waiver | Change-local evidence above and in closeout tasks; not promoted as system behavior |
+
+## Closeout review 48 corrections
+
+The owner accepted 48 F1 and 48 F2 and directed Advance after the corrections.
+48 F1 clarifies D2/D5 without changing behavior: only null-valued mapping keys are
+removed, including keys inside list elements; list elements keep their item
+schema's meaning. The permanent deployment-state requirement and this archive's
+delta are corrected together, and D2/D5's wording above is aligned. The operator
+guide already states that distinction.
+
+48 F2 removes the false Helm limitation from the comment in
+`helm/charts/storefront/values.yaml`. The comment now states that the chart ships
+no agent and the umbrella values declare the release's agents. This is a
+comment-only correction explicitly directed by the owner while the change is
+archived. It supersedes the earlier scope-based deferral in triage 43.
+
+The correction plan touches only those two spec files, this design, the chart
+comment, the closeout task notes, and the index's current-state note. It changes
+no template logic, schema, dependency, or runtime behavior. Static change checks
+are run; the owner's existing waiver continues to cover further test suites,
+packaging builds, Helm deployments and pipeline runs. No new passing validation
+is claimed. The owner chose Advance because these are corrections to the
+existing design rather than a changed representation or authority boundary.
