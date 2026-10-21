@@ -22,16 +22,19 @@ from dataclasses import asdict
 import pytest
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_settlement_runtime import ReadinessBlocker
 
 from market_storefront import lifecycle
 from market_storefront.startup import _start_lifecycle_loops
 
-from tests._settings_overrides import settings_overrides
+from tests._settings_overrides import replaced_setting, settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
+from tests.introduction_deals import CONTACT_MECHANISM, CONTACT_PUBLISHABLE
 from tests.publication_app import (
     BUYER_SIGNER,
     SELLER_WALLET,
     SITE,
+    contact_clause,
     pool,
     publication_app,
     settlement_clause,
@@ -152,6 +155,38 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
             ).lower(),
             "demand_data": {"recipient": SELLER_WALLET.lower()},
         }
+    ]
+
+
+async def test_an_unready_alkahest_publishes_the_other_options_and_refuses_no_candidate(
+    tmp_path,
+):
+    """An unready Alkahest's clauses publish no option and no release
+    condition, the candidate publishes with its ready mechanism's option, and
+    no candidate is refused for Alkahest. The settlement double reports the
+    blocker the real preflight gives an oracle-gated section with no oracle
+    (spec scenario "Alkahest is unready on a VM storefront"); the preflight
+    itself is the kit's to test."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE: {"email": "sales@seller.invalid"}},
+    ) as world:
+        world.composition.alkahest_blocker = ReadinessBlocker(
+            code="alkahest.oracle_policy_invalid",
+            message="Settlement.alkahest.oracle_gated requires a trusted oracle",
+            kind="configuration",
+        )
+        world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+        with replaced_setting("pricing.settlements", [settlement_clause(), contact_clause()]):
+            result = await _cycle(world)
+            (listing,) = (await _listings(world)).values()
+
+    assert result["counts"] == {"publish": 1}
+    assert not listing.get("accepted_escrows")
+    assert not listing.get("demands")
+    assert [option["mechanism"] for option in listing["settlement_options"]] == [
+        CONTACT_MECHANISM
     ]
 
 

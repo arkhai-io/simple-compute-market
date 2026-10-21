@@ -681,6 +681,15 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
   the chain as it is; the loop's timer is what bounds how often a chain is called
   (settled in implementation, Section 4, after a step that skipped chains probed within
   the interval made an explicit step a no-op).
+- **A disabled section names what it lacks.** "Enabled or not" needs the settlement
+  runtime: it built a disabled section's readiness itself and never ran its preflight, so
+  a disabled section could report only `disabled`. It now lists, after `disabled`, the
+  configuration blockers the mechanism's preflight reports for a disabled section,
+  dropping reachability ones. Each preflight decides what that is: Alkahest's seller
+  preflight reports its wallet, key, chains, address configuration, and release model,
+  and nothing about publication; contact exchange reports its missing profiles or
+  contact; Arkhai payments reports nothing; a buyer's preflights report nothing. Settled
+  in implementation (Section 5).
 - **Status carries readiness.** No storefront's system status reported mechanism readiness,
   so the probe's results had nowhere to appear. Each storefront's status gains a
   mechanism-neutral `settlement` list, each composed mechanism's readiness as its safe

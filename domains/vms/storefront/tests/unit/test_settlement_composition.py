@@ -16,6 +16,7 @@ from core_storefront.domain_registry import (
     StorefrontThreadBinding,
     build_storefront_derivation_key,
 )
+from market_core import SettlementStageTable
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer
 from market_settlement_runtime import PreparedSettlement, derive_obligation_ref
@@ -37,6 +38,7 @@ from market_storefront.settlement_composition import (
 )
 from market_storefront.settlement_stages import vm_seller_stages
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests._settings_overrides import replaced_setting
 from tests.fulfillment_fixtures import vm_delivery_evidence
 
 _BUYER_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -544,6 +546,52 @@ def test_composition_rejects_repository_domain_mismatch_before_registration(
         )
 
     registry_builder.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_release_model_the_domain_cannot_deliver_composes_and_is_unready(tmp_path):
+    """The composition hands Alkahest readiness the models its domain's entry
+    declares, so a coherent model outside them is a configuration blocker
+    rather than a startup refusal. VM's own entry delivers every model, so a
+    contract declaring fewer stands in for a domain that delivers fewer."""
+    base = build_vm_storefront_domain()
+    stages = base.settlement.seller_stages
+    restricted = SettlementStageTable(
+        {
+            **stages,
+            "alkahest.v1": replace(stages["alkahest.v1"], release_models=frozenset({"recipient"})),
+        }
+    )
+    domain = replace(base, settlement=replace(base.settlement, seller_stages=restricted))
+    db = SQLiteClient(
+        db_path=str(tmp_path / "vm-settlement.db"),
+        registry=build_vm_storefront_registry(domain),
+    )
+    settlement = {
+        "schema_version": 1,
+        "priority": ["alkahest.v1"],
+        "alkahest": {
+            "enabled": True,
+            "interruptible": True,
+            # A development address; never used on a public network.
+            "interruptible_oracle_addresses": ["0x" + "cd" * 20],
+        },
+    }
+
+    with replaced_setting("settlement", settlement):
+        composition = build_vm_settlement_composition(
+            domain=db.domain_registry.resolve_mode("vm").contract,
+            sqlite_client=db,
+            alkahest_clients={},
+            marketplace_signer=_SELLER_SIGNER,
+        )
+        readiness = await composition.readiness()
+
+    (alkahest,) = [status for status in readiness if status.mechanism == "alkahest.v1"]
+    assert alkahest.ready is False
+    assert ("alkahest.release_model_undeliverable", "configuration") in {
+        (blocker.code, blocker.kind) for blocker in alkahest.blockers
+    }
 
 
 @pytest.mark.asyncio

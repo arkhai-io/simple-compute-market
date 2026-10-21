@@ -335,6 +335,39 @@ async def test_the_runtimes_own_blockers_are_configuration_blockers() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_a_disabled_section_reports_its_configuration_blockers_after_disabled() -> None:
+    async def preflight(config, resources, role):
+        return MechanismReadiness(
+            mechanism="demo.pay.v1",
+            configured=True,
+            enabled=False,
+            ready=False,
+            blockers=(
+                ReadinessBlocker(
+                    code="demo.key_missing", message="no key", kind="configuration"
+                ),
+                ReadinessBlocker(
+                    code="demo.unreachable", message="no answer", kind="reachability"
+                ),
+            ),
+        )
+
+    registration = replace(_registration(), preflight=preflight)
+    registry = SettlementConfigurationRegistry([registration])
+    config = registry.resolve(
+        {"priority": [], "demo": {"enabled": False}}, role="seller"
+    )
+
+    (status,) = await registry.ordered_readiness(config, role="seller")
+
+    assert (status.configured, status.enabled, status.ready) == (True, False, False)
+    assert [(b.code, b.kind) for b in status.blockers] == [
+        ("disabled", "configuration"),
+        ("demo.key_missing", "configuration"),
+    ]
+
+
 def test_the_safe_projection_carries_each_blockers_kind() -> None:
     readiness = MechanismReadiness(
         mechanism="demo.pay.v1",

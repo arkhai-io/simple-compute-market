@@ -147,7 +147,6 @@ def alkahest_composition(
             "marketplace_signer": signer,
             "claimant_principal": signer.identity,
             "wallet": wallet,
-            "wallet_ready": True,
             "clients": dict(chain_clients),
             "chains": (
                 dict(chains)

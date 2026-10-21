@@ -328,6 +328,55 @@ def _validate_address_file(path: str) -> bool:
     return isinstance(payload, dict)
 
 
+def _wallet_blockers(
+    wallet: Any, wallet_address: str, *, signs: bool
+) -> tuple[ReadinessBlocker, ...]:
+    if wallet is None:
+        return (
+            _configuration_blocker(
+                "alkahest.wallet_missing", "an injected settlement wallet is required"
+            ),
+        )
+    blockers: list[ReadinessBlocker] = []
+    if not wallet_address:
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_address_missing",
+                "the settlement wallet has no address",
+            )
+        )
+    if signs and not _wallet_key_present(wallet):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_key_missing",
+                "the settlement wallet has no private key to sign with",
+            )
+        )
+    return tuple(blockers)
+
+
+def _chains_missing_blocker() -> ReadinessBlocker:
+    return _configuration_blocker(
+        "alkahest.chains_missing",
+        "no settlement chain is configured under [Chains]",
+    )
+
+
+def _address_config_blockers(
+    config: AlkahestSettlementConfig,
+) -> tuple[ReadinessBlocker, ...]:
+    if config.address_config_path and not _validate_address_file(
+        config.address_config_path
+    ):
+        return (
+            _configuration_blocker(
+                "alkahest.address_config_invalid",
+                "the Alkahest address configuration cannot be loaded",
+            ),
+        )
+    return ()
+
+
 async def alkahest_preflight(
     section: BaseModel,
     resources: Mapping[str, Any],
@@ -352,56 +401,53 @@ async def alkahest_preflight(
       whose last result per selected chain readiness reads; readiness makes no
       chain call of its own.
 
-    A buyer supplies none of them.
+    A buyer supplies none of them. A seller's disabled section publishes nothing,
+    so it reports only the blockers that do not concern publication: its wallet,
+    key, and chains, which servicing the deals accepted under it needs; its
+    address configuration; and its release model, so a seller re-enabling it
+    learns first that it could not settle. A buyer's disabled section reports
+    none.
     """
 
     config = AlkahestSettlementConfig.model_validate(section)
+    wallet = resources.get("wallet")
+    wallet_address = _wallet_address(wallet) if wallet is not None else ""
+    signs = bool(resources.get("signs_transactions"))
+    chains = resources.get("chains")
+    chains_missing = signs and not (isinstance(chains, Mapping) and chains)
     if not config.enabled:
         return MechanismReadiness(
             mechanism=ALKAHEST_MECHANISM_ID,
             configured=True,
             enabled=False,
             ready=False,
+            blockers=(
+                (
+                    *_wallet_blockers(wallet, wallet_address, signs=signs),
+                    *((_chains_missing_blocker(),) if chains_missing else ()),
+                    *_address_config_blockers(config),
+                    *_release_model_blockers(
+                        config,
+                        role=role,
+                        wallet_address=wallet_address,
+                        deliverable=resources.get("deliverable_release_models"),
+                    ),
+                )
+                if role == "seller"
+                else ()
+            ),
             capabilities=("conditional-escrow.v1", "evm.v1"),
             contract_version="alkahest.v1",
             schema_version="1",
             public_details={},
         )
 
-    blockers: list[ReadinessBlocker] = []
-    wallet = resources.get("wallet")
-    wallet_address = _wallet_address(wallet) if wallet is not None else ""
-    if wallet is None:
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.wallet_missing", "an injected settlement wallet is required"
-            )
-        )
-    elif not wallet_address:
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.wallet_address_missing",
-                "the settlement wallet has no address",
-            )
-        )
-    signs = bool(resources.get("signs_transactions"))
-    if signs and wallet is not None and not _wallet_key_present(wallet):
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.wallet_key_missing",
-                "the settlement wallet has no private key to sign with",
-            )
-        )
-
-    chains = resources.get("chains")
+    blockers: list[ReadinessBlocker] = list(
+        _wallet_blockers(wallet, wallet_address, signs=signs)
+    )
     chain_names = _selected_chain_names(resources)
-    if signs and not (isinstance(chains, Mapping) and chains):
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.chains_missing",
-                "no settlement chain is configured under [Chains]",
-            )
-        )
+    if chains_missing:
+        blockers.append(_chains_missing_blocker())
     elif not chain_names or not isinstance(chains, Mapping):
         blockers.append(
             _configuration_blocker(
@@ -429,15 +475,7 @@ async def alkahest_preflight(
                 )
         blockers.extend(_chain_probe_blockers(resources.get("chain_probe"), chain_names))
 
-    if config.address_config_path and not _validate_address_file(
-        config.address_config_path
-    ):
-        blockers.append(
-            _configuration_blocker(
-                "alkahest.address_config_invalid",
-                "the Alkahest address configuration cannot be loaded",
-            )
-        )
+    blockers.extend(_address_config_blockers(config))
 
     if resources.get("require_asset") and not resources.get("asset"):
         blockers.append(

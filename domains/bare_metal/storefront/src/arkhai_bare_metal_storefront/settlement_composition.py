@@ -30,9 +30,9 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ORACLE_GATED_RELEASE,
     RECIPIENT_RELEASE,
+    configured_release_model,
     create_alkahest_registration,
-    release_conditions,
-    require_deliverable_release_model,
+    publication_release_conditions,
 )
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
@@ -120,13 +120,10 @@ class BareMetalStorefrontSettlementComposition:
         ):
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
-        alkahest = self.config.mechanisms.get(ALKAHEST_CONFIG_KEY)
-        if alkahest is not None and ALKAHEST_MECHANISM in self.seller_stages:
-            # A configured section owns the deals accepted under it, enabled or
-            # not, so its release model must be one bare metal delivers.
-            require_deliverable_release_model(
-                alkahest, self.seller_stages[ALKAHEST_MECHANISM].release_models
-            )
+        # A section selecting contradictory release models is incoherent and
+        # refused here; a coherent model bare metal cannot deliver is an
+        # Alkahest readiness blocker, given the deliverable models as a resource.
+        configured_release_model(self.config.mechanisms.get(ALKAHEST_CONFIG_KEY))
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
         # are published, so the stage follows the servicing fields, not `enabled`.
@@ -218,16 +215,16 @@ class BareMetalStorefrontSettlementComposition:
         """Build ready settlement publication alternatives.
 
         A listing publishing an Alkahest escrow advertises, per chain its
-        escrows are on, the release condition the Alkahest mechanism derives
-        from the configured section, the seller wallet, and that chain's
-        address book.
+        clauses publish on, the release condition the Alkahest mechanism
+        derives from the configured section, the seller wallet, and that
+        chain's address book, and only while Alkahest is ready: an unready
+        mechanism's clauses publish no option to release.
         """
 
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
-        alkahest_chains: set[str] = set()
 
         for clause in clauses:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
@@ -258,8 +255,6 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
-            if clause.mechanism == ALKAHEST_MECHANISM:
-                alkahest_chains.update(str(item["chain_name"]) for item in built_escrows)
             settlement_options.extend(
                 SettlementOption.model_validate(item).model_dump(mode="json")
                 for item in built_options
@@ -277,17 +272,20 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(self._release_conditions(alkahest_chains)),
+            demands=tuple(self._release_conditions(clauses, readiness)),
             max_duration_seconds=max_duration_seconds,
         )
 
-    def _release_conditions(self, chain_names: set[str]) -> list[dict[str, Any]]:
-        if not chain_names:
-            return []
+    def _release_conditions(
+        self,
+        clauses: Sequence[SettlementPublicationClause],
+        readiness: Sequence[MechanismReadiness],
+    ) -> list[dict[str, Any]]:
         chains = self.resources.get("chains")
-        return release_conditions(
+        return publication_release_conditions(
             self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
-            chain_names=chain_names,
+            clauses,
+            readiness=readiness,
             chains=chains if isinstance(chains, Mapping) else {},
             wallet_address=_wallet_address(self.resources.get("wallet")),
         )

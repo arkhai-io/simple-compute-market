@@ -69,7 +69,8 @@ async def test_disabled_alkahest_preflight_does_not_touch_injected_resources() -
     assert status.mechanism == ALKAHEST_MECHANISM_ID
     assert status.enabled is False
     assert status.ready is False
-    assert status.blockers == ()
+    # With no wallet injected it names the wallet, and it still calls no client.
+    assert [blocker.code for blocker in status.blockers] == ["alkahest.wallet_missing"]
     assert calls == []
 
 
@@ -415,6 +416,55 @@ async def test_alkahest_preflight_admits_all_listing_chains_without_default() ->
 
     assert status.ready is True
     assert "chain" not in status.public_details
+
+
+@pytest.mark.asyncio
+async def test_a_complete_disabled_section_reports_nothing_beside_being_disabled() -> None:
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(enabled=False),
+        _seller_resources(chain_name=None, chain_probe=None),
+        "seller",
+    )
+
+    assert (status.enabled, status.ready) == (False, False)
+    assert status.blockers == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"wallet": {"address": WALLET}}, {"alkahest.wallet_key_missing"}),
+        ({"wallet": {"private_key": "0x" + "33" * 32}}, {"alkahest.wallet_address_missing"}),
+        ({"chains": {}}, {"alkahest.chains_missing"}),
+        (
+            {"deliverable_release_models": frozenset({"recipient"})},
+            {"alkahest.release_model_undeliverable"},
+        ),
+    ],
+    ids=["key", "address", "chains", "release-model"],
+)
+async def test_a_disabled_section_names_what_would_stop_its_servicing(
+    overrides, expected
+) -> None:
+    config = AlkahestSettlementConfig(
+        enabled=False,
+        oracle_gated=True,
+        trusted_oracle_addresses=["0x" + "cd" * 20],
+    )
+
+    status = await alkahest_preflight(config, _seller_resources(**overrides), "seller")
+
+    assert {(b.code, b.kind) for b in status.blockers} == {
+        (code, "configuration") for code in expected
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_buyers_disabled_section_reports_nothing() -> None:
+    status = await alkahest_preflight(AlkahestSettlementConfig(enabled=False), {}, "buyer")
+
+    assert (status.enabled, status.ready, status.blockers) == (False, False, ())
 
 
 def test_alkahest_registration_has_exact_contract_and_factory() -> None:

@@ -61,7 +61,7 @@ from apicredits_storefront.settlement_composition import (
     ApiCreditsSettlementComposition,
     build_api_credit_settlement_composition,
     build_storefront_settlement_registry,
-    require_api_credit_release_model,
+    require_coherent_release_model,
 )
 from apicredits_storefront.utils.config import (
     AGENT_ID,
@@ -152,10 +152,11 @@ def _build_api_credit_services(
     domain: MarketDomainContract,
 ) -> ApiCreditsStorefrontServices:
     # Before anything is constructed: a renamed setting, a capacity
-    # configuration that cannot be read, or an Alkahest release model this
-    # storefront cannot deliver, stops startup.
+    # configuration that cannot be read, or a contradictory Alkahest release
+    # model stops startup. A coherent model this storefront cannot deliver
+    # makes Alkahest unready instead.
     require_startable_storefront()
-    require_api_credit_release_model()
+    require_coherent_release_model()
     marketplace_signer = resolve_identity_signer()
     resolve_admin_identities()
     if settings.enable_registry_discovery:

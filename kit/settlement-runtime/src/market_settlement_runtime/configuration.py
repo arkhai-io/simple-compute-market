@@ -657,18 +657,8 @@ class SettlementConfigurationRegistry:
                 continue
             if not _section_enabled(section):
                 results.append(
-                    MechanismReadiness(
-                        mechanism=registration.mechanism_id,
-                        configured=True,
-                        enabled=False,
-                        ready=False,
-                        blockers=(
-                            ReadinessBlocker(
-                                code="disabled",
-                                message="mechanism is disabled",
-                                kind="configuration",
-                            ),
-                        ),
+                    await self._disabled_readiness(
+                        registration, section, shared_resources, role
                     )
                 )
                 continue
@@ -876,6 +866,60 @@ class SettlementConfigurationRegistry:
             ensure_ascii=True,
         ).encode("utf-8")
         return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+    async def _disabled_readiness(
+        self,
+        registration: MechanismRegistration,
+        section: BaseModel,
+        resources: Mapping[str, Any],
+        role: SettlementRole,
+    ) -> MechanismReadiness:
+        """A disabled section's readiness: ``disabled``, then its own blockers.
+
+        A disabled section publishes nothing, but its configuration is still
+        the operator's to correct, so the configuration blockers its
+        mechanism's preflight reports for it are listed beside ``disabled``
+        rather than hidden by it; each preflight decides which it reports for a
+        disabled section. Reachability blockers are dropped: whether a disabled
+        mechanism can be reached says nothing about publication.
+        """
+        pending = registration.preflight(section, resources, role)
+        observed = await pending if inspect.isawaitable(pending) else pending
+        if not isinstance(observed, MechanismReadiness):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned invalid status"
+            )
+        if observed.mechanism != registration.mechanism_id:
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} returned status for {observed.mechanism!r}"
+            )
+        readiness = MechanismReadiness(
+            mechanism=registration.mechanism_id,
+            configured=True,
+            enabled=False,
+            ready=False,
+            blockers=(
+                ReadinessBlocker(
+                    code="disabled",
+                    message="mechanism is disabled",
+                    kind="configuration",
+                ),
+                *(
+                    blocker
+                    for blocker in observed.blockers
+                    if blocker.kind == "configuration"
+                ),
+            ),
+        )
+        secret_values = _secret_values(section)
+        public_payload = json.dumps(
+            readiness.safe_projection(), sort_keys=True, ensure_ascii=True
+        )
+        if any(value and value in public_payload for value in secret_values):
+            raise SettlementConfigurationError(
+                f"preflight for {registration.mechanism_id!r} exposed a secret value"
+            )
+        return readiness
 
     def _validate_readiness(
         self,

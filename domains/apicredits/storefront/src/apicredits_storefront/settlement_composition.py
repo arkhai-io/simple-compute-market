@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_apicredits.settlement import CreditsServiceClient
@@ -13,8 +13,8 @@ from market_alkahest import (
     ALKAHEST_MECHANISM_ID,
     RECIPIENT_RELEASE,
     AlkahestChainProbe,
+    configured_release_model,
     release_conditions,
-    require_deliverable_release_model,
 )
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
@@ -83,7 +83,8 @@ class ApiCreditsSettlementComposition:
     mechanism_clients: Mapping[str, Any]
     settlement_config: Any
     configuration_registry: SettlementConfigurationRegistry
-    mechanism_resources: Mapping[str, Any]
+    # Carries the seller wallet's key, so it is never part of the repr.
+    mechanism_resources: Mapping[str, Any] = field(repr=False)
     credits_client: CreditsServiceClient
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
@@ -106,11 +107,21 @@ class ApiCreditsSettlementComposition:
             mechanism=ARKHAI_PAYMENTS_MECHANISM,
         )
 
-    async def readiness(self) -> tuple[MechanismReadiness, ...]:
+    async def readiness(
+        self, *, accepted_escrows: Sequence[Mapping[str, Any]] = ()
+    ) -> tuple[MechanismReadiness, ...]:
+        """Each mechanism's readiness; ``accepted_escrows`` are escrows a listing
+        request supplies, whose chains Alkahest's readiness is then judged on."""
+        resources: Mapping[str, Any] = self.mechanism_resources
+        if accepted_escrows:
+            resources = {
+                **resources,
+                "accepted_escrows": [dict(escrow) for escrow in accepted_escrows],
+            }
         return await self.configuration_registry.ordered_readiness(
             self.settlement_config,
             role="seller",
-            resources=self.mechanism_resources,
+            resources=resources,
         )
 
     def accepted_obligation_dispatch(
@@ -147,19 +158,23 @@ class ApiCreditsSettlementComposition:
         return dispatch
 
     def release_conditions(
-        self, accepted_escrows: Sequence[Mapping[str, Any]]
+        self,
+        accepted_escrows: Sequence[Mapping[str, Any]],
+        *,
+        readiness: Sequence[MechanismReadiness],
     ) -> list[dict[str, Any]]:
         """The release conditions a listing publishing ``accepted_escrows`` advertises.
 
         Accepted escrows are the Alkahest publication form, so each one's chain
         gets the condition the Alkahest mechanism derives from the configured
-        section, the seller wallet, and that chain's address book. An escrow on
-        a chain this storefront does not configure is refused, since nothing
-        could settle it. An unset wallet still derives a condition, with no
-        recipient; materialization refuses every deal under it as unreadable.
+        section, the seller wallet, and that chain's address book, and only
+        while ``readiness`` reports Alkahest ready: an unready Alkahest
+        publishes no escrow, so it advertises no condition. An escrow on a chain
+        this storefront does not configure is refused, since nothing could
+        settle it.
         """
         chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
-        if not chain_names:
+        if not chain_names or not alkahest_ready(readiness):
             return []
         chains = self.mechanism_resources["chains"]
         unconfigured = sorted(name for name in chain_names if name not in chains)
@@ -263,22 +278,28 @@ class ApiCreditsSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
-def require_api_credit_release_model(settlement_config: Any = None) -> None:
-    """Refuse a configured Alkahest release model API credits cannot deliver.
+def alkahest_ready(readiness: Sequence[MechanismReadiness]) -> bool:
+    """Whether ``readiness`` reports Alkahest ready."""
+    return any(
+        status.mechanism == ALKAHEST_MECHANISM_ID and status.ready
+        for status in readiness
+    )
 
-    A configured section owns the deals accepted under it, enabled or not, so
-    its release model must be one the Alkahest entry declares. With no
-    ``settlement_config``, the storefront's own configuration is resolved.
+
+def require_coherent_release_model(settlement_config: Any = None) -> None:
+    """Refuse a configured Alkahest section that selects contradictory models.
+
+    A section stating both the oracle-gated and the interruptible model is
+    incoherent configuration rather than an unusable mechanism, so it stops
+    startup, enabled or not; a coherent model API credits cannot deliver is a
+    readiness blocker instead. With no ``settlement_config``, the storefront's
+    own configuration is resolved.
     """
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
-    if alkahest_section is not None:
-        require_deliverable_release_model(
-            alkahest_section, SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models
-        )
+    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
 
 
 def build_api_credit_settlement_composition(
@@ -301,22 +322,28 @@ def build_api_credit_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_api_credit_release_model(settlement_config)
+    require_coherent_release_model(settlement_config)
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path, apply_migrations=False
     )
     seller_wallet_address = str(
         storefront_config.settings.get("wallet.address", "") or ""
     )
+    seller_wallet_key = str(storefront_config.settings.get("wallet.private_key", "") or "")
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
         "clients": alkahest_clients,
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": next(iter(storefront_config.CHAINS), None),
-        # Readiness reads the seller wallet's address: with none, no escrow
-        # could pay the seller, whatever clients are composed.
-        "wallet": {"address": seller_wallet_address},
+        # Readiness reads the seller wallet: with no address no escrow could
+        # pay the seller, whatever clients are composed, and the storefront
+        # submits its issuance evidence on chain with the key, so a missing key
+        # or chain makes Alkahest unready. A configured model the Alkahest entry cannot
+        # deliver is reported the same way.
+        "wallet": {"address": seller_wallet_address, "private_key": seller_wallet_key},
+        "signs_transactions": True,
+        "deliverable_release_models": SELLER_STAGES[ALKAHEST_MECHANISM_ID].release_models,
     }
     if chain_probe is not None:
         resources["chain_probe"] = chain_probe

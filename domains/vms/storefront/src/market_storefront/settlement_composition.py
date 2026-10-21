@@ -26,7 +26,7 @@ from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
     AlkahestChainProbe,
-    require_deliverable_release_model,
+    configured_release_model,
 )
 from market_arkhai_payments import (
     PaymentSellerStage,
@@ -89,7 +89,8 @@ class VmSettlementComposition:
     evidence_clients: Mapping[str, Any]
     settlement_config: SettlementConfig
     configuration_registry: SettlementConfigurationRegistry
-    mechanism_resources: Mapping[str, Any]
+    # Carries the seller wallet's key, so it is never part of the repr.
+    mechanism_resources: Mapping[str, Any] = field(repr=False)
     arkhai_payments_stage: PaymentSellerStage | None = None
     payments_coordinator: VmPaymentsCoordinator | None = None
 
@@ -834,25 +835,27 @@ async def preflight_settlement_mechanisms(
     return readiness
 
 
-def require_vm_release_model(
-    domain: MarketDomainContract, settlement_config: SettlementConfig | None = None
+def require_coherent_release_model(
+    settlement_config: SettlementConfig | None = None,
 ) -> None:
-    """Refuse a configured Alkahest release model ``domain`` cannot deliver.
+    """Refuse a configured Alkahest section that selects contradictory models.
 
-    A configured section owns the deals accepted under it, enabled or not, so
-    its release model must be one the domain's Alkahest entry declares. With no
+    A section stating both the oracle-gated and the interruptible model names
+    two arbiters for one escrow, which is incoherent configuration rather than
+    an unusable mechanism, so it stops startup, enabled or not. A coherent model
+    the domain cannot deliver is a readiness blocker instead. With no
     ``settlement_config``, the storefront's own configuration is resolved.
     """
     if settlement_config is None:
         settlement_config = build_storefront_settlement_registry().resolve(
             storefront_config.settlement_config_mapping(), role="seller"
         )
-    alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
-    alkahest_stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
-    if alkahest_section is not None and alkahest_stage is not None:
-        require_deliverable_release_model(
-            alkahest_section, alkahest_stage.release_models
-        )
+    configured_release_model(settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY))
+
+
+def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
+    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM_ID)
+    return frozenset(getattr(stage, "release_models", ()) or ())
 
 
 def build_vm_settlement_composition(
@@ -886,7 +889,7 @@ def build_vm_settlement_composition(
         storefront_config.settlement_config_mapping(),
         role="seller",
     )
-    require_vm_release_model(domain, settlement_config)
+    require_coherent_release_model(settlement_config)
     alkahest_section = settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY)
     mechanism_resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
@@ -894,12 +897,17 @@ def build_vm_settlement_composition(
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": getattr(storefront_config.settings, "chain_name", None),
+        # Readiness reports a configured model VM's Alkahest entry cannot
+        # deliver, and a missing key or chain, since VM signs its settlement
+        # transactions with the seller wallet.
+        "deliverable_release_models": _alkahest_release_models(domain),
+        "signs_transactions": True,
     }
     if chain_probe is not None:
         mechanism_resources["chain_probe"] = chain_probe
-    if alkahest_section is not None and (
-        bool(getattr(alkahest_section, "enabled", False)) or alkahest_clients
-    ):
+    if alkahest_section is not None:
+        # Whenever a section is configured, enabled or not: readiness reads the
+        # wallet, and a disabled section still services its accepted deals.
         mechanism_resources["wallet"] = {
             "address": storefront_config.get_evm_wallet_address(),
             "private_key": storefront_config.get_evm_wallet_private_key(),

@@ -561,8 +561,6 @@ class BareMetalStorefrontRuntime:
         composition = self.settlement_composition
         if composition is None:
             raise RuntimeError("no bare-metal settlement mechanism is configured")
-        if composition.configures(ALKAHEST_MECHANISM) and not self.seller_evm_address:
-            raise RuntimeError("Alkahest settlement is not configured")
         if self.capacity_client is None or self.fulfillment_client is None:
             return self._settlement_service()
         return self._settlement_service(self.fulfillment_service().begin)
@@ -786,6 +784,12 @@ def _alkahest_client_policy(
     )
 
 
+def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
+    """The release models the domain's Alkahest seller entry delivers."""
+    stage = domain.settlement.seller_stages.get(ALKAHEST_MECHANISM)
+    return frozenset(getattr(stage, "release_models", ()) or ())
+
+
 def _build_chain_clients(
     chains: Mapping[str, ChainSettings],
     *,
@@ -873,15 +877,16 @@ def build_runtime_from_configuration(
             resources={"marketplace_signer": signer, "claimant_principal": principal},
         )
     except ReleaseModelError as exc:
-        # A well-formed section asking for a release model bare metal cannot
-        # deliver: the refusal names the model rather than calling it malformed.
+        # A section selecting contradictory release models is incoherent: the
+        # refusal names the models rather than calling the section malformed.
         raise RuntimeError(str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise RuntimeError("[Settlement] must be strict shared settlement config") from exc
     # A configured Alkahest section, enabled or not, owns the obligations
-    # accepted under it, so its recovery resources are required whenever the
-    # section exists; with no section they would be a second, stale statement
-    # of what the settlement root says.
+    # accepted under it. One that lacks its address, chains, or key cannot
+    # settle, which Alkahest readiness reports by name while the storefront's
+    # other mechanisms run; with no section, those inputs would be a second,
+    # stale statement of what the settlement root says, which is incoherent.
     alkahest_configured = section_check.configures(ALKAHEST_MECHANISM)
     seller_evm_address = active.wallet.address.strip()
     private_key = active.wallet.private_key.strip()
@@ -891,14 +896,18 @@ def build_runtime_from_configuration(
         "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
-        missing = [name for name, present in supplied.items() if not present]
-        if missing:
-            raise RuntimeError(
-                "a configured Alkahest settlement section, enabled or not, requires "
-                + ", ".join(missing)
+        chain_clients, chain_config_paths = (
+            _build_chain_clients(
+                active.chains, private_key=private_key, build_clients=build_chain_clients
             )
-        chain_clients, chain_config_paths = _build_chain_clients(
-            active.chains, private_key=private_key, build_clients=build_chain_clients
+            if private_key and active.chains
+            else (
+                {},
+                {
+                    name: chain.alkahest_address_config_path or None
+                    for name, chain in active.chains.items()
+                },
+            )
         )
         alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
         # The probe owns the client map from here: the composition and the
@@ -929,8 +938,12 @@ def build_runtime_from_configuration(
         resources={
             "marketplace_signer": signer,
             "claimant_principal": principal,
-            "wallet": seller_evm_address or None,
-            "wallet_ready": bool(seller_evm_address),
+            # Bare metal signs its settlement transactions with this key, so
+            # readiness reports a missing key or chain; the composition's
+            # resources are never part of its repr.
+            "wallet": {"address": seller_evm_address, "private_key": private_key},
+            "signs_transactions": True,
+            "deliverable_release_models": _alkahest_release_models(selected_domain),
             "clients": chain_clients,
             **({"chain_probe": chain_probe} if chain_probe is not None else {}),
             "chains": {

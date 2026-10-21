@@ -43,6 +43,7 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
 from market_settlement_runtime import (
     MechanismReadiness,
+    ReadinessBlocker,
     SettlementRuntime,
     SettlementSQLiteRepository,
 )
@@ -197,6 +198,11 @@ class SettlementCompositionDouble:
     declares it.
     """
 
+    #: A blocker Alkahest readiness reports, or ``None`` for a ready Alkahest.
+    #: While one is set, publication suppresses Alkahest's clauses as the real
+    #: composition does: no accepted escrow, no option, and Alkahest unready.
+    alkahest_blocker: ReadinessBlocker | None = None
+
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
         self.configuration_registry = build_storefront_settlement_registry()
         self.settlement_config = self.configuration_registry.resolve(
@@ -270,6 +276,16 @@ class SettlementCompositionDouble:
 
     async def publication_artifacts(self, resources, clauses=None):
         options = await self._registry_options(resources, clauses)
+        if self.alkahest_blocker is not None:
+            return [], options, (
+                MechanismReadiness(
+                    mechanism="alkahest.v1",
+                    configured=True,
+                    enabled=True,
+                    ready=False,
+                    blockers=(self.alkahest_blocker,),
+                ),
+            )
         accepted = [
             {
                 "chain_name": str(clause.mechanism_input["chain"]),

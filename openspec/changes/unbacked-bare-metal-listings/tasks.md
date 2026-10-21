@@ -558,7 +558,7 @@ bare-metal seller lifecycle", "Publication derives all ready settlement options"
 `settlement-configuration` "An Alkahest section that cannot settle makes Alkahest unready").
 Touches the three storefronts.
 
-- [ ] 5.1 VM: `services/publication_loop.py` `_create_request` no longer derives demands
+- [x] 5.1 VM: `services/publication_loop.py` `_create_request` no longer derives demands
       before readiness; `listing_service.py` derives them through
       `publication_release_conditions` with the readiness `publication_artifacts` returns,
       so an unready Alkahest refuses no candidate per cycle. `require_vm_release_model`'s
@@ -566,7 +566,17 @@ Touches the three storefronts.
       VM's deliverable models (D19).
       Note: the derivation after readiness landed with Section 3 (its notes); this task
       keeps the startup call's removal, the deliverable models, and 5.4's tests.
-- [ ] 5.2 Bare metal `src/runtime.py` `build_runtime_from_configuration`: a configured
+      Done: `require_vm_release_model` became `require_coherent_release_model`, which
+      refuses only a section selecting contradictory models (`configured_release_model`),
+      in `server.py` before anything is built and in the composition. The composition
+      hands the preflight `deliverable_release_models` (the domain's Alkahest entry's) and
+      `signs_transactions`, and supplies the wallet, key included, whenever a section is
+      configured rather than only when enabled or when clients exist. **Beyond the plan:**
+      `groups/settlement.py`'s `settlement status` command reads the wallet and chains of
+      any configured section and passes `signs_transactions` and VM's deliverable models,
+      as the server's composition does, since it is an explicit
+      check and a disabled section now reports its own blockers (below).
+- [x] 5.2 Bare metal `src/runtime.py` `build_runtime_from_configuration`: a configured
       section missing `[Wallet].address`, `[Chains]`, or `[Wallet].private_key` starts with
       the named configuration blockers rather than refusing; a `ReleaseModelError` for an
       undeliverable model no longer refuses startup; `settlement_service()` no longer
@@ -574,13 +584,42 @@ Touches the three storefronts.
       reconciliation keeps running); Alkahest inputs supplied with no section are still
       refused. `settlement_composition.py` calls `publication_release_conditions` with
       readiness and passes the deliverable models (D19).
-- [ ] 5.3 API credits: `settlement_composition.py` and `services/listing_service.py`
+      Done. Missing inputs no longer refuse; clients are built only with a key and chains,
+      and the probe is composed over the configured chains either way. The composition's
+      `wallet` is a mapping carrying the key, beside `signs_transactions` and
+      `deliverable_release_models`; `wallet_ready` is gone. The composition refuses only a
+      contradictory section (`configured_release_model`), which the runtime still turns
+      into a startup refusal naming it. `settlement_service()` no longer refuses when the
+      address is missing. `publication_payload` derives `demands` through
+      `publication_release_conditions` over its clauses and the readiness it published
+      under. **Beyond the plan:** "enabled or not" needed `kit/settlement-runtime` and
+      `kit/alkahest`. The runtime built a disabled section's readiness itself and never
+      ran its preflight, so a disabled section could name nothing missing. It now reports
+      `disabled` followed by the preflight's configuration blockers (reachability ones
+      dropped). Alkahest's seller preflight for a disabled section reports what would stop
+      servicing its accepted deals: wallet, key, chains, address configuration, release
+      model. A buyer's disabled section reports nothing. Arkhai payments returns no
+      blockers when disabled; contact exchange's seller preflight now also lists its own
+      configuration blockers beside `disabled`.
+- [x] 5.3 API credits: `settlement_composition.py` and `services/listing_service.py`
       derive release conditions after readiness, gating the escrows a listing request
       supplies as well as those its clauses compile, so an unready Alkahest yields no
       escrow option on either path; `require_api_credit_release_model`'s startup call goes;
       the preflight is given the wallet and the deliverable models (D19).
       Note: the wallet landed with Section 3 (its notes); the deliverable models remain.
-- [ ] 5.4 Tests (application integration through the typed client): bare metal
+      Done: `require_coherent_release_model` replaces the startup call. The preflight
+      also gets the wallet's key and `signs_transactions`, since the storefront submits
+      issuance evidence with that key. The composition's `mechanism_resources` is
+      excluded from its repr, as VM's now is. `readiness(accepted_escrows=)` judges
+      Alkahest on the supplied escrows' chains. The listing service always judges
+      supplied escrows on that readiness, clauses or not, and drops them while Alkahest is
+      unready on their chains. `release_conditions(escrows, readiness=)` derives nothing
+      while it is unready. The clause path was already gated by `publication_artifacts`.
+      (Review caught a first version that judged supplied escrows on the clauses'
+      readiness whenever clauses were present.) A clause-only create with
+      an unready Alkahest still raises `RuntimeError` ("no enabled settlement mechanism is
+      ready"), which the route answers 500; Section 6 owns that status (6.2).
+- [x] 5.4 Tests (application integration through the typed client): bare metal
       `tests/test_app_composition.py` — the release-model and missing-input refusal tests
       inverted to unready-with-blocker starts, and the no-section refusal kept; VM
       `tests/integration/test_release_model_startup.py` — an undeliverable model starts
@@ -589,11 +628,141 @@ Touches the three storefronts.
       candidate; API credits `tests/integration/test_alkahest_release_conditions.py` — an
       undeliverable model or missing oracle yields no Alkahest option on the clause and the
       supplied-escrow paths; each storefront's status reporting the blocker (D19).
-- [ ] 5.5 Versions: the three storefronts; `make lock`.
-- [ ] 5.6 **Verify.** `make test-storefront`, `make test-bare-metal`, `make
+      Done.
+      - Bare metal `tests/test_app_composition.py`:
+        - each missing input, enabled and disabled, starts with Alkahest unready naming
+          it, and contact exchange stays ready. This reads the composition's readiness
+          over a runtime built from the files (composition level).
+        - an undeliverable model starts unready, at the same level.
+        - application integration through `StorefrontClient`: a storefront started from
+          its files, with an undeliverable model, reports the blocker in the
+          administrator's status while contact stays ready.
+        - the contradictory-model refusal, which before was covered only through the
+          section model, gets a file-level case and the lifespan case (rewritten from the
+          interruptible refusal); the no-section refusal is kept unchanged.
+        - the missing-input and undeliverable-model cases stay at composition level
+          rather than through the typed client, one typed-client case standing for them.
+          Each blocker is the kit's unit case; what bare metal adds is that it starts,
+          which the files-built runtime shows.
+      - VM:
+        - `tests/integration/test_release_model_startup.py` keeps the both-models refusal
+          unchanged.
+        - **Differed:** VM's Alkahest entry delivers every model, so "an undeliverable
+          model starts unready" cannot happen in VM's production contract. It is a unit
+          case in `tests/unit/test_settlement_composition.py` instead: a contract whose
+          entry declares only `recipient` composes without refusal, and the real
+          readiness names `alkahest.release_model_undeliverable`.
+        - `tests/integration/test_publication_loop.py`: an unready Alkahest publishes the
+          contact option and no escrow or demand, and refuses no candidate. The harness
+          double gained `alkahest_blocker` to report Alkahest unready as the real
+          composition does, so this exercises the publication path's handling of an
+          unready readiness, not the real preflight.
+        - VM has no test of its status reporting the blocker: VM's status serves the
+          composition's readiness (Section 4's test) and the unit case above shows that
+          readiness names it.
+      - API credits `tests/integration/test_alkahest_release_conditions.py`, through the
+        real app and settlement composition. The chain probe is replaced by patching
+        `server._build_alkahest_chain_probe` to return a probe over a stub JSON-RPC
+        transport, with no client constructor and the default interval, stepped
+        directly rather than through its loop: the production probe wiring is Section
+        4's test, not this one's.
+        - the positive case now needs a wallet key and a probed chain.
+        - an undeliverable model and a missing oracle each report the blocker in the
+          administrator's status, and refuse a create whose only options are supplied
+          escrows with 400 naming the blocker.
+        - `tests/integration/test_publish_reconcile.py`, the listing service over a
+          settlement double (library-integration level, real database): a supplied
+          escrow judged unready on its own chain is dropped while the clause's escrow,
+          judged ready on its chain, publishes. A real clause cannot compile here, since
+          its option builder resolves the token on chain.
+        - on the clause path, the composition's `publication_artifacts`, called
+          directly, compiles no option; the condition check reads the supplied-escrow
+          derivation, since the clause path raises before deriving one.
+        - the contradictory-model refusal is kept.
+      - Kit (unit):
+        - `kit/settlement-runtime`: a disabled section reports `disabled` and then its
+          configuration blockers.
+        - `kit/alkahest`: a complete disabled section reports nothing more, each missing
+          input names itself, and a buyer's disabled section reports nothing. The
+          existing "disabled touches no client" case now expects `wallet_missing`.
+- [x] 5.5 Versions: the three storefronts; `make lock`.
+      Bumped: VM storefront 0.19.0 (its exact pin on bare metal moved), bare-metal
+      storefront 0.19.0, API-credit storefront 0.12.0; `make lock` refreshed every lock.
+      **Not bumped:** `kit/settlement-runtime` (0.5.0) and `kit/alkahest` (0.10.0) changed
+      at versions this branch has not released (Sections 3 and 4), and the section's plan
+      names only the storefronts. The storefronts' versions were unreleased too and were
+      bumped because 5.5 names them; the kits were not, since a runtime bump cascades
+      through every exact pin on it for nothing a release would see. `make
+      check-packaging` passes on the rebuilt wheels. One policy for repeat bumps inside an
+      unreleased change is the round's triage to settle.
+- [x] 5.6 **Verify.** `make test-storefront`, `make test-bare-metal`, `make
       test-apicredits`; `make test`; `make check-packaging`. End-to-end: `e2e_deal`,
       `e2e_listing_shapes`, `e2e_bare_metal_mock_deal`, and `e2e_credits_deal` publish their
       Alkahest options through the reordered derivation.
+      Results:
+      - Unit kit suites: `make -C kit test-settlement-runtime` 111, `test-alkahest` 353,
+        `test-arkhai-payments` 84, `test-contact-exchange` 127.
+      - `make test-storefront`: unit 1104; integration 448 passed, with the same two
+        environmental `test_alkahest.py` failures.
+      - `make test-bare-metal` (storefront 442) and `make test-apicredits` (storefront
+        189): all passed, rerun after the review fixes with the kit suites and
+        `make test-storefront` (same counts and the same two environmental failures).
+      - `make test`, by its components touched: `test-kits` (every kit), `test-core`,
+        `test-vms-buyer`, and `test-e2e-unit` passed. The compute-provisioning and
+        registry suites were not rerun, since nothing they install changed in this
+        section.
+      - `make test-release-tooling`, `make check-packaging`: passed.
+      - `make check-change`: fails only on the two citations Sections 13 and 22 create.
+      - End-to-end, by reading the lanes rather than a run: each lane supplies its
+        storefront's wallet key (the compose overlays and the bare-metal secrets overlay),
+        so `signs_transactions` leaves their Alkahest ready. `e2e_deal`,
+        `e2e_listing_shapes`, and `e2e_bare_metal_mock_deal` cover the reordered
+        derivation once deployed. `e2e_credits_deal` does only from Section 6 on (see the
+        handoff below).
+
+Section 5 notes (handoff):
+
+- **For closeout (23.9):** `DEPLOYMENT_AND_CONFIG.md`'s "Bare-metal role configuration"
+  still says a configured section "requires" the address, chains, and key, and that the
+  storefront "refuses to start configured as `interruptible`". Both are now readiness
+  blockers, and only a contradictory section refuses. The `settlement-configuration`
+  architecture companion should state the disabled-section readiness rule.
+- **For Section 6:** API credits' clause-only create with an unready mechanism answers
+  500 today. 6.2's distinct error replaces it.
+- **Between this section and Section 6, the API-credit seed publishes nothing.** The
+  configured seed still runs during startup (`startup.py` `_seed_demo_listing`), before
+  the loops start. So the chain probe has no result yet, Alkahest reads unready, the
+  seed's supplied escrows are now gated out, and the seed logs "no settlement alternative
+  is ready" and creates no listing. `e2e_credits_deal` would fail on a commit between the
+  two. 6.1's `listing-seed` step, which waits for the probe, is the fix; the design
+  rejected a startup probe pass before the seed (decision 19). Sections 5 and 6 are one
+  round, validated together, so the gap is accepted between their commits rather than
+  6.1 folded in here; the round's triage may decide otherwise.
+- **Surprise:** the settlement runtime is where "enabled or not" had to land; no
+  storefront could report a disabled section's missing inputs without it. Recorded in
+  `design.md` decision 19 and the `settlement-configuration` delta (a disabled section's
+  readiness lists its configuration blockers after `disabled`). At closeout, the
+  companion's "evaluates every enabled registration" and the requirement "Common seller
+  status covers enabled mechanisms" need reading against it.
+- **Operator-visible:** VM and API credits now pass `signs_transactions`, so an enabled
+  Alkahest with no `[Wallet].private_key` or no chain is unready and its options are
+  withdrawn on the next cycle (VM) or refused at create (API credits). Before, it
+  published options no deal could settle. Every lane and the local Helm release supply
+  the key.
+- **Not covered by a test in this section:** contact exchange's new blockers beside
+  `disabled`; Arkhai payments reports nothing for a disabled section, though bare metal
+  services its accepted payment deals whatever `enabled` says, so a missing credential
+  there stays silent; bare metal's settlement service no longer refuses as a whole when
+  the address is missing, and each Alkahest verification refuses its own deal instead
+  (`settlement_stages.py`), which no new test exercises.
+- **Declined from review:** the API-credit test patches `server._startup_tasks` and
+  `server._build_alkahest_chain_probe`, as that file already patched its startup tasks.
+  A server-level seam for the probe transport is a testability refactor no task names,
+  so it is left for the round's triage. The integration parametrizations (two cases over
+  three API-credit tests, three inputs times enabled and disabled in bare metal) were
+  kept, since each case is a distinct configuration path at that level. The disabled
+  readiness's repeated ID and secret checks and its extra preflight per readiness call
+  were kept, since a disabled preflight reads only configuration and one address file.
 
 ## 6. API credits publishes once its dependencies answer
 

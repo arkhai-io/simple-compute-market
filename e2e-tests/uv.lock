@@ -208,7 +208,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.18.0"
+version = "0.19.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -242,7 +242,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.18.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.19.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -849,7 +849,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.18.0"
+version = "0.19.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -899,7 +899,7 @@ dependencies = [
     { name = "websockets" },
 ]
 wheels = [
-    { path = "arkhai_vms_storefront-0.18.0-py3-none-any.whl" },
+    { path = "arkhai_vms_storefront-0.19.0-py3-none-any.whl" },
 ]
 
 [[package]]

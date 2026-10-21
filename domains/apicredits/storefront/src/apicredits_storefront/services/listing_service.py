@@ -24,7 +24,7 @@ from apicredits_storefront.listing_binding import (
     quota_pool,
 )
 from apicredits_storefront.services import capacity_client
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.settlement_composition import SELLER_STAGES, alkahest_ready
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
     settlement_publication_defaults,
@@ -122,16 +122,34 @@ class ListingService:
                 list(clauses) if clauses else None,
             )
             if clauses or not accepted_escrows
-            else ([], [], await self._settlement_composition.readiness())
+            else ([], [], ())
         )
+        # Escrows the request supplies are Alkahest options, so they publish
+        # only while Alkahest is ready on their own chains, as the escrows the
+        # clauses compile do on theirs. Clauses that compile no option at all
+        # refuse the create above, before supplied escrows are considered.
+        escrow_readiness = (
+            await self._settlement_composition.readiness(
+                accepted_escrows=accepted_escrows
+            )
+            if accepted_escrows
+            else ()
+        )
+        if accepted_escrows and not alkahest_ready(escrow_readiness):
+            accepted_escrows = []
         accepted_escrows = [*accepted_escrows, *configured_escrows]
+        # Every escrow left was published under a ready Alkahest, judged on its
+        # own chains, so either readiness may stand for it below.
+        readiness = (*readiness, *escrow_readiness)
         if not accepted_escrows and not settlement_options:
-            blockers = [
-                blocker.code
-                for status in readiness
-                if status.enabled
-                for blocker in status.blockers
-            ]
+            blockers = list(
+                dict.fromkeys(
+                    blocker.code
+                    for status in readiness
+                    if status.enabled
+                    for blocker in status.blockers
+                )
+            )
             suffix = f" ({', '.join(blockers)})" if blockers else ""
             raise ValueError(f"no settlement alternative is ready{suffix}")
 
@@ -158,7 +176,9 @@ class ListingService:
         accepted_escrows, settlement_options = _admissible_settlement_terms(
             pool, accepted_escrows=accepted_escrows, settlement_options=settlement_options
         )
-        demands = self._settlement_composition.release_conditions(accepted_escrows)
+        demands = self._settlement_composition.release_conditions(
+            accepted_escrows, readiness=readiness
+        )
 
         listing = get_market_domain_contract().codecs.listing(
             {

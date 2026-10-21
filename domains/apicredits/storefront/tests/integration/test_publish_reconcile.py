@@ -20,6 +20,7 @@ from apicredits_storefront.services.publication_service import (
 from apicredits_storefront.utils import sqlite_client as sqlite_module
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
+from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
 from tests.listing_bindings import upsert_bound_listing
 
 _SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -119,8 +120,15 @@ class _QuotaRuntime:
 
 
 class _SettlementComposition:
-    async def readiness(self) -> tuple[()]:
-        return ()
+    """Stands in for settlement: Alkahest ready, so the escrows a request
+    supplies publish, and no release condition derived."""
+
+    async def readiness(self, *, accepted_escrows=()) -> tuple[MechanismReadiness, ...]:
+        return (
+            MechanismReadiness(
+                mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+            ),
+        )
 
     async def publication_artifacts(
         self,
@@ -129,7 +137,7 @@ class _SettlementComposition:
     ) -> tuple[list[dict], list[dict], tuple[()]]:
         return [], [], ()
 
-    def release_conditions(self, _accepted_escrows) -> list[dict]:
+    def release_conditions(self, _accepted_escrows, *, readiness) -> list[dict]:
         return []
 
 
@@ -167,6 +175,79 @@ async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
         storefront_url="http://seller:8002",
         seller_principal=SELLER_PRINCIPAL,
     )
+
+
+class _ChainJudgedComposition(_SettlementComposition):
+    """Alkahest ready on the clauses' chain and unready on the chains of the
+    escrows a request supplies, each readiness reported as the composition
+    judges it."""
+
+    _CLAUSE_ESCROW = {
+        "chain_name": "anvil",
+        "escrow_address": "0x" + "11" * 20,
+        "literal_fields": {"token": "0x" + "01" * 20},
+        "rates": [{"field": "amount", "per": "token", "value": "100"}],
+    }
+
+    async def readiness(self, *, accepted_escrows=()):
+        return (
+            MechanismReadiness(
+                mechanism="alkahest.v1",
+                configured=True,
+                enabled=True,
+                ready=False,
+                blockers=(
+                    ReadinessBlocker(
+                        code="alkahest.chain_unreachable",
+                        message="no answer",
+                        kind="reachability",
+                    ),
+                ),
+            ),
+        )
+
+    async def publication_artifacts(self, _facts, _clauses):
+        return (
+            [dict(self._CLAUSE_ESCROW)],
+            [],
+            (
+                MechanismReadiness(
+                    mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+                ),
+            ),
+        )
+
+
+async def test_supplied_escrows_are_judged_on_their_own_chains_beside_clauses(
+    db, monkeypatch
+):
+    """An escrow a request supplies publishes only while Alkahest is ready on
+    its own chain, whatever the clauses beside it compile."""
+    from apicredits_storefront.services import capacity_client as cc_module
+    from apicredits_storefront.services.listing_service import ListingService
+
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(
+        cc_module, "build_capacity_runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
+    )
+    svc = ListingService(
+        sqlite_client=db,
+        seller_principal=SELLER_PRINCIPAL,
+        settlement_composition=_ChainJudgedComposition(),
+    )
+
+    result = await svc.publish_from_quota(
+        resource_id="svc-quota",
+        service_name="Acme Inference",
+        accepted_escrows=[{**_ChainJudgedComposition._CLAUSE_ESCROW, "chain_name": "base"}],
+        settlement_clauses=[{"mechanism": "alkahest.v1", "asset": "0x" + "01" * 20}],
+        paused=True,
+    )
+
+    row = await db.load_listing(listing_id=result["listing_id"])
+    escrows = row["accepted_escrows"]
+    escrows = json.loads(escrows) if isinstance(escrows, str) else escrows
+    assert [escrow["chain_name"] for escrow in escrows] == ["anvil"]
 
 
 async def test_publish_from_quota_requires_registered_sellable_resource(

@@ -42,7 +42,8 @@ probed, to determine readiness. The kind MUST be set on every blocker: by each
 mechanism's preflight on the blockers it reports, and by the settlement runtime on the
 `not_configured` and `disabled` blockers it builds itself, which are configuration
 blockers. Status MUST report it. A mechanism whose readiness contacts nothing reports only
-configuration blockers.
+configuration blockers. A disabled section's readiness MUST list, after `disabled`, the
+configuration blockers its mechanism's preflight reports for it.
 
 #### Scenario: A chain cannot be reached
 
@@ -65,6 +66,13 @@ configuration blockers.
 - **WHEN** a mechanism's section is absent or disabled
 - **THEN** the settlement runtime's `not_configured` or `disabled` blocker is a
   configuration blocker
+
+#### Scenario: A disabled section could not settle
+
+- **WHEN** a seller's Alkahest section is disabled and lacks its wallet key, or names a
+  release model its domain cannot deliver
+- **THEN** its readiness reports `disabled` followed by the configuration blocker naming
+  the problem, and no reachability blocker
 
 ### Requirement: Alkahest probes its chains apart from readiness
 

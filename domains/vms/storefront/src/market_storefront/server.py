@@ -83,7 +83,7 @@ from market_storefront.services.publication_terms import (
     parse_configured_admissibility_default,
 )
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.settlement_composition import require_vm_release_model
+from market_storefront.settlement_composition import require_coherent_release_model
 from market_storefront.settlement_registry import build_storefront_settlement_registry
 from market_storefront.startup_refusal import require_publishable_storefront
 
@@ -322,11 +322,12 @@ def _build_vm_services(
             "VM service composition must use the exact registry-owned domain contract"
         )
     # Before anything is constructed: a configured default the storefront
-    # cannot read, an Alkahest release model it cannot deliver, or a
-    # configuration under which it could never publish stops startup rather
-    # than running without it.
+    # cannot read, a contradictory Alkahest release model, or a configuration
+    # under which it could never publish stops startup rather than running
+    # without it. An Alkahest section that is coherent but cannot settle makes
+    # Alkahest unready instead.
     admissibility_default = parse_configured_admissibility_default()
-    require_vm_release_model(domain)
+    require_coherent_release_model()
     seams.startup_refusal()
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()

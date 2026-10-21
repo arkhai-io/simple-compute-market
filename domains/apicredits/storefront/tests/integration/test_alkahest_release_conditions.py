@@ -3,30 +3,33 @@
 The real app and lifespan compose the storefront from configuration: its signer
 from a development credential supplied as the Secret boundary supplies it, its
 settlement composition, wallet, and chains, and the listing service the route
-reaches. Two seams stand in for what lies beyond the storefront: the quota
+reaches. Three seams stand in for what lies beyond the storefront: the quota
 site's capacity runtime, which the listing service resolves through
-``build_capacity_runtime``, and the startup tasks, which preflight the credits
-service and start the timer loops. The anvil chain's address book is the
-development chain's. Every address and key here is a deterministic development
-value, never used on a public network.
+``build_capacity_runtime``; the startup tasks, which preflight the credits
+service and start the timer loops; and the chain probe's JSON-RPC transport,
+the boundary to the chain, which answers as a deployed chain does. The anvil
+chain's address book is the development chain's. Every address and key here is
+a deterministic development value, never used on a public network.
 """
 
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
 from unittest.mock import patch
 
 import httpx
 import pytest
-from market_alkahest import ReleaseModelError
+from market_alkahest import AlkahestChainProbe, ProbedChain, ReleaseModelError
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_config.config_loader import ChainConfig
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient
+from storefront_client.client import StorefrontClientError
 
+import apicredits_storefront.container as container
 import apicredits_storefront.server as server
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.listing_publication import ApiCreditListingClient
@@ -39,6 +42,9 @@ SEED = b"\x22" * 32
 SELLER_SIGNER = Ed25519Signer(SEED)
 ADMIN_SIGNER = Ed25519Signer(b"\x44" * 32)
 SELLER_WALLET = "0x" + "33" * 20
+# A deterministic development key; never used on a public network.
+SELLER_WALLET_KEY = "0x" + "55" * 32
+ORACLE = "0x" + "cd" * 20
 ESCROW = {
     "chain_name": "anvil",
     "escrow_address": "0x" + "11" * 20,
@@ -51,6 +57,21 @@ ANVIL = ChainConfig(
     chain_id=31337,
     alkahest_address_config_path=str(anvil_address_book_path()),
 )
+ALKAHEST_CLAUSE = {
+    "mechanism": "alkahest.v1",
+    "asset": "0x" + "01" * 20,
+    "rate": "100",
+    "per": "token",
+    "mechanism_input": {
+        "chain": "anvil",
+        "escrow_kind": "erc20_escrow_obligation_default",
+    },
+}
+
+
+def _deployed_chain(rpc_url, method, params, timeout):
+    """The chain's JSON-RPC endpoint, answering as the deployed dev chain."""
+    return hex(31337) if method == "eth_chainId" else "0x6080"
 
 
 @contextmanager
@@ -89,6 +110,27 @@ def storefront(tmp_path, monkeypatch):
     # The process's database client is created by the first startup; each test
     # starts from none and leaves none behind.
     monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
+
+    async def no_startup_tasks(*, domain):
+        return None
+
+    monkeypatch.setattr(server, "_startup_tasks", no_startup_tasks)
+    monkeypatch.setattr(
+        capacity_module,
+        "build_capacity_runtime",
+        lambda factory: _QuotaRuntime({"svc-quota": 42}),
+    )
+    probe_for = server._build_alkahest_chain_probe
+
+    def probe_over_the_deployed_chain(section, clients):
+        built = probe_for(section, clients)
+        return AlkahestChainProbe(
+            [ProbedChain.from_config(name, chain) for name, chain in storefront_config.CHAINS.items()],
+            clients=built.clients,
+            json_rpc=_deployed_chain,
+        )
+
+    monkeypatch.setattr(server, "_build_alkahest_chain_probe", probe_over_the_deployed_chain)
     identity = SELLER_SIGNER.identity
     with _replaced(
         identity={
@@ -98,7 +140,7 @@ def storefront(tmp_path, monkeypatch):
                 "identities": [ADMIN_SIGNER.identity.model_dump(mode="json")]
             },
         },
-        wallet={"address": SELLER_WALLET, "private_key": ""},
+        wallet={"address": SELLER_WALLET, "private_key": SELLER_WALLET_KEY},
         db_path=str(db_path),
         # A quota site the startup refusal can read; its runtime is the test's.
         capacity={
@@ -124,13 +166,50 @@ def _app():
     )
 
 
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_startup_refuses_a_release_model_api_credits_cannot_deliver(
-    storefront, enabled
-):
+@asynccontextmanager
+async def _started(settlement: dict):
+    """The started storefront under ``settlement``, its chain probed once."""
     app = _app()
-    with _replaced(settlement=_settlement(enabled=enabled, interruptible=True)):
-        with pytest.raises(ReleaseModelError, match="'interruptible' release model"):
+    with _replaced(settlement=settlement):
+        async with app.router.lifespan_context(app):
+            probe = container.resolved_alkahest_chain_probe
+            if probe is not None:
+                await probe.step()
+            transport = httpx.ASGITransport(app=app)
+            async with StorefrontClient(
+                "http://seller",
+                signer=SELLER_SIGNER,
+                caller_role="seller",
+                expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                transport=transport,
+            ) as seller, StorefrontClient(
+                "http://seller", transport=transport
+            ) as public, StorefrontClient(
+                "http://seller",
+                signer=ADMIN_SIGNER,
+                caller_role="admin",
+                expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                transport=transport,
+            ) as admin:
+                yield ApiCreditListingClient(seller, seller=SELLER_SIGNER.identity), public, admin
+
+
+def _supplied_escrows() -> dict:
+    return {
+        "resource_id": "svc-quota",
+        "service_name": "Acme Inference",
+        "accepted_escrows": [dict(ESCROW)],
+    }
+
+
+async def test_a_contradictory_release_model_refuses_startup(storefront):
+    app = _app()
+    with _replaced(
+        settlement=_settlement(
+            oracle_gated=True, trusted_oracle_addresses=[ORACLE], interruptible=True
+        )
+    ):
+        with pytest.raises(ReleaseModelError, match="mutually exclusive"):
             async with app.router.lifespan_context(app):
                 pass
 
@@ -140,41 +219,11 @@ async def test_startup_refuses_a_release_model_api_credits_cannot_deliver(
 
 
 async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_seller(
-    storefront, monkeypatch
+    storefront,
 ):
-    async def no_startup_tasks(*, domain):
-        return None
-
-    monkeypatch.setattr(server, "_startup_tasks", no_startup_tasks)
-    monkeypatch.setattr(
-        capacity_module,
-        "build_capacity_runtime",
-        lambda factory: _QuotaRuntime({"svc-quota": 42}),
-    )
-    app = _app()
-    with _replaced(settlement=_settlement()):
-        async with app.router.lifespan_context(app):
-            transport = httpx.ASGITransport(app=app)
-            publishers = TrustedIdentitySet(identities=(SELLER_SIGNER.identity,))
-            async with StorefrontClient(
-                "http://seller",
-                signer=SELLER_SIGNER,
-                caller_role="seller",
-                expected_publishers=publishers,
-                transport=transport,
-            ) as seller, StorefrontClient(
-                "http://seller", transport=transport
-            ) as public:
-                created = await ApiCreditListingClient(
-                    seller, seller=SELLER_SIGNER.identity
-                ).publish_from_quota(
-                    {
-                        "resource_id": "svc-quota",
-                        "service_name": "Acme Inference",
-                        "accepted_escrows": [dict(ESCROW)],
-                    }
-                )
-                listing = await public.get_listing(created.listing_id)
+    async with _started(_settlement()) as (listings, public, _admin):
+        created = await listings.publish_from_quota(_supplied_escrows())
+        listing = await public.get_listing(created.listing_id)
 
     assert created.status == "created"
     assert listing.extra["demands"] == [
@@ -186,3 +235,63 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
             "demand_data": {"recipient": SELLER_WALLET.lower()},
         }
     ]
+
+
+UNSETTLEABLE = {
+    "interruptible": (
+        {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
+        "alkahest.release_model_undeliverable",
+    ),
+    "no-oracle": ({"oracle_gated": True}, "alkahest.oracle_policy_invalid"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
+async def test_an_unsettleable_section_starts_and_its_status_names_the_blocker(
+    storefront, case
+):
+    """Spec scenario "An Alkahest section that cannot settle makes Alkahest
+    unready": the storefront starts, and the administrator's status reports
+    Alkahest unready with the configuration blocker."""
+    section, blocker = UNSETTLEABLE[case]
+    async with _started(_settlement(**section)) as (_listings, _public, admin):
+        status = await admin.get_system_status()
+
+    (alkahest,) = [item for item in status.settlement if item["mechanism"] == "alkahest.v1"]
+    assert alkahest["ready"] is False
+    assert (blocker, "configuration") in {(b["code"], b["kind"]) for b in alkahest["blockers"]}
+
+
+@pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
+async def test_supplied_escrows_publish_no_alkahest_option_while_it_is_unready(
+    storefront, case
+):
+    """Spec scenario "An API-credit listing request supplies its escrows":
+    with Alkahest unready no condition is derived for them and no Alkahest
+    option publishes, so a listing whose only option they were is refused."""
+    section, blocker = UNSETTLEABLE[case]
+    async with _started(_settlement(**section)) as (listings, _public, _admin):
+        with pytest.raises(StorefrontClientError, match=blocker) as refused:
+            await listings.publish_from_quota(_supplied_escrows())
+
+    assert refused.value.status_code == 400
+
+
+@pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
+async def test_alkahest_clauses_compile_no_option_while_it_is_unready(storefront, case):
+    """The clause path: the composition the route uses compiles no Alkahest
+    escrow and derives no condition while Alkahest is unready."""
+    section, _blocker = UNSETTLEABLE[case]
+    async with _started(_settlement(**section)):
+        composition = container.resolved_settlement_composition
+        with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):
+            await composition.publication_artifacts(
+                {
+                    "claimant_principal": SELLER_SIGNER.identity,
+                    "resource_id": "svc-quota",
+                    "service": "Acme Inference",
+                },
+                [dict(ALKAHEST_CLAUSE)],
+            )
+        readiness = await composition.readiness()
+        assert composition.release_conditions([dict(ESCROW)], readiness=readiness) == []
