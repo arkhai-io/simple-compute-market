@@ -232,14 +232,21 @@ def test_unattended_planning_may_start_fresh_and_validation_take_every_scenario(
 
 def test_make_review_runs_the_wrappers_review() -> None:
     assert _make_n("review", "CHANGE=X", "KIND=design") == [
-        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev"    ']
+        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev"     ']
 
 
 def test_make_review_passes_the_owners_model_for_one_run() -> None:
     assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_MODEL=claude-fable-5-1",
                    "REVIEW_EFFORT=low") == [
         'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
-        '--model "claude-fable-5-1" --effort "low"  ']
+        '--model "claude-fable-5-1"  --effort "low"  ']
+
+
+def test_make_review_passes_the_owners_harness_for_one_run() -> None:
+    assert _make_n("review", "CHANGE=X", "KIND=design", "REVIEW_HARNESS=bb",
+                   "REVIEW_MODEL=pi/anthropic/claude-opus-5-5") == [
+        'python3 scripts/run_change_step.py review "X" --kind "design" --base "dev" '
+        '--model "pi/anthropic/claude-opus-5-5" --harness "bb"   ']
 
 
 def test_make_check_change_runs_the_changes_closing_checks() -> None:

@@ -101,6 +101,10 @@ def test_every_step_may_run_the_cost_report() -> None:
     ('models = [{ harness = "claude", effort = "high" }]\n', "without a model"),
     ('models = [{ harness = "codex", model = "gpt-6-sol" }]\n', "Codex runs only the review"),
     ('models = [{ harness = "gemini", model = "g" }]\n', "harness 'gemini'"),
+    ('models = [{ harness = "pi", model = "anthropic/claude-opus-5-5" }]\n',
+     "pi runs only the review"),
+    ('models = [{ harness = "bb", model = "claude-code/claude-opus-5-5" }]\n',
+     "A bb thread runs only the review"),
     ('models = [{ harness = "claude", model = "m", speed = "fast" }]\n', "a key other than"),
 ])
 def test_a_row_naming_models_the_policy_forbids_is_refused(
@@ -112,6 +116,37 @@ def test_a_row_naming_models_the_policy_forbids_is_refused(
         load_steps(table)
 
     assert "triage row" in str(refused.value)
+
+
+@pytest.mark.parametrize("models,problem", [
+    ('models = [{ harness = "pi", model = "openai/gpt-6.1-sol" }]\n', "use openai-codex"),
+    ('models = [{ harness = "bb", model = "pi/openai/gpt-6.1-sol" }]\n', "use openai-codex"),
+    ('models = [{ harness = "pi", model = "gpt-6.1-sol" }]\n', "expected <provider>/<model>"),
+    (('models = [{ harness = "codex", model = "gpt-6-sol" }, '
+      '{ harness = "pi", model = "openai-codex/gpt-6.1-sol" }]\n'), "two models of one vendor"),
+    (('models = [{ harness = "claude", model = "claude-opus-5-5" }, '
+      '{ harness = "bb", model = "pi/anthropic/claude-opus-5-5" }]\n'),
+     "two models of one vendor"),
+])
+def test_a_review_row_the_policy_forbids_is_refused(tmp_path: Path, models: str,
+                                                    problem: str) -> None:
+    table = tmp_path / "steps.toml"
+    table.write_text(f'[steps.review]\nskill = "change-review"\n{models}', "utf-8")
+
+    with pytest.raises(StepError, match=problem):
+        load_steps(table)
+
+
+def test_a_review_row_may_name_pi_and_bb_models_of_other_vendors(tmp_path: Path) -> None:
+    table = tmp_path / "steps.toml"
+    table.write_text('[steps.review]\nskill = "change-review"\nmodels = [\n'
+                     '  { harness = "pi", model = "openai-codex/gpt-6.1-sol", effort = "high" },\n'
+                     '  { harness = "bb", model = "claude-code/claude-opus-5-5" },\n]\n', "utf-8")
+
+    models = load_steps(table)["review"].models
+
+    assert [(model.harness, model.vendor) for model in models] == [("pi", "openai"),
+                                                                    ("bb", "anthropic")]
 
 
 PUSHES = ["git push origin HEAD", "make push-branch", "uv run git push",
