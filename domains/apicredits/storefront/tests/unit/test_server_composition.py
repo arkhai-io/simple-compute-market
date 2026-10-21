@@ -22,6 +22,7 @@ from apicredits_storefront.lifecycle_steps import (
     register_api_credit_lifecycle_steps,
     register_api_credit_loops,
 )
+from apicredits_storefront.listing_seed import ListingSeed
 from apicredits_storefront.retired_settings import retired_setting_problems
 from apicredits_storefront.services.capacity_client import capacity_poll_interval
 from apicredits_storefront.startup_refusal import StorefrontStartupError
@@ -121,7 +122,8 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     Startup registers each sweep's timer over the step its route runs and the
     capacity-event pollers' fan-out, and `start_loops` starts them all. Payment
     reconciliation runs only while Arkhai payments is composed; the Alkahest
-    chain probe, composed here, runs while Alkahest is.
+    chain probe, composed here, runs while Alkahest is; and the listing seed,
+    configured here, runs while a seed is configured.
     """
     domain = get_market_domain_contract()
     composition = (
@@ -133,6 +135,18 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
         container,
         "resolved_alkahest_chain_probe",
         AlkahestChainProbe((), interval_seconds=3600),
+    )
+    # A configured seed, held with every loop, so its step never attempts and
+    # none of its boundaries is reached.
+    monkeypatch.setattr(
+        container,
+        "resolved_listing_seed",
+        ListingSeed(
+            seed={"resource_id": "demo-quota"},
+            register_quota=None,
+            find_listing=None,
+            listing_service=None,
+        ),
     )
     loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
@@ -156,9 +170,13 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(container, "resolved_loop_controller", loops)
     monkeypatch.setattr(negotiation_thread, "get_thread_store", lambda **_kwargs: None)
     monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
-    monkeypatch.setattr(startup, "_seed_demo_listing", _noop)
 
-    timed = {"negotiation_watchdog", "settlement_servicing", "alkahest_chain_probe"}
+    timed = {
+        "negotiation_watchdog",
+        "settlement_servicing",
+        "alkahest_chain_probe",
+        "listing_seed",
+    }
     if payments:
         timed.add("payment_reconciliation")
     loops.request_pause(True)

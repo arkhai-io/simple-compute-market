@@ -2,22 +2,69 @@
 
 Subcommands:
     serve      Run the storefront HTTP server in-process.
-    publish    Create + publish a listing backed by a quota resource.
-    listings   List the storefront's local listings.
+    publish    Create + publish a listing backed by a quota resource, through
+               the running storefront.
+    listings   List the running storefront's local listings.
+
+``publish`` and ``listings`` are clients of a running storefront: a listing
+created with no storefront serving it is one no buyer can negotiate, so neither
+command builds the storefront's services or opens its database.
 """
 
 from __future__ import annotations
 
-import asyncio
+import dataclasses
 import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
+import httpx
 import typer
 from market_alkahest.alkahest import get_erc20_escrow_obligation_default
+from market_identity import Signer, TrustedIdentitySet
+from storefront_client import StorefrontClientError, SyncStorefrontClient
+
+from apicredits_storefront.listing_publication import SyncApiCreditListingClient
 
 app = typer.Typer(no_args_is_help=True)
+
+_STOREFRONT_URL_HELP = (
+    "The running storefront's origin; the configured base_url, else "
+    "http://localhost:<port>, when omitted."
+)
+
+
+def _open_storefront(url: str, signer: Signer | None) -> SyncStorefrontClient:
+    """The typed client the listing commands reach the storefront through,
+    signing as the storefront's own principal when ``signer`` is given."""
+    if signer is None:
+        return SyncStorefrontClient(url)
+    return SyncStorefrontClient(
+        url,
+        signer=signer,
+        caller_role="seller",
+        expected_publishers=TrustedIdentitySet(identities=(signer.identity,)),
+    )
+
+
+def _storefront_url(explicit: str | None) -> str:
+    # Imported when a command runs, after the root `--config` option: the
+    # storefront's settings resolve when its config module is first imported.
+    from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+
+    return explicit or BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
+
+
+def _refused(url: str, exc: Exception) -> typer.Exit:
+    """Report a refusal or an unreachable storefront, naming where it was sent."""
+    if isinstance(exc, httpx.HTTPError):
+        typer.echo(
+            f"no storefront answered at {url} ({type(exc).__name__})", err=True
+        )
+    else:
+        typer.echo(f"the storefront at {url} refused: {exc}", err=True)
+    return typer.Exit(code=1)
 
 
 def version_callback(value: bool) -> None:
@@ -109,19 +156,21 @@ def publish_cmd(
         help="Base URL of the token-gated service.",
     ),
     paused: bool = typer.Option(False, "--paused"),
+    storefront_url: str | None = typer.Option(
+        None, "--storefront-url", "-a", help=_STOREFRONT_URL_HELP
+    ),
 ) -> None:
     """Create + publish a listing backed by a quota resource.
 
     Pass the Alkahest rate, token, and chain together to publish an escrow
     option. Omit all three to publish configured settlement clauses, such as
-    Arkhai payments, without requiring an EVM chain.
+    Arkhai payments, without requiring an EVM chain. The running storefront
+    creates the listing; the command signs as the storefront's own principal,
+    from the configuration and ``ARKHAI_IDENTITY_CREDENTIAL``.
     """
     # Imported only once ``--config`` has run: the storefront's settings
     # resolve when its config module is first imported.
-    import apicredits_storefront.container as _container
-    from apicredits_storefront.domain_runtime import get_market_domain_contract
-    from apicredits_storefront.server import _build_api_credit_services
-    from apicredits_storefront.utils.config import CHAINS
+    from apicredits_storefront.utils.config import CHAINS, resolve_identity_signer
 
     legacy_requested = any(
         value is not None for value in (price_per_token, token, chain)
@@ -163,44 +212,51 @@ def publish_cmd(
             }
         ]
 
-    # The same listing service the running storefront composes, with its
-    # settlement composition, and the signer its capacity runtime reads.
-    services = _build_api_credit_services(get_market_domain_contract())
-    _container.resolved_marketplace_signer = services.marketplace_signer
-    _container.resolved_sqlite_client = services.sqlite_client
-    result = asyncio.run(
-        services.listing_service.publish_from_quota(
-            resource_id=resource_id,
-            service_name=service_name,
-            accepted_escrows=accepted_escrows,
-            description=description,
-            openapi_url=openapi_url,
-            base_url=base_url,
-            paused=paused,
-        )
-    )
-    typer.echo(json.dumps(result, indent=2))
+    signer = resolve_identity_signer()
+    url = _storefront_url(storefront_url)
+    request = {
+        "resource_id": resource_id,
+        "service_name": service_name,
+        "accepted_escrows": accepted_escrows,
+        "description": description,
+        "openapi_url": openapi_url,
+        "base_url": base_url,
+        "paused": paused,
+    }
+    try:
+        with _open_storefront(url, signer) as client:
+            result = SyncApiCreditListingClient(
+                client, seller=signer.identity
+            ).publish_from_quota(request)
+    except (StorefrontClientError, httpx.HTTPError) as exc:
+        raise _refused(url, exc) from exc
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2))
 
 
 @app.command("listings")
 def listings_cmd(
     status: str | None = typer.Option(None, "--status"),
     limit: int = typer.Option(50, "--limit"),
+    storefront_url: str | None = typer.Option(
+        None, "--storefront-url", "-a", help=_STOREFRONT_URL_HELP
+    ),
 ) -> None:
-    """List the storefront's local listings."""
-    from apicredits_storefront.utils.config import (
-        BASE_URL_OVERRIDE,
-        resolve_identity_config,
-    )
-    from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+    """List the running storefront's local listings."""
+    # Imported only once ``--config`` has run, as in ``publish``.
+    from apicredits_storefront.utils.config import resolve_identity_config
 
-    rows = asyncio.run(
-        get_sqlite_client(
-            local_listing_principal=resolve_identity_config().principal,
-            expected_legacy_sellers=(BASE_URL_OVERRIDE,),
-        ).list_listings(status=status, limit=limit),
-    )
-    typer.echo(json.dumps(rows, indent=2, default=str))
+    seller = resolve_identity_config().principal
+    url = _storefront_url(storefront_url)
+    try:
+        # The listing route is public, so the read needs no credential: the
+        # seller's public principal is all the listing client needs.
+        with _open_storefront(url, None) as client:
+            page = SyncApiCreditListingClient(client, seller=seller).list_listings(
+                status=status, limit=limit
+            )
+    except (StorefrontClientError, httpx.HTTPError) as exc:
+        raise _refused(url, exc) from exc
+    typer.echo(json.dumps(dataclasses.asdict(page), indent=2, default=str))
 
 
 if __name__ == "__main__":

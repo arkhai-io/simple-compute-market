@@ -543,8 +543,8 @@ class AlkahestSellerStage:
         # As for the payment stage: required, with no default.
         self.fulfils_through_capacity = fulfils_through_capacity
         # The Alkahest release models, from market_alkahest.RELEASE_MODELS, a
-        # credit deal may be released under. Composition refuses a configured
-        # [Settlement.alkahest] model outside them, so a listing never
+        # credit deal may be released under. A configured [Settlement.alkahest]
+        # model outside them makes Alkahest unready, so a listing never
         # advertises a condition its deal could not honour.
         self.release_models = release_models
 

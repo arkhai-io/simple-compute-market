@@ -150,10 +150,11 @@ policies = []
 default_min_price = "1"
 
 [seed]
-# Demo self-seed (e2e): on startup, register this quota resource in the
-# credits-service ledger and publish a listing from it, so a fresh
-# `compose up` has something to discover. The listing's base_url points
-# at the gated sample app the buyer will consume.
+# Demo self-seed (e2e): the storefront's listing-seed loop registers this
+# quota resource in the credits-service ledger and publishes a listing from
+# it once the credits service and the chain answer, so a fresh `compose up`
+# has something to discover. The listing's base_url points at the gated
+# sample app the buyer will consume.
 resource_id     = "weather-quota"
 total_units     = 100
 service_name    = "weather-api"

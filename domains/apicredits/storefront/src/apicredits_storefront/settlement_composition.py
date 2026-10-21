@@ -124,6 +124,11 @@ class ApiCreditsSettlementComposition:
             resources=resources,
         )
 
+    def canonical_mechanism(self, name: str) -> str:
+        """The canonical ID of the mechanism a publication clause names, by its
+        ID or its configuration key, as compiling the clause resolves it."""
+        return self.configuration_registry.canonical_mechanism_id(name, role="seller")
+
     def accepted_obligation_dispatch(
         self,
     ) -> dict[str, Callable[[Mapping[str, Any], Mapping[str, Any]], Any] | None]:
@@ -197,7 +202,12 @@ class ApiCreditsSettlementComposition:
     ) -> tuple[
         list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
     ]:
-        """Compile each complete ready clause without suppressing ready peers."""
+        """Compile each complete ready clause without suppressing ready peers.
+
+        A clause whose mechanism is unready compiles nothing, so with none ready
+        no artifact is returned; the readiness returned beside them says why,
+        which the caller judges.
+        """
         merged_resources = {**self.mechanism_resources, **resources}
         compiled = (
             [
@@ -273,8 +283,6 @@ class ApiCreditsSettlementComposition:
             settlement_options.extend(
                 dict(item) for item in envelope.get("settlement_options", ())
             )
-        if not accepted_escrows and not settlement_options:
-            raise RuntimeError("no enabled settlement mechanism is ready")
         return accepted_escrows, settlement_options, readiness
 
 

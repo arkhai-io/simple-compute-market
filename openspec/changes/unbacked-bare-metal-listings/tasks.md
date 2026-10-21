@@ -771,21 +771,67 @@ storefront CLI's listing commands as clients of the running storefront (D19;
 `storefront-publication` "API-credit listing creation waits for or names an unreachable
 mechanism"). Touches the API-credit storefront.
 
-- [ ] 6.1 `src/startup.py`: the configured seed no longer runs in startup. It is the
+- [x] 6.1 `src/startup.py`: the configured seed no longer runs in startup. It is the
       `listing-seed` loop and lifecycle step (`lifecycle_steps.py`): it waits, logging
       nothing at error level, while the credits service cannot be reached for its quota
       registration or a mechanism its clauses use is unknown (every blocker a reachability
       blocker); gives up, logging once, on a configuration failure; and finishes once the
       listing exists, created or found (D19).
-- [ ] 6.2 `services/listing_service.py` and `controllers/listings_controller.py`: a create
+      Done.
+      - The seed moved out of `startup.py` into `src/listing_seed.py` (`ListingSeed`,
+        `register_seed_quota`, `capacity_authority_site`, `configured_listing_seed`).
+        `server.py` installs it on the container (`resolved_listing_seed`).
+        `lifecycle_steps.py` registers the step and the loop only while a seed is
+        configured.
+      - Waiting: a registration or availability read the credits service did not answer
+        (no response, or a 5xx), or any mechanism the seed uses is unknown. The seed
+        creates with `wait_for_every_mechanism`, so it waits whenever a mechanism it
+        uses is unknown, even if another would publish: a listing's options are fixed
+        at creation. Waiting is logged at INFO when its reason changes. A registration
+        the ledger accepted is not sent again while the seed waits.
+      - Given up: anything else. The cycle that gives up raises `ListingSeedGivenUp`, so
+        the loop controller records a failed cycle with that type and logs it once at
+        ERROR; later cycles do nothing and complete.
+      - Done: an open listing derives from the resource, found or created.
+      - The report names a reason code (`credits_service_unanswered`,
+        `settlement_mechanism_unreached` with the mechanisms) or, given up, the error's
+        type, never an error's text, which can carry the credits service's URL.
+      - **Differed:** the loop retries every 2 s (`LISTING_SEED_INTERVAL_SECONDS`, or the
+        probe's interval if shorter) rather than at the probe's 30 s. The lanes' scenarios
+        discover once, right after the stack is healthy, so a seed that missed the probe's
+        first result would otherwise be a whole interval late.
+- [x] 6.2 `services/listing_service.py` and `controllers/listings_controller.py`: a create
       refused only because a mechanism is unknown raises a distinct error the route answers
       with 503, naming the unreached mechanism and that the create can be retried; a
       configuration refusal stays a 400 with its blocker codes (D19).
-- [ ] 6.3 `listing_publication.py`: `ApiCreditListingClient` and
+      Done:
+      - `SettlementMechanismUnreachable(mechanisms, chains=)` is raised when no option
+        publishes and every enabled, unready mechanism the request uses has only
+        reachability blockers. A mechanism is used when a clause names it, by ID or
+        configuration key (`canonical_mechanism` on the composition), or, for
+        Alkahest, when escrows are supplied, judged on their own chains; and only when
+        the pool's backing admits it. The refusal comes after the resource and its pool
+        are read, so a create refused as retryable is one that publishes once the
+        mechanism answers. Its message names each mechanism and the chains the request
+        uses it on, as the spec scenario requires. The route answers it 503.
+      - **Changed beside it:** the composition's `publication_artifacts` no longer raises
+        `RuntimeError` when nothing is ready. It returns no artifacts and the readiness,
+        so a clause-only create with an unready mechanism is now this 503, or the 400
+        with its blocker codes, rather than the 500 Section 5 noted.
+- [x] 6.3 `listing_publication.py`: `ApiCreditListingClient` and
       `SyncApiCreditListingClient` gain a list method over the listing route, in both
       variants. `cli.py` `publish` and `listings` call the running storefront through them
       and no longer build services or open the database in their own process (D19).
-- [ ] 6.4 Tests: unit `tests/unit/test_listing_publication_client.py` (parity of the new
+      Done. `list_listings(status, limit, offset)` on both clients delegates to the
+      transport's own `list_listings`. `publish` signs as the storefront's principal
+      (`resolve_identity_signer`) through `SyncApiCreditListingClient`, to
+      `--storefront-url`/`-a`, else the configured `base_url`, else
+      `http://localhost:<port>`. `listings` reads through
+      `SyncApiCreditListingClient.list_listings` over an unsigned client, given the
+      configured public principal, since the route is public and reading it should not
+      need the signing credential. A refusal exits 1 with the storefront's reason, and
+      no answer exits 1 naming the URL and the transport error's type.
+- [x] 6.4 Tests: unit `tests/unit/test_listing_publication_client.py` (parity of the new
       method) and `tests/unit/test_listing_publication_entry_points.py` (inverted: the CLI
       uses the typed client); unit `tests/unit/test_startup_seed_quota.py` moved onto the
       step — waits on an unreachable credits service and on an unprobed chain, gives up on
@@ -794,10 +840,142 @@ mechanism"). Touches the API-credit storefront.
       create against an unprobed chain answers 503 naming Alkahest, a configuration refusal
       400, and a stepped probe then lets the same create succeed; `tests/unit/test_server_composition.py`
       lists `listing-seed` (D19).
-- [ ] 6.5 Versions: `arkhai-apicredits-storefront`; `make lock`.
-- [ ] 6.6 **Verify.** `make test-apicredits`; `make test`; `make check-packaging`.
+      Done.
+      - Unit, `tests/unit/test_listing_publication_client.py`: the sync and async
+        clients' public methods match, and both list through the transport's listing
+        method.
+      - Unit, `tests/unit/test_listing_publication_entry_points.py`, with the storefront
+        client replaced at `cli._open_storefront`, and constructing the services or the
+        storefront's `SQLiteClient` failing the test:
+        - `publish` opens the client with the storefront's signer and sends the create
+          the listing client builds, as the seller; the signed transport itself is the
+          fake's, so its signing is not exercised here;
+        - `listings` opens an unsigned client and reads through the listing client;
+        - no answer and a refusal each exit 1 with their message.
+      - Unit, `tests/unit/test_startup_seed_quota.py` (rewritten in place; its name is
+        kept because this step cannot rename a file):
+        - the registration request through the typed client over a stub transport,
+          given its site and signer; a ledger refusal and an unanswering ledger each
+          raising the client's error, the second with no status;
+        - each cycle run through the storefront's loop controller: waiting on no
+          response or a 5xx to the registration, then finishing; waiting on an
+          unanswered availability read without registering again, then finishing;
+          waiting on an unknown mechanism, then finishing, every create asking to
+          wait for every mechanism; none of these logging at ERROR;
+        - giving up on a configuration refusal and on a ledger refusal: the cycle
+          fails with `ListingSeedGivenUp`, one ERROR record, and a later cycle does
+          nothing;
+        - finishing on a listing already there, registering nothing.
+      - **Differed:** the 503 case is application integration in
+        `tests/integration/test_alkahest_release_conditions.py` rather than
+        `test_publish_reconcile.py`, because that file has the real app and composition.
+        Through `ApiCreditListingClient`:
+        - a supplied-escrow create and a clause create, naming Alkahest by ID or by
+          configuration key, against an unprobed chain are each refused 503 naming
+          `alkahest.v1 (chain anvil)`; after an `alkahest-chain-probe` run-cycle
+          through the administrator's typed client the supplied-escrow create
+          succeeds;
+        - a clause create while Alkahest is unready for its configuration answers 400
+          naming the blocker, as the supplied-escrow unsettleable cases do, and so does
+          a supplied-escrow create unready for its configuration before any probe
+          (the test asserts the 400 and the configuration blocker, not the
+          reachability blocker beside it);
+        - the seed, stepped as `listing-seed` through the administrator's typed client
+          in the started storefront, with its quota registration replaced on the
+          storefront's seed: it waits naming `alkahest.v1` while the chain is
+          unprobed, and after a probe run-cycle publishes its listing on `anvil`,
+          registering once. This stands for the spec scenario "A storefront starts
+          with its chain down" with a chain not yet probed rather than one a probe
+          failed to reach, which reads the same way at readiness; "… with its
+          dependencies up" is the same step after a probe, not tested separately.
+          Alkahest is the seed's only mechanism here, so this does not show the seed
+          waiting where another mechanism would publish; the unit test of the rule
+          and the seed's own unit tests (the flag reaches the create) cover that
+          between them, not against the real listing service.
+        - The composition-level clause case asserts no artifacts and the
+          configuration blocker.
+      - Unit, `tests/unit/test_unreached_mechanisms.py`: which mechanisms are unknown,
+        with every and with any: a mechanism with only reachability blockers, one
+        with both kinds, an unknown one beside a misconfigured one (no refusal as
+        retryable; the seed waits), and ready or disabled ones.
+      - `tests/unit/test_server_composition.py` lists `listing_seed` among every loop.
+- [x] 6.5 Versions: `arkhai-apicredits-storefront`; `make lock`.
+      0.13.0; `make lock` refreshed every lock.
+- [x] 6.6 **Verify.** `make test-apicredits`; `make test`; `make check-packaging`.
       End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` run on the seeded
       listing, so their passing proves the step publishes once dependencies answer.
+      Results:
+      - `make test-apicredits` all passed (storefront 215, after both reviews' fixes).
+      - `make check-packaging` passed.
+      - `make check-change`: fails only on the two citations Sections 13 and 22 create.
+      - `make test`: **not run.** Only the API-credit project changed, and no other
+        project's pyproject or lock depends on it, so no other suite could see the
+        change. The VM and bare-metal storefronts gained comment changes only (below).
+      - End-to-end, unrun. `e2e_credits_deal` and `e2e_credits_payment_deal` are the
+        scenarios that would show the step publishing once dependencies answer, but
+        each discovers once, right after the stack is healthy, so it passes only if the
+        seed has published by then: the probe's first cycle, then a seed cycle at most
+        2 s later. The pipeline run is the evidence, and it may lose that race (handoff
+        below).
+
+Section 6 notes (handoff):
+
+- **Residual race for validation:** before this section the seed published before the
+  storefront served; now it publishes up to a couple of seconds after the chain probe's
+  first cycle. If the credits lane's discovery runs inside that window it finds nothing.
+  The remedy, if the pipeline shows it, is the scenario stepping `listing-seed` (or
+  waiting on its state) before discovery, not a longer storefront startup.
+- **Startup still preflights the credits service** (`_preflight_credits_service`), which
+  Section 11 removes.
+- **For closeout:** `TESTING.md`'s API-credit loop row gains `alkahest-chain-probe`
+  (Section 4) and `listing-seed`, as the design's promotion list says.
+- **Comments from Section 5 corrected here:** the storefronts' Alkahest stage
+  comments (`settlement_stages.py`) still said composition refuses an undeliverable
+  release model; bare metal's and API credits' now say it makes Alkahest unready.
+  VM's same correction is committed with Section 7, which changes that file and was
+  already in the worktree when this section was committed, since this step cannot
+  stage part of a file. Comment-only, so no suite was rerun for bare metal. The seed's
+  configuration and compose comments (`storefront.credits.toml`,
+  `domains/apicredits/compose.yml`) no longer say it seeds at startup.
+- **From the fresh-context review, fixed:** the seed published without an unknown
+  mechanism's option whenever another mechanism was ready (now
+  `wait_for_every_mechanism`); a given-up seed recorded a completed cycle; raw error
+  text in the report; the registration re-sent every cycle while waiting; `listings`
+  bypassing the typed client; `ListingSeed` and `register_seed_quota` reading their
+  listing service, signer, site, and database from the container (the server now
+  builds the seed from its own services, and the seed module reads no container); a
+  private `_capacity_settings` import (now `configured_sites`); the seed interval's
+  dead fallback; import order; the notes above. **Declined:** the CLI tests still
+  replace `cli._open_storefront`, a module function, since a Typer command has no
+  constructor to inject through; `listing_service.py` keeps its direct
+  `ALKAHEST_MECHANISM_ID` import (it already treats supplied escrows as the Alkahest
+  form) and the `"reachability"` literal, which `ReadinessBlockerKind` types; the
+  test file's name (it cannot be renamed here).
+- **From the second fresh-context review, fixed:** a clause naming Alkahest by its
+  configuration key was refused 400 rather than 503 (mechanisms are now
+  canonicalized); the 503 named no chain, against the delta scenario "names
+  Alkahest's unreached chain" (it now names the chains); a 503 could precede the
+  resource and pool checks, telling the caller to retry a create that would then fail
+  (the refusal now follows them and counts only mechanisms the pool's backing
+  admits; no test sends an unknown-mechanism create to a missing resource or an
+  unbacked pool); the waiting rule had no unit test and the seed loop no
+  integration test (both above); `list_listings` returned `Any` (now
+  `ListingListResponse`).
+- **Deliberate, from the third check:** a create that publishes nothing, with one
+  mechanism unknown and another unready for its configuration, answers 400, though
+  it would publish the first once it is reached: "refused only because a
+  mechanism's readiness is unknown" is read as every unready mechanism being
+  unknown. The seed waits in that case. The 503 names every chain the request uses
+  Alkahest on, since Alkahest's readiness covers its chains together. **Declined:** the listing client still takes a `seller`
+  identity its public list does not use, since the one client serves both routes; the
+  CLI's `listings` resolves the configured public principal for it. The loop
+  controller's ERROR record carries the given-up seed's chained traceback, which can
+  name the credits service's URL; it is a log, not status, which is what the
+  controller's disclosure rule governs.
+- **A given-up seed's failure stays in status only until its next cycle**, 2 s later,
+  which completes as a no-op; the controller has no way to stop a timer loop. The
+  ERROR record and the step's report (`state: given_up`, the error's type) remain.
+  A controller that lets a step end its loop would keep it visible; no task names one.
 
 ## 7. Settlement verifies against the plan committed at acceptance
 

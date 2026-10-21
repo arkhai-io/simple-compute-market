@@ -42,6 +42,7 @@ from apicredits_storefront.domain_runtime import (
     reserve_api_credit_settlement,
 )
 from apicredits_storefront.listing_binding import api_credit_registration
+from apicredits_storefront.listing_seed import configured_listing_seed
 from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.negotiation_runtime import (
     build_api_credit_negotiation_runtime,
@@ -275,6 +276,13 @@ async def _start_api_credit_services(
     _container.resolved_marketplace_signer = services.marketplace_signer
     _container.resolved_failure_policy = services.failure_policy
     _container.resolved_listing_service = services.listing_service
+    # The seed is created by its loop step, never here: a mechanism it uses
+    # may not have been reached yet.
+    _container.resolved_listing_seed = configured_listing_seed(
+        listing_service=services.listing_service,
+        signer=services.marketplace_signer,
+        db=services.sqlite_client,
+    )
     _container.resolved_negotiation_runtime = services.negotiation_runtime
     _container.resolved_negotiation_service = services.negotiation_service
     _container.resolved_system_service = services.system_service

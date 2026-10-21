@@ -140,6 +140,9 @@ class _SettlementComposition:
     def release_conditions(self, _accepted_escrows, *, readiness) -> list[dict]:
         return []
 
+    def canonical_mechanism(self, name: str) -> str:
+        return name
+
 
 @pytest.fixture
 async def db(tmp_path):

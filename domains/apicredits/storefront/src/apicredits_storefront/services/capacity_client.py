@@ -62,9 +62,14 @@ def _capacity_settings() -> tuple[dict[str, CapacitySite], str]:
     return sites, placement
 
 
+def configured_sites() -> dict[str, CapacitySite]:
+    """Each configured capacity site by its ID, in configuration order."""
+    return _capacity_settings()[0]
+
+
 def configured_site_ids() -> tuple[str, ...]:
     """The configured capacity sites' IDs, in configuration order."""
-    return tuple(_capacity_settings()[0])
+    return tuple(configured_sites())
 
 
 def capacity_poll_interval() -> float:

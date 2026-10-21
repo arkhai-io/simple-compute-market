@@ -703,7 +703,13 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     reached for its quota registration or a mechanism its clauses use is unknown; gives
     up, logging once, on a configuration failure; and finishes once the listing exists,
     created or found. A storefront whose dependencies answer publishes its seed within a
-    probe interval of start.
+    probe interval of start. Settled in implementation (Section 6): the seed waits
+    whenever any mechanism it uses is unknown, not only when nothing would publish,
+    since a listing's options are fixed at creation; the step retries every 2 seconds,
+    or the probe's interval if shorter, so the seed follows the probe's first result
+    rather than a whole interval later; and the cycle that gives up fails, so the loop
+    controller records and logs it, its report naming a reason code or error type,
+    never an error's text.
   - A create refused only because a mechanism is unknown answers 503, naming the
     unreached mechanism and that the create can be retried once it is reached; a
     configuration refusal answers 400 with its blocker codes, as today.

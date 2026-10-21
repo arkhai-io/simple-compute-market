@@ -722,9 +722,9 @@ class AlkahestStage(SellerStage):
     """The Alkahest entry, which also declares the release models it delivers.
 
     ``release_models`` names, from ``market_alkahest.RELEASE_MODELS``, the
-    conditions a bare-metal escrow may be released under. Composition refuses a
-    configured ``[Settlement.alkahest]`` model outside them, so a listing never
-    advertises a condition its deal could not honour.
+    conditions a bare-metal escrow may be released under. A configured
+    ``[Settlement.alkahest]`` model outside them makes Alkahest unready, so a
+    listing never advertises a condition its deal could not honour.
     """
 
     release_models: frozenset[str] = field(kw_only=True)

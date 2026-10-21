@@ -167,13 +167,14 @@ def _app():
 
 
 @asynccontextmanager
-async def _started(settlement: dict):
-    """The started storefront under ``settlement``, its chain probed once."""
+async def _started(settlement: dict, *, probed: bool = True):
+    """The started storefront under ``settlement``, its chain probed once
+    unless ``probed`` is false."""
     app = _app()
     with _replaced(settlement=settlement):
         async with app.router.lifespan_context(app):
             probe = container.resolved_alkahest_chain_probe
-            if probe is not None:
+            if probe is not None and probed:
                 await probe.step()
             transport = httpx.ASGITransport(app=app)
             async with StorefrontClient(
@@ -280,18 +281,122 @@ async def test_supplied_escrows_publish_no_alkahest_option_while_it_is_unready(
 @pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
 async def test_alkahest_clauses_compile_no_option_while_it_is_unready(storefront, case):
     """The clause path: the composition the route uses compiles no Alkahest
-    escrow and derives no condition while Alkahest is unready."""
-    section, _blocker = UNSETTLEABLE[case]
+    escrow and derives no condition while Alkahest is unready, and its
+    readiness names the configuration blocker."""
+    section, blocker = UNSETTLEABLE[case]
     async with _started(_settlement(**section)):
         composition = container.resolved_settlement_composition
-        with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):
-            await composition.publication_artifacts(
-                {
-                    "claimant_principal": SELLER_SIGNER.identity,
-                    "resource_id": "svc-quota",
-                    "service": "Acme Inference",
-                },
-                [dict(ALKAHEST_CLAUSE)],
-            )
-        readiness = await composition.readiness()
+        escrows, options, readiness = await composition.publication_artifacts(
+            {
+                "claimant_principal": SELLER_SIGNER.identity,
+                "resource_id": "svc-quota",
+                "service": "Acme Inference",
+            },
+            [dict(ALKAHEST_CLAUSE)],
+        )
+        assert (escrows, options) == ([], [])
+        assert blocker in {b.code for status in readiness for b in status.blockers}
         assert composition.release_conditions([dict(ESCROW)], readiness=readiness) == []
+
+
+def _clause_request(mechanism: str = "alkahest.v1") -> dict:
+    return {
+        "resource_id": "svc-quota",
+        "service_name": "Acme Inference",
+        "settlement_clauses": [{**ALKAHEST_CLAUSE, "mechanism": mechanism}],
+    }
+
+
+@pytest.mark.parametrize("mechanism", ["alkahest.v1", "alkahest"])
+async def test_a_clause_create_before_the_chain_is_reached_answers_503(
+    storefront, mechanism
+):
+    """A clause may name its mechanism by ID or by configuration key."""
+    async with _started(_settlement(), probed=False) as (listings, _public, _admin):
+        with pytest.raises(StorefrontClientError) as refused:
+            await listings.publish_from_quota(_clause_request(mechanism))
+
+    assert refused.value.status_code == 503
+    assert "alkahest.v1 (chain anvil)" in str(refused.value)
+
+
+@pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
+async def test_a_create_unready_for_configuration_before_the_chain_is_reached_answers_400(
+    storefront, case
+):
+    """Not retryable: the configuration blocker stands whatever the chain answers."""
+    section, blocker = UNSETTLEABLE[case]
+    async with _started(_settlement(**section), probed=False) as (listings, _p, _a):
+        with pytest.raises(StorefrontClientError, match=blocker) as refused:
+            await listings.publish_from_quota(_supplied_escrows())
+
+    assert refused.value.status_code == 400
+
+
+@pytest.mark.parametrize("case", sorted(UNSETTLEABLE))
+async def test_a_clause_create_while_alkahest_is_unready_for_configuration_answers_400(
+    storefront, case
+):
+    section, blocker = UNSETTLEABLE[case]
+    async with _started(_settlement(**section)) as (listings, _public, _admin):
+        with pytest.raises(StorefrontClientError, match=blocker) as refused:
+            await listings.publish_from_quota(_clause_request())
+
+    assert refused.value.status_code == 400
+
+
+async def test_a_create_before_the_chain_is_reached_answers_503_until_a_probe_reaches_it(
+    storefront,
+):
+    """Spec scenario "An operator creates a listing before the chain is
+    reached": the create is refused as retryable, naming Alkahest, and the same
+    request succeeds once a stepped probe reaches the chain."""
+    async with _started(_settlement(), probed=False) as (listings, public, admin):
+        with pytest.raises(StorefrontClientError, match="alkahest.v1") as refused:
+            await listings.publish_from_quota(_supplied_escrows())
+        await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+        created = await listings.publish_from_quota(_supplied_escrows())
+        listing = await public.get_listing(created.listing_id)
+
+    assert refused.value.status_code == 503
+    assert "alkahest.v1 (chain anvil)" in str(refused.value)
+    assert "retry" in str(refused.value)
+    assert created.status == "created"
+    assert [escrow["chain_name"] for escrow in listing.extra["accepted_escrows"]] == ["anvil"]
+
+
+SEED_LISTING = {
+    "resource_id": "svc-quota",
+    "service_name": "Acme Inference",
+    "chain": "anvil",
+    "token": ESCROW["literal_fields"]["token"],
+    "escrow_address": ESCROW["escrow_address"],
+    "price_per_token": "100",
+}
+
+
+async def test_the_seed_waits_for_its_chain_and_publishes_once_a_probe_reaches_it(
+    storefront,
+):
+    """Spec scenario "A storefront starts with its chain down": the seed's step
+    waits while the chain is unprobed and publishes after a probe reaches it,
+    with no restart. Its quota registration, the boundary to the credits
+    service, is replaced on the started storefront's seed."""
+    registered = []
+
+    async def register(**request):
+        registered.append(request)
+
+    with _replaced(seed=dict(SEED_LISTING)):
+        async with _started(_settlement(), probed=False) as (_listings, public, admin):
+            container.resolved_listing_seed.register_quota = register
+            waiting = await admin.admin_run_lifecycle_cycle("listing-seed")
+            await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+            done = await admin.admin_run_lifecycle_cycle("listing-seed")
+            listing = await public.get_listing(done["listing_id"])
+
+    assert (waiting["state"], waiting["mechanisms"]) == ("waiting", ["alkahest.v1"])
+    assert done["state"] == "done"
+    assert [escrow["chain_name"] for escrow in listing.extra["accepted_escrows"]] == ["anvil"]
+    # Registered once: the ledger re-asserts a registration it already holds.
+    assert [request["resource_id"] for request in registered] == ["svc-quota"]
