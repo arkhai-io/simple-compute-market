@@ -1002,7 +1002,7 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       section 7.1 teaches the skill to read it. `metrics-server` is detected by
       `kubectl get --raw /apis/metrics.k8s.io/v1beta1/nodes`. Both checks run
       before anything is built.
-- [ ] 6.5 Verification. Unit, with the injected runner and reader: each step's
+- [x] 6.5 Verification. Unit, with the injected runner and reader: each step's
       commands for a change; a crashed run scaled down before its volumes are
       deleted; the upgrade's fallback; the scenario pod's log and status collected;
       the evidence and scale-to-zero after a passing and a failing scenario run; the
@@ -1136,6 +1136,33 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       unchecked until that run is recorded here; the unit tests do not show that
       a real Helm release restores the counts, that the cluster recreates the
       deleted claims, or that the two scenarios pass from the `helm` profile.
+      Correction, on the owner's word: once the render fix was merged in from
+      `dev` (8e6494f51), this step ran the cluster run itself.
+      System, on the development cluster (`docker-desktop`), `make validate-helm
+      CHANGE=parallel-change-workflows` at 8e6494f51, attempt 1, passed
+      (`.snapshot/validation/8e6494f519ac/helm/1/`): namespace
+      `validate-parallel-change-workflows`; images built and deployed as
+      `arkhai:{dev-env,registry,storefront,compute-provisioning,e2e-tests}-parallel-change-workflows`,
+      each pod's image so in `pods.json`; test-render passed with no skip; the
+      release's pods, claims, and `arkhai-buyer-profiles` deleted and gone, the
+      namespace's Secrets created, the deploy (`helm upgrade --install`, 25.7 s,
+      no refusal), `resume`, and all four rollouts passed, the rollouts at once,
+      so the upgrade's `--wait` had already brought the pods up; the scenario pod
+      `arkhai-node-operator-e2e-tests-e2e-scenarios` ran with the `helm` and
+      `e2e-secret` profiles, reaching the chain at
+      `http://arkhai-node-operator-dev-env:8545` by its in-cluster name, and
+      passed `contracts`' one test and `e2e_alkahest_escrow_codecs`' twelve (13
+      passed, 239 deselected; exit 0); the evidence was kept and the four
+      Deployments scaled to zero. The owner's own release in `default` was up
+      throughout (`other_namespaces_at_start` and `other_namespaces`, four
+      Deployments at one replica each) and untouched. Both preflight warnings
+      fired as designed: no metrics source is installed on this cluster, so
+      `summary.json`'s `memory` is empty, and no figure is recorded. Not shown
+      by this run: an upgrade over a namespace scaled down by an earlier run
+      (this was the namespace's first install), the refused-upgrade fallback,
+      and a memory sample; section 8.4's figure needs a cluster with
+      `metrics-server`. End to end: `contracts` and `e2e_alkahest_escrow_codecs`,
+      run in the change's namespace by this validation.
       Handoff: section 7.1's skill still describes the forwarded run (its steps,
       "the port-forwards stopped and their ports free", the retained-volume
       refusal for every run); it should read the capacity step's `environmental:`
