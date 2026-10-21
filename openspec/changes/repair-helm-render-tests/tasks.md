@@ -364,7 +364,7 @@ Delivers D3 and D4's mechanism. Touches `.github/workflows/tests.yml` and
       (D4).
       — Printed as `helm <version>` right after the release name is set, before any
       render; the comment says why and names the workflow pin as the supported Helm.
-- [ ] 5.3 Verification: `make -C helm test-render` prints the version first and passes;
+- [x] 5.3 Verification: `make -C helm test-render` prints the version first and passes;
       `make test-release-tooling`. CI's run of the pushed branch shows Helm v4.3.0 in
       its setup step and passes `make -C helm test-render`; record the run.
       End-to-end: none; the pin and the printed version change no deployment.
@@ -375,6 +375,34 @@ Delivers D3 and D4's mechanism. Touches `.github/workflows/tests.yml` and
       Not run here: CI on the pushed branch, since this step may not
       push; validation pushes the branch and records that run, and 5.3 stays open
       until it does. End-to-end confirmed: none.
+      Correction: CI was not recorded by validation; `tests.yml` runs on a push only
+      to `dev` and `staging`, so the owner dispatched it at `ca8f5f309` (run
+      39625394342), recorded here. Its `release · deployment contracts` job
+      passed: `azure/setup-helm@v4` ran `with: version: v4.3.0` and installed
+      v4.3.0; `make test-release-tooling`'s step passed 1090; `make -C helm
+      test-render` printed `helm v4.3.0+gbec5b06` after `helm dependency update`,
+      before the first render, and passed. The job sets neither loader interpreter,
+      so five checks print `skip:`: the VM storefront chart's startup check twice and
+      its loader check once, the bare-metal chart's loader check, and the topology
+      test's bare-metal loader check. The local `make test` at `ca8f5f309`, run while
+      recording this, printed no `skip:`, so those checks ran there. On dev's run
+      39614790584 the same job fails at that render step.
+      Pre-existing and outside this change: the run's `py · vms-storefront` and
+      `py · bare-metal-storefront` jobs fail at pytest. They fail the same tests
+      with the same errors on dev's run 39614790584, and this change touches neither
+      the test files nor the code they test. The VM storefront has three `TimeoutError`
+      failures in `tests/unit/test_loop_gate_wiring.py`
+      (`test_a_pause_during_the_idle_wait_reaches_every_gate`,
+      `test_a_failing_cycle_is_recorded_and_the_loop_keeps_running`,
+      `test_the_sweep_is_registered_while_contact_exchange_is_composed`): 3 failed
+      and 1546 passed here, against 3 failed and 1544 passed on dev. The bare-metal
+      storefront has one failure, `tests/test_publication_cli.py::
+      test_abort_all_is_not_previewed`, whose expected `--abort-all cannot be combined
+      with --dry-run` is not found in the Rich-formatted usage error: 1 failed and 439
+      passed here, against 1 failed and 437 passed on dev. The extra passes on this
+      branch are its new `test_values_schema` tests. Both suites passed locally under
+      `make test`, so these failures happen only in CI; no change on this branch owns
+      them.
 
 Notes: the version prints after `helm dependency update`, before the first render. The
 fresh-context check found the script's comment claiming a merge difference between Helm
@@ -382,6 +410,10 @@ releases that the change never established; reworded to the reason D4 gives. Clo
 6.9 must replace `TESTING.md`'s "rely on the pinned Helm of the release environment for
 anything recorded as evidence", which now reads as the evidence-only-on-the-pin claim D4
 rules out.
+CI's `release · deployment contracts` job runs `test-render` with no loader interpreter,
+so CI never runs the chart-to-loader or startup checks; only local and validation runs
+do. The four CI-only storefront pytest failures (5.3) belong to no change on this
+branch; 6.8 should not count them against this change.
 
 ## 6. Closeout
 
