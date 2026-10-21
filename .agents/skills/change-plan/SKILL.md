@@ -53,11 +53,14 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
 - **The end is an outcome.** Once the plan is written and checked, its report
-  (section 6) written, and the status set (section 7), end with `finished`, its
-  `message` the report, `next` naming the first round's implementation, and
-  `rounds` the cadence's mapping onto the sections (section 7). Planning asks no
-  question.
+  (section 6) written, and the status set and the plan committed and pushed
+  (section 7), end with `finished`, its `message` the report, `next` naming the
+  first round's implementation, and `rounds` the cadence's mapping onto the
+  sections (section 7). Planning asks no question.
 - **A return to design is proposed, not made.** When planning exposes a design
   question (section 3), or finds no cadence it can cut its sections to (section 4),
   end with `returned`, `return_to` `design`, and `evidence`
@@ -73,11 +76,20 @@ happened elsewhere. Read the change's row in `openspec/changes/README.md` — st
 `reviews/`. Then confirm:
 
 - The change's status is `ready for planning` or `in planning`, or the owner has
-  confirmed implementation's return of the change to planning, in which case set
-  it to `in planning`.
+  confirmed implementation's return of the change to planning, or the change is
+  `in design` with the orchestrating session's record of the owner's waiver below;
+  in the last two cases set it to `in planning`.
 - The latest design review's triage file has a `## Next` beginning `Advance` — a
   file from before `## Next`, ending with a `## Gate` beginning `Passed`, reads the
-  same — or the owner's waiver of that review is recorded (section 3).
+  same — or the owner's waiver of that review is recorded (section 3). Under
+  orchestration, a waiver of another design review for what the design step
+  settled after a confirmed return is recorded by the orchestrating session
+  instead, while the change is still `in design`: a decision line in the workflow
+  log — `orchestrator`, `by: owner`, `next: plan`, naming no run, after the design
+  run that followed the return — and a ledger line. `python3
+  scripts/run_change_step.py log <change>` shows the decision, and `python3
+  scripts/change_next_step.py <change>` names `plan` from it. Commit that ledger
+  line with the plan (section 7).
 - No dependency in the row's `Depends on` gates `design` or `planning` and is
   unlanded. A dependency gating implementation does not stop planning; the plan
   notes it.
@@ -240,6 +252,12 @@ destination — append a line to the change's `interventions.jsonl` with
 When the plan is written and checked, set the change's `Status` to
 `ready for implementation` yourself. Planning has no review of its own: its sizing
 and closeout are examined by the first implementation review.
+
+Commit the plan as one commit — `tasks.md`, what you recorded into `design.md`,
+the index row, and the ledger lines planning wrote or the waiver left — whose
+message names the change and says it is planned. Then push it with `make
+push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop and report
+its reasons.
 
 Map the cadence onto the sections: a list of rounds, each a list of the sessions
 that implement it, each a list of section ids in order —

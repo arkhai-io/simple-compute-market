@@ -22,18 +22,18 @@ the change's files rather than an earlier session's memory.
 
 | Step | Skill | Start it with | Writes |
 |---|---|---|---|
-| Design | `change-design` | `make design CHANGE=<change>` | `design.md`, `proposal.md`, the spec deltas, the index row |
+| Design | `change-design` | `make design CHANGE=<change>` | `design.md`, `proposal.md`, the spec deltas, the index row, one commit once the design is settled |
 | Design review | `change-review` | `make review CHANGE=<change> KIND=design` | `reviews/NN-design.md` |
-| Planning | `change-plan` | `make plan CHANGE=<change>`, once the design review's triage advances the change | `tasks.md`, ending with the closeout task |
+| Planning | `change-plan` | `make plan CHANGE=<change>`, once the design review's triage advances the change | `tasks.md`, ending with the closeout task, one commit |
 | Implementation | `change-implement` | `make implement CHANGE=<change> [SECTION=<n> \| SECTIONS=<n-m>]` | each section's code and tests, its task notes, one commit per section |
 | Implementation review | `change-review` | `make review CHANGE=<change> KIND=implementation` | `reviews/NN-implementation.md` |
 | Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD` and runs the pipeline |
-| Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, `interventions.jsonl`, accepted fixes, the index row when a phase-closing review's triage advances the change |
+| Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; after a design review, one commit of its edits |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
 | Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md` |
-| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | `orchestrator` and `round` lines in the workflow log, the owner's notes on a round, its own observations of the tooling |
+| Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log, the owner's notes on a round, the ledger line of a waived design review, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
 `UNATTENDED=1` the same target runs the step headless instead, through
@@ -41,6 +41,11 @@ Every step but the review opens an interactive Claude Code session. With
 `.claude/change-steps.toml`, on its step's models, ending with an outcome appended
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
+
+Every step that commits — design, planning, implementation, triage, closeout, and
+archive cleanup — pushes each commit right after through `make push-branch`, the
+guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
+starts nothing: validation dispatches the end-to-end pipeline itself.
 
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
@@ -72,10 +77,14 @@ Ask the owner questions in prose, never through a multiple-choice selector
 change through its steps: it runs the step `scripts/change_next_step.py` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
-question and commits nothing. It stops for you at the design discussion's questions,
-your reading of each implementation round, the triage discussion, and anything no
-rule settles — an environmental remedy, a denial that needs a rule, a proposed
-return, a stopped step; every other step follows without asking.
+question and commits none of the change's own work; it creates the change's clone
+and branch (below), and on your word commits changes to the workflow itself —
+skills, the step table, anything else you name — in the change's clone, on its
+branch, so they take effect for its next step and land with it. It stops for you
+at the design discussion's questions, your reading of each implementation round,
+the triage discussion, and anything no rule settles — an environmental remedy, a
+denial that needs a rule, a proposed return, a stopped step; every other step
+follows without asking.
 
 **Starting and resuming.** The session keeps no state of its own: on every start
 and after compaction it recomputes where the change stands from the files and the
@@ -99,12 +108,16 @@ and into the archive when closeout moves the change there.
 **Answering and taking over.** A step that asks ends its turn with a question; your
 answer, relayed by the orchestrating session, resumes the same session by the
 waiting run's `seq`. Between turns you can take a step over with
-`claude --resume <session>`, the session id on its log line, and hand back; never
-resume one concurrently. The orchestrating session rereads the files afterwards.
+`claude --resume <session>`, the session id on its log line, run in the checkout
+the step ran in, since a session is keyed by its checkout's path; hand back, and
+never resume one concurrently. The orchestrating session rereads the files
+afterwards.
 
 **Maintaining the step table.** `.claude/change-steps.toml` gives each step its
 skill, its allow and deny rules, and its models in priority order with their
-effort. No step may edit it: a rule or model changes as a tracked edit you commit.
+effort. No step may edit it: a rule or model changes as a tracked edit, which you
+commit, or which the orchestrating session commits on your word in the change's
+clone.
 The orchestrating session reads each run's denials from its log line
 (`python3 scripts/run_change_step.py denials <change> <seq>`) and proposes the
 narrowest rule for a gap, either granted for one resumed run or as a table edit. A
@@ -120,6 +133,94 @@ the harness's list prices.
 **Completing names.** Source `scripts/completions/make-change.bash` from your
 `~/.bashrc`, after bash-completion, to complete `CHANGE=` with the active changes —
 the archived ones after `archive-cleanup` — and `KIND=` with the review kinds.
+
+## A change in its own clone
+
+Each change can be worked in a clone of your workspace of its own, so several
+changes run at once without moving each other's branch: your workspace — your
+editor project — meets a change's workflow only when you read one of its rounds.
+Clones live beside the workspace, one directory per change under
+`<workspace>.changes/<change>/`. A clone holds the change's branch, its
+`reviews/` with the workflow log and transcripts, its wheelhouse and
+environments, `.snapshot/`, and its step sessions.
+
+**Creating it.** `make orchestrate CHANGE=<change>`, started in the workspace,
+creates the clone when the change's branch is checked out neither there nor in a
+clone, by running `make change-clone CHANGE=<change> [BRANCH=feat/<change>]
+[FROM=dev]` in the workspace, with another `BRANCH` or `FROM` when you name one —
+a branch started from another change's branch; you can run it by hand too. It
+clones the workspace locally, sets the clone's `origin` to the workspace's and
+adds a `workspace` remote naming the workspace, and checks out the branch — the
+existing one, or a new one from `FROM` — at its furthest point between the
+workspace's copy and `origin`'s, refusing one where the two have diverged; the
+branch tracks `origin`'s, never the workspace's. It links the clone's
+`.claude/settings.local.json` to the workspace's and starts `make init` in the
+background. It is safe to run again: it finishes a clone left incomplete, restarts
+a failed bootstrap, and refuses, deleting nothing, a directory that is not a clone
+of the workspace, has another branch checked out, or has uncommitted changes.
+
+**The bootstrap.** `make init` in the clone is running, succeeded, or failed —
+failed when it exited non-zero or its process died without recording a status —
+and its log is in the clone's Git directory. Design and planning go on while it
+runs; implementation, validation, and every later step wait for it. A failed
+bootstrap comes to you naming its log, almost always for a reason in the
+environment, and is never retried by itself: `make change-clone CHANGE=<change>`
+restarts it.
+
+**Running steps.** From the clone on, the orchestrating session computes the
+change there and drives every step with `make -C <clone> <step> CHANGE=<change>
+UNATTENDED=1`, so the log, the transcripts, and the step sessions are the clone's.
+To take a step over, resume its session from the clone:
+`cd <clone> && claude --resume <session>`.
+
+**Reading a round.** Once a round's sections are committed, validation and the
+implementation review start in the clone, and you read the round in your
+workspace beside them. `make round-view CHANGE=<change>`, run in the workspace,
+refuses a dirty workspace, naming the files, an unattended run in progress there,
+and another change's open view; it fast-forwards the workspace's copy of the
+change's branch from the clone, refusing one that has diverged or holds a commit
+of yours triage has not pulled, checks it out, and resets it to the round's base,
+so the round shows as uncommitted changes. Run again while the view is open, it
+moves the view to the branch's new head over the same base, to follow triage's
+fixes, unless you have edits or commits in the view. The clone's branch never
+moves. `make round-done` returns the branch to the round's head and the workspace
+to where it was — staying on the branch when you have uncommitted edits, which it
+leaves for you.
+
+A commit you make on the branch during the view — your editor's "commit all"
+included — is carried onto the round's head when the view closes, each holding
+exactly the paths it changed, with its author and message; `make round-done`
+prints each beside its replacement, and drops one that holds nothing beyond the
+round. Where the round also changed a path, the commit must hold every change the
+round made to it: `make round-done` refuses, moving nothing and naming the file
+and the way back (`git reset --mixed <head>`, then commit again on the round's
+head), a commit holding part of a file the round changed, an edit inside a line
+the round changed, an edit of a file the round added, a binary file, a symlink, or
+a mode the round changed when not as the round left it, a merge, and a branch
+moved off the round's base by an amend, reset, or rebase. Triage pulls your
+commits into the clone, fast-forward only, and presents each as one of your points
+on the round.
+
+**A change worked in the workspace.** A change can still be worked in your
+workspace with no clone, its branch checked out there; the tooling tells the cases
+apart by whether a clone holds the change's branch. Its round view resets that
+branch in place, so you read the round before validation and the review start, and
+the view is never refreshed.
+
+**Moving a change already under way into a clone.** A change whose records are in
+the workspace's `reviews/` is not cloned automatically: a clone copies what Git
+tracks, and `reviews/` is ignored. The orchestrating session brings it to you with
+two routes: check out its branch in the workspace and go on there, or move it into
+a clone by hand:
+
+1. Settle any run waiting on an answer, in the workspace, since its session is
+   keyed to the workspace's path.
+2. Merge `dev` into the change's branch, so its tooling knows clones.
+3. Run `make change-clone CHANGE=<change>` in the workspace.
+4. Copy the change's `reviews/`, and the validation evidence its records name
+   (`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`), to the same
+   paths in the clone; check with `diff -r` that the copies are identical, then
+   remove the workspace's.
 
 ## Reviews
 
@@ -147,13 +248,15 @@ triage, which saves it verbatim as the next record, `NN-<kind>-external.md`, and
 triages it with any other review of the same kind.
 
 Before an implementation round is triaged the owner reads it:
-`make round-view CHANGE=<change>` pushes `HEAD`, starts the end-to-end pipeline, and
-shows the round as uncommitted changes in the checkout, over the commit recorded as
-the round started; `make round-done` returns the branch to the round's commit.
-While a round view is open, every step that could commit refuses (`make
-round-view-closed`). The owner's notes on the round go to triage with the reviews;
-under orchestration, the orchestrating session opens and closes the view and saves
-the notes.
+`make round-view CHANGE=<change>` shows the round as uncommitted changes over the
+commit recorded as the round started, and `make round-done` returns the branch to
+the round's commit. For a change in its own clone the view is in the owner's
+workspace, beside the round's validation and review ("A change in its own clone",
+above). For a change worked in the workspace the view moves the branch its steps
+run on, so it comes first, and while it is open every step that could commit
+refuses (`make round-view-closed`). The owner's notes on the round go to triage
+with the reviews; under orchestration, the orchestrating session opens and closes
+the view and saves the notes.
 
 ### The review directory
 

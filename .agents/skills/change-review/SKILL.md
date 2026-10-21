@@ -30,7 +30,9 @@ outcome; `scripts/run_change_step.py` checks it, publishes it, and logs an outco
 from the record it publishes, or a stopped one when your message is not a review.
 Nobody can answer a question in the session; where this skill would ask, say so
 in the review instead. Run one command per Bash call: on Claude, a chained command
-runs only when every command in it is allowed.
+runs only when every command in it is allowed. Run Git in the current checkout,
+never with `-C`: the review already runs in the checkout it reads, and no rule
+allows `git -C`, since a wildcard after `-C` would also span a push.
 
 ## 1. Load everything first
 

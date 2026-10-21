@@ -463,7 +463,7 @@ permissions", "Triage of an implementation round"). Touches `.agents/skills/`
 `change-triage`, `change-validate`, `change-closeout`, `change-archive-cleanup`),
 `.claude/change-steps.toml`, and `docs/agents/change-workflow.md`.
 
-- [ ] 4.1 `change-orchestrate`: run the computation in the workspace and, once a
+- [x] 4.1 `change-orchestrate`: run the computation in the workspace and, once a
       clone exists, in the clone; on `clone`, run `make change-clone`; on the
       `owner` result for a change under way, relay both routes; drive every step
       with `make -C <clone> <step> UNATTENDED=1`; once a round is committed, open
@@ -477,7 +477,22 @@ permissions", "Triage of an implementation round"). Touches `.agents/skills/`
       --resume <session>`; for the pilot, merge this change's branch into the
       pilot's on the owner's word only between the pilot's steps and never inside
       one of its rounds (D9) (D2, D3, D6, D8).
-- [ ] 4.2 The committing skills push: `change-design` commits its recorded design
+      Note: a new "Where the change is worked" section routes `clone`, `in-clone`,
+      `wait`, and the `owner` results carrying `environmental`, `routes`, or the
+      workspace; after `in-clone` every command runs in the clone
+      (`python3 <clone>/scripts/…`, `make -C <clone> …`), only `make change-clone`
+      and the view in the workspace. For a round in a clone the session starts
+      validation and the review first and then opens the view, so a view the
+      workspace refuses holds nothing up; `reading` is read on whichever of them
+      carries it. The waiver's ledger line (`"review": "plan"`, lens `readiness`)
+      goes into the clone's `interventions.jsonl` uncommitted, for planning to
+      commit. The pilot merge is written generally, as merging any branch whose
+      tooling the change's later rounds need: `git -C <clone> pull --no-rebase
+      workspace <branch>`, index-row conflicts resolved each row as its own branch
+      has it, any other conflict aborted and taken to the owner. Workflow
+      maintenance is committed only in a clone and only between steps; for a
+      change in the workspace the session makes the edit and the owner commits it.
+- [x] 4.2 The committing skills push: `change-design` commits its recorded design
       once the owner says it is settled; `change-design`, `change-plan`,
       `change-implement`, `change-triage`, `change-closeout`, and
       `change-archive-cleanup` push each commit through `make push-branch` (D8).
@@ -486,14 +501,44 @@ permissions", "Triage of an implementation round"). Touches `.agents/skills/`
       between the round's head and what it pulled; it scopes the round from the
       `round` line's base, as the review does (D2, D3). `change-validate` dispatches
       the pipeline itself and no longer reads a baseline the view recorded (D3).
-- [ ] 4.3 Every step skill's "Running unattended" section gains: run Git in the
+      Note: `change-plan` also commits its plan (it gained `git add`/`git commit`
+      in 4.4), and its entry check accepts the orchestrator's waiver line with the
+      status still `in design` (section 3's handoff), reading it from the log and
+      `change_next_step.py`. Beyond the task, found by the fresh-context check: a
+      design review's triage now commits and pushes its edits, whichever `## Next`
+      records, since nothing else commits them now that the owner no longer
+      commits design-phase work and the guarded push refuses an unclean worktree.
+      The triage skill decides a clone by its `.git/config` naming a `[remote
+      "workspace"]` (no rule allows `git remote` or `git config`), pulls the
+      owner's commits at the start of an implementation round, before they are
+      presented, and reverts one the owner rejects among the fixes — D2's order,
+      since the commits are identified by the pull; the delta scenario "The owner
+      commits an edit while reading" says triage pulls "once disposed of", which
+      review should reconcile. D3's "scopes the round from the `round` line's
+      base, as the review does" is written without the comparison: the review
+      reads the change against `REVIEW_BASE` (`dev`), not the round. `change-validate`
+      clarifies that a view in the owner's workspace for a change in a clone does
+      not stop validation. `scripts/check_push_ready.py`'s refusal of a protected
+      branch now says "a step pushes", not "validation pushes".
+- [x] 4.3 Every step skill's "Running unattended" section gains: run Git in the
       current checkout, never with `-C` (D8, 36 R2).
-- [ ] 4.4 `.claude/change-steps.toml` (the orchestrator's, as the preamble says): `make
+      Note: `change-review` has no bulleted unattended section; the sentence joins
+      its paragraph.
+- [x] 4.4 `.claude/change-steps.toml` (the orchestrator's, as the preamble says): `make
       push-branch` moves from the deny to the allow list of design, plan, triage,
       implement, closeout, and archive cleanup; design and plan gain `git add *`
       and `git commit *`; triage and implement gain `git pull --ff-only workspace *`;
       the round view stays denied to every step (D8).
-- [ ] 4.5 `docs/agents/change-workflow.md`: a change worked in its own clone —
+      Note: the orchestrator's edit was in the worktree as the session started and
+      is committed with this section; it also drops validation's allow of `make
+      round-e2e-baseline` (section 2 removed the target), rewrites the preamble's
+      push sentence, and the design row's comment. Left for the orchestrator, which
+      alone may edit `.claude/`: the preamble still says a step's permissions
+      change "by the owner", where D8 lets the orchestrating session commit them
+      on the owner's word; the design comment sits above `[steps.review]`; and
+      `git pull --ff-only workspace *` also matches trailing options such as
+      `--rebase`, so a narrower rule may be wanted.
+- [x] 4.5 `docs/agents/change-workflow.md`: a change worked in its own clone —
       where clones live, `make change-clone` and the bootstrap's states, steps run
       with `make -C <clone>`, taking a step over, reading a round in the workspace
       and what `round-done` does with commits made during the view and what it
@@ -502,13 +547,75 @@ permissions", "Triage of an implementation round"). Touches `.agents/skills/`
       the workspace, merge `dev` into its branch, `make change-clone`, move
       `reviews/` and the evidence its records name into the clone and check the
       copies are identical (D6, 37 F1).
-- [ ] 4.6 Verification: `make check-agent-skills`; `make check-change
+      Note: a new section, "A change in its own clone"; the skills table, the
+      orchestrating session's commits, taking a step over from its checkout, the
+      step table's maintenance, and the review section's reading paragraph are
+      updated to match. The move by hand copies, checks with `diff -r`, then
+      removes the workspace's copies. History and clone removal are not written
+      here: their targets come in section 8.
+- [x] 4.6 Verification: `make check-agent-skills`; `make check-change
       CHANGE=parallel-change-workflows`; `uv run --no-project --with pytest pytest -q
       scripts/tests/test_change_workflow_steps.py`, extended with the table's new
       allows and denies (unit); a fresh-context read of each changed skill against
       D2, D3, D6, D8 and the delta's orchestrating-session and permissions
       requirements, recording what it found; `make test`. Validated in the owner's
       workspace on the existing Helm part. No end-to-end scenario covers it.
+      Evidence: `scripts/tests/test_change_workflow_steps.py`, unit over the real
+      step table, 35 passed: every committing step (design, plan, implement,
+      triage, closeout, archive cleanup) may run `make push-branch` and no other
+      push, validation `make push-branch` and `make run-e2e`, the review none, and
+      `git push`, `make push-branch FORCE=1`, and `git -C … push` none; exactly the
+      committing steps may `git add` and `git commit`; triage and implementation
+      alone may `git pull --ff-only workspace <branch>`, and no step a pull
+      without `--ff-only` or from `origin`; no step may run `git -C`. The test
+      shows the rule's prefix, not that every form it matches is a fast-forward
+      (above). `uv run --no-project --with pytest pytest -q scripts/tests`: 1204
+      passed. `make check-agent-skills` and `make check-comment-hygiene`: passed.
+      `make check-packaging`: passed. `make check-change`: only the citations of
+      the scripts sections 5, 7, and 8 create. `make test`: every suite passed,
+      the script tests' 1204 among them, up to `make -C helm test-render`, which
+      failed on the same Helm schema error wording as in sections 1–3; nothing
+      under `helm/` changed. The fresh-context read of the skills found, and this
+      section fixed: nothing committed a design review's triage edits; the view
+      opened before validation could hold a clone's validation up behind the
+      workspace; `reading` was tied to `validate-and-review` alone; the waiver's
+      ledger line named no checkout; workflow commits were allowed in the
+      workspace, which D8 does not give; triage's refusal named only divergence
+      when an open view is the likelier cause; the push guard's message. Declined
+      or left: the step table's comments and the pull rule's breadth (the
+      orchestrator's file); implementation's pull allowance, which D8 grants and
+      no skill uses; the pull-before-disposition order (D2, above); D1's last
+      paragraph telling the cases apart by the checked-out branch where D2 and
+      the computation look for a clone first, a design wording for review. A
+      second fresh-context read, after those fixes, found no breach of the
+      guidance and every named target, field, and option present; this section
+      fixed what it found within its reach: an owner's rejected commit is undone
+      by edits (no rule allows `git revert`); a workflow commit between a round's
+      sections and its triage would move the `HEAD` its validation and review
+      describe, so the orchestrating session grants a stopped run's permission for
+      its resumed run then and commits the table edit after the triage; its
+      commits wait for a clean worktree (the waiver's pending ledger line); the
+      owner may name another `BRANCH` or `FROM` for `make change-clone` (the
+      pilot's branch starts from this change's); the guide's table rows for
+      triage and orchestration, and its step-table sentence. `make test` was run
+      again after the push guard's message changed: the same result. Left for
+      review, each needing a decision this section does not have: whether a
+      triage of every kind commits what it changed — an implementation,
+      pre-closeout, or closeout triage that writes only ledger lines, tasks, or
+      design edits, with no fix, leaves them uncommitted for the next step's
+      clean-worktree checks, and committing a pre-closeout triage's index row
+      would make closeout ask for a new validation, since the computation's
+      validation check allows only records and ledgers to differ; and that a
+      triage started by hand for a change in a clone cannot see the owner's view
+      still open in the workspace (a step may not run Git there), so only the
+      computation holds it. No end-to-end scenario covers it.
+      Handoff: this section's skills take effect for this change's own next steps:
+      triage and validation of round 1 run on them, and validation dispatches the
+      pipeline itself (no baseline). This section's commit was not pushed: the
+      session ran on the skill as loaded before 4.2, which said not to; the next
+      committing step or validation pushes it. The permanent `change-workflow`
+      spec and architecture still describe validation's single push and the
+      reading first, until closeout (10.9).
 
 ## 5. Per-change image tags and namespaces in the build and Helm targets
 

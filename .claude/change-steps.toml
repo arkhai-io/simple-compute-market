@@ -7,8 +7,7 @@
 # not given ends `stopped` instead of waiting on a prompt nobody will answer. A
 # chained command runs only when every command in it is allowed. `deny`
 # rules win over `allow` rules; they are the "never" lines of each step's skill,
-# and a push other than validation's guarded `make push-branch` is denied to
-# every step.
+# and a push other than the guarded `make push-branch` is denied to every step.
 #
 # Interactive runs of a step do not read this file: the owner's own permission
 # settings apply to them, with prompts. A step's permissions change here, by the
@@ -47,10 +46,9 @@ deny = [
   "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
 ]
 
-# Design writes the change's documents and commits nothing; the owner commits
-# design-phase work. A design blocked on a prerequisite writes the
-# prerequisite's proposal in a worktree on a new branch from dev, never on the
-# blocked branch.
+# Design commits and pushes its own settled design. A design blocked on a
+# prerequisite writes the prerequisite's proposal in a worktree on a new branch
+# from dev, never on the blocked branch.
 # Review runs on Codex in its read-only sandbox, falling back to Claude when Codex is
 # unavailable. The Claude reviewer only reads: no edit, and nothing beyond common's
 # read-only commands.
@@ -76,8 +74,8 @@ allow = [
   "Bash(git worktree add ../*-proposal -b propose-* dev)",
   "Bash(make -C ../*-proposal check-change-index)",
   "Edit(../*-proposal/openspec/**)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]
-deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
 # Planning resumes the design step's session, which holds the design's context.
 [steps.plan]
@@ -88,8 +86,8 @@ allow = [
   "Edit(openspec/**)", "Edit(docs/**)",
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]
-deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
 
 # Triage fixes what the owner accepts and commits it, so it has implementation's
 # rules beside design's.
@@ -103,9 +101,10 @@ allow = [
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
+  "Bash(git pull --ff-only workspace *)",
 ]
-deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+deny = ["Bash(make run-e2e*)"]
 
 [steps.implement]
 skill = "change-implement"
@@ -115,9 +114,10 @@ allow = [
   "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
   "Bash(make dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
+  "Bash(git pull --ff-only workspace *)",
 ]
-deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+deny = ["Bash(make run-e2e*)"]
 
 # Validation never changes the commit: it writes only its own record, and its
 # one push is the guarded push of the change's branch.
@@ -127,7 +127,7 @@ models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }
 allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
   "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(make push-branch)",
-  "Bash(make run-e2e)", "Bash(make round-e2e-baseline)", "Bash(make fetch-e2e-logs*)",
+  "Bash(make run-e2e)", "Bash(make fetch-e2e-logs*)",
   "Bash(make dist-clean)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
@@ -146,9 +146,8 @@ allow = [
   "Bash(bunx @fission-ai/openspec@1.14.0 *)",
   "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
   "Bash(make check-*)", "Bash(python3 scripts/check_*)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]
-deny = ["Bash(make push-branch*)"]
 
 # Archive cleanup drafts the pull request; the owner creates it.
 [steps.archive-cleanup]
@@ -158,6 +157,6 @@ allow = [
   "Edit(openspec/changes/README.md)",
   "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
-  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)",
+  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]
-deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]
+deny = ["Bash(gh pr create*)"]

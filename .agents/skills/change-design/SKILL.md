@@ -45,13 +45,16 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
-- **The end is an outcome.** When the settled design is recorded (section 6),
-  end with `finished`, `next` naming the design review. A design that cannot
-  proceed without another change ends `blocked`, `blocked_on` the prerequisite's
+- **The end is an outcome.** When the settled design is recorded, committed, and
+  pushed (section 6), end with `finished`, `next` naming the design review. A
+  design that cannot proceed without another change ends `blocked`, `blocked_on` the prerequisite's
   exact change name, at steps 3 and 4 of "When the design needs another change
   first" (section 4); telling the owner there is that outcome's `message`. Under
   orchestration the release of step 5 is proposed to the owner by the
@@ -298,6 +301,11 @@ Only when the owner says the design is settled:
   validation and the change's citations check among the repository's closing
   checks, and report the result. A citation of a file the change itself will
   create is expected; any other is a defect.
+- Commit the recorded design as one commit — the change's documents, the index
+  row, and the ledger lines this step wrote — whose message names the change and
+  says its design is settled, so the design review reads a committed design. Then
+  push it with `make push-branch`, the guarded push of exactly `HEAD`; if it
+  refuses, stop and report its reasons.
 
 Do not write or amend `tasks.md`: planning is a separate phase and starts only
 once the design review's triage records that the change advances.

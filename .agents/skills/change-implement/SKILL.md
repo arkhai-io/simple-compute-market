@@ -46,9 +46,12 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **The end is an outcome.** When the sections you were given are committed,
-  end with `finished`, `next` naming what the round needs next. When the plan is
-  wrong (step 4), commit nothing from the section and end with `returned`,
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
+- **The end is an outcome.** When the sections you were given are committed and
+  pushed, end with `finished`, `next` naming what the round needs next. When the
+  plan is wrong (step 4), commit nothing from the section and end with `returned`,
   `return_to` `design` or `planning`, and `evidence` naming the section's notes,
   leaving the status as it is: the owner confirms the return, and the step started
   then sets it. An external input the change cannot supply, and a section far
@@ -199,7 +202,9 @@ each other.
 
 Commit the section's work, `tasks.md` included, as one commit, unreviewed: review
 findings land as later commits. The message names the change and the section and
-says what it delivers. Do not push; pushing belongs to validation.
+says what it delivers. Then push it with `make push-branch`, the guarded push of
+exactly `HEAD`; if it refuses, stop and report its reasons. A pushed branch starts
+nothing: validation dispatches the pipeline itself.
 
 ## 8. Continue or stop
 
@@ -209,9 +214,9 @@ could not be made to pass, which ends the sections. Before starting the next
 section, re-read the section and its earlier sections' notes; and if the session
 has compacted, re-read every document in step 2.
 
-When the sections you were given are committed, stop and report. Say how large the
-session has grown if you can tell; when it is large, recommend that the next
-sections start in a fresh session.
+When the sections you were given are committed and pushed, stop and report. Say
+how large the session has grown if you can tell; when it is large, recommend that
+the next sections start in a fresh session.
 
 ## 9. Report
 
@@ -221,12 +226,14 @@ When the session stops, tell the owner, for each section implemented:
 - the evidence: each check and suite with its result;
 - what the fresh-context check found, what was fixed, and what was declined;
 - the handoff recorded;
-- what comes next — the owner reads the commits since the last round as
-  uncommitted changes (`make round-view CHANGE=<change>`, which first pushes them
-  and starts the end-to-end pipeline) and closes the view (`make round-done`);
-  then validation (`make validate CHANGE=<change>`) and one implementation review
-  (`make review CHANGE=<change> KIND=implementation`), run side by side; then the
-  round triaged in a fresh session
-  (`make triage CHANGE=<change>`), which fixes what the owner accepts and records
-  whether the change advances; then, once the fix commit is validated, the next
-  round.
+- what comes next — validation (`make validate CHANGE=<change>`) and one
+  implementation review (`make review CHANGE=<change> KIND=implementation`), run
+  side by side, and the owner's reading of the commits since the last round as
+  uncommitted changes (`make round-view CHANGE=<change>`, closed with `make
+  round-done`). For a change worked in its own clone, the owner reads in their
+  workspace while validation and the review run in the clone. For a change worked
+  in the owner's workspace, the view moves the branch this checkout works on, so
+  the reading comes first and validation and the review start once it is closed.
+  Then the round is triaged in a fresh session (`make triage CHANGE=<change>`),
+  which fixes what the owner accepts and records whether the change advances;
+  then, once the fix commit is validated, the next round.

@@ -47,9 +47,12 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
-- **The end is an outcome.** When the cleanup is committed and the pull request
-  drafted, end with `finished`, `next` naming the owner creating the pull request;
-  you never create it. A row already `archived` (step 1) ends `finished` too,
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
+- **The end is an outcome.** When the cleanup is committed and pushed and the pull
+  request drafted, end with `finished`, `next` naming the owner creating the pull
+  request; you never create it. A row already `archived` (step 1) ends `finished` too,
   saying cleanup had run.
 
 ## 1. Check that cleanup may start
@@ -133,7 +136,8 @@ the index check is the one that sees this edit.
 
 Commit the index edit, with a waiver's ledger line when step 1 recorded one, as
 one commit whose message names the change and says its archive is cleaned up and
-which dependents it released. Do not push.
+which dependents it released. Then push it with `make push-branch`, the guarded
+push of exactly `HEAD`; if it refuses, stop and report its reasons.
 
 ## 6. Draft the merge
 

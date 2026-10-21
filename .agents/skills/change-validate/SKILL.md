@@ -54,6 +54,9 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
 - **The end is an outcome.** An environmental failure (section 5) is a
   `question` naming the evidence and the remedy, awaiting the owner's word; once
   answered, take only the action the answer names, and rerun the part. When the
@@ -65,10 +68,12 @@ the session, and every turn ends with an outcome matching
 
 ## 1. Check that this commit may be validated
 
-`make validate` refuses while the owner's round view is open (`make round-view`):
-the branch then points at the round's base, not its commit. If you were started
-some other way, `make round-view-closed` says the same; stop and ask the owner to
-run `make round-done`.
+`make validate` refuses while a round view is open in this checkout (`make
+round-view` of a change worked in the owner's workspace): the branch then points
+at the round's base, not its commit. If you were started some other way, `make
+round-view-closed` says the same; stop and ask the owner to run `make round-done`.
+A view the owner opens in their workspace for a change worked in its own clone
+moves nothing here, and validation runs beside it.
 
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
@@ -93,14 +98,11 @@ The pipeline is by far the slowest part, so it runs while everything else does:
 1. `gh auth status` — without it the dispatch fails after the push.
 2. `make push-branch` — the guarded push of exactly `HEAD`, never forced. If it
    refuses, stop and report its reasons.
-3. First run `make round-e2e-baseline`, once. If it prints a run ID,
-   `make round-view` already pushed `HEAD` and dispatched the pipeline while the
-   owner read the round, and the ID is the run recorded before that dispatch:
-   use it, and dispatch nothing — a second dispatch on the branch cancels the run
-   in progress. It prints the ID only once, so note it. Otherwise record the
-   newest end-to-end run ID —
+3. Record the newest end-to-end run ID —
    `gh run list --workflow e2e.yml --limit 1 --json databaseId --jq '.[0].databaseId'`
-   — then `make run-e2e`, which dispatches the workflow on the branch.
+   — then `make run-e2e`, which dispatches the workflow on the branch. The steps
+   that commit push their commits, but a push starts no run: the pipeline runs on
+   dispatch and nightly, so the run that describes `HEAD` is the one you dispatch.
 4. `make fetch-e2e-logs E2E_AFTER_RUN=<that ID>`, in the background. It waits for
    a run of `HEAD` newer than that ID to be listed — so a commit validated before
    never fetches its earlier run — then for it to finish, and downloads its logs

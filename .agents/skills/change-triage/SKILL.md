@@ -31,7 +31,20 @@ log holds the owner's decision that it runs on this branch
 and the worktree is clean, and `make round-view-closed` passes — while the owner reads the
 round (`make round-view`), the branch points at its base, and a fix committed then
 would squash the round into it; ask the owner to run `make round-done` first.
-Record `HEAD`: it is the base the fixes are made against.
+
+The round is the commits from its base — the `commit` on the change's latest
+`round` line, which `python3 scripts/run_change_step.py log <change>` prints — to
+`HEAD`. Record `HEAD` as the round's head. For a change worked in its own clone —
+this checkout's `.git/config` names a `[remote "workspace"]` — the owner read the
+round in their workspace and may have committed there, on the change's branch;
+`make round-done` left any such commit on the round's head. Bring them in with
+`git pull --ff-only workspace <branch>`, the branch checked out here, and nothing
+else: a pull that is not a fast-forward is refused, so stop and tell the owner
+that their workspace's branch has diverged from this one — or that their view of
+the round is still open there, which `make round-done` in the workspace closes.
+The owner's commits are those the pull brought, `git log <round head>..HEAD`; each
+is a point of the owner's notes (below), so their answer need not name the hashes.
+Record `HEAD` after the pull: it is the base the fixes are made against.
 
 ## Running unattended
 
@@ -64,15 +77,18 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
 - **The end is an outcome.** Each finding you present (step 3) and the question
   whether another round is merited (step 6) is a `question`. When the dispositions
-  are recorded, the accepted fixes committed, and `## Next` written, end with
-  `finished`, `next` naming what `## Next` leads to. A triage with nothing to
-  dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
+  are recorded, the accepted fixes committed and pushed, and `## Next` written,
+  end with `finished`, `next` naming what `## Next` leads to. A triage with
+  nothing to dispose of asks nothing and ends `finished` (step 6). At a closeout triage, a
   finding whose fix needs code is a `question` naming the correction it needs
   (step 5): the change is archived, so no step takes it back to implementation,
   and the owner directs the correction.
@@ -132,15 +148,20 @@ For an implementation round, also take:
   no owner's notes are asked for. Its triage file ends "Evidence for the round
   triaged in `<NN-review>.triage.md`.", naming the earlier round's review, and the
   `## Next` that review's triage recorded still stands.
-- **The owner's notes.** Ask for them if the owner has not pasted them. The owner
-  reads the round before validation and review, with `make round-view
-  CHANGE=<change>`, which shows it as uncommitted changes in the checkout until
-  `make round-done`. Save them
-  exactly as pasted as the next numbered record, `NN-implementation-owner.md`.
+- **The owner's notes.** The owner reads the round with `make round-view
+  CHANGE=<change>`, which shows it as uncommitted changes until `make round-done`:
+  for a change worked in its own clone, in the owner's workspace while validation
+  and the review run in the clone; for a change worked in the owner's workspace,
+  in this checkout, before validation and the review. Under orchestration the
+  orchestrating session saves the notes as the round's record. Otherwise ask for
+  them if the owner has not pasted them, and save them exactly as pasted as the
+  next numbered record, `NN-implementation-owner.md`.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
-  the ledger only, never in the saved notes — and triage each point like any
-  finding: assign its lens, basis, and severity, and take your
-  own position. A point the owner raised is advice, like any other; where the
+  the ledger only, never in the saved notes — and then each commit the owner made
+  while reading, which the pull above brought in, as a point after them; and
+  triage each point like any finding: assign its lens, basis, and severity, and
+  take your own position. A commit the owner rejects is undone by edits among the
+  round's fixes. A point the owner raised is advice, like any other; where the
   files contradict it, say so with the evidence. Note each point no review raised
   — it is the clearest sign of a check the guidance is missing.
 - **The orchestrating session's observations**, when it wrote any: a numbered
@@ -362,8 +383,10 @@ whether the round's accepted fixes merit another review round, while still prese
   Commit, as one commit
   naming the change and the round: the fixes, the change documents the dispositions
   edited (`design.md`, `proposal.md`, `tasks.md`), and `interventions.jsonl`.
-  The triage records stay in `reviews/`, which is untracked. Do not push: the fix commit is
-  validated next (`make validate CHANGE=<change>`), which pushes it.
+  The triage records stay in `reviews/`, which is untracked. Then push the commit
+  with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
+  and report its reasons. The fix commit is validated next (`make validate
+  CHANGE=<change>`), which dispatches the pipeline.
 
 Then run `make check-change CHANGE=<change>` and report the result. It validates
 an active change with `openspec validate <change> --strict`, and an archived one —
@@ -409,6 +432,12 @@ contradict its status misleads every agent that reads the index — then run
 | `implementation` | unchanged — implementation reviews after a section do not close the phase |
 | `pre-closeout` | `ready for closeout` — only once the latest validation is `passed` and names `HEAD`, or an ancestor `HEAD` differs from only in changes' ledgers and reviews, unless the owner overrides it |
 | `closeout` | unchanged — `in closeout` until archive cleanup writes `archived` |
+
+Whichever `## Next` records, a design review's triage then commits what it
+changed — the change's documents its dispositions edited, `interventions.jsonl`,
+and the index row — as one commit naming the change and the review, and pushes it
+with `make push-branch`, so planning, or the next design review, reads a committed
+design from a clean worktree.
 
 A closeout triage that advances ends triage. Do not release dependents, set the row
 to `archived`, or draft the merge yourself: that is archive cleanup's, in a fresh

@@ -54,12 +54,15 @@ the session, and every turn ends with an outcome matching
 - **A stop with nothing to ask is stopped.** Where this skill says only to stop, or
   to stop and report — a repository guard refusing, `HEAD` moving under you — end
   with `stopped`, `reason` saying why, and `denials` empty.
+- **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
+  the step already runs in the checkout it reads, and no rule allows `git -C`, since
+  a wildcard after `-C` would also span a push.
 - **The end is an outcome.** Each point this skill puts to the owner is a
   `question`. A part that would need a code edit ends with `returned`,
   `return_to` `implementation`, and `evidence` naming the closeout task's notes,
   where you recorded what needs the edit; closeout never edits code. The owner
-  confirms the return, and implementation then sets the status. When the archive is committed, end with `finished`,
-  `next` naming the closeout review.
+  confirms the return, and implementation then sets the status. When the archive
+  is committed and pushed, end with `finished`, `next` naming the closeout review.
 
 ## 1. Check that closeout may start
 
@@ -214,8 +217,9 @@ not closeout's to make, stop and tell the owner.
 
 Commit the closeout as one commit: the permanent documents, the archived change
 with its `tasks.md` and promotion record, the merged specifications, and the index.
-The message names the change and says it is closed out and archived. Do not push;
-the closeout review reads the commit locally.
+The message names the change and says it is closed out and archived. Then push it
+with `make push-branch`, the guarded push of exactly `HEAD`; if it refuses, stop
+and report its reasons. The closeout review reads the commit locally.
 
 ## 6. Report
 

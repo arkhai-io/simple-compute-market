@@ -116,15 +116,44 @@ def test_a_row_naming_models_the_policy_forbids_is_refused(
 
 PUSHES = ["git push origin HEAD", "make push-branch", "uv run git push",
           "uv run bash -c 'git push'", "make run-e2e", "docker push registry/image",
-          "helm push chart.tgz oci://registry"]
+          "helm push chart.tgz oci://registry", "make push-branch FORCE=1",
+          "git -C ../workspace push"]
+COMMITTING = {"design", "plan", "implement", "triage", "closeout", "archive-cleanup"}
 
 
-def test_no_step_may_push_except_validations_guarded_push() -> None:
+def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
+    """Validation pushes the commit it validates and dispatches the pipeline; every
+    step that commits work pushes it; the review pushes nothing."""
     for name, rules in load_steps().items():
         assert "Bash(git push*)" in rules.deny
         allowed = [command for command in PUSHES if _allows(rules, command)]
         assert allowed == (["make push-branch", "make run-e2e"] if name == "validate"
+                           else ["make push-branch"] if name in COMMITTING
                            else []), name
+
+
+def test_every_step_that_commits_its_work_may_commit_and_no_other() -> None:
+    for name, rules in load_steps().items():
+        commits = name in COMMITTING
+        assert _allows(rules, "git add scripts/x.py") == commits, name
+        assert _allows(rules, "git commit -m x") == commits, name
+
+
+def test_triage_and_implementation_may_pull_from_the_workspace_with_ff_only() -> None:
+    for name, rules in load_steps().items():
+        pulls = name in ("triage", "implement")
+        assert _allows(rules, f"git pull --ff-only workspace feat/{CHANGE}") == pulls, name
+        assert not _allows(rules, f"git pull workspace feat/{CHANGE}"), name
+        assert not _allows(rules, f"git pull --no-rebase workspace feat/{CHANGE}"), name
+        assert not _allows(rules, f"git pull --ff-only origin feat/{CHANGE}"), name
+
+
+def test_no_step_runs_git_in_another_checkout() -> None:
+    """A wildcard after `git -C` would also span a push no deny rule names in that
+    form, and a step already runs in the checkout it reads."""
+    for name, rules in load_steps().items():
+        assert not _allows(rules, "git -C ../workspace status"), name
+        assert not _allows(rules, "git -C ../workspace log --oneline"), name
 
 
 def test_every_step_may_check_that_no_round_view_is_open() -> None:
