@@ -75,6 +75,11 @@ than register payments on the obligation worker.
   retired; recovery resources required while a mechanism is configured, and startup
   refused while a mechanism with no configured section has unfinished obligations.
 - Compose all three domains and remove every domain-local copy in this change.
+- Keep, in the unified delivery surface, the rule `unbacked-bare-metal-listings` gives both
+  compute domains: a deal whose accepted seller stage has no delivery operation, as a
+  contact exchange's has none, is answered from that stage — settle refused with 409,
+  fulfillment reads and teardown with 404 — after the caller's ownership is checked and
+  before any fulfillment context is loaded.
 - Record, per concern, where the copies diverged and which behavior was chosen.
 
 ## Capabilities

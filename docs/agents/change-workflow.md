@@ -77,14 +77,15 @@ Ask the owner questions in prose, never through a multiple-choice selector
 change through its steps: it runs the step `scripts/change_next_step.py` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
-question and commits none of the change's own work; it creates the change's clone
-and branch (below), and on your word commits changes to the workflow itself —
-skills, the step table, anything else you name — in the change's clone, on its
-branch, so they take effect for its next step and land with it. It stops for you
-at the design discussion's questions, your reading of each implementation round,
-the triage discussion, and anything no rule settles — an environmental remedy, a
-denial that needs a rule, a proposed return, a stopped step; every other step
-follows without asking.
+question. It commits nothing while a step runs; when a step closes leaving work its
+own skill does not commit, the session commits that work as its own commit and
+pushes it. It also creates the change's clone and branch (below), and on your word
+commits changes to the workflow itself — skills, the step table, anything else you
+name — in the change's clone, on its branch, so they take effect for its next step
+and land with it. It stops for you at the design discussion's questions, your
+reading of each implementation round, the triage discussion, and anything no rule
+settles — an environmental remedy, a denial that needs a rule, a proposed return, a
+stopped step; every other step follows without asking.
 
 **Starting and resuming.** The session keeps no state of its own: on every start
 and after compaction it recomputes where the change stands from the files and the

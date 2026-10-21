@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,8 @@ from change_workflow.steps import Model, load_steps
 from change_workflow.wrapper import Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
                                       FakeClaude, clock, event_lines, failed_run, make_wrapper,
-                                      not_installed, option, option_rules)
+                                      not_installed, option, option_rules,
+                                      without_session_id)
 
 
 def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path) -> None:
@@ -38,6 +40,8 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
     assert option_rules(command, "--allowedTools") == list(rules.allow)
     assert option_rules(command, "--disallowedTools") == list(rules.deny)
     assert "--resume" not in command
+    # Its own session, never one inherited from the environment it was started in.
+    assert uuid.UUID(option(command, "--session-id")).version == 4
 
 
 @pytest.mark.parametrize("kind", sorted(VALID))
@@ -368,7 +372,12 @@ def test_a_network_error_then_a_run_logs_the_run(tmp_path: Path) -> None:
 
     line = make_wrapper(tmp_path, claude).run("design", CHANGE)
 
-    assert claude.commands[0] == claude.commands[1]
+    # The retry is the same command on the same model, under a session id of its
+    # own: the failed attempt may already have claimed the first.
+    first, second = (without_session_id(command) for command in claude.commands)
+    assert first == second
+    assert option(claude.commands[0], "--session-id") != option(claude.commands[1],
+                                                                 "--session-id")
     assert (line["outcome"], line["exit_status"]) == ("finished", 0)
     transcript = log_path(tmp_path, CHANGE).parent / line["transcript"]
     assert "EAI_AGAIN" in transcript.read_text("utf-8")

@@ -158,12 +158,40 @@ the umbrella's `global.provisioning` and `global.provisioningIdentity`, or "".
 {{- end -}}
 
 {{/*
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: under the supported Helm release, a parent's `null` for a subchart is dropped
+only where the subchart's own defaults define the key, and the umbrella or an
+overlay supplies `config`'s keys and `internalRegistryTrust`. So the chart reads
+both with every `null` removed, and the storefront's document renders as it would
+had the removed key never been stated.
+
+`bare-metal-storefront.dropNulls`: remove, in place, every key whose value is `null`
+from the mapping `.`, at every depth, inside list elements too; a `null` list
+element stays.
+*/}}
+{{- define "bare-metal-storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "bare-metal-storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "bare-metal-storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render the public storefront document, `storefront.json`.
 
-`config` is the storefront's own configuration and passes through unchanged:
-the chart supplies no service default and does not validate the service's
-settings, which the storefront does at startup. The chart adds only what the
-release knows -- the port its container, probes, and Service share, the
+`config` is the storefront's own configuration and passes through with its
+`null` keys removed. The chart supplies no service default and does not validate
+the service's settings, which the storefront does at startup. The chart adds only
+what the release knows -- the port its container, probes, and Service share, the
 Service's URL, and the database path under the persistence mount; and, in an
 umbrella release, its internal registry, with the trust stated as
 `internalRegistryTrust` written under its URL, and a `default` site for its
@@ -176,6 +204,7 @@ configuration through".
 */}}
 {{- define "bare-metal-storefront.configDocument" -}}
 {{- $cfg := deepCopy (.Values.config | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $cfg -}}
 {{- include "bare-metal-storefront.refuseFoldedDuplicates" (dict "path" "config" "value" $cfg) -}}
 {{- $portKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "port") -}}
 {{- if $portKey -}}
@@ -198,7 +227,8 @@ configuration through".
 {{- /* Registry: the umbrella's internal registry, its trust stated outside config. */ -}}
 {{- $registryKey := include "bare-metal-storefront.foldedKey" (dict "doc" $cfg "name" "registry") | default "registry" -}}
 {{- $registry := index $cfg $registryKey | default dict -}}
-{{- $trust := .Values.internalRegistryTrust -}}
+{{- $trust := deepCopy (.Values.internalRegistryTrust | default dict) -}}
+{{- include "bare-metal-storefront.dropNulls" $trust -}}
 {{- $internalRegistry := include "bare-metal-storefront.internalRegistryUrl" . -}}
 {{- if include "bare-metal-storefront.foldedKey" (dict "doc" $registry "name" "urls") -}}
   {{- if $trust -}}

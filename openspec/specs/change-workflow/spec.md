@@ -470,7 +470,9 @@ its workflow log, so that a new session resumes the change from them alone. It M
 run the next step the next-step computation names, and MUST advance without the
 owner wherever the computation names a step. It MUST bring every question a step
 raises to the owner, showing each step's message as written, and MUST NOT answer a
-design question, decide or state a position on a finding, or commit. It MUST NOT
+design question or decide or state a position on a finding. It MUST NOT commit
+while a step runs; when a step closes leaving work its own rules do not commit, it
+MUST commit that work as its own commit on the checked-out branch. It MUST NOT
 read code, reviews, or change documents to form or state a view of a finding or a
 design question; it MAY read what routing and recovery need: the computation and
 the inputs it names, the workflow log, and the denials report.

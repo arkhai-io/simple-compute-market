@@ -344,6 +344,189 @@ def test_without_retired_keys_the_definition_holds_only_its_sections() -> None:
     }
 
 
+# --- null removal -------------------------------------------------------------
+
+
+class Labelled(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str | None = None
+
+
+class Listed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entries: list[Wallet] = Field(default_factory=list)
+
+
+def _removable() -> dict:
+    """A definition with a typed section, an optional field, a list of models,
+    a plugin section, settlement, and a retired key in an open section."""
+    return values_schema.config_definition(
+        {
+            "wallet": values_schema.model_fragment(Wallet, role=ROLE),
+            "labelled": values_schema.model_fragment(Labelled, role=ROLE),
+            "listed": values_schema.model_fragment(Listed, role=ROLE),
+            "delivery": _sinks(),
+            "settlement": values_schema.settlement_fragment(
+                [Mechanism("escrow", Escrow, frozenset({"seller"}))], role=ROLE
+            ),
+        },
+        retired=["old_interval", "capacity.old_setting"],
+    )
+
+
+def test_a_key_accepts_null_wherever_it_is_accepted() -> None:
+    definition = values_schema.accepting_null(_removable())
+    wallet = _field(definition, "wallet")
+    delivery = _field(definition, "delivery")
+
+    # A typed section and a typed field keep their shape, with null among their types.
+    assert wallet["type"] == ["object", "null"]
+    assert wallet["additionalProperties"] is False
+    assert _field(wallet, "address") == {"type": ["string", "null"]}
+    # An open section, and a typed settlement mechanism within a closed root.
+    assert _field(definition, "capacity")["type"] == ["object", "null"]
+    assert _field(_field(definition, "settlement"), "escrow")["type"] == ["object", "null"]
+    assert _field(_field(definition, "settlement"), "priority")["type"] == ["array", "null"]
+    # A delivery instance named for its sink, and one typed by additionalProperties.
+    assert _field(delivery, "hook")["type"] == ["object", "null"]
+    assert delivery["additionalProperties"]["type"] == ["object", "null"]
+    # A key whose schema accepts no type by name accepts null beside it.
+    assert _field(delivery, "hook")["patternProperties"]["^sink$"] == {
+        "anyOf": [{"const": "hook"}, {"type": "null"}]
+    }
+
+
+def test_a_key_inside_a_combinator_accepts_null() -> None:
+    """A typed instance selected through ``dependencies`` reads null as absence,
+    as the same instance named for its sink does."""
+    definition = values_schema.accepting_null(_removable())
+    (choices,) = _field(definition, "delivery")["additionalProperties"]["dependencies"].values()
+    hook = next(
+        choice
+        for choice in choices["anyOf"]
+        if {"const": "hook"} in choice["patternProperties"]["^sink$"].get("anyOf", ())
+    )
+
+    # The branch is the instance itself, not a key's value, so it is not widened.
+    assert hook["type"] == "object"
+    assert _field(hook, "sign") == {"type": ["boolean", "null"]}
+
+
+def test_a_refused_key_stays_refused() -> None:
+    definition = values_schema.accepting_null(_removable())
+    delivery = _field(definition, "delivery")
+    misspelled = values_schema.other_spellings("sink")
+
+    assert _withheld(_field(definition, "wallet"), "private_key", "payer")
+    assert _withheld(_field(delivery, "hook"), "url")
+    assert _withheld(definition, "old_interval")
+    assert _withheld(_field(definition, "capacity"), "old_setting")
+    assert _withheld(_field(_field(definition, "settlement"), "escrow"), "api_key")
+    assert delivery["additionalProperties"]["patternProperties"] == {misspelled: False}
+    assert _field(delivery, "file")["patternProperties"][misspelled] is False
+
+
+def test_a_field_already_accepting_null_is_unchanged() -> None:
+    before = _field(_field(_removable(), "labelled"), "label")
+    after = _field(_field(values_schema.accepting_null(_removable()), "labelled"), "label")
+
+    assert before == {"anyOf": [{"type": "string"}, {"type": "null"}]}
+    assert after == before
+
+
+def test_a_list_element_stays_refused_as_null_while_its_keys_accept_it() -> None:
+    after = values_schema.accepting_null(_removable())
+    entries = _field(_field(after, "listed"), "entries")
+
+    assert entries["type"] == ["array", "null"]
+    assert entries["items"]["type"] == "object"
+    assert entries["items"]["additionalProperties"] is False
+    assert _field(entries["items"], "address") == {"type": ["string", "null"]}
+    assert _withheld(entries["items"], "private_key")
+    assert _field(_field(after, "delivery"), "enabled") == {
+        "type": ["array", "null"],
+        "items": {"type": "string"},
+    }
+
+
+def _keyed(**fields) -> dict:
+    return {"type": "object", "patternProperties": dict(fields)}
+
+
+@pytest.mark.parametrize(
+    ("schema", "widened"),
+    [
+        (
+            {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]},
+        ),
+        (
+            {"type": "string", "enum": ["a", "b"]},
+            {"anyOf": [{"type": "string", "enum": ["a", "b"]}, {"type": "null"}]},
+        ),
+        (
+            {"oneOf": [{"type": "string"}, {"type": "integer"}]},
+            {"anyOf": [{"oneOf": [{"type": "string"}, {"type": "integer"}]}, {"type": "null"}]},
+        ),
+        (
+            {"$ref": "#/definitions/other", "type": "object"},
+            {"anyOf": [{"$ref": "#/definitions/other", "type": "object"}, {"type": "null"}]},
+        ),
+        ({"enum": ["a", None]}, {"enum": ["a", None]}),
+        ({"not": {"type": "null"}}, {"anyOf": [{"not": {"type": "null"}}, {"type": "null"}]}),
+        ({}, {}),
+    ],
+)
+def test_a_key_schema_is_widened_in_the_form_its_keywords_allow(schema, widened) -> None:
+    definition = values_schema.accepting_null({"type": "object", "properties": {"k": schema}})
+
+    assert definition["properties"]["k"] == widened
+
+
+def test_the_keys_a_not_or_if_types_accept_null_as_their_absence() -> None:
+    """Under ``not`` and ``if`` a key's schema is checked only when the key is
+    present, so widening it makes a ``null`` key read as an absent one there too."""
+    definition = values_schema.accepting_null(
+        {
+            "type": "object",
+            "not": _keyed(a={"const": 1}),
+            "if": _keyed(b={"type": "string"}),
+            "then": _keyed(c={"type": "integer"}),
+        }
+    )
+
+    assert definition["not"]["patternProperties"]["a"] == {"anyOf": [{"const": 1}, {"type": "null"}]}
+    assert definition["if"]["patternProperties"]["b"] == {"type": ["string", "null"]}
+    assert definition["then"]["patternProperties"]["c"] == {"type": ["integer", "null"]}
+    assert definition["not"]["type"] == "object"
+
+
+def test_the_root_and_the_input_are_left_as_they_are() -> None:
+    definition = _removable()
+    before = json.loads(json.dumps(definition))
+
+    accepted = values_schema.accepting_null(definition)
+
+    assert definition == before
+    assert accepted["type"] == "object"
+
+
+def test_the_result_shares_nothing_with_its_input_or_another_result() -> None:
+    definition = {
+        "type": "object",
+        "properties": {"k": {"const": 1}},
+        "dependencies": {"a": ["b"]},
+    }
+    first = values_schema.accepting_null(definition)
+    second = values_schema.accepting_null(definition)
+
+    first["properties"]["k"]["anyOf"][1]["type"] = "string"
+    first["dependencies"]["a"].append("c")
+
+    assert second["properties"]["k"] == {"anyOf": [{"const": 1}, {"type": "null"}]}
+    assert definition["dependencies"] == {"a": ["b"]}
+
+
 # --- drift detection ----------------------------------------------------------
 
 

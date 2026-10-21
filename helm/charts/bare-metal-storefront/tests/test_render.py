@@ -3,8 +3,8 @@
 Each test renders the chart with ``examples/production-values.yaml`` and an
 overlay, and reads the rendered ``storefront.json`` back with ``json``.
 Standard library only: overlays are written as JSON, which is YAML, and Helm
-merges an overlay into the values key by key, replacing lists and removing a
-key the overlay sets to ``None``.
+merges an overlay into the values key by key and replaces lists; a key the
+overlay sets to ``None`` is removed, by the chart where Helm's merge keeps it.
 
 Set ``BARE_METAL_STOREFRONT_PYTHON`` to the bare-metal storefront environment's
 interpreter to also load a rendered document with the storefront's own
@@ -49,10 +49,11 @@ def _render(overlay: dict | None = None, *, values: Path | None = VALUES) -> sub
 UMBRELLA_STOREFRONT_PRINCIPAL = {"scheme": "eip191", "identifier": "0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f"}
 
 
-def _render_umbrella(overlay: dict | None = None) -> subprocess.CompletedProcess[str]:
+def _render_umbrella(overlay: dict | None = None, *, stated: dict | None = None) -> subprocess.CompletedProcess[str]:
     """Render the umbrella as a release of the bare-metal storefront and its
     own provisioning service, over its values.yaml, then ``overlay`` of the
-    storefront's values.
+    storefront's values. ``stated`` is configuration the release's own values
+    file states, which ``overlay`` may remove.
 
     The VM storefront is disabled: the release's provisioning service trusts
     and calls back one storefront, so a release running both is refused. The
@@ -62,7 +63,10 @@ def _render_umbrella(overlay: dict | None = None) -> subprocess.CompletedProcess
     release = {
         "storefront": {"enabled": False},
         "provisioning": {"storefrontIdentity": {"principals": [UMBRELLA_STOREFRONT_PRINCIPAL]}},
-        "bare-metal-storefront": {"enabled": True, "config": {"Identity": {"principal": UMBRELLA_STOREFRONT_PRINCIPAL}}},
+        "bare-metal-storefront": {
+            "enabled": True,
+            "config": {**(stated or {}), "Identity": {"principal": UMBRELLA_STOREFRONT_PRINCIPAL, **((stated or {}).get("Identity") or {})}},
+        },
     }
     with tempfile.NamedTemporaryFile("w", suffix=".json") as base, tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
         json.dump(release, base)
@@ -90,6 +94,14 @@ def _refused(rendered: subprocess.CompletedProcess[str], *names: str) -> None:
     assert rendered.returncode != 0, "render succeeded"
     for name in names:
         assert name in rendered.stderr, f"{name!r} not named in: {rendered.stderr}"
+
+
+def _refused_at(rendered: subprocess.CompletedProcess[str], dotted: str) -> None:
+    """Refused, naming the value at ``dotted`` as a dotted path or as the JSON
+    pointer Helm's schema validator writes, however Helm words the rest."""
+    assert rendered.returncode != 0, "render succeeded"
+    pointer = "/" + dotted.replace(".", "/")
+    assert dotted in rendered.stderr or pointer in rendered.stderr, f"{dotted!r} not named in: {rendered.stderr}"
 
 
 def _source(manifest: str, path: str) -> str:
@@ -324,6 +336,32 @@ def test_an_umbrella_releases_parts_that_disagree_are_refused() -> None:
         _refused(_render_umbrella(overlay), message)
 
 
+def test_an_umbrella_release_removes_a_configuration_key_at_depth() -> None:
+    """A null removes the key it names whatever Helm's merge did, so the document
+    renders as if it were never stated and holds no null."""
+    administrators = {"operator": {"principals": [UMBRELLA_STOREFRONT_PRINCIPAL]}}
+    stated = {
+        "capacity": {"poll_interval": 2, "publication_interval_seconds": 60},
+        "Identity": {"administrators": administrators},
+    }
+    assert _config(_ok(_render_umbrella(stated=stated)))["Identity"]["administrators"] == administrators
+    manifest = _ok(_render_umbrella(
+        _with_config(capacity={"publication_interval_seconds": None}, Identity={"administrators": None}),
+        stated=stated,
+    ))
+    document = _block(_source(manifest, "configmap.yaml"), "storefront.json")
+    config = json.loads(document)
+
+    assert config["capacity"]["poll_interval"] == 2
+    assert "publication_interval_seconds" not in config["capacity"]
+    assert "administrators" not in config["Identity"]
+    assert "null" not in document
+
+
+def test_an_umbrella_release_refuses_removed_internal_registry_trust() -> None:
+    _refused(_render_umbrella({"internalRegistryTrust": None}), "requires internalRegistryTrust")
+
+
 def test_a_chart_installed_alone_has_no_internal_registry_to_trust() -> None:
     trust = {"authority": "registry-a", "principals": [UMBRELLA_REGISTRY_PRINCIPAL]}
     _refused(
@@ -339,7 +377,7 @@ def test_a_stated_port_must_be_a_number_equal_to_the_charts() -> None:
     _refused(_render(_with_config(port=9000)), "differs from the chart's port")
     _refused(_render(_with_config(Port=9000)), "config.Port", "differs from the chart's port")
     # The values schema types the port, so a string is refused before render.
-    _refused(_render(_with_config(port="8000")), "config.port")
+    _refused_at(_render(_with_config(port="8000")), "config.port")
 
 
 def test_two_spellings_of_one_key_are_refused_at_any_depth() -> None:
@@ -409,8 +447,15 @@ def test_the_retired_values_shape_is_refused_naming_each_key() -> None:
         "principal": {"identity": {"principal": {"scheme": "ed25519"}}},
         "service.port": {"service": {"port": 8000}},
     }
+    # The schema refuses each as a property its parent does not allow; the
+    # assertion names the property and its parent, not the words a Helm release
+    # refuses it in.
     for name, overlay in cases.items():
-        _refused(_render(overlay), f"Additional property {name.rsplit('.', 1)[-1]} is not allowed")
+        parent, _, key = name.rpartition(".")
+        rendered = _render(overlay)
+        assert rendered.returncode != 0, f"{name}: render succeeded"
+        named = f"'{key}'" in rendered.stderr or f"property {key} is not allowed" in rendered.stderr
+        assert named and ("/" + parent.replace(".", "/") in rendered.stderr if parent else True), rendered.stderr
 
 
 def test_the_development_configuration_passes_the_schema() -> None:

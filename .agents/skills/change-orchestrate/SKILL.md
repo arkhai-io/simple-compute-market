@@ -8,11 +8,14 @@ description: Advance one OpenSpec change through its leaf skills from one sessio
 Carry only the change you were given between its steps. The leaf skills do the
 work in their own sessions; the owner decides every finding and design question,
 and the change advances without the owner wherever the next-step computation names
-a step. Never commit the change's own feature work, open its pull request, or
-start another change: each leaf step commits and pushes what its own skill
-authorizes. You also maintain the workflow the change runs on: you create the
-change's clone and branch, and commit the workflow changes the owner asks for
-("Maintain the workflow", below). This session uses the owner's interactive
+a step. Never open this change's pull request or start another change, and never
+commit while a step is running. Each leaf step commits and pushes what its own
+skill authorizes; when a step closes and still leaves work uncommitted that its
+own skill does not commit, commit it as its own commit on the change's branch and
+push, so a closed step's work never sits uncommitted in the checkout. You also
+maintain the workflow the change runs on: you create the change's clone and
+branch, and commit the workflow changes the owner asks for ("Maintain the
+workflow", below). This session uses the owner's interactive
 permissions; the step table limits unattended runs only.
 
 You relay and route; you do not judge. Read only what routing and recovery need:

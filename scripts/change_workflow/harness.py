@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -74,8 +75,15 @@ def claude_command(prompt: str, rules: StepRules, schema: dict[str, Any] | None,
     take a prompt placed after them as one more rule. Only the project's settings
     are loaded, not the owner's user or local settings with their allow rules. A
     review is given no schema: its final message is the review.
+
+    A fresh run names its own session id. Without one, a headless child started
+    from inside another Claude Code session inherits that session's id from its
+    environment, its events and log line then name the parent, and resuming the
+    recorded id reopens the parent's conversation instead of the step's.
     """
     command = ["claude", "-p", prompt, "--model", model.model]
+    if not session:
+        command += ["--session-id", str(uuid.uuid4())]
     if model.effort:
         command += ["--effort", model.effort]
     command += ["--permission-mode", "dontAsk",
