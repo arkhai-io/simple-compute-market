@@ -60,6 +60,19 @@ earlier run of the same ref, not of another branch.
   and other workflow changes the owner asks for, on the feature branch. The owner's
   waiver of another design review after a return, which the specification already
   allows, is carried out by the next-step computation.
+- A plan names evidence only a push produces — a CI workflow run a change branch's
+  push does not trigger — as owed by validation, never as a task's checkbox.
+  Validation dispatches each such workflow from a fixed list that holds no
+  publishing workflow, judges the named jobs and their observations, and compares
+  every other failing job with `dev`'s latest run.
+- A one-run permission grant reaches a fresh run as well as a resumed one: every
+  unattended step target takes `ALLOW`, one or more `;`-separated rules.
+- Each step commits and pushes its own work; a returning implementation or triage
+  commits its partial work, a stopped one leaves it. The orchestrating session no
+  longer commits a closed step's leftovers; it commits workflow maintenance, what
+  the owner instructs, and merges of `dev` on the owner's word, resolving conflicts
+  in workflow files itself and handing code conflicts to the owner, then to an
+  implementation run.
 - Takes from `helm-e2e-pipeline-parity` the Helm items this needs: the Secrets in
   each namespace, forwarding to a named namespace, and running the Helm scenarios
   in the cluster.
@@ -75,7 +88,9 @@ earlier run of the same ref, not of another branch.
   their workspace while validation and review run; each Helm validation is isolated
   in its change's namespace; steps push their own work; the orchestrating session
   creates clones and branches and commits workflow maintenance; history moves to
-  the owner's workspace at archive cleanup.
+  the owner's workspace at archive cleanup; validation produces the CI evidence a
+  plan owes; a grant reaches a fresh run; a returning step commits its partial
+  work.
 
 ## Non-Goals
 
@@ -105,9 +120,11 @@ earlier run of the same ref, not of another branch.
 - `scripts/round_view.py`, `scripts/change_next_step.py`, `scripts/find_change.py`,
   `scripts/validate_slice.py`, `scripts/change_workflow/`, and new scripts for
   clones and history, with their tests under `scripts/tests/`.
-- The root `Makefile`'s workflow targets and every image build target
-  (`IMAGE_SUFFIX`), the subproject Makefiles that build images, and
+- The root `Makefile`'s workflow targets — `ALLOW` on every unattended step,
+  `ARGUMENTS` on `implement`, and `run-ci` with its fetch — and every image build
+  target (`IMAGE_SUFFIX`), the subproject Makefiles that build images, and
   `helm/Makefile`'s namespace, forward, resume, and teardown targets.
+- `scripts/fetch-e2e-logs.py`, for a dispatched CI workflow's named jobs.
 - `helm/validation-capacity.toml`, new.
 - `.agents/skills/change-*` and `.claude/change-steps.toml`.
 - The `change-workflow` specification. No service code changes.
@@ -138,6 +155,20 @@ earlier run of the same ref, not of another branch.
   owner's uncommitted work; side work is chosen to stay clear of the critical-path
   goal's files) — `openspec/specs/change-workflow/architecture.md`, with "Current
   limits" rewritten.
+- Evidence only a push produces owed by validation, the fixed list of dispatchable
+  workflows, the owed jobs judged and other failing jobs compared with `dev`, a
+  grant for one run fresh or resumed, partial work committed on a return, and the
+  orchestrating session's commits and merges — `openspec/specs/change-workflow/spec.md`.
+- Why no publishing workflow can be dispatched, why every job but the owed ones is
+  compared with `dev`, why steps once did not commit or push and why they now do,
+  and the principles the owner stated (the branch is the guard against unfinished
+  work, only `dev` being protected; conflicts in workflow files are the
+  orchestrating session's, conflicts in code the owner's and then implementation's)
+  — `openspec/specs/change-workflow/architecture.md`, "Restrictions bind unattended
+  runs only", "Pushing is guarded, never repaired", and "Validation observes a
+  committed slice".
+- The `Owed by validation:` line, `ALLOW`, and the merge hand-off —
+  `docs/agents/change-workflow.md`.
 - How clones are created, read, taken over, and removed, and where history lives —
   `docs/agents/change-workflow.md` and `AGENTS.md`'s change-workflow section.
 - Validation namespaces, per-change image tags with fixed rather than commit tags,

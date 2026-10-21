@@ -177,6 +177,162 @@ kept.
 
 ## MODIFIED Requirements
 
+### Requirement: Implementation sections and sessions
+
+Each `tasks.md` section MUST be a coherent slice that can be verified, sized by what
+it changes and what proves it, and MUST end at a verification point. A section's
+verification MUST name only evidence an implementation session can produce; evidence
+only a push produces, such as a CI workflow run a change branch's push does not
+trigger, MUST be named as owed by validation — the workflow, the job, and what the
+job must show — and MUST NOT gate a task's completion. An implementation session that
+finds such evidence in a verification MUST check the task once its own evidence
+passes and name that evidence as owed by validation in the section's notes. The plan
+MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions or
+review rounds.
+A session implementing sections MUST begin with no prior conversation and read the
+repository guidance documents, the change, and its sections; how many sessions
+implement the work, and how much each round covers before it is reviewed, MUST be
+settled in the design discussion as the change's implementation cadence, the
+plan's sections ordered by it, and planning's outcome MUST carry the mapping of the
+cadence onto the sections, as the sessions and rounds that implement them. Each
+round MUST be recorded as it starts, from the latest plan's mapping, as its first
+round with a section not yet complete; a change with no mapping for its next
+incomplete section MUST ask the owner, once per round. Each section MUST still be checked, handed off, and
+committed on its own. Anything a later session needs MUST be recorded in the change's
+files before each section is committed. Before a section is committed, its diff MUST
+be checked against the repository guidance by an agent whose context contains no
+part of the implementing session. When discovered code invalidates the plan, the
+session MUST record why, commit what it has as work in progress with no task checked
+for it, push it, and return the change.
+
+#### Scenario: A section is finished
+
+- **WHEN** an implementation session completes a section's tasks
+- **THEN** it records any handoff in the section's task notes, a fresh-context
+  check of the section's diff passes, and the section is committed; the session
+  continues into the next section it was given, or stops
+
+#### Scenario: A plan maps a two-round cadence
+
+- **WHEN** a design settles "round 1: the contract changes; round 2: the handlers
+  and the migration", and planning writes sections 1 to 4 in that order
+- **THEN** the plan's outcome carries `[[[1, 2]], [[3], [4]]]`, and the second
+  round's `round` line is recorded only when that round starts, after the first
+  round's triage advanced
+
+#### Scenario: The plan's premise fails mid-section
+
+- **WHEN** an implementation session finds code that invalidates the section's plan
+- **THEN** it records the finding in the change, commits its partial work as work in
+  progress with no task checked for it, pushes it, and returns the change
+
+#### Scenario: A section owes CI evidence
+
+- **WHEN** a section's change can be shown only by a run of `tests.yml`, which no
+  push of the change's branch triggers
+- **THEN** the plan names the workflow, the job, and what it must show as owed by
+  validation, and the section's verification task is checked on its local evidence
+  alone
+
+#### Scenario: An older plan gates a task on a CI run
+
+- **WHEN** an implementation session's verification task asks for a CI run of the
+  pushed branch
+- **THEN** the session checks the task once its own evidence passes and names the
+  CI run as owed by validation in the section's notes, and the next-step computation
+  does not name the section again
+
+### Requirement: Validation observes a committed slice
+
+Validation before an implementation review MUST describe one commit and MUST NOT
+modify the checkout: it MUST fail if the worktree is not clean when it starts or
+after any step, or if `HEAD` is no longer the validated commit after any step, and
+MUST then collect no further evidence, though it MAY still stop what it started,
+such as port-forwards; it MUST NOT itself regenerate lockfiles or any other
+tracked file, `tasks.md` included. It MUST build the internal packages
+it tests from the commit under validation, never from wheels another branch left in
+the shared wheelhouse. A
+condition validation could repair, such as a stale lock, MUST fail validation and
+return the slice to implementation. End-to-end evidence MUST come from a pipeline
+run whose head commit is the commit under validation. Validation MUST dispatch, on
+the change's branch, each workflow a section complete at the validated commit names
+as owed by validation, and MUST dispatch only workflows on a fixed list that holds
+none that publishes; adding to the list MUST be a tracked change by the owner. It
+MUST judge each named job and what that job must show, from a run whose head commit
+is the commit under validation; a named job that fails, or an observation that is
+absent, MUST be a failure. It MUST compare every other failing job of that run with
+the latest run of the same workflow on `dev`: one failing there too MUST be reported
+as already failing on `dev` and MUST NOT be a failure, and any other MUST be
+diagnosed as any failure is. Validation MUST also build the
+service images and include the Helm render checks, with the chart-to-loader check
+able to run, and a Helm end-to-end run of the scenarios the charts serve, named in
+an explicit list. A skipped chart-to-loader check MUST fail validation. Every
+pipeline scenario not on that list MUST be reported as not run against Helm, never
+as passed. Validation MUST
+NOT fix what it finds in the commit. Its result MUST be `passed`, `failed` — a
+failure caused by the commit or of unknown cause — or `inconclusive`, when no
+failure is caused by the commit but a part produced no evidence for an
+environmental reason. A failure diagnosed as environmental MUST be put to the
+repository owner with its remedy before the record is written, and its part rerun
+on the owner's word; every attempt's evidence MUST be kept. The Helm end-to-end run
+MUST start from no persistent state left by an earlier deployment. The record MUST
+name the end-to-end scenarios that exercise the change, with the basis for each.
+
+#### Scenario: A deploy fails on volumes left by an earlier install
+
+- **WHEN** the Helm part finds a release volume that survived the uninstall, or a
+  deploy fails on persistent state another commit wrote
+- **THEN** validation tells the owner the evidence and the remedy, reruns the part
+  as a new attempt once the owner has acted or named the action, and the failure is
+  not a triage finding
+
+#### Scenario: A lockfile is stale
+
+- **WHEN** validation runs on a slice whose committed lockfile is not current
+- **THEN** validation fails and reports the stale lock, and the lockfile is
+  unchanged
+
+#### Scenario: An earlier pipeline run exists on the branch
+
+- **WHEN** validation dispatches the end-to-end pipeline and an earlier, finished
+  run exists on the same branch
+- **THEN** validation reports the run whose head commit is the validated commit,
+  never the earlier one
+
+#### Scenario: A pipeline scenario the charts do not serve
+
+- **WHEN** the pipeline runs a scenario that is not on the Helm run's list
+- **THEN** the validation report lists it as not run against Helm, and its evidence
+  comes from the pipeline alone
+
+#### Scenario: Owed CI evidence beside jobs that fail on `dev`
+
+- **WHEN** a complete section owes `tests.yml`'s `release · deployment contracts`
+  job passing, and the dispatched run passes that job and fails two others that
+  `dev`'s latest run of `tests.yml` also fails
+- **THEN** validation judges the owed job passed, reports the two others as already
+  failing on `dev`, and neither is a failure
+
+#### Scenario: A job not owed fails only on the branch
+
+- **WHEN** a job no section owes fails in the dispatched run and passes in `dev`'s
+  latest run of the same workflow
+- **THEN** validation diagnoses it as any failure, and one caused by the commit or of
+  unknown cause fails validation
+
+#### Scenario: A plan owes a workflow that publishes
+
+- **WHEN** a section names `publish-pypi.yml` as owed by validation
+- **THEN** the dispatch is refused, naming the workflows validation may dispatch, and
+  nothing is published
+
+#### Scenario: A dispatched run is cancelled
+
+- **WHEN** the run validation dispatched is cancelled by a newer dispatch on the same
+  branch
+- **THEN** the part produced no evidence for an environmental reason, which goes to
+  the owner with its remedy, and the part is rerun on the owner's word
+
 ### Requirement: Triage of an implementation round
 
 The implementation review, the validation of the same commit, and the owner's own
@@ -360,8 +516,17 @@ owner wherever the computation names a step. It MUST bring every question a step
 raises to the owner, showing each step's message as written, and MUST NOT answer a
 design question or decide or state a position on a finding. It MAY create the
 change's clone and branch, and MAY commit changes to the workflow itself — skills,
-the step table, and what else the owner explicitly asks for — in the change's clone,
-on its branch; it MUST NOT commit the change's own feature work. It MUST NOT read
+the step table — what else the owner explicitly asks for, and merges of `dev` the
+owner asks for, in the change's clone, on its branch, pushing each through the
+guarded push. It MUST NOT commit while a step runs, MUST NOT merge while a round
+view of the change is open or between a round's sections being committed and that
+round's triage, and MUST NOT write the change's feature work of its own accord; it
+MUST NOT commit a closed step's leftover work unless the owner asks, bringing such
+work to the owner instead. It MUST resolve a merge's conflicts in the change index,
+change documents, the step table, and skills itself, and MUST bring a conflict in
+code to the owner; one the owner does not rule on MUST go to an implementation run,
+named the conflicted files. While a merge is in progress the next-step computation
+MUST name the owner. It MUST NOT read
 code, reviews, or change documents to form or state a view of a finding or a design
 question; it MAY read what routing and recovery need: the computation and the inputs
 it names, the workflow log, and the denials report.
@@ -416,12 +581,38 @@ for.
 - **THEN** it edits the step table in the change's clone and commits the edit on the
   change's branch, so the step's next run is held to the new rule
 
+#### Scenario: A merge of `dev` conflicts in a skill and in code
+
+- **WHEN** the owner asks the orchestrating session to merge `dev` between steps, and
+  the merge conflicts in a skill and in a script
+- **THEN** it resolves the skill's conflict itself and brings the script's to the
+  owner; when the owner does not rule on it, it starts an implementation run naming
+  the conflicted script, which resolves it, concludes the merge, and pushes
+
+#### Scenario: A merge is asked for during a round's window
+
+- **WHEN** the owner asks for a merge of `dev` after a round's sections are committed
+  and before that round's triage
+- **THEN** the orchestrating session makes the merge only once the round is triaged,
+  so it never moves the commit the round's validation and review describe
+
+#### Scenario: A closed step leaves tracked work uncommitted
+
+- **WHEN** a step's run finished and left a tracked edit uncommitted
+- **THEN** the orchestrating session brings it to the owner as a defect of that step,
+  and commits it only if the owner asks
+
 ### Requirement: Unattended runs are held to their step's permissions
 
 An unattended run MUST be limited to the tools its step's permission table allows,
 and MUST NOT be granted a push other than the guarded push of the change's branch.
-Every step that commits work on the change MUST push it through that guarded push
-after committing. Every denial a
+Every step that writes tracked work on the change — design, planning,
+implementation, triage, closeout, archive cleanup — MUST commit it and push it
+through that guarded push; validation and review MUST commit nothing. A run that
+returns the change to an earlier phase MUST commit what it has as work in progress,
+check no task for it, and push it; a run that stops MUST leave its partial work
+uncommitted, and one stopped by a refusing repository guard or a moved `HEAD` MUST
+commit nothing. A step MUST NOT reset, check out, switch, rebase, stash, or clean. Every denial a
 run records MUST be recorded on the run's outcome, from the run's own record and
 with the harness's reason when it gives one; the harness gives none for a call a
 deny rule refused. A run that cannot go on without a denied tool MUST end
@@ -442,7 +633,10 @@ denials are read, and the reading MUST NOT settle that outcome. A denial by a
 deny rule MUST NOT be granted for one run. A
 change to a step's permissions MUST be made by the owner or, on the owner's word, by
 the orchestrating session, as a tracked change, or granted by the owner for one
-resumed run. Interactive runs MUST NOT be restricted by the table.
+run, fresh or resumed. A grant MUST be passed on that run's command line — for a
+fresh run through its step's make target — recorded as `granted` on the run's log
+line, and never added to the table, so the step's next run is held to its table
+again. Interactive runs MUST NOT be restricted by the table.
 
 #### Scenario: Validation attempts to relock
 
@@ -455,6 +649,13 @@ resumed run. Interactive runs MUST NOT be restricted by the table.
 - **WHEN** an unattended run is denied a command because no allow rule names it
 - **THEN** the orchestrating session proposes the narrowest allow rule matching the
   call, and the owner grants it for the resumed run or has it committed to the table
+
+#### Scenario: The owner grants rules before a fresh run
+
+- **WHEN** the owner grants two rules for a step's next run, which has not started
+- **THEN** the orchestrating session starts the run through its make target with
+  both rules in `ALLOW`, separated by `;`, the run's log line records both as
+  `granted`, and the step's run after it is held to its table alone
 
 #### Scenario: A step does the work of a call no rule names with a tool its rules allow
 
@@ -482,6 +683,13 @@ resumed run. Interactive runs MUST NOT be restricted by the table.
 - **WHEN** an unattended implementation run commits a section
 - **THEN** it pushes that commit through the guarded push of the change's branch, and
   any other push it attempted would be denied
+
+#### Scenario: A step stops at its session's limit
+
+- **WHEN** an unattended implementation run stops partway through a section because
+  its session reached its limit
+- **THEN** its edits stay uncommitted, and the resumed session finishes the section
+  and commits it
 
 ### Requirement: The next step is computed from the files
 

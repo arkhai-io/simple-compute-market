@@ -49,7 +49,10 @@ with every step of one running while another's run; the owner reading any change
 committed round, by its branch's name, in their own workspace, while that change's
 validation and review run; Helm validations side by side, each in its change's
 namespace with its own images, release, volumes, and Secrets; a change's history
-kept in the owner's workspace once it is cleaned up, where later sessions find it.
+kept in the owner's workspace once it is cleaned up, where later sessions find it;
+and, settled on a return from implementation, evidence only a push produces owed by
+validation rather than gating a task, a one-run grant for a fresh run as for a
+resumed one, and each step committing and pushing its own work.
 
 **Non-Goals.** Orchestrating several changes from one session. Two changes'
 pipelines on one branch. A container per change (open question 1). Making the
@@ -480,7 +483,8 @@ does not remove the clone, since the pull request may need another round.
   change ready for closeout).
 - The orchestrating session maintains the workflow as well as advancing the
   change: it creates the clone and the branch (D6), and commits skill changes,
-  permission changes, and anything else the owner explicitly asks for. It commits
+  permission changes, merges of `dev`, and anything else the owner explicitly asks
+  for (D20). It commits
   them in the clone, on the feature branch, so they take effect at once and land
   with that feature. It still forms no view of a finding or a design question.
   Rejected: committing workflow maintenance on `dev` in the owner's workspace
@@ -537,7 +541,8 @@ such as for round 2's triage fixes. No revalidation rule is added: the pilot's n
 validation is of the merged `HEAD`, and the pre-closeout and archive-cleanup gates
 already require a passed validation naming `HEAD` once a path outside `openspec/`
 and `docs/` changed. The index rows are the merge's expected conflicts, resolved in
-the merge commit; any other conflict stops the merge and goes to the owner. The
+the merge commit with any other conflict in a workflow file, and a conflict in code
+goes to the owner (D20). The
 next-step computation is not taught a parent branch: an ordinary change branches
 from `dev` and never needs one. Rejected: rebasing the pilot onto this branch (it
 rewrites a pushed branch, and every fast-forward-only pull then refuses); holding
@@ -597,6 +602,228 @@ every skill that reads another change's or an earlier change's records uses it.
 `docs/agents/change-workflow.md` and `AGENTS.md`'s change-workflow section say the
 owner's workspace holds the history of every cleaned-up change.
 
+D14–D20 were settled when implementation returned the change to design, after
+round 2's sections 5 and 6, to take up two workflow items `dev` had recorded for
+it, and the conflict the merge of `dev` exposed. D12 and D13 were labels of the
+earlier discussion, recorded in D9 and the implementation cadence.
+
+### D14 — A plan names evidence only a push produces as owed by validation
+
+A section's verification names only evidence an implementation session can
+produce. Evidence only a push produces — a CI workflow run such as `tests.yml`,
+which a change branch's push does not trigger — is named on its own line of the
+verification task, beside `End-to-end:`, giving the workflow, the job, and what the
+job must show:
+
+```
+- [ ] 5.3 Verification: `make -C helm test-render` prints the version first and passes;
+      `make test-release-tooling`. End-to-end: none; the pin changes no deployment.
+      Owed by validation: `tests.yml`, job `release · deployment contracts` —
+      `azure/setup-helm` installs v4.3.0, and `make -C helm test-render` prints
+      `helm v4.3.0` before the first render and passes.
+```
+
+Implementation confirms or corrects the line in the section's notes, as it does the
+end-to-end scenarios; validation reads it (D17). A workflow not on validation's list
+(D15) cannot be owed: owing one is a design question, since only the owner extends
+the list. Validation never edits `tasks.md`.
+
+A task gated on evidence no implementation session can produce stays unchecked, and
+the next-step computation names `implement` for it indefinitely; the case that
+raised this, a CI run showing a pinned Helm, waited until the owner dispatched the
+workflow by hand. A round advances only on a `passed` validation, so evidence owed
+by validation keeps its gate without a checkbox.
+
+Rejected: a structured block a script parses (a grammar in `tasks.md` the task-list
+check would have to police, for an observation an agent reads from a log anyway); a
+separate file per change (it parts what is owed from the section that owes it).
+
+### D15 — Validation dispatches only workflows on a fixed list
+
+`make run-ci WORKFLOW=<file>` dispatches a workflow on the current branch and
+refuses, naming the list, any workflow its script does not list. The list holds
+`tests.yml`; `e2e.yml` stays validation's pipeline part, through `make run-e2e`.
+A companion fetch, reusing `scripts/fetch-e2e-logs.py`'s `--workflow` and
+`--after-run`, waits for the run of `HEAD` newer than the run recorded before the
+dispatch and downloads the named jobs' logs. Adding a workflow to the list is a
+tracked change the owner makes. The validate step's table gains the two targets.
+
+Three workflows that accept a dispatch publish — `publish-pypi.yml`,
+`publish-npm.yml`, `release-cli.yml` — so a plan line naming one would publish from
+a feature branch. A list in the script holds interactive runs too, which the step
+table does not bind.
+
+Rejected: dispatching any workflow a plan names; the step table as the list (it
+binds unattended runs only); the owner's approval at each dispatch (a question in
+every validation that owes CI evidence); leaving push-only evidence to the owner's
+hand.
+
+### D16 — The owed jobs are judged; other failing jobs are compared with `dev`
+
+In each dispatched run, validation judges each named job and its observation. A
+named job that fails, or an observation that is absent, is caused by the commit or
+of unknown cause: a `V<n>`, and the result `failed`. Every other job that fails is
+compared with `dev`'s latest run of the same workflow: failing there too, it is
+reported as already failing on `dev` and is not a finding; passing there, it is
+diagnosed like any failure, so caused by the commit or unknown, a `V<n>`. A run that
+produced no evidence — `gh` not signed in, a runner outage, a run cancelled by a
+newer dispatch on the same ref — is environmental: put to the owner with its remedy,
+the part rerun on the owner's word, and `inconclusive` when the owner declines.
+
+The record gains a `ci` part and a section:
+
+```markdown
+- **Parts:** local passed · helm passed · pipeline passed · ci passed
+- **CI:** tests.yml run 39625394342, failure — owed jobs passed; 2 failures not owed, both failing on dev
+
+## CI
+
+| Workflow | Run | Owed by | Job | Owed observation | Result |
+|---|---|---|---|---|---|
+| tests.yml | 39625394342 | §5, 5.3 | release · deployment contracts | setup-helm installs v4.3.0; `make -C helm test-render` prints `helm v4.3.0` before the first render and passes | passed |
+
+Not owed: `py · vms-storefront` — failed, 3 tests (`TimeoutError`), dev's run fails the same; `py · bare-metal-storefront` — failed, `test_abort_all_is_not_previewed`, dev's run fails the same.
+```
+
+With nothing owed, the part reads `ci not owed` and nothing is dispatched. The
+`Commit:` and `Result:` lines, which the pre-closeout review and the next-step
+computation read, are unchanged.
+
+`tests.yml` fails on `dev` in two jobs unrelated to any change owing evidence from
+it, so judging the run's conclusion would fail every such validation. Judging only
+the named jobs would let a job the commit broke pass unseen; the comparison with
+`dev` is the diagnosis validation gives any failure, and a difference it cannot
+place is of unknown cause, so triaged.
+
+Rejected: the run's conclusion; the named jobs alone; the observation alone (its job
+passing was part of what was owed); every job judged against `dev` without named
+jobs (a general CI gate no plan asked for).
+
+### D17 — Every validation dispatches what its complete sections owe
+
+Every validation of a change dispatches each listed workflow named on an `Owed by
+validation:` line of a section whose tasks are all checked at the validated commit,
+and judges each observation (D16). Validation describes one commit, and a fix
+commit can break evidence an earlier commit produced, as with the pipeline.
+Rejected: only the validation of the round whose sections owe it; once per change.
+
+### D18 — Implementation corrects a verification that demands push-only evidence; closeout records it
+
+An implementation session that finds push-only evidence inside a verification task
+— an older plan, or a slip — checks the task once its own evidence passes and
+rewrites that evidence as an `Owed by validation:` line in the section's notes, as
+it corrects end-to-end scenarios. Closeout's end-to-end part records the owed
+observations from the latest passing validation's `## CI`, as it records the
+pipeline run. Rejected: returning the change to planning (a round's cycle for a
+line); leaving the task unchecked (the loop D14 removes).
+
+### D19 — A grant reaches a fresh run through `ALLOW`
+
+`run_change_step.py run` takes `--allow` as `resume` does; each value is split on
+`;`, empty parts dropped, for both commands. Every unattended step target passes
+`ALLOW`, which may hold several rules separated by `;`, to `run`:
+
+```
+make -C ../simple-compute-market.changes/seed-default-pool-at-runtime validate \
+  CHANGE=seed-default-pool-at-runtime UNATTENDED=1 ALLOW='Bash(make lock);Bash(kubectl delete pvc *)'
+```
+
+The run's log line records the rules as `granted`, as a resumed run's does, and the
+step's next run is held to its table again. A deny rule is still never granted. A
+rule holding `;` could never match, since the harness matches each command of a
+chain on its own, so the separator takes nothing from the rule syntax.
+
+The orchestrating session starts every fresh step through its make target, which
+checks the change, refuses while a round view is open, and translates `SECTIONS`,
+`FRESH`, and `HELM_ALL_SCENARIOS`; a grant on `run` alone would not reach those
+runs. A grant the owner decides before a fresh run otherwise costs that run a
+refused turn before its resume carries the grant — and, between a round's sections
+being committed and its triage, where no table edit may be committed, a fresh run
+could not be granted at all.
+
+Rejected: one rule per run (two rules one run needs should not force a table
+edit); the orchestrating session calling the script directly (it
+skips the targets' guards and keeps two translations of the targets' variables);
+moving the targets' guards into the wrapper (a refactor larger than the item); a
+grant recorded in the log for the step's next run (a waiting grant is state a run
+nobody meant could take).
+
+### D20 — Each step commits and pushes its own work; the orchestrating session commits maintenance, instructions, and merges
+
+The steps were once denied their own commits and pushes by inheritance, not by a
+decided reason: the owner read and committed design-phase work, and only validation
+pushed, since only the pipeline needed a pushed branch. `dev`'s step table still
+denies design and planning `git commit`, and every step but validation `make
+push-branch`; under it the orchestrating session was given a closed step's leftover
+work to commit and push, so a remote owner's work would not sit in the checkout.
+D8's table removes the cause, and the rules are now:
+
+1. **Each step that writes tracked work commits and pushes it itself** — design,
+   planning, implementation, triage, closeout, archive cleanup (D8).
+2. **Partial work is committed only on a return.** An implementation or triage run
+   that returns records why, commits what it has as work in progress, checks no
+   task for it, pushes it, and stops. A stopped run leaves its work uncommitted:
+   stops are mostly a session's token limit, resumed as they stand or after a merge
+   of `dev`, and the owner can have the orchestrating session commit the work to a
+   separate work-in-progress branch. A run stopped because a repository guard
+   refused, or `HEAD` moved, commits nothing.
+3. **Validation and review commit nothing**; validation edits only its own record.
+   Each describes one commit, and a commit of its own would move `HEAD` from under
+   its evidence.
+4. **Every push is the guarded push** — exactly `HEAD`, never forced, never `main`
+   or `dev`, to an upstream of the same name; `git push` stays denied. `dev` is the
+   line that matters, so the guard keeps every step off it; never forcing keeps
+   the fast-forward-only pulls between the clone and the workspace valid.
+5. **No step rewrites or discards**: `reset`, `checkout`, `switch`, `rebase`,
+   `stash`, and `clean` stay denied.
+6. **The orchestrating session commits workflow maintenance, what the owner
+   instructs, and merges of `dev`**, never while a step runs, and never writes the
+   change's feature work of its own accord. Nothing restricts its commits
+   mechanically: it runs on the owner's interactive permissions, and "when the
+   owner instructs" is not a rule a table can hold. It no longer commits a closed
+   step's leftovers: under the rules above there are none, and tracked work left
+   after a step ends is a defect of that step, brought to the owner.
+
+The branch is the guard against unfinished work: only `dev` is protected, and
+`dev` is not deployed at every commit, so a commit known not to work harms nothing
+while it stays on a change branch.
+
+**Merges of `dev` (D20.1).** The orchestrating session merges `dev` into the
+change's branch on the owner's word, between steps, never while a round view is
+open, and never between a round's sections being committed and that round's triage,
+so a merge never moves the `HEAD` a round's validation and review describe or falls
+inside a round's diff. Rejected: merging on its own initiative; dropping the timing
+rules.
+
+**Conflicts (D20.2).** It resolves conflicts in the change index, change documents,
+the step table, and skills itself: it understands the workflow's files, and there is
+rarely a real decision in them. A conflict in code goes to the owner as it stands;
+one the owner cannot rule on from the report goes to an implementation run, with no
+planning, since understanding the code base and deciding such a conflict is
+implementation's work. Rejected: resolving every conflict, naming code resolutions
+(a code decision at relaying effort); resolving index rows only (as before).
+
+**Handing a code conflict to implementation (D20.3).** While a merge is in progress
+(`MERGE_HEAD` exists), the next-step computation names the owner, "a merge is in
+progress", so a restarted orchestrating session does not route on the change's
+state alone. On the owner's word the session records a decision naming the
+conflicted files and runs `make implement CHANGE=<change> UNATTENDED=1
+ARGUMENTS='resolve the merge conflicts in <files>'`: the `implement` target gains
+`ARGUMENTS`, passed as `--arguments`. The wrapper starts each implementation run in
+a fresh session; a resume reaches only a waiting run. `change-implement` gains a
+merge mode with no sections: resolve the conflicts, run the suites of the sections
+owning the conflicted files, conclude the merge with `git commit`, and push.
+Rejected: calling the script directly (skips the target's guards, as D19 rejects);
+aborting the merge for implementation to redo it (implementation would make a merge
+the owner asked the orchestrating session to make, and needs `git merge`).
+
+Rejected for D20 as a whole: keeping `dev`'s rule that the orchestrating session
+commits a closed step's leftover work (it compensated for a table this branch has
+replaced); committing a stopped run's partial work too (a stop is usually resumed,
+and its own session finishes the section); keeping partial work uncommitted on a
+return (no session is left to commit it, and a dirty clone blocks every later
+step's guarded push and validation).
+
 ### The implementation cadence
 
 Four rounds:
@@ -620,12 +847,25 @@ Four rounds:
    `change-validate` and the scripted two-validation check. Once its sections are
    committed, this change's branch is merged into the pilot's (D9), and this round's
    validation overlaps the pilot's.
-3. **History and teardown**, in one session: `make change-history`,
-   `find_change.py --records` and the skills that read history,
-   `change-clone-remove`, which runs that synchronization as its first act (D6),
-   namespace and image teardown, and the capacity figure at archive cleanup. Once
-   it is triaged, this change's branch is merged into the pilot's again, and the
-   pilot then reaches archive cleanup on this tooling.
+3. **History and teardown, CI evidence, grants and commit rules**, in three
+   sessions (D21):
+   1. `make change-history`, `find_change.py --records` and the skills that read
+      history, `change-clone-remove`, which runs that synchronization as its first
+      act (D6), namespace and image teardown, and the capacity figure at archive
+      cleanup;
+   2. validation's CI part (D14–D18): `make run-ci` with its list and the fetch,
+      the `ci` part and its comparison with `dev`, and the plan, implement,
+      validate, and closeout skills. Its section owes one observation of its own —
+      `tests.yml`'s `release · deployment contracts` job passing — so the round's
+      validation dispatches `tests.yml` on this branch and exercises the list, the
+      fetch, the judging of a named job, and the comparison of the jobs failing on
+      `dev`;
+   3. grants for a fresh run (D19) and the commit rules (D20): `run --allow` and
+      `ALLOW`, the merge-in-progress routing and `ARGUMENTS` on `implement`, the
+      implement, triage, and orchestrate skills, and the guide.
+
+   Once it is triaged, this change's branch is merged into the pilot's again, and
+   the pilot then reaches archive cleanup on this tooling.
 4. **The pilot's evidence and the containerization decision**, in one session,
    once the pilot's archive cleanup has run: it records the pilot's clone and
    bootstrap, its validation beside round 2's, a round of it read in the owner's
@@ -634,6 +874,15 @@ Four rounds:
    change to containerize the workflow (open question 1). The round records the
    decision only; a change it decides to open is proposed afterwards on its own
    branch from `dev`. Then the pre-closeout review.
+
+**D21.** The work of D14–D20 joins round 3 as sessions of their own rather than a
+round of its own: it adds no round's cycle, each session's context holds one slice,
+and the pilot has the new rules before its closeout. Round 2 had already been
+recorded with sections 5–7 when they were settled, so section 7 stays next.
+Rejected: two sessions, D14–D20 in one (a larger context for the second); a round of
+their own between rounds 2 and 3 (one more cycle, and the pilot's history tooling
+later); adding them to round 2 (the recorded round would have to be redistributed
+by hand, for nothing gained).
 
 Clone removal sits with the synchronization it runs first, rather than the
 synchronization moving to round 1: removal is first needed after the pilot merges,
