@@ -25,6 +25,7 @@ from market_alkahest.plans import (
 )
 from market_alkahest.proposals import (
     ReleaseConditionError,
+    UnpinnedEscrowError,
     accepted_escrow_artifacts_from_proposal,
     authorize_escrow_proposal,
     authorized_release_conditions,
@@ -100,14 +101,32 @@ def test_a_selection_the_listing_does_not_authorize_is_refused(selected) -> None
         authorize_escrow_proposal(_proposal(demand=selected), listing=_LISTING)
 
 
-def test_an_unpinned_escrow_is_held_to_the_listing_all_the_same() -> None:
-    with pytest.raises(ReleaseConditionError, match="release_condition_not_authorized"):
-        authorize_escrow_proposal(
-            _proposal(escrow_address=_ZERO, demand=_condition(_BUYER)), listing=_LISTING
-        )
-    assert authorize_escrow_proposal(
-        _proposal(escrow_address=_ZERO), listing=_LISTING
-    ).demand.model_dump(exclude_none=True) == _condition()
+_UNPINNED = pytest.mark.parametrize(
+    "escrow_address",
+    [_ZERO, "", "0x", "0x" + "00" * 19 + "0"],
+    ids=["zero address", "empty", "bare prefix", "zero digits"],
+)
+
+
+@_UNPINNED
+@pytest.mark.parametrize(
+    "selected",
+    [None, _condition(), _condition(_BUYER)],
+    ids=["no condition", "the listing's condition", "another condition"],
+)
+def test_an_escrow_naming_no_contract_is_refused(escrow_address, selected) -> None:
+    """Whatever condition it selects, even the listing's own."""
+    overrides = {"escrow_address": escrow_address}
+    if selected is not None:
+        overrides["demand"] = selected
+
+    with pytest.raises(UnpinnedEscrowError, match="^escrow_contract_unpinned"):
+        authorize_escrow_proposal(_proposal(**overrides), listing=_LISTING)
+
+
+def test_the_unpinned_refusal_is_a_release_condition_error() -> None:
+    """Every caller already translating that family refuses it the same way."""
+    assert issubclass(UnpinnedEscrowError, ReleaseConditionError)
 
 
 @pytest.mark.parametrize(
@@ -296,6 +315,15 @@ def test_materialization_called_directly_refuses_an_unauthorized_condition(
 
 
 @_MATERIALIZERS
+@_UNPINNED
+def test_materialization_called_directly_refuses_an_escrow_naming_no_contract(
+    materialize, escrow_address
+) -> None:
+    with pytest.raises(UnpinnedEscrowError, match="^escrow_contract_unpinned"):
+        materialize(_proposal(escrow_address=escrow_address), _LISTING)
+
+
+@_MATERIALIZERS
 def test_materialization_called_directly_encodes_the_listings_condition(
     materialize,
 ) -> None:
@@ -357,3 +385,28 @@ async def test_settlement_verification_refuses_a_condition_its_listing_does_not_
                 escrow_proposal=proposal,
                 get_obligation_fn=_never_read,
             )
+
+
+@_UNPINNED
+async def test_settlement_verification_refuses_an_escrow_naming_no_contract(
+    escrow_address,
+) -> None:
+    """The listing form reads the escrow at the contract its proposal names, and
+    resolves no default kind for a proposal naming none."""
+
+    async def _never_read(_client, _uid):
+        raise AssertionError("the chain is read only at a named contract")
+
+    with pytest.raises(EscrowVerificationError, match="escrow_contract_unpinned"):
+        await verify_escrow_for_settlement(
+            escrow_uid="0x" + "ab" * 32,
+            seller_wallet=_SELLER,
+            agreed_price=100,
+            agreed_duration_seconds=3600,
+            listing=_LISTING,
+            alkahest_client=object(),
+            chain_name="anvil",
+            alkahest_address_config_path=_BOOK,
+            escrow_proposal=_proposal(escrow_address=escrow_address),
+            get_obligation_fn=_never_read,
+        )

@@ -30,8 +30,10 @@ from market_alkahest.plans import (
 )
 from market_alkahest.release_authorization import (
     ReleaseConditionError,
+    UnpinnedEscrowError,
     authorized_release_condition,
     authorized_release_conditions,
+    require_pinned_escrow,
     selected_release_condition,
 )
 from market_alkahest.schemas import (
@@ -43,6 +45,7 @@ from market_alkahest.schemas import (
 __all__ = [
     "ReleaseConditionError",
     "SettlementPlanMaterializationError",
+    "UnpinnedEscrowError",
     "accepted_escrow_artifacts_from_proposal",
     "authorize_escrow_proposal",
     "authorized_escrow_proposal_at_amount",
@@ -85,11 +88,12 @@ def authorize_escrow_proposal(
 
     The proposal's own selection is kept only when the listing authorizes it on
     the proposal's chain, and replaced by the listing's form of it; a proposal
-    selecting none takes the listing's authorized condition. Its escrow address
-    plays no part, so a proposal that leaves its contract unpinned is held to
-    the listing all the same. Raises ``ReleaseConditionError``.
+    selecting none takes the listing's authorized condition. A proposal naming
+    no escrow contract is refused (``UnpinnedEscrowError``), whatever condition
+    it selects. Raises ``ReleaseConditionError``.
     """
     model = _escrow_proposal(proposal)
+    require_pinned_escrow(model)
     condition = authorized_release_condition(
         listing,
         chain_name=model.chain_name,

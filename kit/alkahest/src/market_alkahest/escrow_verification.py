@@ -51,6 +51,10 @@ from market_alkahest.plans import (
     SettlementPlan,
     settlement_obligation_to_escrow_terms,
 )
+from market_alkahest.release_authorization import (
+    UnpinnedEscrowError,
+    require_pinned_escrow,
+)
 from market_alkahest.schemas import (
     accepted_recipient_address,
     accepted_token_address,
@@ -528,9 +532,10 @@ async def verify_escrow_for_settlement(
         thread at /negotiate/new. When present, the verifier materializes
         the same concrete ``EscrowTerms`` shape the buyer used, under the
         release condition ``listing`` authorizes, and compares
-        its ``obligation_data`` with the chain-read obligation. None for
-        legacy threads — verifier falls back to the listing-derived token
-        and the ``escrow_kind`` default.
+        its ``obligation_data`` with the chain-read obligation, read through
+        the codec of the contract it names; a proposal naming no contract is
+        refused. None for legacy threads — verifier falls back to the
+        listing-derived token and the ``escrow_kind`` default.
     escrow_kind:
         Fallback escrow slot name when ``escrow_proposal`` is None.
         Today ``"erc20_escrow_obligation_default"`` is
@@ -564,22 +569,18 @@ async def verify_escrow_for_settlement(
     expected_obligation_raw: dict[str, Any] | None = None
     expected_candidates: list[tuple[int, dict[str, Any], int | None]] = []
     if escrow_proposal is not None:
-        _addr = (escrow_proposal.escrow_address or "").lower()
-        # The buyer may leave the escrow contract unpinned — a zero-address
-        # placeholder — so negotiation gates on field equality rather than a
-        # specific (chain, address). An unpinned proposal escrows against the
-        # chain's default kind, so resolve the codec from ``escrow_kind``
-        # rather than the placeholder address (which matches no codec).
-        _unpinned = (not _addr) or set(_addr.removeprefix("0x")) <= {"0"}
-        if _unpinned:
-            effective_escrow_kind = escrow_kind
-        else:
-            _codec = _escrow_codec(
-                escrow_proposal.chain_name,
-                escrow_proposal.escrow_address,
-                alkahest_address_config_path,
-            )
-            effective_escrow_kind = _codec.kind
+        # An escrow is read at the contract its proposal names; a proposal
+        # naming none has no contract to read.
+        try:
+            require_pinned_escrow(escrow_proposal)
+        except UnpinnedEscrowError as exc:
+            raise EscrowVerificationError(str(exc)) from exc
+        _codec = _escrow_codec(
+            escrow_proposal.chain_name,
+            escrow_proposal.escrow_address,
+            alkahest_address_config_path,
+        )
+        effective_escrow_kind = _codec.kind
         proposal_recipient = accepted_recipient_address(escrow_proposal)
         if proposal_recipient:
             effective_recipient = proposal_recipient

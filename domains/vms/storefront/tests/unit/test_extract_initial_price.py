@@ -60,10 +60,12 @@ def _make_listing(*, demand_amount: int | None) -> Listing:
     )
 
 
-def _extract_initial_price_from_order(order: Listing | dict) -> int | Fraction:
+def _extract_initial_price_from_order(order: Listing) -> int | Fraction:
+    """The floor for the listing's one accepted escrow, as a buyer selecting it gets."""
     return extract_initial_price_from_order(
         order,
         default_min_price=settings.pricing.default_min_price,
+        selected_option=order.accepted_escrows[0],
     )
 
 
@@ -117,6 +119,10 @@ class TestExtractInitialPrice:
                 _extract_initial_price_from_order(listing)
 
 
+#: A proposal selecting the listing's one accepted escrow.
+_ESCROW_PROPOSAL = {"chain_name": "test_chain", "escrow_address": "0x" + "11" * 20}
+
+
 class TestSellerReferenceAmount:
     def test_long_rate_over_a_year_is_exact(self):
         """A 21-significant-digit base-unit rate over one year needs 29 digits,
@@ -124,20 +130,45 @@ class TestSellerReferenceAmount:
         rate = 123456789012345678901
         year = 365 * 24 * 3600
         listing = _make_listing(demand_amount=rate)
-        assert _seller_reference_amount(listing, year) == rate * year // 3600
+        assert (
+            _seller_reference_amount(listing, year, proposal=_ESCROW_PROPOSAL)
+            == rate * year // 3600
+        )
 
     def test_amount_truncates_to_whole_base_units(self):
         listing = _make_listing(demand_amount=7)
-        assert _seller_reference_amount(listing, 1800) == 3
+        assert _seller_reference_amount(listing, 1800, proposal=_ESCROW_PROPOSAL) == 3
 
     def test_floor_reference_amount_is_exact(self):
         listing = _make_listing(demand_amount=None)
         with settings_overrides(**{"pricing.default_min_price": "1.5"}):
             amount = _seller_reference_amount(
-                listing, 7200, default_min_price=settings.pricing.default_min_price
+                listing,
+                7200,
+                default_min_price=settings.pricing.default_min_price,
+                proposal=_ESCROW_PROPOSAL,
             )
         assert amount == 3
         assert isinstance(amount, int)
+
+    @pytest.mark.parametrize(
+        "proposal",
+        [
+            pytest.param(None, id="no proposal"),
+            pytest.param({**_ESCROW_PROPOSAL, "escrow_address": "0x" + "00" * 20}, id="unpinned"),
+            pytest.param({**_ESCROW_PROPOSAL, "escrow_address": "0x" + "22" * 20}, id="unlisted"),
+            pytest.param({**_ESCROW_PROPOSAL, "chain_name": "other_chain"}, id="another chain"),
+        ],
+    )
+    def test_a_proposal_selecting_nothing_is_priced_from_no_entry(self, proposal):
+        """Not from the listing's first accepted escrow, nor from the floor."""
+        listing = _make_listing(demand_amount=900)
+        assert (
+            _seller_reference_amount(
+                listing, 3600, default_min_price="7", proposal=proposal
+            )
+            == 0
+        )
 
 
 _RATED_OPTION = {

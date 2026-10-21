@@ -20,7 +20,10 @@ from arkhai_vms_negotiation.policies import (
     proposal_uses_scalar_amount,
 )
 from market_policy.listing_source import ListingSourceVerdict
-from market_policy.scalar_policies import selected_settlement_artifact
+from market_policy.scalar_policies import (
+    selected_settlement_artifact,
+    selecting_proposal,
+)
 from market_policy.negotiation_middleware import (
     NegotiationContext,
     NegotiationMiddleware,
@@ -32,8 +35,6 @@ from market_policy.negotiation_middleware import (
 )
 
 logger = logging.getLogger(__name__)
-
-_NO_PROPOSAL = object()
 
 
 # The result carrier and hook protocol are domain-invariant and live in
@@ -198,21 +199,18 @@ def _direction_from_strategy_label(strategy: str) -> str:
 
 
 def _selected_option(listing: Any, proposal: Any) -> Any:
-    """The accepted escrow or settlement option ``proposal`` selects.
+    """The accepted escrow or settlement option ``proposal`` selects, or None.
 
-    ``_NO_PROPOSAL`` when there is no buyer proposal to read, or when it selects
-    nothing the listing offers -- an escrow proposal naming no escrow address, or
-    a selection the round's guards will refuse. The reference amount then falls
-    back to the listing's first accepted escrow, so a proposal the guards are
-    about to refuse is refused for its own reason rather than for want of a floor.
+    None when there is no buyer proposal to read, or when it selects nothing the
+    listing offers: an escrow proposal naming no escrow contract or one the
+    listing does not accept, or a selection matching no option.
     """
     if not isinstance(proposal, Mapping):
-        return _NO_PROPOSAL
+        return None
     listing_dict = (
         listing.model_dump(mode="json") if hasattr(listing, "model_dump") else dict(listing)
     )
-    selected = selected_settlement_artifact(listing_dict, proposal)
-    return _NO_PROPOSAL if selected is None else selected
+    return selected_settlement_artifact(listing_dict, proposal)
 
 
 def _seller_reference_amount(
@@ -230,14 +228,17 @@ def _seller_reference_amount(
     rate in an 18-decimal token over a long duration exceeds what a
     fixed-precision decimal context holds, and rounding there would silently
     change the amount the seller negotiates from.
+
+    A proposal selecting nothing the listing offers is priced from nothing: its
+    reference amount is zero, never another entry's rate, and the round's
+    escrow-shape and selection guards, which every VM chain runs, refuse it for
+    its own reason, as plan materialization does at acceptance.
     """
     selected = _selected_option(listing, proposal)
-    per_hour = (
-        extract_initial_price_from_order(listing, default_min_price=default_min_price)
-        if selected is _NO_PROPOSAL
-        else extract_initial_price_from_order(
-            listing, default_min_price=default_min_price, selected_option=selected
-        )
+    if selected is None:
+        return 0
+    per_hour = extract_initial_price_from_order(
+        listing, default_min_price=default_min_price, selected_option=selected
     )
     seconds = int(duration_seconds) if duration_seconds is not None else 3600
     return math.floor(Fraction(per_hour) * seconds / 3600)
@@ -283,7 +284,7 @@ async def _run_default_seller_round_policy(
             listing,
             requested_duration_seconds,
             default_min_price=default_min_price,
-            proposal=their_proposal,
+            proposal=selecting_proposal(history),
         )
         if uses_scalar_amount else 0
     )

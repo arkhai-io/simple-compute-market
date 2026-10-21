@@ -27,6 +27,8 @@ from arkhai_apicredits.listings.pricing import (
 from market_policy.scalar_policies import (
     make_escrow_kind_dispatch_middleware,
     proposal_uses_scalar_amount,
+    selected_settlement_artifact,
+    selecting_proposal,
 )
 from market_policy.seller_round import SellerRoundResult
 from market_policy.negotiation_middleware import (
@@ -117,8 +119,17 @@ def _seller_reference_amount(
     """quantity × the per-credit rate of the option ``proposal`` selects, exactly.
 
     The unit is a base-unit rate or a rational floor, and a long amount must not
-    round through a fixed-precision decimal context.
+    round through a fixed-precision decimal context. An escrow proposal selecting
+    no accepted escrow the listing offers, or a round with no selecting proposal,
+    is priced from nothing: its reference amount is zero, never another entry's
+    rate, and the round's escrow-shape guard, which every API-credit chain runs,
+    refuses it for its own reason, as plan materialization does at acceptance.
     """
+    selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
+    if not isinstance(selection, Mapping) and (
+        selected_settlement_artifact(dict(listing), proposal) is None
+    ):
+        return 0
     unit = extract_unit_price_from_order(
         dict(listing),
         default_min_price=default_min_price,
@@ -164,7 +175,7 @@ async def _run_seller_round(
             listing_dict,
             requested_quantity,
             default_min_price=default_min_price,
-            proposal=their_proposal if isinstance(their_proposal, Mapping) else None,
+            proposal=selecting_proposal(history),
         )
         if uses_scalar_amount
         else 0

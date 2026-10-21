@@ -37,6 +37,7 @@ from typing import Any, Protocol, runtime_checkable
 from market_alkahest.release_authorization import (
     ReleaseConditionError,
     authorized_release_condition,
+    require_pinned_escrow,
     selected_release_condition,
 )
 from market_alkahest.schemas import EscrowTerms, RateValue, compute_rate_total
@@ -927,10 +928,12 @@ def materialize_escrow_terms_from_proposal(
     proposal selecting none takes the listing's, and an ``arbiter`` or
     ``demand`` stated among the escrow's fields is overwritten. ``listing`` is
     the listing the proposal was negotiated against, a mapping or model
-    carrying its ``demands``. A listing authorizing none, a selection it does
-    not authorize, and a condition the codecs cannot encode raise
-    ``ReleaseConditionError`` before any obligation data is built.
+    carrying its ``demands``. A proposal naming no escrow contract, a listing
+    authorizing none, a selection it does not authorize, and a condition the
+    codecs cannot encode raise ``ReleaseConditionError`` before any obligation
+    data is built.
     """
+    require_pinned_escrow(proposal)
     # The release condition is the one the listing authorizes, and nothing
     # else: an arbiter or demand stated among the escrow's fields, or a
     # recipient implied by them, is never a condition of the obligation.

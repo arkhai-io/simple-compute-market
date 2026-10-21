@@ -175,8 +175,11 @@ def _negotiate_new_proposal(
     """The opening proposal ``negotiate_new`` sends.
 
     An escrow opening carries an Alkahest escrow carrier: chain, escrow address,
-    fields, literal fields, and expiry, with development defaults for any the
-    caller omits. A selection-only opening carries only ``fields`` beside its
+    fields, literal fields, and expiry. It must name the escrow contract it
+    funds, since a storefront refuses an escrow naming none, so an opening with
+    no ``escrow_address`` is refused here; the chain and expiry have development
+    defaults, and the token appears only when the caller states one. A
+    selection-only opening carries only ``fields`` beside its
     ``settlement_selection``: a payments or introduction mechanism has no escrow,
     and a storefront may refuse a proposal that mixes the two carriers. Stating
     an escrow parameter in a selection-only opening is refused here rather than
@@ -206,12 +209,17 @@ def _negotiate_new_proposal(
                 "a selection-only opening carries no escrow; remove " + ", ".join(stated)
             )
         return {"fields": fields}
+    if not escrow_address:
+        raise ValueError(
+            "an escrow opening names the escrow contract it funds; pass escrow_address, "
+            "or open with selection_only=True for a mechanism with no escrow"
+        )
     literals = dict(literal_fields or {})
-    if token or literal_fields is None:
-        literals.setdefault("token", token or ("0x" + "0" * 40))
+    if token:
+        literals.setdefault("token", token)
     proposal: dict[str, Any] = {
         "chain_name": chain_name or "anvil",
-        "escrow_address": escrow_address or ("0x" + "0" * 40),
+        "escrow_address": escrow_address,
         "fields": fields,
         "literal_fields": literals,
         "expiration_unix": escrow_expiration_unix or (int(time.time()) + 3600),
@@ -1514,8 +1522,9 @@ class StorefrontClient(_StorefrontClientBase):
         interprets a domain payload. ``initial_amount`` is the absolute opening
         amount for scalar escrows; amountless exact escrows can pass
         ``initial_amount=None`` with explicit ``literal_fields`` / ``rates``.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,
@@ -2832,8 +2841,9 @@ class SyncStorefrontClient(_StorefrontClientBase):
 
         ``provision_terms`` is the required versioned domain envelope. The
         shared client validates its generic shape without interpreting payload.
-        ``selection_only=True`` opens with a ``settlement_selection`` and no
-        escrow carrier, as a payments or introduction buyer does.
+        An escrow opening must name its ``escrow_address``; ``ValueError``
+        otherwise. ``selection_only=True`` opens with a ``settlement_selection``
+        and no escrow carrier, as a payments or introduction buyer does.
         """
         proposal = _negotiate_new_proposal(
             initial_amount=initial_amount,

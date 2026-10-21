@@ -27,8 +27,44 @@ class ReleaseConditionError(ValueError):
     materialized only under one its listing authorizes for the chain, so a
     selection the listing does not authorize, a listing authorizing none, and a
     condition that cannot be read or encoded all refuse before anything is
-    accepted. The message starts with a ``release_condition_*`` reason.
+    accepted. The message starts with a ``release_condition_*`` reason, or with
+    ``escrow_contract_unpinned`` for the subclass below.
     """
+
+
+class UnpinnedEscrowError(ReleaseConditionError):
+    """An escrow proposal names no escrow contract to fund.
+
+    An escrow is funded, priced, and verified at the contract its proposal names,
+    so a proposal naming none (no address, or the zero address) has nothing to
+    settle at and is refused, whatever release condition it selects. It is a
+    ``ReleaseConditionError`` so every caller translating that family refuses it
+    the same way. The message starts with ``escrow_contract_unpinned``.
+    """
+
+
+def require_pinned_escrow(proposal: EscrowProposal | Mapping[str, Any] | Any) -> None:
+    """Refuse ``proposal`` when it names no escrow contract.
+
+    Raises ``UnpinnedEscrowError`` for a missing or empty escrow address and for
+    the zero address.
+    """
+    address = (
+        proposal.get("escrow_address")
+        if isinstance(proposal, Mapping)
+        else getattr(proposal, "escrow_address", None)
+    )
+    digits = address.lower().removeprefix("0x") if isinstance(address, str) else ""
+    if not digits or set(digits) <= {"0"}:
+        chain = (
+            proposal.get("chain_name")
+            if isinstance(proposal, Mapping)
+            else getattr(proposal, "chain_name", None)
+        )
+        raise UnpinnedEscrowError(
+            "escrow_contract_unpinned: the escrow proposal names no escrow contract "
+            f"on chain {chain!r}"
+        )
 
 
 def _listing_value(listing: Any, key: str) -> Any:
