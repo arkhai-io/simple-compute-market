@@ -32,8 +32,7 @@ image:
 # A map rather than a list because Helm merges maps key by key and replaces
 # lists whole: an overlay states only what it changes in one agent, and setting
 # a key to null removes it, the agent's own name included. The chart ships no
-# agent, since Helm cannot remove a subchart's default agent from a parent's
-# values; the umbrella chart's values declare the release's agents. A list of
+# agent; the umbrella chart's values declare the release's agents. A list of
 # agents is refused, naming this shape.
 #
 # Each agent renders one Deployment and Service, named for its key. `config` is
