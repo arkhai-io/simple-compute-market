@@ -413,7 +413,20 @@ rules out.
 CI's `release · deployment contracts` job runs `test-render` with no loader interpreter,
 so CI never runs the chart-to-loader or startup checks; only local and validation runs
 do. The four CI-only storefront pytest failures (5.3) belong to no change on this
-branch; 6.8 should not count them against this change.
+branch; 6.8 should not count them against this change. On the owner's word they are
+recorded as two rows of the index's "Unowned work left by this campaign" table.
+Triage of the orchestrating session's observations (28): R1 and R3, the workflow-tooling
+defects this section met (CI evidence no implement session can produce; a one-run grant
+that reaches only a resumed run), are recorded with the owner's settled direction as two
+more rows of that table, for `parallel-change-workflows`. R2: `[steps.triage]` in
+`.claude/change-steps.toml` gains implement's five rules it lacked (`make -C * dist*`,
+`make init*`, `make -C * init*`, `make validate-*`, `helm version*`), made by the
+orchestrating session on the owner's word. Checks: `scripts/tests/test_change_workflow_steps.py`
+(unit) 32 passed; `make test` passed; `make check-packaging`, `make check-comment-hygiene`,
+`make check-change-index` and `make check-change` passed. The fresh-context check found
+no leak and every cited path resolving; fixed: the new rows now give full test paths and no
+longer read as owned; declined: a note in `parallel-change-workflows`' proposal, since the
+owner chose the table as the hand-off.
 
 ## 6. Closeout
 
