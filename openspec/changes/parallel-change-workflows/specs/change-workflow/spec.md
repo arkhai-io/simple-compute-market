@@ -117,10 +117,11 @@ preflight MUST be classified as any validation failure is, from the namespace's
 events, the other namespaces' workloads at the time, and the rendered requests and
 limits: as environmental only when that evidence shows contention for the node's
 memory, and otherwise as caused by the commit or of unknown cause.
-Archive cleanup MUST remove the change's namespace and images and MUST record the
-memory the change's latest validation measured, with when it was measured; where
-two branches' recorded figures conflict at a merge, the one measured later MUST be
-kept.
+Archive cleanup MUST remove the change's namespace and images and, when the
+change's latest validation measured memory, MUST record it, with when it was
+measured; when that validation measured none, it MUST keep the figure already
+recorded and say that it recorded none. Where two branches' recorded figures
+conflict at a merge, the one measured later MUST be kept.
 
 #### Scenario: Two changes are validated at once
 
@@ -147,6 +148,13 @@ kept.
 - **WHEN** the cluster has no metrics source
 - **THEN** the preflight warns that no memory figure will be recorded, and the part
   goes on
+
+#### Scenario: Archive cleanup after a validation that measured nothing
+
+- **WHEN** archive cleanup runs and the change's latest validation recorded no
+  memory
+- **THEN** it leaves the recorded figure as it is, or absent, and says in its report
+  and the pull-request draft that it recorded none
 
 #### Scenario: No memory figure is recorded yet
 
@@ -260,10 +268,14 @@ as owed by validation, and MUST dispatch only workflows on a fixed list that hol
 none that publishes; adding to the list MUST be a tracked change by the owner. It
 MUST judge each named job and what that job must show, from a run whose head commit
 is the commit under validation; a named job that fails, or an observation that is
-absent, MUST be a failure. It MUST compare every other failing job of that run with
-the latest run of the same workflow on `dev`: one failing there too MUST be reported
-as already failing on `dev` and MUST NOT be a failure, and any other MUST be
-diagnosed as any failure is. Validation MUST also build the
+absent, MUST be a failure. It MUST compare each failure of every other failing job
+of that run — a failing test where the job reports one, otherwise the failing step
+and its error — with the same job in the latest completed run of the same workflow
+on `dev` whose head commit is an ancestor of the commit under validation, and MUST
+name that run and its commit: a failure that run shows too MUST be reported as
+already failing on `dev` and MUST NOT be a failure, and any other MUST be diagnosed
+as any failure is; with no such run, or a job whose failures cannot be compared,
+the failure MUST be of unknown cause. Validation MUST also build the
 service images and include the Helm render checks, with the chart-to-loader check
 able to run, and a Helm end-to-end run of the scenarios the charts serve, named in
 an explicit list. A skipped chart-to-loader check MUST fail validation. Every
@@ -308,17 +320,31 @@ name the end-to-end scenarios that exercise the change, with the basis for each.
 #### Scenario: Owed CI evidence beside jobs that fail on `dev`
 
 - **WHEN** a complete section owes `tests.yml`'s `release · deployment contracts`
-  job passing, and the dispatched run passes that job and fails two others that
-  `dev`'s latest run of `tests.yml` also fails
+  job passing, and the dispatched run passes that job and fails two others whose
+  failing tests also fail in `dev`'s latest run of `tests.yml` at a commit the
+  branch contains
 - **THEN** validation judges the owed job passed, reports the two others as already
-  failing on `dev`, and neither is a failure
+  failing on `dev`, naming that run and its commit, and neither is a failure
 
 #### Scenario: A job not owed fails only on the branch
 
 - **WHEN** a job no section owes fails in the dispatched run and passes in `dev`'s
-  latest run of the same workflow
+  latest run of the same workflow at a commit the branch contains
 - **THEN** validation diagnoses it as any failure, and one caused by the commit or of
   unknown cause fails validation
+
+#### Scenario: A new failure in a job that already fails on `dev`
+
+- **WHEN** a job no section owes fails on `dev` with one test, and the dispatched
+  run's same job fails with that test and another
+- **THEN** validation reports the first as already failing on `dev` and diagnoses the
+  other as any failure
+
+#### Scenario: No `dev` run of the branch's code
+
+- **WHEN** a job no section owes fails, and no completed run of the workflow on `dev`
+  has a head commit the branch contains
+- **THEN** the failure is of unknown cause, so validation fails and it is triaged
 
 #### Scenario: A plan owes a workflow that publishes
 

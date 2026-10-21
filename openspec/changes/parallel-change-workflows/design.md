@@ -337,7 +337,17 @@ owner's notes, which are triaged beside it).
   namespaces' replica counts when the failure happened, and the rendered requests
   and limits beside the previous validation's. Usage is measured through
   `metrics-server`; when it is missing the preflight warns and goes on. Archive
-  cleanup writes the figure from the change's latest validation. The pilot's archive
+  cleanup writes the figure from the change's latest validation. When that
+  validation measured nothing, cleanup writes nothing, keeps any figure already
+  recorded, and says so in its report and the pull-request draft (78 F2).
+  `metrics-server` is not a prerequisite of the development cluster, and the one
+  the workflow uses has none (section 6's cluster run measured nothing), so the
+  preflight first becomes active at the first archive cleanup whose latest
+  validation measured — on that cluster, not until one is installed. The pilot's
+  evidence records the figure its cleanup wrote, or that it wrote none for want of
+  a metrics source. Rejected: requiring a measured figure, with `metrics-server`
+  installed on the development cluster before the pilot's cleanup (a cluster-wide
+  component for an advisory check). The pilot's archive
   cleanup (D9) writes the first, on the pilot's branch, which this branch never
   merges; this change's archive cleanup writes its own here. The file then conflicts
   when the pilot's pull request merges after this one's, beside the index rows, and
@@ -658,14 +668,21 @@ binds unattended runs only); the owner's approval at each dispatch (a question i
 every validation that owes CI evidence); leaving push-only evidence to the owner's
 hand.
 
-### D16 — The owed jobs are judged; other failing jobs are compared with `dev`
+### D16 — The owed jobs are judged; other failures are compared with a `dev` run the branch contains
 
 In each dispatched run, validation judges each named job and its observation. A
 named job that fails, or an observation that is absent, is caused by the commit or
 of unknown cause: a `V<n>`, and the result `failed`. Every other job that fails is
-compared with `dev`'s latest run of the same workflow: failing there too, it is
-reported as already failing on `dev` and is not a finding; passing there, it is
-diagnosed like any failure, so caused by the commit or unknown, a `V<n>`. A run that
+compared failure by failure (78 F1) — pytest's failing test IDs where the job
+reports them, otherwise the failing step and its error lines — with the same job in
+the baseline: the latest completed run of the same workflow on `dev` whose head
+commit is an ancestor of the validated commit, usually the merge base, since
+`tests.yml` runs on every push to `dev`. A failure the baseline shows too is
+reported as already failing on `dev` and is not a finding; any other — a job
+passing in the baseline, or a test failing only on the branch in a job failing in
+both — is diagnosed like any failure, so caused by the commit or unknown, a `V<n>`.
+With no baseline run, or a job whose logs cannot be compared, the failure is of
+unknown cause and triaged. The record names the baseline run and its commit. A run that
 produced no evidence — `gh` not signed in, a runner outage, a run cancelled by a
 newer dispatch on the same ref — is environmental: put to the owner with its remedy,
 the part rerun on the owner's word, and `inconclusive` when the owner declines.
@@ -674,7 +691,7 @@ The record gains a `ci` part and a section:
 
 ```markdown
 - **Parts:** local passed · helm passed · pipeline passed · ci passed
-- **CI:** tests.yml run 39625394342, failure — owed jobs passed; 2 failures not owed, both failing on dev
+- **CI:** tests.yml run 39625394342, failure — owed jobs passed; 2 jobs failing not owed, every failure also in dev's run
 
 ## CI
 
@@ -682,7 +699,9 @@ The record gains a `ci` part and a section:
 |---|---|---|---|---|---|
 | tests.yml | 39625394342 | §5, 5.3 | release · deployment contracts | setup-helm installs v4.3.0; `make -C helm test-render` prints `helm v4.3.0` before the first render and passes | passed |
 
-Not owed: `py · vms-storefront` — failed, 3 tests (`TimeoutError`), dev's run fails the same; `py · bare-metal-storefront` — failed, `test_abort_all_is_not_previewed`, dev's run fails the same.
+Baseline: dev's tests.yml run `<run>` at `968a4a9cd` (the merge base).
+
+Not owed: `py · vms-storefront` — failed, 3 tests (`TimeoutError`), each failing in the baseline; `py · bare-metal-storefront` — failed, `test_abort_all_is_not_previewed`, failing in the baseline.
 ```
 
 With nothing owed, the part reads `ci not owed` and nothing is dispatched. The
@@ -693,11 +712,19 @@ computation read, are unchanged.
 it, so judging the run's conclusion would fail every such validation. Judging only
 the named jobs would let a job the commit broke pass unseen; the comparison with
 `dev` is the diagnosis validation gives any failure, and a difference it cannot
-place is of unknown cause, so triaged.
+place is of unknown cause, so triaged. A job's status alone cannot show a failure
+inherited: the branch can break another test in a job already failing, and
+`dev`'s latest run may test code the branch does not contain (53 V1's `dev` run was
+not an ancestor of the branch).
 
 Rejected: the run's conclusion; the named jobs alone; the observation alone (its job
 passing was part of what was owed); every job judged against `dev` without named
-jobs (a general CI gate no plan asked for).
+jobs (a general CI gate no plan asked for); comparing job statuses with `dev`'s
+latest run (it hides a new failure in a failing job, and its run may not be of the
+branch's base); a tracked file of known failures with their commits (a list to
+keep current, describing what was true when last edited rather than the branch's
+base); dispatching the workflow on `dev` at each validation (a dispatch runs the
+ref's tip, not the merge base, at twice the CI cost).
 
 ### D17 — Every validation dispatches what its complete sections owe
 
@@ -725,7 +752,7 @@ line); leaving the task unchecked (the loop D14 removes).
 
 ```
 make -C ../simple-compute-market.changes/seed-default-pool-at-runtime validate \
-  CHANGE=seed-default-pool-at-runtime UNATTENDED=1 ALLOW='Bash(make lock);Bash(kubectl delete pvc *)'
+  CHANGE=seed-default-pool-at-runtime UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(make check-packaging)'
 ```
 
 The run's log line records the rules as `granted`, as a resumed run's does, and the
@@ -870,7 +897,7 @@ Four rounds:
    once the pilot's archive cleanup has run: it records the pilot's clone and
    bootstrap, its validation beside round 2's, a round of it read in the owner's
    workspace, its archive cleanup's history copy, and the capacity figure that
-   cleanup wrote; and the owner's decision, discussed with the agent, on opening a
+   cleanup wrote, or that it wrote none; and the owner's decision, discussed with the agent, on opening a
    change to containerize the workflow (open question 1). The round records the
    decision only; a change it decides to open is proposed afterwards on its own
    branch from `dev`. Then the pre-closeout review.
@@ -904,7 +931,9 @@ pre-closeout review.
   merges.
 - **Two releases at once on one node** may exhaust Docker Desktop's memory. The
   capacity figure is only as current as the last archive cleanup that wrote it,
-  and absent until one does; the preflight is an estimate, so two validations
+  and absent until one does — on a cluster without `metrics-server`, which the
+  development cluster is today, indefinitely, so the preflight stays inactive
+  there; the preflight is an estimate, so two validations
   starting together can both pass it; an overflow the evidence shows to be
   contention is rerun.
 - **The pilot's branch is merged from this change's branch** at least twice. The
