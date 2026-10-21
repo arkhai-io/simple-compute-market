@@ -27,12 +27,14 @@ Until it is fixed:
 - The storefront charts make a values-file `null` remove what it names — an agent, an
   agent's value, or a key at any depth of its configuration — whatever the Helm
   release's merge did: one helper drops nulls from each agent before any template reads
-  it, and the values schemas accept `null` wherever they accept the key.
+  it, and the values schemas accept `null` wherever they accept the key. An agent renders
+  as it would had a removed key never been stated, and an agent map that names no agent
+  once its nulls are removed is refused.
 - `kit/config`'s values-schema generator gains that null-accepting form; both storefront
   charts' schemas and the umbrella's storefront definition are regenerated. A key the
   schema refuses stays refused even as `null`.
 - CI pins Helm v4.3.0, and `helm/scripts/test-render.sh` prints the Helm version it runs.
-- State: **design settled; awaiting design review.**
+- State: **design reviewed; ready for planning.**
 
 ## Capabilities
 
@@ -94,8 +96,8 @@ code changes, and no change to the storefront's configuration loader.
   `null`; the supported Helm is the release CI pins (D2, D4) —
   `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Storefront agents: pass-through
   configuration".
-- The supported Helm is the release `tests.yml` pins, render results are evidence only on
-  it, and `test-render.sh` names the Helm it ran (D3, D4) —
+- The supported Helm is the release `tests.yml` pins, and `test-render.sh` names the Helm
+  it ran (D3, D4) —
   `docs/development/TESTING.md`, "Chart Render Tests", replacing the citation of a pin
   that did not exist.
 - `kit/config`'s generator accepts `null` wherever it accepts a key (D2) —

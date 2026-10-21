@@ -77,6 +77,18 @@ release's merge did:
   `_helpers.tpl` release checks, and the umbrella's `templates/tests/test-config.yaml`.
   The bare-metal chart applies it to its single agent's values and `config`. No reader
   needs to know about `null`.
+- An agent renders as it would had a removed key never been stated. A setting the
+  storefront defaults is omitted and defaulted; a value the chart adds when absent —
+  `port`, `base_url`, `db_path`, the internal registry and its trust, the provisioning
+  URL, the `default` capacity site — is added, the release's value; a setting the
+  storefront requires is rendered absent, and the storefront refuses it at startup.
+  (09 F1)
+- An agent map that names no agent once its nulls are removed is refused at render,
+  naming `agents`, by the helper in both the umbrella and the storefront chart, as the
+  schemas' `minProperties: 1` refuses an empty map. An enabled storefront has at least
+  one agent; `storefront.enabled: false` is how a release runs none. Rejected: rendering
+  an agent-free release, which would drop that invariant and leave two ways to say "no
+  storefront". The bare-metal chart has one agent, not a map. (09 F2)
 - The hand-written schemas — the agent map and `internalRegistryTrust` in the storefront
   chart, the umbrella, and the bare-metal chart — accept `null` where an overlay removes
   something.
@@ -89,7 +101,7 @@ release's merge did:
 
 A `null` always means removal, never a value. The generated definition accepts `null` for
 optional typed fields today; after this change the chart removes such a key and the
-storefront applies its own default. A typed field whose default is not `None` therefore
+storefront applies its own default, unless the chart derives it. A typed field whose default is not `None` therefore
 cannot be set to `None` through chart values; the Secret overlay or the storefront's own
 file still can. This is what `DEPLOYMENT_AND_CONFIG.md` promises, and on Helm 4.3.0 such
 a `null` is refused today, so no working deployment changes.
@@ -121,16 +133,21 @@ these nulls; and a declaration file read by CI, more machinery than one tool nee
 ### D4. The supported Helm is stated once, and every render run names its Helm
 
 `TESTING.md` "Chart Render Tests" and `DEPLOYMENT_AND_CONFIG.md` say the supported Helm
-is the release `tests.yml` pins, and that render results are evidence only on that
-release; neither repeats the version, so a bump is one edit. This replaces `TESTING.md`'s
-citation of a pin that did not exist. `helm/scripts/test-render.sh` prints
-`helm version --short` first, so every render log, including `make validate-helm`'s,
-names the Helm it ran.
+is the release `tests.yml` pins; neither repeats the version, so a bump is one edit.
+This replaces `TESTING.md`'s citation of a pin that did not exist.
+`helm/scripts/test-render.sh` prints `helm version --short` first, so every render log,
+including `make validate-helm`'s, names the Helm it ran. The documents claim only that:
+they do not say render results are evidence only on the pinned release, since nothing
+checks a run's Helm against the pin, and a passed render step is recorded as passed
+whatever Helm ran it. (09 F3)
 
 Rejected: prose alone, which leaves a run unable to say which Helm produced it, the gap
 that left this change's cause undetermined; a warning when the local Helm differs from
-the pin, which couples the script to the workflow's text; and a declaration file the
-script enforces, which would require exactly one Helm for any local render check.
+the pin, which couples the script to the workflow's text; a declaration file the
+script enforces, which would require exactly one Helm for any local render check; and
+(09 F3) a `make validate-helm` check of the logged Helm against the pin, recorded as a
+warning or a failure, which the owner declined so that this change leaves the
+validation tooling alone.
 
 ### D5. `null` removal is a `deployment-state` requirement
 
@@ -159,7 +176,9 @@ One round, one session, then the implementation review:
    fix proceeds, not folded into it.
 2. The charts absorb a `null` (D2): the helper, every agent reader, the hand-written
    schemas, the generator form, the regenerated schemas, and render tests for D5's
-   scenarios. Any typed field whose default is not `None` is recorded as a finding.
+   scenarios, including removal of the only agent through the umbrella and through the
+   storefront chart alone. Any typed field whose default is not `None` is recorded as a
+   finding.
 3. The CI pin and the printed Helm version (D3, D4).
 
 Validation: `make -C helm test-render` with both loader interpreters set, `kit/config`'s
