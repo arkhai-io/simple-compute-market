@@ -32,7 +32,11 @@ from market_resource_pools_client import SyncResourcePoolClient
 
 from e2e_harness.provisioning_test_client import ProvisioningTestClient
 from e2e_harness.settings import settings
-from tests.e2e.roles.helpers.compute_deal import SiteCapacity, convergence_paused
+from tests.e2e.roles.helpers.compute_deal import (
+    SiteCapacity,
+    convergence_paused,
+    pause_storefront,
+)
 from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealState
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
     BareMetalComputeDealDriver,
@@ -281,3 +285,22 @@ def convergence_advanced_explicitly(provisioning_client):
     See `convergence_paused` for why it is opt-in and resumed in the finaliser.
     """
     yield from convergence_paused(provisioning_client)
+
+
+@pytest.fixture(scope="module")
+def bare_metal_loops_held(bare_metal_storefront_admin):
+    """Hold the storefront's timer loops for this module and resume afterwards.
+
+    The storefront publishes and polls its site on timers, so a module that
+    steps those loops itself holds them first: a timer cycle would otherwise
+    race the cycle the scenario is about to observe. Wherever a site changes,
+    the scenario steps ``site-projections`` before publication, since the held
+    poller will not see the change. Opt-in, taken with ``pytest.mark.usefixtures``
+    by each module that drives the loops, and resumed in a finaliser so a
+    failing stage does not leave the next module with the loops stopped.
+    """
+    held = pause_storefront(bare_metal_storefront_admin)
+    assert held
+    yield
+    bare_metal_storefront_admin.admin_resume_lifecycle_loops()
+

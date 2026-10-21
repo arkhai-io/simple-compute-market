@@ -167,15 +167,23 @@ drives transitions instead of waiting for a timer:
 | Lease watchdog | `POST /api/v1/system/lease-watchdog/pause` | `POST /api/v1/system/check-leases` |
 | Fulfillment convergence | `POST /api/v1/system/fulfillment-convergence/pause` | `POST /api/v1/system/fulfillment-convergence/advance-cycle` |
 | VM storefront loops (`publication`, `capacity-events`, `site-projections`, `settlement-servicing`, `fulfillment-resume`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication`, `capacity-events`, and `introduction-retention` |
-| Bare-metal storefront loops (`settlement-servicing`, `negotiation-watchdog`, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../introduction-retention/dry-run` |
-| Bare-metal storefront publication | none: publication has no timer, and each pass is operator-invoked | `POST /api/v1/admin/lifecycle/publication/run-cycle`, the same pass the `bare-metal-storefront publish` command runs, previewed by `.../publication/dry-run`, which reports what the pass would open, close, refresh, reopen, or hold |
-| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
+| Bare-metal storefront loops (`publication`, `site-projections`, `settlement-servicing`, `negotiation-watchdog`, `payment-reconciliation` while Arkhai payments is composed, and `introduction-retention` while contact exchange is enabled) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../<loop>/dry-run` for `publication` and `introduction-retention`; the `bare-metal-storefront publish` command is a client of the `publication` step and its preview |
+| API-credit storefront loops (`capacity-events`, `settlement-servicing`, `negotiation-watchdog`, and `payment-reconciliation` while Arkhai payments is composed) | `POST /api/v1/admin/lifecycle/pause`, which holds them all | `POST /api/v1/admin/lifecycle/<loop>/run-cycle`, previewed by `.../capacity-events/dry-run` |
 
 Every storefront composes its loops onto the one kit loop controller in
 `kit/storefront`, so the routes, response shapes, and the canonical
 `StorefrontClient` methods are the same for every storefront. The storefront
 loops hold no claim between cycles, so their `run-cycle` is a step: it runs
-exactly the cycle the timer runs, whether or not the loops are held.
+exactly the cycle the timer runs, through the same locked operation, whether or
+not the loops are held, and records its outcome as the timer's cycle does.
+
+A storefront whose source checks read held projections confirms a listing only
+from a generation polled within its `[capacity].source_confirmation_seconds`. A
+scenario that holds the loops keeps trading, so it steps `site-projections`
+wherever a site changed before stepping publication or negotiating, and the
+end-to-end lanes widen the window to an hour so a scenario's rounds are not
+refused between steps. The bare-metal scenarios hold the loops through an opt-in
+per-module fixture (`bare_metal_loops_held`) resumed in a finaliser.
 
 Traps this has already sprung, worth checking for a new loop:
 
@@ -196,9 +204,13 @@ Traps this has already sprung, worth checking for a new loop:
   top of each cycle but waiting with a plain sleep reaches its gate only
   when the sleep ends, so a pause landing in a 30-second interval outlasts
   the pause's 5-second bounded wait and reports the loop `pausing`. Every
-  loop waits through the controller's `idle`, which returns on a pause
-  request, and the kit runners refuse a gate without such a wait. Test it
-  with the real loop body and an interval far longer than the test waits.
+  timer loop waits through the controller's `idle`, which returns on a pause
+  request, and the kit runners refuse a gate without such a wait. The one
+  kind of loop whose task gates itself is a fan-out — the per-site
+  capacity-event pollers — whose children read their gates under each site's
+  cursor lock. Test it with the real loop body and an interval far longer
+  than the test waits. A test that needs a self-gating body runs it as a
+  fan-out with no children.
 - **Scope the pause to the module that owns the advances.** A pause in
   a shared `conftest.py` reaches every scenario in that directory, and a
   scenario that legitimately relies on the timer — one that arms an
@@ -343,9 +355,15 @@ have separate fail-closed behavior.
 
 To run the lanes in GitHub Actions, push the current branch and run
 `make run-e2e` with an authenticated `gh` CLI on PATH. Then run
-`make fetch-e2e-logs E2E_RUN_ID=<run-id>` to wait for that run and download its
-diagnostics. Omitting the ID selects the current branch's latest run among the
-100 most recent workflow runs. Logs live under `.snapshot/e2e-logs/<run-id>/`:
+`make fetch-e2e-logs` to wait for the run and download its diagnostics. Without
+`E2E_RUN_ID`, it selects the newest run on the current branch whose head commit is
+local `HEAD` (or `E2E_COMMIT`), among the 100 most recent workflow runs, and waits
+up to three minutes for a just-dispatched run to be listed. Matching the commit is
+what makes it safe straight after `make run-e2e`: the new run may not be listed
+yet, and the branch's previous run tested a different commit. `E2E_COMMIT` may be
+a short ID or a ref. When the commit already has a run, pass the newest run ID seen
+before dispatching as `E2E_AFTER_RUN`, so the earlier run is not taken while the
+new one is still unlisted. Logs live under `.snapshot/e2e-logs/<run-id>/`:
 `actions.log`, `e2e-vm-logs/compose-logs.txt`,
 `e2e-bare-metal-logs/compose-logs.txt`, and
 `e2e-apicredits-logs/compose-logs.txt`. `E2E_LOG_DIR` overrides the root
@@ -440,9 +458,11 @@ Tests").
 Pool offering-mode coverage follows the lowest-meaningful-level rule while
 proving that no execution layer relies on another layer's earlier decision:
 
-- `kit/resource-pools` unit tests own declaration shape, typed reads,
-  membership, absent-as-empty behavior, and identical validation across
-  individual and bulk administration.
+- `kit/resource-pools-contracts` unit tests own declaration shape, typed reads,
+  membership, absent-as-empty behavior, the pool models' refusal of every
+  malformed domain-neutral hint, and asking-rate structure. `kit/resource-pools`
+  library integration tests own identical validation across individual and
+  bulk administration against real persistence.
 - `kit/site` unit tests own explicit claim identity and reservation admission.
   They assert that neither a VM-shaped resource nor any resource attribute
   supplies a missing mode, that an undeclared mode creates no hold, and that
@@ -456,16 +476,28 @@ proving that no execution layer relies on another layer's earlier decision:
   idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
   backfill, conflicting proof, unproved active rows, and terminal rows.
 - Advertisement and backing declarations follow the same split.
-  `kit/resource-pools` unit tests own declaration shape, both cross-tag rules,
-  the pool models' refusal to build an invalid write, and the resolver's
-  distinction between an absent and a malformed declaration. Its library
-  integration suite owns identical validation across individual and bulk
-  administration, backing immutability, and the stored-declaration check.
+  `kit/resource-pools-contracts` unit tests own declaration shape, both cross-tag
+  rules, the pool models' refusal to build an invalid write, and the resolver's
+  distinction between an absent and a malformed declaration. The
+  `kit/resource-pools` library integration suite owns identical validation
+  across individual and bulk administration, backing immutability, and the
+  stored-declaration check.
   Provisioning integration tests own server-side refusal through the typed
   client — status and stored state only, per the rejection-path rule — plus the
   upgrade migration, the startup refusal, and every projected pool carrying both
   declarations. The API-credits service's integration suite owns its own
   migration and startup refusal.
+- Provider and backing immutability follow the same split. `kit/resource-pools`
+  unit tests own the pure stored-versus-proposed comparison; no database is
+  needed to prove it. Its library integration suite owns preserved state on
+  refused replace, patch and import, and the no-write equal-provider patch, using
+  real persistence and a recording handler. Provisioning integration tests own
+  the HTTP 400 and HTTP 422 statuses through the typed client — rejection-path
+  bodies for malformed hints — and, against file-backed SQLite with the real
+  importer, a refused startup document leaving its digest unchanged, the
+  document-created default, interrupted first migration, and the VM provider
+  identity upgrade. No deployed scenario is owed for these single-authority
+  transactions.
 - The deployed `e2e_pool_declared_modes` scenario sends an unsupported explicit
   mode for a real matching capacity resource and observes HTTP 409 plus no
   reservation row. It stops at the reservation boundary by design: provider
@@ -652,8 +684,10 @@ relocated unit tests. Validate:
 
 - package build and wheel contents;
 - typing markers and static type checks where the contract moved;
-- allowed dependency direction, including `TYPE_CHECKING` imports (see
-  `AGENTS.md`'s "Package and dependency discipline");
+- allowed dependency direction, including `TYPE_CHECKING` imports, with
+  `make check-architecture` (see `AGENTS.md`'s "Package and dependency
+  discipline"); write a package's own boundary test only for what that check
+  cannot express, such as which module of a package may import what;
 - old import removal, or an explicit, deliberate compatibility path;
 - every changed consumer's unit and integration suites, not just the
   producer's;
@@ -690,17 +724,30 @@ passing render is not deployment evidence, just as it is not deal evidence.
 
 - Umbrella-chart assertions are in `helm/scripts/test-render.sh`, run by
   `make -C helm test-render` and by the top-level `make test-deployment-packaging`.
+  The umbrella's own Python render tests, such as the two-release topology's
+  `helm/tests/test_release_topology.py`, live in `helm/tests/`, and
+  `test-render.sh` runs them beside each chart's.
 - A chart's own render tests are `helm/charts/<chart>/tests/test_render.py`. Call
   each from `test-render.sh` so that one target runs every render check; a test
   reachable only through its chart's own Makefile is easily never run.
-- None of this is part of `make test`, and all of it needs `helm` on `PATH`.
+- `make test` runs all of it, through `make test-deployment-packaging`, and all of it
+  needs `helm` on `PATH`.
 - `helm/charts/storefront/tests/test_render.py` also loads one rendered
   `storefront.json` with the storefront's own configuration loader, through the
-  interpreter `STOREFRONT_PYTHON` names; `test-render.sh` sets it when the VM
-  storefront environment exists (`make init-storefront`). Without it the test
-  reports a skip. No CI job has both Helm and that environment, so in CI this
-  check does not run; run it locally before a change to the chart or the loader
-  is reviewed.
+  interpreter `STOREFRONT_PYTHON` names, runs the storefront's startup refusal over
+  it, and derives the local release's Alkahest release conditions over its render;
+  over the chart defaults' render the refusal names the missing settlement
+  mechanism. `test-render.sh` sets it when the VM storefront environment exists
+  (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
+  does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
+  when `domains/bare_metal/storefront/.venv` exists: bare metal's loader, startup
+  refusal, clause compilation, and site binding over the example's rendered
+  document, and the refusal over the defaults'. That shows a rendered configuration
+  is publishable, not that the storefront starts on it, since the runtime also needs
+  the credential, the overlay's wallet key, a writable database, and chain clients.
+  Without its interpreter each check reports a skip. No CI job has both Helm and
+  those environments, so in CI these checks do not run; run them locally before a
+  change to a chart or a loader is reviewed.
 
 **How to write one:**
 
@@ -721,14 +768,19 @@ passing render is not deployment evidence, just as it is not deal evidence.
   instance with the service's own parser as well. The render test proves the
   chart emits what it was given; only the parser proves the service accepts it.
 
-**A values schema generated from typed models.** The VM storefront chart's
-values schemas carry one definition generated from the storefront's typed
-configuration models (`make helm-values-schema`). Its drift test is a storefront
-unit test, `domains/vms/storefront/tests/unit/test_values_schema.py`, so `make
-test` fails when a model or settlement registration changes without
-regenerating; packaging checks cannot run it, because the generator imports the
-storefront's third-party dependencies. The render tests then assert what the
-schema refuses and accepts.
+**A values schema generated from typed models.** Each storefront chart's values
+schema carries a definition generated from that storefront's typed configuration
+models (`make helm-values-schema`, which runs each storefront's generator in its own
+environment). The generator is `kit/config`'s, with its own unit tests over small
+model sets; each storefront supplies only its sections, settlement registrations,
+and discovered delivery sinks, and writes only its own chart's schema. Each
+storefront's drift test is its own unit test —
+`domains/vms/storefront/tests/unit/test_values_schema.py` and
+`domains/bare_metal/storefront/tests/test_values_schema.py` — so `make test` fails
+when a model or settlement registration changes without regenerating; it runs in
+the storefront's environment because the definition is built from the storefront's
+models and installed sinks. The render tests then assert what the schema refuses
+and accepts.
 
 **Obtaining Helm where its download host is unreachable.** Helm's official
 binaries are served from `get.helm.sh`. An environment that cannot reach it can

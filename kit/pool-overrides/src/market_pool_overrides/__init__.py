@@ -36,7 +36,6 @@ from market_pool_overrides.route_service import (
 )
 from market_pool_overrides.service import (
     OVERRIDE_APPLIED,
-    OVERRIDE_INACTIVE,
     OVERRIDE_ORPHANED,
     OVERRIDE_SITE_UNCONFIGURED,
     OVERRIDE_UNKNOWN,
@@ -56,7 +55,6 @@ __all__ = [
     "PoolOverrideRouteError",
     "PoolOverrideRouteService",
     "OVERRIDE_APPLIED",
-    "OVERRIDE_INACTIVE",
     "OVERRIDE_ORPHANED",
     "OVERRIDE_SITE_UNCONFIGURED",
     "OVERRIDE_UNKNOWN",

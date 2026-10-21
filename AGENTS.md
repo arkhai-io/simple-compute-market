@@ -19,7 +19,7 @@ Use a discuss → plan → implement workflow for non-trivial changes.
 - Name the files to touch and why.
 - Identify the permanent documentation destination for every accepted material design decision.
 - Include focused validation and relevant integration suites.
-- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, documentation citations, end-to-end pipeline evidence, and promotion. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
+- End the plan with the closeout task defined in `openspec/README.md#plan-closeout-requirements` — comment hygiene, import placement, documentation compliance, narrative compression, roadmap currency, campaign index currency, packaging, end-to-end pipeline evidence, promotion, documentation citations, and archival. Do not defer this to a later review round. Promotion happens post code-review to reduce file churn.
 
 ### Implement
 
@@ -34,6 +34,13 @@ Implementation is not complete when code merely passes tests. It is complete whe
 - the active change records where each material decision was promoted;
 - the relevant focused, integration, packaging, and typing checks have been run or any unrun checks are disclosed;
 - `make check-packaging` passes.
+
+### Asking the owner
+
+Ask the owner questions in prose, in the chat, with each option and your
+recommendation written out. Do not use a multiple-choice selector, even where a
+skill names one: a list of buttons invites picking an option over thinking the
+problem through and writing the answer that fits it.
 
 ## Documentation ownership
 
@@ -99,7 +106,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - Follow the package layers, scope, and kind rules in `ARCHITECTURE.md#package-and-dependency-layers` and the relevant subsystem specification. A change whose edges all point a permitted way has answered the direction and knowledge questions, not the ownership one; that one is review's.
 - Any import is an architectural dependency: module-level, function-local, under `TYPE_CHECKING`, or behind `try`/`except`. A "lazy" or "call-path" import does not soften the edge; if the edge is wrong, move the code rather than defer the import.
 - Place a new package where `ARCHITECTURE.md` says its scope puts it, and declare every distribution it imports in its `pyproject.toml`. A declared internal distribution the source never imports is removed or kept for a stated runtime reason.
-- These rules are enforced by the per-package boundary tests and by review; an edge no test forbids is still a violation. Record a known divergence in `ARCHITECTURE.md`'s "Where the current tree diverges" and the change that owns it, never as a comment at the import.
+- `make check-architecture` enforces the layer, scope, and kind rules over every package, in CI and in `make check-packaging`; a per-package boundary test exists only for what it cannot express, and review answers ownership. A known divergence is an exception row in `docs/development/ARCHITECTURE.toml` naming its owning change — never a comment at the import — and a declaration kept without an import gives its runtime reason in the declaring package's `pyproject.toml`, under `[tool.arkhai.architecture.runtime-dependencies]`, beside the dependency it explains.
 
 ## Tests and diagnostics
 
@@ -108,15 +115,7 @@ A bare documentation pointer is not a substitute for a useful local explanation.
 - When a failure cannot be reproduced locally, report useful diagnostic steps and identify any design decision needed before changing behavior.
 - A difficult-to-test failure is evidence to consider a testability refactor, not permission to bypass the boundary.
 - Run `make check-comment-hygiene` before implementation is considered complete; see `openspec/README.md#plan-closeout-requirements`.
-- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before returning a fileset. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
-
-## Generated implementation artifacts
-
-Return only updated files. Represent a file requiring deletion by replacing its entire contents with a single-line tombstone comment stating the reason, at the file's original path — never a separate manifest file, a suffixed parallel copy, or a silent omission. Tombstones are review artifacts only: final production code and permanent documentation must not contain one.
-
-```python
-# TOMBSTONE: delete this file — replaced by domains/apicredits/src/arkhai_apicredits/settlement/credits_client.py
-```
+- Once the tests covering a change pass, run `make check-packaging` and resolve every failure it reports before the work is committed. Passing tests do not prove it: they may have run against an environment a missing or hand-maintained refresh left stale, and the next environment to rebuild will fail instead.
 
 ## Public repository discipline
 
@@ -176,8 +175,8 @@ is a leak, and it also rots the moment the external caller is renamed.
 
 ### Cross-references must resolve
 
-Every `openspec/`, `docs/`, `tools/`, `scripts/`, and `e2e-tests/` path cited by
-a permanent document must exist on the branch that cites it.
+Every `openspec/`, `docs/`, `tools/`, `scripts/`, `e2e-tests/`, and `.agents/`
+path cited by a permanent document must exist on the branch that cites it.
 
 A permanent document describing behaviour this branch does not implement is not
 a harmless forward reference — it is how work from another branch or another
@@ -194,6 +193,14 @@ run one before promoting documentation, and treat an unresolvable citation as a
 blocking defect rather than a stale link to fix later.
 
 ## Agent skills
+
+### Change workflow
+
+Each step of an OpenSpec change is a leaf skill under `.agents/skills/`, started
+through `make` or a slash command, or carried from step to step by one
+orchestrating session, `make orchestrate CHANGE=<change>`. See
+`docs/agents/change-workflow.md` for which skill each step uses, orchestrating a
+change, the review files, and the intervention ledger.
 
 ### Issue tracker
 

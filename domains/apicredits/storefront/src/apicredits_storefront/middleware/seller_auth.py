@@ -7,6 +7,7 @@ import json
 from fastapi import HTTPException, Request
 from market_identity import EMPTY_BODY
 
+from apicredits_storefront.listing_publication import seller_resource
 from apicredits_storefront.middleware.response_auth import bind_response_contract
 from core_storefront.auth import AuthError, authenticate_request
 
@@ -60,8 +61,7 @@ def make_seller_auth_dep(operation: str, *, resource_param: str = "listing_id"):
     async def _dep(request: Request) -> None:
         resource_id = request.path_params.get(resource_param, "")
         if not resource_id:
-            identity = _expected_identity()
-            resource_id = f"{identity.scheme.value}:{identity.identifier}"
+            resource_id = seller_resource(_expected_identity())
         await verify_seller_signature(request, operation, resource_id)
 
     return _dep

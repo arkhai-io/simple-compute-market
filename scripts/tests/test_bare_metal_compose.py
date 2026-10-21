@@ -76,16 +76,24 @@ def test_bare_metal_compose_merges_bindings_and_preserves_mount_paths(
         for volume in service.get("volumes", []):
             if volume["type"] == "volume":
                 assert volume["source"] in model["volumes"]
-    storefront = services["bare-metal-storefront"]["environment"]
-    # The chains and the wallet key reach the storefront through the wrapper's
-    # own inputs, with or without the development overlay.
-    assert json.loads(storefront["BARE_METAL_STOREFRONT_CHAINS"])["anvil"]
-    assert storefront["BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY"].startswith("0x")
-    # The seller chain that counters is the lane's own; the wrapper sets none,
-    # so an operator's storefront runs the default chain.
-    policies = storefront.get("BARE_METAL_STOREFRONT_NEGOTIATION_POLICIES")
+    storefront = services["bare-metal-storefront"]
+    # Every storefront setting is in a mounted file: the environment carries
+    # only the configuration directory and the signer credential, with or
+    # without the development overlay.
+    assert set(storefront["environment"]) == {"XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL"}
+    assert storefront["environment"]["XDG_CONFIG_HOME"] == "/etc"
+    mounts = {v["target"]: v["source"] for v in storefront["volumes"]}
+    assert mounts["/etc/arkhai/storefront.toml"] == str(
+        REPO_ROOT / "domains/bare_metal/storefront/storefront.dev.toml"
+    )
+    assert mounts["/etc/arkhai/storefront.secrets.toml"] == str(
+        REPO_ROOT / "dev-env/identities/bare-metal.storefront.secrets.toml"
+    )
     if development:
-        assert services["bare-metal-storefront"]["depends_on"]["anvil"]["condition"] == "service_healthy"
-        assert json.loads(policies) == ["escrow_shape_guard", "bisection"]
+        assert storefront["depends_on"]["anvil"]["condition"] == "service_healthy"
+        # The address book the development storefront.toml names.
+        assert mounts["/app/alkahest_anvil_addresses.json"] == str(
+            REPO_ROOT / "kit/alkahest/src/market_alkahest/data/alkahest_anvil_addresses.json"
+        )
     else:
-        assert policies is None
+        assert "/app/alkahest_anvil_addresses.json" not in mounts

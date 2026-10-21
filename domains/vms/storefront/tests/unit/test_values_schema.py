@@ -3,14 +3,15 @@
 The definition keeps secret-marked and role-inapplicable fields out of an
 agent's pass-through config and closes typed sections. These tests fail when
 the committed schemas are stale, so a model or registration change cannot
-reach a chart without regenerating them (``make helm-values-schema``).
+reach a chart without regenerating them (``make helm-values-schema``). The
+generator's own rules are tested with ``market_config.values_schema``; these
+tests cover the definition the VM storefront's sections produce.
 """
 
 from __future__ import annotations
 
 import ast
 import json
-import re
 from pathlib import Path
 
 import market_storefront.values_schema as module
@@ -18,17 +19,13 @@ import pytest
 import tomllib
 import yaml
 from jsonschema import Draft7Validator
-from market_delivery.builtin.file_sink import FileSinkSettings
+from market_config.values_schema import any_case, stale_files
+from market_delivery import RESERVED_SECTION_KEYS
 from market_storefront import values_schema
 from market_storefront.utils.config import IdentityConfigDeclaration
-from market_storefront.values_schema import _delivery_fragment, any_case
-from pydantic import BaseModel, ConfigDict, Field
 
 REPO = Path(__file__).resolve().parents[5]
-SCHEMAS = (
-    REPO / "helm" / "values.schema.json",
-    REPO / "helm" / "charts" / "storefront" / "values.schema.json",
-)
+SCHEMAS = tuple(REPO / relative for relative in values_schema.SCHEMA_FILES)
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +35,7 @@ def definition() -> dict:
 
 def _field(node: dict, name: str):
     """A field's schema, keyed by the any-case pattern for ``name``."""
-    return node["patternProperties"][values_schema.any_case(name)]
+    return node["patternProperties"][any_case(name)]
 
 
 def _section(definition: dict, name: str) -> dict:
@@ -47,7 +44,7 @@ def _section(definition: dict, name: str) -> dict:
 
 def _allowed(node: dict, *names: str) -> bool:
     patterns = {p for p, schema in node["patternProperties"].items() if schema is not False}
-    return patterns == {values_schema.any_case(n) for n in names}
+    return patterns == {any_case(n) for n in names}
 
 
 def _withheld(node: dict, *names: str) -> bool:
@@ -65,18 +62,16 @@ def _walk(node):
 
 
 def test_committed_values_schemas_carry_the_generated_definition(definition) -> None:
-    stale = values_schema.stale_files(SCHEMAS, definition)
+    stale = stale_files(SCHEMAS, definition, name=values_schema.DEFINITION)
     assert not stale, (
         f"regenerate with `make helm-values-schema`: {[str(p) for p in stale]}"
     )
 
 
-def test_any_case_matches_every_spelling_and_nothing_else() -> None:
-    pattern = re.compile(values_schema.any_case("private_key"))
-    for spelling in ("private_key", "Private_Key", "PRIVATE_KEY"):
-        assert pattern.match(spelling)
-    for other in ("private_keys", "privatekey", "x_private_key"):
-        assert not pattern.match(other)
+def test_the_command_checks_the_schema_files_the_storefront_names() -> None:
+    """The command ``make helm-values-schema`` runs finds the files the
+    storefront names under the repository root it is given."""
+    assert values_schema.main(["check", "--root", str(REPO)]) == 0
 
 
 def test_wallet_private_key_is_refused_and_the_section_closed(definition) -> None:
@@ -106,11 +101,27 @@ def test_identity_is_closed_to_its_public_keys_at_every_level(definition) -> Non
         assert _allowed(principal, "scheme", "identifier")
 
 
+def _overlaid(base, overlay):
+    """``overlay`` merged into ``base`` as Helm merges values files: mappings
+    key by key, a ``None`` removing the key, and anything else replaced."""
+    if not isinstance(base, dict) or not isinstance(overlay, dict):
+        return overlay
+    merged = dict(base)
+    for key, value in overlay.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = _overlaid(base.get(key), value)
+    return merged
+
+
 def _shipped_identity_tables():
     """Every operator-written storefront ``[Identity]`` table this repository ships.
 
     The packaged ``settings.toml`` is left out: its empty principal is a
-    placeholder the storefront refuses until an operator states one.
+    placeholder the storefront refuses until an operator states one. Each Helm
+    overlay's agents are read as the release renders them, merged into the
+    umbrella's default agents, since an overlay states only what it changes.
     """
     toml_files = (
         "domains/vms/storefront/storefront.alice.toml",
@@ -121,25 +132,23 @@ def _shipped_identity_tables():
         for key, value in document.items():
             if key.lower() == "identity":
                 yield name, value
-    values_files = [
-        REPO / "helm" / "values.yaml",
-        REPO / "helm" / "charts" / "storefront" / "values.yaml",
-        *sorted((REPO / "helm" / "fixtures").glob("*-values.yaml")),
-    ]
-    for path in values_files:
-        document = yaml.safe_load(path.read_text())
-        if not isinstance(document, dict):
-            continue
-        agents = (document.get("storefront") or {}).get("agents") or document.get("agents") or []
-        for agent in agents:
+    umbrella = REPO / "helm" / "values.yaml"
+    defaults = yaml.safe_load(umbrella.read_text())["storefront"]["agents"]
+    releases = [(umbrella, defaults)]
+    for path in [REPO / "helm" / "local-values.yaml", *sorted((REPO / "helm" / "fixtures").glob("*-values.yaml"))]:
+        overlay = ((yaml.safe_load(path.read_text()) or {}).get("storefront") or {}).get("agents")
+        if overlay:
+            releases.append((path, _overlaid(defaults, overlay)))
+    for path, agents in releases:
+        for name, agent in agents.items():
             for key, value in (agent.get("config") or {}).items():
                 if key.lower() == "identity":
-                    yield f"{path.relative_to(REPO)}:{agent.get('name')}", value
+                    yield f"{path.relative_to(REPO)}:{name}", value
 
 
 def test_identity_declaration_accepts_every_shipped_identity_table() -> None:
     tables = list(_shipped_identity_tables())
-    assert len(tables) >= 8
+    assert len(tables) >= 8, [source for source, _ in tables]
     for source, table in tables:
         # Configuration is text, so validate as JSON: strict models take enum
         # values as their string form there, as the storefront's parsers do.
@@ -152,7 +161,7 @@ def test_identity_declaration_accepts_every_shipped_identity_table() -> None:
 def test_registry_auth_is_refused_and_the_section_left_open(definition) -> None:
     registry = _section(definition, "registry")
     assert registry["additionalProperties"] is True
-    assert registry["patternProperties"] == {values_schema.any_case("auth"): False}
+    assert registry["patternProperties"] == {any_case("auth"): False}
 
 
 def test_settlement_is_closed_to_registered_mechanisms(definition) -> None:
@@ -178,53 +187,6 @@ def test_definition_carries_no_defaults_references_markers_or_exact_names(defini
             assert not forbidden & set(node), node
 
 
-def test_fields_differing_only_by_case_are_refused_at_generation() -> None:
-    class Ambiguous(BaseModel):
-        name: str = ""
-        Name: str = ""
-
-    with pytest.raises(ValueError, match="differ only by case"):
-        values_schema.model_fragment(Ambiguous)
-
-
-def test_a_secret_marked_field_is_refused_wherever_it_nests() -> None:
-    class Inner(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        token: str = Field(default="", json_schema_extra={"secret": True})
-        label: str = ""
-
-    class Outer(BaseModel):
-        model_config = ConfigDict(extra="forbid")
-        sinks: dict[str, Inner] = Field(default_factory=dict)
-        buyer_only: str = Field(default="", json_schema_extra={"roles": ["buyer"]})
-
-    fragment = values_schema.model_fragment(Outer)
-
-    assert _withheld(fragment, "buyer_only")
-    inner = _field(fragment, "sinks")["additionalProperties"]
-    assert _field(inner, "label") == {"type": "string"}
-    assert _withheld(inner, "token")
-
-
-def test_recursive_references_become_unconstrained() -> None:
-    class Node(BaseModel):
-        children: list[Node] = Field(default_factory=list)
-
-    fragment = values_schema.model_fragment(Node)
-
-    assert _field(fragment, "children")["items"] == {}
-
-
-def test_check_reports_a_stale_schema(tmp_path, definition) -> None:
-    current = tmp_path / "current.json"
-    stale = tmp_path / "stale.json"
-    current.write_text(values_schema.render({"type": "object"}, definition))
-    stale.write_text(json.dumps({"definitions": {values_schema.DEFINITION: {}}}))
-
-    assert values_schema.main(["check", str(current)]) == 0
-    assert values_schema.main(["check", str(current), str(stale)]) == 1
-
-
 def test_contact_fields_are_public_configuration(definition) -> None:
     contact = _field(_section(definition, "Settlement"), "contact")
     payload = _field(contact, "contact_payload")
@@ -244,6 +206,19 @@ def test_delivery_keeps_its_own_settings_and_types_shipped_sinks(definition) -> 
         assert _field(delivery, name) is not False
     for sink in ("apprise", "command", "file", "smtp", "webhook"):
         assert _field(delivery, sink)["additionalProperties"] is False
+
+
+def test_delivery_states_the_settings_the_bare_metal_chart_does(definition) -> None:
+    """``[Delivery]``'s own settings are stated by each storefront's generator,
+    the delivery kit naming them only; they must agree. Read from the bare-metal
+    chart's committed definition, which that storefront's own drift test holds to
+    its code, so neither storefront imports the other."""
+    assert set(module._DELIVERY_SETTINGS) == RESERVED_SECTION_KEYS
+    bare_metal = json.loads(
+        (REPO / "helm" / "charts" / "bare-metal-storefront" / "values.schema.json").read_text()
+    )["definitions"][values_schema.DEFINITION]
+    for name in RESERVED_SECTION_KEYS:
+        assert _field(_delivery(definition), name) == _field(_section(bare_metal, "Delivery"), name), name
 
 
 def test_secret_sink_settings_are_refused_however_the_instance_is_named(definition) -> None:
@@ -292,21 +267,10 @@ def test_the_generator_names_no_sink() -> None:
     assert not {name for name in imported if name.startswith("market_delivery_apprise")}
 
 
-def test_a_sink_without_a_declared_model_stays_open() -> None:
-
-    fragment = _delivery_fragment("seller", sinks={"file": FileSinkSettings})
-    (choices,) = fragment["additionalProperties"]["dependencies"].values()
-    (pattern,) = choices["anyOf"][-1]["patternProperties"].values()
-    assert pattern["not"]["enum"] == ["file"]
-    # A table named for a sink with no declared model is not typed by name.
-    assert any_case("file") in fragment["patternProperties"]
-    assert any_case("webhook") not in fragment["patternProperties"]
-
-
 def _committed_definition() -> dict:
     """The storefront configuration definition as the chart actually validates it."""
     schema = json.loads(SCHEMAS[1].read_text(encoding="utf-8"))
-    return schema["definitions"]["storefrontServiceConfig"]
+    return schema["definitions"][values_schema.DEFINITION]
 
 
 def _accepts(delivery: dict) -> bool:

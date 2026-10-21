@@ -1,0 +1,17 @@
+{{/*
+The Alkahest address book of the contracts this chart's Anvil state deploys, for
+a storefront agent to mount (its alkahestAddressBook names this ConfigMap). The
+file is a copy of kit/alkahest's development address book, which is generated
+with that state; the storefront chart's render tests check that the two agree.
+Development only, like the chain it describes: the addresses are deterministic
+Anvil deployments and name nothing on a public network.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dev-env.fullname" . }}-alkahest-addresses
+  labels:
+    {{- include "dev-env.labels" . | nindent 4 }}
+data:
+  alkahest_anvil_addresses.json: |
+    {{- .Files.Get "files/alkahest_anvil_addresses.json" | nindent 4 }}

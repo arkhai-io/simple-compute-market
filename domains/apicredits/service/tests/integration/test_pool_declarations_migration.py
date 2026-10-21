@@ -14,13 +14,19 @@ import json
 import logging
 
 import pytest
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools_contracts.backing import BACKED
+from market_resource_pools import DEFAULT_POOL_ID, ResourcePool, read_site_declarations
+from market_site.projections import resource_pool_projection
 from market_resource_pools_contracts import resolve_pool_declarations
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from apicredits_service.db.database import run_migrations
+from apicredits_service.db.database import (
+    create_session_factory,
+    load_pool_directory,
+    run_migrations,
+)
 from apicredits_service.db.migrations import _migrate_pool_advertisement_and_backing
 
 
@@ -45,7 +51,7 @@ class TestPoolAdvertisementAndBacking:
             tags = session.get(ResourcePool, DEFAULT_POOL_ID).policy_tags
         resolved = resolve_pool_declarations(tags)
         assert resolved.advertisable_modes == frozenset({"api_credits"})
-        assert resolved.backed
+        assert resolved.backing is BACKED
 
     def test_previous_version_pool_is_migrated_and_opaque_values_clobbered(
         self, caplog,
@@ -89,3 +95,20 @@ class TestPoolAdvertisementAndBacking:
 
         with pytest.raises(RuntimeError, match="pool 'default'"):
             run_migrations(engine)
+
+
+def test_the_resource_pool_projection_carries_the_system_pools_declarations():
+    # A storefront binds a credit listing with the backing its quota
+    # resource's pool declares, read from this projection.
+    engine = _sqlite_memory_engine()
+    run_migrations(engine)
+
+    rows = resource_pool_projection(
+        [{"resource_id": "quota-1", "pool_id": DEFAULT_POOL_ID, "capacity": {"units": 5}}],
+        pool_metadata=load_pool_directory(create_session_factory(engine)),
+    )
+    reading = read_site_declarations(rows)
+
+    pool = reading.resolved[DEFAULT_POOL_ID]
+    assert pool.backing is BACKED
+    assert pool.advertises("api_credits") and pool.enabled

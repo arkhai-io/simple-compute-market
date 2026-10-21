@@ -7,6 +7,8 @@ import hashlib
 import json
 import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from arkhai_vms import DIMENSION_KEYS as _DIMENSION_COMPUTE_KEYS
@@ -24,8 +26,16 @@ from arkhai_vms_negotiation import storefront_round as vm_storefront_round
 from arkhai_vms_negotiation.policies import _amount_from_proposal
 from arkhai_vms_negotiation.storefront_round import SellerRoundHook
 from arkhai_vms_settlement.proposals import accepted_escrow_artifacts_from_proposal
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+)
 from market_arkhai_payments import PaymentSellerStage
-from market_capacity_publication import CapacityBinding, CapacityRuntime
+from market_capacity_publication import (
+    RESOURCE_POOL,
+    CapacityRuntime,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_storefront.settlement_stages import resolve_proposal_stage
 from market_core.schemas import (
@@ -55,10 +65,7 @@ from market_policy.listing_source import ListingSourceVerdict
 from market_resource_pools_contracts.hints import capped_hold_seconds
 from market_storefront.lifecycle import trading_pause
 from market_storefront.services.listing_source_check import check_listing_source
-from market_capacity_publication import (
-    PublicationBinding,
-    UnbackedBinding,
-)
+from market_capacity_publication import PublicationBinding
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settings
 
@@ -243,23 +250,28 @@ def _agreement(
 def build_vm_accepted_artifacts(
     *,
     proposal: Any,
+    listing: Mapping[str, Any],
     agreed_amount: int,
     duration_seconds: int,
     buyer_principal: Identity,
     seller_principal: Identity,
     uses_scalar_amount: bool = True,
-    seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     **_unused: Any,
 ) -> dict[str, Any]:
-    """Materialize VM settlement artifacts from domain-owned proposal codecs."""
+    """Materialize VM settlement artifacts from domain-owned proposal codecs.
+
+    The escrow settles under the release condition ``listing`` authorizes;
+    the kit refuses any other with ``ReleaseConditionError``, and an escrow
+    whose plan cannot be materialized with ``SettlementPlanMaterializationError``.
+    """
 
     artifacts = accepted_escrow_artifacts_from_proposal(
         proposal=proposal,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         uses_scalar_amount=uses_scalar_amount,
-        seller_wallet_address=seller_wallet_address,
         chain_config_paths=(
             dict(chain_config_paths)
             if chain_config_paths is not None
@@ -269,9 +281,6 @@ def build_vm_accepted_artifacts(
             getattr(settings, "heartbeat_interval_seconds", 60)
         ),
     )
-    error = artifacts.pop("accepted_escrow_terms_error", None)
-    if error:
-        logger.debug("Could not materialize accepted escrow terms: %s", error)
     plan = artifacts.get("settlement_plan")
     if isinstance(plan, dict):
         buyer_wire = buyer_principal.model_dump(mode="json")
@@ -338,13 +347,17 @@ def _accepted_selection_artifacts(
     seller_principal: Identity,
     listing: Mapping[str, Any],
     provision_terms: Any,
+    settles_from_agreement: bool,
 ) -> dict[str, Any]:
     """Build the accepted plan through the selected mechanism's registration.
 
     The mechanism is resolved exactly once — from the selection — and the
     obligation is built by the composed registry dispatch. The domain keeps
     only domain semantics: the negotiated duration that scales time rates,
-    and the plan's ``vm.v1`` service terms.
+    and the plan's ``vm.v1`` service terms. A mechanism the registry builds no
+    obligation for is accepted without a plan only when its seller entry
+    ``settles_from_agreement``; any other would be accepted with nothing its
+    settlement could be verified against, so it is refused.
     """
 
     accepted = SettlementSelection.model_validate(selection)
@@ -361,6 +374,8 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
     if build_obligation is None:
+        if not settles_from_agreement:
+            raise OfferUnfulfillableError("settlement_selection_requires_plan")
         return {
             "settlement_selection": accepted.model_dump(
                 mode="json", exclude_none=True
@@ -467,16 +482,23 @@ def _accepted_settlement_artifacts(
         seller_wallet_address=get_evm_wallet_address() or None,
         chain_config_paths=_chain_config_paths(),
     )
-    artifacts = stage.accepted_artifacts(
-        domain=domain, context=context, listing=listing, selection=selection,
-        option=option,
-        build_selection=lambda: _accepted_selection_artifacts(
-            dispatch, selection=selection.model_dump(), option=option,
-            agreed_amount=agreed_amount, duration_seconds=duration_seconds,
-            listing=listing, provision_terms=provision_terms,
-            buyer_principal=buyer_principal, seller_principal=seller_principal,
-        ),
-    )
+    try:
+        artifacts = stage.accepted_artifacts(
+            domain=domain, context=context, listing=listing, selection=selection,
+            option=option,
+            build_selection=lambda: _accepted_selection_artifacts(
+                dispatch, selection=selection.model_dump(), option=option,
+                agreed_amount=agreed_amount, duration_seconds=duration_seconds,
+                listing=listing, provision_terms=provision_terms,
+                buyer_principal=buyer_principal, seller_principal=seller_principal,
+                settles_from_agreement=getattr(stage, "settles_from_agreement", False),
+            ),
+        )
+    except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
+        # No accepted escrow without the release condition its listing
+        # authorizes and the plan its settlement is verified against: the
+        # acceptance is refused before anything is recorded.
+        raise OfferUnfulfillableError(str(exc)) from exc
     artifacts["settlement_selection"] = selection.model_dump(mode="json", exclude_none=True)
     artifacts["_agreement_settlement_option"] = dict(option)
     return artifacts
@@ -556,9 +578,9 @@ def _build_response_artifacts(
     dispatch: AcceptedObligationDispatch,
     payments_stage: PaymentSellerStage | None = None,
 ) -> Mapping[str, Any]:
-    # Settlement artifacts carry the listing's site, mode, and source for both
-    # backed and unbacked listings; only capacity effects need the backed form.
-    if not isinstance(acceptance.binding, (CapacityBinding, UnbackedBinding)):
+    # Settlement artifacts carry the listing's site, mode, and source whatever
+    # its backing; only capacity effects ask the backing to admit them.
+    if not isinstance(acceptance.binding, PublicationBinding):
         raise RuntimeError("VM negotiation has no frozen listing binding")
     if accepted:
         artifacts = _with_agreement(
@@ -634,8 +656,9 @@ async def _persist_artifacts(
 def lookup_pool_policy_tags(
     repository: Any,
     listing_id: str | None,
+    site_projections: SiteProjectionState,
 ) -> dict[str, Any]:
-    """Return the live policy tags for the pool mapped to a VM listing."""
+    """Return the held policy tags for the pool mapped to a VM listing."""
 
     if not listing_id:
         return {}
@@ -645,18 +668,11 @@ def lookup_pool_policy_tags(
             site_id_for_listing,
         )
 
-        from market_storefront.services.site_projection_cache import (
-            projection_caches,
-        )
-
         site_id = site_id_for_listing(repository.db_path, listing_id)
         pool_id = pool_id_for_listing(repository.db_path, listing_id)
         if not site_id or not pool_id:
             return {}
-        caches = projection_caches().get(site_id)
-        if caches is None:
-            return {}
-        pools = caches.resource_pools.view().value or []
+        pools = site_projections.values(RESOURCE_POOL).get(site_id) or []
         for pool in pools:
             if str(pool.get("pool_id") or "") == pool_id:
                 metadata = pool.get("pool_metadata") or {}
@@ -666,11 +682,23 @@ def lookup_pool_policy_tags(
     return {}
 
 
+@dataclass(frozen=True)
+class _HoldAttempt:
+    """A reservation attempt's outcome, which may be no reservation.
+
+    Distinct from the ``None`` a backing that admits no hold returns, so a hold
+    that was not applicable is never reported as one that was unavailable.
+    """
+
+    reservation: Mapping[str, Any] | None
+
+
 async def _place_capacity_hold(
     repository: Any,
     acceptance: Acceptance,
     *,
     capacity_runtime: CapacityRuntime,
+    site_projections: SiteProjectionState,
 ) -> None:
     """Place the VM domain's best-effort capacity hold after acceptance.
 
@@ -690,37 +718,34 @@ async def _place_capacity_hold(
     )
     if ttl <= 0:
         return
-    if isinstance(acceptance.binding, UnbackedBinding):
-        # Nothing can be reserved against a listing with no admission authority,
-        # so there is no hold to place and nothing has failed.
-        stage_event(
-            "negotiation",
-            "capacity_hold_not_applicable",
-            negotiation_id=acceptance.negotiation_id,
-            listing_id=acceptance.listing_id,
-            capacity_backing=acceptance.binding.capacity_backing,
-        )
-        return
-    try:
-        if not isinstance(acceptance.binding, CapacityBinding):
-            raise RuntimeError("capacity hold requires a durably bound listing")
+    binding = acceptance.binding
+
+    async def reserve() -> _HoldAttempt:
         claim = compute_capacity_claim_from_order(dict(acceptance.listing_record))
-        capacity = capacity_runtime
-        ttl = capped_hold_seconds(
+        capped_ttl = capped_hold_seconds(
             ttl,
-            lookup_pool_policy_tags(repository, acceptance.listing_id),
+            lookup_pool_policy_tags(
+                repository, acceptance.listing_id, site_projections
+            ),
         )
-        held = await capacity.reserve(
-            acceptance.binding,
-            claim=claim,
-            deal_ref={
-                "listing_id": acceptance.listing_id,
-                "negotiation_id": acceptance.negotiation_id,
-            },
-            ttl_seconds=ttl,
-            lease_start_utc=acceptance.agreement.start_utc,
-            lease_duration_seconds=acceptance.agreement.duration_seconds,
+        return _HoldAttempt(
+            await capacity_runtime.reserve(
+                binding,
+                claim=claim,
+                deal_ref={
+                    "listing_id": acceptance.listing_id,
+                    "negotiation_id": acceptance.negotiation_id,
+                },
+                ttl_seconds=capped_ttl,
+                lease_start_utc=acceptance.agreement.start_utc,
+                lease_duration_seconds=acceptance.agreement.duration_seconds,
+            )
         )
+
+    try:
+        if not isinstance(binding, PublicationBinding):
+            raise RuntimeError("capacity hold requires a durably bound listing")
+        attempt = await binding.backing.place_hold(reserve)
     except Exception as exc:
         logger.warning(
             "[NEGOTIATION] Could not place capacity hold for %s: %s",
@@ -728,6 +753,18 @@ async def _place_capacity_hold(
             exc,
         )
         return
+    if attempt is None:
+        # The listing's backing admits no hold, so there is none to place and
+        # nothing has failed.
+        stage_event(
+            "negotiation",
+            "capacity_hold_not_applicable",
+            negotiation_id=acceptance.negotiation_id,
+            listing_id=acceptance.listing_id,
+            capacity_backing=binding.backing.label,
+        )
+        return
+    held = attempt.reservation
     if not held:
         stage_event(
             "negotiation",
@@ -761,15 +798,21 @@ def build_vm_negotiation_runtime(
     registry: StorefrontDomainRegistry,
     binding: StorefrontDomainBinding,
     capacity_runtime: CapacityRuntime,
+    site_projections: SiteProjectionState,
     seller_round_hook: SellerRoundHook | None = None,
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     arkhai_payments_stage: PaymentSellerStage | None = None,
     listing_source_check: ListingSourceCheckHook | None = None,
+    source_confirmation_clock: Callable[[], datetime] | None = None,
 ) -> NegotiationRuntime:
     """Compose the shared lifecycle with the exact registered VM contract.
 
     ``listing_source_check`` replaces the check of each listing against its own
-    source; by default it reads the site projections this storefront holds.
+    source; by default it reads ``site_projections``, the projections this
+    storefront holds, which the capacity hold's pool tags also come from, and
+    confirms a listing only from projections polled within the configured
+    source-confirmation window, measured at ``source_confirmation_clock``
+    (the current UTC time unless given).
     """
 
     dispatch = (
@@ -954,7 +997,7 @@ def build_vm_negotiation_runtime(
             listing_id=opening.listing_id,
         )
         require_domain_binding(copied.binding)
-        if not isinstance(opening.binding, (CapacityBinding, UnbackedBinding)):
+        if not isinstance(opening.binding, PublicationBinding):
             raise NegotiationStateError(
                 "VM negotiation opening has no listing binding"
             )
@@ -974,6 +1017,8 @@ def build_vm_negotiation_runtime(
             listing_record=resolved.listing_record,
             binding=resolved.binding,
             capacity_runtime=capacity_runtime,
+            site_projections=site_projections,
+            clock=source_confirmation_clock,
         )
 
     async def place_hold(
@@ -984,6 +1029,7 @@ def build_vm_negotiation_runtime(
             repository,
             acceptance,
             capacity_runtime=capacity_runtime,
+            site_projections=site_projections,
         )
 
     from core_storefront.stage_log import stage_event

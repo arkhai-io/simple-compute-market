@@ -14,15 +14,27 @@ The generic pool package stores opaque provider configuration only after a provi
 
 Resolved configuration is routing input. A fulfillment operation snapshots the accepted provider inputs at dispatch so later administrative edits do not silently rewrite an in-flight operation.
 
+The provider itself is fixed at creation. It is the routing context of every member and every record already resolved through the pool, so changing it in place would hand existing inventory to another executor without any of the checks that guard moving a resource. Replace, patch and document import therefore all refuse a differing provider before mutation, as they refuse a changed backing. The refusal is a validation error (HTTP 400) rather than a conflict, because no drain or wait could ever make it valid. Restating the pool's own provider on a patch is the same as omitting it and writes no configuration. Configuration stays editable within the provider through the handler's replacement, under its secret-retention rules.
+
+The handler interface is validation, the two reads, and same-provider replacement. It has no deletion operation: pools are disabled rather than deleted, and configuration must stay resolvable for existing work, so a deletion hook would only ever serve the provider swap the pool refuses.
+
+VM and bare metal register as `vm.ansible` and `bare_metal.ansible`, so neither domain's provider name is a bare mechanism name the other could be mistaken for. Upgrade rewrites the historical VM name in pools and fulfillment records, and nothing else.
+
 ## Membership and draining
 
 Membership expresses which resources are candidates under a pool's routing context. Disabling a pool blocks new assignment but preserves membership and records needed by existing workloads. This is draining, not deletion.
 
 Hard deletion is intentionally absent because an existing assignment, job, or lease must remain explainable even after operators stop selling through that pool.
 
+Moving inventory to another provider is a second pool and an explicit reassignment of its members. The pool authority adds no guard of its own to that move, because each kind of member already has one at its own authority, and the two differ. A capacity resource cannot change pools while a held reservation is debited against it or assigns it for settlement; the site ledger enforces this, serialized through commit (see the site-capacity requirement "A capacity resource does not move pools under live obligations"). A host moves through the host authority's pool-change hooks, where the VM adapter refuses a relay-changing move while the host holds relay leases. A host move that keeps its relay may proceed while work exists, because it reassigns no capacity resource. A pool-level obligation guard would duplicate the site's rule across an authority boundary, and refusing disablement would contradict draining.
+
 ## Administrative reconciliation
 
 Declarative YAML import is an operator reconciliation surface rather than a second persistence model. Strict validation rejects unknown structure. Dry-run computes the exact change without mutation. Apply is atomic, and canonical export makes equivalent state stable for review and automation. Omitted pools are disabled rather than erased.
+
+Validation runs in the order of what each check needs to judge the request. The typed pool models in `kit/resource-pools-contracts` check what the request establishes by itself: mode and backing declarations, and the structure of the hold, SLA, listing-shape, asking-rate and pricing hints. A typed caller and the server therefore refuse a malformed individual write before dispatch or database work, and the server answers HTTP 422. The service checks what needs composition or stored state: handler registration and provider-owned configuration, which need the composed registry the contracts package may not import, and then provider and backing immutability. Those last two are one pure comparison of a stored pool and the proposed values, returning field-specific problems. Individual writes raise its first problem, and documents report every problem prefixed with the entry's submitted index, so the rule has one implementation on every path. Documents carry raw YAML rather than models, so they reuse the same contracts-owned checks with their structured paths and codes. A document with request problems is not compared against stored state, and any problem leaves the whole document unapplied: no entry, no omitted-pool disablement, and, at startup, no new digest. A path is not reordered, and no lookup is added, only to report a different error first.
+
+On a fresh database with a mounted pool document, the document creates the `default` pool. Schema initialization seeds no implicit default, and startup imports contributed definitions, then the pool document, then host inventory, so `default` exists with its declared provider and configuration before any host can reference it. Seeding a VM default and letting the document replace it would be a provider change, which the pool refuses. A second setting naming the default's provider would duplicate the document's authority. Whether a database is fresh is judged by pool or host rows, not by schema tables, because an interrupted first migration can leave tables with no state; its retry must still leave the default to the document. A database holding pools or hosts keeps its default and legacy host backfill. With no document, initialization seeds the VM default with its configured playbook. A configured document that is missing or invalid fails startup rather than falling back to a VM default.
 
 ## Advertisement, delivery, and backing
 
@@ -49,6 +61,35 @@ Backing is fixed at creation because every listing derived from a pool inherits
 it, and changing it in place would reinterpret listings already published. Moving
 supply between backed and unbacked is a second pool with its resources migrated
 across.
+
+What backing means lives in one delegate, `CapacityBacking` in
+`kit/resource-pools-contracts`, beside the label it interprets. The declared label
+selects it — `capacity_backing(label)` returns `BACKED` or `UNBACKED` and refuses a
+label with no delegate — and the label stays what declarations, bindings, and the
+projection carry, and what a published listing carries where its market's registry
+schema publishes backing. Whether a market publishes backing at all is that schema's
+decision, not the delegate's: the compute schema does, so a buyer can filter on it, and
+the API-credit schema does not, since every credit listing is backed. Every decision that differs between backed
+and unbacked supply is one of the delegate's operations: the declaration rules above,
+admitting a capacity effect, placing a hold, judging supply against its declaration
+and then, where availability bounds it, against availability, which labels
+availability reconciliation may touch, and which settlement clauses an unbacked
+listing keeps. Consumers ask it to act and never learn the category, so none
+branches on the label, and a further category is a change to the delegate rather
+than to its callers. A delegate exposing flags for callers to test would only move
+those branches; one that performed effects would need clients and bindings its
+contracts package may not import, so each operation takes the caller's work as an
+argument and decides whether and how it runs.
+
+The delegate is a kit rather than core or the compute family because backing applies
+to every market whose listings are admitted against capacity an authority holds — VM
+and bare metal against physical capacity, API credits against quota — and to no
+market without such an authority. It sits beside the label because both sides of the
+provisioning boundary consult it: the site's declaration rules, and the storefronts'
+bindings, reconciliation, negotiation, and settlement. Two questions are answered by
+the registry without the caller naming a category: `legacy_producer_backing()`, what a
+pool from a producer predating the declarations resolves to, and `admitted_backing()`,
+the backing of a reservation a site admitted with no listing behind it.
 
 Both declarations are required on every write rather than defaulted. A default
 backing would assert whether anything stands behind a listing, and a default

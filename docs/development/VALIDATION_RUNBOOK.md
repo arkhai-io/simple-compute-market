@@ -36,7 +36,8 @@ then run a CLI-first GCP proof for real Ansible/KVM provisioning.
   - Registry `/health` returns `status: ok`.
   - Bob and Alice storefront `/health` return `status: ok`.
   - Bob `/api/v1/system/status` has `registry: ok`, `registry_auth: ok`,
-    populated `agent_id`, `chain_id: 31337`, and `resource_count >= 1`.
+    populated `agent_id`, `chain_id: 31337`, and every configured site's
+    `site_projections` families `loaded`.
   - Provisioning `/api/v1/system/status` has `storefront: ok`,
     `storefront_auth: ok`, and `lease_watchdog: running`. Its
     `fulfillment_recovery` object reports sweep/claim/provider-failure counters,
@@ -836,8 +837,9 @@ make unforward
 
 `helm/fixtures/contact-exchange-values.yaml` overlays the default release so Bob's
 storefront offers contact exchange, delivers each revealed buyer contact by SMTP,
-and the `dev-env` chart runs Mailpit to receive it. It repeats Bob's whole agent
-entry, since Helm replaces lists; layer your environment's values first if it
+and the `dev-env` chart runs Mailpit to receive it. It states only what differs
+from Bob's default agent, since agents are keyed by name and Helm merges an
+overlay into an agent key by key; layer your environment's values first if it
 already redefines Bob. The fixture advertises Bob at the host port-forward URL
 and gives capacity-backed test pools a contact-exchange settlement clause. Use
 it only for a local Helm test release with the deterministic development
@@ -1060,7 +1062,7 @@ helm upgrade --install "$RELEASE" "$APP_REPO/helm" \
   --values "$APP_REPO/helm/values.yaml" \
   --values "$OPS_REPO/helm/argocd-apps/envs/dev/simple-market-service-values.yaml" \
   --set provisioning.mockMode=false \
-  --set storefront.agents[0].config.provisioning.mode=real \
+  --set storefront.agents.arkhai.config.provisioning.mode=real \
   --namespace default \
   --wait \
   --timeout 10m

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowProposal, EscrowTerms, accepted_demands
 
 logger = logging.getLogger(__name__)
 
-BuildEscrowTermsFn = Callable[[Any, str | None, int, int], list[EscrowTerms]]
+BuildEscrowTermsFn = Callable[[Any, Mapping[str, Any], int, int], list[EscrowTerms]]
 CreateEscrowFn = Callable[[list[Any]], list[str]]
 
 
@@ -75,11 +76,18 @@ def make_buyer_payment_escrow_terms_fn(
     chain_name: str,
     addr_config_path: Optional[str],
 ) -> BuildEscrowTermsFn:
-    """Build a closure that materializes a negotiated proposal to terms."""
+    """Build a closure that materializes a negotiated proposal to terms.
+
+    The closure takes the listing the proposal was negotiated against: the
+    escrow is created only under the release condition that listing
+    authorizes, so a seller echoing any other condition is refused with
+    ``market_alkahest.proposals.ReleaseConditionError`` before anything
+    reaches the chain.
+    """
 
     def _build(
         proposal: Any,
-        seller_wallet_address: str,
+        listing: Mapping[str, Any],
         agreed_amount: int,
         duration_seconds: int,
     ) -> list[EscrowTerms]:
@@ -87,13 +95,39 @@ def make_buyer_payment_escrow_terms_fn(
 
         return materialize_escrow_terms_from_proposal(
             proposal=proposal,
-            seller_wallet_address=seller_wallet_address,
+            listing=listing,
             agreed_amount=int(agreed_amount),
             duration_seconds=duration_seconds,
             addr_config_path=addr_config_path,
         )
 
     return _build
+
+
+def resumed_proposal_refusal(proposal: Mapping[str, Any]) -> str:
+    """Why a resumed run creates no escrow from an accepted proposal alone.
+
+    An escrow is materialized only under the release condition its listing
+    authorizes. A run-log records the seller's accepted proposal but not the
+    listing it was negotiated against, so with no accepted escrow terms there is
+    nothing to authorize the proposal's condition against, and no escrow is
+    created from it.
+    """
+    selected = accepted_demands(proposal)
+    if len(selected) > 1:
+        return (
+            "release_condition_ambiguous: the accepted escrow proposal selects "
+            "several release conditions"
+        )
+    if not selected:
+        return (
+            "release_condition_unselected: the accepted escrow proposal names no "
+            "release condition"
+        )
+    return (
+        "the run-log records no accepted escrow terms, and not the listing that "
+        "authorizes the accepted proposal's release condition"
+    )
 
 
 def make_create_escrow_fn(

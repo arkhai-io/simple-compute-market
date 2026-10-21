@@ -12,10 +12,14 @@ and `skip_specs` in `.openspec.yaml` is revisited with it.
       as a finding for its capability's owner.
 - [ ] 3. Move the validator pin in `openspec/README.md` forward, and pass
       `validate --all --strict` under it.
-- [ ] 4. Closeout, per `openspec/README.md#plan-closeout-requirements`: comment
-      hygiene; import placement (no code is expected to change, so a recorded
-      no-op); documentation compliance; narrative compression; roadmap currency
-      (expected: no roadmap impact, recorded explicitly); campaign index currency
-      (this change's row in `changes/README.md`); documentation citations; packaging
-      (expected: no package change, recorded); end-to-end pipeline (expected: no
-      behavior change, recorded with the run used); promotion record.
+- [ ] 4. Closeout, per `openspec/README.md#plan-closeout-requirements`, in its
+      order: comment hygiene and import placement confirmed (no code is expected
+      to change, so recorded no-ops); documentation compliance; narrative
+      compression; roadmap currency (expected: no roadmap impact, recorded
+      explicitly); campaign index currency (this change's row in
+      `changes/README.md`; other rows' `Depends on` are left to archive cleanup);
+      packaging (expected: no package change, recorded); end-to-end pipeline
+      (expected: no behavior change, recorded with the run used); promotion record,
+      the restructured specs being written by the archive or by hand as task 1
+      decides; documentation citations, then `openspec validate --strict`; and
+      archival last, with `--skip-specs` if task 1 synchronizes the specs by hand.

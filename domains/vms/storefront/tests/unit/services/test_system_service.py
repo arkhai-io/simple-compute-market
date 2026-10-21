@@ -6,9 +6,7 @@ and avoids mock complexity for DB reads).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+import sqlite3
 
 import pytest
 from compute_provisioning_contracts import COMPUTE_PROVISIONING_CONTRACT_VERSION
@@ -17,6 +15,7 @@ from market_identity import Ed25519Signer
 from market_storefront.services.system_service import SystemService
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 MARKETPLACE_SIGNER = Ed25519Signer(b"\x41" * 32)
 
@@ -35,141 +34,34 @@ def _make_service(
     *,
     projection_status_provider=None,
     listing_cardinality_mode_explanation_provider=None,
+    site_projections=None,
 ) -> SystemService:
     return SystemService(
         sqlite_client=db,
         marketplace_signer=MARKETPLACE_SIGNER,
+        site_projections=site_projections
+        or site_projection_state({"site-a": FakeProjectionSite(resource_pools=[])}),
         agent_id="test-agent",
         projection_status_provider=projection_status_provider,
         listing_cardinality_mode_explanation_provider=listing_cardinality_mode_explanation_provider,
     )
 
 
-OFFER = {"gpu_model": "H200", "gpu_count": 1, "sla": 99.0, "region": "California, US"}
-
-
 # ---------------------------------------------------------------------------
-# seed_resources_if_empty
+# get_health: no local inventory
 # ---------------------------------------------------------------------------
 
-class TestSeedResourcesIfEmpty:
-    async def test_skips_when_resources_already_present(self, db, tmp_path):
-        """When the resources table is non-empty, seeding is skipped.
+class TestGetHealthReadsNoLocalInventory:
+    async def test_status_needs_no_local_resource_table(self, db):
+        """Status reports no resource count and reads no local inventory, so
+        a database without a ``resources`` table is still healthy."""
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute("DROP TABLE IF EXISTS resources")
 
-        The CSV path exists (a minimal valid file) but must never be read
-        because the early-exit guard fires first.
-        """
-        # Pre-populate the resources table with one row so the guard fires.
-        await db.upsert_resource(
-            resource_id="existing-001",
-            resource_type="compute.gpu",
-            state="available",
-        )
+        result = await _make_service(db).get_health(include_registry=True)
 
-        # Create a minimal CSV that would be valid if imported.
-        csv_file = tmp_path / "dummy.csv"
-        csv_file.write_text(
-            "resource_id,resource_type,state\n"
-            "new-001,compute.gpu,available\n"
-        )
-
-        svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
-
-        assert result["seeded"] is False
-        # imported_count reflects what was already there, not a new import.
-        assert result["imported_count"] == 1
-        # The new row from the CSV must not have been inserted.
-        resources = await db.list_resources()
-        assert len(resources) == 1
-        assert resources[0]["resource_id"] == "existing-001"
-
-    async def test_seeds_when_table_is_empty(self, tmp_path):
-        """When the resources table is empty, the CSV is imported."""
-        from market_storefront.utils.sqlite_client import SQLiteClient
-
-        db = SQLiteClient(db_path=str(tmp_path / "seed_test.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
-
-        # Minimal valid kvm1-style CSV row.
-        csv_file = tmp_path / "resources.csv"
-        csv_file.write_text(
-            "resource_id,resource_type,resource_subtype,unit,value,state,"
-            "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,"
-            "attribute.vm_host,attribute.vcpu_count,attribute.ram_gb,"
-            "attribute.disk_gb,attribute.offering_mode\n"
-            "compute-test-001,compute.gpu,rtx5080,count,1,available,"
-            "150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,"
-            'RTX 5080,90.0,"California, US",'
-            "kvm1,16,256,4000,bare_metal\n"
-        )
-
-        svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(csv_path=str(csv_file))
-
-        assert result["seeded"] is True
-        assert result["imported_count"] == 1
-
-        resources = await db.list_resources(resource_type="compute.gpu", state="available")
-        assert len(resources) == 1
-        assert resources[0]["resource_id"] == "compute-test-001"
-
-    async def test_seeds_from_inline_content(self, db):
-        """When csv_inline is provided, it is imported without touching the filesystem."""
-        csv_content = (
-            "resource_id,resource_type,resource_subtype,unit,value,state,"
-            "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
-            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
-        )
-        svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(csv_inline=csv_content)
-
-        assert result["seeded"] is True
-        assert result["imported_count"] == 1
-        resources = await db.list_resources()
-        assert len(resources) == 1
-        assert resources[0]["resource_id"] == "compute-inline-001"
-
-    async def test_inline_takes_priority_over_path(self, db, tmp_path):
-        """csv_inline is used when both inline and path are provided."""
-        csv_file = tmp_path / "resources.csv"
-        csv_file.write_text(
-            "resource_id,resource_type,state\n"
-            "compute-path-001,compute.gpu,available\n"
-        )
-        csv_content = (
-            "resource_id,resource_type,resource_subtype,unit,value,state,"
-            "min_price,token,max_duration_seconds,"
-            "attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host\n"
-            'compute-inline-001,compute.gpu,rtx5080,count,1,available,'
-            '150,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,'
-            'RTX 5080,90.0,"California, US",kvm1\n'
-        )
-        svc = _make_service(db)
-        result = await svc.seed_resources_if_empty(
-            csv_inline=csv_content, csv_path=str(csv_file)
-        )
-        assert result["seeded"] is True
-        resources = await db.list_resources()
-        # Only the inline row should be present.
-        assert len(resources) == 1
-        assert resources[0]["resource_id"] == "compute-inline-001"
-
-    async def test_empty_csv_path_returns_not_seeded(self, db):
-        """Neither source configured skips seeding and returns seeded=False."""
-        svc = _make_service(db)
-        result = await svc.seed_resources_if_empty()
-        assert result["seeded"] is False
-        assert result["imported_count"] == 0
-
-    async def test_missing_csv_raises(self, db):
-        """A configured but missing CSV path raises FileNotFoundError."""
-        svc = _make_service(db)
-        with pytest.raises(FileNotFoundError):
-            await svc.seed_resources_if_empty(csv_path="/nonexistent/path/resources.csv")
+        assert "resource_count" not in result
+        assert result["checks"]["database"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -202,15 +94,23 @@ class TestGetHealthSiteProjections:
         result = await svc.get_health(include_registry=False)
         assert "site_projections" not in result
 
-    async def test_default_provider_is_the_real_projection_status_summary(self, db):
-        """With no provider injected, get_health falls back to the real
-        production source rather than silently returning nothing."""
-        svc = _make_service(db)  # no projection_status_provider -- exercises the default
+    async def test_default_provider_reports_the_injected_projection_state(self, db):
+        """With no provider injected, get_health reports the projection state
+        it was given, each family by its own state and never its rows."""
+        site = FakeProjectionSite(resource_pools=[{"pool_id": "pool-1"}])
+        state = site_projection_state({"site-a": site})
+        await state.poll_once()
+        svc = _make_service(db, site_projections=state)
         result = await svc.get_health(include_registry=True)
-        # No sites are configured/loaded in this process, so the real
-        # summary is an empty dict, not None -- proving the default path
-        # actually ran rather than swallowing an exception.
-        assert result["site_projections"] == {}
+
+        families = result["site_projections"]["site-a"]
+        assert families["resource_pool"]["state"] == "loaded"
+        assert families["resource_pool"]["revision"] == 1
+        assert families["resource_pool"]["digest"]
+        assert "pool-1" not in str(families)
+        # The site serves no bucket projection, so that family never loaded.
+        assert families["capacity_bucket"]["state"] == "unavailable"
+        assert families["capacity_bucket"]["last_error"]
 
     async def test_one_site_unavailable_is_reported_outside_the_health_gate(self, db):
         """An unavailable/invalid site must be reported, not gated on.
@@ -312,15 +212,19 @@ class TestGetHealthListingModeExplanations:
         result = await svc.get_health(include_registry=False)
         assert "listing_cardinality_mode_explanations" not in result
 
-    async def test_default_provider_is_the_real_listing_cardinality_mode_explanations(self, db):
-        """With no provider injected, get_health falls back to the real
-        production source rather than silently returning nothing."""
-        svc = _make_service(db)  # no listing_cardinality_mode_explanation_provider injected
+    async def test_default_provider_reads_the_injected_projection_state(self, db):
+        """With no provider injected, get_health reports the notices of the
+        projection state it was given."""
+        site = FakeProjectionSite(resource_pools=[{
+            "pool_id": "gpu-pool", "resources": [],
+            "pool_metadata": {"policy_tags": {"listing_cardinality_mode": "bogus"}},
+        }])
+        state = site_projection_state({"site-a": site})
+        await state.poll_once()
+        svc = _make_service(db, site_projections=state)
         result = await svc.get_health(include_registry=True)
-        # No sites are configured/loaded in this process, so the real
-        # function returns an empty dict, not None -- proving the default
-        # path actually ran rather than swallowing an exception.
-        assert result["listing_cardinality_mode_explanations"] == {}
+
+        assert set(result["listing_cardinality_mode_explanations"]) == {"site-a"}
 
     async def test_reporting_failure_does_not_add_a_checks_entry(self, db):
         def _boom():

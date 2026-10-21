@@ -43,9 +43,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from market_resource_pools_contracts.backing import BACKED
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     DELIVERABLE_MODES_POLICY_TAG,
 )
@@ -162,7 +162,7 @@ def register_e2e_pool(
     _pools(provisioning_client).create_pool(PoolCreate(
         id=pool_id,
         label=label or pool_id,
-        provider="ansible",
+        provider="vm.ansible",
         policy_tags={
             "listing_mode": listing_mode,
             # A pool must declare the offering modes it delivers; reservation
@@ -188,7 +188,7 @@ def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
     """
     return {
         ADVERTISABLE_MODES_POLICY_TAG: list(deliverable_modes),
-        CAPACITY_BACKING_POLICY_TAG: CAPACITY_BACKED,
+        CAPACITY_BACKING_POLICY_TAG: BACKED.label,
     }
 
 

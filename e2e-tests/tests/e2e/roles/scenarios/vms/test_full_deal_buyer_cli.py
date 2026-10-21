@@ -8,8 +8,8 @@ Phase 0 — E2E readiness (all services healthy, no state changes)
   00c  Provisioning reachable:  GET provisioning /health → status=ok
   00d  Negotiation strategy viable: checks.negotiation_strategy not exit-on-probe
   00e  Provisioning mock mode:  GET /api/v1/system/status → execution.mocked
-  00f  Resource seed:           POST /api/v1/admin/portfolio/resources/import
-                                upserts the compute row this test needs
+  00f1 Executor and capacity:  register the executor host and declare its
+                                capacity at provisioning; refresh projections
   00g  Alkahest configured:     GET /api/v1/system/status → checks.alkahest=ok
                                 gates Phase 7b (on-chain escrow verification)
   00h  Provisioning→storefront: GET provisioning /api/v1/system/status →
@@ -142,8 +142,7 @@ OFFER_RESOURCE = {
     # offering mode its domain binding selected.
     "offering_mode": "vm",
     "interruptible": True,
-    # Matches E2E_RESOURCE_CSV below. The test imports that CSV through the
-    # storefront admin API so it does not depend on a mounted resource file.
+    # The resource stage 00f1 declares at the site for this scenario.
     "resource_id": "compute-e2e-deal-cli-001",
     "gpu_model": "RTX 5080",
     "gpu_count": 1,
@@ -225,10 +224,6 @@ REMOVE_RULE_ID = "e2e-remove-pause"  # mock rule that pauses provider teardown
 #: so two scenarios advertising one resource on one site derive the same key
 #: and the second listing create is refused outright.
 E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
-E2E_RESOURCE_CSV = """resource_id,resource_type,resource_subtype,unit,value,state,min_price,token,max_duration_seconds,attribute.gpu_model,attribute.sla,attribute.region,attribute.vm_host
-compute-e2e-deal-cli-001,compute.gpu,rtx5080,count,1,available,10,0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0,,RTX 5080,90.0,"California, US",kvm-deal-cli
-"""
-
 # ===========================================================================
 # Phase 0 — E2E readiness
 # ===========================================================================
@@ -366,42 +361,6 @@ class TestStage00e_ProvisioningMockMode:
         log.info("[00e] Provisioning mock mode confirmed: %s", execution.executors)
 
 
-class TestStage00f_ResourceSeed:
-    def test_00f_imports_e2e_resource_inventory(
-        self, storefront_admin_client, deal_state: DealState
-    ):
-        """Import the compute resource row required by this scenario.
-
-        The e2e deal should not depend on a container-mounted CSV. Importing
-        an inline fixture through the admin API keeps this scenario
-        self-contained while exercising the same upsert path operators use.
-        """
-        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
-
-        result = storefront_admin_client.admin_import_resources(
-            E2E_RESOURCE_CSV.encode("utf-8"),
-            filename="e2e-deal-resources.csv",
-        )
-        assert result.failed_count == 0, (
-            f"E2E resource import failed for {result.failed_count} row(s): {result}"
-        )
-        assert result.imported_count >= 1, (
-            f"Expected at least one imported resource row, got: {result}"
-        )
-
-        status = storefront_admin_client.get_system_status()
-        assert (status.resource_count or 0) >= 1, (
-            f"Storefront still reports no resources after import: {status}"
-        )
-
-        deal_state._resources_seeded = True
-        log.info(
-            "[00f] Imported e2e resource inventory row %s (resource_count=%s)",
-            E2E_RESOURCE_ID,
-            status.resource_count,
-        )
-
-
 class TestStage00f1_ExecutorHostRegistry:
     def test_00f1_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
@@ -428,14 +387,14 @@ class TestStage00f1_ExecutorHostRegistry:
         projections immediately and the pull is asserted, rather than sleeping
         out the poller interval.
         """
-        require_state(deal_state, "_resources_seeded")
+        require_state(deal_state, "_storefront_healthy", "_provisioning_mock_mode")
 
         host = provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,
             host=E2E_DEAL_CLI_HOST,
             pool_id=E2E_DEAL_CLI_POOL_ID,
-            resource_id="compute-e2e-deal-cli-001",
+            resource_id=E2E_RESOURCE_ID,
             sellable_units=1,
             attributes={
                 "gpu_model": "RTX 5080",
@@ -569,7 +528,7 @@ class TestStage02b_CreateListingPaused:
           2. local GET shows status=open, paused=True
           3. registry GET does NOT contain the listing
         """
-        require_state(deal_state, "_resources_seeded", "_registry_reachable")
+        require_state(deal_state, "_executor_host_registered", "_registry_reachable")
 
         resp = storefront_seller_client.create_listing(
             listing_resource=OFFER_RESOURCE,
@@ -1227,8 +1186,7 @@ class TestStage09a2_CapacityEventCycle:
             f"head={pending['feed_head']!r})"
         )
 
-        # Projections before deltas. With `use_site_projection_for_listings`
-        # on (the shipped default) the close path decides from the
+        # Projections before deltas. The close path decides from the
         # storefront's own projection cache, and only the site-projections
         # loop refills it -- held here like every other loop. Applying the
         # deltas against a pre-deal projection closes nothing however many of
@@ -1404,9 +1362,8 @@ class TestStage09c_LeaseRecorded:
 
         deal_state.deal_lease = lease_view
         # This scenario's own constant, not the lease's null field. The later
-        # stages that consume this address the *storefront's* resource row by
-        # id, so the value they need is the one 00f imported -- the lease never
-        # reported it.
+        # stages that consume this address the resource stage 00f1 declared at
+        # the site by id, and the lease never reported it.
         deal_state.reserved_resource_id = E2E_RESOURCE_ID
         deal_state.lease_id = lease.get("id")
         deal_state.lease_status = lease.get("status")

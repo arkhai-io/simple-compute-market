@@ -12,6 +12,11 @@ from typing import Any
 
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+    authorized_escrow_proposal_at_amount,
+)
 from market_core import MarketDomainContract
 from market_core.schemas import (
     Agreement,
@@ -37,6 +42,11 @@ from market_negotiation_runtime import (
 from market_policy.scalar_policies import _amount_from_proposal
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.listing_binding import api_credit_listing_binding
+from apicredits_storefront.listing_source_check import (
+    ListingSourceCheck,
+    build_listing_source_check,
+)
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
@@ -83,9 +93,46 @@ def _seller_wallet_address() -> str | None:
     return str(settings.get("wallet.address", "") or "") or None
 
 
+class _QuotaSnapshot:
+    """The quota snapshot one listing's round reads, through its backing.
+
+    The listing's binding decides whether availability bounds it; where it
+    does not, no snapshot is captured and the quota guard does not apply.
+    Only the bound site is read: the guard matches rows by quota resource,
+    and another site may name a resource the same way.
+    """
+
+    def __init__(self, repository: Any, listing_id: str) -> None:
+        self._repository = repository
+        self._listing_id = listing_id
+
+    async def snapshot(self) -> list[dict[str, Any]] | None:
+        binding = await api_credit_listing_binding(self._repository, self._listing_id)
+        if binding is None:
+            raise NegotiationStateError(
+                f"listing {self._listing_id!r} has no durable capacity binding"
+            )
+        try:
+            site = build_capacity_client(lambda: self._repository).site(binding.site_id)
+        except KeyError:
+            raise NegotiationStateError(
+                f"listing {self._listing_id!r} is bound to unconfigured site "
+                f"{binding.site_id!r}"
+            ) from None
+
+        async def declared() -> None:
+            return None
+
+        async def available() -> list[dict[str, Any]]:
+            return list(await site.snapshot() or [])
+
+        return await binding.backing.judge_async(declared, available)
+
+
 def _default_seller_round_hook(
     domain: MarketDomainContract,
     repository: Any,
+    listing_id: str,
 ) -> ApiCreditsSellerRoundHook:
     policy = domain.storefront
     if policy is None:
@@ -93,7 +140,7 @@ def _default_seller_round_hook(
             f"domain {domain.identity!s} has no storefront negotiation capability"
         )
     return policy.run_negotiation_policy(
-        build_capacity_client(lambda: repository),
+        _QuotaSnapshot(repository, listing_id),
         lookup_key_record,
         negotiation_config=_negotiation_settings(),
         chains=_chain_settings(),
@@ -350,7 +397,11 @@ def _accepted_selection_artifacts(
     The mechanism is resolved exactly once — from the selection — and the
     obligation is built by the composed registry dispatch. The domain keeps
     only domain semantics: the negotiated credit quantity that scales
-    counted rates, and the plan's ``api_credits.v1`` service terms.
+    counted rates, and the plan's ``api_credits.v1`` service terms. A
+    mechanism the registry builds no obligation for is accepted without a
+    plan only when its seller entry ``settles_from_agreement``; any other
+    would be accepted with nothing its settlement could be verified against,
+    so it is refused.
     """
 
     accepted = SettlementSelection.model_validate(selection)
@@ -367,6 +418,8 @@ def _accepted_selection_artifacts(
         raise OfferUnfulfillableError("settlement_mechanism_unsupported")
     build_obligation = dispatch[accepted.mechanism]
     if build_obligation is None:
+        if stage is None or not getattr(stage, "settles_from_agreement", False):
+            raise OfferUnfulfillableError("settlement_selection_requires_plan")
         return {
             "settlement_selection": accepted.model_dump(mode="json", exclude_none=True),
             "_agreement_settlement_option": advertised.model_dump(
@@ -535,22 +588,37 @@ def _build_response_artifacts(
         if accepted:
             return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
         return {"settlement_selection": artifacts["settlement_selection"]}
-    artifacts = build_api_credit_accepted_artifacts(
-        buyer_principal=acceptance.buyer_principal,
-        seller_principal=acceptance.seller_principal,
-        proposal=acceptance.pinned_proposal,
-        agreed_amount=acceptance.agreed_amount,
-        uses_scalar_amount=acceptance.uses_scalar_amount,
-        listing=acceptance.listing_record,
-    )
-    if accepted:
-        return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
-    accepted_proposal = artifacts.get("accepted_escrow_proposal")
-    return (
-        {"accepted_escrow_proposal": accepted_proposal}
-        if accepted_proposal is not None
-        else {}
-    )
+    if not accepted:
+        # A round that does not accept offers the escrow back at its amount,
+        # under the listing's release condition; its plan is built only when
+        # the escrow is accepted.
+        if acceptance.pinned_proposal is None:
+            return {}
+        try:
+            offered = authorized_escrow_proposal_at_amount(
+                proposal=acceptance.pinned_proposal,
+                listing=acceptance.listing_record,
+                agreed_amount=acceptance.agreed_amount,
+                uses_scalar_amount=acceptance.uses_scalar_amount,
+            )
+        except ReleaseConditionError as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
+        return {"accepted_escrow_proposal": offered}
+    try:
+        artifacts = build_api_credit_accepted_artifacts(
+            buyer_principal=acceptance.buyer_principal,
+            seller_principal=acceptance.seller_principal,
+            proposal=acceptance.pinned_proposal,
+            agreed_amount=acceptance.agreed_amount,
+            uses_scalar_amount=acceptance.uses_scalar_amount,
+            listing=acceptance.listing_record,
+        )
+    except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
+        # An escrow the listing authorizes no condition for, a condition it
+        # does not authorize, and an escrow whose settlement plan cannot be
+        # materialized refuse the round before anything is recorded.
+        raise OfferUnfulfillableError(str(exc)) from exc
+    return _with_agreement(acceptance, artifacts, settlement_artifacts_builder)
 
 
 async def _persist_opening(repository: Any, opening: OpeningRecord) -> None:
@@ -633,8 +701,17 @@ def build_api_credit_negotiation_runtime(
     accepted_obligation_dispatch: AcceptedObligationDispatch | None = None,
     settlement_artifacts_builder: Callable[[Mapping[str, Any]], dict[str, Any]]
     | None = None,
+    listing_source_check: ListingSourceCheck | None = None,
 ) -> NegotiationRuntime:
-    """Compose the shared lifecycle with API-credit codecs and effects."""
+    """Compose the shared lifecycle with API-credit codecs and effects.
+
+    ``listing_source_check`` rechecks a listing against its source before every
+    seller decision and acceptance; by default it reads the listing's own site
+    through the aggregate capacity client.
+    """
+    source_check = listing_source_check or build_listing_source_check(
+        lambda repository: build_capacity_client(lambda: repository)
+    )
 
     dispatch = (
         accepted_obligation_dispatch if accepted_obligation_dispatch is not None else {}
@@ -696,6 +773,7 @@ def build_api_credit_negotiation_runtime(
         policy = seller_round_hook or _default_seller_round_hook(
             domain,
             request.repository,
+            str(request.listing_record.get("listing_id") or ""),
         )
         decoded = request.terms.decoded
         result = await policy(
@@ -767,6 +845,9 @@ def build_api_credit_negotiation_runtime(
             repository, acceptance, dispatch
         ),
         persist_artifacts=_persist_artifacts,
+        check_listing_source=lambda repository, resolved: source_check(
+            repository, resolved.listing_id
+        ),
     )
     return NegotiationRuntime(
         resolve_opening=resolve_opening,

@@ -52,7 +52,6 @@ dependencies = [
     { name = "arkhai-compute-provisioning-contracts" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-fulfillment" },
-    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-resource-pools" },
     { name = "arkhai-kit-site" },
     { name = "pydantic" },
@@ -103,6 +102,17 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-admissibility"
+version = "0.1.0"
+source = { registry = "../../../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-capability-pricing"
 version = "0.1.0"
 source = { registry = "../../../../.dist" }
@@ -123,7 +133,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-config"
-version = "0.2.0"
+version = "0.4.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
@@ -134,7 +144,7 @@ dependencies = [
     { name = "tomlkit" },
 ]
 wheels = [
-    { path = "arkhai_kit_config-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_config-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -171,29 +181,29 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-resource-pools"
-version = "0.6.0"
+version = "0.7.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
-    { name = "arkhai-kit-capability-shape" },
     { name = "arkhai-kit-resource-pools-contracts" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools-0.6.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools-0.7.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../../.dist" }
 dependencies = [
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_kit_resource_pools_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -233,6 +243,7 @@ source = { registry = "../../../../.dist" }
 dependencies = [
     { name = "arkhai-compute" },
     { name = "arkhai-core" },
+    { name = "arkhai-kit-capability-admissibility" },
     { name = "arkhai-kit-capability-pricing" },
     { name = "arkhai-kit-capability-shape" },
     { name = "pydantic" },

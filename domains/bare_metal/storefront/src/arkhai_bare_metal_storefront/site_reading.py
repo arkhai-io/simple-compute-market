@@ -25,6 +25,7 @@ from market_resource_pools import (
     read_site_declarations,
     resolve_asking_rates,
 )
+from market_resource_pools_contracts.backing import BACKED, CapacityBacking
 from market_resource_pools_contracts.hints import raw_listing_shapes, raw_region
 
 
@@ -68,7 +69,8 @@ def resolve_bare_metal_asking_rates(
 class SitePoolReading:
     """One site's pools as bare-metal publication reads them.
 
-    ``admission`` maps every named pool to how it admits bare metal.
+    ``admission`` maps every named pool to how it admits bare metal, and
+    ``backings`` each pool whose declarations resolved to its backing delegate.
     ``unresolvable`` names the problems of each pool whose declarations do not
     resolve; ``unbacked`` the admitted-in-all-else pools that declare no
     capacity backing; ``regionless`` the admitted pools stating no region;
@@ -80,6 +82,7 @@ class SitePoolReading:
 
     admission: Mapping[str, str]
     regions: Mapping[str, str | None]
+    backings: Mapping[str, CapacityBacking] = field(default_factory=dict)
     unresolvable: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     unbacked: tuple[str, ...] = ()
     regionless: tuple[str, ...] = ()
@@ -123,7 +126,11 @@ def read_site_pools(
     for pool_id, pool in declarations.resolved.items():
         if not pool.enabled or not pool.advertises(BARE_METAL_OFFERING_MODE):
             admission[pool_id] = POOL_NOT_ADMITTED
-        elif not pool.backed:
+        elif pool.backing is not BACKED:
+            # Bare metal derives listings only from backed supply. No backing
+            # delegate operation expresses this refusal: bare metal composes
+            # contact exchange, which settlement admissibility alone would let
+            # an unbacked listing publish.
             admission[pool_id] = POOL_NOT_ADMITTED
             unbacked.append(pool_id)
         else:
@@ -157,6 +164,9 @@ def read_site_pools(
     return SitePoolReading(
         admission=admission,
         regions=regions,
+        backings={
+            pool_id: pool.backing for pool_id, pool in declarations.resolved.items()
+        },
         unresolvable=dict(declarations.unresolvable),
         unbacked=tuple(sorted(unbacked)),
         regionless=tuple(

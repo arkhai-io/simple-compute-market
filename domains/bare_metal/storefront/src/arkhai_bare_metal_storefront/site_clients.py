@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit
 
-from compute_provisioning_client import ComputeProvisioningClient
+from compute_provisioning_client import AuthorityTrust, ComputeProvisioningClient
 from compute_provisioning_contracts import (
     FulfillmentAcceptanceResponse,
     FulfillmentRequestBody,
@@ -25,138 +23,141 @@ from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
 )
-from market_identity import Identity, Signer, TrustedIdentitySet
+from core_storefront.auth import AuthError
+from core_storefront.service_peers import (
+    SERVICE_PEER_ROLE,
+    ServicePeerConfigs,
+    ServicePeerTrust,
+)
+from market_config.setting_types import site_authority_url
+from market_identity import Signer
 from market_site_client import SiteCapacityClient
 
 _SITE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_BINDING_FIELDS = frozenset({"site_id", "authority_url", "authority_principal"})
 
 
 @dataclass(frozen=True, slots=True)
 class BareMetalSiteBinding:
-    """One public site identity bound to one exact signed authority."""
+    """One public site identity bound to its URL and to its one service peer.
+
+    The binding names the peer, not a principal: the principals the site's
+    responses and callbacks verify against are the peer's durable active ones,
+    which :class:`ServicePeerTrust` holds, so a rotation reaches them without a
+    configuration change or a restart.
+    """
 
     site_id: str
-    authority_principal: Identity
+    service_peer: str
     authority_url: str = field(repr=False)
 
-    def diagnostic(self) -> dict[str, Any]:
-        """Return only public identity data; routing URLs stay private."""
-        return {
+    def diagnostic(self, trust: ServicePeerTrust | None) -> dict[str, Any]:
+        """Return only public identity data; routing URLs stay private.
+
+        The authority principals are the peer's active ones now, primary
+        first; a site the trust cannot answer for reports none, and why.
+        """
+        report: dict[str, Any] = {
             "site_id": self.site_id,
-            "authority_principal": self.authority_principal.model_dump(mode="json"),
+            "service_peer": self.service_peer,
+            "authority_principals": [],
         }
+        if trust is None:
+            report["trust_error"] = "service-peer trust is not composed"
+            return report
+        try:
+            trusted = trust.site_trusted_set(self.site_id)
+        except AuthError as exc:
+            report["trust_error"] = exc.detail
+            return report
+        report["authority_principals"] = [
+            principal.model_dump(mode="json") for principal in trusted.identities
+        ]
+        return report
 
 
 def _authority_url(value: Any, *, site_id: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"site {site_id!r} authority_url must be a string")
     try:
-        parsed = urlsplit(value.strip())
-    except ValueError:
-        raise ValueError(
-            f"site {site_id!r} authority_url must be an HTTP(S) origin "
-            "without credentials, query, or fragment"
-        ) from None
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.netloc
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise ValueError(
-            f"site {site_id!r} authority_url must be an HTTP(S) origin "
-            "without credentials, query, or fragment"
-        )
-    return value.strip().rstrip("/")
+        return site_authority_url(value)
+    except ValueError as exc:
+        reason = str(exc)
+    # Raised outside the handler, so the refusal carries no exception context.
+    raise ValueError(f"site {site_id!r} authority_url {reason}")
 
 
-def parse_site_bindings(raw_json: str) -> tuple[BareMetalSiteBinding, ...]:
-    """Parse exact site bindings without ever returning raw configuration."""
-    try:
-        raw = json.loads(raw_json)
-    except Exception as exc:
-        raise ValueError("trusted site bindings must be valid JSON") from exc
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("trusted site bindings must be a non-empty JSON list")
+def parse_site_bindings(
+    sites: Mapping[str, str],
+    peers: ServicePeerConfigs,
+) -> tuple[BareMetalSiteBinding, ...]:
+    """Bind each configured site to its URL and to its one service peer,
+    without ever returning raw configuration.
 
+    ``sites`` is ``[capacity.sites]``, each stable site ID to its authority URL;
+    ``peers`` the configured service peers, each bound to one site.
+    """
+    if not sites:
+        raise ValueError("at least one site must be configured")
     bindings: list[BareMetalSiteBinding] = []
-    seen: set[str] = set()
-    for index, item in enumerate(raw):
-        if not isinstance(item, dict):
-            raise ValueError(f"trusted site binding {index} must be an object")
-        unknown = sorted(set(item) - _BINDING_FIELDS)
-        missing = sorted(_BINDING_FIELDS - set(item))
-        if unknown or missing:
-            raise ValueError(
-                f"trusted site binding {index} has invalid fields; "
-                f"missing={missing}, unknown={unknown}"
-            )
-        site_id = item["site_id"]
+    for site_id, url in sites.items():
         if not isinstance(site_id, str) or _SITE_ID.fullmatch(site_id) is None:
+            raise ValueError("a configured site has an invalid site ID")
+        bound = [
+            peer_id
+            for peer_id, (role, peer_site, _principals) in peers.items()
+            if role == SERVICE_PEER_ROLE and peer_site == site_id
+        ]
+        if len(bound) != 1:
             raise ValueError(
-                f"trusted site binding {index} has an invalid site_id"
+                f"site {site_id!r} must be bound to exactly one service peer"
             )
-        if site_id in seen:
-            raise ValueError(f"duplicate trusted site_id {site_id!r}")
-        try:
-            authority_principal = Identity.model_validate(
-                item["authority_principal"]
-            )
-        except Exception as exc:
-            raise ValueError(
-                f"site {site_id!r} has an invalid authority principal"
-            ) from exc
         bindings.append(
             BareMetalSiteBinding(
                 site_id=site_id,
-                authority_url=_authority_url(
-                    item["authority_url"],
-                    site_id=site_id,
-                ),
-                authority_principal=authority_principal,
+                service_peer=bound[0],
+                authority_url=_authority_url(url, site_id=site_id),
             )
         )
-        seen.add(site_id)
     return tuple(bindings)
 
 
 class DurableReservationSiteMap(dict[str, str]):
-    """Reservation-to-site cache whose exact authority binding survives restart."""
+    """Reservation-to-site cache whose site binding survives restart.
+
+    Each reservation is pinned to its site and to the service peer that site is
+    bound to: the stable subject, not a principal, so an authorized rotation of
+    the peer leaves every reservation bound. The principal recorded beside them
+    is the peer's primary when the reservation was made, an audit record that
+    is never compared.
+    """
 
     def __init__(
         self,
         db_path: str,
         bindings: Mapping[str, BareMetalSiteBinding],
+        trust: ServicePeerTrust,
     ) -> None:
         self._db_path = db_path
         self._bindings = dict(bindings)
+        self._trust = trust
         loaded: dict[str, str] = {}
         conn = sqlite3.connect(db_path)
         try:
             rows = conn.execute(
-                "SELECT capacity_reservation_id, site_id, authority_scheme, "
-                "authority_identifier FROM bare_metal_selected_site_bindings"
+                "SELECT capacity_reservation_id, site_id, service_peer "
+                "FROM bare_metal_selected_site_bindings"
             ).fetchall()
         finally:
             conn.close()
-        for reservation_id, site_id, scheme, identifier in rows:
+        for reservation_id, site_id, service_peer in rows:
             binding = self._bindings.get(str(site_id))
             if binding is None:
                 raise RuntimeError(
                     "persisted bare-metal reservation references an unconfigured "
                     f"site_id {site_id!r}"
                 )
-            principal = binding.authority_principal
-            if (
-                principal.scheme.value != str(scheme)
-                or principal.identifier != str(identifier)
-            ):
+            if binding.service_peer != str(service_peer):
                 raise RuntimeError(
-                    "persisted bare-metal reservation site authority changed for "
-                    f"site_id {site_id!r}"
+                    "persisted bare-metal reservation's site is now bound to another "
+                    f"service peer for site_id {site_id!r}"
                 )
             loaded[str(reservation_id)] = str(site_id)
         super().__init__(loaded)
@@ -165,6 +166,13 @@ class DurableReservationSiteMap(dict[str, str]):
         binding = self._bindings.get(site_id)
         if binding is None:
             raise KeyError(f"unknown trusted site_id {site_id!r}")
+        try:
+            audited = self._trust.site_trusted_set(site_id).identities[0]
+        except AuthError as exc:
+            raise RuntimeError(
+                f"site_id {site_id!r} has no trusted service peer to record the "
+                "reservation against"
+            ) from exc
         reservation_id = str(reservation_id)
         conn = sqlite3.connect(self._db_path)
         try:
@@ -172,32 +180,28 @@ class DurableReservationSiteMap(dict[str, str]):
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO bare_metal_selected_site_bindings(
-                      capacity_reservation_id, site_id,
+                      capacity_reservation_id, site_id, service_peer,
                       authority_scheme, authority_identifier
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?)
                     """,
                     (
                         reservation_id,
                         site_id,
-                        binding.authority_principal.scheme.value,
-                        binding.authority_principal.identifier,
+                        binding.service_peer,
+                        audited.scheme.value,
+                        audited.identifier,
                     ),
                 )
                 recorded = conn.execute(
-                    "SELECT site_id, authority_scheme, authority_identifier "
+                    "SELECT site_id, service_peer "
                     "FROM bare_metal_selected_site_bindings "
                     "WHERE capacity_reservation_id = ?",
                     (reservation_id,),
                 ).fetchone()
-                expected = (
-                    site_id,
-                    binding.authority_principal.scheme.value,
-                    binding.authority_principal.identifier,
-                )
-                if recorded != expected:
+                if recorded != (site_id, binding.service_peer):
                     raise RuntimeError(
                         "capacity reservation conflicts with its persisted "
-                        "trusted site authority binding"
+                        "trusted site binding"
                     )
         finally:
             conn.close()
@@ -310,17 +314,50 @@ class SelectedSiteFulfillmentClient:
         )
 
 
+def _seller_provisioning_client(
+    url: str, signer: Signer, authorities: AuthorityTrust
+) -> ComputeProvisioningClient:
+    return ComputeProvisioningClient(
+        url,
+        signer=signer,
+        caller_role="seller",
+        expected_authorities=authorities,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SiteClientFactories:
+    """How each site's two clients are built from its URL, the storefront's
+    signer, and the provider of the site's trusted principals.
+
+    The defaults are the production clients; a test serves the sites through
+    its own transports by supplying factories that pass one.
+    """
+
+    capacity: Callable[[str, Signer, AuthorityTrust], Any] = SiteCapacityClient
+    fulfillment: Callable[[str, Signer, AuthorityTrust], Any] = (
+        _seller_provisioning_client
+    )
+
+
 def build_trusted_site_clients(
     *,
     bindings: tuple[BareMetalSiteBinding, ...],
     signer: Signer,
     db_path: str,
     placement: str,
+    trust: ServicePeerTrust,
+    factories: SiteClientFactories = SiteClientFactories(),
 ) -> tuple[
     AggregateCapacityClient,
     SelectedSiteFulfillmentClient,
 ]:
-    """Construct exact per-site clients and a shared durable route map."""
+    """Construct exact per-site clients and a shared durable route map.
+
+    Each site's capacity and fulfillment clients verify every response against
+    the provider of that site's peer's active principals, read at verification
+    time, the set its callbacks are verified against too.
+    """
     try:
         placement_policy = PLACEMENT_POLICIES[placement]
     except KeyError as exc:
@@ -331,23 +368,16 @@ def build_trusted_site_clients(
         ) from exc
 
     by_site = {binding.site_id: binding for binding in bindings}
-    reservation_sites = DurableReservationSiteMap(db_path, by_site)
+    reservation_sites = DurableReservationSiteMap(db_path, by_site, trust)
     capacity_sites = {
-        site_id: SiteCapacityClient(
-            binding.authority_url,
-            signer,
-            TrustedIdentitySet(identities=(binding.authority_principal,)),
+        site_id: factories.capacity(
+            binding.authority_url, signer, trust.site_authorities(site_id)
         )
         for site_id, binding in by_site.items()
     }
     fulfillment_sites = {
-        site_id: ComputeProvisioningClient(
-            binding.authority_url,
-            signer=signer,
-            caller_role="seller",
-            expected_authorities=TrustedIdentitySet(
-                identities=(binding.authority_principal,)
-            ),
+        site_id: factories.fulfillment(
+            binding.authority_url, signer, trust.site_authorities(site_id)
         )
         for site_id, binding in by_site.items()
     }

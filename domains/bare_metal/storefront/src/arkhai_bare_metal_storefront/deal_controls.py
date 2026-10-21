@@ -15,11 +15,12 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from core_storefront.stage_log import stage_event
-from market_capacity_publication import CapacityAdminRouteService
+from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
 from market_identity import Identity
 from market_settlement_runtime import SettlementAdminRouteService
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
+from .listing_binding import bare_metal_listing_binding
 from .settlement_composition import ALKAHEST_MECHANISM
 
 if TYPE_CHECKING:
@@ -166,8 +167,13 @@ def capacity_admin_routes(
         if any(claim.get(str(name)) != str(value) for name, value in required.items()):
             return None
         claim["resource_id"] = str(context["physical_resource_id"])
-        return await runtime.capacity_client.reserve(
-            site=str(context["site_id"]), claim=claim, deal_ref=dict(deal_ref)
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
+        # The kit's guard refuses a listing no admission authority stands
+        # behind, which the kit's route answers as a conflict.
+        return await CapacityEffects(runtime.capacity_client).reserve(
+            binding, claim=claim, deal_ref=dict(deal_ref)
         )
 
     async def released(event: Mapping[str, Any]) -> dict[str, Any]:

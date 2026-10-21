@@ -181,7 +181,7 @@ class BareMetalSettlementService:
                 "settlement evidence is bound to another Agreement"
             )
         delivery = None
-        if stage.physical:
+        if stage.fulfils_through_capacity:
             terms, _ = await self.physical_terms(thread, negotiation_id)
             context = await self.db.load_bare_metal_fulfillment_context(
                 negotiation_id=negotiation_id

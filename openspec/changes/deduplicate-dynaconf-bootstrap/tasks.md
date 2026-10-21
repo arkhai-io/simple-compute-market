@@ -15,6 +15,7 @@
 
 - [x] 3.1 Run `kit/config` unit tests; compute-provisioning config/unit and startup-relevant integration tests; e2e settings/unit tests; and wheel/install/lock checks. Run profile-based integration checks that are locally available, and disclose any deployment/system suites that cannot run in this environment. Final repository-standard verification: kit/config 134 passed; provisioning 632 unit and 215 integration tests passed under `ACTIVE_PROFILES=mock`; e2e focused settings 2 passed and full unit suite 236 passed under the local profile; all three `uv lock --check` commands passed. The full deployment/system e2e suite was not run because this refactor's planned evidence is satisfied by wheel-installed unit and locally available profile/integration coverage.
 - [x] 3.2 Promote the shared bootstrap contract and preserved compute-provisioning/e2e semantics to `openspec/specs/deployment-state/spec.md` and the foundation/composition rationale to `openspec/specs/deployment-state/architecture.md`. Scope the permanent contract to these migrated consumers; the API-credit service remains out of scope. No repository-wide `ARCHITECTURE.md` edit is expected because the existing package-layer rule already classifies configuration as a foundation capability.
+  Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 3.3 Update `openspec/changes/deduplicate-dynaconf-bootstrap/design.md` with the design-promotion record and final validation evidence; scan the two consumers for obsolete duplicate profile/include constructors; run strict OpenSpec validation when the repository tool is available. The active change passes `npx @fission-ai/openspec@latest validate deduplicate-dynaconf-bootstrap --strict`; repository-wide `validate --all --strict` reports 76 passed and 11 failures in other active changes, so those baseline failures are deferred outside this change.
 
 ## 4. Closeout
@@ -28,28 +29,64 @@
 - [x] 5.3 Narrow the published bootstrap surface in `kit/config/src/market_config/__init__.py` so only `DynaconfBootstrapOptions`, `DynaconfBootstrapResult`, and `load_dynaconf` are re-exported at top level; profile/config/include helpers remain available from `market_config.dynaconf_bootstrap`. Repository search found no consumer of the removed top-level helper exports.
 - [x] 5.4 Promote the configuration-resolution ownership boundary to `docs/development/DEPLOYMENT_AND_CONFIG.md`: the guide now distinguishes shared `arkhai-kit-config` construction from composition-root resolver/policy ownership and documents dotenv as environment-layer input, including e2e project `.env` and provisioning normal `.env` discovery without `.env.local`. The deployment-state spec/architecture and design-promotion record carry the detailed subsystem contract/rationale; `docs/development/ARCHITECTURE.md` remains unchanged because the existing foundation-layer rule is sufficient.
 - [ ] 5.5 Re-run boundary validation after 5.1-5.4: rebuild `arkhai-kit-config` into `.dist`, inspect its wheel metadata/content, reinstall it through provisioning/e2e `reinit`, run `make -C kit/config test`, `make -C provisioning/compute/service test-unit`, `make -C provisioning/compute/service test-integration`, `make -C e2e-tests test PYTEST_ARGS="tests/unit/test_settings_loader.py"`, `make -C e2e-tests test PYTEST_ARGS="tests/unit"`, and `uv lock --check` from `kit/config`, `provisioning/compute/service`, and `e2e-tests`. Run the configured e2e type check with `cd e2e-tests && uv run mypy src/settings.py`; record that kit/config and compute provisioning have no configured mypy target/dependency rather than introducing an ad hoc type-checking toolchain. Run `npx @fission-ai/openspec@latest validate deduplicate-dynaconf-bootstrap --strict` and disclose repository-wide `validate --all --strict` baseline failures separately. The deployed multi-service/system e2e suite remains non-required for this configuration-only refactor. The pre-existing raw happy-path HTTP helpers in provisioning integration tests remain explicitly out of scope; passing integration tests are broad regression evidence, not a claim of exhaustive typed-client contract coverage. Local sandbox evidence after implementation: changed Python sources/tests compile; scoped searches find no removed top-level helper consumers, no shared/provisioning `dotenv_files`, no direct consumer `Dynaconf(...)`, and no duplicate consumer profile splitting; all three `uv lock --check --offline` commands pass; `make check-comment-hygiene` passes. Repository-standard execution remains unverified here: `make dist` cannot fetch build dependencies, focused pytest cannot import uncached Dynaconf, e2e mypy cannot resolve the missing internal `.dist` wheelhouse, and OpenSpec CLI download times out. Run the planned commands in the maintainer environment before marking this task complete.
+- [ ] 5.6 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 6. Closeout after review follow-up
 
-- [ ] 6.1 Complete the plan closeout required by `openspec/README.md#plan-closeout-requirements`: (1) run `make check-comment-hygiene` and directly review comments/docstrings touched by tasks 5.1-5.4 for present-intent wording; (2) review every local import added or touched by this follow-up and move it to module scope when safe, verifying any necessary local import against the real suite; (3) re-check every accepted design decision against documentation ownership and cross-reference rules, including `docs/development/DEPLOYMENT_AND_CONFIG.md`; (4) compress the completed task notes to final behavior, material validation, unresolved/deferred work, and permanent-documentation destinations while preserving useful rationale in `design.md`; (5) re-evaluate roadmap currency and retain the existing explicit no-impact disposition unless the follow-up changes it; and (6) complete the design-promotion record for every material decision. Implementation-side closeout review has rechecked comment/docstring intent, module-scope import placement, documentation ownership/cross-references, roadmap no-impact, and the design-promotion record; final completion remains gated on task 5.5 real-suite/type/OpenSpec evidence.
-- [ ] 6.2 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
-- [ ] 6.3 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=deduplicate-dynaconf-bootstrap` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 6.4 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 6.5 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+Per `openspec/README.md#plan-closeout-requirements`.
+
+- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added, including those tasks 5.1–5.4 touched, for any
+      that narrate the review or migration that introduced them. Do not edit code here:
+      anything to rewrite returns the change to implementation. An implementation-side
+      review already rechecked comment and docstring intent.
+- [ ] 6.2 **Import placement — confirm.** Check the imports this change added, including
+      the follow-up's, for any still local without a recorded reason. One that should
+      move returns the change to implementation. An implementation-side review already
+      rechecked module-scope placement.
+- [ ] 6.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe, including
+      `docs/development/DEPLOYMENT_AND_CONFIG.md`.
+- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 6.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+      Expected: retain the existing explicit no-impact disposition unless the
+      follow-up changes it.
+- [ ] 6.6 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation), then `make check-architecture-change
+      CHANGE=deduplicate-dynaconf-bootstrap`: the change owns an exception row in
+      `docs/development/ARCHITECTURE.toml`, which must be gone, with its edge, before
+      archival.
+- [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun. Closeout is gated on task 5.5's real-suite, type, and OpenSpec
+      evidence.
+- [ ] 6.9 **Promotion.** Write the permanent documents this change owes —
+      `openspec/specs/deployment-state/architecture.md` (3.2) and
+      `docs/development/DEPLOYMENT_AND_CONFIG.md` (5.4), rechecked against the
+      follow-up; `docs/development/ARCHITECTURE.md` stays unchanged — and complete the
+      design-promotion record. `openspec/specs/deployment-state/spec.md` was
+      synchronized by hand in 3.2, so the archive in 6.11 does not write it; the record
+      names it all the same.
+- [ ] 6.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=deduplicate-dynaconf-bootstrap` and resolve every
+      match, then `openspec validate deduplicate-dynaconf-bootstrap --strict`.
+- [ ] 6.11 **Archival.** Last, once every other part is checked: `openspec archive
+      deduplicate-dynaconf-bootstrap -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without re-applying the deltas 3.2 synchronized by
+      hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.

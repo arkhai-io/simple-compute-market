@@ -1,9 +1,12 @@
+from typing import Any
+
 from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
 from market_resource_pools import ResourcePool
 from market_resource_pools_contracts import (
+    BACKED,
     PoolDeclarationError,
     resolve_pool_declarations,
 )
@@ -68,7 +71,7 @@ def run_migrations(engine: Engine) -> None:
                     policy_tags={
                         "deliverable_modes": ["api_credits"],
                         "advertisable_modes": ["api_credits"],
-                        "capacity_backing": "backed",
+                        "capacity_backing": BACKED.label,
                     },
                 )
             )
@@ -98,3 +101,23 @@ def _require_valid_pool_declarations(engine: Engine) -> None:
         raise RuntimeError(
             "stored resource pools carry invalid declarations: " + "; ".join(failures)
         )
+
+
+def load_pool_directory(
+    session_factory: "sessionmaker[Session]",
+) -> dict[str, dict[str, Any]]:
+    """Each stored pool's metadata, as the resource-pool projection carries it.
+
+    A storefront reads a quota resource's pool declarations from the site's
+    projection through the shared resolver, the same way it reads any site's.
+    """
+    with session_factory() as session:
+        return {
+            pool.id: {
+                "label": pool.label,
+                "enabled": bool(pool.enabled),
+                "mechanism": pool.provider,
+                "policy_tags": dict(pool.policy_tags or {}),
+            }
+            for pool in session.query(ResourcePool).all()
+        }

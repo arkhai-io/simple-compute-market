@@ -20,6 +20,5 @@ class VmSystemStatusResponse(HealthResponse):
     #: and to which shape-bearing successor.
     listing_identity_carryover: dict[str, Any] | None = None
     #: Every stored storefront pool override and the one state it is in:
-    #: ``applied``, ``orphaned``, ``unknown``, ``site_unconfigured``, or
-    #: ``inactive``.
+    #: ``applied``, ``orphaned``, ``unknown``, or ``site_unconfigured``.
     pool_overrides: list[dict[str, Any]] | None = None

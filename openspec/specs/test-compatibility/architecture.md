@@ -47,7 +47,7 @@ A moved or extracted boundary may require wheel-content checks, typing markers, 
 
 For an injected domain boundary, focused tests supply a compatible contract object distinct from the default and assert object identity at application, container, repository, codec, settlement, and fulfillment seams. Invalid type, identity, version, declarations, and hook sets are rejected at the root with stateful collaborators left untouched. Existing HTTP and package suites continue to own observable workflow parity; restart coverage reopens real persisted identifiers and confirms that parameterization adds no schema rewrite.
 
-Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. They enforce one default contract construction site, no lower-layer singleton accessor, no concrete cross-domain import, and an installed dependency on the lower-layer contract package.
+Architecture tests inspect production imports and package metadata rather than test monkeypatch patterns. The repository check, `make check-architecture`, holds the layer, scope, and kind rules for every package, including no concrete cross-domain import. Per-package architecture tests hold what it cannot express: one default contract construction site, no lower-layer singleton accessor, which module of a package may import what, and an installed dependency on the lower-layer contract package.
 
 
 

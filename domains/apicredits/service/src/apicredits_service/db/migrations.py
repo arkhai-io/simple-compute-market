@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from typing import Callable
 
 from market_identity import Identity, IdentityScheme
+from market_resource_pools_contracts.backing import legacy_producer_backing
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     declared_deliverable_modes,
 )
@@ -243,7 +243,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             except ValueError as exc:
                 raise SchemaDriftError(f"pool {pool['id']!r} policy_tags: {exc}") from exc
             policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
-            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = legacy_producer_backing().label
             connection.execute(
                 text("UPDATE resource_pools SET policy_tags=:policy_tags WHERE id=:pool_id"),
                 {"pool_id": pool["id"], "policy_tags": json.dumps(policy_tags, sort_keys=True)},
@@ -253,7 +253,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
                 "advertisable=%s backing=%s",
                 pool["id"],
                 ", ".join(sorted(deliverable)) or "none",
-                CAPACITY_BACKED,
+                legacy_producer_backing().label,
             )
 
 

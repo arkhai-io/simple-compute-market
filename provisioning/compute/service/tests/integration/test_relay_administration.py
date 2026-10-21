@@ -219,7 +219,7 @@ class TestTheReaderSplit:
     def _pool_with_relay(self, session_factory, relays, handler):
         _make_relay(relays, token="admission-secret")
         with session_factory() as db, db.begin():
-            db.add(ResourcePool(id="gpu-pool", label="GPU", provider="ansible", enabled=True))
+            db.add(ResourcePool(id="gpu-pool", label="GPU", provider="vm.ansible", enabled=True))
             handler.replace_config(
                 db,
                 "gpu-pool",
@@ -253,7 +253,7 @@ class TestTheReaderSplit:
     ):
         handler = AnsiblePoolConfigHandler(settings=settings)
         with session_factory() as db, db.begin():
-            db.add(ResourcePool(id="nat-pool", label="NAT", provider="ansible", enabled=True))
+            db.add(ResourcePool(id="nat-pool", label="NAT", provider="vm.ansible", enabled=True))
             handler.replace_config(db, "nat-pool", {"playbook_path": _PLAYBOOK_PATH})
         with session_factory() as db:
             config = handler.read_config_for_execution(db, "nat-pool")
@@ -498,7 +498,7 @@ class TestRebinding:
         """A pool already pointing at a relay. Written before any lease exists,
         which is the real order: a lease is what a VM on that pool produced."""
         with session_factory() as db, db.begin():
-            db.add(ResourcePool(id=pool_id, label=pool_id, provider="ansible", enabled=True))
+            db.add(ResourcePool(id=pool_id, label=pool_id, provider="vm.ansible", enabled=True))
             handler.replace_config(
                 db, pool_id,
                 {"playbook_path": _PLAYBOOK_PATH, "relay_id": relay_id},

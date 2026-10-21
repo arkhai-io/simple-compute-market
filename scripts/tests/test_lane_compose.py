@@ -155,6 +155,17 @@ def test_no_storefront_carries_a_provisioning_mode(tmp_path: Path, stack: str) -
         assert not set(services[name].get("environment") or {}) & PROVISIONING_MODE_NAMES, name
 
 
+def test_the_bare_metal_storefront_reads_its_settings_from_mounted_files(
+    tmp_path: Path,
+) -> None:
+    storefront = _render(tmp_path, "bare-metal")["services"]["bare-metal-storefront"]
+    # Only the configuration directory and the signer credential travel through
+    # the environment; every setting is in the files mounted under it.
+    assert set(storefront["environment"]) == {"XDG_CONFIG_HOME", "ARKHAI_IDENTITY_CREDENTIAL"}
+    targets = {volume["target"] for volume in storefront["volumes"]}
+    assert {"/etc/arkhai/storefront.toml", "/etc/arkhai/storefront.secrets.toml"} <= targets
+
+
 @pytest.mark.parametrize(
     "target", ["e2e-vms-dev-env", "e2e-bare-metal-dev-env", "e2e-dev-identities-env"]
 )

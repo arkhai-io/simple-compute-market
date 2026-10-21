@@ -20,14 +20,17 @@ import sqlite3
 from dataclasses import asdict
 
 import pytest
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_storefront import lifecycle
-from market_storefront.startup import _start_publication_loop
+from market_storefront.startup import _start_lifecycle_loops
 
 from tests._settings_overrides import settings_overrides
 from tests.fixtures.publication_cycle import validate_cycle_report
 from tests.publication_app import (
     BUYER_SIGNER,
+    SELLER_WALLET,
     SITE,
     pool,
     publication_app,
@@ -62,7 +65,16 @@ async def capacity_world(tmp_path):
         yield app
 
 
+async def _poll(world) -> None:
+    """One cycle of the projection poller: the storefront now holds what the
+    harness's sites serve."""
+    await world.client.admin_run_lifecycle_cycle("site-projections")
+
+
 async def _cycle(world, *, dry_run: bool = False) -> dict:
+    """One publication cycle, after the projection poller's, so the cycle reads
+    what the harness's sites now serve."""
+    await _poll(world)
     if dry_run:
         report = await world.client.admin_dry_run_lifecycle_cycle("publication")
     else:
@@ -121,6 +133,26 @@ async def test_an_unbacked_source_with_only_capacity_mechanisms_publishes_nothin
 
     assert await _listings(capacity_world) == {}
     assert result["counts"] == {"refuse": 2}
+
+
+async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_seller(
+    capacity_world,
+):
+    capacity_world.pools.append(pool("pool-a", backing="backed", gpu_count=1))
+
+    await _cycle(capacity_world)
+
+    (listing,) = (await _listings(capacity_world)).values()
+    assert [escrow["chain_name"] for escrow in listing["accepted_escrows"]] == ["anvil"]
+    assert listing["demands"] == [
+        {
+            "chain_name": "anvil",
+            "arbiter": get_recipient_arbiter(
+                "anvil", config_path=str(anvil_address_book_path())
+            ).lower(),
+            "demand_data": {"recipient": SELLER_WALLET.lower()},
+        }
+    ]
 
 
 async def test_a_dry_run_reports_the_cycle_and_changes_nothing(world):
@@ -221,6 +253,93 @@ async def test_an_unresolvable_pool_is_held_not_closed(world):
     assert {a["pool_id"] for a in result["actions"] if a["action"] == "hold"} == {
         "broker-b"
     }
+
+
+def _without_region(projected: dict) -> dict:
+    del projected["pool_metadata"]["policy_tags"]["region"]
+    return projected
+
+
+async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world):
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+
+    result = await _cycle(world)
+
+    assert await _listings(world) == {}
+    assert [
+        (action["pool_id"], action["reason"])
+        for action in result["actions"]
+        if action["action"] == "hold"
+    ] == [("broker-a", "pool_region_missing")]
+    report = (await world.client.get_system_status()).publication_derivation[SITE]
+    assert report["regionless_pools"] == ["broker-a"]
+
+
+async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_it(world):
+    """A previewed cycle derives as the cycle would, holds included, and
+    publishes no derivation report: status keeps the last cycle's until a cycle
+    runs, so its derivation and the loop's last outcome describe one cycle."""
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+    await _cycle(world)
+    world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=2)
+
+    preview = await _cycle(world, dry_run=True)
+    previewed = (await world.client.get_system_status()).publication_derivation[SITE]
+    await _cycle(world)
+    ran = (await world.client.get_system_status()).publication_derivation[SITE]
+
+    assert [action for action in preview["actions"] if action["action"] == "hold"] == []
+    assert previewed["regionless_pools"] == ["broker-a"]
+    assert ran["regionless_pools"] == []
+
+
+async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
+    """A backed pool with nothing available yields no candidate; publication
+    still reports it as held for its missing region."""
+    world.pools.append(
+        _without_region(pool("pool-b", backing="backed", available={"gpu_count": 0}))
+    )
+
+    result = await _cycle(world)
+
+    assert await _listings(world) == {}
+    assert [
+        (action["pool_id"], action["reason"])
+        for action in result["actions"]
+        if action["action"] == "hold"
+    ] == [("pool-b", "pool_region_missing")]
+
+
+async def test_a_pool_losing_its_region_holds_its_listings_open(world):
+    world.pools.append(pool("broker-a", backing="unbacked", gpu_count=2))
+    await _cycle(world)
+    published = await _listings(world)
+
+    world.pools[0] = _without_region(pool("broker-a", backing="unbacked", gpu_count=2))
+    world.set_settlement_clauses([settlement_clause(rate="250")])
+    result = await _cycle(world)
+
+    # Neither closed nor refreshed: the changed rate, which would refresh a
+    # listing whose pool states a region, does not reach them.
+    assert await _listings(world) == published
+    assert result["counts"] == {"hold": 1}
+
+
+async def test_a_regionless_pools_sold_out_listing_still_closes(world):
+    """Region does not bear on capacity, so availability reconciliation still
+    closes a backed listing whose pool has stopped stating a region."""
+    world.pools.append(pool("pool-b", backing="backed"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+
+    world.pools[0] = _without_region(pool("pool-b", backing="backed"))
+    world.pools[0]["resources"][0]["available"]["gpu_count"] = 0
+    await _poll(world)
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+
+    row = await _listing(world, listing_id)
+    assert (row["status"], row["closed_by"]) == ("closed", "reconciliation")
 
 
 async def test_a_backed_listing_without_disclosed_backing_is_refreshed(world):
@@ -394,12 +513,15 @@ async def test_a_capacity_event_acts_only_on_backed_listings(world):
         row = await _listing(world, listing_id)
         return row["status"], row["closed_by"]
 
-    def set_available(units):
+    async def set_available(units):
         # Only availability moves; every declared capacity stays as it was.
         for projected in world.pools:
             projected["resources"][0]["available"]["gpu_count"] = units
+        # A fungible pool's availability is read from the site's capacity
+        # buckets, which the storefront holds as of its last poll.
+        await world.client.admin_run_lifecycle_cycle("site-projections")
 
-    set_available(0)
+    await set_available(0)
     world.site.emit("reserved")
     await world.client.admin_run_lifecycle_cycle("capacity-events")
     assert await state(backed) == ("closed", "reconciliation")
@@ -409,11 +531,45 @@ async def test_a_capacity_event_acts_only_on_backed_listings(world):
     await world.db.update_listing(
         listing_id=unbacked, status="closed", closed_by="reconciliation"
     )
-    set_available(1)
+    await set_available(1)
     world.site.emit("released")
     await world.client.admin_run_lifecycle_cycle("capacity-events")
     assert await state(backed) == ("open", None)
     assert await state(unbacked) == ("closed", "reconciliation")
+
+
+async def test_a_capacity_event_reconciles_on_the_buckets_current_with_it(world):
+    """A capacity event refreshes its site's buckets before it reconciles.
+
+    The site's availability moves and its event arrives with no projection poll
+    between them, so the buckets the storefront held were the last poll's: the
+    event's own reconciliation must fetch them, closing the backed fungible
+    listing a reservation leaves without capacity and reopening it on release,
+    and it wakes no publication.
+    """
+    world.pools.append(pool("pool-b", backing="backed"))
+    await _cycle(world)
+    (listing_id,) = await _listings(world)
+
+    def set_available(units):
+        for projected in world.pools:
+            projected["resources"][0]["available"]["gpu_count"] = units
+
+    async def state():
+        row = await _listing(world, listing_id)
+        return row["status"], row["closed_by"]
+
+    wakes = len(world.wakes)
+    set_available(0)
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    assert await state() == ("closed", "reconciliation")
+
+    set_available(1)
+    world.site.emit("released")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    assert await state() == ("open", None)
+    assert len(world.wakes) == wakes
 
 
 def _vm_provision(duration_seconds: int = 3600) -> dict:
@@ -485,13 +641,12 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
 
 
 @pytest.fixture
-def lifecycle_registry():
-    """A clean loop registry and pause flag, as a fresh process has."""
-    lifecycle.reset_for_tests()
-    lifecycle.controller().request_pause(False)
+async def lifecycle_registry():
+    """A clean loop registry and pause flag, as a fresh process has; any timer
+    a test started is cancelled and awaited before its event loop closes."""
+    await lifecycle.reset_for_tests()
     yield
-    lifecycle.reset_for_tests()
-    lifecycle.controller().request_pause(False)
+    await lifecycle.reset_for_tests()
 
 
 async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
@@ -499,7 +654,7 @@ async def test_the_lifecycle_pause_holds_the_loop_while_its_controls_step_it(
 ):
     # Held before it starts, so the running loop never begins a cycle of its own.
     await world.client.admin_pause_lifecycle_loops()
-    _start_publication_loop(world.db)
+    _start_lifecycle_loops()
     held = await world.client.admin_pause_lifecycle_loops()
     assert held["loops"]["publication"] == "paused"
 
@@ -564,9 +719,11 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
     supported = await evaluate()
     assert supported.decision == "accept"
 
-    # The declaration shrinks below the listing's count; no cycle has run, so
-    # the listing is still open and only the guard can notice.
+    # The declaration shrinks below the listing's count and the poller holds
+    # it; no publication cycle has run, so the listing is still open and only
+    # the guard can notice.
     world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=1)
+    await _poll(world)
     refused = await evaluate()
 
     # A policy rejection refuses the opening, as negotiate/new would.
@@ -578,7 +735,7 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
 @pytest.fixture
 async def registry_world(tmp_path):
     async with publication_app(
-        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE, registries=True
+        tmp_path, mechanism_fulfillment=_UNBACKED_PUBLISHABLE
     ) as app:
         yield app
 
@@ -836,6 +993,90 @@ async def test_a_stated_shape_negotiates_and_reserves_every_declared_dimension(t
         assert reservation["dimensions"] == {
             "gpu_count": 1, "vcpu_count": 8, "ram_gb": 32, "disk_gb": 100,
         }
+
+
+# ---------------------------------------------------------------------------
+# Shape admissibility
+# ---------------------------------------------------------------------------
+
+
+def _gpu(count) -> dict:
+    return {**_SHAPE, "gpu": {"count": count, "model": "H100"}}
+
+
+async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
+    """The parsed ``[admissibility.defaults.vm]`` bounds generated shapes, withholds
+    a stated offer it excludes, and withholds a listing whose range it empties, each
+    stated finding reported in system status. That such a listing, once open,
+    closes is the reconciler's derivation-level evidence; the closing of a
+    published listing is the next case's."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"max": 1}}},
+    ) as world:
+        world.pools.append(pool("generated", backing="unbacked", capacity=_BIG))
+        world.pools.append(
+            _shaped(
+                "stated",
+                shapes=(
+                    _SHAPE,
+                    _gpu(2),
+                    {**_SHAPE, "cpu": {"count": 4}, "gpu": {"count": {"offer": 2, "min": 2}, "model": "H100"}},
+                ),
+            )
+        )
+
+        assert (await _cycle(world))["counts"] == {"publish": 2}
+
+        published = {
+            (row["listing_resource"]["pool_id"], row["listing_resource"]["gpu_count"])
+            for row in (await _listings(world)).values()
+        }
+        assert published == {("generated", 1), ("stated", 1)}
+        report = await _report(world)
+        (excluded,) = report["inadmissible_listing_shapes"]["stated"]
+        assert excluded["tier"] == "pool_hint"
+        assert [problem["tier"] for problem in excluded["problems"]] == ["configured_default"]
+        (unusable,) = report["unusable_shape_constraints"]["stated"]
+        assert {bound["tier"] for bound in unusable["bounds"]} == {
+            "pool_hint", "configured_default",
+        }
+        assert "generated" not in report["inadmissible_listing_shapes"]
+
+
+async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_path):
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=_UNBACKED_PUBLISHABLE,
+        admissibility_default={"gpu": {"count": {"max": 1}}},
+    ) as world:
+        # The hint widens the configured default for this listing alone.
+        widened = {**_SHAPE, "gpu": {"count": {"offer": 2, "max": 2}, "model": "H100"}}
+        world.pools.append(_shaped(shapes=(_SHAPE, widened)))
+        await _cycle(world)
+        before = await _listings(world)
+        (two_gpu,) = [
+            listing_id for listing_id, row in before.items()
+            if row["listing_resource"]["gpu_count"] == 2
+        ]
+
+        # A change to the constraints alone keeps the listing's identity.
+        world.pools[0] = _shaped(
+            shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2, "max": 4}, "model": "H100"}})
+        )
+        assert "close" not in (await _cycle(world))["counts"]
+        assert set(await _listings(world)) == set(before)
+
+        # Without its own maximum, the configured default's governs the offer.
+        world.pools[0] = _shaped(
+            shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2}, "model": "H100"}})
+        )
+        assert (await _cycle(world))["counts"] == {"close": 1}
+
+        closed = await _listing(world, two_gpu)
+        assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
+        assert set(await _listings(world)) == set(before) - {two_gpu}
 
 
 def _pre_shape_listing(db, listing_id, *, gpu_count, status="open", closed_by=None,

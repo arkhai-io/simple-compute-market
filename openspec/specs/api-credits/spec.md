@@ -14,15 +14,35 @@ The API-credits domain MUST validate listings, round-zero provision intent, nego
 - **THEN** the domain rejects it before policy or settlement processing
 
 ### Requirement: Quota-backed publication
-An API-credits listing MUST identify a named service and an authoritative quota resource. Publication from quota MUST require that resource to exist with available capacity. Reconciliation MUST close an open listing when authoritative availability reaches zero and MAY reopen it when availability later becomes positive; an unavailable authority MUST preserve the last complete listing state rather than be interpreted as zero.
+An API-credits listing MUST identify a named service and an authoritative quota resource. Publication from quota MUST require that resource to exist with available capacity, and MUST resolve the backing the resource's pool declares from the credits service's resource-pool projection, which carries each pool's declarations. Listing creation MUST record the listing's immutable durable binding — site, offering mode, quota resource, pool, domain identity and version, and backing — and every capacity effect, reconciliation, and recheck MUST build the listing's binding from that record, never from the published listing. Listing creation MUST resolve the listing's settlement options from the settlement clauses the operator submits, or from the storefront's configured defaults when none are submitted, and a pool whose backing leaves none of them for the domain to publish MUST yield no listing. Reconciliation MUST close an open capacity-backed listing when authoritative availability reaches zero and MAY reopen it when availability later becomes positive, but only while its quota resource is still in its bound pool and that pool declares the listing's bound backing; an unavailable authority MUST preserve the last complete listing state rather than be interpreted as zero. Every reconciliation pass, whatever capacity event triggered it, MUST also close any open listing, backed or not, whose quota resource is no longer in its bound pool, or whose bound pool is unresolvable, disabled, no longer advertises `api_credits`, or declares a backing other than the listing's bound backing; a site whose pools cannot be read MUST close nothing. A pool declaration changed without a capacity event closes its listings on the next reconciliation pass, and the listing-source check refuses them until then. The storefront MUST refuse to start against a database holding a listing with no durable binding, naming that a fresh database is required.
 
 #### Scenario: Quota is exhausted and later replenished
-- **WHEN** reconciliation observes zero available units for an open listing and later observes at least one available unit
+- **WHEN** reconciliation observes zero available units for an open capacity-backed listing and later observes at least one available unit
 - **THEN** it closes the listing and subsequently republishes it from the new authoritative view
 
 #### Scenario: Quota authority is unavailable
 - **WHEN** reconciliation cannot obtain an authoritative availability view
 - **THEN** it neither closes nor reopens the listing based solely on that failure
+
+#### Scenario: An open listing's source changes while quota remains
+- **WHEN** a reconciliation pass finds an open listing's quota resource moved to another pool, even one declaring the same backing, or its bound pool declaring another backing, while the resource still has available units
+- **THEN** the listing closes, and it is not reopened while that mismatch holds
+
+#### Scenario: A listing is created
+- **WHEN** an operator creates a listing for a quota resource in a backed pool
+- **THEN** the listing and its durable binding, recording the pool's declared backing, are stored together before registry publication
+
+#### Scenario: Two listings share a quota resource
+- **WHEN** an operator creates a second listing over a quota resource that already has an open listing
+- **THEN** each listing records its own durable binding, both naming that quota resource as their source
+
+#### Scenario: A listing is created with settlement clauses
+- **WHEN** an operator creates a listing and names its settlement clauses
+- **THEN** the listing's settlement options are resolved from those clauses rather than the configured defaults
+
+#### Scenario: A database predates listing bindings
+- **WHEN** the storefront starts against a database holding a listing with no durable binding
+- **THEN** it refuses to start and names the listing and the fresh-database remedy
 
 ### Requirement: Quantity-scaled pricing
 API-credits negotiation MUST interpret an advertised escrow rate as a per-credit-unit rate and compute the scalar reference payment as quantity multiplied by that rate in payment base units. Seller policy MUST evaluate offers against the same quantity-scaled reference amount. A hidden-reserve listing MUST have an operator-configured minimum price before it can accept an offer.
@@ -32,7 +52,7 @@ API-credits negotiation MUST interpret an advertised escrow rate as a per-credit
 - **THEN** buyer and seller policy use 300 base units as the scalar reference payment
 
 ### Requirement: Advisory negotiation checks and authoritative issuance
-Negotiation-time quota and key checks MUST be advisory guards over captured views. Existing-key negotiation MUST reject known revoked keys, keys owned by another wallet, and unavailable keys while allowing an active unowned key to receive an open top-up. Issuance MUST recheck key status and ownership at the credits service and MUST commit a live quota hold or atomically reserve fresh quota before granting credits.
+Negotiation-time quota and key checks MUST be advisory guards over captured views. The quota check MUST compare a requested quantity with captured availability only for a listing whose backing is bounded by availability, and MUST report itself not applicable otherwise. Existing-key negotiation MUST reject known revoked keys, keys owned by another wallet, and unavailable keys while allowing an active unowned key to receive an open top-up. Issuance MUST recheck key status and ownership at the credits service and MUST commit a live quota hold or atomically reserve fresh quota before granting credits.
 
 #### Scenario: Captured quota cannot satisfy the request
 - **WHEN** the captured availability is two units and the buyer requests three
@@ -178,3 +198,56 @@ The storefront MUST persist accepted-Agreement-bound SettlementEvidence and nego
 
 - **WHEN** preparation has verified the authoritative escrow and saved matching delivery facts
 - **THEN** delivery consumes those facts without a second preparation inside terminal failure handling
+
+### Requirement: An API-credit listing is rechecked against its source
+
+Before every seller decision in a negotiation round, and before a buyer's or an
+administrator's acceptance, the API-credit storefront MUST recheck the listing
+against its source: that its quota resource is still declared in the pool its
+durable binding records, that the pool is enabled and advertises `api_credits`, and that the pool's backing equals the
+listing's bound backing. For a capacity-backed listing it MUST also require at least
+one available unit. A source it cannot confirm MUST be refused as retryable. A
+buyer's exit MUST NOT be rechecked.
+
+#### Scenario: The pool stops advertising API credits
+
+- **WHEN** a buyer negotiates against a listing whose pool no longer advertises `api_credits`
+- **THEN** the seller rejects with a declared-match reason
+
+#### Scenario: The quota resource moves to another pool
+
+- **WHEN** a buyer negotiates against a listing whose quota resource is now declared in a pool other than the one its binding records, even one declaring the same backing
+- **THEN** the seller rejects with a declared-match reason
+
+#### Scenario: Quota is exhausted
+
+- **WHEN** a buyer negotiates against a capacity-backed listing whose quota resource has no available unit
+- **THEN** the seller rejects with the availability reason
+
+#### Scenario: The credits service cannot be reached
+
+- **WHEN** the listing's source cannot be confirmed
+- **THEN** a seller decision that would counter or accept, and any acceptance, is refused as retryable
+
+### Requirement: API-credit system status is the administrator's signed read
+
+The API-credit storefront's system status MUST be read only by its administrator,
+through the same signed request and signed response every other administrator route
+uses (operation `admin_system_status`, resource `system/status`), so the canonical
+storefront client reads it and an unsigned request is refused. Beside its checks,
+system status MUST report every lifecycle loop the storefront's loop controller holds,
+by name: the loop's state and the outcome of its last cycle, in the shape the other
+storefronts report.
+
+#### Scenario: An unsigned status read is refused
+
+- **WHEN** a caller requests the API-credit storefront's system status without the
+  administrator's signature
+- **THEN** the request is refused as unauthenticated and no status is returned
+
+#### Scenario: The administrator reads every loop's state
+
+- **WHEN** the administrator reads system status through the canonical storefront
+  client
+- **THEN** the signed response reports every lifecycle loop, the capacity-event
+  pollers' sites among them, with its state and its last cycle's outcome

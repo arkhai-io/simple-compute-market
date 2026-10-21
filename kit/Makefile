@@ -1,8 +1,8 @@
-.PHONY: test test-alkahest test-capability-shape test-capability-pricing test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront dist dist-ci dist-capability-shape dist-capability-pricing dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront test-arkhai-payments
+.PHONY: test test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront dist dist-ci dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront test-arkhai-payments
 
 DIST_DIR ?= ../.dist
 
-test: dist test-alkahest test-capability-shape test-capability-pricing test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
+test: dist test-alkahest test-capability-shape test-capability-pricing test-capability-admissibility test-capacity-publication test-pool-overrides test-config test-contact-exchange test-delivery test-delivery-apprise test-identity test-policy test-site test-site-client test-resource-pools-contracts test-resource-pools test-resource-pools-client test-fulfillment test-settlement-runtime test-negotiation-runtime test-storefront test-arkhai-payments
 
 test-alkahest:
 	cd alkahest && $(MAKE) test
@@ -21,6 +21,9 @@ test-capability-shape:
 
 test-capability-pricing:
 	cd capability-pricing && $(MAKE) test
+
+test-capability-admissibility:
+	cd capability-admissibility && $(MAKE) test
 
 test-pool-overrides:
 	cd pool-overrides && $(MAKE) test
@@ -66,7 +69,7 @@ test-storefront:
 
 dist: dist-ci
 
-dist-ci: dist-capability-shape dist-capability-pricing dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
+dist-ci: dist-capability-shape dist-capability-pricing dist-capability-admissibility dist-capacity-publication dist-pool-overrides dist-contact-exchange dist-delivery dist-delivery-apprise dist-site dist-site-client dist-resource-pools-contracts dist-resource-pools dist-resource-pools-client dist-fulfillment dist-settlement-runtime dist-negotiation-runtime dist-storefront dist-arkhai-payments
 
 dist-contact-exchange: dist-settlement-runtime
 	-mkdir -p $(DIST_DIR)
@@ -85,6 +88,12 @@ dist-capability-pricing: dist-capability-shape
 	cd capability-pricing && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_capability_pricing-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-capability-pricing produced a platform-specific wheel" && exit 1)
+
+dist-capability-admissibility: dist-capability-shape
+	-mkdir -p $(DIST_DIR)
+	cd capability-admissibility && $(MAKE) build
+	@ls $(DIST_DIR)/arkhai_kit_capability_admissibility-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-kit-capability-admissibility produced a platform-specific wheel" && exit 1)
 
 dist-pool-overrides:
 	-mkdir -p $(DIST_DIR)
@@ -122,7 +131,7 @@ dist-site-client:
 	@ls $(DIST_DIR)/arkhai_kit_site_client-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-kit-site-client produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-resource-pools-contracts:
+dist-resource-pools-contracts: dist-capability-admissibility
 	-mkdir -p $(DIST_DIR)
 	cd resource-pools-contracts && $(MAKE) build
 	@ls $(DIST_DIR)/arkhai_kit_resource_pools_contracts-*-none-any.whl > /dev/null 2>&1 || \

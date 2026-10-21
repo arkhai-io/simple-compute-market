@@ -7,10 +7,11 @@ A registry that misses a close or a reopen is recorded as failed, and the next
 from __future__ import annotations
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED
 
 from market_capacity_publication import (
+    PublicationBinding,
     BoundListing,
-    CapacityBinding,
     PublicationCandidate,
     PublicationRuntime,
 )
@@ -18,7 +19,7 @@ from market_capacity_publication import (
 _A = "https://registry-a.example"
 _B = "https://registry-b.example"
 _STOREFRONT = "https://seller.example"
-_BINDING = CapacityBinding("site-a", "vm", "pool-a")
+_BINDING = PublicationBinding("site-a", "vm", "pool-a", BACKED)
 
 
 class _Repository:

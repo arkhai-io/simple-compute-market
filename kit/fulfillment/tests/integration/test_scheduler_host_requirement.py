@@ -49,9 +49,6 @@ class _Handler:
     def replace_config(self, db, pool_id, config):
         pass
 
-    def delete_config(self, db, pool_id):
-        pass
-
 
 @pytest.fixture
 def services():

@@ -95,11 +95,19 @@ def _add_operator_state(conn: sqlite3.Connection) -> None:
 
 
 def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
+    """Each capacity reservation's site and the service peer that site is bound to.
+
+    The reservation is pinned to the peer, a stable subject whose principals
+    rotate, so an authorized rotation keeps it bound. ``authority_scheme`` and
+    ``authority_identifier`` record the peer's primary principal when the
+    reservation was made, for audit only.
+    """
     conn.execute(
         """
         CREATE TABLE bare_metal_selected_site_bindings (
           capacity_reservation_id TEXT PRIMARY KEY,
           site_id TEXT NOT NULL,
+          service_peer TEXT NOT NULL,
           authority_scheme TEXT NOT NULL,
           authority_identifier TEXT NOT NULL,
           created_at TEXT NOT NULL
@@ -108,6 +116,7 @@ def _add_selected_site_bindings(conn: sqlite3.Connection) -> None:
             DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
           CHECK (LENGTH(TRIM(capacity_reservation_id)) > 0),
           CHECK (LENGTH(TRIM(site_id)) > 0),
+          CHECK (LENGTH(TRIM(service_peer)) > 0),
           CHECK (LENGTH(TRIM(authority_scheme)) > 0),
           CHECK (LENGTH(TRIM(authority_identifier)) > 0)
         )
@@ -154,12 +163,13 @@ def _add_selected_site_immutability(conn: sqlite3.Connection) -> None:
         """
         CREATE TRIGGER IF NOT EXISTS bare_metal_selected_site_immutable
         BEFORE UPDATE OF
-          capacity_reservation_id, site_id,
+          capacity_reservation_id, site_id, service_peer,
           authority_scheme, authority_identifier
         ON bare_metal_selected_site_bindings
         WHEN NOT (
           OLD.capacity_reservation_id IS NEW.capacity_reservation_id
           AND OLD.site_id IS NEW.site_id
+          AND OLD.service_peer IS NEW.service_peer
           AND OLD.authority_scheme IS NEW.authority_scheme
           AND OLD.authority_identifier IS NEW.authority_identifier
         )
@@ -372,24 +382,32 @@ def _refuse_retired_listing_kind(conn: sqlite3.Connection) -> None:
         )
 
 
-#: Each site's latest projection generation a publication run accepted. Override
-#: status reads it: publication may run in another process, or before a restart,
-#: so no in-memory record could answer for it.
-ACCEPTED_GENERATIONS_TABLE = "bare_metal_accepted_site_generations"
+class RetiredReservationBindingError(RuntimeError):
+    """The database records reservations without their site's service peer."""
 
 
-def _add_accepted_site_generations(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {ACCEPTED_GENERATIONS_TABLE} (
-          site_id TEXT PRIMARY KEY,
-          revision INTEGER NOT NULL,
-          digest TEXT NOT NULL,
-          pool_ids TEXT NOT NULL,
-          accepted_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
+def _refuse_reservations_without_their_peer(conn: sqlite3.Connection) -> None:
+    """Refuse a database whose reservations name no service peer.
+
+    A reservation is pinned to its site's service peer, a column the
+    selected-site table has had since it was first created; a database created
+    before then records only the principal, which no longer identifies the
+    site's authority once that principal rotates. Its reservations cannot be
+    rebound without guessing, and no upgrade is kept, so startup refuses and
+    names the remedy rather than failing on the missing column later. Recognized
+    by structure, as the retired listing kind is.
+    """
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(bare_metal_selected_site_bindings)")
+    }
+    if columns and "service_peer" not in columns:
+        raise RetiredReservationBindingError(
+            "this bare-metal storefront database records reservations without "
+            "their site's service peer and cannot be read; reset it as described "
+            "in docs/bare-metal-seller-quickstart.md, "
+            "\"Resetting the storefront database\""
         )
-        """
-    )
 
 
 def _retire_storefront_negotiation(conn: sqlite3.Connection) -> None:
@@ -486,10 +504,10 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
         id="bare-metal-storefront-0010-drop-derived-publications",
         apply=_drop_derived_publication_tracking,
     ),
-    Migration(
-        id="bare-metal-storefront-0011-accepted-site-generations",
-        apply=_add_accepted_site_generations,
-    ),
+    # No migration takes 0011's ID: its table, the projection generations
+    # publication once accepted, is frozen. A database that applied it keeps
+    # the table, which nothing reads or writes. See
+    # docs/development/DEPLOYMENT_AND_CONFIG.md, "Migrations at startup".
     Migration(
         id="bare-metal-storefront-0012-retire-storefront-negotiation",
         apply=_retire_storefront_negotiation,
@@ -497,5 +515,12 @@ BARE_METAL_STOREFRONT_MIGRATIONS = (
     Migration(
         id="bare-metal-storefront-0013-alkahest-lease-ready-evidence",
         apply=_add_alkahest_lease_ready_evidence,
+    ),
+    # After every migration that creates or alters the selected-site table, so
+    # a fresh database passes it and records it, and a database whose table
+    # predates the service-peer column is refused at every start.
+    Migration(
+        id="bare-metal-storefront-0014-refuse-reservations-without-their-peer",
+        apply=_refuse_reservations_without_their_peer,
     ),
 )

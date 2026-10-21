@@ -26,7 +26,7 @@ buyer-side escrow requirements.
   provisioning SSH private-key file.
 - A Resource Pool document that explicitly declares `bare_metal`; absence is
   not a permissive default.
-- One strict shared settlement configuration. Alkahest roles require chain configuration, the funded public seller address, and the wallet key in its own credential file. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose or this document.
+- One strict shared settlement configuration, the `[Settlement]` section of the storefront's configuration. Alkahest roles require chain configuration, the funded public seller address, and the wallet key in the storefront's Secret overlay. Payments-only roles use public service, account, and receipt-trust settings without wallet or RPC inputs. Never put a wallet private key, payment credential, or provider object in Compose, the public configuration file, or this document.
 
 The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal` discovery, negotiation, contact introduction, and physical lifecycle commands. A running seller stack is not end-to-end evidence until the public path also observes authenticated access, teardown, and access revocation against a disposable host.
 
@@ -36,9 +36,11 @@ The installed `arkhai-bare-metal-buyer` contribution supplies `market bare-metal
 make dist build-registry build-provisioning build-bare-metal-storefront
 ```
 
-`domains/bare_metal/storefront/Dockerfile` installs
-`arkhai_bare_metal_storefront-0.2.1` from `.dist`. The runtime image does not
-copy repository source or resolve an editable sibling package.
+`domains/bare_metal/storefront/Dockerfile` installs the
+`arkhai-bare-metal-storefront` wheel from `.dist`. The runtime image does not
+copy repository source or resolve an editable sibling package, and it sets no
+application setting: the storefront reads every setting from its mounted
+configuration files.
 
 ## Define the selected site
 
@@ -109,7 +111,12 @@ Use separate owner-readable files:
 - `BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE` contains only the registry
   signing credential expected by its configured public principal.
 - `BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE` contains the storefront's
-  `ARKHAI_IDENTITY_CREDENTIAL`.
+  `ARKHAI_IDENTITY_CREDENTIAL`, the one value the storefront reads from its
+  environment besides its configuration directory.
+- `BARE_METAL_STOREFRONT_SECRETS_FILE` is the storefront's Secret overlay,
+  `storefront.secrets.toml`: for Alkahest, the seller wallet's
+  `[Wallet] private_key`, and any other secret setting, such as a delivery sink's
+  credentials.
 - `BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE` contains the provisioning
   authority's `ARKHAI_IDENTITY_CREDENTIAL`.
 - `BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE` is the Ansible key for the
@@ -120,12 +127,14 @@ credential across roles, and do not commit credential values.
 
 ## Configure public bindings
 
-Export the paths plus exact public principals. Values shown in angle brackets
-are required deployment inputs, not defaults:
+Export the file paths and the public principals the Compose stack reads. Values
+shown in angle brackets are required deployment inputs, not defaults:
 
 ```bash
 export BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=/run/operator/registry-credential
 export BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=/run/operator/storefront-identity.env
+export BARE_METAL_STOREFRONT_CONFIG_FILE=/run/operator/storefront.toml
+export BARE_METAL_STOREFRONT_SECRETS_FILE=/run/operator/storefront.secrets.toml
 export BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=/run/operator/provisioning-identity.env
 export BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=/run/operator/site-ssh-key
 export BARE_METAL_PROVISIONING_INVENTORY_FILE=/run/operator/bare-metal-hosts.ini
@@ -135,31 +144,92 @@ export BARE_METAL_REGISTRY_AUTHORITY_ID=bare-metal-registry
 export BARE_METAL_REGISTRY_AUTHORITY_SCHEME=<scheme>
 export BARE_METAL_REGISTRY_AUTHORITY_IDENTIFIER=<canonical-identifier>
 
+# The provisioning service trusts the storefront's principal and binds it to the site.
 export BARE_METAL_STOREFRONT_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=<canonical-identifier>
-export BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON='[{"scheme":"<scheme>","identifier":"<canonical-admin-identifier>"}]'
-export BARE_METAL_STOREFRONT_PUBLIC_URL=https://seller.example/
-export BARE_METAL_STOREFRONT_EVM_ADDRESS=<public-settlement-address>   # Alkahest only
-export BARE_METAL_STOREFRONT_CHAINS_JSON='{"<chain>":{"rpc_url":"<rpc-url>"}}'   # Alkahest only
-export BARE_METAL_STOREFRONT_WALLET_ENV_FILE=/run/operator/wallet.env   # Alkahest only; holds BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY
-export BARE_METAL_STOREFRONT_SETTLEMENT_JSON="$(cat /run/operator/settlement.json)"
-export BARE_METAL_PUBLICATION_CLAUSES_JSON='<exact versioned settlement clauses>'
-export BARE_METAL_MAX_DURATION_SECONDS=7200
-
 export BARE_METAL_PROVISIONING_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=<canonical-site-authority-identifier>
 export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_SCHEME=<scheme>
 export BARE_METAL_PROVISIONING_ADMIN_IDENTITY_IDENTIFIER=<canonical-admin-identifier>
 export BARE_METAL_SITE_ID=california-1
-
-export BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first
-export BARE_METAL_STOREFRONT_SITES_JSON='[{"site_id":"california-1","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"<scheme>","identifier":"<canonical-site-authority-identifier>"}}]'
 ```
 
-The site object is an exact trust binding. The storefront does not infer a
-site from inventory, payload fields, reachability, or list order. With
-`most_available`, it compares authoritative capacity projections only among
-the listed trusted sites.
+The storefront itself reads its settings only from files under
+`$XDG_CONFIG_HOME/arkhai/`: the operator's `storefront.toml`, the Compose stack
+mounting it and the Secret overlay at `/etc/arkhai/`. The keys are the VM
+storefront's for the same concepts; the packaged `settings.toml` documents every
+key and its default. A minimal Alkahest seller's `storefront.toml`:
+
+```toml
+base_url = "https://seller.example"
+
+[Identity.principal]
+scheme     = "<scheme>"
+identifier = "<canonical-identifier>"   # the storefront principal exported above
+
+[Identity.administrators.operator]
+principals = [{ scheme = "<scheme>", identifier = "<canonical-admin-identifier>" }]
+
+# The site's service peer: the provisioning authority's principal.
+[Identity.service_peers.california_1_site]
+role       = "service"
+site_id    = "california-1"
+principals = [{ scheme = "<scheme>", identifier = "<canonical-site-authority-identifier>" }]
+
+[capacity]
+placement = "fill_first"
+
+[capacity.sites]
+california-1 = "http://bare-metal-provisioning:8081"
+
+[registry]
+urls = ["http://bare-metal-registry:8080"]
+
+[registry.authorities."http://bare-metal-registry:8080"]
+authority  = "bare-metal-registry"
+principals = [{ scheme = "<scheme>", identifier = "<canonical-registry-identifier>" }]
+
+[Settlement]
+schema_version = 1
+priority = ["alkahest.v1"]
+
+[Settlement.alkahest]
+enabled = true
+
+[Wallet]
+address = "<public-settlement-address>"
+
+[Chains.<chain>]
+rpc_url = "<rpc-url>"
+# alkahest_address_config_path = "<address book>", unless the chain's is built in
+
+[pricing]
+# Each publication clause is complete; a pool's storefront override may replace them.
+settlements = [
+  { mechanism = "alkahest.v1", asset = "<token-address>", rate = "<rate>", per = "hour", mechanism_input = { chain = "<chain>", escrow_kind = "erc20_escrow_obligation_default" } },
+]
+default_max_duration_seconds = 7200
+```
+
+and its `storefront.secrets.toml`, mounted read-only from the overlay file:
+
+```toml
+[Wallet]
+private_key = "<seller wallet key>"
+```
+
+Each `[capacity.sites]` entry is an exact trust binding: the site's URL, an
+HTTP(S) origin with no path, credentials, query, or fragment, and exactly one
+service peer bound to it. The storefront seeds the peer into its durable identity
+state when it starts; from then on the site's responses and callbacks are verified
+against the peer's active principals, which rotate through the storefront's
+identity routes (`admin_initiate_identity_rotation`,
+`admin_complete_identity_rotation`, `admin_get_identity_status`). After a rotation,
+update the peer's `principals` to name the replacement before the next restart:
+startup refuses configuration that no longer covers the peer's durable principals.
+The storefront does not infer a site from inventory, payload fields, reachability,
+or list order. With `most_available`, it compares authoritative capacity
+projections only among the listed trusted sites.
 
 ## Start and inspect
 
@@ -223,20 +293,40 @@ The stack persists registry, Redis, provisioning, and storefront state in
 separate named volumes. Do not treat an HTTP 200 alone as deal readiness:
 inspect the storefront health projection and stop if database, fulfillment, or
 the configured settlement mechanism is unavailable. Each configured site is
-reported separately under `site_projections`, with its resource-pool projection
-`loaded` (with its revision and digest) or `unavailable` (with the error). A site
+reported separately under `site_projections`, from the projections the storefront
+holds and with no call to the site: its resource-pool and capacity-bucket
+families each `loaded` (with its revision and digest), `stale` (an earlier
+generation kept through a failed poll, with the error), or not yet loaded. A site
 that is down is reported there and does not mark the whole storefront degraded.
 
-The dedicated image includes the bare-metal publication command. Run one
-authenticated publication round with `bare-metal-storefront publish`, or ask the
-running storefront for one as its administrator: `POST
-/api/v1/admin/lifecycle/publication/run-cycle`, which the canonical storefront
-client calls as `admin_run_lifecycle_cycle("publication")`. Both run the same
-round and return the same report, and the storefront runs one round at a time.
-Each round:
+The storefront refuses to start, naming every problem, when it cannot publish at
+all: no `[registry].urls`, or a registry without its `[registry.authorities]`
+pin; no enabled `[Settlement]` mechanism; no `[capacity.sites]`, a site bound to
+no service peer or to several, or a site URL that is not an origin. Missing
+storefront-wide terms are not a refusal: a pool whose override and configuration
+state no settlement clause or no positive maximum lease duration is held and
+reported instead. Its administrator's system status (`get_system_status()` through
+the canonical storefront client) reports each lifecycle loop's state and last
+cycle as `lifecycle`, and the latest publication's per-site holds, refusals, and
+reports as `publication_derivation`.
 
-- Reads every configured site's resource-pool projection through that site's
-  own trusted client, and derives one listing per Physical Resource from the
+The storefront publishes on its own. Its projection poller loads every
+configured site's projections at startup and every `[capacity].poll_interval`
+seconds, and its publication loop runs a cycle every
+`[capacity].publication_interval_seconds` and whenever a poll sees a site's
+resource-pool generation change, so a machine a site declares is published
+without any command. To run or preview one cycle by hand, use
+`bare-metal-storefront publish` (`--dry-run` to preview), which signs as the
+storefront's administrator and calls the running storefront's
+`POST /api/v1/admin/lifecycle/publication/run-cycle` (or `.../dry-run`), the
+routes the canonical storefront client calls as
+`admin_run_lifecycle_cycle("publication")`; it opens no database and prints the
+cycle's report as JSON. `publish --abort-all` closes every open listing as its
+seller. The storefront runs one cycle at a time, timer and command alike, and
+the lifecycle pause holds the loop without stopping trading. Each cycle:
+
+- Reads the resource-pool projection the storefront holds for every configured
+  site, calling no site, and derives one listing per Physical Resource from the
   bare-metal view the site projects for it.
 - Lists a resource only if its pool advertises `bare_metal`, is enabled, and is
   capacity-backed, as the Resource Pool document above declares. The listing's
@@ -255,25 +345,28 @@ Each round:
 - Treats a Physical Resource moved to another pool as a new listing: the old
   one closes and a new one is published under the new pool.
 - Leaves a listing its seller closed as it is.
-- Holds, without closing or refreshing, the listings of a site that cannot be
-  reached or whose projection is malformed, and of a pool whose declarations do
-  not resolve. The round reports each one; every other site is reconciled as
-  usual.
+- Holds, without closing or refreshing, the listings of a site whose projection
+  the storefront does not hold or whose projection is malformed, and of a pool
+  whose declarations do not resolve or that resolves no settlement clause or lease
+  bound. A site that stops answering keeps its last generation, reported stale,
+  and its listings keep deriving from it. The cycle reports each hold; every other
+  site is reconciled as usual.
 - Writes every new listing locally before any registry is told of it, records
   each registry's answer, and resends to any registry that missed a publish,
-  close, or reopen. A later round repairs a registry that was unreachable.
+  close, or reopen. A later cycle repairs a registry that was unreachable.
 
-The round prints a report of every publish, refresh, reopen, close (with its
-reason), hold, refusal, and registry repair. It publishes independent typed
+The cycle reports every publish, refresh, reopen, close (with its reason), hold,
+refusal, and registry repair. It publishes independent typed
 settlement options; it does not manufacture availability or substitute a
 different site or resource.
 
-The storefront refuses to start without its settlement configuration. While that configuration has an Alkahest section, enabled or not, the seller address, the chains, and the wallet file are required, since a disabled section still services accepted deals; with no Alkahest section they must be absent. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client. The shared settlement JSON is mounted read-only and contains public service, account, and trust settings only. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
+While the configuration has an Alkahest section, enabled or not, `[Wallet].address`, at least one `[Chains.<name>]`, and the overlay's `[Wallet].private_key` are required, since a disabled section still services accepted deals; with no Alkahest section they must be absent. Payments-only startup constructs no wallet, RPC, chain, or Alkahest client. The public `[Settlement]` section contains service, account, and trust settings only. An Alkahest listing advertises the release condition its escrow will use on each chain, the recipient arbiter paying the seller's wallet by default, and the storefront refuses to start configured for the interruptible release model, which bare metal cannot deliver. The runtime composes obligation servicing for Alkahest and contact exchange, and receipt-based settlement and reconciliation for Arkhai payments.
 
 ### Resetting the storefront database
 
 The bare-metal storefront refuses to start against a database written under a
-listing kind it can no longer decode, and names this section. Accepted
+listing kind it can no longer decode, or one whose reservation table records no
+service peer for each reservation's site, and names this section. Accepted
 bare-metal state is signed or pinned by content digest, so it is never rewritten
 in place, and no decoder for a retired listing kind is kept. The remedy is to
 remove the bare-metal deployment and install it fresh:
@@ -286,9 +379,10 @@ remove the bare-metal deployment and install it fresh:
    claims. Its registry listings go with it only if the registry belongs to
    that release. A registry shared with other roles keeps them, and nothing in
    a fresh storefront knows their listing ids; before uninstalling, disable the
-   bare-metal capacity declarations at the provisioning service and run one
-   `bare-metal-storefront publish` round, which closes every listing the
-   storefront tracks once its sites report no bare-metal resources.
+   bare-metal capacity declarations at the provisioning service and let one
+   publication cycle run (or run `bare-metal-storefront publish`) after the
+   storefront's next poll, which closes every listing the storefront tracks once
+   its sites report no bare-metal resources.
 3. Deploy the upgrade. The provisioning service migrates its own database in
    place. It is shared with VM fulfillment and is never reset.
 4. Install the bare-metal release fresh, re-enable its capacity declarations,
@@ -298,7 +392,9 @@ remove the bare-metal deployment and install it fresh:
 
 This applies only while bare metal is unreleased. A released deployment cannot
 drain long-running contracts to patch, so a retired kind must keep a read-only
-decoder until nothing references it.
+decoder until nothing references it. The reservation check is a refusal, not an
+upgrade: a reservation recorded before reservations named their site's peer cannot
+be rebound to one without guessing.
 
 ## Release-qualified deal evidence
 

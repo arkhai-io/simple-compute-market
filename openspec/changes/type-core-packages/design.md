@@ -31,16 +31,23 @@ Core and registry-client markers/config exist, but core typecheck fails and mark
   `token_transfer.py`, and `fastapi` in `app_composition.py` and `openapi.py`. A
   per-package ratchet either fails on these, because the project's own environment
   does not install them, or hides them behind ignores that erase the architectural
-  fact. `ARCHITECTURE.md` lists the undeclared imports under "Where the current tree
-  diverges" and `enforce-package-layers`'s exceptions table carries them under this
-  change. Suggested resolution: add "every distribution the source imports is declared,
+  fact. The architecture check, `make check-architecture`, holds the internal one:
+  `market_alkahest` is an `undeclared_import` exception row in
+  `docs/development/ARCHITECTURE.toml` owned by `move-escrow-into-alkahest`,
+  whose move removes it (`docs/development/ARCHITECTURE.md`, "Where the current
+  tree diverges"). The check requires third-party declarations only of a package
+  with a package allowlist, which `core/storefront` has not, so `web3` and
+  `fastapi` are this ratchet's to catch. Suggested resolution: add "every distribution the source imports is declared,
   and every declared internal distribution is imported or carries a stated runtime
   reason" to the acceptance criterion for every ratcheted package, and sequence the `core/storefront` step after
   `kit-owned-storefront-auth-and-persistence` and `move-escrow-into-alkahest` decide
   whether `refund`, `token_transfer`, and `escrow_identity` leave for `kit/alkahest`
-  (the recommended outcome) or stay and are declared. The reverse direction catches
-  `domains/vms/storefront/pyproject.toml`'s two bare-metal declarations with no
-  import, owned by `kit-owned-storefront-shell`. Task 2.5 is the decision gate for
+  (the recommended outcome) or stay and are declared. The reverse direction is a warning
+  rather than a defect, since a declaration can exist to install a plugin or a
+  driver — the VM storefront's two bare-metal declarations install the bare-metal
+  contribution into the compute shell — and such a reason is recorded in the
+  declaring package's `[tool.arkhai.architecture.runtime-dependencies]`
+  (`docs/development/ARCHITECTURE.md`, "Repository layers"). Task 2.5 is the decision gate for
   the "`kit/site` question" and stays one; the recommended answer for it is that
   `kit/site` passes `ARCHITECTURE.md`'s third-domain placement test because API
   credits composes it, stays repository-wide, and belongs in a kit typing ratchet

@@ -71,7 +71,7 @@ interchangeable:
 | `storefront-alice-admin.eip191` | 7 (`0x14dc7996…`) | `storefront.alice.toml` `[Identity.administrators.operator]` |
 | `api-credits.identity.env` | 3 (`0x90f79bf6…`) | `[identity]` in `storefront.credits.toml` |
 | `api-credits.wallet.env` | 3 (`0x90F79bf6…`) | `[wallet].address` in `storefront.credits.toml` |
-| `bare-metal.wallet.env` | 2 (`0x3C44CdDd…`) | `BARE_METAL_STOREFRONT_EVM_ADDRESS` in `make e2e-bare-metal-dev-env` |
+| `bare-metal.storefront.secrets.toml` | 2 (`0x3C44CdDd…`) | `[Wallet].address` in `domains/bare_metal/storefront/storefront.dev.toml` |
 
 The three administrator credentials are separate principals from the sellers
 and services they administer. A storefront's `Identity.principal` publishes
@@ -158,8 +158,12 @@ authority's trust set names it with an explicit scheme for that reason.
 
 The bare-metal end-to-end lane (`make -C e2e-tests test-e2e-bare-metal`) is a
 separate stack on its own dev chain, so it reuses the committed credentials
-above rather than adding more. `make e2e-bare-metal-dev-env` binds them, and the
-lane's settings in `e2e-tests/config/config-docker.yml` pin the same identifiers:
+above rather than adding more. `make e2e-bare-metal-dev-env` binds them, the
+storefront's development configuration
+(`domains/bare_metal/storefront/storefront.dev.toml`, with
+`bare-metal.storefront.secrets.toml` as its secrets overlay) names the public
+principals, and the lane's settings in `e2e-tests/config/config-docker.yml` pin
+the same identifiers:
 
 | File | Anvil account | Bare-metal role |
 |---|---|---|

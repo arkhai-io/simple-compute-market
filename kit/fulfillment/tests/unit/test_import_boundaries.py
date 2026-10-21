@@ -1,36 +1,15 @@
-"""Package-boundary tests proving dependency direction and carrier purity.
+"""Module-level import boundaries inside ``market_fulfillment``.
 
-the kit dependency contract. Mirrors the AST-scan pattern used by ``kit/site/tests/unit/
-test_import_boundaries.py`` and ``provisioning/compute/service/tests/
-unit/test_import_boundaries.py``.
-
-Dependency direction (``openspec/specs/fulfillment/spec.md#dependency-boundary``): ``kit/fulfillment`` depends on ``kit/site``
-(``market_site``), ``kit/resource-pools`` (``market_resource_pools``) and its
-contracts (``market_resource_pools_contracts``), and the core carrier package
-(``market_core``) for versioned envelopes.
-Nothing here may depend on ``compute_provisioning``, the extracted
-compute provisioning service, any VM/bare-metal domain package, or the
-storefront -- those depend on this package, not the reverse. In
-particular, this package must never import ``compute_provisioning`` or
-``compute_provisioning_service``: that would recreate exactly the
-reverse dependency that the permanent fulfillment boundary prohibits.
+`make check-architecture` holds the package-level rules: this kit depends only
+downward, on ``kit/site``, ``kit/resource-pools`` and its contracts, and the
+core carrier package, and never on the compute family kit, a domain, or a
+storefront (``openspec/specs/fulfillment/spec.md#dependency-boundary``). What it
+cannot express is which module of the package may reach which of those, so the
+carrier modules stay free of the scheduling and persistence dependencies.
 """
 
 import ast
 from pathlib import Path
-
-
-FORBIDDEN_PREFIXES = (
-    "compute_provisioning",
-    "compute_provisioning_service",
-    "core_storefront",
-    "market_storefront",
-    "arkhai_vms_",
-    "arkhai_apicredits",
-    "arkhai_bare_metal",
-    "vm_provisioning_adapter",
-    "bare_metal_provisioning_adapter",
-)
 
 
 def _imported_module_names(source_path: Path) -> list[tuple[int, str]]:
@@ -48,18 +27,6 @@ def _imported_module_names(source_path: Path) -> list[tuple[int, str]]:
             prefix = "." * node.level
             found.append((node.lineno, f"{prefix}{node.module or ''}"))
     return found
-
-
-def test_fulfillment_modules_do_not_import_downstream_packages():
-    package_root = Path(__file__).parents[2] / "src" / "market_fulfillment"
-    violations = []
-
-    for source_path in package_root.glob("*.py"):
-        for lineno, module_name in _imported_module_names(source_path):
-            if module_name.startswith(FORBIDDEN_PREFIXES):
-                violations.append(f"{source_path.name}:{lineno}: {module_name}")
-
-    assert violations == []
 
 
 def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies():
@@ -80,7 +47,8 @@ def test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies(
         "results.py": {"market_core", "pydantic", "typing"},
         "scheduler.py": {"market_resource_pools", "market_resource_pools_contracts", "market_site"},
         "scheduling_persistence.py": {"market_resource_pools", "market_site", "sqlalchemy"},
-        "provider.py": {"market_core"},
+        # Preparation receives the acceptance session for local resource claims.
+        "provider.py": {"market_core", "sqlalchemy"},
         "fulfillment.py": {"market_core", "market_resource_pools", "market_resource_pools_contracts"},
         "fulfillment_persistence.py": {"market_core", "market_resource_pools", "sqlalchemy"},
         "transitions.py": set(),

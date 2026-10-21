@@ -12,20 +12,14 @@ from unittest.mock import patch
 
 import pytest
 from core_storefront.domain_registry import StorefrontThreadBinding
-from core_storefront.site_projections import (
-    ProjectionCache,
-    ProjectionIdentity,
-    ProjectionState,
-)
 from market_identity import create_signer
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
 
 from market_storefront.domain_runtime import (
     build_vm_storefront_domain,
     build_vm_storefront_registry,
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
-from market_storefront.services import site_projection_cache
 from market_storefront.services.capacity_client import capacity_binding_for_listing
 from market_storefront.settlement_composition import (
     truncate_lease_for_terminal_settlement,
@@ -39,35 +33,13 @@ from tests.fake_site import (
 
 _BUYER_SIGNER = create_signer("ed25519", b"\x43" * 32)
 
-def _pool_projection_caches(pool_id: str) -> site_projection_cache.SiteProjectionCaches:
-    resource_pools = ProjectionCache(client=None)
-    resource_pools._value = [
-        {
-            "pool_id": pool_id,
-            "pool_metadata": {
-                "policy_tags": {"deliverable_modes": ["vm"]},
-            },
-            "resources": [],
-        }
-    ]
-    resource_pools._state = ProjectionState.loaded
-    resource_pools._identity = ProjectionIdentity(
-        revision=1,
-        digest=f"vm-pool:{pool_id}",
-    )
-    return site_projection_cache.SiteProjectionCaches(
-        resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
-    )
-
-
 async def _persist_terminal_negotiation(
     db: SQLiteClient,
     *,
     agreement_ref: str,
     listing_id: str,
     pool_id: str,
-) -> CapacityBinding:
+) -> PublicationBinding:
     now = datetime.now(timezone.utc).isoformat()
     listing_binding = prepare_vm_listing_binding(
         listing_id=listing_id,
@@ -199,11 +171,6 @@ async def test_an_uncommitted_hold_is_released_not_truncated(db):
     fake.add_resource(pool_id, 2, attributes={"vm_host": "kvm1"})
 
     with (
-        patch.dict(
-            site_projection_cache._caches,
-            {"default": _pool_projection_caches(pool_id)},
-            clear=True,
-        ),
         patch(
             "market_storefront.settlement_composition.build_capacity_runtime",
             return_value=capacity_runtime_over(fake),
@@ -235,11 +202,6 @@ async def test_truncates_the_ledger_lease_to_now(db):
     escrow_uid = "0xabandoned"
 
     with (
-        patch.dict(
-            site_projection_cache._caches,
-            {"default": _pool_projection_caches(pool_id)},
-            clear=True,
-        ),
         patch(
             "market_storefront.settlement_composition.build_capacity_runtime",
             return_value=capacity,
@@ -296,11 +258,6 @@ async def test_no_live_reservation_is_a_quiet_noop(db):
     agreement_ref = "negotiation-with-missing-reservation"
 
     with (
-        patch.dict(
-            site_projection_cache._caches,
-            {"default": _pool_projection_caches(pool_id)},
-            clear=True,
-        ),
         patch(
             "market_storefront.settlement_composition.build_capacity_runtime",
             return_value=capacity,

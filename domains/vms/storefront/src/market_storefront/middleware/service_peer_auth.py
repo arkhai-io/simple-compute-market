@@ -1,11 +1,15 @@
-"""V2 authentication and signed responses for provisioning service callbacks."""
+"""V2 authentication and signed responses for provisioning service callbacks.
+
+A callback is verified against its site's service-peer principals, held by the
+process's :class:`core_storefront.service_peers.ServicePeerTrust` -- the same
+principals that site's responses are verified against. The service-role status
+read names no site, so any configured site's peer may make it.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
-import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -19,14 +23,10 @@ from core_storefront.auth import (
     authenticate_request,
     signed_response_headers,
 )
-from core_storefront.identity_authority import (
-    SERVICE_PEER_AUTHORITY,
-    StorefrontIdentityAuthority,
-)
+from core_storefront.service_peers import SERVICE_PEER_ROLE, ServicePeerTrust
 from market_identity import EMPTY_BODY, Identity
 
 import market_storefront.container as _container
-from market_storefront.utils.config import get_service_peer_configs
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,9 @@ class ServiceCallback:
     method: str
     operation: str
     resource: str
-    site_id: str
+    #: The sites whose service peers may send the request: the one a callback
+    #: names, or every configured site for the status read.
+    site_ids: tuple[str, ...]
     body: Any
 
 
@@ -51,49 +53,11 @@ _CALLBACK_OPERATIONS = {
 }
 
 
-def initialize_service_peer_identities(
-    db_path: str, *, now: int | None = None
-) -> None:
-    """Idempotently materialize configured service-peer trust pins."""
-
-    timestamp = int(time.time()) if now is None else now
-    authority = StorefrontIdentityAuthority(db_path)
-    for peer_id, (role, site_id, principals) in get_service_peer_configs().items():
-        try:
-            status = authority.status(
-                authority=SERVICE_PEER_AUTHORITY,
-                subject=peer_id,
-            )
-        except KeyError:
-            if len(principals.identities) != 1:
-                raise AuthError(
-                    "A new service peer requires exactly one primary principal"
-                ) from None
-            status = authority.register_service_peer(
-                peer_id=peer_id,
-                role=role,
-                site_id=site_id,
-                principal=principals.identities[0],
-                now=timestamp,
-            )
-        conn = sqlite3.connect(db_path)
-        try:
-            durable_peer = conn.execute(
-                "SELECT role, site_id FROM service_peers WHERE peer_id=?",
-                (peer_id,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if durable_peer != (role, site_id):
-            raise AuthError(
-                "Service-peer config role/site differs from durable identity state"
-            )
-        configured = frozenset(principals.identities)
-        active = status.active_principals(timestamp)
-        if status.primary not in configured or not active.issubset(configured):
-            raise AuthError(
-                "Service-peer config does not cover durable active identities"
-            )
+def _service_peer_trust() -> ServicePeerTrust:
+    trust = _container.resolved_service_peer_trust
+    if trust is None:
+        raise AuthError("Storefront service-peer trust is unavailable", status_code=503)
+    return trust
 
 
 def _storefront_signer():
@@ -109,23 +73,24 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
     # the asserted role: the administrator middleware hands a request asserting
     # `service` straight through to this one. A service peer reads status to
     # confirm its own signing path works, which is the only side-effect-free
-    # service operation there is — the rest are fulfillment callbacks.
+    # service operation there is — the rest are fulfillment callbacks. The read
+    # names no site and returns readiness alone, so every configured site's
+    # peer may make it.
     if request.method == "GET" and path == "/api/v1/system/status":
-        configured = [
-            (site_id, principal)
-            for role, site_id, principal in get_service_peer_configs().values()
-            if role == "service"
-        ]
-        if len(configured) != 1:
-            raise AuthError(
-                "System status requires exactly one configured service peer",
-                status_code=503,
+        site_ids = tuple(
+            sorted(
+                {
+                    site_id
+                    for role, site_id, _principals in _service_peer_trust().peers.values()
+                    if role == SERVICE_PEER_ROLE
+                }
             )
+        )
         return ServiceCallback(
             "GET",
             "admin_system_status",
             "system/status",
-            configured[0][0],
+            site_ids,
             EMPTY_BODY,
         )
     operation = _CALLBACK_OPERATIONS.get(path)
@@ -142,57 +107,7 @@ def _callback(request: Request, body: Any) -> ServiceCallback | None:
         )
     if not isinstance(site_id, str) or not site_id:
         raise AuthError("Provisioning callback requires site_id", status_code=400)
-    return ServiceCallback("POST", operation, resource, site_id, body)
-
-
-def _allowed_service_principals(
-    *, db_path: str, site_id: str, now: int
-) -> frozenset[Identity]:
-    configured = [
-        peer_id
-        for peer_id, (role, configured_site, _principal) in
-        get_service_peer_configs().items()
-        if role == "service" and configured_site == site_id
-    ]
-    if len(configured) != 1:
-        raise AuthError(
-            "Provisioning site must have exactly one configured service peer"
-        )
-    configured_peer_id = configured[0]
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute(
-            """
-            SELECT role, site_id, principal_scheme, principal_identifier, status
-            FROM service_peers WHERE peer_id=?
-            """,
-            (configured_peer_id,),
-        ).fetchone()
-    finally:
-        conn.close()
-    if row is None:
-        raise AuthError("Configured provisioning service peer is not materialized")
-    role, durable_site, scheme, identifier, peer_status = row
-    if role != "service" or durable_site != site_id:
-        raise AuthError("Provisioning service peer binding differs from public config")
-    if peer_status != "active":
-        raise AuthError("Provisioning service peer is not active")
-    try:
-        status = StorefrontIdentityAuthority(db_path).status(
-            authority=SERVICE_PEER_AUTHORITY,
-            subject=configured_peer_id,
-        )
-    except KeyError as exc:
-        raise AuthError("Provisioning service peer trust binding is incomplete") from exc
-    durable_primary = Identity(scheme=scheme, identifier=identifier)
-    if status.primary != durable_primary:
-        raise AuthError(
-            "Provisioning service peer row differs from its durable primary binding"
-        )
-    principals = status.active_principals(now)
-    if not principals:
-        raise AuthError("Provisioning service peer has no active principal")
-    return principals
+    return ServiceCallback("POST", operation, resource, (site_id,), body)
 
 
 async def _authenticate(
@@ -202,12 +117,7 @@ async def _authenticate(
     if db is None:
         raise AuthError("Storefront identity state is unavailable", status_code=503)
     now = int(time.time())
-    allowed = await asyncio.to_thread(
-        _allowed_service_principals,
-        db_path=db.db_path,
-        site_id=callback.site_id,
-        now=now,
-    )
+    allowed = _allowed_principals(_service_peer_trust(), callback.site_ids, now=now)
     return await authenticate_request(
         headers=request.headers,
         method=callback.method,
@@ -219,6 +129,36 @@ async def _authenticate(
         replay_store=db,
         now=now,
     )
+
+
+def _allowed_principals(
+    trust: ServicePeerTrust, site_ids: tuple[str, ...], *, now: int
+) -> frozenset[Identity]:
+    """The principals that may send a request on behalf of ``site_ids`` at ``now``.
+
+    A request naming one site is verified against that site's peer, and the
+    trust's own refusal is returned when it has none to offer. A request any of
+    several sites may make, the status read, is verified against the union of
+    their peers' principals, skipping a site the trust cannot answer for; it is
+    refused as unavailable only when the trust can answer for none of them.
+    """
+    if len(site_ids) == 1:
+        return trust.site_active_principals(site_ids[0], now=now)
+    principals: set[Identity] = set()
+    answered = False
+    for site_id in site_ids:
+        try:
+            principals |= trust.site_active_principals(site_id, now=now)
+        except AuthError as exc:
+            if exc.status_code == 503:
+                raise
+            continue
+        answered = True
+    if not answered:
+        raise AuthError(
+            "No configured site's service peer can be trusted", status_code=503
+        )
+    return frozenset(principals)
 
 
 def _decoded_body(raw: bytes) -> Any:

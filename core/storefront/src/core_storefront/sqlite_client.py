@@ -4,7 +4,7 @@ Owns domain-neutral market-state tables such as listings, negotiation
 threads/messages, escrows, publications, credentials, heartbeats, capacity
 holds, and stage events. Settlement lifecycle tables are composed from
 ``market_settlement_runtime`` by domain roots. Domain storefronts subclass
-:class:`SQLiteClient` to add inventory tables and migrations
+:class:`SQLiteClient` to add domain tables and migrations
 (``_ensure_domain_tables`` / ``_ensure_domain_indexes`` /
 ``_domain_migrations``); the settings-bound singleton factory stays with each
 composition root.
@@ -1201,7 +1201,7 @@ class SQLiteClient:
 
     # ------------------------------------------------------------------
     # Domain hooks — storefront composition roots override these to add
-    # their inventory tables beside the core market state.
+    # their domain tables beside the core market state.
     # ------------------------------------------------------------------
 
     def _ensure_domain_tables(self, cur: sqlite3.Cursor) -> None:

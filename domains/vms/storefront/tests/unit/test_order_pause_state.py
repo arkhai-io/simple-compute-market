@@ -17,7 +17,8 @@ from core_storefront.domain_registry import (
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import PublicationBinding, CapacityRuntime, CapacitySite
+from market_resource_pools_contracts.backing import BACKED
 from market_core.schemas import EscrowProposal
 from market_identity import TrustedIdentitySet, create_signer
 
@@ -32,6 +33,7 @@ from market_negotiation_runtime import (
     StorefrontPausedError,
 )
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 _BUYER_SIGNER = create_signer("ed25519", b"\x41" * 32)
@@ -83,6 +85,10 @@ async def _start(
         registry=sqlite_client.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
+        # The site has served nothing, so no listing's source is confirmed.
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
     return await runtime.start(
         repository=sqlite_client,
@@ -163,17 +169,11 @@ async def db(tmp_path) -> SQLiteClient:
 @pytest.fixture
 def marketplace_signer(monkeypatch):
     from market_storefront import container
-    from market_storefront.services import capacity_client
 
     monkeypatch.setattr(
         container,
         "resolved_marketplace_signer",
         _SELLER_SIGNER,
-    )
-    monkeypatch.setattr(
-        capacity_client,
-        "get_provisioning_authorities",
-        lambda: _PROVISIONING_AUTHORITIES,
     )
     return _SELLER_SIGNER
 
@@ -182,10 +182,11 @@ def exact_capacity_binding(monkeypatch):
     async def resolve(repository, listing_id):
         binding = await repository.load_listing_binding(listing_id=listing_id)
         assert binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             binding.site_id,
             binding.binding.offering_mode,
             str(binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(

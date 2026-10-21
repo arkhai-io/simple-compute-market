@@ -805,6 +805,23 @@
             },
             "^[pP][rR][iI][vV][aA][tT][eE]_[kK][eE][yY]$": false
           }
+        },
+        "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[pP][aA][tT][hH]$": false,
+        "^[rR][eE][sS][oO][uU][rR][cC][eE][sS]_[cC][sS][vV]_[iI][nN][lL][iI][nN][eE]$": false,
+        "^[eE][sS][cC][rR][oO][wW]_[tT][eE][mM][pP][lL][aA][tT][eE][sS]$": false,
+        "^[cC][aA][pP][aA][cC][iI][tT][yY]$": {
+          "type": "object",
+          "patternProperties": {
+            "^[uU][sS][eE]_[sS][iI][tT][eE]_[pP][rR][oO][jJ][eE][cC][tT][iI][oO][nN]_[fF][oO][rR]_[lL][iI][sS][tT][iI][nN][gG][sS]$": false
+          }
+        },
+        "^[cC][lL][aA][iI][mM][sS]_[sS][wW][eE][eE][pP]_[iI][nN][tT][eE][rR][vV][aA][lL]$": false,
+        "^[eE][nN][aA][bB][lL][eE]_[rR][eE][gG][iI][sS][tT][rR][yY]_[dD][iI][sS][cC][oO][vV][eE][rR][yY]$": false,
+        "^[pP][rR][oO][vV][iI][sS][iI][oO][nN][iI][nN][gG]$": {
+          "type": "object",
+          "patternProperties": {
+            "^[iI][dD][eE][nN][tT][iI][tT][yY]$": false
+          }
         }
       }
     }
@@ -831,77 +848,103 @@
       }
     },
     "agents": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
+      "if": {
+        "type": "array"
+      },
+      "then": {
+        "description": "The list of agents is refused, naming the shape that replaced it.",
+        "enum": [
+          "agents is a map keyed by agent name, such as agents: {bob: {port: 8001}}, not a list"
+        ]
+      },
+      "else": {
         "type": "object",
-        "required": [
-          "name",
-          "identity"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535
-          },
-          "component": {
-            "type": "string",
-            "minLength": 1
-          },
-          "configMapName": {
-            "type": "string",
-            "minLength": 1
-          },
-          "identity": {
-            "$ref": "#/definitions/storefrontIdentity"
-          },
-          "internalRegistryTrust": {
-            "$ref": "#/definitions/registryAuthority"
-          },
-          "secret": {
-            "type": "object",
-            "properties": {
-              "createSecret": {
-                "const": false
-              },
-              "secretName": {
-                "type": "string"
-              },
-              "configKey": {
-                "type": "string",
-                "minLength": 1
-              },
-              "privKey": false,
-              "privateKey": false,
-              "walletPrivateKey": false
-            }
-          },
-          "agentId": false,
-          "autoRegister": false,
-          "rootPath": false,
-          "config": {
-            "allOf": [
-              {
-                "$ref": "#/definitions/storefrontServiceConfig"
-              },
-              {
-                "type": "object",
-                "patternProperties": {
-                  "^[sS][eE][lL][lL][eE][rR]$": false,
-                  "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
-                  "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
-                  "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
-                  "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
-                  "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
-                  "^[cC][hH][aA][iI][nN]$": false
+        "minProperties": 1,
+        "additionalProperties": {
+          "type": "object",
+          "required": [
+            "identity"
+          ],
+          "properties": {
+            "name": false,
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "component": {
+              "type": "string",
+              "minLength": 1
+            },
+            "configMapName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "identity": {
+              "$ref": "#/definitions/storefrontIdentity"
+            },
+            "internalRegistryTrust": {
+              "$ref": "#/definitions/registryAuthority"
+            },
+            "secret": {
+              "type": "object",
+              "properties": {
+                "createSecret": {
+                  "const": false
+                },
+                "secretName": {
+                  "type": "string"
+                },
+                "configKey": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "privKey": false,
+                "privateKey": false,
+                "walletPrivateKey": false,
+                "resourcesCsvInline": false
+              }
+            },
+            "agentId": false,
+            "autoRegister": false,
+            "rootPath": false,
+            "alkahestAddressBook": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "configMapName": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mountPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^/"
                 }
               }
-            ]
+            },
+            "config": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/storefrontServiceConfig"
+                },
+                {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[sS][eE][lL][lL][eE][rR]$": false,
+                    "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
+                    "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
+                    "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
+                    "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
+                    "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
+                    "^[cC][hH][aA][iI][nN]$": false
+                  }
+                }
+              ]
+            }
           }
         }
       }

@@ -125,6 +125,7 @@ def test_listing_service_validates_offer_through_injected_domain() -> None:
         binding=collaborators.binding,
         domain=collaborators.domain,
         capacity_runtime=collaborators.capacity_runtime,
+        site_projections=collaborators.site_projections,
         sqlite_client=SimpleNamespace(
             domain_registry=registry,
             market_domain=domain,

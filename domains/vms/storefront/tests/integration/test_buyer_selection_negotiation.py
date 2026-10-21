@@ -17,6 +17,7 @@ from arkhai_vms_buyer.settlement_composition import (
     buyer_stage,
 )
 from core_buyer.settlement import SelectedSettlementOption
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_core.schemas import SettlementOption, SettlementSelection
 from market_identity import TrustedIdentitySet
 
@@ -30,9 +31,25 @@ from tests.publication_app import BUYER_SIGNER, pool, publication_app
 _ALKAHEST_PUBLISHABLE = {"alkahest.v1": False, "arkhai.payments.v1": True}
 
 
+def _buyer_chain(tmp_path, monkeypatch) -> None:
+    """The buyer's configured anvil chain, with the address book the seller uses.
+
+    The buyer reads the arbiter's codec from it to check the plan's demand.
+    """
+    config_dir = tmp_path / "buyer-config" / "arkhai"
+    config_dir.mkdir(parents=True)
+    (config_dir / "buyer.toml").write_text(
+        "[chains.anvil]\n"
+        'rpc_url = "http://anvil.test"\n'
+        f'alkahest_address_config_path = "{anvil_address_book_path()}"\n'
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir.parent))
+
+
 async def test_a_buyer_selection_of_a_priced_alkahest_option_reaches_acceptance(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
+    _buyer_chain(tmp_path, monkeypatch)
     async with publication_app(
         tmp_path, mechanism_fulfillment=_ALKAHEST_PUBLISHABLE, negotiation=True
     ) as world:

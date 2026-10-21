@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-kit-resource-pools-contracts"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "Resource-pool wire models, declaration vocabulary, and route declarations, without the pool authority's persistence."
 requires-python = ">=3.12"
 # Models and declarations only, so a pool client or a projection reader never
 # installs the authority's persistence.
 dependencies = [
-    # Shape hints are validated with the shared capability-shape utility.
+    # Inline shape constraints are split by the admissibility kit.
+    "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-kit-capability-shape>=0.1.0",
     "pydantic>=2.7",
 ]
@@ -27,3 +28,9 @@ testpaths = ["tests/unit"]
 dev = [
     "pytest>=8.3.4,<9.0.0",
 ]
+
+# The package allowlist: every distribution this package may declare or import
+# beyond the standard library, because its lightness is part of its contract.
+# make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
+[tool.arkhai.architecture]
+allowed-dependencies = ["arkhai-kit-capability-admissibility", "arkhai-kit-capability-shape", "pydantic"]

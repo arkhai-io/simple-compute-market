@@ -132,7 +132,10 @@ registry:
 
   config:
     filterSpecPath: "/app/filter-spec.yaml"
-    databaseUrl: "sqlite:///./indexer.db"
+    # databaseUrl is the registry chart's default, a SQLite file under its
+    # persistence mount, so the index survives a pod replacement; a path
+    # outside that mount is on the container's own filesystem and is lost
+    # with the pod.
     host: "0.0.0.0"
     enableHealthChecks: true
     healthCheckInterval: 60
@@ -175,7 +178,6 @@ api-credits-registry:
 
   config:
     filterSpecPath: "/app/filter-spec-apicredits.yaml"
-    databaseUrl: "sqlite:////var/lib/arkhai-registry/indexer.db"
     host: "0.0.0.0"
     rootPath: ""
     enableHealthChecks: true
@@ -217,12 +219,13 @@ storefront:
 
   # Only sellers run a storefront; the `market` buyer CLI is a pure HTTP
   # client and is invoked as a one-shot process (or a helm-test Job),
-  # not deployed alongside the storefront. Add more agents: entries to
-  # run multiple seller identities on one cluster.
+  # not deployed alongside the storefront. Agents are keyed by name: add a key
+  # to run another seller identity on one cluster, and in an overlay state only
+  # what changes, since Helm merges maps key by key (null removes a key).
   # See helm/charts/storefront/values.yaml for the per-agent shape: `config`
   # is the storefront's own configuration and passes through unchanged.
   agents:
-    - name: bob
+    bob:
       port: 8001
       component: seller
       identity:
@@ -266,12 +269,16 @@ storefront:
               principals:
                 - scheme: eip191
                   identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        # How long a confirmed projection poll lets the inventory guard confirm
+        # a listing, widened for this development release only. Validation
+        # scenarios hold the lifecycle loops while they trade, and with the
+        # shipped window -- three poll intervals -- a round sent more than a
+        # few seconds after the last `site-projections` step is refused as
+        # retryable. Production releases keep the shipped window.
+        capacity:
+          source_confirmation_seconds: 3600
         provisioning:
           mode: mock
-          identity:
-            principals:
-              - scheme: eip191
-                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
         negotiation:
           policies:
             - has_matching_inventory_guard
@@ -282,8 +289,32 @@ storefront:
 
 # The dedicated bare-metal storefront is an optional role. The combined
 # compute storefront above already loads the bare-metal domain contribution.
+# The provisioning service below trusts and calls back one storefront, Bob, so
+# the dedicated storefront runs as a second release of this chart with its own
+# provisioning service, publishing to this release's registry:
+# helm/bare-metal-release-values.yaml, installed by `make helm-topology-up`.
+# Enabled beside Bob and bound to this release's provisioning service, it is
+# refused. Enabled, the chart derives its release's registry and provisioning
+# service, as its `default` site, into its configuration; the registry trust and
+# the site's service peer below are this release's development principals, as
+# Bob's are, which the second release's overlay replaces where they differ. Its
+# own principal, a settlement mechanism, and its secrets are an overlay's to state.
 bare-metal-storefront:
   enabled: false
+  internalRegistryTrust:
+    authority: registry-a
+    principals:
+      - scheme: eip191
+        identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  config:
+    Identity:
+      service_peers:
+        provisioning_default:
+          role: service
+          site_id: default
+          principals:
+            - scheme: eip191
+              identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 
 # ---------------------------------------------------------------------------
 # provisioning subchart

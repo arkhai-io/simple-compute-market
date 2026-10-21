@@ -11,6 +11,7 @@ import apicredits_service.container as _container_module
 from apicredits_service.config import settings
 from apicredits_service.controllers.keys_controller import make_keys_router
 from apicredits_service.controllers.system_controller import make_health_router, make_system_router
+from apicredits_service.db.database import load_pool_directory
 from apicredits_service.identity import (
     expected_principals,
     require_signer,
@@ -144,7 +145,14 @@ app.include_router(                                                            #
     prefix="/api/v1",
 )
 app.include_router(                                                            # /api/v1/capacity/*
-    make_capacity_router(lambda: _container_module.resolved_capacity_ledger_service),
+    make_capacity_router(
+        lambda: _container_module.resolved_capacity_ledger_service,
+        # The resource-pool projection carries each pool's declarations, which
+        # a storefront resolves to bind a listing with its pool's backing.
+        get_pool_directory=lambda: load_pool_directory(
+            _container_module.resolved_session_factory
+        ),
+    ),
     prefix="/api/v1",
 )
 

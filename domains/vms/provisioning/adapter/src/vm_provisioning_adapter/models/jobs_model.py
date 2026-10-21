@@ -81,4 +81,3 @@ class VmJobParams:
             self.executor_target = self.vm_target or self.host_id
         if not self.vm_action:
             self.vm_action = self.executor_action
-

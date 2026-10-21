@@ -8,8 +8,9 @@ from .admin_routes import (
 )
 from .capacity import (
     capacity_availability,
-    CapacityBinding,
+    backing_changed,
     CapacityBindingError,
+    CapacityEffects,
     CapacityConfigurationError,
     CapacityProjection,
     CapacityReconcileContext,
@@ -17,13 +18,14 @@ from .capacity import (
     CapacityRuntime,
     CapacitySite,
     PublicationBinding,
-    UnbackedBinding,
     publication_binding,
     remote_site_clients,
     run_capacity_event_pollers,
 )
+from .capacity_remote import SiteEventCycle
 from .cycle import (
     PublicationCycleDriver,
+    PublicationCycleStopped,
     PublicationCycleReport,
     converge_registries,
 )
@@ -36,6 +38,12 @@ from .publication import (
     RegistryDivergence,
     ReconciliationPlan,
 )
+from .site_projections import (
+    CAPACITY_BUCKET,
+    RESOURCE_POOL,
+    SiteProjectionState,
+    freshly_confirmed,
+)
 
 __all__ = [
     "CapacityAdminRouteError",
@@ -45,8 +53,9 @@ __all__ = [
     "run_capacity_event_pollers",
     "BoundListing",
     "capacity_availability",
-    "CapacityBinding",
+    "backing_changed",
     "CapacityBindingError",
+    "CapacityEffects",
     "CapacityConfigurationError",
     "CapacityProjection",
     "CapacityReconcileContext",
@@ -56,14 +65,19 @@ __all__ = [
     "converge_registries",
     "PublicationBinding",
     "publication_binding",
-    "UnbackedBinding",
     "remote_site_clients",
     "PublicationCandidate",
     "PublicationCycleDriver",
+    "PublicationCycleStopped",
     "PublicationCycleReport",
     "PublicationDomainHooks",
     "PublicationRepository",
     "PublicationRuntime",
     "RegistryDivergence",
     "ReconciliationPlan",
+    "CAPACITY_BUCKET",
+    "RESOURCE_POOL",
+    "SiteEventCycle",
+    "SiteProjectionState",
+    "freshly_confirmed",
 ]

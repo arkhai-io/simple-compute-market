@@ -106,10 +106,11 @@ registry_b:
 
 # The bare-metal end-to-end lane (`make test-e2e-bare-metal`): one mock-profile
 # site, the bare-metal storefront, its registry, and the dev chain, with the
-# development identities `make e2e-bare-metal-dev-env` binds. Every credential
-# here is a well-known Anvil development key; see dev-env/identities/README.md,
-# "The bare-metal lane". Kept apart from `bare_metal`, which configures the
-# real-host deal scenario.
+# development identities `make e2e-bare-metal-dev-env` and the storefront's
+# development configuration (domains/bare_metal/storefront/storefront.dev.toml)
+# bind. Every credential here is a well-known Anvil development key; see
+# dev-env/identities/README.md, "The bare-metal lane". Kept apart from
+# `bare_metal`, which configures the real-host deal scenario.
 bare_metal_lane:
   storefront_url: "http://bare-metal-storefront:8000"
   # The storefront's principal: it signs the storefront's responses, and the
@@ -133,14 +134,14 @@ bare_metal_lane:
   buyer_credential: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
   # The buyer's wallet is its signer's Anvil development account, so the deal's
   # escrow is funded by the key above; the seller's wallet is the storefront's
-  # settlement address, as `make e2e-bare-metal-dev-env` binds it. Development
+  # settlement address, its development storefront.toml's [Wallet]. Development
   # values only, never to be used on a public network.
   buyer_wallet_address:  "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   buyer_rpc_url:         "ws://anvil:8545"
   seller_wallet_address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-  # The storefront's contact-exchange settings, as `make e2e-bare-metal-dev-env`
-  # binds them: a development contact on a reserved domain and the short
-  # retention window the introduction scenario watches expire.
+  # The storefront's contact-exchange settings, as its development
+  # storefront.toml states them: a development contact on a reserved domain and
+  # the short retention window the introduction scenario watches expire.
   seller_contact_email: "seller@bare-metal-e2e.invalid"
   introduction_retention_seconds: "5"
 

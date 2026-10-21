@@ -6,8 +6,14 @@ used on any network; the token and escrow addresses are placeholders.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
+from unittest.mock import patch
 
+import apicredits_storefront.utils.config as storefront_config
+from market_alkahest.alkahest import get_recipient_arbiter
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_config.config_loader import ChainConfig
 from market_core.schemas import (
     EscrowProposal,
     ProvisionTerms,
@@ -17,6 +23,7 @@ from market_core.schemas import (
     derive_settlement_option_id,
 )
 from market_identity import Ed25519Signer
+from tests.listing_bindings import upsert_bound_listing
 
 BUYER_SIGNER = Ed25519Signer(bytes.fromhex("11" * 32))
 SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
@@ -25,6 +32,27 @@ SELLER_PRINCIPAL = SELLER_SIGNER.identity
 TOKEN = "0x" + "01" * 20
 ESCROW = "0x" + "11" * 20
 LISTING_ID = "L-tok"
+SELLER_WALLET = "0x" + "33" * 20
+#: The release condition the seeded listing authorizes: the development chain's
+#: recipient arbiter paying the seller wallet. The buyer's proposal selects it.
+CONDITION = {
+    "chain_name": "anvil",
+    "arbiter": get_recipient_arbiter("anvil", config_path=str(anvil_address_book_path())),
+    "demand_data": {"recipient": SELLER_WALLET},
+}
+
+
+@contextmanager
+def anvil_chain():
+    """The storefront's anvil chain, naming the address book the condition uses."""
+    chain = ChainConfig(
+        name="anvil",
+        rpc_url="http://anvil.test",
+        chain_id=31337,
+        alkahest_address_config_path=str(anvil_address_book_path()),
+    )
+    with patch.dict(storefront_config.CHAINS, {"anvil": chain}, clear=True):
+        yield
 
 
 PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
@@ -63,6 +91,7 @@ def proposal(amount: int) -> EscrowProposal:
         fields={"token": TOKEN, "amount": amount},
         literal_fields={"token": TOKEN},
         rates=[{"field": "amount", "per": "token", "value": "100"}],
+        demand=CONDITION,
         expiration_unix=1_800_000_000,
     )
 
@@ -79,9 +108,36 @@ def terms(quantity=3, key_mode="new", key_id=None) -> ProvisionTerms:
 
 
 class FakeCapacity:
+    """The credits service's site: its quota snapshot and its pool projection."""
+
+    site_names = ["tokens"]
+
     def __init__(self, available: int = 100) -> None:
         self.available = available
         self.reserved: list[dict] = []
+
+    def site(self, site_id: str) -> "FakeCapacity":
+        if site_id not in self.site_names:
+            raise KeyError(site_id)
+        return self
+
+    async def resource_pool_projection(self):
+        return {
+            "resource_pools": [
+                {
+                    "pool_id": "default",
+                    "resources": [{"physical_resource_id": "svc-quota"}],
+                    "pool_metadata": {
+                        "enabled": True,
+                        "policy_tags": {
+                            "deliverable_modes": ["api_credits"],
+                            "advertisable_modes": ["api_credits"],
+                            "capacity_backing": "backed",
+                        },
+                    },
+                }
+            ]
+        }
 
     async def snapshot(self):
         return [
@@ -112,7 +168,8 @@ class FakeCapacity:
 
 async def seed_listing(client) -> None:
     """Open the one quota-backed listing these tests negotiate."""
-    await client.upsert_listing(
+    await upsert_bound_listing(
+        client,
         listing_id="L-tok",
         status="open",
         created_at=datetime.now().isoformat(),
@@ -135,6 +192,7 @@ async def seed_listing(client) -> None:
             }
         ],
         settlement_options=[],
+        demands=[CONDITION],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://test-seller:8002",

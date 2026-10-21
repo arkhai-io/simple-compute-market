@@ -75,9 +75,8 @@ class DealState(ComputeDealState):
     and consume stay declared here too.
     """
     domain_identity: str = "vms.compute"
-    # VM's own stages of the typed-client deal: 00f imports the storefront
-    # resource row 02b lists, and 03a validates the publish 03b performs.
-    _resources_seeded: bool = False
+    # VM's own stage of the typed-client deal: 03a validates the publish 03b
+    # performs.
     _registry_validate_passed: bool = False
     # The buyer-CLI and one-shot scenarios' own sentinels: the listing resumed
     # into publication, the executor host registered, and the capacity-event

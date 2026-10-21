@@ -31,6 +31,7 @@ from core_storefront.sqlite_migrations import (
     migrate_storefront_domain_bindings_schema,
 )
 from market_core import ContractVersion, DomainIdentity
+from market_resource_pools_contracts.backing import legacy_producer_backing
 
 
 class StorefrontDomainMigrationError(RuntimeError):
@@ -214,9 +215,9 @@ def _prepare_vm_bindings(
             ),
             source_envelope_json=source_json,
             last_reconciled_at=str(raw_row[6]),
-            # A legacy single-domain database could only publish listings a
-            # site admits against.
-            capacity_backing="backed",
+            # A legacy single-domain database predates backing declarations,
+            # so its listings bind with that producer era's backing.
+            capacity_backing=legacy_producer_backing().label,
             pool_id=pool,
             physical_resource_id=resource,
         )

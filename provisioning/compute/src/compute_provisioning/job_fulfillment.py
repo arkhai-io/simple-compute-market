@@ -66,6 +66,7 @@ from market_fulfillment import (
     SettlementResult,
 )
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy.orm import Session
 
 from compute_provisioning.jobs.action_request import JobActionRequest
 from compute_provisioning.jobs.db import JobStatus
@@ -116,11 +117,14 @@ class JobFulfillmentPlan(Protocol):
         resource: SettlementResource,
         pool_config: dict[str, Any],
         allocate: bool,
+        db: Session | None = None,
     ) -> PreparedJob:
         """The create job for a settled resource.
 
         ``allocate=False`` asks for every rejection with nothing acquired, as the
         fulfillment kit's ``prepare_create`` defines it.
+        Resource acquisition uses the acceptance session supplied as ``db``;
+        the plan must not commit it or open an independent write transaction.
         """
         ...
 
@@ -323,6 +327,7 @@ class JobFulfillmentProvider(FulfillmentProvider):
         resource: SettlementResource,
         pool_config: dict[str, Any],
         allocate: bool = True,
+        db: Session | None = None,
     ) -> VersionedEnvelope[Any]:
         prepared = _checked(
             self._plan.prepare_create(
@@ -331,6 +336,7 @@ class JobFulfillmentProvider(FulfillmentProvider):
                 resource=resource,
                 pool_config=pool_config,
                 allocate=allocate,
+                db=db,
             ),
             resource,
         )

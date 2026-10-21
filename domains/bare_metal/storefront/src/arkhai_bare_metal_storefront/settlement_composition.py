@@ -13,9 +13,9 @@ from market_core.schemas import SettlementOption
 from .alkahest_lifecycle import alkahest_servicing
 from .settlement_stages import (
     ALKAHEST_MECHANISM,
+    AlkahestStage,
     ContactStage,
     PaymentStage,
-    SellerStage,
     declined_servicing,
     refund_payment,
     revalidate_alkahest,
@@ -26,7 +26,14 @@ from .settlement_stages import (
     verify_contact,
     verify_payment,
 )
-from market_alkahest import create_alkahest_registration
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ORACLE_GATED_RELEASE,
+    RECIPIENT_RELEASE,
+    create_alkahest_registration,
+    release_conditions,
+    require_deliverable_release_model,
+)
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
     create_contact_exchange_registration,
@@ -49,12 +56,15 @@ from market_arkhai_payments import (
 
 SELLER_STAGES = SettlementStageTable(
     {
-        ALKAHEST_MECHANISM: SellerStage(
+        # A bare-metal deal leases a whole machine that is never preempted, so
+        # the interruptible splitter's refund split has nothing to settle.
+        ALKAHEST_MECHANISM: AlkahestStage(
             create_alkahest_registration,
             verify_alkahest,
             revalidate_alkahest,
             True,
             servicing=alkahest_servicing,
+            release_models=frozenset({RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}),
         ),
         ARKHAI_PAYMENTS_MECHANISM: PaymentStage(
             create_arkhai_payments_registration,
@@ -73,6 +83,16 @@ SELLER_STAGES = SettlementStageTable(
         ),
     }
 )
+
+
+def _wallet_address(wallet: Any) -> str:
+    """The seller wallet's address, given as the address or as a wallet carrying one."""
+    if wallet is None or isinstance(wallet, str):
+        return wallet or ""
+    if isinstance(wallet, Mapping):
+        return str(wallet.get("address") or "")
+    return str(getattr(wallet, "address", "") or "")
+
 
 def build_bare_metal_settlement_registry() -> SettlementConfigurationRegistry:
     """Install the supported mechanisms through their shared facades."""
@@ -100,6 +120,13 @@ class BareMetalStorefrontSettlementComposition:
         ):
             raise ValueError("enabled settlement mechanism has no seller stage")
         self.registry.validate(self.config, role="seller")
+        alkahest = self.config.mechanisms.get(ALKAHEST_CONFIG_KEY)
+        if alkahest is not None and ALKAHEST_MECHANISM in self.seller_stages:
+            # A configured section owns the deals accepted under it, enabled or
+            # not, so its release model must be one bare metal delivers.
+            require_deliverable_release_model(
+                alkahest, self.seller_stages[ALKAHEST_MECHANISM].release_models
+            )
         object.__setattr__(self, "resources", MappingProxyType(dict(self.resources)))
         # Accepted payment deals are serviced whether or not new payment options
         # are published, so the stage follows the servicing fields, not `enabled`.
@@ -176,15 +203,21 @@ class BareMetalStorefrontSettlementComposition:
         *,
         candidate: Mapping[str, Any],
         clauses: Sequence[SettlementPublicationClause],
-        demands: Sequence[Mapping[str, Any]] = (),
         max_duration_seconds: int | None = None,
     ) -> PublicationPayload:
-        """Build ready settlement publication alternatives."""
+        """Build ready settlement publication alternatives.
+
+        A listing publishing an Alkahest escrow advertises, per chain its
+        escrows are on, the release condition the Alkahest mechanism derives
+        from the configured section, the seller wallet, and that chain's
+        address book.
+        """
 
         readiness = await self.readiness(clauses=clauses)
         readiness_by_mechanism = {item.mechanism: item for item in readiness}
         accepted_escrows: list[dict[str, Any]] = []
         settlement_options: list[dict[str, Any]] = []
+        alkahest_chains: set[str] = set()
 
         for clause in clauses:
             mechanism_readiness = readiness_by_mechanism.get(clause.mechanism)
@@ -215,6 +248,8 @@ class BareMetalStorefrontSettlementComposition:
             ):
                 raise ValueError("settlement option builder returned invalid carriers")
             accepted_escrows.extend(dict(item) for item in built_escrows)
+            if clause.mechanism == ALKAHEST_MECHANISM:
+                alkahest_chains.update(str(item["chain_name"]) for item in built_escrows)
             settlement_options.extend(
                 SettlementOption.model_validate(item).model_dump(mode="json")
                 for item in built_options
@@ -232,8 +267,19 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(dict(item) for item in demands),
+            demands=tuple(self._release_conditions(alkahest_chains)),
             max_duration_seconds=max_duration_seconds,
+        )
+
+    def _release_conditions(self, chain_names: set[str]) -> list[dict[str, Any]]:
+        if not chain_names:
+            return []
+        chains = self.resources.get("chains")
+        return release_conditions(
+            self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
+            chain_names=chain_names,
+            chains=chains if isinstance(chains, Mapping) else {},
+            wallet_address=_wallet_address(self.resources.get("wallet")),
         )
 
     def runtime_clients(self) -> dict[str, Any]:

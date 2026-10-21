@@ -85,8 +85,13 @@ None.
   this change may own once `enforce-package-layers`'s audit says which packages
   legitimately keep a mechanism; see its design.
 - No move of `kit/alkahest`, `kit/arkhai-payments`, or `kit/contact-exchange` into
-  a mechanism directory. Mechanism scope is inferred from imports, so their paths
-  are not wrong; grouping them is a readability choice this change does not make.
+  a mechanism directory. Each is the one kit the rules file names for its
+  mechanism, so their paths are not wrong; grouping them is a readability choice
+  this change does not make.
+- No move of the compute storefront shell. `kit-owned-storefront-shell` decides
+  whether the shell at `domains/vms/storefront` becomes a
+  family composition or a repository-wide role; this change moves it once that is
+  decided.
 
 ## Impact
 

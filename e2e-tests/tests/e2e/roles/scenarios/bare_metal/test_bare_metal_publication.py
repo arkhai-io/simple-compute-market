@@ -13,11 +13,12 @@ Each change refreshes the same listing in place, and a buyer finds it by rate
 through the registry's filter vocabulary. Finally it declares a pool that states
 no region and observes it held.
 
-Publication has no timer; each step is one explicit pass, so every transition
-here is invoked by the scenario. Registry convergence after a missed close,
-and holding a site whose projection cannot be read, are proven by the
-storefront's own cycle tests: this lane cannot inject a registry fault or stop
-a service mid-run.
+The storefront's loops are held for the module, so every transition here is
+invoked by the scenario: wherever the site changes, the scenario steps the
+site-projection poller, which the storefront's publication reads, and then one
+publication cycle. Registry convergence after a missed close, and holding a site
+whose projection is not held, are proven by the storefront's own tests: this
+lane cannot inject a registry fault or stop a service mid-run.
 """
 
 from __future__ import annotations
@@ -36,9 +37,13 @@ from market_resource_pools_contracts import PoolCreate, PoolUpdate
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
-pytestmark = pytest.mark.e2e_bare_metal_publication
+pytestmark = [
+    pytest.mark.e2e_bare_metal_publication,
+    pytest.mark.usefixtures("bare_metal_loops_held"),
+]
 
 PUBLICATION = "publication"
+SITE_PROJECTIONS = "site-projections"
 BARE_METAL = "bare_metal"
 REGION = "us-west"
 # One whole machine: the unit a bare-metal claim reserves, and the hardware it
@@ -129,7 +134,14 @@ async def _declare_whole_host(capacity_client, resource_id: str, pool_id: str) -
 
 
 def _step(storefront_admin) -> dict[str, Any]:
+    """One publication cycle, over the projections the storefront holds."""
     return storefront_admin.admin_run_lifecycle_cycle(PUBLICATION)
+
+
+def _step_after_the_site_changed(storefront_admin) -> dict[str, Any]:
+    """One cycle of the held site-projection poller, then one publication cycle."""
+    storefront_admin.admin_run_lifecycle_cycle(SITE_PROJECTIONS)
+    return _step(storefront_admin)
 
 
 def _actions(report: dict[str, Any], action: str) -> list[dict[str, Any]]:
@@ -190,7 +202,7 @@ class TestStage02_Publish:
         self, bare_metal_storefront_admin, state: PublicationState
     ):
         require_state(state, "advertised_resource")
-        report = _step(bare_metal_storefront_admin)
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
 
         published = _actions(report, "publish")
         sources = [item["source"]["physical_resource_id"] for item in published]
@@ -263,7 +275,7 @@ class TestStage04_Withdraw:
             PoolUpdate(policy_tags=_declarations(advertised=False)),
         )
 
-        report = _step(bare_metal_storefront_admin)
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
 
         assert _with_listing(report, state.listing_id) == [
             {"action": "close", "listing_id": state.listing_id, "reason": "source_gone"}
@@ -287,7 +299,7 @@ class TestStage05_Reinstate:
             PoolUpdate(policy_tags=_declarations(advertised=True)),
         )
 
-        report = _step(bare_metal_storefront_admin)
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
 
         reopened = [
             item
@@ -319,7 +331,7 @@ class TestStage05b_PriceThePool:
             PoolUpdate(policy_tags=_declarations(advertised=True, asking_rate="12.50")),
         )
 
-        report = _step(bare_metal_storefront_admin)
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
 
         assert _refreshed_fields(report, state.listing_id) == ["asking_rate"], report
         listing = bare_metal_registry.get_listing(state.listing_id)
@@ -405,7 +417,7 @@ class TestStage06_RegionlessPool:
             _declare_whole_host(bare_metal_site_capacity, resource_id, state.regionless_pool)
         )
 
-        report = _step(bare_metal_storefront_admin)
+        report = _step_after_the_site_changed(bare_metal_storefront_admin)
 
         assert not [
             item

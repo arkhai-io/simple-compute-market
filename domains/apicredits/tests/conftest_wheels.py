@@ -86,10 +86,15 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
             REPO / "kit" / "resource-pools-contracts",
             "arkhai_kit_resource_pools_contracts-*.whl",
         ),
-        # The pool kit validates listing-shape hints with this kit.
+        # The pool kit validates listing-shape hints and their inline constraints
+        # through the admissibility kit, which depends on the shape kit.
         "capability_shape": (
             REPO / "kit" / "capability-shape",
             "arkhai_kit_capability_shape-*.whl",
+        ),
+        "capability_admissibility": (
+            REPO / "kit" / "capability-admissibility",
+            "arkhai_kit_capability_admissibility-*.whl",
         ),
         "negotiation_runtime": (
             REPO / "kit" / "negotiation-runtime",

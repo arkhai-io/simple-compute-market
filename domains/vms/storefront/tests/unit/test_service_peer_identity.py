@@ -17,7 +17,7 @@ from market_identity import (
 
 import market_storefront.container as container
 from core_storefront.auth import AuthError
-from core_storefront.identity_authority import StorefrontIdentityAuthority
+from core_storefront.service_peers import ServicePeerTrust
 from core_storefront.sqlite_client import SQLiteClient
 from market_storefront.middleware.service_peer_auth import (
     _authenticate,
@@ -81,25 +81,16 @@ def _compose(tmp_path, monkeypatch):
     db = SQLiteClient(str(tmp_path / "storefront.db"))
     service = _SERVICE_SIGNER
     seller = _SELLER_SIGNER
-    StorefrontIdentityAuthority(db.db_path).register_service_peer(
-        peer_id="provisioning-home",
-        role="service",
-        site_id="home",
-        principal=_SERVICE_PRINCIPAL,
-        now=int(time.time()),
+    # The trust the composition root builds from configuration, seeded and
+    # loaded as the lifespan seeds it, and injected through the container.
+    trust = ServicePeerTrust(
+        db.db_path,
+        {"provisioning-home": ("service", "home", _SERVICE_AUTHORITIES)},
     )
+    trust.seed()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", seller)
-    monkeypatch.setattr(
-        "market_storefront.middleware.service_peer_auth.get_service_peer_configs",
-        lambda: {
-            "provisioning-home": (
-                "service",
-                "home",
-                _SERVICE_AUTHORITIES,
-            )
-        },
-    )
+    monkeypatch.setattr(container, "resolved_service_peer_trust", trust)
     return db, service
 
 

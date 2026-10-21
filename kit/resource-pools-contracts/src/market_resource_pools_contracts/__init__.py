@@ -1,14 +1,29 @@
-"""Resource-pool wire models, declaration vocabulary, and route declarations."""
+"""Resource-pool wire models, declaration vocabulary, backing, and route declarations."""
+
+from .asking_rates import (
+    ASKING_RATES_POLICY_TAG,
+    asking_rate_entry_problems,
+    validate_asking_rates,
+)
+from .backing import (
+    BACKED,
+    UNBACKED,
+    CapacityBacking,
+    CapacityBackingLabel,
+    CapacityNotAdmittedError,
+    UnknownCapacityBackingError,
+    admitted_backing,
+    capacity_backing,
+    capacity_backing_labels,
+    labels_reconciled_by_availability,
+    legacy_producer_backing,
+)
 
 from .hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
-    CAPACITY_BACKING_VALUES,
-    CAPACITY_UNBACKED,
     DELIVERABLE_MODES_POLICY_TAG,
     LISTING_SHAPES_POLICY_TAG,
-    CapacityBacking,
     MissingPoolDeclarationError,
     PoolDeclarationError,
     PoolDeclarationProblem,
@@ -38,14 +53,24 @@ from .pools import (
 from .routes import RESOURCE_POOL_ROUTES, pool_route
 
 __all__ = [
+    "ASKING_RATES_POLICY_TAG",
+    "asking_rate_entry_problems",
+    "validate_asking_rates",
     "ADVERTISABLE_MODES_POLICY_TAG",
-    "CAPACITY_BACKED",
+    "BACKED",
     "CAPACITY_BACKING_POLICY_TAG",
-    "CAPACITY_BACKING_VALUES",
-    "CAPACITY_UNBACKED",
     "DELIVERABLE_MODES_POLICY_TAG",
     "LISTING_SHAPES_POLICY_TAG",
+    "UNBACKED",
     "CapacityBacking",
+    "CapacityBackingLabel",
+    "CapacityNotAdmittedError",
+    "UnknownCapacityBackingError",
+    "admitted_backing",
+    "capacity_backing",
+    "capacity_backing_labels",
+    "labels_reconciled_by_availability",
+    "legacy_producer_backing",
     "MissingPoolDeclarationError",
     "PoolDeclarationError",
     "PoolDeclarationProblem",

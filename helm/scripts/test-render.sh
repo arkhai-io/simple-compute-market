@@ -13,7 +13,11 @@ EVM_RENDERED="$(mktemp)"
 OVERLAP_RENDERED="$(mktemp)"
 TWO_REGISTRIES_RENDERED="$(mktemp)"
 BARE_METAL_RENDERED="$(mktemp)"
-trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED"' EXIT
+RETAINED_RENDERED="$(mktemp)"
+LOCAL_RENDERED="$(mktemp)"
+RETAINED_BARE_METAL_RENDERED="$(mktemp)"
+LOCAL_BARE_METAL_RENDERED="$(mktemp)"
+trap 'rm -f "$DEFAULT_RENDERED" "$PAYMENTS_RENDERED" "$EVM_RENDERED" "$OVERLAP_RENDERED" "$TWO_REGISTRIES_RENDERED" "$BARE_METAL_RENDERED" "$RETAINED_RENDERED" "$LOCAL_RENDERED" "$RETAINED_BARE_METAL_RENDERED" "$LOCAL_BARE_METAL_RENDERED"' EXIT
 
 # Render one release into a file. A render that fails stops the script with
 # Helm's own message rather than exiting silently under `set -e`.
@@ -39,20 +43,36 @@ render "$EVM_RENDERED" "$RELEASE-evm" "$CHART_DIR" \
 render "$OVERLAP_RENDERED" "$RELEASE-overlap" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/identity-overlap-values.yaml" \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.Identity.service_peers.provisioning_default.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.Identity.administrators.operator.principals[1].identifier=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].scheme=ed25519' \
-    --set-string 'storefront.agents[0].config.provisioning.identity.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI'
+    --set-string 'storefront.agents.bob.config.Identity.service_peers.provisioning_default.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.config.Identity.service_peers.provisioning_default.principals[1].identifier=xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI' \
+    --set-string 'storefront.agents.bob.config.Identity.administrators.operator.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.config.Identity.administrators.operator.principals[1].identifier=5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g' \
+    --set-string 'storefront.agents.bob.internalRegistryTrust.principals[1].scheme=ed25519' \
+    --set-string 'storefront.agents.bob.internalRegistryTrust.principals[1].identifier=NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y'
 render "$TWO_REGISTRIES_RENDERED" "$RELEASE-registries" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
     --values "$CHART_DIR/fixtures/two-registries-values.yaml"
+# The dedicated bare-metal storefront runs in a release of its own, beside its
+# own provisioning service (bare-metal-release-values.yaml).
 render "$BARE_METAL_RENDERED" "$RELEASE-bare-metal" "$CHART_DIR" \
     --values "$CHART_DIR/values.yaml" \
-    --set 'bare-metal-storefront.enabled=true'
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
+# Every persistent chart enabled, with and without the local overlay: the
+# umbrella's own, then the bare-metal release's.
+render "$RETAINED_RENDERED" "$RELEASE-retained" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --set 'api-credits-registry.enabled=true'
+render "$LOCAL_RENDERED" "$RELEASE-local" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/local-values.yaml" \
+    --set 'api-credits-registry.enabled=true'
+render "$RETAINED_BARE_METAL_RENDERED" "$RELEASE-retained" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
+render "$LOCAL_BARE_METAL_RENDERED" "$RELEASE-local" "$CHART_DIR" \
+    --values "$CHART_DIR/values.yaml" \
+    --values "$CHART_DIR/local-values.yaml" \
+    --values "$CHART_DIR/bare-metal-release-values.yaml"
 
 errors=0
 fail() {
@@ -147,6 +167,35 @@ expect_absent "$DEFAULT_RENDERED" 'private_key|privateKey|request_credential' "d
 expect_absent "$DEFAULT_RENDERED" 'admin_api_key|adminApiKey|X-Admin-Key' "default manifests contain no legacy administrator shared secret"
 expect_absent "$DEFAULT_RENDERED" 'charts/bare-metal-storefront/' "default render omits the dedicated bare-metal storefront"
 expect_present "$BARE_METAL_RENDERED" 'charts/bare-metal-storefront/templates/deployment\.yaml' "dedicated bare-metal storefront can be enabled explicitly"
+# PVCs are retained on uninstall unless a chart sets persistence.retainOnUninstall
+# false, as the local overlay does for every persistent chart. Each PVC document is
+# checked on its own, by name, so one chart's missing annotation cannot hide behind
+# another resource's.
+pvc_retention() {
+    awk '
+        /^---/ { if (pvc) print name "=" keep; pvc = 0; keep = "absent"; name = "" }
+        /^kind: PersistentVolumeClaim/ { pvc = 1 }
+        /^  name: / && name == "" { name = $2 }
+        /helm\.sh\/resource-policy: keep/ { keep = "keep" }
+        END { if (pvc) print name "=" keep }
+    ' "$1"
+}
+check_pvcs() {
+    local retained="$1" local_render="$2"
+    shift 2
+    for suffix in "$@"; do
+        grep -qx "$RELEASE-retained-$suffix=keep" <(pvc_retention "$retained") \
+            && pass "$suffix is retained on uninstall by default" \
+            || fail "$suffix is retained on uninstall by default"
+        grep -qx "$RELEASE-local-$suffix=absent" <(pvc_retention "$local_render") \
+            && pass "$suffix is deleted on uninstall under the local overlay" \
+            || fail "$suffix is deleted on uninstall under the local overlay"
+    done
+}
+check_pvcs "$RETAINED_RENDERED" "$LOCAL_RENDERED" \
+    api-credits-registry-data provisioning-data registry-data storefront-bob-data
+check_pvcs "$RETAINED_BARE_METAL_RENDERED" "$LOCAL_BARE_METAL_RENDERED" \
+    bare-metal-storefront-data provisioning-data
 expect_present "$DEFAULT_REGISTRY" 'name: +REGISTRY_DESCRIPTOR_BASE_URL' "registry renders its public descriptor URL"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Local VM Compute Registry"?' "registry renders its descriptor display name"
 expect_present "$DEFAULT_REGISTRY" 'value: +"?Arkhai local development"?' "registry renders its operator identity"
@@ -211,19 +260,19 @@ expect_render_failure \
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "legacy hosted values fail schema/render" \
-    --set 'storefront.agents[0].config.hostedSettlement.enabled=true'
+    --set 'storefront.agents.bob.config.hostedSettlement.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "a removed mechanism's section fails the generated storefront schema" \
-    --set 'storefront.agents[0].config.Settlement.stripe.enabled=true'
+    --set 'storefront.agents.bob.config.Settlement.stripe.enabled=true'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "an unknown payments field fails the generated storefront schema" \
-    --set-string 'storefront.agents[0].config.Settlement.arkhai_payments.api_key=forbidden'
+    --set-string 'storefront.agents.bob.config.Settlement.arkhai_payments.api_key=forbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/eip191-evm-values.yaml" \
     "a wallet key in pass-through config fails the generated storefront schema" \
-    --set-string 'storefront.agents[0].config.Wallet.private_key=0xforbidden'
+    --set-string 'storefront.agents.bob.config.Wallet.private_key=0xforbidden'
 expect_override_failure \
     "$CHART_DIR/fixtures/payments-ed25519-values.yaml" \
     "key-gated registry without an acquisition pointer fails render" \
@@ -233,14 +282,21 @@ expect_override_failure \
     "public registry with an acquisition pointer fails render" \
     --set-string 'registry.descriptor.accessAcquisitionPointer=https://registry.example/access'
 # Each chart's own render tests (docs/development/TESTING.md, "Chart Render
-# Tests"), so this one target runs every render check. The storefront chart's
-# tests also load a rendered document with the storefront's own loader when its
-# environment exists (make init-storefront); without it they say so and skip.
+# Tests"), so this one target runs every render check. The storefront and
+# bare-metal storefront charts' tests also load a rendered document with that
+# storefront's own loader when its environment exists (make init-storefront;
+# make -C domains/bare_metal/storefront init); without it they say so and skip.
 STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/vms/storefront/.venv/bin/python"
 if [[ -z "${STOREFRONT_PYTHON:-}" && -x "$STOREFRONT_ENV_PYTHON" ]]; then
     export STOREFRONT_PYTHON="$STOREFRONT_ENV_PYTHON"
 fi
-for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py; do
+BARE_METAL_STOREFRONT_ENV_PYTHON="$CHART_DIR/../domains/bare_metal/storefront/.venv/bin/python"
+if [[ -z "${BARE_METAL_STOREFRONT_PYTHON:-}" && -x "$BARE_METAL_STOREFRONT_ENV_PYTHON" ]]; then
+    export BARE_METAL_STOREFRONT_PYTHON="$BARE_METAL_STOREFRONT_ENV_PYTHON"
+fi
+# The umbrella's own Python render tests (helm/tests/), such as the two-release
+# topology's, run beside the charts'.
+for chart_test in "$CHART_DIR"/charts/*/tests/test_render.py "$CHART_DIR"/tests/test_*.py; do
     if ! "${PYTHON:-python3}" "$chart_test"; then
         echo "FAIL: $chart_test" >&2
         errors=$((errors + 1))

@@ -65,11 +65,31 @@ identifier = "<unpadded-base64url-public-key>"
 service_url = "http://seller-provisioning:8081"
 mode = "http"                            # "mock" for a dry run
 
+[capacity.sites]
+# Each site the storefront sells from, by stable ID, and its authority's origin.
+default = "http://seller-provisioning:8081"
+
+# The one service peer the site is bound to: the provisioning authority's
+# public principal. Its responses and callbacks are verified against it.
+[Identity.service_peers.provisioning_default]
+role = "service"
+site_id = "default"
+principals = [{ scheme = "ed25519", identifier = "<provisioning-authority-public-key>" }]
+
 [registry]
-# The Arkhai public listing registry (preprod, Base Sepolia listings):
-urls = ["http://34.41.205.175/registry"]
+# The listing registry to publish to (a placeholder: use the URL its operator publishes):
+urls = ["https://registry.example.com"]
 # Or point at any other listing registry, e.g. a self-hosted one:
 # urls = ["http://<REGISTRY_HOST>:8080"]
+
+# Required: one pin per registry URL, keyed by the string in `urls`,
+# naming the registry's authority and the principal its responses are signed
+# with. A storefront refuses to start with a registry it cannot verify. Replace
+# both placeholders with the values the registry's operator publishes, and
+# re-key the table if you change `urls`.
+[registry.authorities."https://registry.example.com"]
+authority  = "<registry-authority>"
+principals = [{ scheme = "eip191", identifier = "<registry-principal>" }]
 
 [registry.auth]
 # Supply any write token through the deployment Secret overlay. Its key must
@@ -102,6 +122,10 @@ settlements = [
 default_min_price = "2"                 # negotiation floor only
 default_max_duration_seconds = 86400
 ```
+
+The storefront refuses to start, naming each problem, when it cannot publish:
+with no registry or a registry without its pin, no enabled settlement mechanism,
+or no site, or a site not bound to exactly one service peer.
 
 For payments-only publication, set priority to `["arkhai.payments.v1"]`,
 configure `[Settlement.arkhai_payments]`, omit wallet and chains, and publish a
@@ -143,27 +167,40 @@ The full schema is at
 ## 3. Commercial listing input and capacity identity
 
 Capacity declarations are authoritative for what a site sells; a provisioning
-Host record is only how the site reaches a machine. The storefront loads trusted `site_resource_pools` and
-`site_capacity_buckets` projections from each configured site. Commercial
-listing input may still be supplied through `resources.csv`, but each VM row
-must reference a projected `pool_id` or `resource_id` and declare its sellable
-shape (`gpu_count`, `vcpu_count`, `ram_gb`, and `disk_gb`). Do not publish
-host identities (`host_id`), authority URLs, API keys, or internal
-capacity-bucket IDs.
+Host record is only how the site reaches a machine. The storefront holds no
+inventory of its own: it loads trusted `site_resource_pools` and
+`site_capacity_buckets` projections from each configured site and derives every
+listing from them. A listing names its projected `pool_id`, never a host
+identity (`host_id`), an authority URL, an API key, or an internal
+capacity-bucket ID.
 
-```csv
-resource_id,resource_type,resource_subtype,unit,value,state,max_duration_seconds,attribute.pool_id,attribute.gpu_model,attribute.region,attribute.gpu_count,attribute.vcpu_count,attribute.ram_gb,attribute.disk_gb
-listing-slice-001,compute.gpu,H200,count,1,available,86400,default,H200,"California, US",1,8,32,100
-```
+A listing's commercial terms come from three places, highest first:
 
-The `[pricing].settlements` list above supplies complete defaults. A resource
-CSV may instead provide a `settlements` JSON-array column; that row-level list
-replaces command and config clauses in full. `min_price` remains only a
-negotiation-policy floor and never constructs a settlement option. Capacity
-admission, physical selection, prepared execution, and teardown are owned by
-the selected provisioning site rather than this CSV.
+- the storefront's own pool override for that site and pool
+  (`market-storefront pool-override`), which may state listing shapes,
+  settlement clauses, asking rates, `sla`, `max_duration_seconds`, and family
+  rates;
+- the pool's own `policy_tags`, declared at provisioning: `region`,
+  `listing_shapes`, `asking_rates`, `pricing`, and `sla`, which is read only
+  when `[pricing].accept_pool_declared_sla` is on;
+- the storefront configuration's defaults, such as `[pricing].settlements`.
+
+Region is a physical fact, so only the pool states it; no override does. A
+pool that states no region publishes nothing new and leaves the listings it
+already published unrefreshed; system status names it under `regionless_pools`.
+`DEPLOYMENT_AND_CONFIG.md`'s "Storefront listing shapes and pool overrides"
+describes each term. Capacity admission, physical selection, prepared
+execution, and teardown are owned by the selected provisioning site.
 
 ### Declaring capacity
+
+VM pools declare provider `vm.ansible`. Provisioning migrations canonicalize
+stored `ansible` routing names while preserving pool configuration and existing
+fulfillment state. Use `vm.ansible` in mounted pool documents and operator
+requests before starting the upgraded service; the old name is not a runtime
+alias. A fresh site with a mounted pool document creates its default from that
+document before importing host inventory. Without a document, migration supplies
+the configured VM default.
 
 A site sells what its capacity declarations say. A declaration names its Resource
 Pool, a `capacity` map of the dimensions it sells (`gpu_count`, `vcpu_count`,
@@ -203,13 +240,12 @@ longer changes what is sold. Change the declaration instead.
 ## 4. Bring it up
 
 `compose/seller.yml` bundles the storefront and provisioning services.
-For mock mode it needs two operator-provided files: `config.seller.toml`
-and `resources.csv`. Pass absolute paths via env to avoid docker compose's
+For mock mode it needs one operator-provided file, `config.seller.toml`. Pass
+an absolute path via env to avoid docker compose's
 relative-path-resolves-from-the-compose-file gotcha:
 
 ```bash
 SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
-SELLER_RESOURCES_CSV="$PWD/resources.csv" \
 docker compose -f compose/seller.yml up -d
 
 docker compose -f compose/seller.yml logs -f seller-storefront
@@ -233,10 +269,6 @@ market-storefront config migrate --scope settlement --check
 market-storefront config migrate --scope settlement --write --backup
 market-storefront config migrate --scope publication --check
 market-storefront config migrate --scope publication --write --backup
-market-storefront config migrate --scope publication \
-  --inventory /app/resources.csv --check
-market-storefront config migrate --scope publication \
-  --inventory /app/resources.csv --write --backup
 ```
 
 The storefront then publishes on its own. It derives listings from every
@@ -341,7 +373,6 @@ touching libvirt. To create real VMs:
 
    ```bash
    SELLER_CONFIG_PATH="$PWD/config.seller.toml" \
-   SELLER_RESOURCES_CSV="$PWD/resources.csv" \
    SELLER_SSH_PRIVKEY="$PWD/keys/id_ed25519" \
    docker compose -f compose/seller.yml -f compose/seller.live.yml \
      up -d --force-recreate seller-provisioning
@@ -364,6 +395,56 @@ touching libvirt. To create real VMs:
    `SUCCESS / ping: pong` means the next buy will actually create a VM.
 
 
+## Upgrading from CSV inventory
+
+Earlier storefronts could hold their own inventory: a resource CSV seeded at
+startup (`resources_csv_path`, `resources_csv_inline`, or a file at
+`/app/resources.csv`) or imported through
+`POST /api/v1/admin/portfolio/resources/import`, with per-row prices drawn from
+`[escrow_templates]`. A storefront now reads inventory only from its sites'
+provisioning services, and nothing warns when the old source is still
+configured: an unmigrated storefront starts, finds no pools, and publishes
+nothing. The upgrade is one-way; there is no supported downgrade.
+
+Before upgrading, declare at provisioning everything the CSV described:
+
+1. **Hosts and capacity.** Register each host in the provisioning service's
+   host inventory and declare what it sells as capacity, as "Declaring
+   capacity" above describes. A CSV row's `attribute.vm_host` names the host,
+   and its `value` and `attribute.vcpu_count`, `ram_gb`, and `disk_gb` become
+   the declaration's `capacity`.
+2. **Pools and their terms.** Put each resource in a pool, and declare the
+   pool's `region` in its `policy_tags`, with its `listing_shapes` and
+   `asking_rates` where you state them. Region can only be declared there, and
+   a pool without it is held until it states one. A
+   pool's `sla` hint is read only by a storefront with
+   `[pricing].accept_pool_declared_sla` on; otherwise state the SLA as an
+   override term.
+3. **Storefront terms.** Re-enter, with `market-storefront pool-override set`,
+   any pool term the storefront itself supplied. System status on the release
+   you are upgrading from lists, under `publication_derivation`, each field a
+   pool still took from the storefront's own pool record
+   (`legacy_overrides_in_effect`): `sla`, `max_duration_seconds`, and pricing
+   left there fall through to the pool's hint and then to the configured
+   default once you upgrade. A per-row `accepted_escrows` value has no
+   equivalent; state the clauses it priced as a `settlements` clause list in
+   the override or in `[pricing].settlements`.
+4. **Configuration.** Remove `resources_csv_path`, `resources_csv_inline`,
+   `[escrow_templates]`, and `capacity.use_site_projection_for_listings` from
+   every storefront configuration file, and the chart's
+   `secret.resourcesCsvInline` value. The chart refuses to render with any of
+   them, and `market-storefront config set` refuses to write them.
+
+After upgrading, the storefront's database keeps the tables the old inventory
+lived in (`resources`, `hosts`, `resource_transition_events`,
+`compute_capacity_pools`, and `compute_pool_members`) exactly as they were. The
+storefront never reads or writes them again; they remain so you can extract
+anything you did not declare beforehand. Their rows are history, not current
+state: reconcile each against what the provisioning service already holds
+before declaring it there, through the provisioning service's own
+administration API or definition documents. Nothing copies them across
+automatically, and nothing should overwrite a declaration that is already live.
+
 ## Common pitfalls
 
 - **Don't restart without pinning `onchain_agent_id`** — every fresh
@@ -377,16 +458,9 @@ touching libvirt. To create real VMs:
   `503 {"reason":"global"}`.** Global pause is durably persisted and separate
   from per-listing pause. Resume it through the authenticated
   `POST /admin/resume` endpoint before accepting buyers.
-- **The resource importer and storefront must use the same SQLite path.**
-  A mismatch leaves the running storefront with no resources and causes
-  `409 no_matching_inventory`. Check `resource_count` in
-  `GET /api/v1/system/status`; zero usually means the importer wrote a
-  different database. Prefer an explicit importer `--db-path` or
-  `STOREFRONT_DB_PATH`.
-- **`resources.csv` `min_price` is only the negotiation floor.** It never
-  supplies a settlement option's asset or rate. Put each decimal asset rate
-  and unit in that resource's complete `settlements` clause list or in the
-  selected command/config default list.
+- **A site whose projection never loads publishes nothing.** The storefront
+  derives listings only from its sites' projections; check `site_projections`
+  in `GET /api/v1/system/status` before looking for missing inventory.
 - **Do not publish a `host_id`.** Listings use trusted projected `pool_id` or
   `resource_id`; physical host selection is provisioning-owned. The admin
   settle evaluate endpoint validates canonical schedule/begin requests without

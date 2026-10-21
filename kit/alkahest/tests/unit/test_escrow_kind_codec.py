@@ -40,10 +40,13 @@ from market_alkahest.alkahest import (
     get_escrow_kind_codec,
     get_escrow_kind_codec_by_address,
     get_escrow_obligation_with_codec,
+    get_recipient_arbiter,
     known_escrow_kinds,
     reclaim_expired_escrow_with_codec,
     register_escrow_kind_codec,
 )
+from market_alkahest.dev_chain import anvil_address_book_path
+from market_alkahest.schemas import EscrowDemand
 
 
 _ARBITER = "0x" + "ab" * 20
@@ -53,6 +56,18 @@ _TOKEN_AMOUNT = 7
 _DEMAND_HEX = "0x" + "11" * 32
 _DEMAND_BYTES = bytes.fromhex("11" * 32)
 _UID = "0x" + "22" * 32
+_ANVIL_BOOK = str(anvil_address_book_path())
+_SELLER = "0x" + "12" * 20
+# The release condition every materialization case below selects: the dev
+# chain's recipient arbiter paying the seller. Materialization encodes it into
+# the obligation's ``arbiter`` and ``demand``; these cases test amounts.
+_CONDITION = EscrowDemand(
+    chain_name="anvil",
+    arbiter=get_recipient_arbiter("anvil", config_path=_ANVIL_BOOK),
+    demand_data={"recipient": _SELLER},
+)
+# A listing authorizing ``_CONDITION``, which the proposals below select.
+_LISTING = {"demands": [_CONDITION.model_dump(exclude_none=True)]}
 
 
 @pytest.fixture
@@ -535,20 +550,17 @@ def test_materialize_escrow_terms_uses_final_agreed_amount_over_proposal_amount(
     proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
-        fields={
-            "arbiter": _ARBITER,
-            "demand": _DEMAND_HEX,
-            "token": _TOKEN,
-            "amount": 7000,
-        },
+        fields={"token": _TOKEN, "amount": 7000},
+        demand=_CONDITION,
         expiration_unix=1_800_000_000,
     )
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address="0x" + "12" * 20,
+        listing=_LISTING,
         agreed_amount=9500,
         duration_seconds=3600,
+        addr_config_path=_ANVIL_BOOK,
     )[0]
 
     assert terms.obligation_data["amount"] == 9500
@@ -558,12 +570,8 @@ def test_materialize_escrow_terms_payload_matches_model_dump():
     proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
-        fields={
-            "arbiter": _ARBITER,
-            "demand": _DEMAND_HEX,
-            "token": _TOKEN,
-            "amount": 7000,
-        },
+        fields={"token": _TOKEN, "amount": 7000},
+        demand=_CONDITION,
         expiration_unix=1_800_000_000,
     )
 
@@ -571,17 +579,19 @@ def test_materialize_escrow_terms_payload_matches_model_dump():
         term.model_dump()
         for term in materialize_escrow_terms_from_proposal(
             proposal=proposal,
-            seller_wallet_address="0x" + "12" * 20,
+            listing=_LISTING,
             agreed_amount=9500,
             duration_seconds=3600,
+            addr_config_path=_ANVIL_BOOK,
         )
     ]
 
     assert materialize_escrow_terms_payload_from_proposal(
         proposal=proposal,
-        seller_wallet_address="0x" + "12" * 20,
+        listing=_LISTING,
         agreed_amount=9500,
         duration_seconds=3600,
+        addr_config_path=_ANVIL_BOOK,
     ) == expected
 
 
@@ -589,11 +599,8 @@ def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
     proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
-        literal_fields={
-            "arbiter": _ARBITER,
-            "demand": _DEMAND_HEX,
-            "erc20Tokens": [_TOKEN, "0x" + "ef" * 20],
-        },
+        literal_fields={"erc20Tokens": [_TOKEN, "0x" + "ef" * 20]},
+        demand=_CONDITION,
         rates=[
             {"field": "erc20Amounts[0]", "per": "hour", "value": 100},
             {"field": "erc20Amounts[1]", "per": "hour", "value": 200},
@@ -604,9 +611,10 @@ def test_materialize_escrow_terms_assigns_indexed_bundle_rate_fields():
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address="0x" + "12" * 20,
+        listing=_LISTING,
         agreed_amount=999,
         duration_seconds=7200,
+        addr_config_path=_ANVIL_BOOK,
     )[0]
 
     assert terms.obligation_data["erc20Amounts"] == [200, 400]
@@ -618,20 +626,18 @@ def test_materialize_escrow_terms_does_not_add_amount_for_amountless_escrow():
     proposal = SimpleNamespace(
         chain_name="anvil",
         escrow_address="0x" + "00" * 20,
-        literal_fields={
-            "arbiter": _ARBITER,
-            "demand": _DEMAND_HEX,
-            "attestationUid": "0x" + "12" * 32,
-        },
+        literal_fields={"attestationUid": "0x" + "12" * 32},
+        demand=_CONDITION,
         rates=[],
         expiration_unix=1_800_000_000,
     )
 
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address="0x" + "12" * 20,
+        listing=_LISTING,
         agreed_amount=999,
         duration_seconds=7200,
+        addr_config_path=_ANVIL_BOOK,
     )[0]
 
     assert terms.obligation_data["attestationUid"] == "0x" + "12" * 32

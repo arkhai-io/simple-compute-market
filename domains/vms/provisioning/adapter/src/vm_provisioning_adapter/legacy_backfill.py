@@ -114,7 +114,7 @@ def compile_legacy_vm_fulfillment_backfill(
     migration cannot safely reconstruct; never submits a replacement create
     operation because a prior job identity was lost or ambiguous.
     """
-    if candidate.provider != "ansible" or not candidate.vm_host or not candidate.pool_id:
+    if candidate.provider not in {"ansible", "vm.ansible"} or not candidate.vm_host or not candidate.pool_id:
         raise LegacyBackfillValidationError(
             f"legacy VM lease {candidate.lease_id} has no unique usable Ansible host/pool"
         )
@@ -189,7 +189,7 @@ def compile_legacy_vm_fulfillment_backfill(
             pool_id=candidate.pool_id,
             offering_mode=_LEGACY_OFFERING_MODE,
             resource_kind="vm",
-            provider="ansible",
+            provider=candidate.provider,
             host_id=candidate.vm_host,
         )
         result = SettlementResult(
@@ -216,7 +216,7 @@ def compile_legacy_vm_fulfillment_backfill(
         settlement_resource_id=candidate.vm_host,
         pool_id=candidate.pool_id,
         offering_mode=_LEGACY_OFFERING_MODE,
-        provider="ansible",
+        provider=candidate.provider,
         resource_attributes={},
         resource_host_id=candidate.vm_host,
         provider_metadata=metadata,

@@ -21,7 +21,7 @@ registry.
 
 Each stateful service owns its database and migration history. Cross-service relationships use public identifiers and APIs rather than foreign keys into another service's database. This keeps backup, rollout, failure, and authority boundaries aligned.
 
-SQLite-backed deployed services use one writer with ReadWriteOnce storage and `Recreate` rollout semantics. Retained, existing, and ephemeral volumes have different durability consequences and must remain explicit deployment choices rather than hidden application behavior.
+SQLite-backed deployed services use one writer with ReadWriteOnce storage and `Recreate` rollout semantics. Retained, existing, and ephemeral volumes have different durability consequences and must remain explicit deployment choices rather than hidden application behavior. The Helm charts make retention one such choice, `persistence.retainOnUninstall`, which local development deployments turn off so a reinstall starts from no state (see [`DEPLOYMENT_AND_CONFIG.md`](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#stateful-service-persistence)).
 
 ## Migration and initialization boundary
 

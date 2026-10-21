@@ -184,21 +184,19 @@ class TestStorefrontRegistration:
         )
         log.info("✓ Negotiation strategy viable: %s", strat)
 
-    def test_resource_portfolio_seeded(
+    def test_site_projections_loaded(
         self,
         seller_api_url: str,
         seller_settings: dict,
     ) -> None:
-        """GET /api/v1/system/status must report resource_count > 0.
+        """GET /api/v1/system/status must report every site's projections loaded.
 
-        Guards against the CSV importer writing to a different SQLite path
-        than the running server reads — a silent misconfiguration where the
-        storefront has no inventory and refuses all /negotiate/new calls with
-        409 no_matching_inventory.
-
-        resource_count is a top-level field (not in checks) on the full
-        diagnostic status endpoint, populated by querying the resources table
-        directly on the server.
+        The storefront holds no inventory of its own: every listing derives
+        from the projections it loads from each configured site. A site whose
+        projection is not loaded publishes nothing and refuses negotiations
+        against its listings, which surfaces several layers away as
+        ``409 no_matching_inventory``. ``site_projections`` reports each
+        family's load state per site, outside ``checks``.
         """
         credential = seller_settings.get("admin_credential", "")
         if not credential:
@@ -227,18 +225,21 @@ class TestStorefrontRegistration:
         finally:
             client.close()
 
-        resource_count = status.resource_count
-        assert resource_count is not None, (
-            "resource_count absent from /api/v1/system/status response.\n"
-            "Rebuild the storefront image with the updated system_service.py."
+        sites = status.site_projections or {}
+        assert sites, (
+            "site_projections absent or empty in /api/v1/system/status: the "
+            "storefront has no capacity site configured, so it can publish nothing.\n"
+            "Check [capacity.sites] in the storefront configuration."
         )
-        assert resource_count > 0, (
-            f"resource_count={resource_count} — storefront has no registered compute resources.\n"
-            "The resource CSV importer likely wrote to a different SQLite path than the server reads.\n"
-            "Check that the compose command passes --db-path matching [seller].db_path in config.toml.\n"
-            "Run the importer manually:\n"
-            "  docker exec bob-storefront python scripts/import_resources_csv.py \\\n"
-            "    --csv src/market_storefront/data/kvm1-machine.csv \\\n"
-            "    --db-path src/market_storefront/data/storefront/agent.db"
+        unloaded = {
+            f"{site}/{family}": (view or {}).get("state")
+            for site, families in sites.items()
+            for family, view in (families or {}).items()
+            if (view or {}).get("state") != "loaded"
+        }
+        assert not unloaded, (
+            f"site projections not loaded: {unloaded}.\n"
+            "Check that each site's provisioning service is reachable and trusts "
+            "this storefront, then refresh with POST /api/v1/admin/capacity/projections/refresh."
         )
-        log.info("✓ Resource portfolio seeded: resource_count=%d", resource_count)
+        log.info("✓ Site projections loaded: %s", sorted(sites))

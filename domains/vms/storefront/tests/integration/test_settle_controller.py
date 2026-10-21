@@ -41,13 +41,9 @@ _TEST_SELLER_PRINCIPAL = Identity(
 
 ADMIN_SIGNER = Ed25519Signer(b"\x51" * 32)
 STOREFRONT_SIGNER = Ed25519Signer(b"\x52" * 32)
-PROVISIONING_SIGNER = Ed25519Signer(b"\x53" * 32)
 ADMINISTRATORS = TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,))
 STOREFRONT_AUTHORITIES = TrustedIdentitySet(
     identities=(STOREFRONT_SIGNER.identity,)
-)
-PROVISIONING_AUTHORITIES = TrustedIdentitySet(
-    identities=(PROVISIONING_SIGNER.identity,)
 )
 
 
@@ -121,10 +117,6 @@ async def admin_client(
         lambda: {"integration-admin": ADMINISTRATORS},
     )
     initialize_administrator_identities(db.db_path)
-    monkeypatch.setattr(
-        "market_storefront.services.capacity_client.get_provisioning_authorities",
-        lambda: PROVISIONING_AUTHORITIES,
-    )
     monkeypatch.setattr(_container, "resolved_alkahest_clients", {})
     _container.resolved_sqlite_client = db
     _container.resolved_marketplace_signer = STOREFRONT_SIGNER
@@ -134,7 +126,7 @@ async def admin_client(
     app.middleware("http")(administrator_identity_middleware)
 
     transport = httpx.ASGITransport(app=app)
-    with site_capacity(
+    async with site_capacity(
         capacity_site,
         site_name="site-test",
         sqlite_client_factory=lambda: db,
@@ -277,16 +269,6 @@ class TestEvaluateSettle:
             resource_id="r-eval-1",
         )
 
-        # Seed a resource so the select could potentially reserve it
-        await db.upsert_resource(
-            resource_id="r-eval-1",
-            resource_type="compute.gpu",
-            resource_subtype="H200",
-            unit="gpu",
-            state="available",
-            value=1,
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host1"},
-        )
         capacity_site.add_resource(
             "r-eval-1",
             1,
@@ -308,12 +290,7 @@ class TestEvaluateSettle:
         job = await db.load_escrow(escrow_uid="no-write-eval-uid")
         assert job is None, "evaluate_settle must not write settlement_jobs rows"
 
-        # Evaluation reserves nothing, locally or at the site.
-        states = {r["resource_id"]: r["state"] for r in await db.list_resources()}
-        assert states["r-eval-1"] == "available", (
-            f"evaluate_settle reserved a resource (state={states['r-eval-1']!r}) "
-            "— it must use reserve=False (read-only inventory selection)."
-        )
+        # Evaluation reserves nothing at the site.
         assert capacity_site._available("r-eval-1") == 1
 
     async def test_with_matching_inventory_returns_would_submit_true(
@@ -327,15 +304,6 @@ class TestEvaluateSettle:
             db,
             "settle-eval-match",
             resource_id="r-eval-match",
-        )
-        await db.upsert_resource(
-            resource_id="r-eval-match",
-            resource_type="compute.gpu",
-            resource_subtype="H200",
-            unit="gpu",
-            state="available",
-            value=1,
-            attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "host-match"},
         )
         capacity_site.add_resource(
             "r-eval-match",

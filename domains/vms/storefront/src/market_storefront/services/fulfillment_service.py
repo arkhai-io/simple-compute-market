@@ -11,7 +11,6 @@ from functools import partial
 from typing import Any
 
 from compute_provisioning_client import (
-    ComputeProvisioningClient,
     ComputeProvisioningJobError,
     ComputeProvisioningTimeoutError,
 )
@@ -21,13 +20,14 @@ from compute_provisioning_contracts import (
     AccessDelivery,
     FulfillmentRequestBody,
     FulfillmentScheduleRequest,
-    LeaseTermination,
+    LeaseView,
 )
 from arkhai_vms import VmConnectionDetails
 from core_storefront.stage_log import stage_event
 from market_core import SettlementEvidence, VersionedEnvelope
 
 from market_storefront.services.capacity_client import (
+    AggregateFulfillmentClient,
     build_capacity_client,
     build_capacity_runtime,
     build_fulfillment_client,
@@ -42,7 +42,6 @@ from market_storefront.services.vm_job_spec_service import (
 )
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
-    get_provisioning_authorities,
     settings,
 )
 
@@ -268,21 +267,6 @@ async def _build_provisioning_job_spec(
     )
 
 
-def _provisioning_client(*, timeout: float) -> ComputeProvisioningClient:
-    from market_storefront import container
-
-    signer = container.resolved_marketplace_signer
-    if signer is None:
-        raise RuntimeError("storefront marketplace signer is unavailable")
-    return ComputeProvisioningClient(
-        settings.provisioning.service_url,
-        signer=signer,
-        caller_role="seller",
-        expected_authorities=get_provisioning_authorities(),
-        timeout=timeout,
-    )
-
-
 def _recorded_utc(value: str) -> datetime:
     """A lease time as the site recorded it: ISO 8601, or minute precision."""
     text = value.strip().replace("Z", "+00:00")
@@ -294,29 +278,33 @@ def _recorded_utc(value: str) -> datetime:
 
 
 async def terminate_vm_lease(
+    fulfillment_client: AggregateFulfillmentClient,
     *,
     capacity_reservation_id: str,
+    site_id: str,
     reason: str | None = None,
-) -> None:
-    """Ask the provisioning service to begin tearing down a leased VM early.
+) -> LeaseView:
+    """Ask the site holding a reservation to begin tearing down its leased VM early.
 
-    Submits the same executor-dispatched release operation the lease
-    watchdog's own expiry sweep submits (`POST
-    /api/v1/contract/leases/{capacity_reservation_id}/terminate`) but
-    immediately, without waiting for a sweep cycle. Capacity is held until
-    the provisioning service confirms teardown; this call only requests
-    that teardown begin, it does not wait for it to finish.
+    ``fulfillment_client`` is the storefront's per-site fulfillment client
+    (``build_fulfillment_client``) and ``site_id`` the site the deal's records
+    bind the reservation to, as every record-bound fulfillment call names it:
+    the request goes to that site alone, and its answer is verified against that
+    site's own service peer. The site submits the same release its lease
+    watchdog's expiry sweep submits (`POST
+    /api/v1/contract/leases/{capacity_reservation_id}/terminate`), but
+    immediately. Capacity is held until the site confirms teardown; this call
+    only requests that teardown begin and returns the lease as the site then
+    records it.
 
-    No caller exists yet in this codebase — this function exists so a
-    future buyer-initiated early-termination flow has something to call
-    rather than needing to add provisioning-service surface area for it
-    later. See `openspec/specs/vm-storefront-fulfillment/spec.md`.
+    No caller exists yet in this codebase: this function exists so a future
+    buyer-initiated early-termination flow -- the buyer asks the storefront,
+    which asks the site -- has something to call. See
+    `openspec/specs/vm-storefront-fulfillment/spec.md`.
     """
-    async with _provisioning_client(timeout=10) as client:
-        await client.terminate_lease(
-            capacity_reservation_id,
-            LeaseTermination(reason=reason),
-        )
+    return await fulfillment_client.terminate_lease(
+        capacity_reservation_id, site_id=site_id, reason=reason
+    )
 
 
 async def fulfill_compute_obligation(

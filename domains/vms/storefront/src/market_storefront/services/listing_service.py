@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from functools import partial
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from typing import Any
@@ -32,7 +33,11 @@ from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
 from arkhai_vms_negotiation.policies import _amount_from_proposal
-from market_capacity_publication import CapacityBinding, CapacityRuntime
+from market_capacity_publication import (
+    CapacityRuntime,
+    PublicationBinding,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -43,14 +48,21 @@ from market_settlement_runtime import (
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
+from market_resource_pools_contracts.backing import CapacityBacking
 from market_storefront.services.listing_sources import resolve_source_backing
-from market_storefront.settlement_composition import (
-    admissible_settlement_clauses,
-    mechanism_fulfills_through_capacity,
-)
 
 logger = logging.getLogger(__name__)
 
+
+
+def _clause_mechanism(clause: Any) -> str:
+    """The mechanism a settlement clause names, compiled or serialized."""
+    mechanism = (
+        clause.get("mechanism")
+        if isinstance(clause, Mapping)
+        else getattr(clause, "mechanism", None)
+    )
+    return str(mechanism)
 
 
 class ListingSourceAlreadyBound(Exception):
@@ -95,7 +107,8 @@ class ListingService:
         marketplace_signer: Signer,
         alkahest_clients: dict[str, Any],
         settlement_composition_provider: Callable[[], Any],
-        source_backing_resolver: Callable[..., str] = resolve_source_backing,
+        site_projections: SiteProjectionState,
+        source_backing_resolver: Callable[..., CapacityBacking] | None = None,
     ) -> None:
         from market_storefront.utils.config import (
             CHAINS,
@@ -124,9 +137,12 @@ class ListingService:
         self._marketplace_signer = marketplace_signer
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
-        # What a source's site currently declares about it; injected so the
-        # create path can be exercised without a loaded projection.
-        self._source_backing = source_backing_resolver
+        # What a source's site currently declares about it, read from the held
+        # projection; replaceable so the create path can be exercised without
+        # a loaded one.
+        self._source_backing = source_backing_resolver or partial(
+            resolve_source_backing, site_projections
+        )
 
         self._token_transfers_available = bool(
             self._alkahest_clients and CHAINS and get_evm_wallet_private_key()
@@ -445,8 +461,9 @@ class ListingService:
             "holds this one."
         )
     @staticmethod
-    def _unbacked_settlement_terms(
+    def _admissible_settlement_terms(
         *,
+        backing: CapacityBacking,
         accepted_escrows: list[dict[str, Any]],
         settlement_options: list[dict[str, Any]],
         clauses: tuple[SettlementPublicationClause, ...],
@@ -459,45 +476,58 @@ class ListingService:
         tuple[SettlementPublicationClause, ...],
         list[dict[str, Any]],
     ]:
-        """Keep only settlement terms an unbacked listing may publish.
+        """Keep only the settlement terms this listing's backing lets it publish.
 
-        A mechanism VM fulfils through capacity would take a buyer's funds and
-        then reach a reservation this listing cannot make, so its options are
-        dropped, with a notice naming them; if nothing remains the listing is
-        refused.
+        Each seller stage declares whether settling through it delivers through
+        VM capacity. Where nothing admits the listing against capacity, such a
+        stage would take a buyer's funds and then reach a reservation that
+        cannot be made, so its options are dropped, with a notice naming them;
+        if nothing remains the listing is refused.
         """
-        declarations = composition.mechanism_fulfillment
-        kept_options, dropped = admissible_settlement_clauses(
+        def fulfils_through_capacity(mechanism: str) -> bool:
+            stage = composition.seller_stages.get(mechanism)
+            if stage is None:
+                raise ValueError(
+                    f"settlement mechanism {mechanism!r} is not composed by this "
+                    "storefront"
+                )
+            return stage.fulfils_through_capacity
+
+        kept_options, dropped_options = backing.admissible_settlement(
             settlement_options,
-            capacity_backing="unbacked",
-            declarations=declarations,
+            mechanism=_clause_mechanism,
+            fulfils_through_capacity=fulfils_through_capacity,
         )
-        kept_clauses, _ = admissible_settlement_clauses(
+        kept_clauses, _ = backing.admissible_settlement(
             clauses,
-            capacity_backing="unbacked",
-            declarations=declarations,
+            mechanism=_clause_mechanism,
+            fulfils_through_capacity=fulfils_through_capacity,
         )
+        dropped = list(dropped_options)
         # Accepted escrows and their demands are the Alkahest publication form.
-        if accepted_escrows and mechanism_fulfills_through_capacity(
-            "alkahest.v1", declarations
-        ):
-            accepted_escrows, demands = [], []
-            if "alkahest.v1" not in dropped:
-                dropped.append("alkahest.v1")
+        if accepted_escrows:
+            _, escrow_dropped = backing.admissible_settlement(
+                ("alkahest.v1",),
+                mechanism=str,
+                fulfils_through_capacity=fulfils_through_capacity,
+            )
+            if escrow_dropped:
+                accepted_escrows, demands = [], []
+                dropped.extend(m for m in escrow_dropped if m not in dropped)
         if dropped:
             logger.warning(
-                "[LISTINGS] unbacked source %s: dropped settlement mechanisms %s, "
-                "which VM fulfils through capacity",
+                "[LISTINGS] %s source %s: dropped settlement mechanisms %s, which "
+                "VM fulfils through capacity",
+                backing.label,
                 source,
                 dropped,
             )
         if not kept_options and not accepted_escrows:
             raise ValueError(
-                f"unbacked source {source} has no settlement option it may publish: "
-                f"every configured mechanism ({', '.join(dropped) or 'none'}) is "
-                "fulfilled through VM capacity"
+                f"{backing.label} source {source} has no settlement option it may "
+                f"publish (dropped: {', '.join(dropped) or 'none'})"
             )
-        return accepted_escrows, kept_options, tuple(kept_clauses), demands
+        return accepted_escrows, list(kept_options), tuple(kept_clauses), demands
 
     async def derive_listing(
         self, request: VmCreateListingRequest
@@ -557,36 +587,41 @@ class ListingService:
         source_id = capacity_source["pool_id"] or capacity_source["resource_id"]
         # Backing comes from what the source's site declares now, never from the
         # request, so a caller cannot publish supply under the wrong category.
-        capacity_backing = self._source_backing(
+        backing = self._source_backing(
             site_id=capacity_source["site_id"],
             pool_id=capacity_source["pool_id"],
             resource_id=capacity_source["resource_id"],
             offering_mode=self._binding.offering_mode,
         )
-        capacity_source["capacity_backing"] = capacity_backing
-        if capacity_backing == "backed":
-            self._capacity_runtime.require_binding(
-                CapacityBinding(
-                    site_id=capacity_source["site_id"],
-                    offering_mode=self._binding.offering_mode,
-                    source_id=source_id,
-                )
-            )
-        else:
-            (
-                accepted_escrows,
-                settlement_options,
-                canonical_clauses,
-                demands,
-            ) = self._unbacked_settlement_terms(
-                accepted_escrows=accepted_escrows,
-                settlement_options=settlement_options,
-                clauses=canonical_clauses,
-                demands=demands,
-                composition=composition,
-                source=f"{capacity_source['site_id']}/{source_id}",
-            )
-        listing_resource.capacity_backing = capacity_backing
+        capacity_source["capacity_backing"] = backing.label
+        binding = PublicationBinding(
+            site_id=capacity_source["site_id"],
+            offering_mode=self._binding.offering_mode,
+            source_id=source_id,
+            backing=backing,
+        )
+
+        def site_admits() -> None:
+            # Where availability bounds the listing, its site must be one this
+            # storefront can reserve at; an unconfigured site raises.
+            self._capacity_runtime.require_binding(binding)
+
+        backing.judge(lambda: None, site_admits)
+        (
+            accepted_escrows,
+            settlement_options,
+            canonical_clauses,
+            demands,
+        ) = self._admissible_settlement_terms(
+            backing=backing,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+            clauses=canonical_clauses,
+            demands=demands,
+            composition=composition,
+            source=f"{capacity_source['site_id']}/{source_id}",
+        )
+        listing_resource.capacity_backing = backing.label
 
         listing = Listing(
             listing_id=str(uuid.uuid4()),

@@ -135,25 +135,6 @@ class SQLiteClient(CoreSQLiteClient):
 
         return await asyncio.to_thread(load)
 
-    async def count_open_bare_metal_resources(self) -> int:
-        """Count open, unpaused bare-metal listings for operator status."""
-
-        def _count() -> int:
-            conn = sqlite3.connect(self.db_path)
-            try:
-                row = conn.execute(
-                    "SELECT COUNT(*) FROM storefront_listing_bindings b "
-                    "JOIN listings l ON l.listing_id = b.listing_id "
-                    "WHERE b.offering_mode = ? AND l.status = 'open' "
-                    "AND COALESCE(l.paused, 0) = 0",
-                    (BARE_METAL_OFFERING_MODE,),
-                ).fetchone()
-                return int(row[0])
-            finally:
-                conn.close()
-
-        return await asyncio.to_thread(_count)
-
     async def list_open_bare_metal_listing_bindings(
         self,
         *,
@@ -269,10 +250,9 @@ class SQLiteClient(CoreSQLiteClient):
             ),
             source_envelope=source_envelope,
             last_reconciled_at=updated_at,
-            # Every bare-metal listing is backed by one selected-site Physical
-            # Resource; this domain publishes nothing an admission authority
-            # does not stand behind.
-            capacity_backing="backed",
+            # The backing its pool declared when it was derived, which the
+            # listing publishes; fixed for the life of the binding.
+            capacity_backing=normalized.capacity_backing,
         )
         listing_resource = normalized.model_dump(mode="json", exclude_none=True)
         listing_resource["offering_mode"] = domain_binding.offering_mode

@@ -20,9 +20,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
+from market_resource_pools_contracts.backing import legacy_producer_backing
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
-    CAPACITY_BACKED,
     CAPACITY_BACKING_POLICY_TAG,
     declared_deliverable_modes,
 )
@@ -61,6 +61,7 @@ def apply_schema_migrations(
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
     default_host_id: str | None = None,
+    seed_default_pool: bool = True,
 ) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
@@ -79,6 +80,7 @@ def apply_schema_migrations(
                 engine,
                 default_playbook_path=default_playbook_path,
                 default_inventory_group=default_inventory_group,
+                seed_default_pool=seed_default_pool,
             )
         elif migration.id == "20261002_002_job_envelopes":
             _migrate_job_envelopes(engine, default_host_id=default_host_id)
@@ -943,11 +945,12 @@ def _migrate_resource_pools_and_hosts_pool_id(
     *,
     default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
     default_inventory_group: str = "kvm_hosts",
+    seed_default_pool: bool = True,
 ) -> None:
     """Create resource_pools/ansible_pool_configs, seed the "default" pool,
     and add hosts.pool_id as NOT NULL.
 
-    Ordering matters: the default pool row must exist before the
+    For an existing database, the default pool row must exist before the
     hosts.pool_id column is added, since the column carries both a
     NOT NULL constraint and a DEFAULT of DEFAULT_POOL_ID — on Postgres the
     FK would fail validation against a not-yet-existing referenced row.
@@ -966,11 +969,13 @@ def _migrate_resource_pools_and_hosts_pool_id(
     PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
     VmBase.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
 
+    # A fresh database with a mounted pool document has no hosts to backfill;
+    # startup creates its default through ordinary atomic document import.
     with Session(engine) as session:
         exists = (
             session.query(ResourcePool).filter(ResourcePool.id == DEFAULT_POOL_ID).one_or_none()
         )
-        if exists is None:
+        if exists is None and seed_default_pool:
             session.add(ResourcePool(
                 id=DEFAULT_POOL_ID,
                 label="Default Pool",
@@ -985,7 +990,7 @@ def _migrate_resource_pools_and_hosts_pool_id(
             .filter(AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID)
             .one_or_none()
         )
-        if config is None:
+        if config is None and seed_default_pool:
             # Migration values intentionally come from active provisioning
             # configuration: the default pool is a backwards-compatible
             # representation of how all existing hosts are provisioned today.
@@ -1470,7 +1475,7 @@ def _derive_pool_deliverable_modes(connection) -> None:
         modes: set[str] = set()
         config = config_rows.get(pool["id"])
         if (
-            pool["provider"] == "ansible"
+            pool["provider"] in {"ansible", "vm.ansible"}
             and config is not None
             and config["requirement_delegate"] == "vm_management_v1"
             and isinstance(config["playbook_path"], str)
@@ -2530,7 +2535,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
             except ValueError as exc:
                 raise SchemaDriftError(f"{label}: {exc}") from exc
             policy_tags[ADVERTISABLE_MODES_POLICY_TAG] = sorted(deliverable)
-            policy_tags[CAPACITY_BACKING_POLICY_TAG] = CAPACITY_BACKED
+            policy_tags[CAPACITY_BACKING_POLICY_TAG] = legacy_producer_backing().label
             connection.execute(
                 text(
                     "UPDATE resource_pools SET policy_tags=:policy_tags "
@@ -2546,7 +2551,7 @@ def _migrate_pool_advertisement_and_backing(engine: Engine) -> None:
                 "advertisable=%s backing=%s",
                 pool["id"],
                 ", ".join(sorted(deliverable)) or "none",
-                CAPACITY_BACKED,
+                legacy_producer_backing().label,
             )
 
 
@@ -3102,7 +3107,7 @@ def _migrate_vm_job_backed_fulfillment(engine: Engine) -> None:
         records = connection.execute(text(
             "SELECT capacity_reservation_id, state, prepared_create_operation, "
             "prepared_teardown_operation, provider_metadata, teardown_provider_metadata "
-            "FROM settlement_records WHERE provider = 'ansible'"
+            "FROM settlement_records WHERE provider IN ('ansible', 'vm.ansible')"
         )).mappings().all()
         for record in records:
             reservation = record["capacity_reservation_id"]
@@ -3285,6 +3290,21 @@ def _migrate_active_fulfillment_targets_on_reservations(engine: Engine) -> None:
             )
 
 
+def _migrate_vm_provider_identity(engine: Engine) -> None:
+    """Canonicalize VM routing names without changing accepted operations.
+
+    Pool and fulfillment provider columns select the same VM implementation.
+    Operation envelopes, job identities, configuration and lifecycle state
+    retain their bytes so recovery continues the work already accepted.
+    """
+    with engine.begin() as connection:
+        for table in ("resource_pools", "settlement_records"):
+            if _table_exists(connection, table):
+                connection.execute(text(
+                    f"UPDATE {table} SET provider = 'vm.ansible' WHERE provider = 'ansible'"
+                ))
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3402,4 +3422,5 @@ MIGRATIONS: tuple[Migration, ...] = (
         "20261006_004_active_fulfillment_targets_on_reservations",
         _migrate_active_fulfillment_targets_on_reservations,
     ),
+    Migration("20261019_001_vm_provider_identity", _migrate_vm_provider_identity),
 )

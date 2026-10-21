@@ -7,8 +7,7 @@ restart-safe fulfillment convergence (obligation resumption, terminal-state driv
 executor-result reconciliation, and teardown independence) MUST be kit-owned and
 composed by every storefront domain. A domain MUST supply its listing payload codec,
 successor-identity rule, executor payload, result decoding, and effects, and MUST NOT
-carry a listing lifecycle service, a resume runtime, or a per-site projection cache of
-its own.
+carry a listing lifecycle service or a resume runtime of its own.
 
 #### Scenario: A seller closes a listing in any domain
 

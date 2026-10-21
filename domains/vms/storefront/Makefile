@@ -58,19 +58,12 @@ deploy: deploy-storefront
 # library); they don't run a storefront. Use `make deploy-storefront`
 # to bring up the seller; run `market buy ...` from the host or another
 # container against `http://bob-storefront:8001`.
-## RESOURCES_CSV_FILE: host path to the compute resource inventory CSV.
-## Bind-mounted read-only into the container so the storefront can seed
-## its resources table on startup via seller.resources_csv_path in config.
-## Defaults to the dev inventory shipped in the source tree.
-RESOURCES_CSV_FILE ?= $(CURDIR)/src/market_storefront/data/kvm1-machine.csv
-
 deploy-storefront:
 	docker run --rm -d --name bob-storefront \
 	--network market -p 8001:8001 \
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
-	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
 deploy-dev:
@@ -79,7 +72,6 @@ deploy-dev:
 	--cap-add NET_ADMIN --cap-add SYS_MODULE --device /dev/net/tun:/dev/net/tun \
 	-e XDG_CONFIG_HOME=/etc \
 	-v $(CURDIR)/storefront.bob.toml:/etc/arkhai/storefront.toml:ro \
-	-v $(RESOURCES_CSV_FILE):/app/resources.csv:ro \
 	arkhai:storefront
 
 stop:
