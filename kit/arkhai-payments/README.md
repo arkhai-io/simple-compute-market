@@ -39,7 +39,8 @@ Receipts carry a signed `livemode`, true only from a live payments service.
 `MandatePolicy` carries the accepted Agreement's payment facts without defining
 or parsing a shared Agreement model. `derive_mandate(agreement_json, policy)`
 commits to the exact JSON object using RFC 8785, creates one `once` part, and
-returns a generated `Mandate`. The hold is the time from acceptance to start,
+returns a generated `Mandate`. The generated models also carry the contract's
+`rate` parts, which the kit never derives or settles. The hold is the time from acceptance to start,
 plus the service duration and the option window. The fixed nonce is
 `arkhai.payments.v1`; repeated derivation for the same inputs gives the same
 transaction ID. Mandate approval expires at `accepted_at + window`.

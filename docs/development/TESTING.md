@@ -673,6 +673,15 @@ payments.serve(build_signed_receipt(signer=IMPOSTOR, mandate=accepted.mandate)) 
 payments.serve(None)                                                              # 202 pending
 ```
 
+A receipt's signed mode is one of those properties. `build_signed_receipt` and
+`FakePaymentsClient` each take the `livemode` they sign, default `False`, the mode
+of a test or development service; a stage configured for one mode is tested with a
+receipt signed in the other:
+
+```python
+payments.serve(build_signed_receipt(signer=SERVICE, mandate=accepted.mandate, livemode=True))  # refused unless the role sets livemode
+```
+
 A fake may give the surrounding transaction snapshot a placeholder proof,
 because sellers trust only the embedded receipt. A change that makes snapshot
 state authoritative must first add a snapshot vector and fixture.
