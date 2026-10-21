@@ -272,9 +272,10 @@ the scenarios "An overlay removes a defaulted setting", "… a value the release
       1.1).
       — Chart render tests, standard library only. Storefront: Bob removed beside
       Carol renders no Bob Deployment, Service, ConfigMap, or PVC (no Secret renders
-      for any agent, the schema pinning `createSecret` false), and Carol's documents
-      equal those she renders beside Bob, rollout checksums aside since they hash every
-      agent; removing the only agent is refused naming `agents` through the umbrella
+      for any agent, the schema pinning `createSecret` false); through the storefront
+      chart alone, a release stating Bob and removing him renders exactly the manifest
+      Carol renders with Bob never stated, rollout checksums included (22 F2); removing
+      the only agent is refused naming `agents` through the umbrella
       (which of the two refusals Helm reports first is not asserted, so the umbrella's
       own is not shown to fire there) and the chart alone; a defaulted setting Bob
       states, removed at depth, is absent, as are `null` keys in a list element and an
@@ -319,6 +320,36 @@ run above preceded those test-only fixes; `make -C helm test-render` was rerun a
 them and passes. Helm applies a parent's `null` to a subchart only where the
 subchart's defaults define the key; closeout 6.9 now corrects the deployment doc's
 sentence that says otherwise.
+
+Implementation round 1 fixes (`reviews/22-implementation.triage.md`):
+- 22 F1, the owner's option (a): every value of an agent accepts `null` in
+  `helm/charts/storefront/values.schema.json` and the umbrella's `storefrontAgent` —
+  `port`, `component`, `configMapName`, `identity`, `secret` with `createSecret`,
+  `secretName`, and `configKey`, and `alkahestAddressBook` with its three keys; refused
+  keys and the keys inside `identity` unchanged. `storefront.agents` and
+  `arkhai.storefrontAgents` refuse an agent stating no `port` or no `identity` once its
+  nulls are removed ("storefront agent <name> states no <key>"); without it a removed
+  `identity` failed on a template nil pointer, as breaking the check once showed. The
+  delta's requirement and two scenarios ("An overlay removes a chart-level agent
+  value", "… an agent's port or identity") and D2 say so. Render tests: each removal
+  falls back as if never stated (component, ConfigMap name, address book and its keys,
+  runtime overlay and `secretName`), and a removed `port` or `identity` is refused
+  through the umbrella and by the storefront chart alone; the umbrella's own refusal is
+  worded the same, so which one fires there is not asserted.
+- 22 F2: the removal test compares against Carol rendered with Bob never stated,
+  through the storefront chart alone (`_render_chart`, with the umbrella's globals), the
+  whole manifest, checksums included; the checksum-stripping `_agent_documents` is
+  gone. The chart's checksums are unchanged: per-agent rollout is out of scope.
+- Evidence: `make -C helm test-render` (chart render tests and chart-to-loader checks,
+  Helm v4.3.0+gbec5b06): every assertion and Python render test passes, the three new
+  or rewritten ones included. `make check-packaging`: passes. `make test`: passes,
+  through `test-deployment-packaging`. `make check-change`: passes. Fresh-context check:
+  no blocking findings; fixed its three test gaps (a positive check before the absent
+  overlay, a removed `secretName` alone, a removed address-book `configMapName`) and two
+  delta wordings (the refusal names the agent; a removed Secret or ConfigMap name
+  mounts none); the umbrella-refusal gap is recorded in the test's docstring rather than
+  given a distinct message. `make check-comment-hygiene`: passes.
+  End-to-end: none owed; the fix commit's validation reruns `make validate-helm`.
 
 ## 5. CI pins Helm, and every render run names its Helm
 

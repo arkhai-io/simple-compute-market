@@ -38,8 +38,10 @@ a key at any depth of an agent's configuration — whether or not the Helm relea
 merge removed it, so a removed key reaches no template, and the agent renders as it
 would had the key never been stated; a `null` is never rendered as a value. An agent
 map that names no agent once its `null`s are removed MUST be refused at render, as an
-empty agent map is refused by the values schema. A key the values schema refuses MUST
-stay refused when its value is `null`.
+empty agent map is refused by the values schema, and so MUST an agent that states no
+port or no identity once its `null`s are removed, naming the agent and the missing
+value. A key the
+values schema refuses MUST stay refused when its value is `null`.
 
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
@@ -135,6 +137,20 @@ retired key, rather than passed through as keys the storefront ignores.
   does not add
 - **THEN** the chart renders the configuration without it and the storefront refuses
   it at startup
+
+#### Scenario: An overlay removes a chart-level agent value
+
+- **WHEN** a values file sets to `null` an agent's `component`, `configMapName`,
+  runtime `secret`, or Alkahest address book, or a key under either of the last two
+- **THEN** the agent renders as it would had the value never been stated: its name as
+  the component, the generated ConfigMap name, no runtime overlay or address book, and
+  for a key under them its default, or none mounted where the key names the Secret or
+  ConfigMap to mount
+
+#### Scenario: An overlay removes an agent's port or identity
+
+- **WHEN** a values file sets an agent's `port` or `identity` to `null`
+- **THEN** rendering fails naming the agent and the missing value
 
 #### Scenario: An overlay removes internal-registry trust
 

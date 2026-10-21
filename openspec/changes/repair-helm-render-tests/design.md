@@ -93,7 +93,16 @@ release's merge did:
   storefront". The bare-metal chart has one agent, not a map. (09 F2)
 - The hand-written schemas — the agent map and `internalRegistryTrust` in the storefront
   chart, the umbrella, and the bare-metal chart — accept `null` where an overlay removes
-  something.
+  something. In the storefront chart and the umbrella that is every value of an agent
+  (22 F1): its `port`, `component`, `configMapName`, `identity`, `secret` and the keys
+  under it, `alkahestAddressBook` and the keys under it, `internalRegistryTrust`, and
+  `config`. A removed `component`, `configMapName`, `secret.configKey`, or address-book
+  key takes the chart's default; a removed `secret` or `secret.secretName` mounts no
+  runtime overlay, and a removed `alkahestAddressBook` no address book. An agent stating
+  no `port` or no `identity` once its nulls are removed is refused at render, naming it,
+  by the helper in both the storefront chart and the umbrella: the chart has neither to
+  default to. The keys inside `identity` keep their schema, since each is required and
+  removing one could only be refused.
 - `kit/config`'s values-schema generator gains a form that accepts `null` wherever it
   accepts a key. A key the schema refuses — a secret field, a retired key, a field a
   typed model lacks — stays refused even as `null`, so refusing secrets and retired keys
@@ -279,8 +288,10 @@ an agent's `secret`, `component`, `configMapName`, `alkahestAddressBook`, `port`
 `identity`, or for a key nested in one of them, is still refused by the schema before
 the chart can remove it.
 
-## Open questions
-
-- Whether a `null` removes every value of an agent, as the delta's requirement says, or
-  only the three D2 names: the owner's to answer before closeout (see "Agent values the
-  hand-written schemas still refuse as `null`").
+Settled at the implementation triage (22 F1), option (a): every value of an agent
+accepts `null`, as the delta's requirement says, and a removed `port` or `identity` is
+refused naming it (D2). Rejected: (b) narrowing the delta to the three values the
+schemas then accepted, which leaves the operator rule with exceptions and no way to
+drop Bob's `component` or runtime `secret`; and (c) widening only the four values whose
+absence has a defined rendering, which keeps `port` and `identity` as exceptions to
+state rather than refusals the rule already implies.

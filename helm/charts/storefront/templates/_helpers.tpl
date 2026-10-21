@@ -131,7 +131,9 @@ rather than a key, so a `null` element stays.
 the mapping `into`: a `null` agent is dropped, and each other agent is a copy with
 its `null` keys removed at every depth. An agent map naming no agent once they are
 removed is refused, as the values schema refuses an empty one: a release running no
-storefront agent disables the storefront instead.
+storefront agent disables the storefront instead. An agent stating no port or no
+identity, once its nulls are removed, is refused naming it: the chart has neither to
+default to, and every agent's container, probes, Service, and credential use them.
 Argument: dict with `root` (the chart root) and `into` (an empty dict).
 */}}
 {{- define "storefront.agents" -}}
@@ -140,6 +142,11 @@ Argument: dict with `root` (the chart root) and `into` (an empty dict).
   {{- if not (kindIs "invalid" $entry) -}}
     {{- $agent := deepCopy $entry -}}
     {{- include "storefront.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
     {{- $_ := set $into $name $agent -}}
   {{- end -}}
 {{- end -}}

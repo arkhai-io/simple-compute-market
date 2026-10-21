@@ -261,8 +261,9 @@ mapping `.`, at every depth, inside list elements too; a `null` list element sta
 {{/*
 `arkhai.storefrontAgents`: the VM storefront's agents with every `null` removed,
 set by name into the mapping `into`: a `null` agent is dropped and each other agent
-copied without its `null` keys. An agent map naming no agent once they are removed
-is refused, as the storefront chart refuses it.
+copied without its `null` keys. An agent map naming no agent once they are removed,
+or an agent stating no port or no identity, is refused, as the storefront chart
+refuses it.
 Argument: dict with `root` (the chart root) and `into` (an empty dict).
 */}}
 {{- define "arkhai.storefrontAgents" -}}
@@ -271,6 +272,11 @@ Argument: dict with `root` (the chart root) and `into` (an empty dict).
   {{- if not (kindIs "invalid" $entry) -}}
     {{- $agent := deepCopy $entry -}}
     {{- include "arkhai.dropNulls" $agent -}}
+    {{- range $key := list "port" "identity" -}}
+      {{- if not (hasKey $agent $key) -}}
+        {{- fail (printf "storefront agent %s states no %s" $name $key) -}}
+      {{- end -}}
+    {{- end -}}
     {{- $_ := set $into $name $agent -}}
   {{- end -}}
 {{- end -}}

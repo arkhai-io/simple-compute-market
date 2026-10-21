@@ -635,16 +635,26 @@ def test_a_retired_value_stays_refused_as_null() -> None:
 # --- a null removes what it names ------------------------------------------
 
 
-def _agent_documents(manifest: str, agent: str) -> list[str]:
-    """Every rendered workload, Service, ConfigMap, Secret, and PVC naming ``agent``,
-    without the rollout checksums, which hash every agent's ConfigMap and Secret."""
-    name = f"{RELEASE}-storefront-{agent}"
-    return sorted(
-        "\n".join(line for line in document.splitlines() if "checksum/" not in line)
-        for path in ("deployment.yaml", "service.yaml", "configmap.yaml", "secrets.yaml", "pvc.yaml")
-        for document in _documents(manifest, path)
-        if f"name: {name}" in document
-    )
+CHART_GLOBALS = {
+    "imageRepository": "",
+    "registryIdentity": {"authority": "registry-a", "principal": ACTIVE_REGISTRY},
+    "provisioningIdentity": ACTIVE_PROVISIONING,
+    "rpc": {"enabled": True, "host": "dev-env", "port": 8545},
+    "registry": {"host": "", "port": 8080},
+    "provisioning": {"host": "arkhai-node-operator-provisioning", "port": 8081},
+}
+
+
+def _render_chart(*layers: dict) -> subprocess.CompletedProcess[str]:
+    """Render the storefront chart alone, with the globals the umbrella would
+    supply and then each of ``layers`` as its own values file, in order."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", RELEASE, str(CHART)]
+        for index, layer in enumerate(({"global": CHART_GLOBALS}, *layers)):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
 
 
 def _render_layers(*layers: dict, files: tuple[Path, ...] = (), release: str = RELEASE) -> subprocess.CompletedProcess[str]:
@@ -668,21 +678,17 @@ def _bob(**changes) -> dict:
     return {"storefront": {"agents": {"bob": dict(changes)}}}
 
 
-def test_removing_an_agent_beside_another_renders_the_other_as_it_does_beside_it() -> None:
-    """No Bob document of the four kinds the chart renders here remains (a Secret
-    is never rendered, the schema pinning ``createSecret`` false), and Carol's are
-    those she renders beside Bob."""
-    both = _ok(_render(agents={"carol": CAROL}))
-    without_bob = _ok(
-        _render(
-            agents={"bob": None, "carol": CAROL},
-            values={"provisioning": {"storefront": {"agentName": "carol", "port": 8002}}},
-        )
-    )
+def test_removing_an_agent_beside_another_renders_the_release_as_if_never_stated() -> None:
+    """The storefront chart alone, since only there can a release leave Bob
+    unstated: with Bob stated and removed by a later values file, the manifest is
+    the one Carol renders alone, rollout checksums included."""
+    bob = {**CAROL, "port": 8001, "config": {**CAROL["config"], "agent_id": "bob"}}
+    assert f"{RELEASE}-storefront-bob" in _ok(_render_chart({"agents": {"bob": bob, "carol": CAROL}}))
+    alone = _ok(_render_chart({"agents": {"carol": CAROL}}))
+    removed = _ok(_render_chart({"agents": {"bob": bob, "carol": CAROL}}, {"agents": {"bob": None}}))
 
-    for path in ("deployment.yaml", "service.yaml", "configmap.yaml", "secrets.yaml", "pvc.yaml"):
-        assert not any("storefront-bob" in document for document in _documents(without_bob, path)), path
-    assert _agent_documents(without_bob, "carol") == _agent_documents(both, "carol")
+    assert "checksum/config" in alone
+    assert removed == alone
 
 
 def test_removing_the_only_agent_is_refused_naming_agents() -> None:
@@ -781,6 +787,60 @@ def test_a_removed_required_setting_renders_absent_and_the_storefront_refuses_it
 
 def test_removed_internal_registry_trust_is_refused_naming_the_missing_trust() -> None:
     _refused(_render(agent=_without("internalRegistryTrust")), "requires internalRegistryTrust")
+
+
+def test_removed_agent_values_render_as_if_never_stated() -> None:
+    """Each value is stated by values.yaml or the first layer and removed by the
+    next: the component falls back to the agent's name, the ConfigMap to its
+    generated name, the address book and the runtime overlay to none, and a key
+    inside either to its default."""
+    stated = _bob(
+        configMapName="bob-settings",
+        alkahestAddressBook={"configMapName": "books", "key": "book.json", "mountPath": "/books"},
+        secret={"configKey": "runtime.toml"},
+    )
+    manifest = _ok(_render_layers(stated))
+    deployment = _source(manifest, "deployment.yaml")
+    assert 'app.kubernetes.io/component: "seller"' in deployment
+    assert "name: bob-settings" in deployment and "mountPath: \"/books\"" in deployment
+    assert "subPath: runtime.toml" in deployment and "arkhai-secrets" in deployment
+
+    removed = _ok(
+        _render_layers(
+            stated,
+            _bob(component=None, configMapName=None, alkahestAddressBook=None, secret={"configKey": None}),
+        )
+    )
+    deployment = _source(removed, "deployment.yaml")
+    assert 'app.kubernetes.io/component: "bob"' in deployment and 'component: "seller"' not in deployment
+    assert f"{RELEASE}-storefront-bob-config" in _configs(removed)
+    assert "bob-settings" not in removed
+    assert "alkahest-address-book" not in deployment
+    assert "subPath: storefront.secrets.toml" in deployment
+
+    nested = _source(_ok(_render_layers(stated, _bob(alkahestAddressBook={"key": None, "mountPath": None}))), "deployment.yaml")
+    assert 'mountPath: "/etc/arkhai/alkahest"' in nested
+    assert 'name: "books"' in nested and 'key: "alkahest_addresses.json"' in nested
+
+    without_book = _source(_ok(_render_layers(stated, _bob(alkahestAddressBook={"configMapName": None}))), "deployment.yaml")
+    assert "alkahest-address-book" not in without_book
+
+    for removal in ({"secretName": None}, None):
+        without_overlay = _source(_ok(_render_layers(_bob(secret=removal))), "deployment.yaml")
+        assert "arkhai-secrets" not in without_overlay and "arkhai-bob-runtime" not in without_overlay, removal
+
+
+def test_a_removed_port_or_identity_is_refused_naming_it() -> None:
+    """An agent cannot run without either, and the chart has neither to default to:
+    refused through the umbrella and by the storefront chart rendered alone. The
+    umbrella's own refusal words it the same, so which of the two Helm reports
+    through the umbrella is not asserted."""
+    for key in ("port", "identity"):
+        _refused(_render(agent=_without(key)), f"storefront agent bob states no {key}")
+        _refused(
+            _render_chart({"agents": {"carol": CAROL}}, {"agents": {"carol": _without(key)}}),
+            f"storefront agent carol states no {key}",
+        )
 
 
 def test_a_refused_key_stays_refused_as_null() -> None:

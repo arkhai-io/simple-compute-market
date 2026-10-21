@@ -1213,20 +1213,36 @@
           "properties": {
             "name": false,
             "port": {
-              "type": "integer",
+              "type": [
+                "integer",
+                "null"
+              ],
               "minimum": 1,
               "maximum": 65535
             },
             "component": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "minLength": 1
             },
             "configMapName": {
-              "type": "string",
+              "type": [
+                "string",
+                "null"
+              ],
               "minLength": 1
             },
             "identity": {
-              "$ref": "#/definitions/storefrontIdentity"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/storefrontIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "internalRegistryTrust": {
               "anyOf": [
@@ -1239,16 +1255,28 @@
               ]
             },
             "secret": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "properties": {
                 "createSecret": {
-                  "const": false
+                  "enum": [
+                    false,
+                    null
+                  ]
                 },
                 "secretName": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "configKey": {
-                  "type": "string",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "minLength": 1
                 },
                 "privKey": false,
@@ -1261,18 +1289,30 @@
             "autoRegister": false,
             "rootPath": false,
             "alkahestAddressBook": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "additionalProperties": false,
               "properties": {
                 "configMapName": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "key": {
-                  "type": "string",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "minLength": 1
                 },
                 "mountPath": {
-                  "type": "string",
+                  "type": [
+                    "string",
+                    "null"
+                  ],
                   "minLength": 1,
                   "pattern": "^/"
                 }
