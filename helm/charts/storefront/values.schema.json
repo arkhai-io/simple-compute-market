@@ -1202,7 +1202,11 @@
         "type": "object",
         "minProperties": 1,
         "additionalProperties": {
-          "type": "object",
+          "description": "An agent; null removes it.",
+          "type": [
+            "object",
+            "null"
+          ],
           "required": [
             "identity"
           ],
@@ -1225,7 +1229,14 @@
               "$ref": "#/definitions/storefrontIdentity"
             },
             "internalRegistryTrust": {
-              "$ref": "#/definitions/registryAuthority"
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/registryAuthority"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "secret": {
               "type": "object",
@@ -1268,21 +1279,28 @@
               }
             },
             "config": {
-              "allOf": [
+              "anyOf": [
                 {
-                  "$ref": "#/definitions/storefrontServiceConfig"
+                  "allOf": [
+                    {
+                      "$ref": "#/definitions/storefrontServiceConfig"
+                    },
+                    {
+                      "type": "object",
+                      "patternProperties": {
+                        "^[sS][eE][lL][lL][eE][rR]$": false,
+                        "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
+                        "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
+                        "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
+                        "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
+                        "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
+                        "^[cC][hH][aA][iI][nN]$": false
+                      }
+                    }
+                  ]
                 },
                 {
-                  "type": "object",
-                  "patternProperties": {
-                    "^[sS][eE][lL][lL][eE][rR]$": false,
-                    "^[rR][eE][gG][iI][sS][tT][rR][yY][aA][uU][tT][hH][oO][rR][iI][tT][yY]$": false,
-                    "^[rR][eE][gG][iI][sS][tT][rR][yY][uU][rR][lL]$": false,
-                    "^[sS][tT][oO][rR][eE][fF][rR][oO][nN][tT][dD][oO][mM][aA][iI][nN][sS]$": false,
-                    "^[cC][oO][nN][fF][iI][gG][mM][aA][pP][nN][aA][mM][eE]$": false,
-                    "^[hH][oO][sS][tT][eE][dD][sS][eE][tT][tT][lL][eE][mM][eE][nN][tT]$": false,
-                    "^[cC][hH][aA][iI][nN]$": false
-                  }
+                  "type": "null"
                 }
               ]
             }

@@ -7,8 +7,8 @@ only: values are written as JSON, which is YAML.
 
 Agents are keyed by name, and a test states only what it changes in Bob's
 default agent from ``values.yaml``, as an operator's overlay does: Helm merges
-the overlay into the agent key by key, replaces lists, and removes a key the
-overlay sets to ``None``.
+the overlay into the agent key by key and replaces lists, and the chart removes a
+key or an agent the overlay sets to ``None``.
 
 Set ``STOREFRONT_PYTHON`` to the storefront environment's interpreter to also
 load rendered documents with the storefront's own configuration loader.
@@ -609,8 +609,184 @@ def test_a_list_of_agents_is_refused_naming_the_map() -> None:
     )
 
 
+def _names_path(stderr: str, dotted: str) -> bool:
+    """Whether a refusal names the value at ``dotted``, as a dotted path or as the
+    JSON pointer Helm's schema validator writes, however Helm words the rest."""
+    return dotted in stderr or "/" + dotted.replace(".", "/") in stderr
+
+
 def test_an_agent_is_named_by_its_key_alone() -> None:
-    _refused(_render(agent=_agent(name="carol")), "agents.bob.name")
+    for name in ("carol", None):
+        rendered = _render(agent=_agent(name=name))
+        assert rendered.returncode != 0, f"{name!r}: render succeeded"
+        assert _names_path(rendered.stderr, "agents.bob.name"), rendered.stderr
+
+
+def test_a_retired_value_stays_refused_as_null() -> None:
+    for agent, dotted in (
+        (_agent(agentId=None), "agents.bob.agentId"),
+        (_with_config(seller=None), "agents.bob.config.seller"),
+    ):
+        rendered = _render(agent=agent)
+        assert rendered.returncode != 0, f"{agent}: render succeeded"
+        assert _names_path(rendered.stderr, dotted), rendered.stderr
+
+
+# --- a null removes what it names ------------------------------------------
+
+
+def _agent_documents(manifest: str, agent: str) -> list[str]:
+    """Every rendered workload, Service, ConfigMap, Secret, and PVC naming ``agent``,
+    without the rollout checksums, which hash every agent's ConfigMap and Secret."""
+    name = f"{RELEASE}-storefront-{agent}"
+    return sorted(
+        "\n".join(line for line in document.splitlines() if "checksum/" not in line)
+        for path in ("deployment.yaml", "service.yaml", "configmap.yaml", "secrets.yaml", "pvc.yaml")
+        for document in _documents(manifest, path)
+        if f"name: {name}" in document
+    )
+
+
+def _render_layers(*layers: dict, files: tuple[Path, ...] = (), release: str = RELEASE) -> subprocess.CompletedProcess[str]:
+    """Render values.yaml, then each of ``files``, then each overlay of
+    ``layers`` from its own values file, in order: a later layer can remove what
+    an earlier one states, as an operator's overlay removes what the release's
+    values state."""
+    with tempfile.TemporaryDirectory() as directory:
+        command = ["helm", "template", release, str(UMBRELLA), "--values", str(UMBRELLA / "values.yaml")]
+        for path in files:
+            command += ["--values", str(path)]
+        for index, layer in enumerate(layers):
+            path = Path(directory) / f"layer-{index}.json"
+            path.write_text(json.dumps(layer))
+            command += ["--values", str(path)]
+        return subprocess.run(command, check=False, capture_output=True, text=True)
+
+
+def _bob(**changes) -> dict:
+    """A values layer changing ``changes`` in Bob's agent."""
+    return {"storefront": {"agents": {"bob": dict(changes)}}}
+
+
+def test_removing_an_agent_beside_another_renders_the_other_as_it_does_beside_it() -> None:
+    """No Bob document of the four kinds the chart renders here remains (a Secret
+    is never rendered, the schema pinning ``createSecret`` false), and Carol's are
+    those she renders beside Bob."""
+    both = _ok(_render(agents={"carol": CAROL}))
+    without_bob = _ok(
+        _render(
+            agents={"bob": None, "carol": CAROL},
+            values={"provisioning": {"storefront": {"agentName": "carol", "port": 8002}}},
+        )
+    )
+
+    for path in ("deployment.yaml", "service.yaml", "configmap.yaml", "secrets.yaml", "pvc.yaml"):
+        assert not any("storefront-bob" in document for document in _documents(without_bob, path)), path
+    assert _agent_documents(without_bob, "carol") == _agent_documents(both, "carol")
+
+
+def test_removing_the_only_agent_is_refused_naming_agents() -> None:
+    """Through the umbrella both the storefront chart and the umbrella's smoke-test
+    profile refuse it, naming the agent map; whichever Helm renders first is the
+    refusal reported."""
+    _refused(_render(agents={"bob": None}), "agents names no agent")
+
+
+def test_removing_the_only_agent_of_the_storefront_chart_alone_is_refused() -> None:
+    """Rendered without the umbrella, a later values file's null reaches the
+    chart's values as a parent's does through the umbrella, and the chart refuses
+    an empty agent map."""
+    agent = {"bob": {"port": 8001, "identity": {"credentialSecret": {"name": "x", "key": "y"}}}}
+    with tempfile.TemporaryDirectory() as directory:
+        defined = Path(directory) / "agents.json"
+        removed = Path(directory) / "removed.json"
+        defined.write_text(json.dumps({"agents": agent}))
+        removed.write_text(json.dumps({"agents": {"bob": None}}))
+        rendered = subprocess.run(
+            ["helm", "template", RELEASE, str(CHART), "--values", str(defined), "--values", str(removed)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    _refused(rendered, "agents names no agent")
+
+
+def test_a_removed_setting_is_absent_and_no_null_is_rendered() -> None:
+    """A defaulted setting removed at depth is absent from storefront.json, and no
+    null the values stated reaches it, even inside a list element."""
+    domains = [{"contribution": "vms", "offering_mode": "vm", "domain_identity": "compute.v1",
+                "contract_version": "1.0", "label": None}]
+    manifest = _ok(
+        _render(
+            agent=_with_config(
+                log_file_path=None,
+                capacity={"source_confirmation_seconds": None},
+                negotiation={"policies": None},
+                storefront_domains=domains,
+                Futuristic={"inner": {"gone": None, "kept": 1}},
+            )
+        )
+    )
+    document = _block(_source(manifest, "configmap.yaml"), "storefront.json")
+    config = json.loads(document)
+
+    assert "log_file_path" not in config
+    assert config["capacity"] == {"sites": {"default": PROVISIONING_URL}}
+    assert config["negotiation"] == {}
+    assert config["storefront_domains"][0] == {key: value for key, value in domains[0].items() if key != "label"}
+    assert config["Futuristic"] == {"inner": {"kept": 1}}
+    assert "null" not in document
+
+
+def test_a_removed_value_the_release_knows_carries_the_releases_value() -> None:
+    """Each value is stated by one layer and removed by the next, so the release's
+    value replaces a stated one."""
+    external = "http://registry.example:8080"
+    stated = _bob(
+        internalRegistryTrust=None,
+        config={
+            "db_path": "/data/custom.db",
+            "port": 8001,
+            "registry": {"urls": [external], "authorities": {external: {"authority": "registry-x", "principals": [ACTIVE_REGISTRY]}}},
+        },
+    )
+    assert _config(_ok(_render_layers(stated)))["db_path"] == "/data/custom.db"
+    removed = _bob(
+        internalRegistryTrust={"authority": "registry-a", "principals": [ACTIVE_REGISTRY]},
+        config={"db_path": None, "port": None, "registry": {"urls": None, "authorities": None}},
+    )
+    config = _config(_ok(_render_layers(stated, removed)))
+
+    assert config["db_path"] == "/var/lib/arkhai/agent.db"
+    assert config["port"] == 8001
+    assert config["registry"]["urls"] == [REGISTRY_URL]
+    assert list(config["registry"]["authorities"]) == [REGISTRY_URL]
+
+
+def test_a_removed_required_setting_renders_absent_and_the_storefront_refuses_it() -> None:
+    """The local release starts on its Settlement (its own test shows it); with
+    that Settlement removed, the document holds none and the storefront refuses
+    it naming the section."""
+    removed = _render_layers(_bob(config={"Settlement": None}), files=(UMBRELLA / "local-values.yaml",), release=LOCAL_RELEASE)
+    config = _config(_ok(removed))
+
+    assert "Settlement" not in config and "settlement" not in config
+    python = os.environ.get("STOREFRONT_PYTHON")
+    if not python:
+        print("skip: STOREFRONT_PYTHON unset; the storefront startup check did not run")
+        return
+    refused = _storefront_starts(config, python)
+    assert "[Settlement]" in (refused["refusal"] or ""), refused
+
+
+def test_removed_internal_registry_trust_is_refused_naming_the_missing_trust() -> None:
+    _refused(_render(agent=_without("internalRegistryTrust")), "requires internalRegistryTrust")
+
+
+def test_a_refused_key_stays_refused_as_null() -> None:
+    rendered = _render(agent=_with_config(Wallet={"private_key": None}))
+    assert rendered.returncode != 0, "render succeeded"
+    assert _names_path(rendered.stderr, "config.Wallet.private_key"), rendered.stderr
 
 
 # --- Alkahest address books ------------------------------------------------

@@ -196,7 +196,7 @@ storefront chart passes service configuration through", its four removal scenari
 the scenarios "An overlay removes a defaulted setting", "… a value the release knows",
 "… a required setting", and "… internal-registry trust"). Touches `helm/` only.
 
-- [ ] 4.1 `helm/charts/storefront/templates/_helpers.tpl`: one recursive helper that
+- [x] 4.1 `helm/charts/storefront/templates/_helpers.tpl`: one recursive helper that
       returns the chart's agents with every `null` removed — a `null` agent dropped, and
       `null` values dropped at every depth of each agent, `config` included — and fails,
       naming `agents`, when no agent remains (D2, 09 F2). Every reader of an agent reads
@@ -205,23 +205,41 @@ the scenarios "An overlay removes a defaulted setting", "… a value the release
       `storefront.agentConfigDocument` and the other per-agent helpers receive agents
       with no `null` in them. A removed key a helper adds when absent is added, as for a
       key never stated (09 F1).
-- [ ] 4.2 `helm/templates/_helpers.tpl` and `helm/templates/tests/test-config.yaml`: the
+      — Two helpers: `storefront.dropNulls` removes `null` keys in place, at every
+      depth and inside list elements (a `null` list element stays, matching the
+      generator), and `storefront.agents` copies each non-`null` agent through it into
+      a dict the caller passes (`into`), so templates get real maps without a JSON
+      round trip, and fails "storefront agents names no agent…" when none remains.
+      The six readers build `$agents` through it.
+- [x] 4.2 `helm/templates/_helpers.tpl` and `helm/templates/tests/test-config.yaml`: the
       umbrella reads `storefront.agents` and the bare-metal agent's `config` through its
       own normalization with the same rules, failing naming `agents` when the VM
       storefront is enabled and no agent remains (D2). The umbrella does not include the
       storefront chart's helper, since a disabled subchart's templates are not rendered.
-- [ ] 4.3 `helm/charts/bare-metal-storefront/templates/_helpers.tpl`: the bare-metal
+      — `arkhai.dropNulls` and `arkhai.storefrontAgents`, the same rules;
+      `test-config.yaml` reads the agents and a copy of the bare-metal `config` through
+      them, its own "requires at least one storefront agent" refusal replaced by the
+      helper's, which names `storefront.agents`.
+- [x] 4.3 `helm/charts/bare-metal-storefront/templates/_helpers.tpl`: the bare-metal
       chart reads its `config` and `internalRegistryTrust` with every `null` removed, at
       every depth, before `bare-metal-storefront.configDocument` and the other templates
       read them (D2). A removed `internalRegistryTrust` reaches the existing refusal
       "requires internalRegistryTrust".
-- [ ] 4.4 The hand-written schemas accept `null` where an overlay removes something (D2):
+      — `bare-metal-storefront.dropNulls` over copies of both in `configDocument`, the
+      only template that reads either; an absent trust is now an empty map, which the
+      existing checks read as absent.
+- [x] 4.4 The hand-written schemas accept `null` where an overlay removes something (D2):
       in `helm/charts/storefront/values.schema.json` and `helm/values.schema.json`, an
       entry of the agent map, an agent's `internalRegistryTrust`, and its `config`; in
       `helm/charts/bare-metal-storefront/values.schema.json`, `internalRegistryTrust` and
       `config`. The list form of `agents`, a `name` inside an entry, and the retired
       values shape stay refused, `null` or not. `minProperties: 1` stays.
-- [ ] 4.5 Render tests (chart render tests, `docs/development/TESTING.md` "Chart Render
+      — An agent entry's type is `["object", "null"]` (the umbrella's `storefrontAgent`
+      definition); `internalRegistryTrust` and `config` are `anyOf` the existing schema
+      and `{"type": "null"}`. `name`, the retired keys, and the list form are
+      unchanged, so stay refused as `null`; the generator's `render` replaces only its
+      own definition, so these hand edits survive regeneration.
+- [x] 4.5 Render tests (chart render tests, `docs/development/TESTING.md` "Chart Render
       Tests"), standard library only, each asserting the rendered artifacts together:
       - `helm/charts/storefront/tests/test_render.py`: an overlay removing Bob beside a
         second agent renders no Deployment, Service, ConfigMap, Secret, or PVC for Bob
@@ -252,7 +270,29 @@ the scenarios "An overlay removes a defaulted setting", "… a value the release
       `test_an_agent_is_named_by_its_key_alone`) assert the key their refusal names
       rather than a whole message, still asserting a non-zero exit (owner's decision at
       1.1).
-- [ ] 4.6 Verification: `make -C helm test-render` with both loader interpreters set
+      — Chart render tests, standard library only. Storefront: Bob removed beside
+      Carol renders no Bob Deployment, Service, ConfigMap, or PVC (no Secret renders
+      for any agent, the schema pinning `createSecret` false), and Carol's documents
+      equal those she renders beside Bob, rollout checksums aside since they hash every
+      agent; removing the only agent is refused naming `agents` through the umbrella
+      (which of the two refusals Helm reports first is not asserted, so the umbrella's
+      own is not shown to fire there) and the chart alone; a defaulted setting Bob
+      states, removed at depth, is absent, as are `null` keys in a list element and an
+      untyped section, and the document holds no `null`; `db_path`, `port`, and
+      `registry.urls` stated by one values layer and removed by the next carry the
+      release's values; Bob's `Settlement` in the local release, which starts, removed,
+      renders absent and the storefront's startup refusal names `[Settlement]`;
+      removed trust is refused naming it; a wallet private key, a `name`, `agentId`,
+      and `config.seller` stated as `null` are refused naming their paths. Bare metal:
+      through the umbrella a key the release states, removed at depth, is absent with
+      no `null` in the document, and removed trust is refused. Topology: removing the
+      bare-metal storefront's stated sites in a later values file is refused by the
+      umbrella's smoke-test profile; without its `null` removal the render succeeds
+      (checked by removing it once). The three wording tests assert the refused
+      value's path, dotted or as Helm's JSON pointer, or the property and its parent,
+      plus a non-zero exit. With the helper keeping a `null` agent, four storefront
+      tests failed; restored.
+- [x] 4.6 Verification: `make -C helm test-render` with both loader interpreters set
       (chart render tests and the chart-to-loader checks), every test Section 1 recorded
       as failing now passing; `make test`. End-to-end: `make validate-helm`'s Helm
       scenarios `contracts` and `e2e_alkahest_escrow_codecs` deploy the local release,
@@ -260,6 +300,25 @@ the scenarios "An overlay removes a defaulted setting", "… a value the release
       deploying as before; they do not exercise removal, which is a render-time
       behaviour the render tests prove, and no scenario is owed for it. The
       docker-compose pipeline deploys no chart.
+      — `make -C helm test-render` (chart render tests and chart-to-loader checks, both
+      interpreters set, none skipped, Helm v4.3.0): every `test-render.sh` assertion
+      and all 83 Python render tests pass, every test Section 1 recorded as failing
+      among them. `make test`: passes, every suite through `test-deployment-packaging`.
+      End-to-end confirmed: `make validate-helm`'s `contracts` and
+      `e2e_alkahest_escrow_codecs` only, which validation runs; they exercise no
+      removal.
+
+Notes: the fresh-context check found the planned schemas narrower than the delta's "a
+value of an agent" (an agent's `secret`, `component`, `configMapName`,
+`alkahestAddressBook`, `port`, and `identity` stay null-refusing); recorded under
+`design.md` "Open questions" for the owner rather than widened, since D2 and 4.4 name
+only three. It also found tests that removed nothing an earlier layer stated, and a
+startup check its removal did not cause; each now states the value in one layer and
+removes it in the next (`_render_layers`, `_render_umbrella(stated=…)`). The `make test`
+run above preceded those test-only fixes; `make -C helm test-render` was rerun after
+them and passes. Helm applies a parent's `null` to a subchart only where the
+subchart's defaults define the key; closeout 6.9 now corrects the deployment doc's
+sentence that says otherwise.
 
 ## 5. CI pins Helm, and every render run names its Helm
 
@@ -320,6 +379,10 @@ The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
         release's value; removing every agent is refused, and `storefront.enabled: false`
         runs none; a key the schema refuses stays refused as `null`; the supported Helm is
         the release `.github/workflows/tests.yml` pins, without repeating its number.
+        Correct the section's "Helm cannot remove a subchart's default from a parent's
+        values": Helm removes a parent's `null` only for a key the subchart's own
+        defaults define, so the storefront subchart still ships no agent, and the
+        chart removes the rest itself.
       - `docs/development/TESTING.md`, "Chart Render Tests": replace "rely on the pinned
         Helm of the release environment" with the release `tests.yml` pins, which is the
         supported one, and say `test-render.sh` prints the Helm it runs, without claiming

@@ -98,6 +98,57 @@ Argument: dict with `root` and `agent`.
 {{- end }}
 
 {{/*
+A values file's `null` removes what it names, whether or not Helm's merge removed
+it: Helm drops a parent's `null` for a subchart only where the subchart's own
+defaults define the key, and every agent and every key under one comes from the
+parent or an overlay. So the chart removes them itself before any template reads
+an agent, and an agent renders as it would had the removed key never been stated.
+See openspec/specs/deployment-state/spec.md, "A storefront chart passes service
+configuration through".
+
+`storefront.dropNulls`: remove, in place, every key whose value is `null` from the
+mapping `.`, at every depth, inside list elements too. A list element is a value
+rather than a key, so a `null` element stays.
+*/}}
+{{- define "storefront.dropNulls" -}}
+{{- if kindIs "map" . -}}
+  {{- range $key, $value := . -}}
+    {{- if kindIs "invalid" $value -}}
+      {{- $_ := unset $ $key -}}
+    {{- else -}}
+      {{- include "storefront.dropNulls" $value -}}
+    {{- end -}}
+  {{- end -}}
+{{- else if kindIs "slice" . -}}
+  {{- range $item := . -}}
+    {{- include "storefront.dropNulls" $item -}}
+  {{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+`storefront.agents`: the chart's agents with every `null` removed, set by name into
+the mapping `into`: a `null` agent is dropped, and each other agent is a copy with
+its `null` keys removed at every depth. An agent map naming no agent once they are
+removed is refused, as the values schema refuses an empty one: a release running no
+storefront agent disables the storefront instead.
+Argument: dict with `root` (the chart root) and `into` (an empty dict).
+*/}}
+{{- define "storefront.agents" -}}
+{{- $into := .into -}}
+{{- range $name, $entry := (.root.Values.agents | default dict) -}}
+  {{- if not (kindIs "invalid" $entry) -}}
+    {{- $agent := deepCopy $entry -}}
+    {{- include "storefront.dropNulls" $agent -}}
+    {{- $_ := set $into $name $agent -}}
+  {{- end -}}
+{{- end -}}
+{{- if not $into -}}
+  {{- fail "storefront agents names no agent once its nulls are removed; a release runs at least one, or sets the umbrella's storefront.enabled false to run none" -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Per-agent fullname: {fullname}-{agent.name}, the agent's name being its key
 under agents:.
 Used as the Deployment / Service / Secret object name.

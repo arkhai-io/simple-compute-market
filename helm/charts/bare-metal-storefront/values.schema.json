@@ -106,10 +106,24 @@
       }
     },
     "internalRegistryTrust": {
-      "$ref": "#/definitions/registryAuthority"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/registryAuthority"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "config": {
-      "$ref": "#/definitions/storefrontServiceConfig"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/storefrontServiceConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "persistence": {
       "type": "object",

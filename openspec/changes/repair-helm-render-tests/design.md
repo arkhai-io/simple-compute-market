@@ -270,6 +270,17 @@ Not checked: keys no typed field generates — VM's open root and untyped sectio
 schema does not type. Their schema accepted `null` already, which rendered as `None`
 where Helm kept it; after Section 4 the chart removes them instead, as D2 settles.
 
+### Agent values the hand-written schemas still refuse as `null`
+
+The delta's requirement says a `null` removes "a value of an agent". The charts' helpers
+remove any agent value, but D2 and task 4.4 widened the hand-written schemas only for an
+agent, its `internalRegistryTrust`, and its `config`, so a values file stating `null` for
+an agent's `secret`, `component`, `configMapName`, `alkahestAddressBook`, `port`, or
+`identity`, or for a key nested in one of them, is still refused by the schema before
+the chart can remove it.
+
 ## Open questions
 
-None.
+- Whether a `null` removes every value of an agent, as the delta's requirement says, or
+  only the three D2 names: the owner's to answer before closeout (see "Agent values the
+  hand-written schemas still refuse as `null`").

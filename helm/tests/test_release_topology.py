@@ -473,6 +473,20 @@ def test_one_release_running_both_storefronts_on_its_provisioning_service_is_ref
     }
     _ok(_render(RELEASE_ONE, RELEASE_ONE_VALUES, own_site))
 
+    # A later values file removing those sites leaves the derived `default` site on
+    # the release's provisioning service, which the release refuses again: the
+    # check reads the bare-metal config with its nulls removed.
+    with tempfile.NamedTemporaryFile("w", suffix=".json") as stated:
+        json.dump(own_site, stated)
+        stated.flush()
+        removed = _render(
+            RELEASE_ONE,
+            (*RELEASE_ONE_VALUES, Path(stated.name)),
+            {"bare-metal-storefront": {"config": {"capacity": {"sites": None}}}},
+        )
+    assert removed.returncode != 0, "render succeeded"
+    assert "run the bare-metal storefront as a second release" in removed.stderr, removed.stderr
+
 
 # --- the storefront's own loader -----------------------------------------
 
