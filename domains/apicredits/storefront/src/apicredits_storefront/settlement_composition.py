@@ -299,12 +299,18 @@ def build_api_credit_settlement_composition(
     repository = SettlementSQLiteRepository(
         sqlite_client.db_path, apply_migrations=False
     )
+    seller_wallet_address = str(
+        storefront_config.settings.get("wallet.address", "") or ""
+    )
     resources: dict[str, Any] = {
         "marketplace_signer": marketplace_signer,
         "clients": dict(alkahest_clients),
         "get_client": lambda chain: alkahest_clients.get(chain or ""),
         "chains": storefront_config.CHAINS,
         "default_chain": next(iter(storefront_config.CHAINS), None),
+        # Readiness reads the seller wallet's address: with none, no escrow
+        # could pay the seller, whatever clients are composed.
+        "wallet": {"address": seller_wallet_address},
     }
     mechanism_clients: dict[str, Any] = {}
     for registration in registry.ordered_registrations(
@@ -350,9 +356,7 @@ def build_api_credit_settlement_composition(
         private_results=private_results,
         failure_policy=failure_policy,
         arkhai_payments_stage=_payments_stage(settlement_config, payments_client_for_owner),
-        seller_wallet_address=str(
-            storefront_config.settings.get("wallet.address", "") or ""
-        ),
+        seller_wallet_address=seller_wallet_address,
     )
     return composition
 

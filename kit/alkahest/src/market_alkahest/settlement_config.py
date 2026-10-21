@@ -117,14 +117,128 @@ class AlkahestSettlementConfig(BaseModel):
         return self
 
 
+RECIPIENT_RELEASE = "recipient"
+ORACLE_GATED_RELEASE = "oracle_gated"
+INTERRUPTIBLE_RELEASE = "interruptible"
+RELEASE_MODELS: frozenset[str] = frozenset(
+    {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE, INTERRUPTIBLE_RELEASE}
+)
+
+
+class ReleaseModelError(ValueError):
+    """The configured release model is contradictory or cannot be delivered."""
+
+
+def configured_release_model(config: AlkahestSettlementConfig | None) -> str:
+    """The release model ``config`` selects; no section selects ``recipient``.
+
+    Raises ``ReleaseModelError`` when the section selects both the oracle-gated
+    and the interruptible model, since an escrow has one arbiter.
+    """
+    if config is None:
+        return RECIPIENT_RELEASE
+    if config.oracle_gated and config.interruptible:
+        raise ReleaseModelError(
+            "Settlement.alkahest oracle and interruptible policies are mutually "
+            "exclusive"
+        )
+    if config.oracle_gated:
+        return ORACLE_GATED_RELEASE
+    if config.interruptible:
+        return INTERRUPTIBLE_RELEASE
+    return RECIPIENT_RELEASE
+
+
 def _value(source: Any, name: str, default: Any = None) -> Any:
     if isinstance(source, Mapping):
         return source.get(name, default)
     return getattr(source, name, default)
 
 
-def _blocker(code: str, message: str) -> ReadinessBlocker:
-    return ReadinessBlocker(code=code, message=message)
+def _configuration_blocker(code: str, message: str) -> ReadinessBlocker:
+    return ReadinessBlocker(code=code, message=message, kind="configuration")
+
+
+def _reachability_blocker(code: str, message: str) -> ReadinessBlocker:
+    return ReadinessBlocker(code=code, message=message, kind="reachability")
+
+
+def _wallet_address(wallet: Any) -> str:
+    # A composing storefront may pass its wallet as a mapping or object with an
+    # ``address``, or as the bare address string.
+    if isinstance(wallet, str):
+        return wallet.strip()
+    value = _value(wallet, "address")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _wallet_key_present(wallet: Any) -> bool:
+    if isinstance(wallet, str):
+        return False
+    value = _value(wallet, "private_key")
+    if hasattr(value, "get_secret_value"):
+        value = value.get_secret_value()
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _release_model_blockers(
+    config: AlkahestSettlementConfig,
+    *,
+    role: SettlementRole,
+    wallet_address: str,
+    deliverable: Any,
+) -> list[ReadinessBlocker]:
+    """The blockers under which no deal could settle on the configured release model.
+
+    Each is configuration: the section parses, but no escrow released under it
+    could pay the seller, so the mechanism is unready rather than the storefront
+    stopped. Only a seller's wallet is the one an escrow pays, so the oracle is
+    compared with the wallet for the seller role alone.
+    """
+    blockers: list[ReadinessBlocker] = []
+    wallet = wallet_address.lower() if role == "seller" else ""
+    if config.oracle_gated and not config.trusted_oracle_addresses:
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.oracle_policy_invalid",
+                "oracle-gated settlement requires a trusted oracle address",
+            )
+        )
+    if config.interruptible and not config.interruptible_oracle_addresses:
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.interruptible_policy_invalid",
+                "interruptible settlement requires an oracle address",
+            )
+        )
+    # The party collecting an escrow cannot also decide whether it collects.
+    oracles = (
+        config.trusted_oracle_addresses[:1] if config.oracle_gated else ()
+    ) + (config.interruptible_oracle_addresses[:1] if config.interruptible else ())
+    if wallet and any(oracle == wallet for oracle in oracles):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.oracle_is_seller_wallet",
+                "the configured release oracle is the seller wallet",
+            )
+        )
+    if deliverable is not None:
+        try:
+            model = configured_release_model(config)
+        except ReleaseModelError:
+            # Not a blocker: a section selecting two release models is
+            # incoherent, and its composer refuses it at startup through
+            # ``configured_release_model`` before readiness runs.
+            model = None
+        if model is not None and model not in set(deliverable):
+            blockers.append(
+                _configuration_blocker(
+                    "alkahest.release_model_undeliverable",
+                    f"the configured {model!r} release model is not one this "
+                    "storefront's domain delivers",
+                )
+            )
+    return blockers
 
 
 async def _await_if_needed(value: Any) -> Any:
@@ -166,9 +280,25 @@ async def alkahest_preflight(
     resources: Mapping[str, Any],
     role: SettlementRole,
 ) -> MechanismReadiness:
-    """Observe Alkahest prerequisites without submitting a transaction."""
+    """Observe Alkahest prerequisites without submitting a transaction.
 
-    del role
+    A section that parses but under which no deal could settle is reported
+    through configuration blockers, never refused, so a storefront that cannot
+    settle through Alkahest still runs its other mechanisms. A section that
+    selects both the oracle-gated and the interruptible model is incoherent
+    rather than unusable; its composer refuses it at startup, and readiness does
+    not report it. The composing storefront supplies, beside its wallet and
+    chains:
+
+    - ``deliverable_release_models``: the release models its domain's Alkahest
+      seller stage delivers; a configured model outside them is a blocker;
+    - ``signs_transactions``: true where the storefront submits transactions
+      with the seller wallet's key, so a missing key or no configured chain is
+      a blocker.
+
+    A buyer supplies neither.
+    """
+
     config = AlkahestSettlementConfig.model_validate(section)
     if not config.enabled:
         return MechanismReadiness(
@@ -184,26 +314,41 @@ async def alkahest_preflight(
 
     blockers: list[ReadinessBlocker] = []
     wallet = resources.get("wallet")
-    has_composed_client = bool(resources.get("get_client") or resources.get("clients"))
-    if wallet is None and not resources.get("wallet_ready") and not has_composed_client:
+    wallet_address = _wallet_address(wallet) if wallet is not None else ""
+    if wallet is None:
         blockers.append(
-            _blocker(
+            _configuration_blocker(
                 "alkahest.wallet_missing", "an injected settlement wallet is required"
             )
         )
-    elif wallet is not None and not (_value(wallet, "address") or has_composed_client):
+    elif not wallet_address:
         blockers.append(
-            _blocker(
+            _configuration_blocker(
                 "alkahest.wallet_address_missing",
                 "the settlement wallet has no address",
+            )
+        )
+    signs = bool(resources.get("signs_transactions"))
+    if signs and wallet is not None and not _wallet_key_present(wallet):
+        blockers.append(
+            _configuration_blocker(
+                "alkahest.wallet_key_missing",
+                "the settlement wallet has no private key to sign with",
             )
         )
 
     chains = resources.get("chains")
     chain_names = _selected_chain_names(resources)
-    if not chain_names or not isinstance(chains, Mapping):
+    if signs and not (isinstance(chains, Mapping) and chains):
         blockers.append(
-            _blocker(
+            _configuration_blocker(
+                "alkahest.chains_missing",
+                "no settlement chain is configured under [Chains]",
+            )
+        )
+    elif not chain_names or not isinstance(chains, Mapping):
+        blockers.append(
+            _configuration_blocker(
                 "alkahest.chain_missing",
                 "each published escrow must select a configured settlement chain",
             )
@@ -221,7 +366,7 @@ async def alkahest_preflight(
                 and not client_present
             ):
                 blockers.append(
-                    _blocker(
+                    _configuration_blocker(
                         "alkahest.rpc_missing",
                         "a selected settlement chain has no RPC client",
                     )
@@ -233,7 +378,7 @@ async def alkahest_preflight(
             if configured_chain_id is not None and observed is not None:
                 if int(configured_chain_id) != int(observed):
                     blockers.append(
-                        _blocker(
+                        _configuration_blocker(
                             "alkahest.chain_id_mismatch",
                             "a selected RPC reports a different chain identity",
                         )
@@ -243,7 +388,7 @@ async def alkahest_preflight(
         config.address_config_path
     ):
         blockers.append(
-            _blocker(
+            _configuration_blocker(
                 "alkahest.address_config_invalid",
                 "the Alkahest address configuration cannot be loaded",
             )
@@ -254,7 +399,7 @@ async def alkahest_preflight(
         value is not True for value in deployed.values()
     ):
         blockers.append(
-            _blocker(
+            _configuration_blocker(
                 "alkahest.contract_missing",
                 "one or more required Alkahest contracts are not deployed",
             )
@@ -273,35 +418,39 @@ async def alkahest_preflight(
                 )
             except Exception:
                 result = None
-            if not isinstance(result, Mapping) or any(
-                value is not True for value in result.values()
-            ):
+            if not isinstance(result, Mapping):
+                # A probe that did not answer cannot tell a missing contract
+                # from an unreachable chain, so it rules nothing out.
                 blockers.append(
-                    _blocker(
+                    _reachability_blocker(
                         "alkahest.contract_probe_failed",
                         "required Alkahest deployments could not be verified",
+                    )
+                )
+                break
+            if any(value is not True for value in result.values()):
+                blockers.append(
+                    _configuration_blocker(
+                        "alkahest.contract_missing",
+                        "one or more required Alkahest contracts are not deployed",
                     )
                 )
                 break
 
     if resources.get("require_asset") and not resources.get("asset"):
         blockers.append(
-            _blocker("alkahest.asset_missing", "a settlement asset must be selected")
-        )
-    if config.oracle_gated and not config.trusted_oracle_addresses:
-        blockers.append(
-            _blocker(
-                "alkahest.oracle_policy_invalid",
-                "oracle-gated settlement requires a trusted oracle address",
+            _configuration_blocker(
+                "alkahest.asset_missing", "a settlement asset must be selected"
             )
         )
-    if config.interruptible and not config.interruptible_oracle_addresses:
-        blockers.append(
-            _blocker(
-                "alkahest.interruptible_policy_invalid",
-                "interruptible settlement requires an oracle address",
-            )
+    blockers.extend(
+        _release_model_blockers(
+            config,
+            role=role,
+            wallet_address=wallet_address,
+            deliverable=resources.get("deliverable_release_models"),
         )
+    )
 
     details: dict[str, Any] = {
         "oracle_gated": config.oracle_gated,
@@ -604,6 +753,12 @@ def create_alkahest_registration(
 
 
 __all__ = [
+    "INTERRUPTIBLE_RELEASE",
+    "ORACLE_GATED_RELEASE",
+    "RECIPIENT_RELEASE",
+    "RELEASE_MODELS",
+    "ReleaseModelError",
+    "configured_release_model",
     "ALKAHEST_CONFIG_KEY",
     "AlkahestPublicationInput",
     "alkahest_chain_projection",

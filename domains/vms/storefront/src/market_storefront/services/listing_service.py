@@ -41,12 +41,17 @@ from market_capacity_publication import (
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
+    MechanismReadiness,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
 
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.publication_terms import (
+    demands_for_publication_clauses,
+)
+from market_storefront.utils.config import get_evm_wallet_address
 from arkhai_vms import DIMENSION_KEYS, flatten_vm_shape
 from market_resource_pools_contracts.backing import CapacityBacking
 from market_storefront.services.listing_sources import resolve_source_backing
@@ -358,7 +363,9 @@ class ListingService:
         clauses: tuple[SettlementPublicationClause, ...] | None = None,
         composition: Any | None = None,
         origin: str,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ) -> tuple[
+        list[dict[str, Any]], list[dict[str, Any]], tuple[MechanismReadiness, ...]
+    ]:
         if request.settlement_options:
             raise ValueError(
                 "settlement_options are derived from installed mechanism registrations"
@@ -379,13 +386,13 @@ class ListingService:
             "origin": origin,
         }
         try:
-            accepted, options, _readiness = await composition.publication_artifacts(
+            accepted, options, readiness = await composition.publication_artifacts(
                 resources,
                 clauses=list(canonical_clauses) or None,
             )
         except (RuntimeError, TypeError, ValueError) as exc:
             raise ValueError(str(exc)) from exc
-        return accepted, options
+        return accepted, options, readiness
 
     def _parse_listing_resource_and_escrows(
         self, request: VmCreateListingRequest
@@ -553,12 +560,25 @@ class ListingService:
         # Read first: the source's site becomes the listing binding's origin,
         # and options are built for exactly that origin.
         capacity_source = request.capacity_source.model_dump(mode="json")
-        accepted_escrows, settlement_options = await self._derive_settlement_artifacts(
+        (
+            accepted_escrows,
+            settlement_options,
+            readiness,
+        ) = await self._derive_settlement_artifacts(
             request,
             clauses=canonical_clauses,
             composition=composition,
             origin=str(capacity_source["site_id"]),
         )
+        if canonical_clauses:
+            # Derived after readiness, under the readiness the options were
+            # built with, so an unready Alkahest advertises no condition and
+            # refuses no candidate.
+            demands = demands_for_publication_clauses(
+                canonical_clauses,
+                readiness=readiness,
+                wallet_address=get_evm_wallet_address() or "",
+            )
 
         if (
             capacity_source["pool_id"] != listing_resource.pool_id

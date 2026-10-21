@@ -61,13 +61,222 @@ async def test_enabled_alkahest_reports_sanitized_prerequisite_blockers() -> Non
     )
 
     assert status.ready is False
-    assert {blocker.code for blocker in status.blockers} == {
-        "alkahest.wallet_missing",
-        "alkahest.chain_missing",
+    assert {(blocker.code, blocker.kind) for blocker in status.blockers} == {
+        ("alkahest.wallet_missing", "configuration"),
+        ("alkahest.chain_missing", "configuration"),
     }
     projection = status.model_dump_json()
     assert "private_key" not in projection
     assert "rpc_url" not in projection
+
+
+WALLET = "0x" + "11" * 20
+ORACLE = "0x" + "22" * 20
+
+
+def _seller_resources(**overrides) -> dict:
+    resources = {
+        "wallet": {"address": WALLET, "private_key": "0x" + "33" * 32},
+        "chains": {"anvil": {"rpc_url": "http://anvil.test", "chain_id": 31337}},
+        "chain_name": "anvil",
+        "clients": {"anvil": object()},
+        "deliverable_release_models": frozenset({"recipient", "oracle_gated"}),
+        "signs_transactions": True,
+    }
+    resources.update(overrides)
+    return resources
+
+
+async def _blockers(config: AlkahestSettlementConfig, resources: dict) -> set:
+    status = await alkahest_preflight(config, resources, "seller")
+    assert status.ready is (not status.blockers)
+    return {(blocker.code, blocker.kind) for blocker in status.blockers}
+
+
+@pytest.mark.asyncio
+async def test_a_complete_seller_section_is_ready() -> None:
+    assert await _blockers(AlkahestSettlementConfig(enabled=True), _seller_resources()) == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "resources", "expected"),
+    [
+        (
+            {"oracle_gated": True},
+            {},
+            ("alkahest.oracle_policy_invalid", "configuration"),
+        ),
+        (
+            {"oracle_gated": True, "trusted_oracle_addresses": [WALLET]},
+            {},
+            ("alkahest.oracle_is_seller_wallet", "configuration"),
+        ),
+        (
+            {"interruptible": True},
+            {"deliverable_release_models": frozenset({"interruptible"})},
+            ("alkahest.interruptible_policy_invalid", "configuration"),
+        ),
+        (
+            {"interruptible": True, "interruptible_oracle_addresses": [WALLET]},
+            {"deliverable_release_models": frozenset({"interruptible"})},
+            ("alkahest.oracle_is_seller_wallet", "configuration"),
+        ),
+        (
+            {"interruptible": True, "interruptible_oracle_addresses": [ORACLE]},
+            {},
+            ("alkahest.release_model_undeliverable", "configuration"),
+        ),
+        (
+            {},
+            {"wallet": {"address": "", "private_key": "0x" + "33" * 32}},
+            ("alkahest.wallet_address_missing", "configuration"),
+        ),
+        (
+            {},
+            {"wallet": ""},
+            ("alkahest.wallet_address_missing", "configuration"),
+        ),
+        (
+            {},
+            {"wallet": {"address": WALLET}},
+            ("alkahest.wallet_key_missing", "configuration"),
+        ),
+        (
+            {},
+            {"chains": {}},
+            ("alkahest.chains_missing", "configuration"),
+        ),
+    ],
+    ids=[
+        "oracle-gated-no-oracle",
+        "trusted-oracle-is-wallet",
+        "interruptible-no-oracle",
+        "interruptible-oracle-is-wallet",
+        "undeliverable-model",
+        "empty-wallet-with-clients",
+        "empty-bare-wallet",
+        "no-wallet-key",
+        "no-chains",
+    ],
+)
+async def test_a_section_that_cannot_settle_names_its_configuration_blocker(
+    policy: dict, resources: dict, expected: tuple[str, str]
+) -> None:
+    config = AlkahestSettlementConfig.model_validate({"enabled": True, **policy})
+
+    assert expected in await _blockers(config, _seller_resources(**resources))
+
+
+def _failing_probe(_chain, _addresses):
+    raise TimeoutError("no answer")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("policy", "resources", "expected"),
+    [
+        (
+            {},
+            {"chains": {"anvil": {"chain_id": 31337}}, "clients": {}},
+            ("alkahest.rpc_missing", "configuration"),
+        ),
+        (
+            {},
+            {"observed_chain_id": 1},
+            ("alkahest.chain_id_mismatch", "configuration"),
+        ),
+        (
+            {},
+            {"deployed_contracts": {"escrow": False}},
+            ("alkahest.contract_missing", "configuration"),
+        ),
+        (
+            {},
+            {"contract_probe": _failing_probe, "required_addresses": {"escrow": "0x1"}},
+            ("alkahest.contract_probe_failed", "reachability"),
+        ),
+        (
+            {},
+            {
+                "contract_probe": lambda _chain, addresses: dict.fromkeys(addresses, False),
+                "required_addresses": {"escrow": "0x1"},
+            },
+            ("alkahest.contract_missing", "configuration"),
+        ),
+        (
+            {"address_config_path": "/nonexistent/alkahest-addresses.json"},
+            {},
+            ("alkahest.address_config_invalid", "configuration"),
+        ),
+        (
+            {},
+            {"require_asset": True},
+            ("alkahest.asset_missing", "configuration"),
+        ),
+    ],
+    ids=[
+        "rpc-missing",
+        "chain-id-mismatch",
+        "contract-missing",
+        "contract-probe-failed",
+        "contract-probe-reports-missing",
+        "address-config-invalid",
+        "asset-missing",
+    ],
+)
+async def test_each_chain_and_input_blocker_states_its_kind(
+    policy: dict, resources: dict, expected: tuple[str, str]
+) -> None:
+    config = AlkahestSettlementConfig.model_validate({"enabled": True, **policy})
+
+    assert expected in await _blockers(config, _seller_resources(**resources))
+
+
+@pytest.mark.asyncio
+async def test_a_wallet_given_as_a_bare_address_is_read_as_one() -> None:
+    # A bare address carries no key, so only a storefront that does not sign
+    # with it reads it as complete.
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(wallet=WALLET, signs_transactions=False),
+    )
+
+    assert blockers == set()
+
+
+@pytest.mark.asyncio
+async def test_a_buyer_preflight_needs_no_key_and_no_deliverable_models() -> None:
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(enabled=True),
+        {
+            "wallet": {"address": WALLET},
+            "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+            "default_chain": "anvil",
+        },
+        "buyer",
+    )
+
+    assert status.ready is True
+
+
+@pytest.mark.asyncio
+async def test_a_buyer_is_never_compared_with_the_release_oracle() -> None:
+    # An escrow pays the seller's wallet, never the buyer's, so a buyer whose
+    # own wallet is the configured oracle is not refused for it.
+    status = await alkahest_preflight(
+        AlkahestSettlementConfig(
+            enabled=True, oracle_gated=True, trusted_oracle_addresses=(WALLET,)
+        ),
+        {
+            "wallet": {"address": WALLET},
+            "chains": {"anvil": {"rpc_url": "http://anvil.test"}},
+            "default_chain": "anvil",
+        },
+        "buyer",
+    )
+
+    assert status.ready is True
 
 
 @pytest.mark.asyncio

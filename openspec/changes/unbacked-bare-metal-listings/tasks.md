@@ -156,19 +156,22 @@ advertises its release conditions"). Touches `kit/settlement-runtime`, `kit/alka
 `kit/arkhai-payments`, `kit/contact-exchange`, and the tests in the domains that build a
 blocker directly.
 
-- [ ] 3.1 `kit/settlement-runtime/src/market_settlement_runtime/configuration.py`:
+- [x] 3.1 `kit/settlement-runtime/src/market_settlement_runtime/configuration.py`:
       `ReadinessBlocker` gains a required `kind`, `configuration` or `reachability`;
       `ordered_readiness`'s `not_configured` and `disabled` blockers are `configuration`;
       `MechanismReadiness.safe_projection` reports it. Tests in
       `kit/settlement-runtime/tests/unit/test_configuration.py` (unit): a blocker without a
       kind cannot be built; the runtime's own blockers are configuration blockers; the
       safe projection carries the kind (D19).
-- [ ] 3.2 `kit/arkhai-payments/.../settlement_config.py` (`_blocker`) and
+      Done: `ReadinessBlockerKind` exported. Unit, `make -C kit test-settlement-runtime`:
+      110 passed.
+- [x] 3.2 `kit/arkhai-payments/.../settlement_config.py` (`_blocker`) and
       `kit/contact-exchange/.../settlement_config.py` (`contact_preflight`): every blocker
       is a configuration blocker, since neither contacts anything during readiness. Tests
       in `kit/arkhai-payments/tests/test_settlement_config.py` and
       `kit/contact-exchange/tests/unit/test_settlement_config.py` (unit) (D19).
-- [ ] 3.3 `kit/alkahest/src/market_alkahest/settlement_config.py` `alkahest_preflight`,
+      Unit, `make -C kit test-arkhai-payments test-contact-exchange`: 84 and 127 passed.
+- [x] 3.3 `kit/alkahest/src/market_alkahest/settlement_config.py` `alkahest_preflight`,
       every blocker a configuration blocker, adding: a trusted or interruptible oracle
       equal to the seller wallet; an empty seller wallet whatever clients are composed (the
       `has_composed_client` shortcut is deleted, and a wallet given as a bare address
@@ -178,27 +181,148 @@ blocker directly.
       composing storefront declares that it signs, a missing wallet key or no configured
       chain, each named by its own code. The oracle-gated "no oracle" check gains its kind
       (D19).
-- [ ] 3.4 `kit/alkahest/src/market_alkahest/release_conditions.py`: delete the seller-wallet
+      Done. The two resources the composing storefront supplies are
+      `deliverable_release_models` and `signs_transactions`; new codes
+      `alkahest.oracle_is_seller_wallet`, `alkahest.release_model_undeliverable`,
+      `alkahest.wallet_key_missing`, `alkahest.chains_missing` (the existing
+      `alkahest.interruptible_policy_invalid` already covered a missing interruptible
+      oracle). The `wallet_ready` resource is no longer read; bare metal still passes it
+      until 5.2. **Differed:** not every blocker is configuration. A contract probe that
+      does not answer is the reachability blocker `alkahest.contract_probe_failed`, since
+      it cannot tell a missing contract from an unreachable chain, and one that answers
+      "not deployed" is the configuration blocker `alkahest.contract_missing`; both go with
+      4.2. The oracle-equals-wallet check applies to the seller role only, since an escrow
+      pays the seller's wallet (a buyer case asserts it). Blockers are built through `_configuration_blocker` and
+      `_reachability_blocker`, so no Alkahest blocker takes a kind by default; a unit case
+      asserts the kind of each pre-existing chain and input blocker too. A section
+      selecting both models is not a blocker: it stays the startup refusal, which the
+      preflight's docstring states. **Differed:** the release-model constants,
+      `ReleaseModelError`, and `configured_release_model` moved from `release_conditions.py`
+      into `settlement_config.py`, which `release_conditions.py` imports, so the preflight
+      reads the model at module level rather than through a circular local import; the
+      package's exports are unchanged.
+- [x] 3.4 `kit/alkahest/src/market_alkahest/release_conditions.py`: delete the seller-wallet
       fallback for the oracle (and the docstring that describes it);
       `publication_release_conditions` takes the clauses' readiness and returns nothing
       for a clause whose mechanism is unready. `configured_release_model`'s refusal of a
       section that is both oracle-gated and interruptible stays a startup refusal:
       incoherent configuration stops startup (D19's retained refusals). Export changes in
       `__init__.py` (D19).
-- [ ] 3.5 Tests (unit): `kit/alkahest/tests/unit/test_settlement_config.py` — one case per
+      Done: `publication_release_conditions(config, clauses, *, readiness, chains,
+      wallet_address)`, `readiness` the `MechanismReadiness` tuple publication built its
+      options under. `release_conditions` refuses an interruptible model with no oracle of
+      its own, and an interruptible oracle equal to the wallet, as it refused the
+      oracle-gated cases. `__init__.py` needed no change. Unit, `make -C kit
+      test-alkahest`: 319 passed (3.5's kit cases included). The module docstring names
+      both ways a composition checks the release model, at startup or at readiness, since
+      every storefront still checks it at startup until Section 5.
+- [x] 3.5 Tests (unit): `kit/alkahest/tests/unit/test_settlement_config.py` — one case per
       new blocker, each with its kind, and a buyer-role preflight unchanged;
       `test_release_conditions.py` — the fallback test inverted to a refusal, and
       `publication_release_conditions` yielding nothing for an unready clause. Update the
       direct `ReadinessBlocker` constructions in
       `domains/vms/storefront/tests/unit/cli/test_settlement.py` and
       `tests/unit/test_settlement_publication.py` (D19).
-- [ ] 3.6 Versions: `arkhai-kit-settlement-runtime`, `arkhai-kit-alkahest`,
+      Kit cases written and passing (in 3.4's run); the two VM files pass in VM's unit
+      suite. Also changed: VM's `tests/unit/test_listing_settlement_config.py` reads the
+      readiness `_derive_settlement_artifacts` now returns, and the publication harness's
+      settlement double (`tests/publication_app.py`) reports Alkahest ready wherever it
+      builds Alkahest options, as the real composition does, since demands are now derived
+      only under a ready Alkahest.
+- [x] 3.6 Versions: `arkhai-kit-settlement-runtime`, `arkhai-kit-alkahest`,
       `arkhai-kit-arkhai-payments`, `arkhai-kit-contact-exchange`; `make lock`.
-- [ ] 3.7 **Verify.** `make -C kit test-settlement-runtime test-alkahest
+      Bumped: settlement runtime 0.5.0, Alkahest 0.9.0, Arkhai payments 0.3.0, contact
+      exchange 0.4.0 (minor: the blocker carrier and `publication_release_conditions` are
+      changed contracts); VM storefront 0.17.1 and API-credit storefront 0.10.1 (patch,
+      for the brought-forward edits below). Packages whose only change is a dependency
+      bumped a patch so the new requirement ships: `arkhai-kit-config` 0.4.1,
+      `arkhai-core-buyer` 0.5.1, `arkhai-vms-buyer` 0.7.1, `arkhai-bare-metal-buyer` 0.5.1,
+      `arkhai-bare-metal-storefront` 0.17.1, with the exact pins on them updated. Every
+      exact pin on the four kits moved; the Alkahest floor is `>=0.9.0` in every package
+      that requires settlement runtime 0.5.0 (both storefronts beside VM's, both compute
+      buyers), since Alkahest 0.8.0 builds blockers without a kind; and in the API-credit
+      buyer (0.5.1), which runs the Alkahest preflight and reaches runtime 0.5.0 through
+      `arkhai-core-buyer`. Packages that never build a readiness blocker keep their floors
+      (`domains/apicredits`, `kit/storefront`, VM's settlement, negotiation, and listings
+      packages); `e2e-tests` installs the buyers, whose floors carry the bound.
+      `make lock` refreshed every lock (the two VM locks once the PyTorch index was
+      reachable, below).
+- [x] 3.7 **Verify.** `make -C kit test-settlement-runtime test-alkahest
       test-arkhai-payments test-contact-exchange` (unit); `make test-storefront`; `make
       test`; `make check-packaging`. End-to-end: `e2e_deal`, `e2e_alkahest_escrow_codecs`,
       and `e2e_credits_deal` read readiness through status once deployed; no scenario
       configures an unusable section, and none is owed (integration covers each blocker).
+      Results: the four kit suites (above); `make test-storefront` unit 1101 passed,
+      integration (application integration, the app through its typed client, plus the
+      chain-backed `test_alkahest.py`) 446 passed and 2 failed, both `tests/integration/test_alkahest.py`
+      (`test_rust`, `test_python`), which need host Node.js and Anvil this container lacks
+      (`could not spawn node`), environmental and unrelated; `make test-apicredits` and
+      `make test-bare-metal` all passed. `make test` was run by its components, since one
+      run outlasts the session's ten-minute command bound: `test-core`, `test-kits`,
+      `test-compute-provisioning-contracts`, `test-compute-provisioning-client`,
+      `test-compute-provisioning`, `test-compute-provisioning-ansible`,
+      `test-provisioning`, `test-provisioning-iac`, `test-registry`,
+      `test-registry-client`, `test-provisioning-adapter`, `test-compute`,
+      `test-vms-domain`, `test-vms-buyer`, and `test-e2e-unit` all passed;
+      `test-deployment-packaging`'s Python checks passed (1079) and its chart render half
+      did not run, since `helm` is not installed here. That half matters: the VM chart's
+      render test (`helm/charts/storefront/tests/test_render.py`) probes
+      `demands_for_publication_clauses` in the storefront's environment, and its probe now
+      passes a ready Alkahest, since readiness turns on a reachable chain and the overlay's
+      key, neither of which a render carries. The probe edit is **unrun**; run `make -C helm
+      test-render` with `make init-storefront` done before this round is reviewed. After
+      the review fixes, the Alkahest, core, kit, VM buyer, VM storefront (same two host-tool
+      failures), bare-metal, API-credit, e2e unit, and provisioning suites were rerun and
+      passed; `make check-packaging` passed; `make check-change` (comment hygiene, skills,
+      citations, task list, index, strict validation) fails only on the two citations of
+      files Sections 13 and 22 create. The repository has no typing target. End-to-end scenarios, confirmed by reading
+      their source rather than by a run: `e2e_deal`, `e2e_alkahest_escrow_codecs`, and
+      `e2e_credits_deal` read readiness through status; none configures an unusable section.
+
+Section 3 notes (handoff):
+
+- **Brought forward from Section 5,** because Section 3's kit changes reach these call
+  sites and the section's commit must pass on its own: VM's demand derivation moved from
+  `publication_loop._create_request` into `listing_service.derive_listing`, after
+  `publication_artifacts`, through `demands_for_publication_clauses(..., readiness=)` (the
+  loop's `wallet_address` argument went with it) — 5.1's derivation half; and the API-credit
+  composition passes its seller wallet to the preflight as `wallet`, without which deleting
+  the `has_composed_client` shortcut made API-credit Alkahest unready — 5.3's wallet half.
+  Section 5 keeps the rest of 5.1 and 5.3. Since `derive_listing` also serves the
+  operator's `POST /api/v1/listings`, a create carrying clauses now gets derived demands
+  rather than the `demands` it was sent, as 5.1's "`listing_service.py` derives them"
+  intends. Not covered by any section: a VM create carrying `accepted_escrows` and no
+  clauses still publishes the `demands` its caller sent, unchecked against readiness,
+  and a create carrying clauses ignores the `demands` it was sent rather than refusing
+  them as it refuses `settlement_options` (decision 19 gates request-supplied escrows only
+  for API credits). Recorded for the round's triage.
+- **Declined from review:** the API-credit `release_conditions` docstring ("an unset
+  wallet still derives a condition") is still true for escrows a listing request
+  supplies, which 5.3 gates; and the derivation's reading of the process's settlement
+  configuration and wallet rather than the composition's is as before (the loop read the
+  same global wallet), both resolving the one configuration the process started on.
+- **For closeout (23.9):** `openspec/specs/storefront-publication/architecture.md`
+  "Settlement option reconciliation" says VM "can advertise a condition for a chain whose
+  option readiness suppressed" and that a storefront refuses to start configured for an
+  undeliverable model; both stop being true with Sections 3 and 5.
+- **Left to 5.4, which owns them:** the storefront-level tests that an unready VM Alkahest
+  yields no demands and refuses no candidate, and that an API-credit storefront with no
+  `wallet.address` reports Alkahest unready; Section 3 proves both rules at kit level
+  only. VM's publication harness double stands in for mechanism readiness (it reports
+  Alkahest ready wherever it builds Alkahest options), so its tests do not exercise the
+  real preflight; 5.4's unready case needs the real readiness or a double reporting a
+  blocker.
+- **For 5.2:** a wallet given as a bare string has no key, so once bare metal passes
+  `signs_transactions` it must pass its wallet as a mapping carrying `private_key`, or it
+  reports `alkahest.wallet_key_missing` whatever its configuration.
+- **Not changed:** VM's human-readable `settlement status` lists blocker codes without
+  their kind; the JSON output carries it.
+- **Environment.** `domains/vms/storefront`, `domains/vms/buyer`, and `kit/policy` pin
+  `torch` to `download.pytorch.org`; every lock refresh and `reinit` of them fetches that
+  index, so a session whose egress refuses it can neither build their environments nor
+  relock them. The owner widened this session's egress, after which both resolved.
+- **Seam.** Tests run only through `make` targets here, so a single failing test is read
+  from the target's log, not rerun alone.
 
 ## 4. Alkahest probes its chains apart from readiness
 
@@ -286,6 +410,8 @@ Touches the three storefronts.
       so an unready Alkahest refuses no candidate per cycle. `require_vm_release_model`'s
       startup call (`server.py`, `settlement_composition.py`) goes; the preflight is given
       VM's deliverable models (D19).
+      Note: the derivation after readiness landed with Section 3 (its notes); this task
+      keeps the startup call's removal, the deliverable models, and 5.4's tests.
 - [ ] 5.2 Bare metal `src/runtime.py` `build_runtime_from_configuration`: a configured
       section missing `[Wallet].address`, `[Chains]`, or `[Wallet].private_key` starts with
       the named configuration blockers rather than refusing; a `ReleaseModelError` for an
@@ -299,6 +425,7 @@ Touches the three storefronts.
       supplies as well as those its clauses compile, so an unready Alkahest yields no
       escrow option on either path; `require_api_credit_release_model`'s startup call goes;
       the preflight is given the wallet and the deliverable models (D19).
+      Note: the wallet landed with Section 3 (its notes); the deliverable models remain.
 - [ ] 5.4 Tests (application integration through the typed client): bare metal
       `tests/test_app_composition.py` — the release-model and missing-input refusal tests
       inverted to unready-with-blocker starts, and the no-section refusal kept; VM
@@ -1183,7 +1310,9 @@ change to implementation.
         shapes" — unbacked candidates, delivery terms, the one-unit commitment;
         "Reconciliation" — the recheck on the held projection and the no-option close or
         hold; "Settlement option reconciliation" — classification of the admissible clauses'
-        mechanisms; "Autonomous publication" — the site-derivation log.
+        mechanisms, and its release-condition paragraph rewritten (conditions derived only
+        under a ready Alkahest; an undeliverable model unready rather than a startup
+        refusal); "Autonomous publication" — the site-derivation log.
       - `openspec/specs/physical-provisioning/architecture.md`: "Compute composition" — the
         view contract, the resource pass's pool context, and view problems; "Canonical
         requests, durable replay, and signed responses" — the signed failure after

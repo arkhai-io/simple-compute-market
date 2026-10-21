@@ -180,7 +180,9 @@ def _loopback_origin(value: str) -> bool:
 
 
 def _blocker(code: str, message: str) -> ReadinessBlocker:
-    return ReadinessBlocker(code=code, message=message)
+    # Readiness never contacts the payments service, so nothing it reports is a
+    # reachability blocker.
+    return ReadinessBlocker(code=code, message=message, kind="configuration")
 
 
 async def arkhai_payments_preflight(

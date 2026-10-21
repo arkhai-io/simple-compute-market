@@ -73,7 +73,11 @@ def _registration(
             ready=section.enabled and is_ready,
             blockers=()
             if is_ready
-            else (ReadinessBlocker(code=f"{key}.unready", message="not ready"),),
+            else (
+                ReadinessBlocker(
+                    code=f"{key}.unready", message="not ready", kind="configuration"
+                ),
+            ),
         )
 
     def option_builder(section, readiness, resources, role):

@@ -88,7 +88,11 @@ def _registration(
             ready=not leak_secret,
             blockers=()
             if not leak_secret
-            else (ReadinessBlocker(code="not_ready", message=message),),
+            else (
+                ReadinessBlocker(
+                    code="not_ready", message=message, kind="configuration"
+                ),
+            ),
             capabilities=("conditional",),
             contract_version="1",
             schema_version="1",
@@ -300,6 +304,63 @@ async def test_readiness_is_ordered_and_observational() -> None:
     assert statuses[0].ready is True
     assert statuses[1].blockers[0].code == "not_configured"
     assert events == ["preflight:seller"]
+
+
+def test_a_blocker_cannot_be_built_without_its_kind() -> None:
+    with pytest.raises(ValueError, match="kind"):
+        ReadinessBlocker(code="not_ready", message="not ready")  # type: ignore[call-arg]
+    with pytest.raises(ValueError, match="kind"):
+        ReadinessBlocker(code="not_ready", message="not ready", kind="transient")  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_the_runtimes_own_blockers_are_configuration_blockers() -> None:
+    registry = SettlementConfigurationRegistry(
+        [_registration(), _registration("other.pay.v1", "other")]
+    )
+    config = registry.resolve(
+        {"priority": [], "demo": {"enabled": False}}, role="seller"
+    )
+
+    statuses = {
+        status.mechanism: status
+        for status in await registry.ordered_readiness(config, role="seller")
+    }
+
+    assert [(b.code, b.kind) for b in statuses["demo.pay.v1"].blockers] == [
+        ("disabled", "configuration")
+    ]
+    assert [(b.code, b.kind) for b in statuses["other.pay.v1"].blockers] == [
+        ("not_configured", "configuration")
+    ]
+
+
+def test_the_safe_projection_carries_each_blockers_kind() -> None:
+    readiness = MechanismReadiness(
+        mechanism="demo.pay.v1",
+        configured=True,
+        enabled=True,
+        ready=False,
+        blockers=(
+            ReadinessBlocker(
+                code="demo.unreachable",
+                message="the demo service cannot be reached",
+                kind="reachability",
+            ),
+            ReadinessBlocker(
+                code="demo.misconfigured",
+                message="the demo section names no account",
+                kind="configuration",
+            ),
+        ),
+    )
+
+    projection = readiness.safe_projection()
+
+    assert [(b["code"], b["kind"]) for b in projection["blockers"]] == [
+        ("demo.unreachable", "reachability"),
+        ("demo.misconfigured", "configuration"),
+    ]
 
 
 def test_public_fingerprint_is_source_free_and_secret_free() -> None:

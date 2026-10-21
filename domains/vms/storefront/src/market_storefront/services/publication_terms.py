@@ -26,6 +26,7 @@ from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
 from market_alkahest import ALKAHEST_CONFIG_KEY, publication_release_conditions
 from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
+    MechanismReadiness,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
 )
@@ -306,19 +307,22 @@ def configured_family_rate_problems() -> list[str]:
 def demands_for_publication_clauses(
     clauses: tuple[SettlementPublicationClause, ...],
     *,
+    readiness: tuple[MechanismReadiness, ...],
     wallet_address: str,
 ) -> list[dict[str, Any]]:
     """The release conditions a listing publishing ``clauses`` advertises.
 
     The Alkahest mechanism derives them from ``[Settlement.alkahest]``, the
     seller wallet, and each chain's address book, one per chain an Alkahest
-    clause publishes on.
+    clause publishes on, and only while ``readiness`` reports Alkahest ready:
+    an unready mechanism's clauses publish no option to release.
     """
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(), role="seller")
     return publication_release_conditions(
         config.mechanism_config(ALKAHEST_CONFIG_KEY),
         clauses,
+        readiness=readiness,
         chains=CHAINS,
         wallet_address=wallet_address,
     )

@@ -22,7 +22,11 @@ from market_alkahest import (
     release_conditions,
     require_deliverable_release_model,
 )
-from market_settlement_runtime import SettlementPublicationClause
+from market_settlement_runtime import (
+    MechanismReadiness,
+    ReadinessBlocker,
+    SettlementPublicationClause,
+)
 
 WALLET = "0x" + "AB" * 20
 ORACLE = "0x" + "CD" * 20
@@ -104,11 +108,17 @@ def test_the_interruptible_model_names_its_configured_refund_authority(chains):
     ]
 
 
-def test_the_interruptible_model_falls_back_to_the_seller_wallet(chains):
-    (condition,) = _conditions(_config(interruptible=True), chains, ["anvil"])
+def test_an_interruptible_model_without_its_oracle_is_refused(chains):
+    """No condition stands in for a missing oracle, the seller wallet least of all."""
+    with pytest.raises(ValueError, match="requires an interruptible oracle"):
+        _conditions(_config(interruptible=True), chains, ["anvil"])
 
-    assert condition["arbiter"] == ARBITERS["anvil"]["erc20_splitter"].lower()
-    assert condition["demand_data"] == {"oracle": WALLET.lower(), "data": "0x"}
+
+def test_the_seller_wallet_cannot_be_its_own_interruptible_oracle(chains):
+    config = _config(interruptible=True, interruptible_oracle_addresses=[WALLET])
+
+    with pytest.raises(ValueError, match="equals the storefront wallet"):
+        _conditions(config, chains, ["anvil"])
 
 
 def test_conditions_are_one_per_chain_in_chain_order(chains):
@@ -207,7 +217,7 @@ def test_publication_derives_a_condition_for_each_alkahest_clause_chain(chains):
     ]
 
     conditions = publication_release_conditions(
-        None, clauses, chains=chains, wallet_address=WALLET
+        None, clauses, readiness=_ready(), chains=chains, wallet_address=WALLET
     )
 
     assert conditions == _conditions(None, chains)
@@ -217,6 +227,62 @@ def test_publication_without_an_alkahest_clause_advertises_no_condition():
     clauses = [_clause("arkhai.payments.v1", payee_account="seller")]
 
     assert (
-        publication_release_conditions(None, clauses, chains={}, wallet_address=WALLET)
+        publication_release_conditions(
+            None, clauses, readiness=_ready(), chains={}, wallet_address=WALLET
+        )
         == []
+    )
+
+
+@pytest.mark.parametrize(
+    "readiness",
+    [
+        (),
+        (
+            MechanismReadiness(
+                mechanism="alkahest.v1",
+                configured=True,
+                enabled=True,
+                ready=False,
+                blockers=(
+                    ReadinessBlocker(
+                        code="alkahest.oracle_policy_invalid",
+                        message="oracle-gated settlement requires a trusted oracle address",
+                        kind="configuration",
+                    ),
+                ),
+            ),
+        ),
+    ],
+    ids=["no-alkahest-readiness", "alkahest-unready"],
+)
+def test_publication_advertises_no_condition_while_alkahest_is_unready(
+    chains, readiness
+):
+    """An unready mechanism publishes no option, so its clauses advertise nothing.
+
+    The section here would refuse derivation outright; readiness keeps the
+    refusal from being reached.
+    """
+    clauses = [
+        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default")
+    ]
+
+    assert (
+        publication_release_conditions(
+            _config(oracle_gated=True),
+            clauses,
+            readiness=readiness,
+            chains=chains,
+            wallet_address=WALLET,
+        )
+        == []
+    )
+
+
+def _ready() -> tuple[MechanismReadiness, ...]:
+    return (
+        MechanismReadiness(
+            mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+        ),
     )

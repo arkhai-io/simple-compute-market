@@ -34,6 +34,11 @@ from .ports import ConditionalEscrowClient
 
 SETTLEMENT_CONFIG_SCHEMA_VERSION = 1
 SettlementRole = Literal["buyer", "seller"]
+# ``configuration``: the storefront's own configuration causes the blocker, and
+# only an operator can clear it. ``reachability``: a dependency the mechanism
+# needs could not be reached, or has not yet been probed, so its readiness is
+# unknown rather than ruled out.
+ReadinessBlockerKind = Literal["configuration", "reachability"]
 
 
 class SettlementConfigurationError(ValueError):
@@ -41,12 +46,19 @@ class SettlementConfigurationError(ValueError):
 
 
 class ReadinessBlocker(BaseModel):
-    """A stable, public reason that a mechanism is not ready."""
+    """A stable, public reason that a mechanism is not ready.
+
+    ``kind`` has no default: whoever raises a blocker knows whether the
+    storefront's configuration rules the mechanism out or a dependency could not
+    be reached, and publication decides between closing and holding a listing on
+    that difference.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     code: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=512)
+    kind: ReadinessBlockerKind
 
     @field_validator("code")
     @classmethod
@@ -637,6 +649,7 @@ class SettlementConfigurationRegistry:
                             ReadinessBlocker(
                                 code="not_configured",
                                 message="mechanism is not configured",
+                                kind="configuration",
                             ),
                         ),
                     )
@@ -651,7 +664,9 @@ class SettlementConfigurationRegistry:
                         ready=False,
                         blockers=(
                             ReadinessBlocker(
-                                code="disabled", message="mechanism is disabled"
+                                code="disabled",
+                                message="mechanism is disabled",
+                                kind="configuration",
                             ),
                         ),
                     )

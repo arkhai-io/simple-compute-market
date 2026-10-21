@@ -76,14 +76,12 @@ from market_storefront.services.listing_source_check import (
 from market_storefront.services.publication_terms import (
     compile_publication_clauses,
     compose_clause_rates,
-    demands_for_publication_clauses,
     listing_resource_for_candidate,
     normalize_max_duration_seconds,
     pool_hint_resolution_settings,
 )
 from market_storefront.utils.config import (
     BASE_URL_OVERRIDE,
-    get_evm_wallet_address,
     settings,
     settlement_publication_defaults,
     storefront_domain_registry,
@@ -144,7 +142,6 @@ class VmPublicationCycle:
         site_projections: SiteProjectionState,
         registry: Any,
         storefront_url: str,
-        wallet_address: str,
         dry_run: bool,
         admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
@@ -162,7 +159,6 @@ class VmPublicationCycle:
         self._site_projections = site_projections
         self._registry = registry
         self._storefront_url = storefront_url
-        self._wallet_address = wallet_address
         self.report = PublicationCycleReport(dry_run=dry_run)
         self._driver = PublicationCycleDriver()
         self._projection: Mapping[str, list[dict[str, Any]]] = {}
@@ -384,9 +380,6 @@ class VmPublicationCycle:
                 "listing_shape": candidate["listing_shape"],
             },
             settlements=list(clauses),
-            demands=demands_for_publication_clauses(
-                clauses, wallet_address=self._wallet_address
-            ),
             max_duration_seconds=normalize_max_duration_seconds(
                 pricing.get("max_duration_seconds")
             ),
@@ -551,7 +544,6 @@ async def run_publication_cycle_once(
         site_projections=site_projections or container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
-        wallet_address=get_evm_wallet_address() or "",
         dry_run=dry_run,
         admissibility_default=container.resolved_admissibility_default,
         enter_stage=enter_stage,

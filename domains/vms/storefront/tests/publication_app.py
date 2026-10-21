@@ -41,7 +41,11 @@ from market_core.schemas import RateValue, derive_settlement_option_id
 from core_storefront.service_peers import ServicePeerTrust
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_policy.identity import Identity as PolicyIdentity
-from market_settlement_runtime import SettlementRuntime, SettlementSQLiteRepository
+from market_settlement_runtime import (
+    MechanismReadiness,
+    SettlementRuntime,
+    SettlementSQLiteRepository,
+)
 from storefront_client.client import StorefrontClient
 
 from market_alkahest.dev_chain import anvil_address_book_path
@@ -274,7 +278,19 @@ class SettlementCompositionDouble:
                 **{**body, "rates": [RateValue.model_validate(rate) for rate in body["rates"]]}
             )
             options.append({"option_id": option_id, **body})
-        return accepted, options, ()
+        # Release conditions are derived only under a ready Alkahest, so the
+        # double reports Alkahest ready wherever it builds Alkahest options, as
+        # the real composition's readiness does.
+        readiness = (
+            (
+                MechanismReadiness(
+                    mechanism="alkahest.v1", configured=True, enabled=True, ready=True
+                ),
+            )
+            if accepted
+            else ()
+        )
+        return accepted, options, readiness
 
 
 REGISTRY_URLS = ("http://registry-a.test", "http://registry-b.test")

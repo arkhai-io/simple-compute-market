@@ -251,7 +251,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
         settlements=clauses,
     )
 
-    accepted, options = await service._derive_settlement_artifacts(
+    accepted, options, readiness = await service._derive_settlement_artifacts(
         request,
         clauses=tuple(clauses),
         origin="default",
@@ -259,6 +259,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
 
     assert accepted == []
     assert options == [option]
+    assert readiness == ()
     composition.publication_artifacts.assert_awaited_once_with(
         {
             "accepted_escrows": [],
