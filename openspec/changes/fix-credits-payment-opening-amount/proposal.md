@@ -58,4 +58,4 @@ Touches `core/buyer` orchestration, the API-credit buyer's buy command and payme
 
 - A selection resolves to its advertised option before negotiating, and an unmatched one exits (D1, D8) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta.
 - The match cap counts candidates the buyer can settle with (D7) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta; `market credits buy --help`.
-- Payment scenarios block only on an absent or unready target (D6) — `openspec/specs/test-compatibility/spec.md`, through this change's delta; `docs/development/TESTING.md#private-service-dependencies` and `e2e-tests/README.md`.
+- Payment scenarios block only on an absent or unready target (D6) — `openspec/specs/test-compatibility/spec.md`, through this change's delta; `docs/development/TESTING.md#private-service-dependencies` and `e2e-tests/README.md`; `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership`, at closeout.
