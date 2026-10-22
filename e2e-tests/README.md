@@ -222,7 +222,13 @@ Re-drive recovers the original run's retained profile and calls the shared
 `settle_agreement` client, keeping both transaction and fulfillment unchanged;
 there is no bare-metal settle command. Seller refund reverses the held once
 payment, then a separate buyer teardown converges mock reclaim and site capacity
-release. Fixtures resume loops and remove their own mock rules even after failure.
+release. If a call fails before the refund call finishes, the module's cleanup
+finds the purchase in the buyer's run log; when the log records the payment
+approved, it refunds the payment (a repeat refund returns the same result) and
+releases the host if one was delivered. It then removes its mock rules, drains,
+and removes its pool override, and resumes the loops it paused last. Each step is
+attempted even after an earlier one fails, and the failures are reported together;
+mock-rule removal ignores a rule that is already gone.
 This is mock grant/reclaim evidence, not SSH qualification. The canonical
 Alkahest mock-deal scenario remains selected unchanged.
 

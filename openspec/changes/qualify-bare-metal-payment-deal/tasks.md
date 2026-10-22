@@ -75,9 +75,11 @@ Handoff: the run-log scan takes the last matching event across the buyer's run l
 
 Delivers D6 and D7's operator-facing description. Touches `docs/development/TESTING.md` and `e2e-tests/README.md`.
 
-- [ ] 6.1 State in `docs/development/TESTING.md`'s bare-metal lane entry and `e2e-tests/README.md`'s "Bare-metal payment deal" that a failed run refunds and tears down any deal it left outstanding, and that every cleanup step runs with the held loops resumed last (D6, D7; 01 F2, 01 F3).
+- [x] 6.1 State in `docs/development/TESTING.md`'s bare-metal lane entry and `e2e-tests/README.md`'s "Bare-metal payment deal" that a failed run refunds and tears down any deal it left outstanding, and that every cleanup step runs with the held loops resumed last (D6, D7; 01 F2, 01 F3).
 
 Verification: `make check-doc-citations CHANGE=qualify-bare-metal-payment-deal`; `make check-change CHANGE=qualify-bare-metal-payment-deal`. End-to-end: none.
+
+Done. `docs/development/TESTING.md`'s bare-metal lane entry and `e2e-tests/README.md`'s "Bare-metal payment deal" describe the cleanup as the code does it: when a run fails before its refund call finishes, cleanup finds the purchase in the buyer's run log, refunds it if the log records the payment approved, and releases its host if one was delivered; each step is attempted after an earlier one fails; the loops the module paused resume last; mock-rule removal reports nothing (6.1). Evidence: `make check-doc-citations CHANGE=qualify-bare-metal-payment-deal` and `make check-change CHANGE=qualify-bare-metal-payment-deal` passed, which prove the citations resolve; that the prose matches the code rests on reading it against the fixture, which a fresh-context check did. It found the first wording unconditional where the code refunds only an approved payment and releases only a delivered host, and "the held loops" readable as the shared `bare_metal_loops_held` fixture, which this module does not use; both fixed, and D7 now says mock-rule removal goes through the shared driver, which ignores its own removal errors. End-to-end: none.
 
 ## 7. Closeout
 

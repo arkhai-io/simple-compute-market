@@ -316,8 +316,14 @@ project of its own:
   `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
   one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
   same-fulfillment re-drive through `settle_agreement`, then seller refund and
-  separate physical teardown with restored whole-host capacity. Unconfigured
-  payments remain a named blocked prerequisite; no real SSH claim is made.
+  separate physical teardown with restored whole-host capacity. When a run
+  fails before its refund call finishes, the module's cleanup finds the
+  purchase in the buyer's run log, refunds it if the log records the payment
+  approved, and releases its host if one was delivered; each cleanup step is
+  attempted even after an earlier one fails, and the loops the module paused
+  resume last.
+  Unconfigured payments remain a named blocked prerequisite; no real SSH claim
+  is made.
 - **API-credit lane** (`make -C e2e-tests test-e2e-apicredits`): the credits
   registry, service, storefront, and gated sample app, a compute-schema registry
   of the lane's own that the credits deal's discovery is routed away from, and
