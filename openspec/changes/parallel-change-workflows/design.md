@@ -396,9 +396,11 @@ next-step computation names `clone`, and the session runs
    permissions have one source;
 5. starts `make init` in the background, recording its state in the clone's Git
    directory: its process and log while it runs, then its exit status. The
-   bootstrap's own process records itself before `make init` starts, so no
-   interruption of `make change-clone` leaves a bootstrap running unrecorded for a
-   rerun to start again (52 F3).
+   bootstrap's own process records itself as its first act, before `make init`
+   starts, so a rerun after `make change-clone` is interrupted reads the bootstrap
+   as started (52 F3). Only a rerun that read the clone between the spawn and that
+   first act would start a second one; a rerun's Git checks on the clone come
+   first and take far longer, so no lock guards the moment (96 F1).
 
 `make change-clone` is idempotent (17 F5). It inspects the target and finishes
 whatever is missing: it clones into an absent directory, and in a directory that is
@@ -978,6 +980,20 @@ pre-closeout review.
    closeout, whether to open it as its own change, proposed afterwards on its own
    branch; revisit sooner if concurrent Helm validations exhaust one node. The owner can forward questions to a Claude Code on the web session about
    how its environment provides Docker and with what isolation.
+2. **The round view mixes the branch's own changes with merges from `dev` (94
+   O1).** The view resets the branch to the round's base (D2), so a merge from
+   `dev` inside the round shows `dev`'s changes as uncommitted beside the round's
+   own, with nothing to tell them apart. Round 2's view held 98 files, 69 of them
+   touched by one merge of `dev` (`8e6494f51`, which brought in a Helm render fix), and
+   the owner could not read the round for it. Candidates: a synthetic base — the
+   view resets to a commit merging the round's base with each `dev` commit the
+   round merged, so only the branch's own changes and its conflict resolutions
+   show; merging `dev` only between rounds, so the next round's base holds it; or
+   listing beside the view the paths a merge brought. The owner leans to the
+   synthetic base: a merge from `dev` often carries an urgent fix, as that render
+   fix was, which a round must build on rather than ignore and then rediscover or
+   duplicate, so holding merges to round boundaries would delay it. Decided in a
+   later round, before this change's closeout.
 
 ## Pilot
 

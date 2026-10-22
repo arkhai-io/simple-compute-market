@@ -209,10 +209,13 @@ def bootstrap_state(clone: Path, alive: Callable[[int], bool] = _alive) -> Boots
     return Bootstrap(FAILED, log)
 
 
-# The supervisor records its own process before the command starts, so no
-# interruption of the process that spawned it leaves a bootstrap running unrecorded
-# for a rerun to start a second time. The record and the status each go through a
-# temporary file, so neither is ever read half-written.
+# The supervisor's first act records its own process, before the command starts,
+# so a rerun after the spawning process is interrupted reads the bootstrap as
+# started. Only a rerun that read the clone between the spawn and that first act
+# would start a second one, and a rerun's Git checks on the clone, which `create`
+# runs before it reads the bootstrap, take far longer than a shell's first command.
+# The record and the status each go through a temporary file, so neither is ever
+# read half-written.
 _SUPERVISOR = ('log=$1; status=$2; record=$3; fields=$4; shift 4; '
                'printf \'{"pid": %s, %s\\n\' "$$" "$fields" >"$record.$$.tmp" '
                '&& mv "$record.$$.tmp" "$record"; '

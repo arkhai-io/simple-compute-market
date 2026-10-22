@@ -135,9 +135,26 @@ clone"). Touches a new `scripts/change_clone.py`, the root `Makefile`, and
       supervisor itself, its own `$$` with the command, log, and start time, through
       a temporary file, before the command runs; `start_bootstrap` forgets a failed
       run's record with its status, and writes the record only when the supervisor
-      has not yet (an injected spawn writes none). So no interruption of
-      `make change-clone` leaves a bootstrap running unrecorded. Evidence: below
+      has not yet (an injected spawn writes none). Evidence: below
       section 4's round 1 triage note.
+      Round 2 triage (96 F1): that conclusion claimed too much, and the comment
+      above `_SUPERVISOR` and D6's step 5 are corrected, with no change in
+      behaviour, on the owner's word. A rerun after an interruption reads the
+      bootstrap as started, unless it reads the clone in the moment between the
+      spawn and the supervisor's first act; then it reads `absent` and starts a
+      second `make init`. No rerun reaches that moment, since `create` runs its
+      Git checks on the clone before reading the bootstrap, so no lock guards it.
+      Evidence (checks on the fix commit, from 19fb8f584):
+      `uv run --no-project --with pytest pytest -q scripts/tests/test_change_clone.py`
+      (unit and real-Git integration, TESTING.md), 37 passed; `make test`,
+      passed (run before the comment's final wording, a comment-only edit);
+      `make check-packaging`, passed; `make check-comment-hygiene`, passed;
+      `make check-change`, only the citations of the scripts sections 8 and 8A
+      create (`change_history.py`, `ci_evidence.py`, `test_ci_evidence.py`). A
+      fresh-context check of the diff found the comment accurate; it corrected
+      the comment's grammar, section 6's note on what the rerun deleted, the
+      figure's wording in open question 2, and found this same claim in D6,
+      corrected with it.
 
 ## 2. The round view in the owner's workspace
 
@@ -1182,6 +1199,16 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
       so closeout (10.9) must rewrite the architecture section, as it plans, and
       the requirement's example needs a MODIFIED delta or the example left as a
       true one (validation still stops the scenario pod it started).
+      Round 2 triage (96 F2): validation 97 at 19fb8f584 showed what this run
+      did not, an upgrade over a namespace scaled down by an earlier run: in
+      `validate-parallel-change-workflows`, left at zero by this run, this run's
+      scenario pod, the release's three claims, and `arkhai-buyer-profiles` were
+      deleted and gone, the deploy upgraded the release to revision 2
+      (`deploy.log`), every pod was created anew, each main container on its
+      `-parallel-change-workflows` image (`pods.json`), the four rollouts and
+      the scenario pod's 13 tests passed, and the Deployments were scaled to zero
+      again (`.snapshot/validation/19fb8f5848ec/helm/1/`). The refused-upgrade
+      fallback is still unexercised: no refusal has occurred on a real cluster.
 
 ## 7. Validation's skill and two validations side by side
 
