@@ -432,9 +432,9 @@ its attribute when that domain's campaign composes the kit.
 
 - **Refactoring a live domain.** Mitigated by the pins, the compatibility
   baselines, each slice's suites and lane, and the rule that a slice leaves
-  API credits green. Continuous integration does not run on the fork the
-  branches live on; local suites and the baselines are the evidence until the
-  branches move.
+  API credits green. The change's pull request is in the main repository, so
+  the pipeline runs on every push beside the local suites; two storefront
+  jobs fail on the `dev` base itself and are inherited, not this change's.
 - **Eleven projects where there were five.** Each exists for a rule the
   documents state; the cost is lock files and the aggregate test target, which
   `make check-packaging` and "Aggregate kit tests cover every kit" hold.

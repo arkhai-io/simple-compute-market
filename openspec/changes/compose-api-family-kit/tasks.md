@@ -19,9 +19,11 @@ and the matching filter and `PACKAGES` entries in
 `.github/workflows/publish-pypi.yml`. `make check-packaging` holds all of it. A
 moved module counts toward a section's reviewable size; lock files do not.
 
-Continuous integration does not run on the fork the branches live on. Each
-section records its suites' results locally and says so; the end-to-end lanes
-are reported by validation, not run on the implementing machine.
+The change's pull request is in the main repository, so continuous integration
+runs on every push; two jobs, the bare-metal and VM storefront suites, fail on
+the `dev` base itself and are inherited, not this change's. Each section records
+its suites' results locally as well; the end-to-end lanes are reported by
+validation and the pipeline, not run on the implementing machine.
 
 **Dependencies.** None. The change stands on `dev`; the inference domain binds
 the vocabulary and composes the kit in its own campaign's changes.
@@ -72,11 +74,19 @@ diffed"). Tests and fixtures only; no production code changes. Touches
       start the current API-credits service image over a copy of a database the
       pre-kit image wrote, then the pre-kit image over a database the current
       image wrote, and in each direction serve the route surface and read every
-      grant. The pre-kit image is the one `make build-apicredits-service`
-      produces at this section's commit, tagged `arkhai:apicredits-service-prekit`
-      by a new `build-apicredits-service-prekit` target that builds from a
-      pinned commit; the scenario skips with a reason when the tag is absent.
-      Not run locally; validation's lane runs it. (D14, `api-credits` "Upgrade
+      grant. The pre-kit image is tagged `arkhai:apicredits-service-prekit` by a
+      new `build-apicredits-service-prekit` target that builds
+      `domains/apicredits/service` from the pinned commit
+      `9720ac59697a132f48913b91448c8224ece35cde`, the `dev` base this change
+      stands on, in a temporary worktree; `build-e2e-apicredits` depends on it,
+      so the lane's image build fails, rather than the scenario skipping, when
+      the pre-kit image cannot be built. `e2e_credits_service_rollback` joins
+      `E2E_APICREDITS_MODULE` in `e2e-tests/Makefile` so the lane runs it, and
+      the scenario fails, never skips, when the tag is absent. The pipeline's
+      checkout fetches only the head commit, so the target fetches the pinned
+      commit itself (`git fetch --depth 1 origin <sha>`) before building, and
+      `.github/workflows/e2e.yml` needs no change. Not run locally;
+      validation's lane and the pipeline run it. (D14, `api-credits` "Upgrade
       and rollback against a retained database".)
 - [ ] 1.7 Verification: `make -C domains/apicredits test-domain` (unit),
       `make -C domains/apicredits/service test` (unit and application
