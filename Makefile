@@ -526,9 +526,9 @@ build-test-image:
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-# `make init` resolves dependencies for all three roles. Each role's
-# Makefile owns its own venv; we just delegate so a fresh clone has one
-# entry point. Run `make build` separately to produce wheel/Docker artifacts.
+# `make init` builds the internal wheels and resolves dependencies for all three
+# roles. Each role's Makefile owns its own venv; we just delegate so a fresh
+# clone has one entry point. Run `make build` separately for Docker images.
 init: init-prerequisites init-submodules init-buyer init-storefront init-arkhai-core-registry
 
 init-prerequisites:
@@ -542,13 +542,17 @@ init-submodules:
 init-zero-tier:
 	cd scripts/zerotier && make install
 
-init-buyer: dist-domains
+# Each role's environment installs every internal package its lock names from
+# .dist, so each builds the whole repository wheelhouse first. A hand-kept subset
+# drifts from the locks, and the gap shows only in a checkout whose .dist no
+# earlier build has filled, such as a fresh clone.
+init-buyer: dist-ci
 	cd domains/vms/buyer && make init
 
-init-storefront: dist-domains dist-policy dist-compute-provisioning dist-storefront-client dist-registry-client
+init-storefront: dist-ci
 	cd domains/vms/storefront && make init
 
-init-arkhai-core-registry: dist-registry-client
+init-arkhai-core-registry: dist-ci
 	cd core/registry && make init
 
 deploy-compose:

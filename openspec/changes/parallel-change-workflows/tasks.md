@@ -1400,16 +1400,44 @@ in 7.2), and `scripts/tests/`.
       below: that `make validate-*`, which implementation and triage hold, now
       also reaches `make validate-parallel`, which scales and deletes in two
       changes' namespaces, neither of them necessarily the step's own.
+      The bootstrap in a fresh clone (on the owner's word, after this section's
+      commit): the owner chose the pilot and `resolve-compute-family-findings`
+      for the system run, and the orchestrating session made both clones from
+      this branch. Both bootstraps failed at `init-buyer`: uv found no
+      `arkhai-core` 0.4.1 for `arkhai-kit-contact-exchange`, because the clone's
+      `.dist` held only what `init-buyer`'s prerequisite, `dist-domains`, builds
+      (`uv build` resolves nothing, so the kit wheels built without
+      `arkhai-core`), while the workspace's `.dist` held every wheel earlier
+      builds had left; `init-arkhai-core-registry` lacked `arkhai-core` and
+      `arkhai-kit-identity` the same way. Changed in the root `Makefile`:
+      `init-buyer`, `init-storefront`, and `init-arkhai-core-registry` each build
+      the whole repository wheelhouse (`dist-ci`) first, in place of a hand-kept
+      subset. `scripts/tests/test_init_targets.py`, integration through `make
+      -n` over the real Makefiles (the tracked projects only, `.dist` a
+      temporary directory): each of the three prints a wheel build for every
+      package its project's lock installs from `.dist`, 3 passed; with
+      `init-buyer` put back on `dist-domains` it failed naming `arkhai-core`,
+      `arkhai-core-buyer`, `arkhai-core-registry-client`, `arkhai-kit-alkahest`,
+      `arkhai-kit-config`, `arkhai-kit-identity`, and `arkhai-kit-policy`, and
+      with `init-arkhai-core-registry` on `dist-registry-client`, naming
+      `arkhai-core` and `arkhai-kit-identity`. That shows the wheels are built,
+      not that a fresh clone's `make init` now succeeds: the clones' bootstraps
+      are rerun only once they hold this fix (below). `uv run --no-project
+      --with pytest pytest -q scripts/tests`: 1379 passed. `make
+      check-packaging`: passed. A fresh-context check of the fix found it
+      complete for the three locks and no caller broken; fixed from it: the
+      test now lists tracked projects, reads the lock as TOML, and runs make in
+      the C locale without `GNUMAKEFLAGS`; the Makefile's `init` comment no
+      longer says wheels are built separately; and this note's wording.
       Not run: the system run, and so the Helm scenarios in two namespaces at
-      once. No clone exists — `<workspace>.changes/` is absent and the pilot's
-      branch has not been created — and this step may not run `make
-      change-clone`. The check takes two clones, while D9 works this change in
-      the owner's workspace and only the pilot in a clone, so the pairing D9
-      plans — this change beside the pilot — cannot be run by it as it stands;
-      two clones of different changes need the owner. Once they exist and have
-      bootstrapped, `make validate-parallel CLONES="<clone> <clone>"`, which an
-      implementation step may run (`make validate-*`), is the run this task
-      records; it stays unchecked until then.
+      once. The two clones exist but were made at 115dc2eb0, before this fix,
+      and their bootstraps failed; each needs this branch's fix and its
+      bootstrap rerun (`make change-clone CHANGE=<change>
+      FROM=feat/parallel-change-workflows`) before `make validate-parallel
+      CLONES="<clone> <clone>"`, which an implementation step may run (`make
+      validate-*`), is the run this task records; it stays unchecked until then.
+      The check takes two clones, so this change, worked in the owner's
+      workspace, is not one of them.
       End-to-end scenarios: `contracts` and `e2e_alkahest_escrow_codecs`, the Helm
       run's served list, in both namespaces at once — by the system run alone; no
       pipeline scenario exercises the check or the skill.
