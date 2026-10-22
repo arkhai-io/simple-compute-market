@@ -298,6 +298,13 @@ sequenceDiagram
 - **`automate-seller-spot`:** rescoped to the strategy runner as a caller of the seller half. It depends on both hosted changes.
 - **Deferred:** the automated dispute authority, the metering gateway, the specialized Alkahest arbiter and its lifecycle adapter.
 
+## Implementation cadence
+
+Two rounds, one session each:
+
+1. **Foundation, wire, and buyer side.** `kit/deal-lifecycle` (models, clause codec and semantics, adapter protocol, case payload, evidence record types), `kit/deal-lifecycle-contracts` and `kit/deal-lifecycle-client`, hosted authority derivation, the per-option query projection, removing the listing-level interruptible marker, and buyer verification and buyer-half dispatch. It changes wire bytes and nothing yet acts on them, so it can be reviewed alone.
+2. **Seller servicing and domain wiring.** `kit/deal-servicing` (evidence store, `watch` loops and cursors, end service and its journal), the hosted adapter, the lifecycle routes, the VM admin route and bare-metal teardown as callers, terminal settlement through end service, heartbeat envelopes, and site lease precision, with integration tests against the payments test double.
+
 ## Dependencies on the hosted payments service
 
 To be confirmed against the payments contract and vendored through `kit/arkhai-payments/schema/SOURCE.md`. Items gate implementation, not planning; the test double implements the confirmed contract.
@@ -353,4 +360,4 @@ Design, third round. Changed after the second review round (`reviews/04-design-e
 - D9: keyed by negotiation ID, with a retention end.
 - D15: the rate-part early-end slice and the four-path scenario move to `spot-deals-through-arkhai-payments`.
 
-Next: spec deltas and the implementation cadence, then a third design review over the design and deltas together.
+Spec deltas are in `specs/`, and the implementation cadence is recorded above. Next: a third design review over the design and deltas together.

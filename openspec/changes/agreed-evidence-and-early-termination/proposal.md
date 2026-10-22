@@ -26,15 +26,15 @@ Seller-initiated interruption ships in part: an interruptible VM listing, a stor
 
 ### Modified Capabilities
 
-- `negotiation-protocol`: the protocol ends at commitment; regimes are chosen per option; acceptance envelopes are kept.
+- `negotiation-protocol`: the protocol ends at commitment; regimes are chosen per option.
 - `buyer-orchestration`: "Payment buyers approve and settle by negotiation" generalizes to verifying the mechanism's committed form; buyer `commit`, stop, dispute, and read go through the buyer half.
 - `market-composition`: "Deals compose negotiate, settle, and provision stages" treats settle as the post-commitment handoff; "Marketplace roles hold no payment ledger" admits lifecycle observation cursors.
-- `settlement-servicing`: lifecycle adapters resolve through the role table, not the escrow-client port; "Signed heartbeat evidence" is modified to keep signatures.
-- `settlement-configuration`: option builders emit the clause only where the part shape can end early; stop and start authorities derive from entitlements; Alkahest interruptible configuration is option-scoped.
-- `storefront-publication`: listings carry the clause per option; the listing-wide flag is removed.
+- `settlement-servicing`: "Signed heartbeat evidence" keeps exact signed envelopes when the regime names heartbeats.
+- `settlement-configuration`: hosted start and stop authorities derive from the clause; Alkahest interruption is option configuration with no listing-level marker.
+- `storefront-publication`: early termination is published per option; the admin interrupt route reads the accepted option.
 - `cli-query-language`: mechanism registrations project early-termination fields per option.
 - `vm-storefront-fulfillment`: "Full settlement convergence ownership" is modified, since end service writes the lease.
-- `site-capacity`: terminate versus truncate under end service, at full precision.
+- `site-capacity`: a truncated lease end keeps the requested instant.
 
 ## Dependencies and Related Changes
 
