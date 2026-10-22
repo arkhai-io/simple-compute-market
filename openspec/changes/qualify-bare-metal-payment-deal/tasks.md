@@ -39,10 +39,16 @@ Landed in `ef8804b93`. Conflicts came from this branch carrying #268–#272's or
 
 Replanned against the reviewed design: the design triage's tasks 4.1–4.4 are split by layer into sections 4–6. Delivers D5's regression proof in the bare-metal buyer. Touches `domains/bare_metal/buyer/tests/`.
 
-- [ ] 4.1 Unit-test `market bare-metal buy` completing an agreed negotiation whose accepted provision terms are a dictionary, as the bare-metal buyer always receives them: drive the command through Typer's runner with its configuration, identity, registry, negotiation, and settlement collaborators replaced at module level (the command takes no injected collaborators), a real `RunLog` in a temporary directory, and assert the run's `run_ended` event carries the terms (D5; 01 F5).
-- [ ] 4.2 The same for `market bare-metal request-introduction`, whose agreed path also writes `run_ended` with the accepted terms (D5; 01 F5).
+- [x] 4.1 Unit-test `market bare-metal buy` completing an agreed negotiation whose accepted provision terms are a dictionary, as the bare-metal buyer always receives them: drive the command through Typer's runner with its configuration, identity, registry, negotiation, and settlement collaborators replaced at module level (the command takes no injected collaborators), a real `RunLog` in a temporary directory, and assert the run's `run_ended` event carries the terms (D5; 01 F5).
+- [x] 4.2 The same for `market bare-metal request-introduction`, whose agreed path also writes `run_ended` with the accepted terms (D5; 01 F5).
 
 Verification: bare-metal buyer suite (unit; collaborators replaced at the command's module), each test failing if its command calls `.model_dump()` on the terms; `make test`. No dependency changes. End-to-end: no pipeline scenario drives either command to an agreement; `e2e_bare_metal_payment_deal` drives `buy` once configured with a payments target.
+
+Done. `domains/bare_metal/buyer/tests/test_cli_completion.py` (unit): each command is driven through Typer's runner with its configuration, identity, registry, and negotiation replaced on `arkhai_bare_metal_buyer.cli` — and, for `buy`, its payment stage, approval, and settlement transport — as `test_buyer_composition.py` already does for the introduction context; the run log is real, under a temporary `XDG_STATE_HOME`. Replacing module-level names departs from `docs/development/TESTING.md`'s unit-test mocking convention; the commands take no injected collaborators, and making them injectable would restructure the bare-metal CLI beyond this change, so the departure is recorded in `design.md#evidence-boundaries`. An agreed `buy` and an agreed `request-introduction`, each with dictionary accepted terms, exit 0 and write `run_ended` carrying the terms as they arrived (4.1, 4.2). The introduction test builds a genuine contact-exchange `SettlementPlan`, since the command validates it.
+
+Evidence: bare-metal buyer suite passed, 15. Mutation: restoring `.model_dump(mode="json")` in both commands fails both tests with the original `AttributeError`. `make -k test` passed except the two known environmental gaps (the VM storefront's Alkahest chain tests; the Helm render step without `helm`). Fresh-context compliance check: no layering, comment, packaging, or key-marking violation; fixed the collaborator list above, which had named the payment-stage replacements for both commands, and a reassigned parameter; the mocking departure is recorded rather than refactored, as above. `make check-change` passed.
+
+End-to-end: as planned.
 
 ## 5. Compensate a failed payment deal and clean up independently
 
