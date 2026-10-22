@@ -67,7 +67,15 @@ LOG_ROOT = Path(".snapshot/validation")
 DEFAULT_HELM_CONTEXT = "docker-desktop"
 DEFAULT_NAMESPACE = "default"
 STOREFRONT_PROJECT = "domains/vms/storefront"
-STOREFRONT_PYTHON = Path(STOREFRONT_PROJECT, ".venv/bin/python")
+BARE_METAL_STOREFRONT_PROJECT = "domains/bare_metal/storefront"
+# The environments the chart-to-loader checks load each storefront chart's
+# rendered configuration with, by the step that reinstalls each and the `make`
+# target that creates it.
+LOADER_ENVIRONMENTS = (
+    ("storefront environment", STOREFRONT_PROJECT, "init-storefront"),
+    ("bare-metal storefront environment", BARE_METAL_STOREFRONT_PROJECT,
+     "init-bare-metal-storefront"),
+)
 # The end-to-end pipeline's scenario selections, one per lane; the Helm run reads
 # them from e2e-tests/Makefile so the two lists cannot drift apart.
 PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
@@ -483,15 +491,15 @@ def validate_helm(validation: Validation, *, change: str | None = None,
     validation.summary.not_run = {marker: NOT_SERVED for marker in markers
                                   if marker not in selected}
 
-    # The loader check runs in the VM storefront's own environment, which holds the
+    # Each loader check runs in its storefront's own environment, which holds the
     # internal wheels it last synced. The images are built first, rebuilding the
-    # wheelhouse from this commit, and the environment is then reinstalled from it,
-    # so the check loads the commit's code rather than another branch's.
+    # wheelhouse from this commit, and each environment is then reinstalled from
+    # it, so the checks load the commit's code rather than another branch's.
     for name, command in (DIST_CLEAN,
                           ("build-dev", ["make", "build-dev",
                                          f"IMAGE_SUFFIX={run.image_suffix}"]),
-                          ("storefront environment", ["make", "-C", STOREFRONT_PROJECT,
-                                                      "reinit"])):
+                          *((step, ["make", "-C", project, "reinit"])
+                            for step, project, _ in LOADER_ENVIRONMENTS)):
         if validation.step(name, command).result != "passed":
             return _after_helm(validation)
     render = validation.step("test-render", run.make("test-render"))
@@ -572,12 +580,13 @@ def _helm_preflight(validation: Validation, context: str,
                         "part deploys unattended, so it runs only against HELM_CONTEXT")
         return False
     validation.note("kube context", current)
-    if not os.access(validation.root / STOREFRONT_PYTHON, os.X_OK):
-        validation.fail("storefront environment",
-                        f"{STOREFRONT_PYTHON} is missing, so the chart-to-loader check cannot "
-                        "run; create it with `make init-storefront` and validate again")
-        return False
-    validation.note("storefront environment", str(STOREFRONT_PYTHON))
+    for step, project, target in LOADER_ENVIRONMENTS:
+        python = Path(project, ".venv/bin/python")
+        if not os.access(validation.root / python, os.X_OK):
+            validation.fail(step, f"{python} is missing, so its chart-to-loader check cannot "
+                            f"run; create it with `make {target}` and validate again")
+            return False
+        validation.note(step, str(python))
     try:
         validation.read(["docker", "info", "--format", "{{.ServerVersion}}"])
     except ValidationError as exc:

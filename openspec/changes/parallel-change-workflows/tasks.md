@@ -1429,15 +1429,49 @@ in 7.2), and `scripts/tests/`.
       test now lists tracked projects, reads the lock as TOML, and runs make in
       the C locale without `GNUMAKEFLAGS`; the Makefile's `init` comment no
       longer says wheels are built separately; and this note's wording.
-      Not run: the system run, and so the Helm scenarios in two namespaces at
-      once. The two clones exist but were made at 115dc2eb0, before this fix,
-      and their bootstraps failed; each needs this branch's fix and its
-      bootstrap rerun (`make change-clone CHANGE=<change>
-      FROM=feat/parallel-change-workflows`) before `make validate-parallel
-      CLONES="<clone> <clone>"`, which an implementation step may run (`make
-      validate-*`), is the run this task records; it stays unchecked until then.
-      The check takes two clones, so this change, worked in the owner's
-      workspace, is not one of them.
+      On the owner's word the orchestrating session fast-forwarded both clones
+      to 297c64fa1 and reran their bootstraps, which succeeded (exit 0).
+      System, attempt 1 of `make validate-parallel` over the two clones
+      (`.snapshot/parallel-validation/20261022T070836Z/`): both Helm parts
+      started together, in `validate-seed-default-pool-at-runtime` and
+      `validate-resolve-compute-family-findings`, and both failed at
+      `test-render` before touching any release, on the render check's `skip:
+      BARE_METAL_STOREFRONT_PYTHON unset; the storefront loader check did not
+      run`, which validation fails by design. The check reported it as it
+      should: `together` and `namespaces` passed, `results` failed naming
+      `test-render` in each, `tags` and `scenario pods` failed on the missing
+      overlays, and `untouched` judged neither namespace. Cause: `make init`
+      never created the bare-metal storefront's environment, which the
+      bare-metal chart's and the release topology's loader checks run in, and
+      validation neither checked for it nor reinstalled it; the workspace had
+      one from earlier `make test` runs. Fixed: `make init` gains
+      `init-bare-metal-storefront` (the wheelhouse, then that project's `make
+      init`); `validate_slice.py`'s preflight checks both loader environments,
+      each naming the `make` target that creates it, and reinstalls both from
+      the commit's wheels before the render checks; `change-validate` says so.
+      `scripts/tests/test_init_targets.py`, 5 passed: the new target builds
+      every wheel its lock installs, and `make -n init` reaches both
+      storefronts' `make init` (failing with the target taken out of `init`);
+      `scripts/tests/test_validate_slice.py`, 77 passed: the second reinstall in
+      the Helm part's command order, and each missing environment refused
+      before any command, naming its target. `uv run --no-project --with pytest
+      pytest -q scripts/tests`: 1382 passed. `make check-packaging`: passed. A
+      fresh-context check of this fix found the environment's `make
+      init`/`reinit` the right way to create and refresh it and no other
+      environment the render checks need; fixed from it: two Makefile comments,
+      `init`'s own dependency on the target untested, an unused constant, and
+      this note. `helm/scripts/test-render.sh`'s and `TESTING.md`'s pointers to
+      `make -C domains/bare_metal/storefront init`, which in a fresh checkout
+      needs the wheelhouse first, are left: the first is a comment of a script
+      this section does not otherwise touch, and the second is closeout's
+      promotion (10.9).
+      Still to run: attempt 2 of the system run, and so the Helm scenarios in
+      two namespaces at once. The clones hold 297c64fa1, which lacks this fix,
+      so each needs it fast-forwarded in and `make init-bare-metal-storefront`
+      run before `make validate-parallel CLONES="<clone> <clone>"`, which an
+      implementation step may run (`make validate-*`), is run again; this task
+      stays unchecked until a run passes. The check takes two clones, so this
+      change, worked in the owner's workspace, is not one of them.
       End-to-end scenarios: `contracts` and `e2e_alkahest_escrow_codecs`, the Helm
       run's served list, in both namespaces at once — by the system run alone; no
       pipeline scenario exercises the check or the skill.

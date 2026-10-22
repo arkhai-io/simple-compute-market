@@ -243,11 +243,15 @@ def _validation(tmp_path: Path, fake: Fake, part: str,
                                 clock=lambda: next(clock), echo=echo)
 
 
-def _storefront_env(tmp_path: Path) -> None:
-    python = tmp_path / validator.STOREFRONT_PYTHON
-    python.parent.mkdir(parents=True)
-    python.write_text("#!/bin/sh\n", "utf-8")
-    python.chmod(0o755)
+def _storefront_env(tmp_path: Path, *, skip: str | None = None) -> None:
+    """Each storefront's loader environment but the one `skip` names."""
+    for _, project, _ in validator.LOADER_ENVIRONMENTS:
+        if project == skip:
+            continue
+        python = tmp_path / project / ".venv/bin/python"
+        python.parent.mkdir(parents=True)
+        python.write_text("#!/bin/sh\n", "utf-8")
+        python.chmod(0o755)
 
 
 def _capacity(tmp_path: Path, memory: int | None = None) -> Path:
@@ -262,7 +266,8 @@ def _capacity(tmp_path: Path, memory: int | None = None) -> Path:
 
 def _helm(tmp_path: Path, fake: Fake, *, change: str | None = CHANGE,
           memory: int | None = None, **options: object) -> object:
-    if not (tmp_path / validator.STOREFRONT_PYTHON).exists():
+    if not any((tmp_path / project / ".venv").exists()
+               for _, project, _ in validator.LOADER_ENVIRONMENTS):
         _storefront_env(tmp_path)
     options.setdefault("sleep", lambda seconds: None)
     options.setdefault("credentials", lambda: None)
@@ -374,6 +379,7 @@ def test_helm_runs_every_step_for_a_change_in_its_namespace(tmp_path: Path) -> N
         "make dist-clean",
         "make build-dev IMAGE_SUFFIX=-pilot",
         "make -C domains/vms/storefront reinit",
+        "make -C domains/bare_metal/storefront reinit",
         "make -C helm test-render CHANGE=pilot",
         f"kubectl delete pods --namespace {NAMESPACE} --selector "
         f"app.kubernetes.io/instance={RELEASE} --ignore-not-found --wait=false",
@@ -795,16 +801,24 @@ def test_helm_refuses_a_kube_context_other_than_the_one_named(tmp_path: Path) ->
     assert "production-cluster" in summary.steps[-1].detail
 
 
-def test_helm_without_the_storefront_environment_names_how_to_create_it(
-        tmp_path: Path) -> None:
+@pytest.mark.parametrize(("missing", "step", "target"), [
+    ("domains/vms/storefront", "storefront environment", "make init-storefront"),
+    ("domains/bare_metal/storefront", "bare-metal storefront environment",
+     "make init-bare-metal-storefront"),
+])
+def test_helm_without_a_loader_environment_names_how_to_create_it(
+        tmp_path: Path, missing: str, step: str, target: str) -> None:
     fake = Fake()
+    _storefront_env(tmp_path, skip=missing)
     summary = validator.validate_helm(_validation(tmp_path, fake, "helm"), change=CHANGE,
                                       credentials=lambda: None,
                                       capacity=_capacity(tmp_path))
 
     assert not summary.passed
     assert fake.commands == []
-    assert "make init-storefront" in summary.steps[-1].detail
+    assert summary.steps[-1].name == step
+    assert f"{missing}/.venv/bin/python is missing" in summary.steps[-1].detail
+    assert target in summary.steps[-1].detail
 
 
 @pytest.mark.parametrize("fault, step", [

@@ -144,16 +144,18 @@ from this commit rather than left in `.dist` by another branch.
    `validate-<change>` (a name longer than a namespace allows is cut and ends in
    a short hash), which its summary names. Preflights first,
    before anything slow: the kube context (`HELM_CONTEXT`, `docker-desktop` unless
-   the owner names another), the storefront environment, the Docker daemon, a
+   the owner names another), the VM and bare-metal storefront environments the
+   chart-to-loader checks run in (`make init` creates both), the Docker daemon, a
    `Ready` node, Foundry's `cast`, which derives the namespace's Secrets, a
    warning if the Docker credential helper does not answer, and the capacity
    preflight: a warning when no metrics source answers (`metrics`), so no memory
    is recorded; a warning when `helm/validation-capacity.toml` records no figure
    (`capacity`), so the check is skipped; and otherwise the namespaces running
    the validation release, plus this one, times the figure, against the node's
-   allocatable memory. Then the images, built under the change's own tags; the
-   storefront environment reinstalled from them; the render checks, with the
-   chart-to-loader check running this commit's code; the release replaced —
+   allocatable memory. Then the images, built under the change's own tags; both
+   storefront environments reinstalled from them; the render checks, with the
+   chart-to-loader checks running this commit's code and failing the part on any
+   skip; the release replaced —
    workloads an earlier run left up scaled to zero, its pods and volumes deleted
    and gone, the namespace's Secrets created, the release upgraded in place from
    zero (or uninstalled and installed when the chart refuses the upgrade, a

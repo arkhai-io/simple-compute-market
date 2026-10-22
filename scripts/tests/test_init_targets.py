@@ -71,9 +71,22 @@ def _built(target: str, dist: Path) -> set[Path]:
     return built
 
 
+def test_init_creates_every_environment_the_helm_render_checks_load_with() -> None:
+    # `make -n init` prints each role's `cd <project> && make init`.
+    environment = {name: value for name, value in os.environ.items()
+                   if name not in ("MAKEFLAGS", "GNUMAKEFLAGS", "MFLAGS", "MAKELEVEL",
+                                   "CHANGE")} | {"LC_ALL": "C"}
+    printed = subprocess.run(["make", "-n", "init", "DIST_DIR=/nonexistent-dist"],
+                             cwd=REPO_ROOT, env=environment, capture_output=True, text=True,
+                             check=True).stdout
+    for project in ("domains/vms/storefront", "domains/bare_metal/storefront"):
+        assert f"cd {project} && make init" in printed, project
+
+
 @pytest.mark.parametrize(("target", "project"), [
     ("init-buyer", "domains/vms/buyer"),
     ("init-storefront", "domains/vms/storefront"),
+    ("init-bare-metal-storefront", "domains/bare_metal/storefront"),
     ("init-arkhai-core-registry", "core/registry"),
 ])
 def test_each_init_target_builds_every_wheel_its_lock_installs(tmp_path: Path, target: str,

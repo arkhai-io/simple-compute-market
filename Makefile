@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
@@ -526,10 +526,11 @@ build-test-image:
 
 #Init should complete all deployment times set up steps required prior to your standalone run statements
 #The less of these the better but sometimes you get things like helm repo add or terraform init that can't be avoided.
-# `make init` builds the internal wheels and resolves dependencies for all three
-# roles. Each role's Makefile owns its own venv; we just delegate so a fresh
-# clone has one entry point. Run `make build` separately for Docker images.
-init: init-prerequisites init-submodules init-buyer init-storefront init-arkhai-core-registry
+# `make init` builds the internal wheels and resolves dependencies for the buyer,
+# both storefronts, and the registry. Each project's Makefile owns its own venv;
+# we just delegate so a fresh clone has one entry point. Run `make build`
+# separately for Docker images.
+init: init-prerequisites init-submodules init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry
 
 init-prerequisites:
 	@command -v uv >/dev/null 2>&1 || { echo "uv is not installed. Installing uv..."; curl -LsSf https://astral.sh/uv/0.8.13/install.sh | sh; source $HOME/.local/bin/env; }
@@ -551,6 +552,12 @@ init-buyer: dist-ci
 
 init-storefront: dist-ci
 	cd domains/vms/storefront && make init
+
+# The bare-metal chart's and the release topology's render checks load their
+# rendered configuration with this environment's storefront; without it they
+# skip, which validation fails.
+init-bare-metal-storefront: dist-ci
+	cd domains/bare_metal/storefront && make init
 
 init-arkhai-core-registry: dist-ci
 	cd core/registry && make init
