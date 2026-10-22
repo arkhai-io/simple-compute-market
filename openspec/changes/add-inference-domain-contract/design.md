@@ -263,8 +263,9 @@ domains is the listing and the consumption, not the purchase.
 
 It is copied into `domains/inference/negotiation/terms.py`, not imported.
 `ARCHITECTURE.md`'s dependency layers forbid a domain importing a sibling, and
-the copy is small. `compose-api-family-kit` decides whether the shape moves into
-the `api` family vocabulary; until then each domain carries its own.
+the copy is small. The `api` family vocabulary owns the shape, and the stack
+change replaces this copy with a binding of it; until then this domain carries
+its own.
 
 ### Usage record and charge derivation are domain-owned deterministic semantics
 

@@ -385,14 +385,18 @@ advertisement change's subset rule depend on a concept its own dependent owned.
 ## Roadmap goal — Sell metered inference as its own market domain
 
 ```text
-add-inference-domain-contract ──► compose-api-family-kit ──► compose-inference-domain-stack ──► meter-inference-usage ──► package-inference-seller ──► qualify-inference-market
+compose-api-family-kit (Goal 4) ──┐
+add-inference-domain-contract ────┴──► compose-inference-domain-stack ──► meter-inference-usage ──► package-inference-seller ──► qualify-inference-market
 ```
 
-The family kit precedes the stack: API credits is refactored onto an `api`
-family vocabulary and kit first, with its digests pinned byte-for-byte, and
-inference then composes the kit, contributing only its listing schema, its
-publication guard, its materialization, and its wiring. Metering mutates the
-kit-composed authority once, after the stack has proven a deal.
+The family kit precedes the stack, and it is not this campaign's: Goal 4's
+[`compose-api-family-kit`](compose-api-family-kit/) refactors API credits onto
+an `api` family vocabulary and kit, standing on `dev` alone, with its digests
+pinned byte-for-byte. Inference then composes that kit, contributing only its
+listing schema, its publication guard, its materialization, its service root,
+and its wiring; its contract binds the kit's purchase shape and its row gains
+the family attribute in the stack change. Metering mutates the kit-composed
+authority once, after the stack has proven a deal.
 
 The campaign's sequencing rule is stated once, in
 [`add-inference-domain-contract`](add-inference-domain-contract/)'s `design.md`.
@@ -419,7 +423,6 @@ change when it is opened.
 | Change | Status | Depends on | Notes | Acceptance boundary |
 |---|---|---|---|---|
 | [`add-inference-domain-contract`](add-inference-domain-contract/) | in implementation | — | Code and tests complete; awaiting implementation review. Promotion and archival at closeout | The `inference.v1` domain identity, `inference` schema identity, and `inference` offering mode; one listing per served model carrying a model card and an integer rate card; provision intent as the API-credits purchase shape under the new kind; the usage record and its deterministic charge derivation; secret-free usage evidence; the three-identity separation; the registry filter specification, its load test, and the image `COPY`; the `arkhai-inference-domain` wheel. Both decision gates closed on 2026-09-24: `model_id` is seller-asserted with a SHOULD derivation rule, and one credit is one base unit of the settlement asset |
-| [`compose-api-family-kit`](compose-api-family-kit/) | ready for design | `add-inference-domain-contract` | Replaces `extract-access-issuance-kit` on 2026-10-19, widened from issuance alone to everything the two domains share. Open for design: the kit's directory, the gate client's distribution, the authority packaging | The `api` family: a vocabulary package under `domains/api` and a family kit in a base distribution (issuance, digest, evidence, key authority, gate client, storefront issuance composition) and a `credits` distribution (balances, quota, top-up, fixed per-request consumption). API credits pinned byte-for-byte, then refactored onto the kit in slices with its behaviour, wire, digests, and data unchanged; the kit never imports a domain. The contribution surface a domain supplies: listing schema and publication mapping, guards, materialization hook, consumption rule |
 | [`compose-inference-domain-stack`](compose-inference-domain-stack/) | ready for design | `add-inference-domain-contract`, `compose-api-family-kit` | Returned to design on 2026-10-19: the copy-based design, its plan, and its implemented sections were withdrawn in favour of composing on the family kit. Its three domain modules and the development seed carry over | Storefront executable, authority service, OpenAI-compatible gateway, and buyer plugin as thin composition roots over the family kit, contributing the model-card listing, the request-priced guard, the rate-card materialization, and the gateway's model check; a local Compose stack with an inference registry and development identities; `e2e_inference_deal` through the shared helpers. Flat per-request consumption |
 | [`meter-inference-usage`](meter-inference-usage/) | ready for design | `compose-inference-domain-stack` | Mutates the authority once, against the kit-composed authority | Hold, settle, and release on the authority with server-side pricing against the pinned rate card; the gate estimates, holds before proxying, settles from `usage`, forces `stream_options.include_usage`, drains on disconnect, and disables batching; hold expiry, usage retention and rollup; metered conformance cases. One decision gate: pre-flight token estimation source |
 | [`package-inference-seller`](package-inference-seller/) | ready for design | `compose-inference-domain-stack`, `meter-inference-usage` | — | The thin seller path: a CLI that generates configuration and a Compose stack from the stack change's own files, generates signing material, checks reachability, and installs from published wheels. GPU detection, TLS automation, and price suggestion are deferred until three third-party sellers report where they got stuck |
