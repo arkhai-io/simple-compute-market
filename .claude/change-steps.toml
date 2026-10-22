@@ -118,7 +118,7 @@ allow = [
   "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
   "Bash(make reinit*)", "Bash(uv run pytest *)",
   "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
-  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git rm *)",
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
   "Bash(helm version*)",
 ]
