@@ -506,8 +506,22 @@ def _negotiate_matches(
                 match,
                 {"settlement_selection": settlement_selection.model_dump(mode="json")},
             )
-            if selected_option is not None:
-                advertised_option = SettlementOption.model_validate(selected_option)
+            if selected_option is None:
+                # A selection naming nothing the listing advertises has no rate
+                # or acceptance contract to negotiate or revalidate against.
+                attempts.append(
+                    {
+                        "seller_url": seller_url,
+                        "listing_id": listing_id,
+                        "error": "unadvertised_settlement_selection",
+                    }
+                )
+                return NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=None,
+                    reason="unadvertised_settlement_selection",
+                )
+            advertised_option = SettlementOption.model_validate(selected_option)
         if advertised_option is not None and revalidate_settlement is not None:
             try:
                 await revalidate_settlement(match, advertised_option)
