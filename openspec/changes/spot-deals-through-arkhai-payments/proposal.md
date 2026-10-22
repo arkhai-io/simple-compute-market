@@ -5,9 +5,11 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 ## What Changes
 
 - VM interruptible listings (the existing `interruptible` offering mode) gain an `arkhai.payments.v1` option priced as a rate per period. The option carries the early-termination clause of `agreed-evidence-and-early-termination` in its `params`, including a maximum term. Its derived mandate is one `rate` part with `until: stop`; `stop` authorities are derived from the clause's entitlements, and `start` is the payee's alone.
-- The VM seller's payment stage is the hosted adapter of that change's lifecycle kit. It calls `start` when service begins, and end service runs while the VM lives. It tears down by the transaction's funded-through time unless the funding extends, and immediately on a stop event. Restart recomputes the deadline from the signed snapshot.
-- Seller preemption posts a `notice` event and stops once the notice period has passed; buyer cancellation is the buyer's own `stop` at the payments service.
-- Spot and on-demand differ only in entitlements. An on-demand option gives the payee no stop entitlement, so the seller is not a `stop` authority; an exceptional end such as failed hardware is a dispute the seller concedes on the buyer's behalf. Reserved deals add a `once` part for the committed term.
+- The hosted adapter of that change gains the rate-part early ends: payer stop settled through the exposure tail, scheduled notice, exhaustion, and the maximum-term stop. End service already tears down by the funded-through time and on stop events, and restart replays from the snapshot.
+- Seller preemption posts one `notice` with an effective time at least the notice period ahead; the payments service applies the stop at that time. Buyer cancellation is the buyer's own `stop` at the payments service.
+- The service stops the transaction at `start + max_term_seconds` with cause terms, so billing never outlives the maximum-term lease, including on on-demand deals where the seller has no stop authority.
+- Spot and on-demand differ only in entitlements. An on-demand option gives the payee no stop entitlement, so the seller is not a `stop` authority; an exceptional end such as failed hardware is a dispute the seller concedes on the buyer's behalf, at no less than the clause's concession floor. Reserved deals add a `once` part for the committed term.
+- This change owns the four-path scenario: buyer stop, seller reclaim with notice, funding exhaustion, and a conceded dispute. It runs as an e2e against the payments service's public test deployment, readiness-gated, with client-side integration tests against the test double at the `kit/arkhai-payments` boundary (`docs/development/TESTING.md`, "Private Service Dependencies").
 - Bare metal and API credits keep `once` parts. Reserved and fixed-interval deals stay on `once` until prepaid credits suit them.
 
 ## Dependencies
@@ -21,8 +23,8 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 
 The payments service's `rate-parts` contract settles the seller-side needs below:
 - `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
-- `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the domain's teardown time, and the SDK supplies a default.
-- The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated, never future-dated, and any stop ends the whole transaction.
+- `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the clause's `exposure_seconds` (polling, watchdog and teardown); the option builder and buyer validation enforce that, and the SDK supplies a default.
+- The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated; the only future-dated stop is a matured `notice`, applied by the service. Any stop ends the whole transaction.
 - Per-transaction event sequence numbers give causal order.
 - Billing is per started period (period = quantum), and periods count from `start`. The first batch, including any `once` parts, is reserved at approval.
 - Platform credits are `USD/6`, so payment options and derived mandates use asset `USD/6`. The examples and kit docs written for `settle-through-arkhai-payments` use `USD/2` and move to `USD/6` here; no production code hardcodes an asset.
@@ -30,13 +32,14 @@ The payments service's `rate-parts` contract settles the seller-side needs below
 ## What the seller needs from the payments service
 
 - **A funded-through time per transaction in the signed snapshot.** This is the end of the currently reserved quantum. With it, the seller enforces locally (deliver until funded-through, tear down unless it moves), and polling or webhooks only make teardown prompter; they aren't needed for correctness. Without it, delivery between an exhaustion and the seller noticing is unpaid, and that gap is as long as the polling interval.
-- **Reservation lead at least as long as teardown.** The reserved horizon must cover the seller's teardown time. Otherwise every exhaustion leaves an unpaid tail. Per-second periods make this matter. It can be a service policy, or a per-part minimum reservation the seller declares in the option params.
+- **Reservation lead at least as long as the declared exposure.** The reserved horizon must cover the seller's whole exposure window, not only teardown, so the payer-stop tail is funded. Otherwise every exhaustion leaves an unpaid tail. Per-second periods make this matter. It can be a service policy, or a per-part minimum reservation the seller declares in the option params.
 - **A stop event with an authoritative effective time, a cause and the settled amount,** in the signed snapshot. Causes: payer, payee, exhaustion, dispute authority. A stop is idempotent and final.
-- **Payee stop at or before now.** No future-dated stops. Backdating only reduces the payee's own revenue, so it can be allowed.
-- **A `notice` event.** Notice before a seller stop is posted at the service, and the service rejects an entitled payee stop before notice plus period.
+- **Payee stop at or before now.** Backdating only reduces the payee's own revenue, so it can be allowed.
+- **A `notice` event as a scheduled stop.** The notice carries an effective time no earlier than now plus the entitlement's notice period, and the service applies the stop at that time.
+- **A maximum-term stop.** The service stops the transaction at `start + max_term` with cause terms.
 - **Payee-only `start`.** Periods count from the seller's `start`; an unstarted mandate's hold is released when its window expires.
 - **A payer stop that settles through the declared exposure.**
-- **Dispute file and concede.** A conceded dispute is applied mechanically, as a stop with cause dispute authority and an optional `reverse`.
+- **Dispute file and concede.** A conceded dispute is applied mechanically, as a stop with cause authority and an optional `reverse`, and only when it meets the mandate's concession floor.
 - **Causal event order in snapshots.** The open ordering issue (events with identical `receivedAt` seconds) matters once stop and reservation events interleave.
 - **A stop on any part stops the whole transaction,** and the snapshot says so. The seller must not reason per part.
 
