@@ -47,13 +47,23 @@
       the property that makes the extraction complete rather than additive.
 - [ ] 5.3 Run `openspec validate --all --strict` against the baseline current at
       implementation time.
+- [ ] 5.4 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both. Read the moved modules'
+      docstrings; they describe a domain-local concern.
 
 ## 6. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene`. Read the moved modules'
-      docstrings; they describe a domain-local concern.
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
+- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them, including the moved modules' docstrings (5.4). Do not edit code
+      here: anything to rewrite returns the change to implementation.
 - [x] 6.2 **Import placement.** Central rather than incidental here: extraction changes
       import direction, and a function-level import retained to dodge a cycle would hide
       a layering violation.
@@ -67,34 +77,27 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [x] 6.5 **Roadmap currency.** Update Goal 4's current-state description and gap
       mapping in `docs/development/ROADMAP.md`.
 - [x] 6.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 6.7 **Campaign index currency** (part seven, added when
-      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
-      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. Update this change's row, and its
-      campaign's dependency graph, in `openspec/changes/README.md` to match its state at
-      completion, or record the disposition here if its status and campaign placement are
-      both unchanged.
-
-- [ ] 6.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=kit-storefront-composition-seam` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 6.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
+      Archival uses `--skip-specs`: this task synchronized the specification by hand.
+- [ ] 6.7 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 6.8 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=kit-storefront-composition-seam` and resolve every
+      match, then `openspec validate kit-storefront-composition-seam --strict`.
+- [ ] 6.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
 - [ ] 6.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 6.11 **Archival.** Last, once every other part is checked: `openspec archive
+      kit-storefront-composition-seam -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without merging the deltas, which 6.6 synchronized by
+      hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location |

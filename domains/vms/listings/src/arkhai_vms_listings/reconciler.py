@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import enum
 import sqlite3
 from dataclasses import dataclass, field
 from collections.abc import Collection
 from typing import TYPE_CHECKING, Any, Mapping, Protocol
+
+from market_capability_admissibility import AdmissibilityProblem, Declaration
 
 from arkhai_vms import (
     DIMENSION_KEYS,
@@ -14,12 +17,19 @@ from arkhai_vms import (
     listing_shape_key,
 )
 
+from market_resource_pools_contracts.backing import (
+    CapacityBacking,
+    capacity_backing,
+    labels_reconciled_by_availability,
+)
+
 from arkhai_vms_listings.asking_rates import resolve_vm_asking_rates
 from arkhai_vms_listings.listing_comparison import REFUSE, compare_listing
 from arkhai_vms_listings.listing_shapes import (
     SHAPE_SOURCE_DEFAULT,
     SHAPE_SOURCE_OVERRIDE,
     ResolvedShape,
+    ShapeResolution,
     resolve_shape,
     resolve_vm_listing_shapes,
 )
@@ -119,266 +129,11 @@ def _member_available_units(
     own total and (when known) the aggregated site snapshot's answer for
     that ``(site, resource_id)`` key. ``None`` availability means the
     caller has no consumption information -- treated as fully available,
-    corrected authoritatively by the reserve path later. Shared by every
-    capacity source (local capacity-pools, legacy resources, and the
-    projection's own fallback) so there is exactly one place this cap is
-    computed.
+    corrected authoritatively by the reserve path later.
     """
     if member_availability is None:
         return member_total
     return max(0, min(member_total, int(member_availability.get(member_key, 0))))
-
-
-def _capacity_pool_member_rows(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Query compute_capacity_pools JOIN compute_pool_members for active,
-    fungible-capable GPU pools -- one row per member, pool columns
-    repeated across each of its members' rows."""
-    member_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(compute_pool_members)")
-    }
-    pool_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(compute_capacity_pools)")
-    }
-    site_select = "m.site" if "site" in member_cols else "NULL AS site"
-    settlements_select = (
-        "p.settlements" if "settlements" in pool_cols else "NULL AS settlements"
-    )
-    return conn.execute(
-        f"""
-        SELECT p.pool_id, p.gpu_model, p.region, p.sla,
-               p.total_gpu_count,
-               p.accepted_escrows, {settlements_select}, p.max_duration_seconds,
-               m.resource_id, m.gpu_count, m.status, m.attributes,
-               {site_select}
-        FROM compute_capacity_pools p
-        JOIN compute_pool_members m ON m.pool_id = p.pool_id
-        WHERE p.resource_type = 'compute.gpu'
-          AND p.status = 'active'
-          AND m.status = 'active'
-        ORDER BY p.pool_id, m.resource_id
-        """
-    ).fetchall()
-
-
-def _accumulate_capacity_pool_member(
-    pool: dict[str, Any],
-    row: sqlite3.Row,
-    member_availability: dict[tuple[str | None, str], int] | None,
-    *,
-    home_site: str,
-) -> None:
-    """Fold one compute_pool_members row into its pool's running
-    aggregate, in place."""
-    member_total = int(row["gpu_count"] or 0)
-    member_site = str(row["site"]) if row["site"] else home_site
-    member_key = (member_site, str(row["resource_id"]))
-    member_available = _member_available_units(
-        member_total, member_key, member_availability
-    )
-    pool["total_gpu_count"] += member_total
-    pool["available_gpu_count"] += member_available
-    pool["max_member_available_gpu_count"] = max(
-        int(pool["max_member_available_gpu_count"]),
-        member_available,
-    )
-    pool["member_count"] += 1
-    pool["single_resource_id"] = (
-        str(row["resource_id"]) if pool["member_count"] == 1 else None
-    )
-
-
-def _pool_rows_from_capacity_pools(
-    conn: sqlite3.Connection,
-    member_availability: dict[tuple[str | None, str], int] | None,
-    *,
-    home_site: str,
-) -> list[dict[str, Any]]:
-    """compute_capacity_pools JOIN compute_pool_members, grouped by pool
-    -- the fungible-pool-capable local source, preferred over the legacy
-    resources table whenever both tables exist."""
-    by_pool: dict[str, dict[str, Any]] = {}
-    for row in _capacity_pool_member_rows(conn):
-        pool_id = str(row["pool_id"])
-        pool = by_pool.setdefault(
-            pool_id,
-            {
-                "pool_id": pool_id,
-                "gpu_model": row["gpu_model"],
-                "region": row["region"],
-                "sla": row["sla"] if row["sla"] is not None else 0.0,
-                "total_gpu_count": 0,
-                "available_gpu_count": 0,
-                "max_member_available_gpu_count": 0,
-                "accepted_escrows": row["accepted_escrows"],
-                "settlements": row["settlements"],
-                "max_duration_seconds": row["max_duration_seconds"],
-                "single_resource_id": None,
-                "member_count": 0,
-                "offering_mode": "vm",
-            },
-        )
-        _accumulate_capacity_pool_member(
-            pool, row, member_availability, home_site=home_site
-        )
-    return list(by_pool.values())
-
-
-def _legacy_resource_columns(conn: sqlite3.Connection) -> tuple[bool, bool, bool]:
-    """Report optional publication columns present on legacy resources."""
-    cols = {r[1] for r in conn.execute("PRAGMA table_info(resources)").fetchall()}
-    return (
-        "accepted_escrows" in cols,
-        "max_duration_seconds" in cols,
-        "settlements" in cols,
-    )
-
-
-def _project_legacy_resource_row(
-    row: sqlite3.Row,
-    *,
-    has_accepted: bool,
-    has_max_duration: bool,
-    has_settlements: bool = False,
-    member_availability: dict[tuple[str | None, str], int] | None,
-    home_site: str,
-) -> dict[str, Any]:
-    """Shape one legacy `resources` row into a pool_rows entry -- each
-    such resource is its own single-member "pool" (no fungible grouping
-    exists at this schema generation)."""
-    try:
-        attrs = json.loads(row["attributes"] or "{}")
-    except json.JSONDecodeError:
-        attrs = {}
-    total_gpu_count = int(row["value"]) if row["value"] is not None else 1
-    available_gpu_count = _member_available_units(
-        total_gpu_count,
-        (home_site, str(row["resource_id"])),
-        member_availability,
-    )
-    return {
-        "pool_id": str(attrs.get("pool_id") or row["resource_id"]),
-        "single_resource_id": str(row["resource_id"]),
-        "gpu_model": attrs.get("gpu_model"),
-        "region": attrs.get("region"),
-        "sla": attrs.get("sla", 0.0),
-        "total_gpu_count": total_gpu_count,
-        "available_gpu_count": available_gpu_count,
-        "max_member_available_gpu_count": available_gpu_count,
-        "accepted_escrows": row["accepted_escrows"] if has_accepted else None,
-        "settlements": row["settlements"] if has_settlements else None,
-        "max_duration_seconds": (
-            row["max_duration_seconds"] if has_max_duration else None
-        ),
-        "offering_mode": "vm",
-    }
-
-
-def _pool_rows_from_legacy_resources(
-    conn: sqlite3.Connection,
-    member_availability: dict[tuple[str | None, str], int] | None,
-    *,
-    home_site: str,
-) -> list[dict[str, Any]]:
-    """Legacy `resources` table fallback, used only when
-    compute_capacity_pools/compute_pool_members don't both exist."""
-    has_accepted, has_max_duration, has_settlements = _legacy_resource_columns(conn)
-    select_extra = ""
-    if has_accepted:
-        select_extra += ", accepted_escrows"
-    if has_max_duration:
-        select_extra += ", max_duration_seconds"
-    if has_settlements:
-        select_extra += ", settlements"
-    rows = conn.execute(
-        f"""SELECT resource_id, resource_subtype, unit, value, state,
-                  attributes{select_extra}
-           FROM resources
-           WHERE resource_type = 'compute.gpu' AND state = 'available'
-           ORDER BY resource_id""",
-    ).fetchall()
-    return [
-        _project_legacy_resource_row(
-            row,
-            has_accepted=has_accepted,
-            has_max_duration=has_max_duration,
-            has_settlements=has_settlements,
-            member_availability=member_availability,
-            home_site=home_site,
-        )
-        for row in rows
-    ]
-
-
-def _pool_rows_from_local_tables(
-    conn: sqlite3.Connection,
-    member_availability: dict[tuple[str | None, str], int] | None,
-    *,
-    home_site: str,
-) -> list[dict[str, Any]]:
-    """Local-table sourcing: compute_capacity_pools joined with
-    compute_pool_members when both exist, else the legacy resources
-    table. One of the two capacity sources `available_compute_slices`
-    can choose between, alongside `_pool_rows_from_projection`.
-    """
-    has_pools = (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
-        ).fetchone()
-        is not None
-    )
-    has_members = (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_pool_members'"
-        ).fetchone()
-        is not None
-    )
-    if has_pools and has_members:
-        return _pool_rows_from_capacity_pools(
-            conn, member_availability, home_site=home_site
-        )
-    return _pool_rows_from_legacy_resources(
-        conn, member_availability, home_site=home_site
-    )
-
-
-def _local_pool_pricing(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
-    """The legacy storefront-override rows for the home site's pools, by pool_id.
-
-    The lower of the storefront's two override tiers: a site-scoped override
-    (``_site_pool_overrides``) takes precedence field by field, and derivation
-    reports each field these rows supply.
-
-    Never looked up for another site's pool: ``compute_capacity_pools`` is
-    keyed by pool alone (``pool_id TEXT PRIMARY KEY``), and pool identifiers
-    are site-local, so a lookup for another site's pool could apply these
-    values to a different pool that shares the name. A non-home-site pool
-    therefore has no legacy tier, only the site-scoped one.
-    """
-    has_pools = (
-        conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='compute_capacity_pools'"
-        ).fetchone()
-        is not None
-    )
-    if not has_pools:
-        return {}
-    pool_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(compute_capacity_pools)")
-    }
-    settlements_select = (
-        "settlements" if "settlements" in pool_cols else "NULL AS settlements"
-    )
-    return {
-        str(row["pool_id"]): row
-        for row in conn.execute(
-            f"""
-            SELECT pool_id, gpu_model, region, sla,
-                   accepted_escrows, {settlements_select}, max_duration_seconds
-            FROM compute_capacity_pools
-            WHERE resource_type = 'compute.gpu' AND status = 'active'
-            """
-        ).fetchall()
-    }
 
 
 VM_OFFERING_MODE = "vm"
@@ -616,11 +371,13 @@ class _SiteDerivationReport:
     members_without_gpu_count: dict[str, str] = field(default_factory=dict)
     members_without_resource_type: dict[str, str] = field(default_factory=dict)
     unreadable_shapes: dict[str, list[str]] = field(default_factory=dict)
+    inadmissible_listing_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    unusable_shape_constraints: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unreadable_asking_rates: dict[str, list[str]] = field(default_factory=dict)
     unpublished_asking_rates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     infeasible_shapes: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     undeclared_attributes: dict[str, dict[str, Any]] = field(default_factory=dict)
-    legacy_overrides_in_effect: dict[str, list[str]] = field(default_factory=dict)
+    regionless_pools: set[str] = field(default_factory=set)
     retired_pricing_keys: dict[str, list[str]] = field(default_factory=dict)
     unreadable_family_rates: dict[str, list[str]] = field(default_factory=dict)
     families_without_rates: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
@@ -640,14 +397,17 @@ class _SiteDerivationReport:
                 sorted(self.members_without_resource_type.items())
             ),
             "unreadable_shapes": dict(sorted(self.unreadable_shapes.items())),
+            "inadmissible_listing_shapes": dict(
+                sorted(self.inadmissible_listing_shapes.items())
+            ),
+            "unusable_shape_constraints": dict(
+                sorted(self.unusable_shape_constraints.items())
+            ),
             "unreadable_asking_rates": dict(sorted(self.unreadable_asking_rates.items())),
             "unpublished_asking_rates": dict(sorted(self.unpublished_asking_rates.items())),
             "infeasible_shapes": dict(sorted(self.infeasible_shapes.items())),
             "undeclared_attributes": dict(sorted(self.undeclared_attributes.items())),
-            "legacy_overrides_in_effect": {
-                pool_id: sorted(fields)
-                for pool_id, fields in sorted(self.legacy_overrides_in_effect.items())
-            },
+            "regionless_pools": sorted(self.regionless_pools),
             "retired_pricing_keys": {
                 pool_id: sorted(set(keys))
                 for pool_id, keys in sorted(self.retired_pricing_keys.items())
@@ -723,6 +483,29 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             pool_id,
             "; ".join(problems),
         )
+    for pool_id, findings in current["inadmissible_listing_shapes"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states %d shape(s) whose offer its "
+            "admissibility policy excludes; they are not published (%s)",
+            site_id,
+            pool_id,
+            len(findings),
+            "; ".join(
+                problem["message"] for finding in findings for problem in finding["problems"]
+            ),
+        )
+    for pool_id, findings in current["unusable_shape_constraints"].items():
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states %d listing(s) whose "
+            "admissibility cannot be computed; they are not published (%s)",
+            site_id,
+            pool_id,
+            len({finding["shape_digest"] for finding in findings}),
+            "; ".join(
+                f"{finding['tier']} {', '.join(finding['paths'])}: {finding['problem']}"
+                for finding in findings
+            ),
+        )
     for pool_id, problems in current["unreadable_asking_rates"].items():
         logger.warning(
             "[PUBLICATION] site %s pool %s states asking rates the VM market "
@@ -756,13 +539,12 @@ def _record_site_report(site_id: str, report: _SiteDerivationReport) -> None:
             finding.get("attribute"),
             finding.get("value"),
         )
-    for pool_id, fields in current["legacy_overrides_in_effect"].items():
-        logger.info(
-            "[PUBLICATION] site %s pool %s takes %s from its legacy storefront "
-            "override row",
+    for pool_id in current["regionless_pools"]:
+        logger.warning(
+            "[PUBLICATION] site %s pool %s states no region; publication holds "
+            "its listings",
             site_id,
             pool_id,
-            ", ".join(fields),
         )
     for pool_id, keys in current["retired_pricing_keys"].items():
         logger.warning(
@@ -848,6 +630,10 @@ class PoolHintResolutionSettings:
     own values, not a site's; defaulted here only so every caller doesn't
     need to construct empty ones. `family_rate_defaults` uses the pricing
     hint's family-grouped nesting.
+
+    `admissibility_default` is the storefront's parsed
+    ``[admissibility.defaults.vm]``, the lower tier of every listing's
+    admissibility policy and the whole policy of a generated listing; ``None`` when the storefront configures none.
     """
 
     accept_pool_declared_sla: bool = False
@@ -855,6 +641,7 @@ class PoolHintResolutionSettings:
     gpu_pricing_defaults_by_model: Mapping[str, Any] = None  # type: ignore[assignment]
     gpu_pricing_flat_default: Any = None
     family_rate_defaults: Mapping[str, Any] = None  # type: ignore[assignment]
+    admissibility_default: Declaration | None = None
 
     def __post_init__(self) -> None:
         # dataclass(frozen=True) needs object.__setattr__ to fill in
@@ -875,8 +662,6 @@ def _projected_pool_rows(
     pool: Mapping[str, Any],
     *,
     site_id: str,
-    home_site: str,
-    local_pricing: Mapping[str, sqlite3.Row],
     member_availability: dict[tuple[str | None, str], int] | None,
     capacity_buckets: list[Mapping[str, Any]] | None,
     declaration: "ResolvedPool",
@@ -886,6 +671,7 @@ def _projected_pool_rows(
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
     declared_only: bool = False,
     override: Mapping[str, Any] | None = None,
+    excluded: set[tuple[str, str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build zero or more pool_rows entries from one projected pool.
 
@@ -900,15 +686,12 @@ def _projected_pool_rows(
     publication shape does not change out from under an existing
     derived-listing mapping.
 
-    Shapes and commercial terms resolve through the storefront's two override
-    tiers before the pool's own hints and the storefront's configuration:
-    ``override`` is the site-scoped override for this site and pool, if any,
-    and ``local_pricing`` holds the legacy override rows, consulted only for
-    the home site's pools because they are keyed by pool alone. Neither tier is
-    required: a pool with neither still resolves through its hints and
+    Shapes and commercial terms resolve through the storefront's override
+    before the pool's own hints and the storefront's configuration:
+    ``override`` is the site-scoped override for this site and pool, if any.
+    It is not required: a pool with none still resolves through its hints and
     configured defaults, and a pool that resolves no price is left to the
-    downstream ``publish_priceless`` handling. Each field a legacy row supplies
-    is reported, so an operator sees which values still come from that tier.
+    downstream ``publish_priceless`` handling.
 
     Every row carries the pool's resolved shapes, each GPU model's resolved
     terms (``pricing_by_model``), and the shapes its source members are
@@ -923,10 +706,6 @@ def _projected_pool_rows(
     # A pool its site declares disabled is a withdrawn source.
     if not declaration.advertises("vm") or not declaration.enabled:
         return []
-    # The legacy rows are keyed by pool alone, so they are only ever the home
-    # site's; another site's identically named pool must not take their values.
-    legacy = local_pricing.get(pool_id) if site_id == home_site else None
-
     usages: list[_ProjectedResourceUsage] = []
     members_by_id: dict[str, Mapping[str, Any]] = {}
     malformed_members: list[str] = []
@@ -990,17 +769,31 @@ def _projected_pool_rows(
     resolution = resolve_vm_listing_shapes(
         policy_tags,
         [members_by_id[usage.resource_id] for usage in usages],
+        configured_default=hint_resolution.admissibility_default,
         override_shapes=override.get("listing_shapes") if override else None,
     )
     if resolution.unreadable:
         report.unreadable_shapes[pool_id] = [
-            f"{resolution.source}: {problem}"
-            if resolution.source == SHAPE_SOURCE_OVERRIDE
-            else problem
-            for problem in resolution.problems
+            f"{resolution.source}: {problem}" for problem in resolution.problems
         ]
         holds.add(("pool", site_id, pool_id))
         return []
+
+    # Every declaration was read, so a listing whose policy cannot be computed,
+    # or whose offer its own policy excludes, is not derived and an open
+    # listing for it closes, while the pool's other listings publish. Holding
+    # it instead would keep advertising what the storefront's policy may
+    # exclude. See openspec/specs/storefront-publication/spec.md#requirement-a-vm-listing-whose-admissibility-cannot-be-computed-closes.
+    shapes = _admissible_shapes(resolution, pool_id=pool_id, report=report)
+    # Recorded apart from the pool's listings because a later hold on the whole
+    # pool, for an unreadable rate, must not keep an excluded listing open.
+    if excluded is not None:
+        admitted = {shape.digest for shape in shapes}
+        excluded.update(
+            (site_id, pool_id, listing.shape.digest)
+            for listing in resolution.listings
+            if listing.shape.digest not in admitted
+        )
 
     # Asking rates hold the pool on the same terms as shapes: a rate the seller
     # believes they published is not silently dropped to a lower tier.
@@ -1014,36 +807,27 @@ def _projected_pool_rows(
         ]
         holds.add(("pool", site_id, pool_id))
         return []
-    unpublished_rates = rates.unpublished(shape.digest for shape in resolution.shapes)
+    unpublished_rates = rates.unpublished(shape.digest for shape in shapes)
     if unpublished_rates:
         report.unpublished_asking_rates[pool_id] = [
             {"shape_digest": digest, "shape": shape}
             for digest, shape in sorted(unpublished_rates.items())
         ]
 
-    legacy_fields: set[str] = set()
-
     def _tier(field_name: str) -> Any:
-        """The storefront-override tier's value: the site-scoped override's,
-        else the legacy row's, recorded when it is the legacy row's."""
+        """The site-scoped override's value for ``field_name``, if it states one."""
         if override is not None and override.get(field_name) is not None:
             return override[field_name]
-        value = (
-            legacy[field_name]
-            if legacy is not None and field_name in legacy.keys()
-            else None
-        )
-        if value is not None:
-            legacy_fields.add(field_name)
-        return value
+        return None
 
-    # Region is a physical fact, so no site-scoped override states it; the
-    # pool's own hint wins and the legacy row is only a fallback.
-    hint_region = resolve_region(policy_tags, fallback=None)
-    legacy_region = legacy["region"] if legacy is not None else None
-    region = hint_region if hint_region is not None else legacy_region
-    if hint_region is None and legacy_region is not None:
-        legacy_fields.add("region")
+    # Region is a physical fact, so no override states it: it is the pool's
+    # own hint or nothing. Every VM listing publishes one, so publication
+    # publishes and refreshes nothing from a pool stating none. The rows are
+    # still derived: region does not bear on capacity, so availability
+    # reconciliation keeps closing a sold-out listing of such a pool.
+    region = resolve_region(policy_tags)
+    if region is None:
+        report.regionless_pools.add(pool_id)
     sla = resolve_sla(
         policy_tags,
         accept_pool_declared_sla=hint_resolution.accept_pool_declared_sla,
@@ -1052,11 +836,8 @@ def _projected_pool_rows(
     )
     storefront_pricing_override = GpuPricingFields(
         max_duration_seconds=_tier("max_duration_seconds"),
-        accepted_escrows=_tier("accepted_escrows"),
         settlements=_tier("settlements"),
     )
-    if legacy_fields:
-        report.legacy_overrides_in_effect[pool_id] = sorted(legacy_fields)
     if override is not None and override.get("retired_terms"):
         report.retired_pricing_keys.setdefault(pool_id, []).extend(
             f"override terms.{name}" for name in override["retired_terms"]
@@ -1069,14 +850,13 @@ def _projected_pool_rows(
         "sla": sla,
         "listing_cardinality_mode": mode,
         "offering_mode": "vm",
-        "capacity_backing": declaration.capacity_backing,
+        "capacity_backing": declaration.backing.label,
         "listing_cardinality_mode_explanation": cardinality.fallback_explanation,
         "listing_cardinality_mode_deprecated_key_notice": (
             cardinality.deprecated_key_notice
         ),
     }
 
-    backed = declaration.capacity_backing == "backed" and not declared_only
     pool_buckets = (
         None
         if capacity_buckets is None
@@ -1090,47 +870,56 @@ def _projected_pool_rows(
     def _judge_members(shape: ResolvedShape, members: list[Mapping[str, Any]]) -> str | None:
         """None when feasible, else what the shape is not feasible against."""
         listing_resource = _shape_listing_resource(
-            shape, pool_id=pool_id, region=region, capacity_backing=declaration.capacity_backing,
+            shape, pool_id=pool_id, region=region, capacity_backing=declaration.backing.label,
             resource_id=(
                 str(members[0].get("physical_resource_id"))
                 if mode == "specific_resource" and members
                 else None
             ),
         )
-        if not any(
-            shape_feasible.member_feasible(
-                listing_resource, pool_id=pool_id, member=member, use_available=False
-            )
-            for member in members
-        ):
-            return "declared"
-        if not backed:
-            return None
-        readable_buckets = (
-            [bucket for bucket in pool_buckets if bucket.get("available")]
-            if pool_buckets is not None
-            else None
-        )
-        if mode != "specific_resource" and pool_buckets is not None and (
-            readable_buckets or not pool_buckets
-        ):
-            # A loaded bucket family is authoritative for fungible availability,
-            # and a loaded family naming no entry for the pool means none is
-            # available. Entries that predate per-resource availability are
-            # unreadable, and only when every entry is does the pool fall back
-            # to its members.
-            feasible = any(
-                shape_feasible.bucket_feasible(listing_resource, bucket=bucket)
-                for bucket in readable_buckets or []
-            )
-        else:
+
+        def declared() -> str | None:
             feasible = any(
                 shape_feasible.member_feasible(
-                    listing_resource, pool_id=pool_id, member=member, use_available=True
+                    listing_resource, pool_id=pool_id, member=member, use_available=False
                 )
                 for member in members
             )
-        return None if feasible else "available"
+            return None if feasible else "declared"
+
+        def available() -> str | None:
+            readable_buckets = (
+                [bucket for bucket in pool_buckets if bucket.get("available")]
+                if pool_buckets is not None
+                else None
+            )
+            if mode != "specific_resource" and pool_buckets is not None and (
+                readable_buckets or not pool_buckets
+            ):
+                # A loaded bucket family is authoritative for fungible
+                # availability, and a loaded family naming no entry for the pool
+                # means none is available. Entries that predate per-resource
+                # availability are unreadable, and only when every entry is does
+                # the pool fall back to its members.
+                feasible = any(
+                    shape_feasible.bucket_feasible(listing_resource, bucket=bucket)
+                    for bucket in readable_buckets or []
+                )
+            else:
+                feasible = any(
+                    shape_feasible.member_feasible(
+                        listing_resource, pool_id=pool_id, member=member, use_available=True
+                    )
+                    for member in members
+                )
+            return None if feasible else "available"
+
+        # A declared-only derivation judges declared capacity for every
+        # backing; otherwise the pool's backing decides whether availability
+        # bounds the shape.
+        if declared_only:
+            return declared()
+        return declaration.backing.judge(declared, available)
 
     # Terms resolve per GPU model because the hint and configured tiers are
     # keyed by model; a listing takes its shape's model's terms.
@@ -1142,14 +931,13 @@ def _projected_pool_rows(
             config_defaults_by_model=hint_resolution.gpu_pricing_defaults_by_model,
             flat_default=hint_resolution.gpu_pricing_flat_default,
         )
-        for model in sorted({shape.gpu_model for shape in resolution.shapes})
+        for model in sorted({shape.gpu_model for shape in shapes})
     }
     # Family rates resolve per model for the same reason: the GPU family is
-    # keyed by model. They resolve on this projection path only; the local-table
-    # path is flat-priced, as overrides are inactive there.
+    # keyed by model.
     family_rates_by_model: dict[str, Mapping[str, Any]] = {}
     unreadable_rates: list[str] = []
-    for model in sorted({shape.gpu_model for shape in resolution.shapes}):
+    for model in sorted({shape.gpu_model for shape in shapes}):
         family = resolve_family_rates(
             policy_tags,
             gpu_model=model,
@@ -1169,7 +957,7 @@ def _projected_pool_rows(
         report.unreadable_family_rates[pool_id] = sorted(set(unreadable_rates))
         holds.add(("pool", site_id, pool_id))
         return []
-    for shape in resolution.shapes:
+    for shape in shapes:
         unrated = _families_without_rates(
             shape,
             family_rates_by_model.get(shape.gpu_model) or {},
@@ -1182,7 +970,7 @@ def _projected_pool_rows(
 
     def _feasible_shapes(members: list[Mapping[str, Any]]) -> tuple[ResolvedShape, ...]:
         feasible: list[ResolvedShape] = []
-        for shape in resolution.shapes:
+        for shape in shapes:
             finding = _judge_members(shape, members)
             if finding is None:
                 feasible.append(shape)
@@ -1194,7 +982,7 @@ def _projected_pool_rows(
         return tuple(feasible)
 
     shape_fields = {
-        "listing_shapes": resolution.shapes,
+        "listing_shapes": shapes,
         "shape_source": resolution.source,
         "pricing_by_model": pricing_by_model,
         "family_rates_by_model": family_rates_by_model,
@@ -1249,7 +1037,7 @@ def _projected_pool_rows(
             }
         ]
 
-    unserved = [shape for shape in resolution.shapes if shape.digest not in served]
+    unserved = [shape for shape in shapes if shape.digest not in served]
     if resolution.stated:
         for shape in unserved:
             report.infeasible_shapes.setdefault(pool_id, []).append(
@@ -1272,6 +1060,67 @@ def _projected_pool_rows(
                 members=[members_by_id[usage.resource_id] for usage in usages],
             )
     return rows
+
+
+def _admissible_shapes(
+    resolution: ShapeResolution, *, pool_id: str, report: _SiteDerivationReport
+) -> tuple[ResolvedShape, ...]:
+    """The base shapes of the listings a pool may publish, reporting the rest.
+
+    A listing whose policy cannot be computed is reported with each problem's
+    tier, paths, and any conflicting tiers' values or entries. A stated
+    listing whose base shape its policy excludes is reported with its source
+    tier and problems. A generated shape is nobody's statement and is never
+    reported; the generator yields only what the default-only policy admits.
+    """
+    admitted: list[ResolvedShape] = []
+    for listing in resolution.listings:
+        shape = listing.shape
+        if listing.policy is None:
+            report.unusable_shape_constraints.setdefault(pool_id, []).extend(
+                {
+                    "tier": problem.tier,
+                    "shape_digest": shape.digest,
+                    "shape": _shape_dict(shape),
+                    "paths": list(problem.paths),
+                    "code": problem.code.value,
+                    "problem": problem.message,
+                    "bounds": [
+                        {"tier": bound.tier, "bound": bound.bound, "value": bound.value}
+                        for bound in problem.bounds
+                    ],
+                    "entries": list(problem.entries),
+                }
+                for problem in listing.policy_problems
+            )
+            continue
+        problems = listing.policy.admissibility_problems(shape.shape)
+        if problems:
+            if resolution.stated:
+                report.inadmissible_listing_shapes.setdefault(pool_id, []).append(
+                    {
+                        "tier": resolution.source,
+                        "shape_digest": shape.digest,
+                        "shape": _shape_dict(shape),
+                        "problems": [_problem_dict(problem) for problem in problems],
+                    }
+                )
+            continue
+        admitted.append(shape)
+    return tuple(admitted)
+
+
+def _shape_dict(shape: ResolvedShape) -> dict[str, dict[str, Any]]:
+    return {family: dict(fields) for family, fields in shape.shape.items()}
+
+
+def _problem_dict(problem: AdmissibilityProblem) -> dict[str, Any]:
+    return {
+        "tier": problem.tier,
+        "paths": list(problem.paths),
+        "code": problem.code.value,
+        "message": problem.message,
+    }
 
 
 def _shape_listing_resource(
@@ -1317,7 +1166,6 @@ def _pool_rows_from_projection(
     conn: sqlite3.Connection,
     site_pool_projection: Mapping[str, list[dict[str, Any]]],
     *,
-    home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
@@ -1326,21 +1174,22 @@ def _pool_rows_from_projection(
     declared_only: bool = False,
     overrides: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
     record_reports: bool = True,
+    excluded: set[tuple[str, str, str]] | None = None,
+    reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build pool_rows from a site_resource_pools projection.
 
     Structure (which pools/resources exist) comes from the projection, for
     every site present in it. Shapes and terms resolve through the
     storefront's site-scoped overrides (``_site_pool_overrides``, read from
-    ``conn`` unless ``overrides`` is given), then the legacy override rows for
-    the home site's pools (`_local_pool_pricing`), then each pool's projected
-    hints and the storefront's configured defaults -- see
-    `_projected_pool_rows`. A pool with no override of either kind still
-    resolves through its hints and defaults.
+    ``conn`` unless ``overrides`` is given), then each pool's projected hints
+    and the storefront's configured defaults -- see `_projected_pool_rows`. A
+    pool with no override still resolves through its hints and defaults.
 
     ``record_reports`` false leaves the published per-site derivation reports
     untouched, for a caller judging a projection other than the one
-    publication derives from.
+    publication derives from, or previewing a cycle. ``reports``, when given,
+    receives each site's report whether or not it is published.
 
     ``site_capacity_buckets`` is the matching ``site_capacity_buckets``
     projection (same per-site-list shape as ``site_pool_projection``),
@@ -1353,7 +1202,6 @@ def _pool_rows_from_projection(
     # resource-pool authority package; only storefront projection needs it.
     from market_resource_pools import read_site_declarations
 
-    local_pricing = _local_pool_pricing(conn)
     site_overrides = _site_pool_overrides(conn) if overrides is None else overrides
     pool_rows: list[dict[str, Any]] = []
     for site_id, pools in site_pool_projection.items():
@@ -1386,8 +1234,6 @@ def _pool_rows_from_projection(
                 _projected_pool_rows(
                     pool,
                     site_id=site_id,
-                    home_site=home_site,
-                    local_pricing=local_pricing,
                     member_availability=member_availability,
                     capacity_buckets=buckets_for_site,
                     declaration=declaration,
@@ -1397,8 +1243,11 @@ def _pool_rows_from_projection(
                     shape_feasible=shape_feasible,
                     declared_only=declared_only,
                     override=site_overrides.get((site_id, pool_id)),
+                    excluded=excluded,
                 )
             )
+        if reports is not None:
+            reports[site_id] = report.as_dict()
         if record_reports:
             _record_site_report(site_id, report)
     return pool_rows
@@ -1410,7 +1259,6 @@ def declared_shape_feasibility(
     *,
     site_id: str,
     pool_id: str,
-    home_site: str,
     override: Mapping[str, Any],
     shape_feasible: ShapeFeasibility,
 ) -> dict[str, bool]:
@@ -1428,7 +1276,7 @@ def declared_shape_feasibility(
     if override.get("listing_shapes") is None:
         return {}
     resolution = resolve_vm_listing_shapes(
-        {}, (), override_shapes=override["listing_shapes"]
+        {}, (), configured_default=None, override_shapes=override["listing_shapes"]
     )
     feasible: dict[str, bool] = {shape.digest: False for shape in resolution.shapes}
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
@@ -1437,7 +1285,6 @@ def declared_shape_feasibility(
         rows = _pool_rows_from_projection(
             conn,
             {site_id: [dict(pool) for pool in site_pools]},
-            home_site=home_site,
             member_availability=None,
             holds=set(),
             shape_feasible=shape_feasible,
@@ -1485,85 +1332,50 @@ def _parsed_settlements(raw: Any) -> list[dict[str, Any]] | None:
     return None
 
 
-def _local_table_shapes(
-    row: Mapping[str, Any], *, declared_range: bool
-) -> tuple[ResolvedShape, ...]:
-    """GPU-only shapes for a pool read from local tables.
-
-    Local tables hold no projected members or hints, so a pool's shapes are the
-    default GPU-only shapes for its one model, ranged over what its members make
-    available. A pool with no model has no shape.
-    """
-    model = row.get("gpu_model")
-    if not isinstance(model, str) or not model.strip():
-        return ()
-    range_field = (
-        "max_member_declared_gpu_count"
-        if row.get("capacity_backing") == "unbacked" or declared_range
-        else "max_member_available_gpu_count"
-    )
-    return tuple(
-        resolve_shape({"gpu": {"count": count, "model": model}})
-        for count in range(1, int(row.get(range_field) or 0) + 1)
-    )
-
-
 def available_compute_slices(
     db_path: str,
     *,
-    home_site: str,
+    site_pool_projection: Mapping[str, list[dict[str, Any]]],
     member_availability: dict[tuple[str | None, str], int] | None = None,
-    site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     hint_resolution: PoolHintResolutionSettings = _DEFAULT_POOL_HINT_RESOLUTION_SETTINGS,
     holds: set[tuple[str, str, str]] | None = None,
     declared_range: bool = False,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    excluded: set[tuple[str, str, str]] | None = None,
+    record_reports: bool = True,
+    reports: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return publishable compute listing slices from current storefront state.
+    """Return publishable compute listing slices from the site projections.
 
-    Pool membership and market attributes (pricing, escrows) are local —
-    the aggregator view. Consumption is the site authorities' answer:
-    ``member_availability`` holds available units keyed by
-    ``(site, resource_id)`` from the aggregated snapshots (``site=None``
-    is the storefront's home site, matching members with no site tag); a
-    member the snapshots don't cover is not reservable and counts as 0.
-    ``None`` means the caller has no consumption information (publish
-    flows when the authority is unreachable) — members are then assumed
-    fully available, which the reserve path corrects authoritatively.
+    ``site_pool_projection`` is the ``site_id -> resource-pool projection rows``
+    mapping the storefront's per-site projection state holds, a site's last
+    generation included while it is stale. It is the only source of listing
+    structure: which pools and members exist comes from it for every site in
+    it, and a configured site
+    absent from it is held (below). Shapes and terms resolve through the
+    storefront's site-scoped overrides, read through the pool-override kit, then
+    each pool's projected hints, then the storefront's configured defaults --
+    see ``_projected_pool_rows``. A pool with no override still publishes
+    through its hints and defaults, with the same "priceless" handling other
+    publish flows support if nothing resolves a real price.
 
-    ``home_site`` is the site every returned slice is attributed to when
-    reading local tables, which only an omitted or ``None``
-    ``site_pool_projection`` selects.
+    Consumption is the site authorities' answer: ``member_availability`` holds
+    available units keyed by ``(site, resource_id)`` from the aggregated
+    snapshots; a member the snapshots don't cover is not reservable and counts
+    as 0. ``None`` means the caller has no consumption information (publish
+    flows when the authority is unreachable) — members are then assumed fully
+    available, which the reserve path corrects authoritatively.
 
-    ``site_pool_projection`` is an optional ``site_id -> resource-pool
-    projection rows`` mapping (the same shape
-    ``site_projection_cache.projection_caches()[site].resource_pools.view().value``
-    already produces). Any mapping, even an empty one, selects the projection
-    path: pool structure comes from the projection for *every* site in it, not
-    just ``home_site``, and a configured site absent from it is held (below).
-    Shapes and terms then resolve through the storefront's site-scoped
-    overrides, read through the pool-override kit; the legacy override rows, for
-    ``home_site``'s pools only; each pool's projected hints; and the
-    storefront's configured defaults -- see ``_projected_pool_rows``. The
-    local-table path applies no site-scoped override: its terms come from its
-    own tables. A pool with no override still publishes through its
-    hints and defaults, with the same "priceless" handling other publish
-    flows support if nothing resolves a real price.
-
-    A pool's ``listing_cardinality_mode`` (from its projected
-    ``policy_tags``, only available on the ``site_pool_projection`` path)
-    decides its row shape:
-    ``fungible`` publishes one pool-keyed aggregated row; ``specific_resource``
-    publishes one resource-keyed row per enabled member, however many
-    members the pool has. ``site_capacity_buckets`` is the matching
-    ``site_capacity_buckets`` projection (same per-site-list shape as
-    ``site_pool_projection``) and, when supplied, sources a ``fungible``
-    pool's per-member availability ceiling instead of a resource-list max
-    -- see ``_projected_pool_rows``. Only takes effect on the projection
-    path; the local-table path has no ``policy_tags``/bucket source
-    and is unaffected by either parameter.
+    A pool's ``listing_cardinality_mode`` (from its projected ``policy_tags``)
+    decides its row shape: ``fungible`` publishes one pool-keyed aggregated row;
+    ``specific_resource`` publishes one resource-keyed row per enabled member,
+    however many members the pool has. ``site_capacity_buckets`` is the
+    matching ``site_capacity_buckets`` projection (same per-site-list shape as
+    ``site_pool_projection``) and, when supplied, sources a ``fungible`` pool's
+    per-member availability ceiling instead of a resource-list max -- see
+    ``_projected_pool_rows``.
 
     Every slice is one listing shape: the storefront override's shapes, else
     the pool's stated ``listing_shapes`` for the ``vm`` mode, else the default
@@ -1578,11 +1390,8 @@ def available_compute_slices(
     pool's ``capacity_backing``, its canonical shape and digest, and exactly the
     quantities its shape declares.
 
-    ``site_pool_projection`` of ``None`` selects the local-table path; any
-    mapping, even an empty one, selects the projection path. A storefront that
-    derives from projections never derives from its local tables for want of a
-    loaded projection: a site whose projection is not held is unknown, not
-    empty, so it yields nothing and is held.
+    An empty mapping derives nothing. A site whose projection is not held is
+    unknown, not empty, so it yields nothing and is held.
 
     ``holds`` collects ``("pool", site, pool_id)`` and
     ``("resource", site, resource_id)`` entries for sources whose declarations
@@ -1591,44 +1400,40 @@ def available_compute_slices(
     be neither closed nor refreshed, so callers that reconcile keep them out of
     both.
 
+    ``excluded`` collects ``(site, pool_id, shape_digest)`` for each listing
+    whose policy cannot be computed or excludes its offer. Such a listing
+    closes even when its pool is held, so callers that reconcile close it
+    despite ``holds``.
+
     ``hint_resolution`` controls how much a pool's own projected
-    ``region``/``sla`` hints are trusted relative to the storefront's
-    override tiers and configured defaults -- see
-    `arkhai_vms_listings.pool_descriptors`. Only takes effect on
-    the projection path, the same as ``site_pool_projection``/
-    ``site_capacity_buckets`` above; the local-table path has no hint
-    source to resolve against.
+    ``region``/``sla`` hints are trusted relative to the storefront's override
+    and configured defaults -- see `arkhai_vms_listings.pool_descriptors`.
+
+    Each site's derivation report is published for status
+    (``derivation_reports``) unless ``record_reports`` is false, as for a
+    previewed cycle, which changes nothing a status reader sees; ``reports``,
+    when given, receives every site's report either way.
     """
     held = holds if holds is not None else set()
+    for site_id in configured_sites:
+        if site_id not in site_pool_projection:
+            held.add(_site_hold(str(site_id)))
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     conn.row_factory = sqlite3.Row
     try:
-        if site_pool_projection is not None:
-            for site_id in configured_sites:
-                if site_id not in site_pool_projection:
-                    held.add(_site_hold(str(site_id)))
-            pool_rows = _pool_rows_from_projection(
-                conn,
-                site_pool_projection,
-                home_site=home_site,
-                member_availability=member_availability,
-                site_capacity_buckets=site_capacity_buckets,
-                hint_resolution=hint_resolution,
-                holds=held,
-                shape_feasible=shape_feasible,
-                declared_only=declared_range,
-            )
-        else:
-            pool_rows = _pool_rows_from_local_tables(
-                conn, member_availability, home_site=home_site
-            )
-            # Local tables can express only capacity-backed supply: nothing
-            # in them declares a pool with no admission authority.
-            for row in pool_rows:
-                row["capacity_backing"] = "backed"
-                row["max_member_declared_gpu_count"] = row.get(
-                    "max_member_available_gpu_count"
-                )
+        pool_rows = _pool_rows_from_projection(
+            conn,
+            site_pool_projection,
+            member_availability=member_availability,
+            site_capacity_buckets=site_capacity_buckets,
+            hint_resolution=hint_resolution,
+            holds=held,
+            shape_feasible=shape_feasible,
+            declared_only=declared_range,
+            excluded=excluded,
+            record_reports=record_reports,
+            reports=reports,
+        )
     finally:
         conn.close()
 
@@ -1636,15 +1441,11 @@ def available_compute_slices(
     for row in pool_rows:
         if row.get("offering_mode") != "vm":
             continue
-        site_id = str(row.get("site_id") or home_site)
-        accepted_escrows = _parsed_escrows(row.get("accepted_escrows"))
-        settlements = _parsed_settlements(row.get("settlements"))
+        site_id = str(row["site_id"])
         backing = row["capacity_backing"]
         pool_id = str(row["pool_id"])
         single_resource_id = row.get("single_resource_id")
-        shapes = row.get("feasible_shapes")
-        if shapes is None:
-            shapes = _local_table_shapes(row, declared_range=declared_range)
+        shapes = row.get("feasible_shapes") or ()
         pricing_by_model = row.get("pricing_by_model") or {}
         family_rates_by_model = row.get("family_rates_by_model") or {}
         for shape in shapes:
@@ -1678,12 +1479,10 @@ def available_compute_slices(
                         family_rates_by_model.get(shape.gpu_model) or {}
                     ).items()
                 },
-                "accepted_escrows": accepted_escrows,
-                "settlements": settlements,
+                "accepted_escrows": None,
+                "settlements": None,
                 "max_duration_seconds": (
-                    pricing.max_duration_seconds
-                    if pricing
-                    else row.get("max_duration_seconds")
+                    pricing.max_duration_seconds if pricing else None
                 ),
                 "listing_cardinality_mode": row.get("listing_cardinality_mode"),
                 "listing_cardinality_mode_explanation": row.get(
@@ -1708,13 +1507,15 @@ def available_compute_slices(
 def current_available_resource_keys(
     db_path: str,
     *,
-    home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
-    site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_pool_projection: Mapping[str, list[dict[str, Any]]],
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     holds: set[tuple[str, str, str]] | None = None,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    admissibility_default: Declaration | None,
+    excluded: set[tuple[str, str, str]] | None = None,
+    record_reports: bool = True,
 ) -> set[str]:
     # Keys come from the full derivation, not a structural shortcut, because a
     # listing's key depends on its shape and its shape can come from the
@@ -1726,17 +1527,22 @@ def current_available_resource_keys(
     # shape, so it is bounded by pool count rather than capacity. Terms never
     # affect a key, which is why none of the key readers take a
     # `hint_resolution` (see
-    # `test_resource_keys_are_identical_regardless_of_hint_resolution`).
+    # `test_resource_keys_are_identical_regardless_of_hint_resolution`). The
+    # configured admissibility default is required instead: it decides which
+    # listings exist, so a reader without it would keep open a listing whose
+    # offer publication no longer advertises.
     keys: set[str] = set()
     for row in available_compute_slices(
         db_path,
-        home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        hint_resolution=PoolHintResolutionSettings(admissibility_default=admissibility_default),
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
+        excluded=excluded,
+        record_reports=record_reports,
     ):
         if row.get("resource_key"):
             keys.add(str(row["resource_key"]))
@@ -1759,6 +1565,32 @@ def _source_envelope(raw: Any) -> Mapping[str, Any] | None:
             return None
         return parsed if isinstance(parsed, Mapping) else None
     return None
+
+
+def _stored_shape_source(
+    source_envelope: Any, site_id: str
+) -> tuple[str, str, str] | None:
+    """A stored listing's ``(site, pool_id, shape_digest)``, or ``None``.
+
+    ``None`` for a listing bound before shapes, one naming no pool, or one
+    whose envelope cannot be read.
+    """
+    envelope = _source_envelope(source_envelope)
+    if (
+        envelope is None
+        or envelope.get("kind") != LISTING_SOURCE_KIND
+        or envelope.get("schema_version") != LISTING_SOURCE_SCHEMA_VERSION
+    ):
+        return None
+    payload = envelope.get("payload") or {}
+    pool_id = payload.get("pool_id")
+    if not pool_id:
+        return None
+    try:
+        digest = resolve_shape(payload.get("listing_shape")).digest
+    except ValueError:
+        return None
+    return (str(site_id), str(pool_id), digest)
 
 
 def stored_listing_key(
@@ -1829,6 +1661,19 @@ def _is_held(
     )
 
 
+class ReconciliationScope(enum.Enum):
+    """Which reconciliation reads the bound listings.
+
+    Source reconciliation (the publication loop) acts on every listing whose
+    source changed. Availability reconciliation (capacity events, a release, a
+    failed deal, an administrator's reservation) acts only on listings whose
+    backing availability bounds, which the backing registry names.
+    """
+
+    SOURCE = "source"
+    AVAILABILITY = "availability"
+
+
 @dataclass(frozen=True, slots=True)
 class BoundVmListing:
     """One bound VM listing as reconciliation reads it."""
@@ -1836,7 +1681,7 @@ class BoundVmListing:
     listing_id: str
     listing_resource: dict[str, Any]
     site_id: str
-    capacity_backing: str
+    backing: CapacityBacking
     source_envelope: Mapping[str, Any] | None = None
 
     @property
@@ -1848,14 +1693,13 @@ def _bound_vm_listings(
     db_path: str,
     *,
     open_listings: bool,
-    backed_only: bool,
+    scope: ReconciliationScope,
 ) -> list[BoundVmListing]:
     """Bound VM listings with their binding's site and backing.
 
     Closed listings exclude those their seller closed: no reconciliation path
-    reopens a listing its seller withdrew. ``backed_only`` restricts the read to
-    listings bound as capacity-backed, which is all availability reconciliation
-    may act on.
+    reopens a listing its seller withdrew. The availability scope reads only
+    listings whose bound backing availability reconciliation may touch.
     """
     clauses = [
         "l.status = 'open'"
@@ -1863,8 +1707,13 @@ def _bound_vm_listings(
         else "l.status != 'open' AND l.closed_by IS NOT 'seller'",
         "b.offering_mode = 'vm'",
     ]
-    if backed_only:
-        clauses.append("b.capacity_backing = 'backed'")
+    params: list[str] = []
+    if scope is ReconciliationScope.AVAILABILITY:
+        labels = sorted(labels_reconciled_by_availability())
+        if not labels:
+            return []
+        clauses.append(f"b.capacity_backing IN ({', '.join('?' for _ in labels)})")
+        params.extend(labels)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro&nolock=1", uri=True, timeout=5)
     try:
         rows = conn.execute(
@@ -1874,12 +1723,13 @@ def _bound_vm_listings(
             FROM listings l
             JOIN storefront_listing_bindings b ON b.listing_id = l.listing_id
             WHERE {' AND '.join(clauses)}
-            """
+            """,
+            params,
         ).fetchall()
     finally:
         conn.close()
     out: list[BoundVmListing] = []
-    for listing_id, raw, site_id, capacity_backing, envelope in rows:
+    for listing_id, raw, site_id, capacity_backing_label, envelope in rows:
         if not raw or not site_id:
             continue
         try:
@@ -1892,23 +1742,20 @@ def _bound_vm_listings(
                     str(listing_id),
                     parsed,
                     str(site_id),
-                    str(capacity_backing),
+                    capacity_backing(capacity_backing_label),
                     _source_envelope(envelope),
                 )
             )
     return out
 
 
-def open_listing_resource_keys(
-    db_path: str,
-    *,
-    home_site: str,
-) -> set[str]:
+def open_listing_resource_keys(db_path: str) -> set[str]:
     """Return exact site-scoped keys covered by bound open VM listings."""
 
-    del home_site
     covered: set[str] = set()
-    for listing in _bound_vm_listings(db_path, open_listings=True, backed_only=False):
+    for listing in _bound_vm_listings(
+        db_path, open_listings=True, scope=ReconciliationScope.SOURCE
+    ):
         key = listing.key
         if key is not None:
             covered.add(key)
@@ -1918,41 +1765,55 @@ def open_listing_resource_keys(
 def stale_open_listing_ids(
     db_path: str,
     *,
-    home_site: str,
     configured_sites: Collection[str],
     member_availability: dict[tuple[str | None, str], int] | None = None,
-    site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_pool_projection: Mapping[str, list[dict[str, Any]]],
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
-    backed_only: bool,
+    scope: ReconciliationScope,
     shape_feasible: ShapeFeasibility,
+    admissibility_default: Declaration | None,
+    record_reports: bool = True,
 ) -> list[str]:
     """Return bound VM listings whose exact site-scoped slice is gone.
 
     A listing whose source cannot currently be read is held, not stale, and so
-    is every listing of a configured site whose projection is unknown.
-    ``backed_only`` has no default because the two reconciliations differ:
-    source reconciliation (the publication loop) closes any listing whose
-    source is gone, while availability reconciliation (capacity events, a
-    release, a failed deal) acts only on capacity-backed listings, since no
-    availability figure describes an unbacked one.
+    is every listing of a configured site whose projection is unknown. A
+    listing whose admissibility policy cannot be computed or excludes its offer
+    is stale even when a later check holds the rest of its pool.
+    ``scope`` has no default because the two reconciliations differ: source
+    reconciliation closes any listing whose source is gone, while availability
+    reconciliation acts only on listings availability bounds.
+    ``admissibility_default`` is the storefront's configured default, which
+    publication applies, so a listing whose offer it excludes is stale here too.
+    ``record_reports`` false, for a previewed cycle, publishes no derivation
+    report (see ``available_compute_slices``).
     """
 
     holds: set[tuple[str, str, str]] = set()
+    excluded: set[tuple[str, str, str]] = set()
     available_keys = current_available_resource_keys(
         db_path,
-        home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
+        admissibility_default=admissibility_default,
+        excluded=excluded,
+        record_reports=record_reports,
     )
     stale: list[str] = []
     for listing in _bound_vm_listings(
-        db_path, open_listings=True, backed_only=backed_only
+        db_path, open_listings=True, scope=scope
     ):
-        if _is_held(listing.listing_resource, listing.site_id, holds):
+        # Admissibility excluded the listing before a later rate check held
+        # its pool, so it closes even though the rest of its pool is held.
+        if (
+            _is_held(listing.listing_resource, listing.site_id, holds)
+            and _stored_shape_source(listing.source_envelope, listing.site_id)
+            not in excluded
+        ):
             continue
         key = listing.key
         if key is not None and key not in available_keys:
@@ -1963,34 +1824,35 @@ def stale_open_listing_ids(
 def closed_available_listing_ids(
     db_path: str,
     *,
-    home_site: str,
     member_availability: dict[tuple[str | None, str], int] | None = None,
-    site_pool_projection: Mapping[str, list[dict[str, Any]]] | None = None,
+    site_pool_projection: Mapping[str, list[dict[str, Any]]],
     site_capacity_buckets: Mapping[str, list[dict[str, Any]]] | None = None,
     shape_feasible: ShapeFeasibility,
     configured_sites: Collection[str] = (),
+    admissibility_default: Declaration | None,
 ) -> list[str]:
-    """Return closed capacity-backed VM listings that may reopen now.
+    """Return closed VM listings that availability may reopen now.
 
     This is availability reconciliation: its callers are capacity events, a
-    released reservation, and a failed deal, so it reads only listings bound as
-    capacity-backed. An unbacked listing is reopened by the publication loop,
-    which refreshes its terms from its source as it does.
+    released reservation, and a failed deal, so it reads only listings whose
+    backing availability bounds. Any other listing is reopened by the
+    publication loop, which refreshes its terms from its source as it does.
 
     A listing may reopen when its exact slice is available again, its seller did
     not close it, its source is not held, and its published identity and its
     binding's backing still match what its source derives. Every availability
     reopen shares this predicate, so a listing closed because its source changed
-    is not reopened by a capacity event that happens to free its slice.
+    is not reopened by a capacity event that happens to free its slice, nor
+    one whose offer ``admissibility_default`` excludes.
     """
     holds: set[tuple[str, str, str]] = set()
     slices: dict[str, dict[str, Any]] = {}
     for row in available_compute_slices(
         db_path,
-        home_site=home_site,
         member_availability=member_availability,
         site_pool_projection=site_pool_projection,
         site_capacity_buckets=site_capacity_buckets,
+        hint_resolution=PoolHintResolutionSettings(admissibility_default=admissibility_default),
         holds=holds,
         shape_feasible=shape_feasible,
         configured_sites=configured_sites,
@@ -2000,7 +1862,9 @@ def closed_available_listing_ids(
     if not slices:
         return []
     available: list[tuple[int, str]] = []
-    for listing in _bound_vm_listings(db_path, open_listings=False, backed_only=True):
+    for listing in _bound_vm_listings(
+        db_path, open_listings=False, scope=ReconciliationScope.AVAILABILITY
+    ):
         listing_id = listing.listing_id
         listing_resource = listing.listing_resource
         site_id = listing.site_id
@@ -2015,8 +1879,8 @@ def closed_available_listing_ids(
             stored_terms={},
             fresh_resource=slice_identity(fresh),
             fresh_terms={},
-            binding_backing=listing.capacity_backing,
-            source_backing=str(fresh.get("capacity_backing")),
+            binding_backing=listing.backing,
+            source_backing=capacity_backing(fresh.get("capacity_backing")),
         )
         if comparison.outcome in REFUSE:
             logger.warning(

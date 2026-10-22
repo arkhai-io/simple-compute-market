@@ -1,12 +1,12 @@
 [project]
 name = "arkhai-vms-settlement"
-version = "0.2.1"
+version = "0.3.0"
 license = "MIT"
 description = "VM settlement terms, proposals, and fulfillment helpers, shared by the VM storefront and buyer."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-vms-listings>=0.4.1",
-    "arkhai-kit-alkahest",
+    "arkhai-kit-alkahest>=0.7.0",
 ]
 
 [build-system]

@@ -20,7 +20,19 @@ task running it.
 
 Each loop's work is also reachable as one step, registered beside the loop
 under a route name, so an operator advances a held loop by running exactly the
-operation its timer runs. Both contracts are the storefront loop requirements in
+operation its timer runs. A loop registers in one of two forms, and
+`start_loops` starts both:
+
+- a timer loop (`register_loop`), run by the controller's own timer, which
+  calls the loop's step through `run_cycle`, the one operation a cycle runs
+  through: it holds the loop's lock, so a timer cycle and an operator's step
+  never run concurrently, and it records each cycle's outcome for status;
+- a fan-out (`register_fan_out`), whose task a kit runtime owns and which runs
+  independent cycles in declared children, such as one capacity-event poller
+  per site: each child gates under its own name, serializes its cycle with its
+  own step itself, and records each timer cycle through `cycle_recorder`.
+
+These contracts are the storefront loop requirements in
 openspec/specs/market-composition/spec.md.
 
 One controller belongs to one storefront process. The pause is process-local:
@@ -31,10 +43,13 @@ idle would stop servicing work with nothing to say so.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
+import math
 import os
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
@@ -63,6 +78,26 @@ HELD_POLL_SECONDS = 0.05
 
 LoopStep = Callable[[], Awaitable[Mapping[str, Any]]]
 
+#: What a timer cycle returns when the gate, re-read under the cycle's lock,
+#: held it: no step ran and no outcome was recorded.
+_NOT_RUN = object()
+
+#: What a timer cycle returns when its step failed: the failure is recorded and
+#: logged, and the timer carries on to its next interval.
+_FAILED = object()
+
+
+#: The stages a cycle reports, in the order a publication cycle passes them:
+#: composing what the cycle reads, running it, and converging registries. A
+#: cycle starts in `run`, so a loop with no stages of its own reports a failure
+#: in the one stage it has.
+CYCLE_STAGES = ("compose", "run", "converge")
+DEFAULT_CYCLE_STAGE = "run"
+
+#: How a cycle was started: by the controller's timer, or by an operator's step.
+TIMER_TRIGGER = "timer"
+STEP_TRIGGER = "step"
+
 
 class LoopNotFound(LookupError):
     """No loop step is registered under the requested route name."""
@@ -73,10 +108,114 @@ class PreviewNotOffered(LookupError):
 
 
 @dataclass(frozen=True, slots=True)
+class CycleError:
+    """The error that ended a cycle, as status may show it.
+
+    `message` is present only for an exception type the storefront declared
+    disclosable -- its own configuration and publication errors, whose text
+    names keys and reasons. Any other exception's text may carry a URL, a
+    credential, or a provider's response, so it is recorded by type alone and
+    its detail stays in the log.
+    """
+
+    type: str
+    message: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": self.type, "message": self.message}
+
+
+@dataclass(frozen=True, slots=True)
+class CycleOutcome:
+    """The terminal outcome of one cycle, whichever of timer or step ran it.
+
+    `stage` names the stage a failed cycle was in; a completed cycle has none.
+    A cycle cancelled part-way did not complete, and its error is the
+    cancellation; a step cancelled while it waited for the running cycle
+    reached no stage, so it names none.
+    """
+
+    finished_at: datetime
+    trigger: str
+    completed: bool
+    stage: str | None = None
+    error: CycleError | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finished_at": self.finished_at.isoformat(),
+            "trigger": self.trigger,
+            "completed": self.completed,
+            "stage": self.stage,
+            "error": self.error.to_dict() if self.error is not None else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LoopSnapshot:
+    """One loop's reported state beside the last outcome it recorded.
+
+    `state` is the vocabulary of `states`; it is `None` for a loop with no
+    running timer, such as one registered as a step alone. The two fields are
+    independent: a `running` loop whose last cycle failed is still running,
+    while an `exited` or `cancelled` loop runs no further cycles whatever its
+    last outcome was.
+    """
+
+    name: str
+    state: str | None
+    last_outcome: CycleOutcome | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "state": self.state,
+            "last_outcome": (
+                self.last_outcome.to_dict() if self.last_outcome is not None else None
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class _RegisteredStep:
     name: str
     step: LoopStep
     preview: LoopStep | None
+
+
+@dataclass(frozen=True, slots=True)
+class _RegisteredLoop:
+    name: str
+    route: str
+    interval_seconds: float
+    initial_delay_seconds: float
+    wake: asyncio.Event | None
+
+
+@dataclass(frozen=True, slots=True)
+class _RegisteredFanOut:
+    name: str
+    run: Callable[[], Awaitable[Any]]
+    children: Callable[[], Iterable[str]]
+
+
+class _CycleInProgress:
+    """The stage of one running cycle, set by its step through `enter_stage`."""
+
+    __slots__ = ("controller", "stage")
+
+    def __init__(self, controller: StorefrontLoopController) -> None:
+        self.controller = controller
+        self.stage = DEFAULT_CYCLE_STAGE
+
+
+#: The cycle the current task is running, if any. A step's stage marks reach its
+#: own cycle through this, without a parameter every step would have to accept,
+#: and a step running outside a cycle -- a preview, or a direct call -- marks
+#: nothing.
+_CURRENT_CYCLE: contextvars.ContextVar[_CycleInProgress | None] = contextvars.ContextVar(
+    "storefront_loop_cycle", default=None
+)
 
 
 class StorefrontLoopController:
@@ -87,9 +226,22 @@ class StorefrontLoopController:
         *,
         quiescence_timeout: float = QUIESCENCE_TIMEOUT_SECONDS,
         logger: logging.Logger | None = None,
+        disclosed_errors: tuple[type[BaseException], ...] = (),
+        clock: Callable[[], datetime] | None = None,
+        cycle_lock_factory: Callable[[str], asyncio.Lock] | None = None,
     ) -> None:
+        """`disclosed_errors` are the exception types whose messages a recorded
+        outcome may carry: the storefront's own configuration and publication
+        errors. `clock` stamps each outcome, in UTC by default.
+        `cycle_lock_factory` makes the lock a loop's cycles hold, given the
+        loop's name; a plain `asyncio.Lock` unless a caller needs to observe
+        who waits on it."""
+
         self._quiescence_timeout = quiescence_timeout
         self._logger = logger or logging.getLogger(__name__)
+        self._disclosed_errors = tuple(disclosed_errors)
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._cycle_lock_factory = cycle_lock_factory or (lambda _name: asyncio.Lock())
         #: Handles are kept for status reporting only. Nothing cancels them: a
         #: paused loop is a live task doing nothing, which is what makes the
         #: pause safe.
@@ -107,10 +259,23 @@ class StorefrontLoopController:
         #: read once per cycle is logged once.
         self._unregistered_reported: set[str] = set()
         #: Gated names with no task handle of their own, such as per-site
-        #: pollers whose fan-out a kit runtime owns. Declaring one is what makes
-        #: a pause wait for it.
-        self._declared: set[str] = set()
+        #: pollers whose fan-out a kit runtime owns, each with the loop whose
+        #: task runs its cycles when it was declared as that fan-out's child.
+        #: Declaring one is what makes a pause wait for it.
+        self._declared: dict[str, str | None] = {}
         self._steps: dict[str, _RegisteredStep] = {}
+        #: Loops whose timer this controller runs, by loop name.
+        self._loops: dict[str, _RegisteredLoop] = {}
+        #: Fan-outs whose task this controller starts, by loop name.
+        self._fan_outs: dict[str, _RegisteredFanOut] = {}
+        #: One lock per loop name, held for the whole of every cycle that loop
+        #: runs, whether its timer or a step started it.
+        self._cycle_locks: dict[str, asyncio.Lock] = {}
+        #: The last outcome each loop recorded, by loop name.
+        self._outcomes: dict[str, CycleOutcome] = {}
+        #: Advanced by `clear_loops`, so a cycle of a torn-down loop that
+        #: finishes afterwards records nothing over the fresh state.
+        self._generation = 0
         self._pause_requested = False
         # Set while a pause is requested. A loop idling between cycles waits on
         # it as well as its interval, so a pause reaches every idle loop's gate
@@ -121,25 +286,132 @@ class StorefrontLoopController:
     # Registration
     # ------------------------------------------------------------------
 
-    def start_loop(
-        self,
-        task: StorefrontBackgroundTask,
-        *,
-        route: str | None = None,
-        step: LoopStep | None = None,
-        preview: LoopStep | None = None,
-        task_logger: Any = None,
+    def _start_task(
+        self, task: StorefrontBackgroundTask, *, task_logger: Any = None
     ) -> asyncio.Task[Any]:
-        """Start one timer loop, keep its handle, and register its step."""
-
-        if step is not None:
-            self.register_step(task.name, route=route or task.name, step=step, preview=preview)
         handle = start_storefront_background_task(task, logger=task_logger or self._logger)
         self._handles[task.name] = handle
         self._acked.setdefault(task.name, asyncio.Event())
         handle.add_done_callback(partial(self._log_loop_completion, task.name))
         self._logger.info("[LIFECYCLE] registered %s (pid=%s)", task.name, os.getpid())
         return handle
+
+    def register_loop(
+        self,
+        name: str,
+        *,
+        step: LoopStep,
+        interval_seconds: float,
+        route: str | None = None,
+        preview: LoopStep | None = None,
+        wake: asyncio.Event | None = None,
+        initial_delay_seconds: float = 0.0,
+    ) -> None:
+        """Register a loop whose timer this controller runs over its step.
+
+        The timer, started by `start_loops`, gates, runs one cycle through
+        `run_cycle`'s own operation, and waits `interval_seconds` through
+        `idle`, so the timer and an operator's step run exactly one operation
+        and never concurrently. `wake`, when set, ends the wait early so a
+        change reaches the loop without waiting out its interval; it never
+        advances a held loop. The first cycle is due `initial_delay_seconds`
+        after the timer starts, with the gate read throughout the delay.
+        """
+
+        if not math.isfinite(interval_seconds) or interval_seconds <= 0:
+            raise ValueError(f"loop {name!r} needs a positive, finite interval")
+        if not math.isfinite(initial_delay_seconds) or initial_delay_seconds < 0:
+            raise ValueError(
+                f"loop {name!r} needs a finite initial delay that is not negative"
+            )
+        if name in self._fan_outs:
+            raise ValueError(f"loop {name!r} is registered as a fan-out")
+        self._refuse_running(name)
+        route = route or name
+        self.register_step(name, route=route, step=step, preview=preview)
+        self._loops[name] = _RegisteredLoop(
+            name=name,
+            route=route,
+            interval_seconds=float(interval_seconds),
+            initial_delay_seconds=float(initial_delay_seconds),
+            wake=wake,
+        )
+
+    def register_fan_out(
+        self,
+        name: str,
+        *,
+        route: str,
+        step: LoopStep,
+        run: Callable[[], Awaitable[Any]],
+        children: Callable[[], Iterable[str]],
+        preview: LoopStep | None = None,
+    ) -> None:
+        """Register a loop that fans out into independent per-child cycles.
+
+        `run` makes the loop's task, which a kit runtime owns: it runs every
+        child's cycles, each child gating under its own name, serializing its
+        cycle with its own step, and recording each timer cycle through
+        `cycle_recorder`; the loop's own task gates under `name` and runs no
+        cycle. `step` is what the loop's route runs, every child's cycle once.
+        `children` names the children: each is declared with this loop as its
+        parent when the loop registers and again when it starts, so status
+        lists every child before its first cycle, and a child the task gates
+        later is declared then. `start_loops` starts the task.
+        """
+
+        if name in self._loops:
+            raise ValueError(f"loop {name!r} is registered as a timer loop")
+        self._refuse_running(name)
+        # Named first, so a `children` that raises registers nothing.
+        named = tuple(children())
+        self.register_step(name, route=route, step=step, preview=preview)
+        self._fan_outs[name] = _RegisteredFanOut(name=name, run=run, children=children)
+        self._declare_children(name, named)
+
+    def _refuse_running(self, name: str) -> None:
+        handle = self._handles.get(name)
+        if handle is not None and not handle.done():
+            raise ValueError(f"loop {name!r} is already running")
+
+    def _declare_children(self, parent: str, children: Iterable[str]) -> None:
+        for child in children:
+            if self._declared.get(child) != parent:
+                self.declare(child, parent=parent)
+
+    def start_loops(self, *, task_logger: Any = None) -> dict[str, asyncio.Task[Any]]:
+        """Start every registered loop that has no task, by loop name.
+
+        A timer loop's task is the controller's timer over its step; a
+        fan-out's is its own `run`, its children declared first. A loop whose
+        task ended keeps its handle, and so stays ended: nothing restarts a
+        loop, so a status surface sees it `exited` rather than running again
+        with no record of why it stopped. `clear_loops` drops every handle,
+        after which this starts every registered loop afresh.
+        """
+
+        # Every fan-out's children are named before any task starts, so one
+        # whose `children` raises leaves nothing started rather than some loops.
+        fan_outs = [
+            (fan_out, tuple(fan_out.children()))
+            for name, fan_out in self._fan_outs.items()
+            if name not in self._handles
+        ]
+        started: dict[str, asyncio.Task[Any]] = {}
+        for name, loop in self._loops.items():
+            if name in self._handles:
+                continue
+            started[name] = self._start_task(
+                StorefrontBackgroundTask(name=name, task_factory=partial(self._timer, loop)),
+                task_logger=task_logger,
+            )
+        for fan_out, children in fan_outs:
+            self._declare_children(fan_out.name, children)
+            started[fan_out.name] = self._start_task(
+                StorefrontBackgroundTask(name=fan_out.name, task_factory=fan_out.run),
+                task_logger=task_logger,
+            )
+        return started
 
     def register_step(
         self,
@@ -151,9 +423,12 @@ class StorefrontLoopController:
     ) -> None:
         """Bind the operation one cycle of loop `name` runs to a route name.
 
-        A loop with no timer registers a step alone. Registering the step with
-        the loop, rather than in a route table, is what keeps the step and the
-        timer calling the same operation.
+        The step half of a loop's registration: `register_loop` and
+        `register_fan_out` register it too, and a storefront that registers
+        its loops' steps before it knows their intervals -- so every route can
+        run a step from the moment it is served -- registers them here first.
+        Registering the step with the loop, rather than in a route table, is
+        what keeps the step and the timer calling the same operation.
         """
 
         existing = self._steps.get(route)
@@ -163,13 +438,28 @@ class StorefrontLoopController:
             )
         self._steps[route] = _RegisteredStep(name=name, step=step, preview=preview)
 
-    def declare(self, name: str) -> Callable[[], bool]:
-        """Declare a gated name this controller holds no handle for, and bind its gate."""
+    def declare(self, name: str, *, parent: str | None = None) -> Callable[[], bool]:
+        """Declare a gated name this controller holds no handle for, and bind its gate.
 
-        self._declared.add(name)
+        `parent` names the loop whose task runs this name's cycles: a fan-out,
+        such as a kit runtime's per-site pollers inside one aggregate loop.
+        Once that loop's task has ended, nothing runs this name's cycles either,
+        so it reports the loop's terminal state rather than the state its gate
+        last left, and a pause no longer waits for it. Only a name declared with
+        its parent is issued a `cycle_recorder`.
+        """
+
+        self._declared[name] = parent
         self._acked.setdefault(name, asyncio.Event())
         self._logger.info("[LIFECYCLE] declared gated name %s (no handle)", name)
         return partial(self.gate, name)
+
+    def _ended_parent(self, name: str) -> asyncio.Task[Any] | None:
+        """The ended task of the loop running a declared name's cycles, if it ended."""
+
+        parent = self._declared.get(name)
+        handle = self._handles.get(parent) if parent is not None else None
+        return handle if handle is not None and handle.done() else None
 
     def _log_loop_completion(self, name: str, handle: asyncio.Task[Any]) -> None:
         """Report a loop that ended, at the moment it ends.
@@ -254,6 +544,43 @@ class StorefrontLoopController:
             for waiter in waiters:
                 waiter.cancel()
 
+    async def _timer(self, loop: _RegisteredLoop) -> None:
+        """A registered loop's timer: gate, a cycle when due, then `idle`.
+
+        The gate is read again inside the cycle's lock, immediately before the
+        step: a timer that passed its gate and then waited for an operator's
+        step to finish must not start work a pause requested meanwhile holds,
+        and a wake it has not acted on stays set for when the loop resumes. A
+        failed cycle is recorded and logged by the cycle itself, and the timer
+        carries on to its next interval.
+        """
+
+        clock = asyncio.get_running_loop().time
+        due_at = clock() + loop.initial_delay_seconds
+        while True:
+            if self.gate(loop.name):
+                await asyncio.sleep(HELD_POLL_SECONDS)
+                continue
+            woken = loop.wake is not None and loop.wake.is_set()
+            remaining = due_at - clock()
+            if remaining > 0 and not woken:
+                await self.idle(remaining, wake=loop.wake)
+                continue
+            registered = self._steps[loop.route]
+            try:
+                result = await self._run_cycle(
+                    loop.name, registered.step, trigger=TIMER_TRIGGER, wake=loop.wake
+                )
+            except Exception:
+                # A failing step is recorded and logged by its cycle and never
+                # reaches here; this is a failure before the step could start.
+                self._logger.exception(
+                    "[LIFECYCLE] %s timer could not start a cycle", loop.name
+                )
+                result = None
+            if result is not _NOT_RUN:
+                due_at = clock() + loop.interval_seconds
+
     # ------------------------------------------------------------------
     # Pausing
     # ------------------------------------------------------------------
@@ -301,7 +628,11 @@ class StorefrontLoopController:
             self._acked[name].wait()
             for name, handle in self._handles.items()
             if not handle.done() and name in self._acked
-        ] + [self._acked[name].wait() for name in sorted(self._declared) if name in self._acked]
+        ] + [
+            self._acked[name].wait()
+            for name in sorted(self._declared)
+            if name in self._acked and self._ended_parent(name) is None
+        ]
         if not pending:
             return
         try:
@@ -314,6 +645,7 @@ class StorefrontLoopController:
                 n
                 for n in [*self._handles, *self._declared]
                 if (n not in self._handles or not self._handles[n].done())
+                and self._ended_parent(n) is None
                 and not self._acked[n].is_set()
             )
             never_gated = sorted(n for n in unacked if not self._gate_calls.get(n))
@@ -341,13 +673,14 @@ class StorefrontLoopController:
         `pausing`: a loop that has never reached its gate cannot observe a
         pause, while a `pausing` loop has a cycle in flight that will finish.
         `exited` is distinct from `paused`: a loop that ended on its own is
-        neither idle nor healthy.
+        neither idle nor healthy. A name declared as a fan-out's child reports
+        its parent loop's `exited` or `cancelled` once that loop has ended.
         """
 
         paused = self._pause_requested
         states: dict[str, str] = {}
         entries: list[tuple[str, asyncio.Task[Any] | None]] = [
-            (n, None) for n in sorted(self._declared)
+            (n, self._ended_parent(n)) for n in sorted(self._declared)
         ] + list(self._handles.items())
         for name, handle in entries:
             if handle is not None and handle.done():
@@ -391,17 +724,196 @@ class StorefrontLoopController:
 
         return {route: registered.name for route, registered in sorted(self._steps.items())}
 
+    def last_outcome(self, name: str) -> CycleOutcome | None:
+        """The last outcome loop `name` recorded, or `None` before its first cycle."""
+
+        return self._outcomes.get(name)
+
+    def snapshot(self) -> dict[str, LoopSnapshot]:
+        """Every loop's state and last recorded outcome, by loop name.
+
+        Covers every loop with a state, every loop with a registered step, and
+        every loop that has recorded an outcome, so a loop stepped but not
+        timed is reported too, with no state.
+        """
+
+        states = self.states()
+        names = (
+            set(states)
+            | {registered.name for registered in self._steps.values()}
+            | set(self._outcomes)
+        )
+        return {
+            name: LoopSnapshot(
+                name=name,
+                state=states.get(name),
+                last_outcome=self._outcomes.get(name),
+            )
+            for name in sorted(names)
+        }
+
     # ------------------------------------------------------------------
     # Stepping
     # ------------------------------------------------------------------
 
     async def run_cycle(self, route: str) -> Mapping[str, Any]:
-        """Run exactly the operation one cycle of the loop runs, held or not."""
+        """Run exactly the operation one cycle of the loop runs, held or not.
+
+        The cycle holds the loop's lock, so a step requested while the loop's
+        timer is mid-cycle runs after that cycle, never alongside it. A held
+        loop's timer runs no cycle, so a step while held never waits. Every
+        step records exactly one outcome -- including one cancelled while it
+        waited for the running cycle, which records a cancelled outcome naming
+        no stage -- and a failure is raised to the caller.
+        """
 
         registered = self._steps.get(route)
         if registered is None:
             raise LoopNotFound(route)
-        return await registered.step()
+        return await self._run_cycle(registered.name, registered.step, trigger=STEP_TRIGGER)
+
+    async def _run_cycle(
+        self,
+        name: str,
+        step: LoopStep,
+        *,
+        trigger: str,
+        wake: asyncio.Event | None = None,
+    ) -> Any:
+        """Run one cycle of loop `name` under its lock and record its outcome.
+
+        A timer cycle re-reads the gate once it holds the lock and returns
+        `_NOT_RUN`, recording nothing and leaving `wake` as it found it, when a
+        pause has been requested; otherwise it clears `wake`, since the cycle
+        about to run is the one the wake asked for. A timer cycle's failure is
+        recorded and returned as `_FAILED`, not raised, so the timer carries on.
+        """
+
+        lock = self._cycle_locks.get(name)
+        if lock is None:
+            lock = self._cycle_locks[name] = self._cycle_lock_factory(name)
+        generation = self._generation
+        try:
+            await lock.acquire()
+        except asyncio.CancelledError as cancelled:
+            if trigger == STEP_TRIGGER:
+                self._record(name, trigger, None, cancelled, generation)
+            raise
+        try:
+            if trigger == TIMER_TRIGGER and self.gate(name):
+                return _NOT_RUN
+            if wake is not None:
+                wake.clear()
+            generation = self._generation
+            cycle = _CycleInProgress(self)
+            token = _CURRENT_CYCLE.set(cycle)
+            error: BaseException | None = None
+            try:
+                return await step()
+            except BaseException as exc:
+                error = exc
+                if trigger == TIMER_TRIGGER and isinstance(exc, Exception):
+                    return _FAILED
+                raise
+            finally:
+                _CURRENT_CYCLE.reset(token)
+                self._record(name, trigger, cycle.stage, error, generation)
+        finally:
+            lock.release()
+
+    def enter_stage(self, stage: str) -> None:
+        """Name the stage the cycle running in this task has reached.
+
+        A failure is reported in the stage last entered. Outside a cycle of
+        this controller -- a preview, or a step called directly -- it records
+        nothing.
+        """
+
+        if stage not in CYCLE_STAGES:
+            raise ValueError(f"unknown cycle stage {stage!r}; stages are {CYCLE_STAGES}")
+        cycle = _CURRENT_CYCLE.get()
+        if cycle is not None and cycle.controller is self:
+            cycle.stage = stage
+
+    def cycle_recorder(self, name: str) -> Callable[..., None]:
+        """Where a fan-out child's timer cycles report their outcomes.
+
+        A kit runtime that fans one loop out into independent per-site cycles
+        serializes each site's cycle under that site's own lock, not this
+        controller's, so each cycle its timer ran is reported through this
+        recorder, under the site's name: `record(error=None)` once per cycle,
+        `error` being the exception that ended a failed one. The outcome is
+        recorded as `run_cycle` records one: a failure is in the one stage such
+        a cycle has, and its message is shown only for a disclosed error type.
+
+        Only a name declared with its parent loop is issued one, so no caller
+        can record an outcome for a loop whose cycles this controller runs
+        itself, or for a name nothing runs. Raises `ValueError` otherwise. A
+        recorder issued before `clear_loops` records nothing after it.
+        """
+
+        if self._declared.get(name) is None:
+            raise ValueError(
+                f"{name!r} was not declared as a fan-out's child; only those "
+                "names record cycles of their own"
+            )
+        if name in self._loops or name in self._handles or any(
+            registered.name == name for registered in self._steps.values()
+        ):
+            raise ValueError(f"{name!r} is a loop whose cycles this controller runs")
+
+        # A recorder outlives no teardown: once `clear_loops` has dropped the
+        # fan-out it was issued for, its cycles record nothing.
+        generation = self._generation
+
+        def record(error: BaseException | None = None) -> None:
+            self._record(name, TIMER_TRIGGER, DEFAULT_CYCLE_STAGE, error, generation)
+
+        return record
+
+    def _record(
+        self,
+        name: str,
+        trigger: str,
+        stage: str | None,
+        error: BaseException | None,
+        generation: int,
+    ) -> None:
+        """Record one outcome; `stage` is `None` for a cycle that never started."""
+
+        if error is None:
+            outcome = CycleOutcome(
+                finished_at=self._clock(), trigger=trigger, completed=True
+            )
+        else:
+            if isinstance(error, asyncio.CancelledError):
+                self._logger.info(
+                    "[LIFECYCLE] %s %s cycle was cancelled %s",
+                    name,
+                    trigger,
+                    f"in {stage}" if stage is not None else "before it started",
+                )
+            else:
+                self._logger.error(
+                    "[LIFECYCLE] %s %s cycle failed in %s",
+                    name,
+                    trigger,
+                    stage,
+                    exc_info=error,
+                )
+            disclosed = isinstance(error, self._disclosed_errors)
+            outcome = CycleOutcome(
+                finished_at=self._clock(),
+                trigger=trigger,
+                completed=False,
+                stage=stage,
+                error=CycleError(
+                    type=type(error).__name__,
+                    message=str(error) if disclosed else None,
+                ),
+            )
+        if generation == self._generation:
+            self._outcomes[name] = outcome
 
     async def dry_run(self, route: str) -> Mapping[str, Any]:
         """Report what one cycle of the loop would do, applying nothing."""
@@ -417,19 +929,32 @@ class StorefrontLoopController:
     # Process teardown
     # ------------------------------------------------------------------
 
-    def clear_loops(self) -> None:
+    def clear_loops(self, *, keep_registrations: bool = True) -> None:
         """Cancel every loop and drop its state, keeping registered steps.
 
         Production never unregisters a loop while serving. A process that tears
         its loops down and starts them again within one interpreter -- an
-        application rebuilt in place -- uses this so stale handles do not report
-        for loops that no longer exist.
+        application rebuilt in place -- uses this so stale handles and outcomes
+        do not report for loops that no longer exist; `start_loops` starts the
+        registered loops again. With `keep_registrations=False` the loops
+        registered with `register_loop` and `register_fan_out` are forgotten
+        too, their steps staying registered, so a later `start_loops` starts
+        only what is registered again: a test's reset, which must not leave one
+        test's loops for the next to start.
         """
 
         for handle in self._handles.values():
             if not handle.done():
                 handle.cancel()
+        if not keep_registrations:
+            self._loops.clear()
+            self._fan_outs.clear()
+        self._generation += 1
         self._handles.clear()
+        self._outcomes.clear()
+        # Fresh locks for the same reason as the fresh pause signal below: a
+        # lock a cancelled cycle still holds belongs to the torn-down loop.
+        self._cycle_locks.clear()
         self._acked.clear()
         self._gate_calls.clear()
         self._unregistered_reported.clear()
@@ -439,12 +964,31 @@ class StorefrontLoopController:
         # on it, and loops started again may run on a different event loop.
         self._pause_signal = asyncio.Event()
 
+    async def stop_loops(self, *, keep_registrations: bool = True) -> None:
+        """`clear_loops`, then wait for every cancelled loop to end.
+
+        A loop is cancelled at whatever await it is on; waiting here means none
+        is still unwinding when the caller goes on, for instance to close the
+        event loop the loops ran on.
+        """
+
+        handles = list(self._handles.values())
+        self.clear_loops(keep_registrations=keep_registrations)
+        await asyncio.gather(*handles, return_exceptions=True)
+
 
 __all__ = [
+    "CYCLE_STAGES",
+    "CycleError",
+    "CycleOutcome",
+    "DEFAULT_CYCLE_STAGE",
     "HELD_POLL_SECONDS",
     "LoopNotFound",
+    "LoopSnapshot",
     "LoopStep",
     "PreviewNotOffered",
     "QUIESCENCE_TIMEOUT_SECONDS",
+    "STEP_TRIGGER",
     "StorefrontLoopController",
+    "TIMER_TRIGGER",
 ]

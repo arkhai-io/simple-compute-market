@@ -10,8 +10,8 @@ import pytest
 
 from arkhai_bare_metal_storefront.pool_overrides import (
     BareMetalPoolOverrideTerms,
-    configured_max_duration_seconds,
     effective_duration_problems,
+    positive_lease_bound,
 )
 
 
@@ -37,8 +37,9 @@ def test_the_effective_pair_must_be_ordered(terms, configured, conflict):
     assert bool(problems) is conflict
 
 
-def test_the_configured_maximum_is_read_from_its_environment_name():
-    assert configured_max_duration_seconds(
-        {"BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS": "3600"}
-    ) == 3600
-    assert configured_max_duration_seconds({}) is None
+@pytest.mark.parametrize(
+    ("configured", "bound"),
+    [(3600, 3600), (1, 1), (None, None), (0, None), (-60, None)],
+)
+def test_only_a_positive_configured_maximum_bounds_a_lease(configured, bound):
+    assert positive_lease_bound(configured) == bound

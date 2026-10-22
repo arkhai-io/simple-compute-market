@@ -223,7 +223,7 @@ class TestStage01_BackedAndUnbackedSupply:
             PoolCreate(
                 id=state.unbacked_pool,
                 label=state.unbacked_pool,
-                provider="ansible",
+                provider="vm.ansible",
                 policy_tags={
                     "listing_mode": "fungible",
                     "deliverable_modes": [],

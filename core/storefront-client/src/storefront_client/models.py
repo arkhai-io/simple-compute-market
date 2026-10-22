@@ -167,7 +167,6 @@ class HealthResponse:
     paused: bool | None = None  # present on /api/v1/system/status only
     agent_id: str | None = None  # canonical eip155:… form; present on /api/v1/system/status
     chain_id: int | None = None  # EVM chain ID; present on /api/v1/system/status
-    resource_count: int | None = None  # registered compute resources; present on /api/v1/system/status
     site_projections: dict[str, Any] | None = None  # per-site/family projection load state; present on /api/v1/system/status
     listing_cardinality_mode_explanations: dict[str, Any] | None = None  # per-site/pool cardinality-hint notices; present on /api/v1/system/status
     publication_derivation: dict[str, Any] | None = None  # per-site held pools and publication notices; present on /api/v1/system/status
@@ -183,21 +182,25 @@ class HealthResponse:
     #: Settlement obligations waiting for an operator, each counted once;
     #: present on /api/v1/system/status where the storefront reports it.
     settlement_manual_required: int | None = None
+    #: Every lifecycle loop by name: its loop-controller state and the outcome
+    #: of its most recent cycle, whether its timer or an operator's step ran
+    #: it; present on /api/v1/system/status where the storefront reports it.
+    lifecycle: dict[str, Any] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict) -> "HealthResponse":
         known = {
             "status", "checks", "paused", "agent_id", "chain_id",
-            "resource_count", "site_projections",
+            "site_projections",
             "listing_cardinality_mode_explanations",
             "publication_derivation",
             "provisioning_contract_version",
             "disclosures",
             "settlement_manual_required",
+            "lifecycle",
         }
         raw_chain_id = d.get("chain_id")
-        raw_resource_count = d.get("resource_count")
         raw_manual = d.get("settlement_manual_required")
         return cls(
             status=d.get("status", "ok"),
@@ -205,7 +208,6 @@ class HealthResponse:
             paused=d.get("paused"),
             agent_id=d.get("agent_id"),
             chain_id=int(raw_chain_id) if raw_chain_id is not None else None,
-            resource_count=int(raw_resource_count) if raw_resource_count is not None else None,
             site_projections=d.get("site_projections"),
             listing_cardinality_mode_explanations=d.get(
                 "listing_cardinality_mode_explanations"
@@ -216,6 +218,7 @@ class HealthResponse:
             settlement_manual_required=(
                 int(raw_manual) if raw_manual is not None else None
             ),
+            lifecycle=d.get("lifecycle"),
             extra={k: v for k, v in d.items() if k not in known},
         )
 
@@ -933,21 +936,4 @@ class SettleWaitResponse:
             status=str(d.get("status", "")),
             provisioning_job_id=d.get("provisioning_job_id"),
             elapsed_ms=int(d.get("elapsed_ms", 0)),
-        )
-
-
-@dataclass
-class ImportResourcesResponse:
-    """Response from POST /api/v1/admin/portfolio/resources/import."""
-
-    imported_count: int = 0
-    failed_count: int = 0
-    total_rows: int = 0
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ImportResourcesResponse":
-        return cls(
-            imported_count=int(d.get("imported_count", 0)),
-            failed_count=int(d.get("failed_count", 0)),
-            total_rows=int(d.get("total_rows", 0)),
         )

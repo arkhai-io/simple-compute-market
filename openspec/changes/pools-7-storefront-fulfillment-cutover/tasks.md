@@ -909,7 +909,7 @@ must close before Section 11 begins.
 - [x] 10.11 Add `begin_fulfillment_teardown(fulfillment_id)` to `ComputeProvisioningClientProtocol` and `ComputeProvisioningClient`. Add an integration test that creates or resolves an active fulfillment aggregate and invokes `POST /fulfillment/{fulfillment_id}/begin-teardown` through the client, including idempotent repeated invocation and HTTP error mapping for unknown/conflicting aggregates. Reopen task 10.2 until this is complete. **Permanent documentation:** `openspec/specs/fulfillment/spec.md` HTTP/client contract section.
 - [x] 10.12 Decide and implement one authoritative reservation-state-to-lease-state projection. Preferred direction: a pure helper or shared mapping in the `compute_provisioning` contract package consumed by both `compute_contract_controller` and the VM `leases_controller`; confirm the package boundary before implementation. Remove the knowingly duplicated controller tables and update the e2e `DealLease` helper so it does not maintain a third partial mapping. Add a test proving every reachable `ReservationState` has one valid `LeaseState` projection across both API surfaces. **Permanent documentation:** update `openspec/specs/compute-provisioning-contract/spec.md` only if it documents lease-state vocabulary; otherwise the enum/helper is the authoritative code contract and no new prose requirement is needed.
 - [x] 10.13 Add the permanent invariant separating lease-release retry ownership from fulfillment-teardown retry ownership: lease lifecycle owns `releasing`/`released` and final capacity return; fulfillment convergence owns dispatch/requeue/recovery of teardown states; lease retry re-observes the same fulfillment aggregate and never creates a second teardown operation. Include scenarios for `teardown_failed`, convergence requeue, operator lease retry, and capacity remaining held until `torn_down`. **Permanent documentation:** `openspec/specs/physical-provisioning/spec.md`, cross-referencing `openspec/specs/fulfillment/spec.md` teardown convergence.
-- [x] 10.14 Rewrite the VM full-deal e2e teardown phases to the current storefront/provisioning relationship. Remove assumptions that the lease-facing release id is an Ansible job id, stop calling `SyncProvisioningClient.get_job()`/`wait_for_job()` with a `fulfillment_id`, and assert the composed durable path: lease expiration or termination → reservation `releasing` → fulfillment `teardown_dispatch_pending`/`tearing_down` with capacity held → provider completion → fulfillment `torn_down` → lease `released` and capacity available. Inventory existing mock/admin controls first; if none can deterministically pause and step fulfillment convergence, add a mock-profile test control rather than relying on background timing. Update all stale stage names, comments, and docstrings that describe Section 10 as a future direct `vm_destroy` change. **Permanent documentation:** no e2e implementation detail belongs in permanent specs; the durable state/capacity invariants map to physical-provisioning and fulfillment specs. **Correction (discovered during `refactor-e2e-fulfillment-lifecycle`'s Section 2 audit):** this task's own "explicitly deferred" note below is stale. `test_full_deal.py`/`test_full_deal_buyer_cli.py` stages 10a-11b already implement exactly the sequence this task describes -- `check_leases()`, `run_fulfillment_convergence_cycle()`, `drain()`, and the full `teardown_dispatch_pending`→`tearing_down`→`torn_down`→`released` state chain, verified line-by-line against this task's own target sequence and against each other (word-for-word identical between the two files). What was actually missing was upstream: stage 08b asserted on `provisioning_job_id`, which is permanently `None` on the durable path, so it failed outright and every stage after it -- teardown included -- never ran, masking that the teardown rewrite already existed. `refactor-e2e-fulfillment-lifecycle`'s Section 1 fixed that upstream failure. **Still open, not yet closed by this correction:** an actual passing run against live services -- both changes' audits were static/structural (no live docker-compose stack available), so runtime confirmation remains outstanding. See `refactor-e2e-fulfillment-lifecycle/design.md`'s "Section 2" for the full trace.
+- [x] 10.14 Rewrite the VM full-deal e2e teardown phases to the current storefront/provisioning relationship. Remove assumptions that the lease-facing release id is an Ansible job id, stop calling `SyncProvisioningClient.get_job()`/`wait_for_job()` with a `fulfillment_id`, and assert the composed durable path: lease expiration or termination → reservation `releasing` → fulfillment `teardown_dispatch_pending`/`tearing_down` with capacity held → provider completion → fulfillment `torn_down` → lease `released` and capacity available. Inventory existing mock/admin controls first; if none can deterministically pause and step fulfillment convergence, add a mock-profile test control rather than relying on background timing. Update all stale stage names, comments, and docstrings that describe Section 10 as a future direct `vm_destroy` change. **Permanent documentation:** no e2e implementation detail belongs in permanent specs; the durable state/capacity invariants map to physical-provisioning and fulfillment specs. **Correction (discovered during `refactor-e2e-fulfillment-lifecycle`'s Section 2 audit):** this task's own "explicitly deferred" note below is stale. `test_full_deal.py`/`test_full_deal_buyer_cli.py` stages 10a-11b already implement exactly the sequence this task describes -- `check_leases()`, `run_fulfillment_convergence_cycle()`, `drain()`, and the full `teardown_dispatch_pending`→`tearing_down`→`torn_down`→`released` state chain, verified line-by-line against this task's own target sequence and against each other (word-for-word identical between the two files). What was actually missing was upstream: stage 08b asserted on `provisioning_job_id`, which is permanently `None` on the durable path, so it failed outright and every stage after it -- teardown included -- never ran, masking that the teardown rewrite already existed. `refactor-e2e-fulfillment-lifecycle`'s Section 1 fixed that upstream failure. **Still open, not yet closed by this correction:** an actual passing run against live services -- both changes' audits were static/structural (no live docker-compose stack available), so runtime confirmation remains outstanding. See `refactor-e2e-fulfillment-lifecycle/design.md`'s "Section 2" for the full trace. **Resolved (2026-10-15):** E2E run 38741626285 on `dev` passed stages 08b–11b of `test_full_deal.py` and `test_full_deal_buyer_cli.py` against the composed VM stack, so the runtime confirmation this correction left open now exists; `refactor-e2e-fulfillment-lifecycle` closed out and archived on that evidence, and this task is complete as written.
   ~~**Explicitly deferred (repository owner direction):** Section 10 is being completed without executing the full e2e suite; this task, its underlying `test_full_deal.py` rewrite, and the `DealLease._LEASE_STATUS` helper's own partial-mapping cleanup (part of the same batch, not worth touching independently given `e2e-tests` doesn't currently depend on the `compute_provisioning` package at all) move to the final POOLS-7 review loop after Section 11. This is a scope decision, not a discovered non-issue — the static analysis above remains accurate and must still be acted on before that e2e suite is trusted again.~~ (superseded by the correction above -- the deferred work was in fact already done; struck through rather than deleted per `AGENTS.md`'s "amend rather than replace implementation history.")
 - [x] 10.15 Add a migration-produced backfill integration path: create representative pre-POOLS VM lease/settlement data, run the actual legacy backfill/migration entrypoint, initiate teardown through the public client, converge provider teardown, and prove final lease/capacity release. Do not substitute a hand-constructed row for this test. **Permanent documentation:** migration behavior remains in the active change; only resulting current-state backfilled/native equivalence belongs in `openspec/specs/fulfillment/spec.md`. **Done:** `provisioning/compute/service/tests/integration/test_legacy_backfill_teardown.py` — bootstraps a real engine via `run_migrations`, seeds a representative pre-cutover `leased` VM lease directly in `vm_leases`, runs the real `_apply_legacy_vm_lease_backfill` entrypoint (not a hand-constructed `SettlementRecord`), then drives the resulting aggregate through `begin_fulfillment_teardown`, simulated convergence (`FulfillmentConvergenceWatchdog` has its own suite; this test only needs its end state), and two `LeaseLifecycleService.force_check_leases()` cycles, proving `releasing` → `teardown_dispatch_pending` → (simulated `torn_down`) → `released` with capacity returned.
 - [x] 10.16 Rebuild the Section 10 design-promotion record after 10.9–10.15. Map the fulfillment-id-as-release-tracking-id seam, kind-routed status lookup, two-state-machine retry invariant, client contract, capacity-hold rule, and backfilled/native equivalence to exact permanent headings. Remove superseded rows and mark Section 10 complete only after focused suites, ~~the rewritten full-deal e2e path~~ (deferred per 10.14's note above), root `make test`, and available strict OpenSpec validation pass. Section 11 remains blocked until this gate is complete. **Done:** see "Section 10 rebuilt design-promotion record" in `design.md`. Section 11 is unblocked as of this entry — 10.14's e2e work is deferred by explicit direction, not silently dropped, and is tracked to resume after Section 11 in the final POOLS-7 review loop.
@@ -1752,35 +1752,57 @@ already-stated wheel-only policy rather than establishing new policy.
 - [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived. **Done, and found more than drift:** running `openspec validate --all --strict` for the first time in a working environment (see 8.15) surfaced that this wasn't just stale prose -- `resource-pool-management`, `physical-provisioning`, and `fulfillment` each had one or more requirements physically stranded outside the parsed `## Requirements` section (a `##`-level companion header, like "## Fulfillment convergence worker", ends the section OpenSpec parses; anything after it is invisible to `validate`/`list`/`archive`), plus several missing scenarios and missing MUST/SHALL language. Fixed all of it: moved every stranded requirement back into a contiguous `## Requirements` block, demoted two `fulfillment/spec.md` companion headers to bold lead-ins with preserved HTML anchors (`#fulfillment-convergence-worker`, `#durable-settlement-persistence` -- confirmed via repository-wide grep that many docstrings and `design.md`/`tasks.md` cross-references depend on those exact anchors still resolving), added missing scenarios, and added missing MUST/SHALL wording. Also found and fixed one genuinely stale content claim in `physical-provisioning/spec.md`: it described `PhysicalSettlementScheduler` and fulfillment-provider coordination as "process-local" with "no durable mechanism-neutral recovery guarantee" -- directly contradicted by Sections 3-6, which made both durable with a dedicated recovery worker. `site-capacity/spec.md`, `resource-pool-management/spec.md`, `physical-provisioning/spec.md`, `fulfillment/spec.md`, and `vm-storefront-fulfillment/spec.md` all now validate clean (`openspec validate --all --strict`: 37/43 passing, up from 32/43; the remaining 6 failures are unrelated other active changes, not POOLS-7's own specs).
 - [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions. **Done.** This repository's documentation model doesn't use separate operator-runbook files (`spec.md`/`architecture.md` are the documentation); checked each of the four service-scoped companions this task names against current behavior rather than inventing a new doc genre. Found and fixed one significant staleness: `openspec/specs/physical-provisioning/architecture.md`'s "Proof-driven release" section still described release as a single-owner, lease-expiry-triggered dispatch, and its "Current limits" section explicitly claimed the compute service "does not yet provide a durable generic fulfillment recovery aggregate" -- directly false since Sections 3-6 built exactly that. Rewrote "Proof-driven release" to describe the real two-owner split (lease lifecycle decides when to release; fulfillment convergence owns teardown dispatch/recovery) and removed the false limits claim. `vm-storefront-fulfillment/architecture.md`, `fulfillment/architecture.md`, and `domains/vms/storefront`/`domains/vms/provisioning` (no README exists; checked for stale references to the retired direct-dispatch/polling path and found none) were already accurate. Migrations: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup" is repository-wide and already generic/accurate; `physical-provisioning/architecture.md`'s "Preserving provider operations across schema cutover" already covers the compute-provisioning-specific cutover model. Status/result query usage and watchdog health are covered normatively by `fulfillment/spec.md`'s "Fulfillment status and result queries" and "Fulfillment convergence worker" (structured per-cycle diagnostics), and now by `ARCHITECTURE.md`'s "Recovery workers" section (12.1).
 - [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirmed it still reflects reality against the final Section 8-11 state. **Blocked, not merely unstarted:** this change cannot archive without a passing end-to-end result, which does not exist yet -- the test harness has not successfully mounted and submitted a result in the environment where that's attempted, independent of anything in this review pass (this review's own environment has no live docker-compose stack to attempt it in either). This is also the same live-services confirmation task 10.14 flagged as still outstanding after its otherwise-complete static/structural correction. Do not archive on the strength of 12.1-12.3's documentation work or this review's unit/integration suite results alone -- 11.18.5 and this review pass both explicitly waived strict OpenSpec validation's absence and later ran it for real (see 8.15), but no equivalent path exists yet for the e2e gate; it stays open until a real result exists.
+- [ ] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
+      `make check-comment-hygiene` and read the comments this change added for any that
+      narrate the review or migration that introduced them; move each import the change
+      added to module level unless a verified circular import or a recorded lazy-load
+      reason keeps it local. Closeout only confirms both.
 
 ## 13. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 13.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the
-      comments and docstrings this change touches for the fuzzier provenance-narration rule
-      the target cannot catch mechanically.
-- [ ] 13.2 **Import placement.** Review every import this change adds or touches and move it
-      to module level where safe; retain a local import only against an observed circular
-      import or a documented lazy-load reason, verified against the real suite.
-- [ ] 13.3 **Documentation compliance.** Re-check this change's accepted decisions against
-      `openspec/README.md`'s placement rules. It carries delta specs for
-      `physical-provisioning`, `site-capacity`; confirm each landed in the owning
-      `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in
-      the companion `architecture.md` rather than only in `design.md`.
+- [ ] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+      the comments this change added for any that narrate the review or migration that
+      introduced them. Do not edit code here: anything to rewrite returns the change to
+      implementation.
+- [ ] 13.2 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 13.3 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe. It carries delta specs for
+      `physical-provisioning` and `site-capacity`; confirm durable conceptual rationale
+      sits in the companion `architecture.md` rather than only in `design.md`.
 - [ ] 13.4 **Narrative compression.** Compress completed-task notes to final behavior,
-      material validation evidence, unresolved or deferred work, and permanent-documentation
-      destinations, moving durable rationale into `design.md` first.
-- [ ] 13.5 **Roadmap currency.** This change sits under the lesser goal “POOLS capacity and
-      fulfillment foundation”, which has no roadmap goal behind it, so it most likely owes
-      `docs/development/ROADMAP.md` nothing. Confirm that and record the no-impact
-      disposition explicitly rather than omitting the step.
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 13.5 **Roadmap currency.** Update the affected goal's current state and gap
+      mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+      This change sits under the lesser goal "POOLS capacity and fulfillment
+      foundation", which has no roadmap goal behind it, so it most likely owes the
+      roadmap nothing; confirm that and record the no-impact disposition explicitly.
 - [ ] 13.6 **Campaign index currency.** Update this change's row, and its campaign's
-      dependency graph, in `openspec/changes/README.md` to match its state at completion, or
-      record the disposition here if its status and campaign placement are both unchanged.
-- [ ] 13.7 **Promotion.** Complete the design-promotion record, mapping every accepted
-      decision to its exact permanent heading, and verify no production source references
-      `openspec/changes/pools-7-storefront-fulfillment-cutover`.
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 13.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun. Task 12.4 records that no passing end-to-end result exists yet
+      for this change; closeout does not proceed on documentation or suite results
+      alone.
+- [ ] 13.9 **Promotion.** Write the permanent documents this change owes — those
+      12.1–12.3 and the section design-promotion records name — and complete the
+      design-promotion record, mapping every accepted decision to its exact permanent
+      heading, and verify no production source references
+      `openspec/changes/pools-7-storefront-fulfillment-cutover`. A `spec.md` the deltas cover
+      (`physical-provisioning`, `site-capacity`) is written by the archive in 13.11, not
+      by hand; the record names it all the same.
       *Superseded decisions (2026-10-05, `bare-metal-mock-provisioned-deal` 5B.8):*
       - Do not promote the following as current behaviour; record each as superseded by
         that change instead:
@@ -1793,23 +1815,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
         and registration written once by executor target.
       - This change's own delta specs (atomic abandonment and release, scheduling,
         fulfillment identity) remain compatible and promote as written.
-- [ ] 13.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=pools-7-storefront-fulfillment-cutover` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 13.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 13.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+- [ ] 13.10 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=pools-7-storefront-fulfillment-cutover` and resolve every
+      match, then `openspec validate pools-7-storefront-fulfillment-cutover --strict`.
+- [ ] 13.11 **Archival.** Last, once every other part is checked: `openspec archive
+      pools-7-storefront-fulfillment-cutover -y` merges the deltas into `openspec/specs/` and
+      moves the change under `openspec/changes/archive/`; point the index row at the
+      archived directory, and run `openspec validate --specs --strict`.

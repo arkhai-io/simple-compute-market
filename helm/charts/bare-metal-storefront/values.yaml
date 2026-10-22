@@ -5,70 +5,129 @@ image:
   repository: ""
   name: arkhai
   tag: bare-metal-storefront
+  # Production/release profiles pin sha256:<digest>; local development may use tag.
   digest: ""
   pullPolicy: IfNotPresent
 
 replicaCount: 1
 
+# ---------------------------------------------------------------------------
+# The storefront's one agent, its keys at the top level, as one entry of the
+# storefront chart's agents is shaped.
+#
+# `config` is the storefront's own configuration, in its own key names, and
+# passes through to a ConfigMap as storefront.json, mounted at
+# /etc/arkhai/storefront.json. The chart adds only what the release knows --
+# `port`, always; `base_url`, the Service's URL; `db_path` under
+# persistence.mountPath; and in an umbrella release its internal registry (with
+# `internalRegistryTrust`) and a `default` site for its provisioning service --
+# each but the port only where `config` does not state it, and the storefront
+# validates the rest when it starts. In an umbrella release, a site bound to its
+# provisioning service needs a service peer naming global.provisioningIdentity,
+# or the chart refuses the release. `config` is
+# public: the values schema, generated from the storefront's typed settings,
+# refuses a key the storefront does not read and every setting it marks secret,
+# which belongs in the Secret overlay named by `secret`. Write integers above
+# 2^53 as strings; every number in a values file passes through a float.
+#
+# The storefront refuses to start unless `config` names a registry and its
+# authority pin, an enabled settlement mechanism, and at least one site bound to
+# exactly one service peer; examples/production-values.yaml states each. The
+# pod's environment carries only XDG_CONFIG_HOME and the signing credential.
+# ---------------------------------------------------------------------------
+
+# The port the container listens on, its probes call, and its Service exposes;
+# rendered into storefront.json, where a different stated value is refused.
+port: 8000
+
 service:
   type: ClusterIP
-  port: 8000
 
 identity:
-  principal:
-    scheme: eip191
-    identifier: "0x0000000000000000000000000000000000000000"
+  # An existing Secret holding the storefront's signing credential, injected as
+  # ARKHAI_IDENTITY_CREDENTIAL. The chart renders only the reference, and the
+  # credential never enters the storefront's settings.
   credentialSecret:
     name: bare-metal-storefront-identity
     key: credential
 
-adminPrincipals:
-  - scheme: eip191
-    identifier: "0x0000000000000000000000000000000000000000"
+# An existing Secret whose `configKey` holds the overlay, mounted as
+# /etc/arkhai/storefront.secrets.toml: settings the storefront marks secret,
+# such as [Wallet] private_key and a delivery sink's credentials. An empty name
+# mounts none. The chart never renders one.
+secret:
+  secretName: ""
+  configKey: storefront.secrets.toml
 
-# Existing Secret containing one JSON array under `key`. Each entry is exactly:
-# {"site_id":"...","authority_url":"https://...","authority_principal":
-#  {"scheme":"eip191|ed25519","identifier":"..."}}.
-# URLs and routing topology therefore never enter chart-generated ConfigMaps.
-siteBindingsSecret:
-  name: bare-metal-storefront-sites
-  key: sites.json
-sitePlacement: fill_first
-
-publicUrl: http://bare-metal-storefront:8000
-# Alkahest inputs: all three are set, or none is. Whether Alkahest is enabled
-# is the settlement Secret's to say; the storefront refuses to start when a
-# configured Alkahest section lacks these, or when they are set with none.
-sellerEvmAddress: ""
-# Public chain configuration keyed by chain name: {"rpc_url": "...",
-# "alkahest_address_config_path": "/path/inside/the/container"} (the path is
-# optional, and needed for a chain whose Alkahest deployment is not built in).
-chains: {}
-# Existing Secret holding the seller wallet's private key; an empty name means
-# none. The chart renders only the reference, never the key.
-walletKeySecret:
-  name: ""
-  key: private-key
-# Existing ConfigMap holding an Alkahest address book, mounted read-only at
-# mountPath; an empty name mounts nothing.
+# An existing ConfigMap holding an Alkahest address book, mounted read-only at
+# <mountPath>/<key>; an empty name mounts nothing. A chain's
+# alkahest_address_config_path and [Settlement.alkahest]'s address_config_path
+# name that file.
 alkahestAddressBook:
   configMapName: ""
   key: alkahest_addresses.json
   mountPath: /etc/arkhai/alkahest
 
-# Strict shared Settlement configuration JSON. Hosted credentials remain in the
-# authority/trust/account references and release pins.
-settlementConfigSecret:
-  name: bare-metal-storefront-settlement
-  key: settlement.json
-databasePath: /var/lib/arkhai/bare-metal-storefront.db
+# In an umbrella release whose `config` names no registry.urls, the storefront
+# publishes to the release's internal registry, and this is its trust, which the
+# chart writes under that registry's derived URL; it must name
+# global.registryIdentity's authority and principal. Installed alone, the chart
+# has no internal registry and refuses it.
+#
+#   internalRegistryTrust:
+#     authority: registry-a
+#     principals:
+#       - {scheme: eip191, identifier: "0x..."}
+
+# The storefront's configuration, rendered into storefront.json. For example:
+#
+#   config:
+#     Identity:
+#       principal:
+#         scheme: ed25519
+#         identifier: <the storefront's public principal>
+#       administrators:
+#         operator:
+#           principals:
+#             - {scheme: ed25519, identifier: <an administrator's principal>}
+#       service_peers:
+#         site_a_authority:
+#           role: service
+#           site_id: site-a
+#           principals:
+#             - {scheme: ed25519, identifier: <the site authority's principal>}
+#     capacity:
+#       sites:
+#         site-a: https://site-a.example.com
+#     registry:
+#       urls: [https://registry.example.com]
+#       authorities:
+#         https://registry.example.com:
+#           authority: registry
+#           principals:
+#             - {scheme: ed25519, identifier: <the registry's principal>}
+#     Settlement:
+#       schema_version: 1
+#       priority: [arkhai.payments.v1]
+#       arkhai_payments: {...}
+#     pricing:
+#       settlements: [...]
+#       default_max_duration_seconds: 86400
+config: {}
 
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   existingClaim: ""
   storageClass: ""
   size: 1Gi
   accessMode: ReadWriteOnce
+  # Where the volume mounts. A `config` stating no db_path gets
+  # <mountPath>/bare-metal-storefront.db; one that states db_path must keep it
+  # under this directory for its state to persist.
   mountPath: /var/lib/arkhai
 
 resources: {}

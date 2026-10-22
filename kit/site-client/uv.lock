@@ -25,6 +25,25 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-capability-admissibility"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-shape" },
+]
+wheels = [
+    { path = "arkhai_kit_capability_admissibility-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-kit-capability-shape"
+version = "0.2.0"
+source = { registry = "../../.dist" }
+wheels = [
+    { path = "arkhai_kit_capability_shape-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-identity"
 version = "0.4.0"
 source = { registry = "../../.dist" }
@@ -40,11 +59,25 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-kit-resource-pools-contracts"
+version = "0.2.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-capability-admissibility" },
+    { name = "arkhai-kit-capability-shape" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_kit_resource_pools_contracts-0.2.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-kit-site-client"
-version = "0.9.1"
+version = "0.11.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-kit-identity" },
+    { name = "arkhai-kit-resource-pools-contracts" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -58,6 +91,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
+    { name = "arkhai-kit-resource-pools-contracts", specifier = ">=0.2.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]

@@ -8,6 +8,12 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
 - `ConditionalEscrowClient`, the obligation journal and the servicing jobs become a library used internally by Alkahest and contact exchange. Domains and core stop driving a servicing lifecycle. Each mechanism's settle stage (see `route-settlement-by-mechanism`) calls into it.
 - `MechanismRegistration` shrinks to publication, readiness and buyer compatibility. `client_factory`, `accepted_obligation_builder` and `settlement_verifier` leave it. Each registration declares a typed resource model, replacing the untyped `resources: Mapping[str, Any]` bag.
 - The legacy path for negotiations without a `SettlementOption` is deleted. Every accepted deal has an Agreement.
+- The Agreement becomes a deal's complete settlement input: an Alkahest option carries its
+  release condition and the Agreement its escrow expiry, so each party derives the plan,
+  the escrow terms, and the obligation identity from the Agreement alone, and the accept
+  reply carries nothing derivable from it. `unbacked-bare-metal-listings` removes the
+  reply's `accepted_escrow_terms` and has the buyer derive its escrow and compare it with
+  the seller's plan; this is the end state that design records.
 - Rename the kit/site quota ledger's `escrow_uid` correlation API/persistence coordinate to a neutral name with its owning ledger and all consumers changed together. Credits issuance currently supplies its negotiation-derived fulfillment ID there, not an escrow or grant alias; domain-local renaming must not create another compatibility projection. This includes shared capacity `deal_ref` consumers, not just the credits service.
 - Escrow-shaped code leaves the foundation kits and the buyer core, so that no kit
   other than Alkahest's holds Alkahest in its scope (`ARCHITECTURE.md`, "Where the
@@ -33,7 +39,10 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `market_config` function-locally to read `[aggregation].best_price_timeout` from
     the user's configuration — the kit's only upward edge, with one consumer,
     `arkhai_vms_buyer/aggregation.py`. The buyer resolves the timeout and passes it;
-    the kit stops reading configuration.
+    the kit stops reading configuration. The same module registers
+    `market.buyer_aggregation_policies` entry points, so a mechanism kit every
+    package imports is also a buyer-side extension; whether the policies move to
+    the Alkahest buyer plugin is decided with the resource-model work above.
   - `core_storefront`'s `refund.py`, `token_transfer.py`, and `escrow_identity.py`
     are Alkahest and EVM helpers in the storefront role package, the first two
     importing `market_alkahest.schemas` and `web3` without declaring them. They move
@@ -46,6 +55,23 @@ Escrow is Alkahest's model, but it still sits in shared carriers. `SettlementObl
     `kit-owned-storefront-shell`'s design for which change lands the lifespan step.
   - `market_core.schemas`'s Alkahest-named escrow fields leave with
     `SettlementObligation`'s, which the first bullet above already moves.
+- The VM listing and negotiation specializations stop importing `kit/alkahest`,
+  since neither carries a mechanism in its name and so neither may know one
+  (`ARCHITECTURE.md`, "Scope"):
+  - `arkhai_vms_listings` types `accepted_escrows` with `AcceptedEscrow` and
+    `EscrowDemand` and resolves `ERC20TokenMetadata` through
+    `resolve_token_cached` in `models.py` and `resources.py`, and reads
+    `accepted_token_address` and `primary_rate_value` in `pricing.py` and
+    `buyer_cli.py`.
+  - `arkhai_vms_negotiation`'s `policies.py` validates an `EscrowProposal` and
+    normalizes it against the listing's accepted escrows through a
+    function-local import.
+  - Each reaches the escrow-shaped data through the Alkahest registration or the
+    VM settlement codec, which legitimately knows its mechanism. The listing's
+    wire shape is unchanged; removing escrow from it is
+    `drop-escrow-from-shared-wire`'s. `enforce-package-layers`'s exceptions table
+    carries both edges under this change, and the rows are deleted when the
+    imports are.
 
 ## Capabilities
 

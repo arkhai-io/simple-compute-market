@@ -112,5 +112,3 @@ def test_a_reservation_recording_no_mode_is_a_conflict_not_a_guess():
         LeaseRouteService(FakeLeases(corrupt), FakeLifecycle()).get("vm-1")
 
     assert refused.value.status_code == 409
-
-

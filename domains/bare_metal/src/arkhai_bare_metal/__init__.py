@@ -72,6 +72,7 @@ from .schema import (
 from .storefront_publication import (
     CANDIDATE,
     HELD,
+    BACKING_CHANGED,
     IDENTITY_CHANGED,
     POOL_ADMITTED,
     POOL_HELD,
@@ -97,6 +98,7 @@ __all__ = [
     "CANDIDATE",
     "ClassifiedBareMetalResource",
     "HELD",
+    "BACKING_CHANGED",
     "IDENTITY_CHANGED",
     "POOL_ADMITTED",
     "POOL_HELD",

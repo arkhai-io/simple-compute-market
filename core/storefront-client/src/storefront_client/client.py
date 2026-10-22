@@ -39,7 +39,6 @@ Usage (async)::
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 import urllib.parse
@@ -86,7 +85,6 @@ from storefront_client.models import (
     SettleResponse,
     SettleStatusResponse,
     SettleWaitResponse,
-    ImportResourcesResponse,
     StageEvent,
     StageEventListResponse,
 )
@@ -1159,52 +1157,6 @@ class StorefrontClient(_StorefrontClientBase):
             resource=escrow_uid,
             request_id=request_id,
         )
-
-    async def admin_import_resources(
-        self,
-        csv_content: bytes,
-        filename: str = "resources.csv",
-        *,
-        request_id: str | None = None,
-    ) -> ImportResourcesResponse:
-        """Upload a CSV using a signed boundary-independent descriptor."""
-        if not isinstance(csv_content, bytes):
-            raise TypeError("csv_content must be bytes")
-        descriptor = {
-            "filename": filename,
-            "media_type": "text/csv",
-            "sha256": hashlib.sha256(csv_content).hexdigest(),
-            "size": len(csv_content),
-        }
-        signed = self._signed_request(
-            role="admin",
-            method="POST",
-            operation="admin_import_resources",
-            resource="portfolio/resources",
-            body=descriptor,
-            request_id=request_id,
-        )
-        headers = dict(signed.headers)
-        headers.pop("Content-Type", None)
-        path = "/api/v1/admin/portfolio/resources/import"
-        url = self._url(path)
-        resp = await self._client.post(
-            path,
-            files={"file": (filename, csv_content, "text/csv")},
-            headers=headers,
-            timeout=self._timeout,
-        )
-        try:
-            payload = resp.json()
-        except ValueError as exc:
-            raise StorefrontClientError(
-                f"POST {url} returned non-JSON response authentication body"
-            ) from exc
-        self._verify_response(resp, signed, payload)
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        if not isinstance(payload, dict):
-            raise StorefrontClientError(f"POST {url} returned non-object JSON")
-        return ImportResourcesResponse.from_dict(payload)
 
     async def admin_reserve_capacity(
         self,
@@ -2561,52 +2513,6 @@ class SyncStorefrontClient(_StorefrontClientBase):
             resource=escrow_uid,
             request_id=request_id,
         )
-
-    def admin_import_resources(
-        self,
-        csv_content: bytes,
-        filename: str = "resources.csv",
-        *,
-        request_id: str | None = None,
-    ) -> ImportResourcesResponse:
-        """Upload a CSV using a signed boundary-independent descriptor."""
-        if not isinstance(csv_content, bytes):
-            raise TypeError("csv_content must be bytes")
-        descriptor = {
-            "filename": filename,
-            "media_type": "text/csv",
-            "sha256": hashlib.sha256(csv_content).hexdigest(),
-            "size": len(csv_content),
-        }
-        signed = self._signed_request(
-            role="admin",
-            method="POST",
-            operation="admin_import_resources",
-            resource="portfolio/resources",
-            body=descriptor,
-            request_id=request_id,
-        )
-        headers = dict(signed.headers)
-        headers.pop("Content-Type", None)
-        path = "/api/v1/admin/portfolio/resources/import"
-        url = self._url(path)
-        resp = self._client.post(
-            path,
-            files={"file": (filename, csv_content, "text/csv")},
-            headers=headers,
-            timeout=self._timeout,
-        )
-        try:
-            payload = resp.json()
-        except ValueError as exc:
-            raise StorefrontClientError(
-                f"POST {url} returned non-JSON response authentication body"
-            ) from exc
-        self._verify_response(resp, signed, payload)
-        self._raise_for_status("POST", url, resp.status_code, resp.text)
-        if not isinstance(payload, dict):
-            raise StorefrontClientError(f"POST {url} returned non-object JSON")
-        return ImportResourcesResponse.from_dict(payload)
 
     def admin_reserve_capacity(
         self,

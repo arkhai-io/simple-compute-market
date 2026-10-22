@@ -21,7 +21,7 @@ registry.
 
 Each stateful service owns its database and migration history. Cross-service relationships use public identifiers and APIs rather than foreign keys into another service's database. This keeps backup, rollout, failure, and authority boundaries aligned.
 
-SQLite-backed deployed services use one writer with ReadWriteOnce storage and `Recreate` rollout semantics. Retained, existing, and ephemeral volumes have different durability consequences and must remain explicit deployment choices rather than hidden application behavior.
+SQLite-backed deployed services use one writer with ReadWriteOnce storage and `Recreate` rollout semantics. Retained, existing, and ephemeral volumes have different durability consequences and must remain explicit deployment choices rather than hidden application behavior. The Helm charts make retention one such choice, `persistence.retainOnUninstall`, which local development deployments turn off so a reinstall starts from no state (see [`DEPLOYMENT_AND_CONFIG.md`](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#stateful-service-persistence)).
 
 ## Migration and initialization boundary
 
@@ -83,7 +83,7 @@ Rollback is valid only before the identity schema cutover and before authenticat
 
 ## Settlement configuration cutover
 
-Role TOML, generated defaults and references, environment overlays, Helm values, Compose, and automation all consume the same typed `[Settlement]` hierarchy; the VM storefront chart passes it through unchanged rather than rendering it key by key. Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Payment-provider, administrator, webhook, ledger database, and service-migration settings remain owned by the payments service and are not marketplace deployment inputs.
+Role TOML, generated defaults and references, environment overlays, Helm values, Compose, and automation all consume the same typed `[Settlement]` hierarchy; the storefront charts pass it through with null-valued keys removed rather than rendering it key by key. A values-file `null` means removal independently of Helm's merge behavior; the chart's schema accepts it for accepted keys while continuing to refuse secret and retired keys. See [the storefront chart contract](spec.md#requirement-a-storefront-chart-passes-service-configuration-through) and [operator configuration](../../../docs/development/DEPLOYMENT_AND_CONFIG.md#storefront-agents-pass-through-configuration). Public mechanism policy and trust pins may render through ordinary configuration; private signer or wallet material comes from approved Secret overlays. Payment-provider, administrator, webhook, ledger database, and service-migration settings remain owned by the payments service and are not marketplace deployment inputs.
 
 The settlement cutover deliberately rejects runtime aliases. Migration tooling is deployed first, then operators preview and back up every affected role file and overlay, quiesce publication and configuration automation, migrate and validate the complete population, and activate the matching image and configuration together. A schema/image mismatch fails before publication or settlement mutation. Rollback restores prior artifacts and backups only before the new configuration is activated; after new effects begin, recovery rolls forward from pinned plans and operation journals.
 

@@ -10,17 +10,16 @@ configuration overlays do. The effective pair must still be ordered: a minimum
 above the effective maximum is refused at the write and holds the pool at
 publication, since configuration can change after the write.
 
-Bare-metal publication runs in the server's administrator step or in the
-one-shot publication command, and either may be the last thing to read a site.
-Every run therefore records, per site whose generation it accepted, the pools
-that generation projected. Override status is judged against that durable
-record, so it survives restarts and command-line runs; a site with no record is
-``unknown``. See openspec/specs/storefront-publication/spec.md.
+Override status is judged against the resource-pool projection the storefront
+holds for the override's site, the generation publication reads; a site whose
+projection is not held, including just after a restart, is ``unknown``. No
+projection generation is persisted for the purpose. See
+openspec/specs/storefront-publication/spec.md, "Bare metal joins the
+site-scoped pool-override store".
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -36,7 +35,6 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, m
 
 from arkhai_bare_metal import BARE_METAL_OFFERING_MODE
 
-from .migrations import ACCEPTED_GENERATIONS_TABLE
 from .site_reading import resolve_bare_metal_asking_rates
 
 
@@ -56,13 +54,13 @@ class BareMetalPoolOverrideTerms(BaseModel):
         return self
 
 
-MAX_DURATION_SECONDS_ENV = "BARE_METAL_STOREFRONT_MAX_DURATION_SECONDS"
+def positive_lease_bound(seconds: int | None) -> int | None:
+    """A maximum lease duration that bounds a listing, or None for one that cannot.
 
-
-def configured_max_duration_seconds(environ: Mapping[str, str]) -> int | None:
-    """The configured lease maximum, or None when none is configured."""
-    raw = environ.get(MAX_DURATION_SECONDS_ENV)
-    return None if raw is None or raw == "" else int(raw)
+    ``[pricing].default_max_duration_seconds`` may be absent, zero, or negative;
+    none of those bounds a lease, so a pool relying on it publishes nothing.
+    """
+    return seconds if seconds is not None and seconds > 0 else None
 
 
 def effective_duration_problems(
@@ -229,64 +227,12 @@ def read_bare_metal_pool_overrides(
     return overrides
 
 
-def record_accepted_generation(
-    db_path: str,
-    *,
-    site_id: str,
-    revision: int,
-    digest: str,
-    pool_ids: Sequence[str],
-) -> None:
-    """Record the latest site generation a publication run accepted."""
-    conn = sqlite3.connect(db_path)
-    try:
-        with conn:
-            conn.execute(
-                f"INSERT INTO {ACCEPTED_GENERATIONS_TABLE} "
-                "(site_id, revision, digest, pool_ids) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(site_id) DO UPDATE SET revision = excluded.revision, "
-                "digest = excluded.digest, pool_ids = excluded.pool_ids, "
-                "accepted_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
-                (site_id, revision, digest, json.dumps(sorted(set(pool_ids)))),
-            )
-    finally:
-        conn.close()
-
-
-def accepted_site_projection(db_path: str) -> dict[str, list[dict[str, str]]]:
-    """Each site's last accepted pools, in the shape override status reads.
-
-    A site with no record is absent, so its overrides are ``unknown`` rather than
-    judged against pools nobody has read.
-    """
-    conn = sqlite3.connect(db_path)
-    try:
-        exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (ACCEPTED_GENERATIONS_TABLE,),
-        ).fetchone()
-        if exists is None:
-            return {}
-        rows = conn.execute(
-            f"SELECT site_id, pool_ids FROM {ACCEPTED_GENERATIONS_TABLE}"
-        ).fetchall()
-    finally:
-        conn.close()
-    return {
-        str(site_id): [{"pool_id": str(pool_id)} for pool_id in json.loads(pool_ids)]
-        for site_id, pool_ids in rows
-    }
-
-
 __all__ = [
-    "ACCEPTED_GENERATIONS_TABLE",
     "BareMetalPoolOverride",
     "BareMetalPoolOverrideContribution",
     "BareMetalPoolOverrideTerms",
-    "accepted_site_projection",
     "compile_publication_clauses",
-    "configured_max_duration_seconds",
     "effective_duration_problems",
+    "positive_lease_bound",
     "read_bare_metal_pool_overrides",
-    "record_accepted_generation",
 ]

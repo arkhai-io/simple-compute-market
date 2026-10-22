@@ -105,7 +105,7 @@ Published wheels MUST resolve internal runtime dependencies by distribution vers
 - **THEN** installation succeeds without the repository's relative directory layout
 
 ### Requirement: Independently deployable bare-metal seller role
-The bare-metal storefront MUST be buildable as a wheel from the repository `.dist` artifact set and as a dedicated image containing its declared domain and shared-role dependencies. It MUST own a writable database distinct from every other storefront, with separate immutable agreement-artifact, fulfillment-lifecycle, and reservation-to-site routing tables. Operator configuration MUST bind every stable site identifier to one exact authority URL and canonical principal, while signer credentials and complete routing records remain Secret-injected and diagnostics remain URL/credential-free.
+The bare-metal storefront MUST be buildable as a wheel from the repository `.dist` artifact set and as a dedicated image containing its declared domain and shared-role dependencies. It MUST own a writable database distinct from every other storefront, with separate immutable agreement-artifact, fulfillment-lifecycle, and reservation-to-site routing tables. It MUST read its configuration as every storefront does, from `storefront.toml`, `storefront.json`, and the Secret overlay `storefront.secrets.toml`, under the keys the other compute storefront uses for the same concepts. Operator configuration MUST bind every stable site identifier to one exact authority URL and to exactly one service peer, whose durable active principals that site's responses and callbacks are both verified against, while the signer credential remains Secret-injected and diagnostics carry no credential. A site's URL is public configuration, refused at startup if it carries credentials, so it may appear in a diagnostic's error text, although a report of the site bindings never names it.
 
 #### Scenario: Bare-metal storefront package is installed
 - **WHEN** the distribution is installed from staged wheels outside the source checkout
@@ -123,9 +123,13 @@ The bare-metal storefront MUST be buildable as a wheel from the repository `.dis
 - **WHEN** health or operator status reports configured bare-metal site bindings
 - **THEN** it reports stable site IDs and canonical authority principals but no authority URL, signer credential, provider configuration, or private inventory
 
+#### Scenario: A site has no service peer
+- **WHEN** the bare-metal storefront starts with a configured site that no service peer is bound to, or that two are
+- **THEN** it refuses to start, naming the site
+
 #### Scenario: Helm deploys the one-domain role
-- **WHEN** an operator supplies public seller identity, existing signer and site-binding Secret references, one persistent volume, and a pinned dedicated image to `helm/charts/bare-metal-storefront`
-- **THEN** the chart renders one unprivileged storefront process with startup, liveness, and readiness probes and no wait or import dependency on the VM storefront
+- **WHEN** an operator supplies the storefront's public configuration, an existing signer credential Secret, an optional existing Secret overlay, one persistent volume, and a pinned dedicated image to `helm/charts/bare-metal-storefront`
+- **THEN** the chart renders the configuration unchanged into `storefront.json`, mounts it and the overlay as files, injects only the credential and the configuration directory through the environment, and renders one unprivileged storefront process with startup, liveness, and readiness probes and no wait or import dependency on the VM storefront
 
 ### Requirement: Installable compute provisioner
 
@@ -331,6 +335,21 @@ storefront starts. The chart MUST match every key it reads or writes as the
 storefront's loader matches it, without regard to case, and MUST refuse a
 configuration that states one key in two spellings at any depth.
 
+A chart that runs several agents MUST key them by agent name, never list them. A
+`null` assigned to a mapping key in a values file MUST remove that key — whether it
+names an agent, a value of an agent, or a key at any depth of an agent's
+configuration, including mapping keys inside list elements — whether or not the
+Helm release's merge removed it. A removed key MUST reach no agent-reading template,
+and the agent MUST render as it would had the key never been stated. The chart MUST
+NOT render `null` as a mapping value. List elements MUST retain their item schema's
+meaning; a `null` list element MUST NOT be removed by mapping-key normalization.
+
+An agent map that names no agent once its null-valued entries are removed MUST be
+refused at render, as an empty agent map is refused by the values schema, and so
+MUST an agent that states no port or no identity once its null-valued keys are
+removed, naming the agent and the missing value. A key the values schema refuses
+MUST stay refused when its value is `null`.
+
 A values file using a retired values shape MUST be refused at render, naming the
 retired key, rather than passed through as keys the storefront ignores.
 
@@ -391,6 +410,65 @@ retired key, rather than passed through as keys the storefront ignores.
 #### Scenario: A values file uses the retired shape
 
 - **WHEN** an agent's values use a retired key such as `seller` or `storefrontDomains`
+- **THEN** rendering fails naming the key
+
+#### Scenario: An overlay removes an agent
+
+- **WHEN** a values file sets to `null` an agent an earlier values file defines
+- **THEN** no workload, Service, ConfigMap, Secret, or volume is rendered for that agent
+- **AND** the release's other agents render as they would without it
+
+#### Scenario: An overlay removes the only agent
+
+- **WHEN** a values file sets to `null` the only agent an earlier values file defines,
+  through the umbrella chart or the storefront chart alone
+- **THEN** rendering fails naming the empty agent map
+
+#### Scenario: An overlay removes a defaulted setting
+
+- **WHEN** a values file sets to `null`, at any depth, a key of an agent's
+  configuration that the storefront defaults and the chart does not add
+- **THEN** the rendered configuration omits the key and the storefront applies its own
+  default
+
+#### Scenario: An overlay removes a value the release knows
+
+- **WHEN** a values file sets to `null` a key of an agent's configuration that the
+  chart adds when it is absent, such as `db_path`, `registry.urls`, or `port`
+- **THEN** the rendered configuration carries the release's value, as when the agent's
+  configuration omits the key
+
+#### Scenario: An overlay removes a required setting
+
+- **WHEN** a values file sets to `null` a setting the storefront requires and the chart
+  does not add
+- **THEN** the chart renders the configuration without it and the storefront refuses
+  it at startup
+
+#### Scenario: An overlay removes a chart-level agent value
+
+- **WHEN** a values file sets to `null` an agent's `component`, `configMapName`,
+  runtime `secret`, or Alkahest address book, or a key under either of the last two
+- **THEN** the agent renders as it would had the value never been stated: its name as
+  the component, the generated ConfigMap name, no runtime overlay or address book, and
+  for a key under them its default, or none mounted where the key names the Secret or
+  ConfigMap to mount
+
+#### Scenario: An overlay removes an agent's port or identity
+
+- **WHEN** a values file sets an agent's `port` or `identity` to `null`
+- **THEN** rendering fails naming the agent and the missing value
+
+#### Scenario: An overlay removes internal-registry trust
+
+- **WHEN** a values file sets an agent's `internalRegistryTrust` to `null` while the
+  agent uses the internal registry
+- **THEN** rendering fails naming the missing internal-registry trust, not the `null`
+
+#### Scenario: A refused key stays refused as null
+
+- **WHEN** a values file sets a key the values schema refuses, such as a wallet's
+  private key, to `null` in an agent's configuration
 - **THEN** rendering fails naming the key
 
 ### Requirement: A storefront reads chart-rendered configuration between its file and its overlay
@@ -768,11 +846,11 @@ building MAY disagree with it.
 ### Requirement: Packaging conventions are checked mechanically
 
 One repository target MUST build the repository wheelhouse and then run every
-packaging check — environment setup, lock currency, Python version, and project layout —
-failing if any fails. Each check MUST also be runnable alone. The checks MUST read only
-the committed tree and the built wheelhouse, and MUST NOT resolve dependencies, relock,
-or contact a package index; building the wheelhouse retains whatever its isolated builds
-need.
+packaging check — environment setup, lock currency, Python version, project layout, and
+package architecture — failing if any fails. Each check MUST also be runnable alone. The
+checks MUST read only the committed tree and the built wheelhouse, and MUST NOT resolve
+dependencies, relock, or contact a package index; building the wheelhouse retains
+whatever its isolated builds need.
 
 Lock currency MUST fail on a lock that no longer satisfies its project; on a lock that
 pins an internal package at a version the tree does not build; and on a lock whose
@@ -800,6 +878,14 @@ a locked dependency version the wheel's requirement no longer admits.
 - **WHEN** the packaging check runs
 - **THEN** it fails and names the consumer, the package, and the requirement
 
+#### Scenario: A package breaks an architecture rule
+
+- **WHEN** a project's source imports an internal distribution its `pyproject.toml` does
+  not declare, or depends on a package its layer or scope does not permit, and no
+  exception row excuses it
+- **THEN** the packaging check fails and names the project, the file and line, and the
+  rule
+
 #### Scenario: Every convention holds
 
 - **GIVEN** a tree that follows every convention and a built wheelhouse
@@ -822,11 +908,37 @@ but the aggregate MUST NOT silently omit a kit.
 - **WHEN** a kit subproject with a default test suite exists
 - **THEN** the aggregate kit test target runs that suite
 
+### Requirement: A storefront's configuration reaches it through its configuration system
+
+Every configuration value of a storefront MUST be supplied through its configuration system:
+its configuration files and its loader's documented override layer. A value MAY be supplied
+outside that system only when it controls which configuration is loaded — the configuration
+directory and the profiles to layer — or when it must be kept from the loader, as the signing
+credential is. A storefront's chart MUST know a configuration value only where the deployment
+itself needs it for a stated reason, such as the port its container, probes, and Service share,
+and MUST supply outside the configuration system only values of those two kinds. Conformance is
+a compliance check of the source and charts, not a runtime refusal: a storefront MUST NOT refuse
+to start because a value reached it through its environment, and the loader's override layer
+remains available to an operator.
+
+#### Scenario: An operator overrides a setting on a development cluster
+
+- **WHEN** an operator injects a setting through the loader's environment override layer into a
+  running deployment and restarts it
+- **THEN** the storefront starts and applies the override
+
+#### Scenario: The chart renders a storefront's environment
+
+- **WHEN** the bare-metal chart is rendered
+- **THEN** its pod environment carries only the configuration directory and the signing
+  credential, and every other value is in a mounted configuration file
+
 ## Evidence
 
 - Configurable registry endpoints and independently composed role stacks: core buyer registry configuration plus domain Compose and Helm manifests.
-- Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/unit/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
+- Service-owned persistence, provisioning migration init, and schema-drift rejection: registry Alembic tests, `provisioning/compute/service/tests/integration/test_database.py`, and `helm/charts/provisioning/templates/deployment.yaml`.
 - Wheel-directory dependency resolution without parent-path UV sources: package `pyproject.toml` files and package Makefiles using `--find-links`.
+- Package architecture in the packaging check: `make check-architecture`, `scripts/check_architecture_*.py`, and `scripts/tests/test_check_architecture.py`.
 - Derived internal-package refresh for environments, images, and locks: `scripts/uv_project.py`, `scripts/tests/test_uv_project.py`, every `reinit` target, and every Dockerfile that copies `.dist`.
 - Packaging checks: `scripts/check_uv_setup.py`, `scripts/check_locks.py`, `scripts/check_python_version.py` and their tests under `scripts/tests/`; `make check-packaging`.
 - One project layout: `scripts/check_project_layout.py` and its tests; every project's `[tool.hatch.build.targets.wheel]`.

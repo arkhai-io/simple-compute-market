@@ -20,9 +20,12 @@ from typing import Any
 
 import typer
 from market_pool_overrides import SyncPoolOverrideClient
-from storefront_client import StorefrontClientError
-
-from ..cli_common import admin_client, resolve_storefront_url
+from ..cli_common import (
+    STOREFRONT_FAILURES,
+    admin_client,
+    resolve_storefront_url,
+    storefront_failure_message,
+)
 
 pool_override_app = typer.Typer(no_args_is_help=True)
 
@@ -48,8 +51,8 @@ def _emit(value: Any) -> None:
     typer.echo(json.dumps(value.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
-def _failed(exc: StorefrontClientError) -> typer.Exit:
-    typer.secho(f"Storefront error: {exc}", err=True, fg=typer.colors.RED)
+def _failed(exc: Exception) -> typer.Exit:
+    typer.secho(storefront_failure_message(exc), err=True, fg=typer.colors.RED)
     return typer.Exit(code=1)
 
 
@@ -79,7 +82,7 @@ def pool_override_set(
     try:
         with _client(storefront_url) as client:
             written = client.put_pool_override(record)
-    except StorefrontClientError as exc:
+    except STOREFRONT_FAILURES as exc:
         raise _failed(exc) from exc
     _emit(written)
     infeasible = [entry for entry in written.feasibility if not entry.feasible]
@@ -103,7 +106,7 @@ def pool_override_get(
     try:
         with _client(storefront_url) as client:
             _emit(client.get_pool_override(site, pool, mode))
-    except StorefrontClientError as exc:
+    except STOREFRONT_FAILURES as exc:
         raise _failed(exc) from exc
 
 
@@ -121,7 +124,7 @@ def pool_override_list(
     try:
         with _client(storefront_url) as client:
             _emit(client.list_pool_overrides(site_id=site, pool_id=pool))
-    except StorefrontClientError as exc:
+    except STOREFRONT_FAILURES as exc:
         raise _failed(exc) from exc
 
 
@@ -136,5 +139,5 @@ def pool_override_delete(
     try:
         with _client(storefront_url) as client:
             _emit(client.delete_pool_override(site, pool, mode))
-    except StorefrontClientError as exc:
+    except STOREFRONT_FAILURES as exc:
         raise _failed(exc) from exc

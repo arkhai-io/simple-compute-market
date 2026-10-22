@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 
+from .alkahest import materialize_escrow_terms_from_proposal
 from .schemas import (
     EscrowTerms,
     _parse_uint256_str,
@@ -203,7 +204,7 @@ def escrow_terms_from_settlement_plan(
 def materialize_settlement_plan_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
@@ -214,14 +215,13 @@ def materialize_settlement_plan_from_proposal(
     The deterministic counterpart of
     ``materialize_escrow_terms_from_proposal`` — same inputs, same
     derivation, with each materialized escrow wrapped in the
-    ``alkahest.v1`` envelope. Single-obligation plans today; the shape
+    ``alkahest.v1`` envelope, so its release condition is the one
+    ``listing`` authorizes. Single-obligation plans today; the shape
     already admits N obligations and mixed mechanisms.
     """
-    from .alkahest import materialize_escrow_terms_from_proposal
-
     terms = materialize_escrow_terms_from_proposal(
         proposal=proposal,
-        seller_wallet_address=seller_wallet_address,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,
@@ -377,7 +377,7 @@ def build_penalty_bond_obligation(
 def settlement_plan_payload_from_proposal(
     *,
     proposal: Any,
-    seller_wallet_address: str | None,
+    listing: Any,
     agreed_amount: int | None,
     duration_seconds: int,
     addr_config_path: str | None = None,
@@ -386,7 +386,7 @@ def settlement_plan_payload_from_proposal(
     """JSON-serializable variant of the plan materialization."""
     return materialize_settlement_plan_from_proposal(
         proposal=proposal,
-        seller_wallet_address=seller_wallet_address,
+        listing=listing,
         agreed_amount=agreed_amount,
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,

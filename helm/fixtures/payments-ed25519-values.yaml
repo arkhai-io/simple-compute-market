@@ -43,8 +43,6 @@ provisioning:
     principals:
       - scheme: ed25519
         identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
-  storefront:
-    agentName: payments-bob
 
 dev-env:
   enabled: false
@@ -57,46 +55,34 @@ e2e-tests:
   createSecret: false
   secretName: arkhai-e2e-unused
 
+# Bob's agent signing with Ed25519 under its own Secret, with no runtime
+# overlay, selling under Arkhai payments. Agents are keyed by name, so only what
+# differs from Bob's default agent is stated; every principal list is replaced.
+# Every principal and account here is a deterministic development value, never
+# for a public network.
 storefront:
   image:
     digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
   agents:
-    - name: payments-bob
-      port: 8001
-      component: seller
+    bob:
       identity:
         credentialSecret:
           name: payments-bob-marketplace-identity
-          key: credential
       internalRegistryTrust:
-        authority: registry-a
         principals:
           - scheme: ed25519
             identifier: NLTZBDFWy23PC-sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y
       secret:
-        createSecret: false
         secretName: ''
-        configKey: storefront.secrets.toml
       config:
         agent_id: payments_bob
         log_file_path: ./logs/payments-bob.log
-        storefront_domains:
-          - contribution: vms
-            offering_mode: vm
-            domain_identity: compute.v1
-            contract_version: '1.0'
-          - contribution: bare_metal
-            offering_mode: bare_metal
-            domain_identity: bare_metal.v1
-            contract_version: '1.0'
         Identity:
           principal:
             scheme: ed25519
             identifier: 0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc
           service_peers:
             provisioning_default:
-              role: service
-              site_id: default
               principals:
                 - scheme: ed25519
                   identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
@@ -105,17 +91,6 @@ storefront:
               principals:
                 - scheme: ed25519
                   identifier: 5zTqbCtiV95yNV5HKqBaTEh-a0Y8Ap7TBt8vAbVja1g
-        provisioning:
-          mode: mock
-          identity:
-            principals:
-              - scheme: ed25519
-                identifier: xoImN8fTEOxXYnvgC6JZ0lN0n0qvZERwz_vlOjX3MkI
-        negotiation:
-          policies:
-            - has_matching_inventory_guard
-            - escrow_shape_guard
-            - bisection
         pricing:
           default_min_price: '100'
           default_max_duration_seconds: 0

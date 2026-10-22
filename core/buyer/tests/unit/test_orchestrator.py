@@ -502,6 +502,42 @@ def test_publisher_trust_resolver_accepts_signed_rotation_without_mutating_listi
     ]
 
 
+@pytest.mark.parametrize(
+    ("changed", "accepted"),
+    [
+        ({}, True),
+        ({"publisher_id": 8}, False),
+        ({"storefront_url": "http://other-seller"}, False),
+    ],
+    ids=["same-subject", "changed-publisher", "changed-storefront"],
+)
+def test_publisher_trust_resolver_compares_a_text_publisher_with_its_registry_integer(
+    changed: dict, accepted: bool
+) -> None:
+    # A recovered run retains the registry's integer publisher ID as text. The
+    # key is a deterministic development value, never used on any network.
+    publisher = Ed25519Signer(b"\x1d" * 32)
+    listing = {
+        "listing_id": "L1",
+        "publisher_id": "7",
+        "storefront_url": "http://seller",
+        "source_registry_url": "http://registry",
+        "source_registry_authority": "registry",
+        "publisher_principals": _trusted(publisher).model_dump(mode="json"),
+    }
+    retained = dict(listing)
+    refreshed = {**listing, "publisher_id": 7, **changed}
+    with patch("core_buyer.orchestration.fetch_listing_dict", return_value=refreshed):
+        resolve = make_publisher_trust_resolver(config=_config(), listing=listing)
+        if accepted:
+            assert resolve() == _trusted(publisher)
+        else:
+            with pytest.raises(RuntimeError, match="changed listing subject binding"):
+                resolve()
+    # The retained listing, its publisher ID still text, is never rewritten.
+    assert listing == retained
+
+
 def test_publisher_trust_resolver_rejects_forged_registry_refresh() -> None:
     publisher = Ed25519Signer(b"\x1c" * 32)
     listing = {

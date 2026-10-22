@@ -38,19 +38,23 @@ from arkhai_vms_listings.reconciler import (
     ShapeFeasibility,
     available_compute_slices,
     open_listing_resource_keys,
+    ReconciliationScope,
     stale_open_listing_ids,
 )
+from market_capability_admissibility import Declaration
 from market_capacity_publication import (
     BoundListing,
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    SiteProjectionState,
     converge_registries,
 )
+from market_resource_pools_contracts.backing import capacity_backing
 
 import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
-from market_storefront.lifecycle import PUBLICATION, gate, idle
+from market_storefront.lifecycle import enter_stage
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
     VmPublicationSourceCallbacks,
@@ -58,8 +62,8 @@ from market_storefront.publication_wiring import (
 )
 from market_storefront.services.capacity_client import (
     capacity_binding_for_listing,
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
 from market_storefront.services.publication_service import (
     _candidate,
@@ -93,12 +97,25 @@ _DEFAULT_INTERVAL_SECONDS = 30.0
 
 # Set when a site's resource-pool projection generation changes, so a change a
 # site declares reaches the loop without waiting out its interval. A held loop
-# stays held: the gate is consulted before any work either way.
+# stays held: the controller's timer reads its gate before any work either way.
 _WAKE = asyncio.Event()
 
 
 def wake_publication_loop() -> None:
     _WAKE.set()
+
+
+def new_publication_wake() -> asyncio.Event:
+    """A fresh wake for a publication timer about to be registered.
+
+    An event is bound to the event loop that first waits on it, so each start
+    of the loops registers its own; `wake_publication_loop` sets whichever is
+    current. A wake raised before the timer starts is not carried over, which
+    loses nothing: the timer's first cycle runs as soon as it starts.
+    """
+    global _WAKE
+    _WAKE = asyncio.Event()
+    return _WAKE
 
 
 def _source_of(candidate: Mapping[str, Any]) -> dict[str, Any]:
@@ -124,25 +141,33 @@ class VmPublicationCycle:
         sqlite_client: Any,
         listing_service: Any,
         capacity_runtime: Any,
+        site_projections: SiteProjectionState,
         registry: Any,
         storefront_url: str,
         wallet_address: str,
         dry_run: bool,
+        admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
+        enter_stage: Callable[[str], None] | None = None,
     ) -> None:
+        """``enter_stage`` names each stage the cycle reaches -- ``compose``,
+        ``run``, ``converge`` -- so a failure is recorded in the stage it
+        happened in; the loop controller's, when a cycle runs under it."""
         self._db = sqlite_client
+        self._enter_stage = enter_stage or (lambda _stage: None)
+        self._admissibility_default = admissibility_default
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
         self._listings = listing_service
         self._capacity = capacity_runtime
+        self._site_projections = site_projections
         self._registry = registry
         self._storefront_url = storefront_url
         self._wallet_address = wallet_address
         self.report = PublicationCycleReport(dry_run=dry_run)
         self._driver = PublicationCycleDriver()
-        self._projection: Mapping[str, list[dict[str, Any]]] | None = None
+        self._projection: Mapping[str, list[dict[str, Any]]] = {}
         self._buckets: Mapping[str, list[dict[str, Any]]] | None = None
         self._availability: Mapping[tuple[str, str], int] | None = None
-        self._home_site: str | None = None
         self._sites: tuple[str, ...] = ()
         self._derived: dict[int, Any] = {}
 
@@ -156,16 +181,14 @@ class VmPublicationCycle:
     # -- cycle -----------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
-        sites = list(self._capacity.site_ids)
-        self._home_site = sites[0] if sites else None
-        self._sites = tuple(sites)
-        if self._home_site is None:
+        self._enter_stage("compose")
+        self._sites = tuple(self._capacity.site_ids)
+        if not self._sites:
+            self._enter_stage("converge")
             await self._converge_registries()
             return self._report()
-        self._projection = listing_source_projection()
-        self._buckets = (
-            site_capacity_buckets() if self._projection is not None else None
-        )
+        self._projection = site_pool_projection(self._site_projections)
+        self._buckets = site_capacity_buckets(self._site_projections)
         try:
             self._availability = dict(await self._capacity.availability())
         except Exception as exc:
@@ -186,8 +209,10 @@ class VmPublicationCycle:
                 reopen_existing=self._reopen_existing,
             ),
         )
+        sources = selection.build_sources()
+        self._enter_stage("run")
         await self._driver.run(
-            selection.build_sources(),
+            sources,
             db_path=self._db.db_path,
             base_url=self._storefront_url,
             build_payload=self._build_payload,
@@ -195,6 +220,7 @@ class VmPublicationCycle:
             close_stale=self._availability is not None,
             skip_open=False,
         )
+        self._enter_stage("converge")
         await self._converge_registries()
         return self._report()
 
@@ -212,23 +238,26 @@ class VmPublicationCycle:
     # -- source callbacks (worker thread) --------------------------------
 
     def _open_keys(self, db_path: str) -> set[str]:
-        return open_listing_resource_keys(
-            db_path,
-            home_site=self._home_site or "",
-        )
+        return open_listing_resource_keys(db_path)
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
+        # A preview derives exactly as the cycle would and publishes no
+        # derivation report, so status keeps describing the last cycle that ran.
+        reports: dict[str, dict[str, Any]] = {}
         candidates = available_compute_slices(
             db_path,
-            home_site=self._home_site or "",
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
-            hint_resolution=pool_hint_resolution_settings(),
+            hint_resolution=pool_hint_resolution_settings(
+                admissibility_default=self._admissibility_default
+            ),
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
+            record_reports=not self.dry_run,
+            reports=reports,
         )
         for kind, site_id, source_id in sorted(holds):
             if kind == "site":
@@ -236,18 +265,31 @@ class VmPublicationCycle:
                 self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
             else:
                 self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
-        return candidates
+        # Every VM listing publishes a region, which only its pool states. A
+        # pool stating none publishes and refreshes nothing; its candidates
+        # still count as present, so source reconciliation does not close the
+        # listings it already published. The hold is reported from the
+        # derivation's own report rather than from the candidates, because a
+        # pool with no available slice yields no candidate and is held all
+        # the same.
+        for site_id in sorted(self._projection):
+            for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
+                self.report.record(
+                    "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
+                )
+        return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
         stale = stale_open_listing_ids(
             db_path,
-            home_site=self._home_site or "",
             configured_sites=self._sites,
             member_availability=self._availability,
             site_pool_projection=self._projection,
             site_capacity_buckets=self._buckets,
-            backed_only=False,
+            scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
+            admissibility_default=self._admissibility_default,
+            record_reports=not self.dry_run,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -428,8 +470,8 @@ class VmPublicationCycle:
             stored_terms=_terms_of(stored),
             fresh_resource=fresh["listing_resource"],
             fresh_terms=_terms_of(fresh),
-            binding_backing=existing.capacity_backing,
-            source_backing=str(candidate.get("capacity_backing")),
+            binding_backing=capacity_backing(existing.capacity_backing),
+            source_backing=capacity_backing(candidate.get("capacity_backing")),
         )
         is_open = stored.get("status") == "open"
         if comparison.outcome in REFUSE:
@@ -468,7 +510,7 @@ class VmPublicationCycle:
             listing_resource=refreshed_listing_resource(
                 stored_resource=stored_resource,
                 fresh_resource=fresh["listing_resource"],
-                binding_backing=existing.capacity_backing,
+                binding_backing=capacity_backing(existing.capacity_backing),
             ),
             accepted_escrows=fresh.get("accepted_escrows"),
             settlement_options=fresh.get("settlement_options"),
@@ -490,22 +532,35 @@ class VmPublicationCycle:
         )
 
 
-async def run_publication_cycle_once(*, dry_run: bool) -> dict[str, Any]:
-    """Run, or preview, exactly one publication cycle — the timer's cycle."""
+async def run_publication_cycle_once(
+    *, dry_run: bool, site_projections: SiteProjectionState | None = None
+) -> dict[str, Any]:
+    """Run, or preview, exactly one publication cycle — the timer's cycle.
 
+    ``site_projections`` is the storefront's state; without one, the cycle reads
+    the state the composition root put in the container. Resolving the
+    cycle's collaborators, the domain registry among them, is its ``compose``
+    stage.
+    """
+
+    enter_stage("compose")
     cycle = VmPublicationCycle(
         sqlite_client=container.resolved_sqlite_client,
         listing_service=container.resolved_listing_service,
         capacity_runtime=container.resolved_capacity_runtime,
+        site_projections=site_projections or container.site_projections(),
         registry=storefront_domain_registry(),
         storefront_url=BASE_URL_OVERRIDE,
         wallet_address=get_evm_wallet_address() or "",
         dry_run=dry_run,
+        admissibility_default=container.resolved_admissibility_default,
+        enter_stage=enter_stage,
     )
     return await cycle.run()
 
 
-def _interval_seconds() -> float:
+def publication_interval_seconds() -> float:
+    """``[capacity].publication_interval_seconds``, the timer's wait between cycles."""
     capacity = getattr(settings, "capacity", None)
     return float(
         getattr(capacity, "publication_interval_seconds", 0)
@@ -513,25 +568,10 @@ def _interval_seconds() -> float:
     )
 
 
-async def publication_loop(
-    run_cycle: Callable[..., Awaitable[dict[str, Any]]] = run_publication_cycle_once,
-) -> None:
-    """Timer-driven publication, woken early by a projection change."""
-    while True:
-        if gate(PUBLICATION):
-            await asyncio.sleep(0.05)
-            continue
-        _WAKE.clear()
-        try:
-            await run_cycle(dry_run=False)
-        except Exception:
-            logger.exception("[PUBLICATION] publication cycle failed")
-        await idle(_interval_seconds(), wake=_WAKE)
-
-
 __all__ = [
     "VmPublicationCycle",
-    "publication_loop",
+    "new_publication_wake",
+    "publication_interval_seconds",
     "run_publication_cycle_once",
     "wake_publication_loop",
 ]

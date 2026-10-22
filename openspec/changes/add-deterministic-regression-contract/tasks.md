@@ -90,43 +90,60 @@ design review.
   strategy; the wrong inference is drawn when someone is looking at a green
   suite, which is why the evidence class is in the artifact as well.
 - [ ] 5.3 Verify every path cited resolves on the branch.
+- [ ] 5.4 **Comment hygiene and import placement, before the pre-closeout review.** Run
+  `make check-comment-hygiene` and read the comments this change added for any that
+  narrate the review or migration that introduced them; move each import the change
+  added to module level unless a verified circular import or a recorded lazy-load
+  reason keeps it local. Closeout only confirms both.
 
 ## 6. Closeout
 
-- [ ] 6.1 **Comment hygiene.** Run `make check-comment-hygiene` and resolve
-  every match; read touched files for what it cannot catch.
-- [ ] 6.2 **Import placement.** Migrate local imports added here to module level
-  where safe, verifying against the real suite.
-- [ ] 6.3 **Documentation compliance.** Re-check accepted decisions against
-  `openspec/README.md`'s placement rules; confirm every citation resolves.
-- [ ] 6.4 **Narrative compression.** Reduce task notes to final behaviour,
-  validation evidence, and unresolved work. The recording-versus-specification
-  argument belongs in `design.md`.
-- [ ] 6.5 **Roadmap currency.** `docs/development/ROADMAP.md` owes nothing: the
-  harness is not a market capability. Recorded as a deliberate disposition.
-- [ ] 6.6 **Promotion.** Complete the design-promotion record below.
-- [ ] 6.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
+Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 6.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=add-deterministic-regression-contract` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 6.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 6.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+- [ ] 6.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+  the comments this change added for any that narrate the review or migration that
+  introduced them. Do not edit code here: anything to rewrite returns the change to
+  implementation.
+- [ ] 6.2 **Import placement — confirm.** Check the imports this change added for any
+  still local without a recorded reason. One that should move returns the change to
+  implementation.
+- [ ] 6.3 **Documentation compliance.** Re-check this change's accepted decisions
+  against `openspec/README.md`'s placement rules, and the permanent documents
+  against the code they describe.
+- [ ] 6.4 **Narrative compression.** Compress completed-task notes to final behavior,
+  material validation evidence, unresolved or deferred work, and
+  permanent-documentation destinations, moving durable rationale into `design.md`
+  first. The recording-versus-specification argument belongs in `design.md`.
+- [ ] 6.5 **Roadmap currency.** Update the affected goal's current state and gap
+  mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
+  Expected: `docs/development/ROADMAP.md` owes nothing, since the harness is not a
+  market capability; record that as a deliberate disposition.
+- [ ] 6.6 **Campaign index currency.** Update this change's row, and its campaign's
+  dependency graph, in `openspec/changes/README.md`, or record that both are
+  unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+  dependents after the closeout gate.
+- [ ] 6.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+  reports (a failure needing a code or lock change returns the change to
+  implementation).
+- [ ] 6.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+  its result, and the scenarios that exercise this change, or an explicit blocker
+  naming its cause and the change that owns it, with the validations it gates
+  treated as unrun.
+- [ ] 6.9 **Promotion.** Write the permanent documents this change owes —
+  `docs/development/TESTING.md`, its harness section (placement and maintenance of a
+  generated regression; a green regression suite is not concurrency or capacity
+  evidence) — and complete the design-promotion record below. A `spec.md` the
+  deltas cover (`openspec/specs/test-compatibility/spec.md`) is written by the
+  archive in 6.11, not by hand; the record names it all the same.
+- [ ] 6.10 **Documentation citations.** After promotion, run
+  `make check-doc-citations CHANGE=add-deterministic-regression-contract` and
+  resolve every match, then
+  `openspec validate add-deterministic-regression-contract --strict`.
+- [ ] 6.11 **Archival.** Last, once every other part is checked: `openspec archive
+  add-deterministic-regression-contract -y` merges the deltas into `openspec/specs/`
+  and moves the change under `openspec/changes/archive/`; point the index row at the
+  archived directory, and run `openspec validate --specs --strict`.
+
 ## Design promotion record
 
 | Accepted decision | Permanent location | State |

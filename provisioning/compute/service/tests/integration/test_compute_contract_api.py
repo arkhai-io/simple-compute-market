@@ -153,7 +153,7 @@ def _create_fulfillment_aggregate(
                 scheduling_requirements={"resource_kind": "vm"},
                 settlement_resource_id="kvm1",
                 pool_id="pool-1",
-                provider="ansible",
+                provider="vm.ansible",
                 resource_host_id="kvm1", resource_attributes={},
                 fulfillment_request={
                     "kind": "vm.fulfillment.request",
@@ -222,5 +222,3 @@ async def test_begin_fulfillment_teardown_client_maps_non_active_aggregate_to_40
             await client.begin_fulfillment_teardown(fulfillment_id)
 
     assert exc_info.value.status_code == 409
-
-

@@ -62,6 +62,17 @@ Dependency direction protects substitutability and testability:
 
 Type-only imports still couple packages and therefore obey the same direction.
 
+Capacity backing shows the direction at work. Its delegate lives in
+`kit/resource-pools-contracts`, a contracts package that may import no binding,
+client, or effect, so every operation takes the caller's work as an argument.
+`kit/capacity-publication` depends downward on it for the binding's delegate,
+and so does `core/storefront`, whose durable listing binding validates its
+label through the delegate's registry rather than a copy of the vocabulary; its
+SQL check on the column stays as a backstop, held equal to the registry's labels
+by a test.
+
+The direction and knowledge rules are held mechanically: `make check-architecture` classifies every project by layer, kind, and scope from its path and name, treats every import and every declared internal dependency as an edge, and fails on any the rules forbid that no owned exception row excuses (`docs/development/ARCHITECTURE.md`, "Package and dependency layers"). Ownership — whether a package holds the right responsibilities when every edge points a permitted way — remains review's.
+
 ## The compute family vocabulary
 
 The VM and bare-metal domains sell the same kind of thing in different units: a slice of a host, or a whole one. What a buyer compares across them (GPU count and model, vCPUs, memory, storage) must therefore mean one thing in both. The compute-family capability schema lives once, in `domains/compute` (`arkhai_compute`), and both domains bind it, so a VM slice and a whole machine with the same hardware publish the same flat fields and one registry filter finds both.
@@ -74,6 +85,18 @@ It has neither of the two obvious homes:
 It is also not either domain's, since a domain importing its sibling couples two markets that should vary independently. A family vocabulary package therefore sits between the kit and the domains, depends only on foundation kits, and is the one place a change to the compute family's spelling is made, for both domains at once.
 
 `unflatten_shape` is the exact inverse of `flatten_shape`, and it serves this sharing. A shape derived from a declaration's flat fields has the same digest as the same shape stated by hand, so asking rates, overrides, and derivation keys agree whether a shape was stated, generated, or derived.
+
+## Capability shape admissibility
+
+Admissibility answers which capability shapes a seller will sell for a listing: a listing offered at one GPU may also be sold with up to four, or with memory at or under 512 GiB. The concept is the same for VM vCPUs, pod memory, or inference tokens, so it lives in a foundation kit, `kit/capability-admissibility` (`market_capability_admissibility`), beside the shape and pricing kits, depending only on `kit/capability-shape` and the standard library. A domain supplies its capability schema; the kit names no family or field. It is not part of `kit/capability-shape`, which is capacity vocabulary kept free of commercial evaluation, nor of `kit/capability-pricing`, which changes for different reasons and shares no code with it, nor of `kit/resource-pools`, an authority kit buyers should not install to evaluate a seller's policy.
+
+**Whole shape in, problems out, never unconditional bounds.** The first implementation is a static minimum and maximum per field, a box. A seller's real policy can couple dimensions — at most 64 GiB of memory per GPU — and buyer and seller are expected to negotiate dimensions with counter-proposals. An interface returning a range per dimension would make every caller compare numbers itself and encode the box, so a coupled form would mean rewriting each caller. The kit instead takes whole shapes and answers questions about them: a check returning structured problems, each naming every path it involves, and the values one dimension may take given a partial shape. That answer is valid only for the partial shape it was computed from, and fixing dimensions one at a time from successive answers always ends at an admissible shape, so a counter-proposal policy chooses which dimension to give up without search and without assuming the region is a box. The values come back as an opaque set rather than an interval, because a later constraint may produce steps or gaps. Callers hold declarations and resolved policies as opaque values; only the kit reads a constraint, so a coupled form arrives as a new key inside the kit with its own parsing, merge, and evaluation, and no caller changes.
+
+**Occupancy is excluded.** A limit that depends on what is already rented is availability, which the site decides at admission. Admissibility is what the seller would sell from an empty pool, so it can be evaluated anywhere without reading site state, and admitting a shape says nothing about whether the site can serve it now.
+
+**Constraints sit inline on the listing they govern.** A stated listing shape gives a quantity field `{offer, min, max}` in place of its scalar, so no dimension path is restated apart from its shape and each listing carries the range around its own offer, the form a buyer would be shown. A pool-level constraint block would restate every path and give a pool-wide range to listings that differ; a separate policy tag would also be ignored by an older reader, which would then sell outside it. Inline, an older reader meets a mapping where it expects a scalar and treats the shape as unreadable, and an unknown constraint key makes a shape's constraints unreadable rather than ignored, so a newer form always fails closed on an older kit. A plain scalar stays shorthand for an offer, so every shape stated before constraints remains valid, and an offer alone says nothing about negotiability: a fixed value is written with `min` and `max` equal to it.
+
+**A dimension a shape omits is free.** A shape is admissible when it can be completed to an admissible shape, the same meaning the values query has, so the two operations never disagree. This follows [omission states no commitment](../../../docs/development/ARCHITECTURE.md#omission-states-no-commitment): constraints govern what an agreed shape states, not what is provisioned, and a ceiling on what is provisioned per deal would be a site-admission constraint. A requirement that a dimension be stated is therefore not a constraint at all: under completion semantics an omitted field can always be completed, so such a rule would need its own check beside the admissibility check, and none exists.
 
 ## Settlement runtime composition
 
@@ -100,6 +123,14 @@ Alkahest and payments; bare-metal purchase binds payments while its seller also
 binds Alkahest and fused contact exchange. Delivery consumes validated source
 and domain facts, not the mechanism ID or an escrow-shaped progress row.
 
+Every domain's seller stage-table entry declares `fulfils_through_capacity`:
+whether settling through that mechanism delivers through capacity. It is one
+name each domain's own settlement-admissibility callback reads from the entry a
+clause's mechanism selects, not a kit protocol, because core's stage table is
+opaque by design. A stage that does not declare it cannot be constructed, so no
+mechanism is classified lazily or by a separate map that could drift from the
+table.
+
 Compatible kits may opt into a stage convention, but no shared convention or
 adapter is required or implemented. Its package is chosen when concrete reuse
 justifies implementation: a kit, never core or either mechanism package. Contact,
@@ -109,6 +140,8 @@ assumed home for a convention consumed by non-escrow mechanisms.
 ## Settlement configuration registration
 
 Composition roots register installed settlement mechanisms explicitly. Each registration contributes its canonical ID, typed configuration, role applicability, preflight, client factory, listing-option builder, buyer compatibility, and optional command group. Core roles consume only ordered registrations and common readiness; they neither branch on mechanism IDs nor import concrete configuration models.
+
+A domain's seller stage for a mechanism may also declare what the domain can deliver under it. Each domain's Alkahest seller stage declares the release models it can deliver — VM all three, bare metal `recipient` and `oracle_gated`, API credits `recipient` — and its composition refuses a configured model the domain does not declare, enabled or not, before it opens a database. A stage's `settles_from_agreement` likewise says whether a deal under its mechanism settles from the accepted Agreement alone; an exact selection of a mechanism whose registration builds no accepted obligation is accepted without a plan only when it does.
 
 Registration controls construction, not lifecycle ownership. A composition injects the marketplace signer, wallet, chains, or other shared resources only into mechanisms that declare them, then composes only the lifecycle the selected mechanism uses. An Arkhai-payment-only VM composition starts without EVM resources. Its mandate and receipt feed the existing selected-site fulfillment stage, not the obligation journal.
 
@@ -159,10 +192,67 @@ Multi-site capacity publication follows the same inversion. The capacity kit
 owns exact site projection, event reconciliation, registry fan-out, durable
 publication results, and close-before-reopen ordering. A domain contributes
 schema-opaque candidates, codecs, and durable binding hooks. Each candidate
-carries one exact `CapacityBinding(site_id, offering_mode, source_id)` whose
-mode is declared by the selected Resource Pool and matches the public offer.
-Commit, release, fulfillment, and restart use the recorded site and never
-default a mode or fan out to another authority.
+carries one exact `PublicationBinding(site_id, offering_mode, source_id,
+backing)` whose mode is declared by the selected Resource Pool and matches the
+public offer, and whose `backing` is the delegate its pool's declared label
+selects. Commit, release, fulfillment, and restart use the recorded site and
+never default a mode or fan out to another authority.
+
+The capacity kit also owns per-site projection state, `SiteProjectionState`:
+for every site the storefront's aggregate capacity client names, the
+resource-pool and capacity-bucket projections, their poller, a per-site
+refresh, the poller's cycle on demand, the drift check a topology-sensitive
+refusal triggers, and a per-site, per-family status. The composition root
+builds exactly one instance per process over its aggregate, with the
+publication wake as its resource-pool change callback, and injects it into
+every consumer. It is an instance rather than module state for the same reason
+the loop controller is: two ways to reach the state would leave tests patching
+a module, and a domain facade over a kit registry would be a second way. The
+state is built once and never replaced; every refresh updates it in place, so
+refreshing every site during an outage keeps an unreachable site's last
+generation as stale rather than turning the site unknown. It runs one
+operation at a time on a site's family, its version check included, in core's
+`ProjectionCache`, so every user of the primitive is serialized: a poll
+arriving during another joins it, a refresh-and-reconcile waits for it and then
+fetches, and a failed operation never replaces a confirmation that completed
+after it began. `freshly_confirmed` is the rule a listing-source check applies
+in every domain: a `loaded` generation confirmed within the storefront's window.
+The state is domain-neutral; a domain checks a generation's trust when it reads
+it.
+
+The kit loop controller is the one place a storefront loop's cycle runs.
+`run_cycle(name)` takes that loop's lock, runs its step, and records exactly
+one terminal outcome in a `finally`, whether its timer or an operator's step ran
+it; the timer the controller starts is a gate, `run_cycle`, and wait over the
+same operation, so the two never run concurrently, and a held loop runs no timer
+cycle, so a step taken while held never waits. A loop registers in one of two
+forms: `register_loop`, a timer loop with its interval, or `register_fan_out`, a
+loop whose task a kit runtime owns and which runs independent cycles in declared
+children — the per-site capacity-event pollers, each serialized under its site's
+cursor lock. A fan-out's children are declared as its children when it
+registers and again when it starts, so status lists every site's poller before
+its first cycle, a child reports its parent's `exited` or `cancelled` once the
+parent's task has ended, and the controller issues a cycle recorder only to a
+declared child, never to a loop whose cycles it runs. `register_step` registers
+a loop's step apart from its timer, so every lifecycle route can run a step
+before startup registers timers, and `start_loops()` is the only start, for
+timers and fan-outs together. A recorded error carries its exception's type,
+and its message only when the exception is one of the storefront's disclosed
+configuration or publication errors, so no value an unexpected exception's text
+holds reaches status; the full exception stays in the log. A preview records
+nothing, and an exited or cancelled loop stays distinct from a running one
+whose last cycle failed. The controller's snapshot is what every storefront's
+system status reports as `lifecycle`.
+
+Every capacity effect — reserve, commit, release, lease truncation — passes
+one guarded boundary, `CapacityEffects`, composed over any aggregate capacity
+client and acting only at the sites that aggregate names. It asks the binding's
+delegate to admit the effect before checking the site, so an unbacked listing
+is refused before any site call, and a refusal is a conflict rather than an
+unknown site. `CapacityRuntime` composes one over its own aggregate; a
+storefront with its own aggregate, as bare metal's is, builds one over that,
+so whatever the aggregate records per reservation is still recorded. Nothing
+reserves, commits, releases, or truncates through an aggregate directly.
 Seller-authenticated creation carries the capacity source separately from the
 public resource. The storefront checks that source against the configured site
 topology and the parsed offer, then writes the listing projection and immutable

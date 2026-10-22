@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_alkahest import RECIPIENT_RELEASE
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
@@ -24,6 +25,8 @@ from arkhai_apicredits.settlement.credits_client import (
     CreditsServiceError,
 )
 from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
+from tests.integration.credit_negotiation import FakeCapacity
+from tests.listing_bindings import upsert_bound_listing
 
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
@@ -229,7 +232,9 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
         local_principal=signer.identity, evidence_service=evidence_service,
         credits_client=CreditsServiceClient("http://tokens:8082", "k"),
     )
-    result = await settlement_stages.AlkahestSellerStage().continue_delivery(
+    result = await settlement_stages.AlkahestSellerStage(
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
+    ).continue_delivery(
         result, evidence=evidence, client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=fake_submit)),
         composition=composition,
     )
@@ -436,7 +441,8 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
 
     db = SQLiteClient(str(tmp_path / "failure.db"))
     now = datetime.now().isoformat()
-    await db.upsert_listing(
+    await upsert_bound_listing(
+        db,
         listing_id="L-tok", status="closed", closed_by="seller", created_at=now,
         updated_at=now, listing_resource=dict(_OFFER), fulfillment_resource=None, max_duration_seconds=None,
         storefront_url="http://seller:8002", seller_principal=_SELLER_PRINCIPAL,
@@ -500,6 +506,9 @@ async def settled_db(tmp_path, monkeypatch):
     from market_policy.negotiation_thread import get_thread_store
 
     class _Capacity:
+        def site(self, site_id):
+            return FakeCapacity().site(site_id)
+
         async def snapshot(self):
             return [{"resource_id": "svc-quota", "available_units": 100}]
 
@@ -543,7 +552,13 @@ async def settled_db(tmp_path, monkeypatch):
     )
     token = "0x" + "01" * 20
     escrow_addr = "0x" + "11" * 20
-    await client.upsert_listing(
+    condition = {
+        "chain_name": "anvil",
+        "arbiter": "0x" + "33" * 20,
+        "demand_data": {"recipient": "0x" + "22" * 20},
+    }
+    await upsert_bound_listing(
+        client,
         listing_id="L-tok",
         status="open",
         created_at=datetime.now().isoformat(),
@@ -557,6 +572,8 @@ async def settled_db(tmp_path, monkeypatch):
                 "rates": [{"field": "amount", "per": "token", "value": "100"}],
             }
         ],
+        # The address book's recipient arbiter paying the seller wallet.
+        demands=[condition],
         fulfillment_resource=None,
         max_duration_seconds=None,
         storefront_url="http://seller:8002",
@@ -575,6 +592,7 @@ async def settled_db(tmp_path, monkeypatch):
             fields={"token": token, "amount": 300},
             literal_fields={"token": token},
             rates=[{"field": "amount", "per": "token", "value": "100"}],
+            demand=condition,
             expiration_unix=1_800_000_000,
         ),
         terms=ProvisionTerms(
@@ -915,7 +933,9 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
 async def test_a_stage_without_seller_refunds_refuses_the_route_and_skips_the_action():
     from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
 
-    stage = AlkahestSellerStage()
+    stage = AlkahestSellerStage(
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
+    )
     with pytest.raises(SettlementRefusal) as refused:
         await stage.refund(db=None, composition=None, negotiation_id="neg-alkahest")
     assert refused.value.status_code == 409

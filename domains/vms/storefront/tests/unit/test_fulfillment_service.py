@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from market_alkahest import RELEASE_MODELS
 from market_core import VersionedEnvelope
 from market_identity import Ed25519Signer
 
@@ -15,20 +17,19 @@ from market_storefront.domain_runtime import (
 )
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services import fulfillment_service
+from market_storefront.services.capacity_client import AggregateFulfillmentClient
 from market_storefront.settlement_stages import VmAlkahestSellerStage
 from market_storefront.utils.sqlite_client import SQLiteClient
-from tests._settings_overrides import settings_overrides
 from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
-    TEST_SITE_AUTHORITIES,
     FakeSite,
     pump_events,
     site_capacity,
 )
 from tests.fulfillment_fixtures import make_vm_lifecycle_fixture
+from tests.publication_app import recorded_registries
 
 _TEST_STOREFRONT_SIGNER = TEST_MARKETPLACE_SIGNER
-_TEST_PROVISIONING_AUTHORITIES = TEST_SITE_AUTHORITIES
 _TEST_SELLER_PRINCIPAL = _TEST_STOREFRONT_SIGNER.identity
 _TEST_BUYER_PRINCIPAL = Ed25519Signer(b"\x23" * 32).identity
 
@@ -40,11 +41,6 @@ def _identity_wiring(monkeypatch):
         "resolved_marketplace_signer",
         _TEST_STOREFRONT_SIGNER,
     )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "get_provisioning_authorities",
-        lambda: _TEST_PROVISIONING_AUTHORITIES,
-    )
 
 
 @pytest.fixture
@@ -52,22 +48,6 @@ def client(tmp_path):
     return SQLiteClient(
         db_path=str(tmp_path / "agent.db"),
         registry=build_vm_storefront_registry(build_vm_storefront_domain()),
-    )
-
-
-async def _seed_compute_pool(client: SQLiteClient) -> None:
-    await client.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=1,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
     )
 
 
@@ -152,18 +132,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     client,
     monkeypatch,
 ):
-    class FakeProvisioningClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         site_id="default",
@@ -184,11 +152,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
             "vm_host": "host-1",
         },
     )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "ComputeProvisioningClient",
-        FakeProvisioningClient,
-    )
 
     async def controlled_provision(*args, on_job_submitted, **kwargs):
         await on_job_submitted("physical-1")
@@ -206,7 +169,7 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
     )
     alkahest.oracle.request_arbitration = AsyncMock()
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,
@@ -222,7 +185,9 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
         negotiation_id=lifecycle.evidence.negotiation_id
     )
     with pytest.raises(RuntimeError, match="contract reverted"):
-        await VmAlkahestSellerStage(None).continue_delivery(
+        await VmAlkahestSellerStage(
+            None, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+        ).continue_delivery(
             evidence=lifecycle.evidence,
             db=client,
             delivery=delivery,
@@ -240,31 +205,6 @@ async def test_fulfill_compute_obligation_defers_when_onchain_fulfillment_fails(
 
 @pytest.mark.asyncio
 async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch):
-    class FakeProvisioningClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-
-    await _seed_compute_pool(client)
-    await client.upsert_resource(
-        resource_id="pool-h200-1",
-        resource_type="compute.gpu",
-        resource_subtype="h200",
-        unit="count",
-        value=4,
-        state="available",
-        attributes={
-            "gpu_model": "H200",
-            "region": "California, US",
-            "vm_host": "host-1",
-        },
-    )
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         listing_id="listing-2x",
@@ -290,11 +230,6 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
             "vm_host": "host-1",
         },
     )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "ComputeProvisioningClient",
-        FakeProvisioningClient,
-    )
 
     async def controlled_provision(*args, on_job_submitted, **kwargs):
         await on_job_submitted("physical-1")
@@ -306,24 +241,19 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
         controlled_provision,
     )
 
-    with (
-        settings_overrides(
-            enable_registry_discovery=False,
-            registry__urls=[],
-        ),
-        site_capacity(
+    with recorded_registries():
+        async with site_capacity(
             fake,
             sqlite_client_factory=lambda: client,
             project_pool_modes=True,
-        ) as aggregate,
-    ):
-        result = await fulfillment_service.fulfill_compute_obligation(
-            sqlite_client=client,
-            evidence=lifecycle.evidence,
-            site_id="default",
-        )
-        # The poller delivers deltas in production; pump them here.
-        await pump_events(aggregate, fake)
+        ) as aggregate:
+            result = await fulfillment_service.fulfill_compute_obligation(
+                sqlite_client=client,
+                evidence=lifecycle.evidence,
+                site_id="default",
+            )
+            # The poller delivers deltas in production; pump them here.
+            await pump_events(aggregate, fake)
 
     assert result["status"] == "fulfilled"
     statuses = {
@@ -341,45 +271,37 @@ async def test_reservation_closes_oversized_dynamic_listings(client, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_terminate_vm_lease_calls_the_same_client_as_registration(monkeypatch):
-    """No early-termination business flow calls this yet --
-    this only confirms the plumbing: same client class registration uses,
-    correct endpoint-backing method, and the reason passed through."""
-    captured = {}
+async def test_terminate_vm_lease_asks_only_the_reservations_site():
+    """No early-termination business flow calls this yet; this confirms the
+    plumbing: the request reaches the reservation's recorded site and no other,
+    with the reason passed through, and the site's lease view comes back."""
+    calls: list[tuple[str, str, Any]] = []
 
-    class FakeComputeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
+    class Site:
+        def __init__(self, name):
+            self.name = name
 
         async def terminate_lease(self, capacity_reservation_id, termination):
-            captured["capacity_reservation_id"] = capacity_reservation_id
-            captured["termination"] = termination
+            calls.append((self.name, capacity_reservation_id, termination))
+            return {"capacity_reservation_id": capacity_reservation_id, "site": self.name}
 
-    monkeypatch.setattr(
-        fulfillment_service, "ComputeProvisioningClient", FakeComputeClient
-    )
-    monkeypatch.setattr(
-        fulfillment_service,
-        "settings",
-        SimpleNamespace(
-            provisioning=SimpleNamespace(service_url="http://provisioning"),
-            admin_api_key="admin",
-        ),
+    aggregate = AggregateFulfillmentClient(
+        {"site-a": Site("site-a"), "site-b": Site("site-b")},
+        # Another site cached for the reservation is not consulted.
+        reservation_sites={"reservation-1": "site-a"},
     )
 
-    await fulfillment_service.terminate_vm_lease(
+    lease = await fulfillment_service.terminate_vm_lease(
+        aggregate,
         capacity_reservation_id="reservation-1",
+        site_id="site-b",
         reason="buyer requested early termination",
     )
 
-    assert captured["capacity_reservation_id"] == "reservation-1"
-    assert captured["termination"].reason == "buyer requested early termination"
+    assert lease == {"capacity_reservation_id": "reservation-1", "site": "site-b"}
+    ((site, reservation, termination),) = calls
+    assert (site, reservation) == ("site-b", "reservation-1")
+    assert termination.reason == "buyer requested early termination"
 
 
 @pytest.mark.asyncio
@@ -395,7 +317,6 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
     inspection -- that credentials produced by the new fulfillment path
     reach the storefront's existing credential store correctly."""
 
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-e2e-1",
@@ -462,21 +383,9 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         ),
     )
 
-    class FakeComputeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
@@ -489,7 +398,7 @@ async def test_do_provision_end_to_end_delivers_credentials_for_storage(
         raising=False,
     )
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,
@@ -535,7 +444,6 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
     calling code doesn't do anything that would defeat that (e.g. calling
     schedule/begin a second time)."""
 
-    await _seed_compute_pool(client)
     lifecycle = await make_vm_lifecycle_fixture(
         Path(client.db_path),
         escrow_uid="escrow-dup-1",
@@ -597,21 +505,9 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         get_fulfillment_result=AsyncMock(return_value=envelope),
     )
 
-    class FakeComputeClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-
     monkeypatch.setattr(
         fulfillment_service, "build_fulfillment_client", lambda *_: fulfillment_client
     )
-    monkeypatch.setattr(fulfillment_service, "ComputeProvisioningClient", FakeComputeClient)
     monkeypatch.setattr(
         fulfillment_service.settings,
         "provisioning",
@@ -621,7 +517,7 @@ async def test_do_provision_result_fetch_is_safe_to_repeat(client, monkeypatch):
         raising=False,
     )
 
-    with site_capacity(
+    async with site_capacity(
         fake,
         sqlite_client_factory=lambda: client,
         project_pool_modes=True,

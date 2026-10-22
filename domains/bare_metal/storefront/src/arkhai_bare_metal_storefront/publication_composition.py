@@ -1,77 +1,86 @@
 """How one bare-metal publication cycle is composed from a running storefront.
 
-The publication command and the administrator's publication step both compose
-their cycle here, so the two cannot run different cycles. Each trusted site's
-own capacity client and the one configured registry come from the storefront
-runtime and the process environment; terms of sale come from durable
-configuration, replaced for one site's pool by the storefront's stored override.
+The publication loop's timer and its step, which the publication command runs
+through the administrator API, compose their cycle here, so neither can run a
+different cycle. The held site projections
+and every configured registry come from the storefront runtime; terms of sale
+come from its configuration, replaced for one site's pool by the storefront's
+stored override. A cycle that cannot be composed raises
+``BareMetalPublicationError`` naming what is missing.
 """
 
 from __future__ import annotations
 
-import json
-import os
-from collections.abc import Callable, Mapping
+import logging
+from collections.abc import Callable
 from typing import Any
 
 from core_storefront.publication_runner import PublicationPayload
-from market_settlement_runtime import SettlementPublicationClause
+from market_resource_pools_contracts.backing import capacity_backing
 
-from .pool_overrides import (
-    MAX_DURATION_SECONDS_ENV,
-    compile_publication_clauses,
-    configured_max_duration_seconds,
-)
-from .publication import BareMetalPublicationCycle
+from .pool_overrides import compile_publication_clauses
+from .publication import BareMetalPublicationCycle, BareMetalPublicationError
 from .publication_service import BareMetalRegistryConfiguration
 from .runtime import BareMetalStorefrontRuntime
 from .storefront_registry import build_bare_metal_storefront_registry
 
-
-def _json_env(environ: Mapping[str, str], name: str) -> Any:
-    try:
-        return json.loads(environ[name])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(f"{name} must contain valid JSON") from exc
+logger = logging.getLogger(__name__)
 
 
 def publication_payload_builder(
     runtime: BareMetalStorefrontRuntime,
-    environ: Mapping[str, str],
 ) -> Callable[[dict[str, Any]], Any]:
-    """Build each candidate's payload from the configured publication inputs."""
+    """Build each candidate's payload from the configured publication terms.
+
+    A candidate reaches the builder only with a positive lease bound: the cycle
+    holds a pool whose override and configuration state none.
+    """
     composition = runtime.settlement_composition
     if composition is None:
-        raise RuntimeError(
+        raise BareMetalPublicationError(
             "shared settlement configuration is required for publication"
         )
-    clauses_raw = _json_env(environ, "BARE_METAL_STOREFRONT_PUBLICATION_CLAUSES")
-    if not isinstance(clauses_raw, list):
-        raise RuntimeError("publication clauses have an invalid JSON shape")
-    clauses = tuple(
-        SettlementPublicationClause.model_validate(item) for item in clauses_raw
-    )
-    demands = _json_env(environ, "BARE_METAL_STOREFRONT_DEMANDS")
-    if not isinstance(demands, list):
-        raise RuntimeError("BARE_METAL_STOREFRONT_DEMANDS must be a JSON list")
-    max_duration = configured_max_duration_seconds(environ)
-    if max_duration is None:
-        raise RuntimeError(f"{MAX_DURATION_SECONDS_ENV} is required for publication")
+    clauses = runtime.publication_clauses
+    default_max_duration = runtime.default_max_duration_seconds
+
+    def fulfils_through_capacity(mechanism: str) -> bool:
+        return composition.seller_stages[mechanism].fulfils_through_capacity
 
     async def build(candidate: dict[str, Any]) -> PublicationPayload:
         # A pool's storefront override replaces the configured clauses and
         # bound for that pool's listings only.
         override_clauses = candidate.get("override_clauses")
+        configured = (
+            compile_publication_clauses(override_clauses)
+            if override_clauses is not None
+            else clauses
+        )
+        # The candidate's backing decides which clauses it may publish: a
+        # mechanism that delivers through capacity reaches a reservation only
+        # an admission authority can make.
+        backing = capacity_backing(candidate["listing_resource"]["capacity_backing"])
+        admissible, dropped = backing.admissible_settlement(
+            configured,
+            mechanism=lambda clause: clause.mechanism,
+            fulfils_through_capacity=fulfils_through_capacity,
+        )
+        if dropped:
+            logger.warning(
+                "bare-metal pool %s: dropped settlement mechanisms %s, which bare "
+                "metal fulfils through capacity",
+                candidate.get("pool_id"),
+                list(dropped),
+            )
+            if not admissible:
+                raise ValueError(
+                    f"pool {candidate.get('pool_id')!r} has no settlement option its "
+                    f"{backing.label} listings may publish"
+                )
         return await composition.publication_payload(
             candidate=candidate,
-            clauses=(
-                compile_publication_clauses(override_clauses)
-                if override_clauses is not None
-                else clauses
-            ),
-            demands=demands,
+            clauses=admissible,
             max_duration_seconds=candidate.get(
-                "override_max_duration_seconds", max_duration
+                "override_max_duration_seconds", default_max_duration
             ),
         )
 
@@ -82,47 +91,41 @@ def build_publication_cycle(
     runtime: BareMetalStorefrontRuntime,
     *,
     registry_configuration: BareMetalRegistryConfiguration,
-    environ: Mapping[str, str],
     cycle_factory: Callable[..., BareMetalPublicationCycle] = BareMetalPublicationCycle,
 ) -> BareMetalPublicationCycle:
-    """Compose one cycle from the runtime's own trusted per-site clients.
-
-    Each site's client is the one the runtime composed for that site, never
-    the aggregate client, whose snapshot cannot tell an unreachable site from
-    an empty one.
-    """
-    if runtime.capacity_client is None:
-        raise RuntimeError("trusted site capacity clients are unavailable")
+    """Compose one cycle over the runtime's held projection of every configured site."""
+    if runtime.site_projections is None:
+        raise BareMetalPublicationError("site projection state is unavailable")
     return cycle_factory(
         sqlite_client=runtime.db,
         registry=build_bare_metal_storefront_registry(domain=runtime.domain),
-        site_clients={
-            binding.site_id: runtime.capacity_client.site(binding.site_id)
-            for binding in runtime.site_bindings
-        },
+        site_projections=runtime.site_projections,
+        site_ids=[binding.site_id for binding in runtime.site_bindings],
         registry_client_factory=registry_configuration.client_factory(
             runtime.marketplace_signer
         ),
-        registry_url=registry_configuration.url,
+        registry_urls=registry_configuration.urls,
         storefront_url=runtime.storefront_url,
         seller_principal=runtime.seller_principal,
-        build_payload=publication_payload_builder(runtime, environ),
-        configured_max_duration_seconds=configured_max_duration_seconds(environ),
+        build_payload=publication_payload_builder(runtime),
+        publication_clauses=runtime.publication_clauses,
+        default_max_duration_seconds=runtime.default_max_duration_seconds,
+        enter_stage=runtime.loops.enter_stage,
+        derivation=runtime.publication_derivation,
     )
 
 
 def compose_publication_cycle(
     runtime: BareMetalStorefrontRuntime,
     *,
-    environ: Mapping[str, str] | None = None,
     cycle_factory: Callable[..., BareMetalPublicationCycle] = BareMetalPublicationCycle,
 ) -> BareMetalPublicationCycle:
-    """Compose one cycle from the runtime and the configured environment."""
-    env = os.environ if environ is None else environ
+    """Compose one cycle from the runtime and every registry it configures."""
+    if runtime.registry_configuration is None:
+        raise BareMetalPublicationError("no registry is configured for publication")
     return build_publication_cycle(
         runtime,
-        registry_configuration=BareMetalRegistryConfiguration.from_environment(env),
-        environ=env,
+        registry_configuration=runtime.registry_configuration,
         cycle_factory=cycle_factory,
     )
 

@@ -13,11 +13,14 @@ DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
 .PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
 .PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
+.PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-next change-watch change-cost round-view round-done round-e2e-baseline round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -383,19 +386,18 @@ e2e-apicredits-dev-env: ## Print the API-credit lane's VAR=value lines for `dock
 #
 # The lane is a separate stack on its own dev chain, so it reuses the committed
 # Anvil development credentials under the assignments recorded in
-# dev-env/identities/README.md ("The bare-metal lane"). The option expiry and
-# fulfillment deadline are absolute instants, so they are generated a week
-# ahead at each run rather than committed, where they would go stale.
+# dev-env/identities/README.md ("The bare-metal lane"). The storefront's own
+# settings are not here: they are its development storefront.toml and secrets
+# overlay, which this target names as files for the stack to mount. Only the
+# bare-metal stack's own files and the variables its Compose files read are
+# printed.
 # ---------------------------------------------------------------------------
 E2E_BARE_METAL_DIR := $(CURDIR)/dev-env/bare-metal
 E2E_BARE_METAL_REGISTRY_ID := 0x90f79bf6eb2c4f870365e785982e1f101e93b906
 E2E_BARE_METAL_SITE_AUTHORITY_ID := 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
 E2E_BARE_METAL_STOREFRONT_ID := 0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc
-E2E_BARE_METAL_STOREFRONT_ADMIN_ID := 0x976ea74026e726554db657fa54763abd0c3a0aa9
 E2E_BARE_METAL_SITE_ADMIN_ID := 0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc
 E2E_BARE_METAL_SITE_ID := bare-metal-e2e
-# The dev chain's test ERC-20, as the VM lane's Alkahest clauses name it.
-E2E_BARE_METAL_ALKAHEST_ASSET := 0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0
 
 e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `docker compose --env-file`
 	@$(E2E_REQUIRE_PROVISIONING_MODE)
@@ -407,7 +409,6 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_REGISTRY_DISPLAY_NAME=Local Bare Metal Compute Registry'
 	@echo 'BARE_METAL_OPERATOR_IDENTITY=Arkhai local development'
 	@echo 'BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE=$(E2E_IDENTITY_DIR)/registry-a.eip191'
-	@echo 'BARE_METAL_REGISTRY_PRINCIPALS_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_REGISTRY_ID)"}]'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/provisioning.identity.env'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_PROVISIONING_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_SITE_AUTHORITY_ID)'
@@ -417,29 +418,13 @@ e2e-bare-metal-dev-env: ## Print VAR=value lines for the bare-metal lane's `dock
 	@echo 'BARE_METAL_POOL_DEFINITIONS_FILE=$(E2E_BARE_METAL_DIR)/resource-pools.yaml'
 	@echo 'BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE=$(E2E_BARE_METAL_DIR)/ssh-key-placeholder'
 	@echo 'BARE_METAL_SITE_ID=$(E2E_BARE_METAL_SITE_ID)'
-	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@# The site binds its seller role to the storefront's principal, which the
+	@# storefront's development storefront.toml states as [Identity.principal].
 	@echo 'BARE_METAL_STOREFRONT_IDENTITY_SCHEME=eip191'
 	@echo 'BARE_METAL_STOREFRONT_IDENTITY_IDENTIFIER=$(E2E_BARE_METAL_STOREFRONT_ID)'
-	@echo 'BARE_METAL_STOREFRONT_ADMIN_IDENTITIES_JSON=[{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_STOREFRONT_ADMIN_ID)"}]'
-	@echo 'BARE_METAL_STOREFRONT_PUBLIC_URL=http://bare-metal-storefront:8000'
-	@echo 'BARE_METAL_STOREFRONT_EVM_ADDRESS=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC'
-	@echo 'BARE_METAL_STOREFRONT_WALLET_ENV_FILE=$(E2E_IDENTITY_DIR)/bare-metal.wallet.env'
-	@echo 'BARE_METAL_STOREFRONT_SITES_JSON=[{"site_id":"$(E2E_BARE_METAL_SITE_ID)","authority_url":"http://bare-metal-provisioning:8081","authority_principal":{"scheme":"eip191","identifier":"$(E2E_BARE_METAL_SITE_AUTHORITY_ID)"}}]'
-	@echo 'BARE_METAL_STOREFRONT_SITE_PLACEMENT=fill_first'
-	@echo 'BARE_METAL_STOREFRONT_REGISTRY_URL=http://bare-metal-registry:8080'
-	@# Contact exchange is enabled so the introduction scenario can offer it through
-	@# a pool override; the configured clauses below stay Alkahest-only, so no other
-	@# listing changes. The seller contact is a development fixture on a reserved
-	@# domain, never to be used on a public network. A 5-second retention window lets
-	@# the scenario watch an introduction expire; the day-long sweep interval keeps
-	@# the timer out of the way of the steps the scenario takes itself.
-	@echo 'BARE_METAL_STOREFRONT_SETTLEMENT_JSON={"schema_version":1,"priority":["alkahest.v1","contact-exchange.v1"],"alkahest":{"enabled":true,"address_config_path":"/app/alkahest_anvil_addresses.json","oracle_gated":false,"trusted_oracle_addresses":[],"interruptible":false,"interruptible_oracle_addresses":[]},"contact":{"enabled":true,"contact_payload":{"email":"seller@bare-metal-e2e.invalid"},"profiles":{"default":{"channel":"email","terms":"Development introduction; no commercial terms."}},"retention_seconds":5,"retention_sweep_interval_seconds":86400}}'
-	@echo 'BARE_METAL_STOREFRONT_CHAINS_JSON={"anvil":{"rpc_url":"ws://anvil:8545","alkahest_address_config_path":"/app/alkahest_anvil_addresses.json"}}'
-	@echo 'BARE_METAL_PUBLICATION_CLAUSES_JSON=[{"mechanism":"alkahest.v1","asset":"$(E2E_BARE_METAL_ALKAHEST_ASSET)","rate":"10","per":"hour","mechanism_input":{"chain":"anvil","escrow_kind":"erc20_escrow_obligation_default"}}]'
-	@echo 'BARE_METAL_FUNDING_DEADLINES_JSON={}'
-	@echo "BARE_METAL_OPTION_EXPIRES_AT=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
-	@echo "BARE_METAL_FULFILLMENT_DEADLINE=$$(python3 -c 'import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(days=8)).strftime("%Y-%m-%dT%H:%M:%SZ"))')"
-	@echo 'BARE_METAL_MAX_DURATION_SECONDS=86400'
+	@echo 'BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE=$(E2E_IDENTITY_DIR)/bob.identity.env'
+	@echo 'BARE_METAL_STOREFRONT_CONFIG_FILE=$(CURDIR)/domains/bare_metal/storefront/storefront.dev.toml'
+	@echo 'BARE_METAL_STOREFRONT_SECRETS_FILE=$(E2E_IDENTITY_DIR)/bare-metal.storefront.secrets.toml'
 	@# The buyer service is in the `buyer` profile and the lane never starts it,
 	@# but compose still requires its variables.
 	@echo 'BARE_METAL_BUYER_IMAGE=arkhai:e2e-tests'
@@ -562,11 +547,32 @@ deploy-compose:
 	docker compose ps
 
 # Top-level Helm deploy consumes pre-existing Secret names from helm/values.yaml;
-# credential files and inventory content never pass through Helm values.
+# credential files and inventory content never pass through Helm values. It keeps
+# the release's volumes on uninstall; a local development cluster is deployed with
+# `make -C helm deploy-local` instead (docs/development/DEPLOYMENT_AND_CONFIG.md).
 deploy: deploy-helm
 
 deploy-helm:
 	$(MAKE) -C helm deploy
+
+# The local two-release topology on a development cluster: several storefronts
+# per registry. Release 1 is `make -C helm deploy-local`'s release; release 2 is
+# the bare-metal storefront and its own provisioning service, publishing to
+# release 1's registry (helm/bare-metal-release-values.yaml). helm/Makefile's
+# topology targets say what each installs, needs, and checks; helm-topology-secrets
+# creates the Secrets both releases read and the deal test's buyer-profile volume,
+# from development values only.
+helm-topology-secrets: ## Create the local two-release Helm topology's Secrets and the buyer-profile volume, from development values (cast and kubectl)
+	$(MAKE) -C helm topology-secrets
+
+helm-topology-up: ## Install the local two-release Helm topology (the umbrella, then the bare-metal seller release on its registry) and restart its Deployments, all but dev-env's, onto rebuilt images
+	$(MAKE) -C helm topology-up
+
+helm-topology-down: ## Uninstall the local two-release Helm topology, the bare-metal seller release first
+	$(MAKE) -C helm topology-down
+
+helm-topology-check: ## Run both releases' helm tests against the installed two-release topology
+	$(MAKE) -C helm topology-check
 
 ## Docker-run based local deploy (legacy, still useful for local dev without k8s).
 deploy-docker: deploy-dev-env deploy-registry deploy-storefront deploy-provisioning
@@ -720,65 +726,20 @@ clobber-wheels: _require-ar-project
 # Reviw and agent targets
 
 # ---------------------------------------------------------------------------
-# check-comment-hygiene check-doc-citations — mechanical sweep for AGENTS.md's "Python comments
-# and docstrings" rule: change IDs, section/task numbers, and change-document
-# filenames must never appear in comments or docstrings outside openspec/.
-# This catches the reliably-mechanical subset of that rule (not the fuzzier
-# "references the review that introduced the code" cases, which still need
-# a human/LLM read) and is meant to run as part of every plan's closeout
-# task, not only when someone remembers to ask. Deliberately does not match
-# a bare "tombstone" -- that word has a legitimate, unrelated meaning
-# (a soft-delete marker row) already in use in this codebase, and a regex
-# can't safely tell the two usages apart; the tombstone convention itself
-# stays a judgment-call check, not a mechanical one.
+# check-comment-hygiene — mechanical sweep for AGENTS.md's "Python comments and
+# docstrings" rule: change IDs, section/task numbers, change-document filenames,
+# and OpenSpec change names must never appear in code outside openspec/. The
+# scans, their file types, exclusions, and the one exemption are
+# scripts/check_comment_hygiene.py's, with their reasons.
 # ---------------------------------------------------------------------------
 check-comment-hygiene: ## Fail if change-ID/task-number references leak outside openspec/
-	@echo "Scanning for change-ID and task-number references outside openspec/..."
-	@matches=$$(grep -rnE \
-		'POOLS-[0-9]+|[Ss]ection [0-9]+\.[0-9]+|[Ss]ection [0-9]+(\s|:|$$)|[Tt]ask [0-9]+\.[0-9]+|\btasks\.md\b|\bdesign\.md\b|\bproposal\.md\b' \
-		--include="*.py" --include="*.yml" --include="*.yaml" \
-		--exclude-dir="openspec" --exclude-dir=".git" --exclude-dir="__pycache__" \
-		--exclude-dir=".venv" --exclude-dir=".dist" --exclude-dir="node_modules" --exclude-dir="build" \
-		. 2>/dev/null || true); \
-	if [ -n "$$matches" ]; then \
-		echo "$$matches"; \
-		echo ""; \
-		echo "FAIL: found change-history references outside openspec/. See AGENTS.md's"; \
-		echo "'Python comments and docstrings' section -- comments must describe the"; \
-		echo "current system, not the history of the change that produced it."; \
-		exit 1; \
-	fi
-	@echo "OK: no change-ID/task-number references found outside openspec/."
-	@echo "Scanning for OpenSpec change directory names in code..."
-	@ids=$$(ls -d openspec/changes/*/ 2>/dev/null | grep -v archive | xargs -n1 basename; \
-		ls -d openspec/changes/archive/*/ 2>/dev/null | xargs -n1 basename \
-			| sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'); \
-	if [ -n "$$ids" ]; then \
-		matches=$$(echo "$$ids" | sort -u | grep -v '^$$' \
-			| grep -Ff /dev/stdin -rn \
-				--include="*.py" --include="*.toml" --include="*.yml" --include="*.yaml" \
-				--exclude-dir="openspec" --exclude-dir="docs" --exclude-dir=".git" \
-				--exclude-dir="__pycache__" --exclude-dir=".venv" --exclude-dir=".dist" \
-				--exclude-dir="node_modules" --exclude-dir="build" --exclude-dir=".claude" \
-				. 2>/dev/null || true); \
-		if [ -n "$$matches" ]; then \
-			echo "$$matches"; \
-			echo ""; \
-			echo "FAIL: code names an OpenSpec change. A comment must describe the"; \
-			echo "current system, not the change that produced it or the change that"; \
-			echo "will alter it next -- a reader of the code cannot see either, and"; \
-			echo "the name goes stale the moment the change is archived."; \
-			echo "docs/ is exempt: the roadmap's job is to name the change owning a gap."; \
-			exit 1; \
-		fi; \
-	fi
-	@echo "OK: no OpenSpec change names found in code."
+	@python3 scripts/check_comment_hygiene.py
 
 # ---------------------------------------------------------------------------
 # check-doc-citations — AGENTS.md's cross-reference rule: every openspec/,
-# docs/, tools/, scripts/, and e2e-tests/ path cited by a document must
-# resolve on this branch, and an unresolvable one is a blocking defect rather
-# than a stale link.
+# docs/, tools/, scripts/, e2e-tests/, and .agents/ path cited by a document
+# must resolve on this branch, and an unresolvable one is a blocking defect
+# rather than a stale link.
 #
 # Rejects a tombstoned target as well as an absent one. The existence test
 # this replaces could not fail on a rename-to-tombstone -- the likeliest
@@ -791,27 +752,29 @@ check-comment-hygiene: ## Fail if change-ID/task-number references leak outside 
 # change runs this during its own closeout, while its citations are still
 # expected to hold.
 # ---------------------------------------------------------------------------
-# Pass CHANGE=<name> to scope to one unarchived change's own documents, which
-# is what a closeout gates on: a change owes the citations it wrote, and
+# Pass CHANGE=<name> to scope to one change's own documents, active or archived,
+# which is what a closeout gates on: a change owes the citations it wrote, and
 # gating it on the whole repository's documentation debt would let one stale
 # runbook block everyone else's archival.
 check-doc-citations: ## Fail if a document cites a path that is absent or tombstoned (CHANGE=<name> to scope)
 	@python3 scripts/check_doc_citations.py "$(CHANGE)"
 
-# The Helm values schemas carry one definition generated from the storefront's
-# typed configuration models; it keeps secret-marked fields out of an agent's
-# pass-through config. It runs in the storefront's own environment (make
-# init-storefront), and the storefront's unit suite fails when it is stale.
-STOREFRONT_VALUES_SCHEMAS := ../../../helm/values.schema.json ../../../helm/charts/storefront/values.schema.json
-
-helm-values-schema: ## Regenerate the storefront config definition in the Helm values schemas
-	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write $(STOREFRONT_VALUES_SCHEMAS)
+# Each storefront chart's values schema carries one definition generated from
+# that storefront's typed configuration models; it keeps secret-marked fields
+# out of the chart's pass-through config. Each storefront names the schema files
+# it writes -- VM's storefront chart and the umbrella's storefront definition, and
+# the bare-metal chart's -- and its generator runs in that storefront's own
+# environment (make init-storefront; make -C domains/bare_metal/storefront init),
+# whose test suite fails when a committed definition is stale.
+helm-values-schema: ## Regenerate each storefront's config definition in its Helm values schemas
+	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
+	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
 lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
 	python3 scripts/uv_project.py lock $(PROJECTS)
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
-	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout
+	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture
 
 check-uv-setup: ## Fail if a reinit target or image install names internal packages instead of deriving them
 	@python3 scripts/check_uv_setup.py
@@ -822,14 +785,58 @@ check-locks: ## Fail if a lock is not current with its project, the wheels in .d
 check-python-version: ## Fail if anything selects a Python version other than .python-version
 	@python3 scripts/check_python_version.py
 
+check-agent-skills: ## Fail if an agent skill is not loaded from its one source under .agents/skills
+	@python3 scripts/check_agent_skills.py
+
 check-project-layout: ## Fail if a distribution is not one package under src/ or cannot install editable
 	@python3 scripts/check_project_layout.py
 
-code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
+# check-architecture -- the package layer, scope, and kind rules of
+# docs/development/ARCHITECTURE.md, over every import and every declared
+# internal dependency, against docs/development/ARCHITECTURE.toml. Each part
+# runs alone; any part failing fails the whole. It reads only the tree, so it
+# needs no wheelhouse and no project environment.
+check-architecture: ## Fail if a package breaks a layer, scope, dependency, or kind rule no exception row excuses
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py || status=1; \
+	done; \
+	exit $$status
+
+check-architecture-layers: ## Fail on an upward dependency, a same-layer cycle, a scope outside its layer's bounds, an unclassified project, a stale override, or an invalid rules file
+	@python3 scripts/check_architecture_layers.py
+
+check-architecture-scope: ## Fail on a dependency or identity literal outside a package's scope
+	@python3 scripts/check_architecture_scope.py
+
+check-architecture-dependencies: ## Fail on an undeclared internal import; warn on an unexplained declaration
+	@python3 scripts/check_architecture_dependencies.py
+
+check-architecture-kinds: ## Fail on a dependency outside a kind or package allowlist, an undeclared third-party import in an allowlisted package, or an imported plugin
+	@python3 scripts/check_architecture_kinds.py
+
+# A change owes the rows it owns, as it owes the citations it wrote: it may not
+# be archived while it owns an exception or override row.
+check-architecture-change: ## Fail while CHANGE=<name> owns an architecture exception or override row
+	@if [ -z "$(CHANGE)" ]; then echo "CHANGE=<name> is required" >&2; exit 2; fi
+	@status=0; \
+	for part in layers scope dependencies kinds; do \
+		python3 scripts/check_architecture_$$part.py --change "$(CHANGE)" || status=1; \
+	done; \
+	if [ $$status -eq 0 ]; then echo "OK: $(CHANGE) owns no architecture row."; fi; \
+	exit $$status
+
+architecture-report: ## Write the full architecture report, no exception applied (OUT=<path>, else stdout)
+	@python3 scripts/architecture_report.py $(if $(OUT),--out "$(OUT)")
+
+# `zip -y` stores a symlink as a link. Without it the agent-skill links under
+# .claude/skills and .codex/skills unzip as empty directories, and the snapshot no
+# longer shows which skills each harness loads.
+code-snapshot: round-view-closed ## Zip all git-tracked files for sharing (excludes gitignored artifacts).
 	@mkdir -p .snapshot
 	@OUTFILE="$(CURDIR)/.snapshot/$(GIT_NAME)-$(GIT_SUFFIX).zip"; \
 	echo "Creating $$OUTFILE ..."; \
-	git ls-files --recurse-submodules | zip -@ "$$OUTFILE"; \
+	git ls-files --recurse-submodules | zip -y -@ "$$OUTFILE"; \
 	SIZE=$$(du -sh "$$OUTFILE" | cut -f1); \
 	echo "Done: $$OUTFILE ($$SIZE)"
 
@@ -840,7 +847,7 @@ code-snapshot: ## Zip all git-tracked files for sharing (excludes gitignored art
 # staging their content; the trailing `git reset` unwinds the index back
 # to exactly its pre-run state, so the target's own "without changing git
 # state" guarantee still holds once it completes.
-review-diff: ## Write a binary-safe HEAD-relative diff for review without changing git state.
+review-diff: round-view-closed ## Write a binary-safe HEAD-relative diff for review without changing git state.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -849,7 +856,7 @@ review-diff: ## Write a binary-safe HEAD-relative diff for review without changi
 	git reset -q; \
 	echo "Done: $$OUTFILE"
 
-last-diff: ## Write a binary-safe diff for the most recent commit.
+last-diff: round-view-closed ## Write a binary-safe diff for the most recent commit.
 	@mkdir -p .snapshot
 	@OUTFILE="${CURDIR}/.snapshot/$(GIT_NAME)-${GIT_SUFFIX}-last.diff"; \
 	echo "Creating $$OUTFILE ..."; \
@@ -887,7 +894,108 @@ review-wheelhouse-scope: ## Print the review projects resolved from REVIEW_PROJE
 	elif [ -n "$${REVIEW_SCOPE_FILE:-}" ]; then args="$$args --scope-file $$REVIEW_SCOPE_FILE"; fi; \
 	$(CURDIR)/scripts/resolve-review-scope.py $$args
 
-run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
+REVIEW_BASE ?= dev
+# The review's models are the review row's in .claude/change-steps.toml. Unset by
+# default; given, they are the owner's choice for one run, outside the row's policy:
+# REVIEW_MODEL replaces the whole list, a claude- model running on Claude and any
+# other on Codex, and the record says so. The orchestrating session never sets them.
+REVIEW_MODEL ?=
+REVIEW_EFFORT ?=
+review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, when Codex is unavailable, on Claude (CHANGE=<change> KIND=design|implementation|pre-closeout|closeout [REVIEW_BASE=dev] [REVIEW_MODEL=<any model id, claude-… on Claude; the owner's choice>] [REVIEW_EFFORT=<effort>] [FRESH=1] [UNVALIDATED=1])
+	@python3 scripts/run_change_step.py review "$(CHANGE)" --kind "$(KIND)" --base "$(REVIEW_BASE)" $(if $(strip $(REVIEW_MODEL)),--model "$(REVIEW_MODEL)") $(if $(strip $(REVIEW_EFFORT)),--effort "$(REVIEW_EFFORT)") $(if $(strip $(FRESH)),--fresh) $(if $(filter 1,$(UNVALIDATED)),--unvalidated)
+
+# With UNATTENDED=1, a step's target runs it through scripts/run_change_step.py
+# instead: a headless Claude Code session held to the step's permissions in
+# .claude/change-steps.toml, ending with an outcome logged to the change's
+# reviews/workflow.jsonl. Without it, each target opens an interactive session as
+# the owner's own permission settings allow.
+STEP_RUN = python3 scripts/run_change_step.py run
+
+design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1])
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
+
+# The orchestrating session relays and routes rather than judging, so it needs a
+# large context for a change's relayed turns, not a high effort.
+orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec change, on Opus 5.5 at medium effort (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
+
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh),claude "/change-plan $(CHANGE)")
+
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1])
+	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))"),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
+
+triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1])
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)",claude "/change-triage $(CHANGE)")
+
+closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1])
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)",claude "/change-closeout $(CHANGE)")
+
+check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
+	@python3 scripts/check_change_index.py
+
+check-tasks: ## Fail if a task of a change's task list sits under another section's heading: a heading is missing or the task misplaced (CHANGE=<change>)
+	@python3 scripts/check_tasks.py "$(CHANGE)"
+
+check-change: ## Run a change's closing checks — comment hygiene, agent skills, its citations and task list, the change index, and the pinned strict OpenSpec validation — printing only failures and one pass line (CHANGE=<change>)
+	@python3 scripts/check_change.py "$(CHANGE)"
+
+change-watch: ## Follow the progress of an OpenSpec change's steps as they run, moving to each new step's progress file as it starts; Ctrl+C stops (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/run_change_step.py watch "$(CHANGE)"
+
+change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
+
+change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@python3 scripts/change_cost.py "$(CHANGE)"
+
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
+	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
+
+round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
+	@python3 scripts/round_view.py check
+
+round-view: ## Show an implementation round as uncommitted changes in this checkout for the owner's reading, after pushing HEAD and dispatching the E2E pipeline (CHANGE=<change> [BASE=<commit>] [NO_E2E=1])
+	@python3 scripts/round_view.py start "$(CHANGE)" $(if $(BASE),--base "$(BASE)") $(if $(filter 1,$(NO_E2E)),--no-e2e)
+
+round-done: ## Return the branch to the round's commit after round-view, keeping any edits as uncommitted changes
+	@python3 scripts/round_view.py done
+
+round-e2e-baseline: ## Print, and forget, the run before the E2E run round-view dispatched for HEAD, if it dispatched one
+	@python3 scripts/round_view.py e2e-baseline
+
+design-review: ## Design review of an OpenSpec change in Codex, continuing the last design reviewer (CHANGE=<change> [FRESH=1])
+	@$(MAKE) --no-print-directory review CHANGE="$(CHANGE)" KIND=design
+
+HELM_CONTEXT ?= docker-desktop
+
+validate-local: round-view-closed ## Validate HEAD without changing the checkout: check-packaging, then make test
+	@python3 scripts/validate_slice.py local
+
+validate-helm: round-view-closed ## Validate HEAD on the Helm charts: preflights, images, render checks, the release replaced by a fresh local deploy, the pipeline's scenarios (HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
+	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+
+check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
+	@python3 scripts/check_push_ready.py check
+
+push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
+	@python3 scripts/check_push_ready.py push
+
+validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1])
+	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1"),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
+
+run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \
 	if [ -z "$$branch" ]; then \
 		echo "ERROR: run-e2e requires a checked-out branch." >&2; \
@@ -898,11 +1006,15 @@ run-e2e: ## Run the E2E GitHub Actions workflow on the current branch.
 
 E2E_LOG_DIR ?= $(CURDIR)/.snapshot/e2e-logs
 E2E_RUN_ID ?=
+E2E_COMMIT ?=
+E2E_AFTER_RUN ?=
 
 fetch-e2e-logs: ## Wait for an E2E run, fetch its logs, and zip the resulting directory.
 	@$(CURDIR)/scripts/fetch-e2e-logs.py \
 		--output-dir "$(E2E_LOG_DIR)" \
-		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)")
+		$(if $(strip $(E2E_RUN_ID)),--run-id "$(E2E_RUN_ID)") \
+		$(if $(strip $(E2E_COMMIT)),--commit "$(E2E_COMMIT)") \
+		$(if $(strip $(E2E_AFTER_RUN)),--after-run "$(E2E_AFTER_RUN)")
 
 prune-tombstones: ## Delete every file whose contents are a tombstone comment
 	@python3 scripts/prune_tombstones.py

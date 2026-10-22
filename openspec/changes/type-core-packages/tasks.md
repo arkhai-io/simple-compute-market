@@ -23,35 +23,20 @@
 - [ ] 4.1 Run all included typechecks, runtime/conformance suites, wheel builds/inspection, and clean consumer fixtures.
 - [ ] 4.2 Promote public typing ownership to `market-composition`, check requirements to `test-compatibility`, and marker behavior to `deployment-state` specs/architecture companions.
 - [ ] 4.3 Update releasing guidance with the exact advertised typed distributions, record promotion in `design.md`, and run strict validation before archive.
+- [ ] 4.4 **Comment hygiene and import placement, before the pre-closeout review.** Run `make check-comment-hygiene` and read the comments this change added for any that narrate the review or migration that introduced them; move each import the change added to module level unless a verified circular import or a recorded lazy-load reason keeps it local. Closeout only confirms both.
 
 ## 5. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 5.1 **Comment hygiene.** Run `make check-comment-hygiene`, then direct-read the comments and docstrings this change touches for the fuzzier provenance-narration rule the target cannot catch mechanically.
-- [ ] 5.2 **Import placement.** Review every import this change adds or touches and move it to module level where safe; retain a local import only against an observed circular import or a documented lazy-load reason, verified against the real suite.
-- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules. It carries delta specs for `deployment-state`, `market-composition`, `test-compatibility`; confirm each landed in the owning `openspec/specs/<capability>/spec.md`, and that durable conceptual rationale sits in the companion `architecture.md` rather than only in `design.md`.
+- [ ] 5.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read the comments this change added for any that narrate the review or migration that introduced them. Do not edit code here: anything to rewrite returns the change to implementation.
+- [ ] 5.2 **Import placement — confirm.** Check the imports this change added for any still local without a recorded reason. One that should move returns the change to implementation.
+- [ ] 5.3 **Documentation compliance.** Re-check this change's accepted decisions against `openspec/README.md`'s placement rules, and the permanent documents against the code they describe: durable conceptual rationale sits in the companion `architecture.md` rather than only in `design.md`, and no production source references `openspec/changes/type-core-packages`.
 - [ ] 5.4 **Narrative compression.** Compress completed-task notes to final behavior, material validation evidence, unresolved or deferred work, and permanent-documentation destinations, moving durable rationale into `design.md` first.
-- [ ] 5.5 **Roadmap currency.** This change sits under the lesser goal “Package and release readiness”, which has no roadmap goal behind it, so it most likely owes `docs/development/ROADMAP.md` nothing. Confirm that and record the no-impact disposition explicitly rather than omitting the step.
-- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
-- [ ] 5.7 **Promotion.** Add a design-promotion record, mapping every accepted decision to its exact permanent heading, and verify no production source references `openspec/changes/type-core-packages`.
-- [ ] 5.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=type-core-packages` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 5.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
-- [ ] 5.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+- [ ] 5.5 **Roadmap currency.** Update the affected goal's current state and gap mapping in `docs/development/ROADMAP.md`, or record that no goal is affected. This change sits under the lesser goal “Package and release readiness”, which has no roadmap goal behind it, so it most likely owes the roadmap nothing; confirm that and record the no-impact disposition explicitly.
+- [ ] 5.6 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md`, or record that both are unchanged. Other rows' `Depends on` are left alone: archive cleanup releases dependents after the closeout gate.
+- [ ] 5.7 **Packaging.** Run `make check-packaging` and resolve every failure it reports (a failure needing a code or lock change returns the change to implementation).
+- [ ] 5.8 **End-to-end pipeline.** Record the passing run the latest validation names, its result, and the scenarios that exercise this change, or an explicit blocker naming its cause and the change that owns it, with the validations it gates treated as unrun.
+- [ ] 5.9 **Promotion.** Write the permanent documents this change owes — the `market-composition`, `test-compatibility`, and `deployment-state` companion `architecture.md` files, and the releasing guidance naming the exact advertised typed distributions (4.2, 4.3) — and add a design-promotion record mapping every accepted decision to its exact permanent heading. The `spec.md` files the deltas cover (`deployment-state`, `market-composition`, `test-compatibility`) are written by the archive in 5.11, not by hand; the record names them all the same.
+- [ ] 5.10 **Documentation citations.** After promotion, run `make check-doc-citations CHANGE=type-core-packages` and resolve every match, then `openspec validate type-core-packages --strict`.
+- [ ] 5.11 **Archival.** Last, once every other part is checked: `openspec archive type-core-packages -y` merges the deltas into `openspec/specs/` and moves the change under `openspec/changes/archive/`; point the index row at the archived directory, and run `openspec validate --specs --strict`.

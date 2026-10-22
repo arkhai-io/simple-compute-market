@@ -14,4 +14,4 @@ spec:
       command:
         - wget
         - -qO-
-        - {{ printf "http://%s:%d/health" (include "bare-metal-storefront.fullname" .) (int .Values.service.port) | quote }}
+        - {{ printf "http://%s:%d/health" (include "bare-metal-storefront.fullname" .) (int .Values.port) | quote }}

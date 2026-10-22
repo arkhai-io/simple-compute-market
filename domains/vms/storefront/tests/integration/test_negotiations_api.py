@@ -20,7 +20,8 @@ import httpx
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
-from market_capacity_publication import CapacityBinding, CapacityRuntime, CapacitySite
+from market_capacity_publication import PublicationBinding, CapacityRuntime, CapacitySite
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer, TrustedIdentitySet
 
 import market_storefront.container as _container
@@ -38,6 +39,7 @@ from market_storefront.domain_runtime import build_vm_storefront_domain, build_v
 from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.negotiation_runtime import build_vm_negotiation_runtime
 from storefront_client.client import StorefrontClient, StorefrontClientError
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 
 _ADMIN_SIGNER = Ed25519Signer(b"\x31" * 32)
@@ -220,6 +222,9 @@ def _make_runtime(db: SQLiteClient):
         registry=db.domain_registry,
         binding=registration.binding,
         capacity_runtime=_capacity_runtime(),
+        site_projections=site_projection_state(
+            {"site-test": FakeProjectionSite(resource_pools=[])}
+        ),
     )
 
 
@@ -241,10 +246,11 @@ async def api(db, monkeypatch) -> AsyncIterator[tuple[FastAPI, SQLiteClient]]:
         assert _repository is db
         listing_binding = await db.load_listing_binding(listing_id=listing_id)
         assert listing_binding is not None
-        return CapacityBinding(
+        return PublicationBinding(
             listing_binding.site_id,
             listing_binding.binding.offering_mode,
             str(listing_binding.pool_id),
+            BACKED,
         )
 
     monkeypatch.setattr(

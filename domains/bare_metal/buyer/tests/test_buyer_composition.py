@@ -50,6 +50,42 @@ default_duration_seconds = 7200
         load_bare_metal_buyer_config(path)
 
 
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param("livemode = true\n", True, id="declared live"),
+        pytest.param("", False, id="undeclared"),
+    ],
+)
+def test_the_payments_mode_in_the_file_reaches_the_loaded_config(
+    tmp_path: Path, line: str, expected: bool
+) -> None:
+    # Development fixtures: a placeholder service identity and accounts, never
+    # for use on a public network.
+    path = tmp_path / "buyer.toml"
+    path.write_text(
+        f"""
+[bare_metal]
+registry_url = "https://registry.example"
+registry_authority = "registry-prod"
+registry_principals = [{{scheme = "ed25519", identifier = "{PRINCIPAL}"}}]
+payer_account = "11111111-1111-4111-8111-111111111111"
+
+[bare_metal.arkhai_payments]
+enabled = true
+service_url = "http://127.0.0.1:9"
+service_identity = {{scheme = "ed25519", identifier = "{PRINCIPAL}"}}
+fee_bps = 250
+dispute_authority = "33333333-3333-4333-8333-333333333333"
+development_auth = true
+{line}""".strip(),
+        encoding="utf-8",
+    )
+    config = load_bare_metal_buyer_config(path)
+    assert config.arkhai_payments is not None
+    assert config.arkhai_payments.livemode is expected
+
+
 def test_transient_action_material_is_not_rendered() -> None:
     safe = _safe_projection(
         {

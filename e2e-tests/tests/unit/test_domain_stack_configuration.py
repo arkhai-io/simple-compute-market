@@ -65,7 +65,8 @@ def test_bare_metal_stack_requires_real_selected_site_inputs():
     assert "ACTIVE_PROFILES=${BARE_METAL_PROVISIONING_ACTIVE_PROFILES:-docker}" in domain_compose
     assert "ACTIVE_PROFILES=mock" not in rendered
     assert "MOCK_PROVISIONING" not in rendered
-    assert "${BARE_METAL_STOREFRONT_SITES_JSON:?" in domain_compose
+    # The storefront's sites, registries, and terms are its mounted configuration.
+    assert "${BARE_METAL_STOREFRONT_CONFIG_FILE:?" in domain_compose
     assert "${BARE_METAL_POOL_DEFINITIONS_FILE:?" in domain_compose
     assert "${BARE_METAL_PROVISIONING_INVENTORY_FILE:?" in domain_compose
     assert "${BARE_METAL_PROVISIONING_SSH_PRIVATE_KEY_FILE:?" in domain_compose
@@ -80,9 +81,10 @@ def test_bare_metal_stack_keeps_role_credentials_and_state_separate():
     assert "ARKHAI_IDENTITY_CREDENTIAL=" not in wrapper
     assert "BARE_METAL_REGISTRY_IDENTITY_CREDENTIAL_FILE:?" in wrapper
     assert "BARE_METAL_STOREFRONT_IDENTITY_ENV_FILE:?" in wrapper
-    # The seller wallet's key arrives in its own optional file, never inline.
-    assert "BARE_METAL_STOREFRONT_WALLET_ENV_FILE:-" in wrapper
-    assert "BARE_METAL_STOREFRONT_EVM_PRIVATE_KEY=" not in wrapper
+    # The seller wallet's key arrives in the storefront's secret overlay file,
+    # never inline.
+    assert "BARE_METAL_STOREFRONT_SECRETS_FILE:?" in wrapper
+    assert "private_key" not in wrapper.lower()
     assert "BARE_METAL_PROVISIONING_IDENTITY_ENV_FILE:?" in wrapper
     for name in (
         "bare-metal-registry-data",

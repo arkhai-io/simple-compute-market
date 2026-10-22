@@ -38,10 +38,12 @@ class FakeDb:
         self.materialization = None
         self.receipt = None
         self.result = None
+        self.capacity_backing = "backed"
         self.context = {
             "buyer_scheme": BUYER.scheme.value,
             "buyer_identifier": BUYER.identifier,
             "terminal_state": "success",
+            "listing_id": "listing-a",
             "site_id": "site-a",
             "physical_resource_id": "resource-a",
             "host_id": "machine-a",
@@ -72,6 +74,16 @@ class FakeDb:
                 contract_major=1,
                 contract_minor=0,
             ),
+        )
+
+    async def load_listing_binding(self, *, listing_id):
+        # The durable record the listing's capacity binding is built from.
+        assert listing_id == "listing-a"
+        return SimpleNamespace(
+            site_id="site-a",
+            physical_resource_id="resource-a",
+            binding=SimpleNamespace(offering_mode="bare_metal"),
+            capacity_backing=self.capacity_backing,
         )
 
     async def load_bare_metal_fulfillment_context(self, *, negotiation_id):
@@ -165,6 +177,7 @@ class FakeCapacity:
     def __init__(self, *, returned_site: str = "site-a") -> None:
         self.returned_site = returned_site
         self.site_client = FakeSite()
+        self.site_names = ["site-a"]
         self.reservation_sites = {}
         self.reserves = []
         self.commits = []
@@ -436,7 +449,7 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
         read_verified_evidence=db.verified_evidence,
     )
 
-    with pytest.raises(BareMetalFulfillmentError, match="conflicting site"):
+    with pytest.raises(BareMetalFulfillmentError, match="mismatched site"):
         await service.begin(
             negotiation_id="neg-a",
             settlement_ref="escrow-a",
@@ -445,6 +458,29 @@ async def test_reservation_conflicting_site_fails_before_scheduling() -> None:
 
     assert fulfillment.schedules == []
     assert fulfillment.begins == []
+
+
+async def test_a_listing_no_authority_stands_behind_reserves_nothing() -> None:
+    db = FakeDb()
+    db.capacity_backing = "unbacked"
+    capacity = FakeCapacity()
+    fulfillment = FakeFulfillment()
+    service = BareMetalFulfillmentService(
+        db=db,
+        capacity_client=capacity,
+        fulfillment_client=fulfillment,
+        read_verified_evidence=db.verified_evidence,
+    )
+
+    with pytest.raises(BareMetalFulfillmentError, match="capacity-backed"):
+        await service.begin(
+            negotiation_id="neg-a",
+            settlement_ref="escrow-a",
+            buyer_principal=BUYER,
+        )
+
+    assert capacity.reserves == []
+    assert fulfillment.schedules == []
 
 
 async def test_a_listing_naming_no_attributes_reserves_nothing() -> None:

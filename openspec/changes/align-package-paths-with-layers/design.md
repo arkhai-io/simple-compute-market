@@ -72,8 +72,9 @@ unbuildable between the two.
   `domains/compute/` directory is shaped once.
 - **The nested middleware path.** `domains/apicredits/middleware/python` carries a
   language segment because the same directory holds the Rust and TypeScript
-  middlewares. Flattening to `domains/apicredits/middleware-python` conforms;
-  leaving it under an override row costs one row forever. Decide with the
+  middlewares. The check already classifies it as an API-credits library, so it
+  needs no override row either way; flattening to
+  `domains/apicredits/middleware-python` is a navigability choice. Decide with the
   vocabulary question, since both are about what `domains/<scope>/` may contain
   besides projects.
 - **`CONTEXT.md` and the platform context.** `docs/agents/domain.md` draws the

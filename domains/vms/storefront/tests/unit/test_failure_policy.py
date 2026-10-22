@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from market_capacity_publication import CapacityBinding
+from market_capacity_publication import PublicationBinding
+from market_resource_pools_contracts.backing import BACKED
 from market_identity import Ed25519Signer
 
 from market_storefront.failure_actions import (
@@ -13,13 +14,20 @@ from market_storefront.failure_actions import (
 )
 from market_storefront.domain_runtime import build_vm_storefront_domain, build_vm_storefront_registry
 from market_storefront.utils.sqlite_client import SQLiteClient
+from tests.fake_site import FakeProjectionSite, site_projection_state
 
 BUYER_PRINCIPAL = Ed25519Signer(b"\x51" * 32).identity
 BUYER_EVM_ADDRESS = "0x" + "bb" * 20
 
 
 @pytest.mark.asyncio
-async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monkeypatch):
+@pytest.mark.parametrize("projections", ["held", "absent", "another_site"])
+async def test_failure_policy_releases_capacity_and_runs_webhook(
+    tmp_path, monkeypatch, projections
+):
+    """The site's release is recorded whatever the projection state can do
+    after it: the held site is refreshed before the reopen, and a state that is
+    absent or does not hold the site fails nothing."""
     from tests.fake_site import FakeSite, capacity_runtime_over
 
     db = SQLiteClient(db_path=str(tmp_path / "failure-policy.db"), registry=build_vm_storefront_registry(build_vm_storefront_domain()))
@@ -29,8 +37,16 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         2,
         attributes={"gpu_model": "H200", "region": "California, US", "vm_host": "kvm1"},
     )
-    binding = CapacityBinding("site-test", "vm", "pool-test")
+    binding = PublicationBinding("site-test", "vm", "pool-test", BACKED)
     capacity = capacity_runtime_over(fake, site_name=binding.site_id)
+    site_projections = {
+        # The state over the runtime's own aggregate, as the root composes it.
+        "held": site_projection_state(capacity.client()),
+        "absent": None,
+        "another_site": site_projection_state(
+            {"elsewhere": FakeProjectionSite(resource_pools=[])}
+        ),
+    }[projections]
 
     async def resolve_capacity_binding(repository, listing_id):
         assert repository is db
@@ -38,7 +54,7 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
         return binding
 
     monkeypatch.setattr(
-        "market_storefront.services.capacity_client.capacity_binding_for_listing",
+        "market_storefront.failure_actions.capacity_binding_for_listing",
         resolve_capacity_binding,
     )
 
@@ -77,10 +93,16 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
             source="test",
         ),
         capacity=capacity,
+        site_projections=site_projections,
     )
 
     assert result.state == "released"
+    assert result.capacity_reservation_id == reserved["capacity_reservation_id"]
     assert result.resource_id == "gpu-host-1"
+    assert result.reopened_listing_ids == []
+    # Only a state holding the site refreshes it before the reopen.
+    refreshed = ("GET", "/api/v1/capacity/site-resource-pools") in fake.requests
+    assert refreshed is (projections == "held")
     assert result.actions == [
         {"action": "release_capacity", "status": "ok"},
         {"action": "webhook", "status": "sent", "status_code": 204},
@@ -94,8 +116,74 @@ async def test_failure_policy_releases_capacity_and_runs_webhook(tmp_path, monke
     assert fake._available("gpu-host-1") == 2
 
 
+_ACCEPTED_ESCROW_PROPOSAL = {
+    "chain_name": "anvil",
+    "escrow_address": "0x" + "aa" * 20,
+    "fields": {"token": "0x" + "cc" * 20},
+    "expiration_unix": 1_800_000_000,
+}
+_ACCEPTED_OBLIGATION_DATA = {
+    "arbiter": "0x" + "bb" * 20,
+    "demand": "0x" + "dd" * 32,
+    "token": "0x" + "cc" * 20,
+    "amount": "42",
+}
+
+
+def _accepted_plan(escrow_contract: str = "0x" + "aa" * 20) -> dict:
+    """The accepted plan as the thread row returns it, decoded from its JSON."""
+    return {
+        "obligations": [
+            {
+                "payer": "buyer",
+                "claimant": "seller",
+                "amount": "42",
+                "asset": "0x" + "cc" * 20,
+                "expiration_unix": 1_800_000_000,
+                "mechanism": "alkahest.v1",
+                "params": {
+                    "chain_name": "anvil",
+                    "escrow_contract": escrow_contract,
+                    "obligation_data": dict(_ACCEPTED_OBLIGATION_DATA),
+                },
+            }
+        ],
+        "service_terms": {},
+    }
+
+
 @pytest.mark.asyncio
-async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch):
+@pytest.mark.parametrize(
+    "recorded",
+    [
+        pytest.param(
+            {
+                "settlement_data": {"accepted_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+                "buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL,
+                "settlement_plan": _accepted_plan(),
+            },
+            id="accepted proposal recorded",
+        ),
+        pytest.param(
+            {
+                "settlement_data": {"accepted_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+                "buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL,
+                "settlement_plan": _accepted_plan("0x" + "ee" * 20),
+            },
+            id="accepted plan names another escrow",
+        ),
+        pytest.param(
+            {"buyer_escrow_proposal": _ACCEPTED_ESCROW_PROPOSAL},
+            id="buyer's opening only",
+        ),
+    ],
+)
+async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch, recorded):
+    """A refund returns the token and amount of the accepted plan's obligation
+    on the escrow, read as accepted rather than materialized again, and only
+    for a deal that recorded its accepted escrow proposal, never the buyer's
+    opening alone."""
+
     class FakeDb:
         def __init__(self):
             self.listing_updates = []
@@ -117,12 +205,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
                 "seller_principal": Ed25519Signer(b"\x52" * 32).identity.model_dump(
                     mode="json"
                 ),
-                "buyer_escrow_proposal": {
-                    "chain_name": "anvil",
-                    "escrow_address": "0x" + "aa" * 20,
-                    "fields": {"token": "0x" + "cc" * 20},
-                    "expiration_unix": 1_800_000_000,
-                },
+                **recorded,
                 "agreed_price": 42,
                 "agreed_duration_seconds": 3600,
             }
@@ -137,9 +220,6 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         kind="erc20_escrow_obligation_default",
         refund_claimed=AsyncMock(return_value={"tx_hash": "0xrefund"}),
     )
-    fake_terms = SimpleNamespace(
-        obligation_data={"token": "0x" + "cc" * 20, "amount": 42}
-    )
 
     monkeypatch.setattr(
         "market_storefront.failure_actions._configured_failure_actions_source",
@@ -148,10 +228,6 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
     monkeypatch.setattr(
         "market_storefront.failure_actions.get_evm_wallet_private_key",
         lambda: "seller-pk",
-    )
-    monkeypatch.setattr(
-        "market_storefront.failure_actions.get_evm_wallet_address",
-        lambda: "0x" + "dd" * 20,
     )
     monkeypatch.setattr(
         "market_storefront.failure_actions.stage_event",
@@ -166,11 +242,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         },
     )
     monkeypatch.setattr(
-        "market_alkahest.alkahest.materialize_escrow_terms_from_proposal",
-        lambda **kwargs: [fake_terms],
-    )
-    monkeypatch.setattr(
-        "market_alkahest.alkahest.get_escrow_codec_for",
+        "market_storefront.failure_actions.get_escrow_codec_for",
         lambda *args, **kwargs: fake_codec,
     )
 
@@ -184,6 +256,26 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
         ),
     )
 
+    if "settlement_data" not in recorded:
+        assert result.actions == [
+            {
+                "action": "refund",
+                "status": "failed",
+                "reason": "accepted_escrow_proposal_unavailable",
+            }
+        ]
+        fake_codec.refund_claimed.assert_not_awaited()
+        assert db.escrow_updates == []
+        return
+    if recorded["settlement_plan"] != _accepted_plan():
+        (action,) = result.actions
+        assert (action["status"], action["reason"]) == (
+            "failed",
+            "escrow_refund_context_invalid",
+        )
+        fake_codec.refund_claimed.assert_not_awaited()
+        assert db.escrow_updates == []
+        return
     assert result.actions == [
         {
             "action": "refund",
@@ -195,7 +287,7 @@ async def test_failure_policy_refund_uses_escrow_codec_for_proposal(monkeypatch)
     fake_codec.refund_claimed.assert_awaited_once_with(
         private_key="seller-pk",
         rpc_url="http://rpc",
-        obligation_data={"token": "0x" + "cc" * 20, "amount": 42},
+        obligation_data={**_ACCEPTED_OBLIGATION_DATA, "amount": 42},
         to_address=BUYER_EVM_ADDRESS,
     )
     assert db.listing_updates == [{"listing_id": "listing-1", "status": "refunded"}]

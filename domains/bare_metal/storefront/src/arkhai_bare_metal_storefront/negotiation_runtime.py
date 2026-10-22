@@ -43,6 +43,11 @@ from market_core.schemas import (
     compute_rate_total,
     Agreement,
 )
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+    authorize_escrow_proposal,
+)
 from market_identity import Identity
 from market_negotiation_runtime import (
     Acceptance,
@@ -284,6 +289,16 @@ def _escrow_proposal(proposal: Mapping[str, Any] | None) -> EscrowProposal:
         ) from exc
 
 
+def _authorized_escrow(
+    proposal: EscrowProposal, listing: Mapping[str, Any]
+) -> EscrowProposal:
+    """``proposal`` under the release condition ``listing`` authorizes, or a refusal."""
+    try:
+        return authorize_escrow_proposal(proposal, listing=listing)
+    except ReleaseConditionError as exc:
+        raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
+
+
 def _seller_reference_amount(
     accepted: AcceptedEscrow | None,
     *,
@@ -330,16 +345,16 @@ def build_bare_metal_negotiation_runtime(
     trading_pause: TradingPause,
     plan_builder: PlanBuilder,
     accepted_obligation_dispatch: AcceptedObligationDispatch,
-    seller_wallet_address: str | None = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     settlement_data_dispatch: Mapping[str, AcceptedAgreementBuilder] | None = None,
     seller_stages: SettlementStageTable[Any] = SELLER_STAGES,
 ) -> NegotiationRuntime:
     """Compose bare metal's hooks onto the kit's negotiation runtime.
 
-    ``plan_builder`` is called with ``seller_wallet_address`` and
+    ``plan_builder`` is called with the listing record and
     ``chain_config_paths``, the inputs settlement verification uses, so the plan
-    committed at acceptance is the plan settlement verifies.
+    committed at acceptance is the plan settlement verifies, under the release
+    condition the listing authorizes.
     """
 
     chain_paths = dict(chain_config_paths or {})
@@ -482,11 +497,20 @@ def build_bare_metal_negotiation_runtime(
             listing_source=request.listing_source,
         )
         state = dict(result.intermediate or {})
+        pinned: dict[str, Any] | None = None
+        if len(request.history) == 1 and result.decision.action in ("accept", "counter"):
+            # The thread pins the opening escrow under the release condition
+            # the listing authorizes, so acceptance and settlement verification
+            # materialize that condition; a selection the listing does not
+            # authorize refuses the opening, whatever the policy decided.
+            pinned = _authorized_escrow(opening, request.listing_record).model_dump(
+                mode="json", exclude_none=True
+            )
         return RoundEvaluation(
             our_amount=int(result.our_amount),
             strategy_label=result.strategy_label,
             decision=result.decision,
-            pinned_proposal=None,
+            pinned_proposal=pinned,
             uses_scalar_amount=bool(state.get("uses_scalar_amount", True)),
             buyer_amount=buyer_amount,
             domain_state=state,
@@ -502,9 +526,12 @@ def build_bare_metal_negotiation_runtime(
 
         selection = exact_selection(proposal, None)
         assert selection is not None
-        # A composed mechanism with no obligation builder settles from the
-        # Agreement alone, so it is admitted without a plan. A mechanism with no
-        # seller entry could never settle, so it is never admitted.
+        # A mechanism with no seller entry could never settle, so it is never
+        # admitted. One with no obligation builder is admitted without a plan
+        # only when its entry settles from the Agreement alone; an Alkahest
+        # escrow is verified against the plan an escrow proposal materializes
+        # under the listing's release condition, which a selection cannot
+        # build, so its exact selection is refused.
         if (
             selection.mechanism not in seller_stages
             or selection.mechanism not in accepted_obligation_dispatch
@@ -514,6 +541,16 @@ def build_bare_metal_negotiation_runtime(
                 status_code=400,
             )
         build_obligation = accepted_obligation_dispatch[selection.mechanism]
+        if (
+            build_obligation is None
+            and not seller_stages[selection.mechanism].settles_from_agreement
+        ):
+            raise BareMetalNegotiationRefusal(
+                "settlement_selection_requires_plan: "
+                f"{selection.mechanism} settles only under a settlement plan, "
+                "which an exact selection cannot build; open with an escrow proposal",
+                status_code=409,
+            )
         record = request.listing_record
         if Identity.model_validate(record.get("seller_principal")) != seller_principal:
             raise BareMetalNegotiationRefusal("listing seller identity changed")
@@ -542,7 +579,7 @@ def build_bare_metal_negotiation_runtime(
             )
         # A deal that provisions the listed machine is held to the same
         # admission rules and records the same terms however it settles.
-        provisions = seller_stages[selection.mechanism].physical
+        provisions = seller_stages[selection.mechanism].fulfils_through_capacity
         terms: BareMetalTerms | None = None
         if provisions:
             trusted_listing = await request.repository.load_bare_metal_listing_payload(
@@ -676,28 +713,37 @@ def build_bare_metal_negotiation_runtime(
             raise NegotiationStateError(
                 "an exact-option negotiation is accepted only when it opens"
             )
+        proposal = _escrow_proposal(acceptance.pinned_proposal)
         try:
             artifacts = plan_builder(
-                proposal=acceptance.pinned_proposal,
+                proposal=proposal,
+                listing=acceptance.listing_record,
                 agreed_amount=acceptance.agreed_amount,
                 duration_seconds=acceptance.agreement.duration_seconds,
                 uses_scalar_amount=acceptance.uses_scalar_amount,
                 buyer_principal=acceptance.buyer_principal,
                 seller_principal=acceptance.seller_principal,
-                seller_wallet_address=seller_wallet_address,
                 chain_config_paths=chain_paths,
             )
         except BareMetalSettlementPlanError as exc:
             raise BareMetalNegotiationRefusal(str(exc)) from exc
+        except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
+            # The plan is materialized under the condition the listing record
+            # authorizes; one it no longer authorizes, an authorized one the
+            # codecs cannot encode, such as one paying an empty seller wallet,
+            # and a plan that cannot be materialized refuse like any other.
+            raise BareMetalNegotiationRefusal(str(exc), status_code=409) from exc
         response = {
             key: artifacts[key] for key in _ESCROW_RESPONSE_ARTIFACTS if key in artifacts
         }
-        response.setdefault("accepted_escrow_proposal", acceptance.pinned_proposal)
+        response.setdefault(
+            "accepted_escrow_proposal",
+            proposal.model_dump(mode="json", exclude_none=True),
+        )
         # The negotiated escrow is recorded as the Agreement's selected option,
         # so settlement dispatches it through its seller entry like any other.
         settlement = legacy_alkahest_option(
-            _escrow_proposal(acceptance.pinned_proposal),
-            response.get("settlement_plan") or {},
+            proposal, response.get("settlement_plan") or {}
         )
         return _with_agreement(
             acceptance, response, settlement=settlement, data_dispatch=data_dispatch

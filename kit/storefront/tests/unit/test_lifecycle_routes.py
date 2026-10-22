@@ -6,7 +6,6 @@ import asyncio
 
 import pytest
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 from market_storefront_kit import (
     LifecycleRouteError,
     StorefrontLifecycleRouteService,
@@ -33,7 +32,14 @@ async def test_pause_and_resume_report_every_loop(controller):
             gated.set()
             await controller.idle(3600)
 
-    controller.start_loop(StorefrontBackgroundTask(name="alpha", task_factory=_loop))
+    # A synthetic body gating for itself, which a fan-out's task is.
+    async def _step():
+        return {}
+
+    controller.register_fan_out(
+        "alpha", route="alpha", step=_step, run=_loop, children=lambda: ()
+    )
+    controller.start_loops()
     service = StorefrontLifecycleRouteService(controller)
     await asyncio.wait_for(gated.wait(), timeout=1)
 

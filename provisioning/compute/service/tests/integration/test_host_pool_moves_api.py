@@ -55,7 +55,7 @@ async def _relay_and_pools(clients) -> None:
             PoolCreate(
                 id=pool_id,
                 label=pool_id,
-                provider="ansible",
+                provider="vm.ansible",
                 policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
                 provider_config=provider_config,
             )

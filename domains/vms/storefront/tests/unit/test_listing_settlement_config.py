@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from market_resource_pools_contracts.backing import BACKED
 from market_settlement_runtime import SettlementPublicationClause
 from pydantic import ValidationError
 
@@ -82,6 +83,7 @@ def test_clause_only_listing_request_is_a_valid_publication_input() -> None:
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
@@ -127,11 +129,12 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=db,
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
-        source_backing_resolver=lambda **_source: "backed",
+        source_backing_resolver=lambda **_source: BACKED,
     )
     monkeypatch.setattr(
         service,
@@ -179,6 +182,7 @@ async def test_direct_settlement_options_are_rejected() -> None:
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
@@ -222,6 +226,7 @@ async def test_registration_composition_receives_ordered_example_clauses() -> No
         binding=_COLLABORATORS.binding,
         domain=_COLLABORATORS.domain,
         capacity_runtime=_COLLABORATORS.capacity_runtime,
+        site_projections=_COLLABORATORS.site_projections,
         sqlite_client=_repository(),
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},

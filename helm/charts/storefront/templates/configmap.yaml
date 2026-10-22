@@ -6,7 +6,11 @@ the storefront merges the two at startup, the overlay winning.
 Kept apart from the Secret so non-sensitive edits (log levels, provisioning
 mode, RPC URLs) diff as a ConfigMap, with no secret-rotation noise.
 */}}
-{{- range $agent := .Values.agents }}
+{{- $agents := dict }}
+{{- include "storefront.agents" (dict "root" . "into" $agents) }}
+{{- range $name, $entry := $agents }}
+{{- /* An agent states no runtime overlay by omitting `secret`. */}}
+{{- $agent := mergeOverwrite (dict "secret" (dict)) $entry (dict "name" $name) }}
 {{- $component := $agent.component | default $agent.name }}
 apiVersion: v1
 kind: ConfigMap

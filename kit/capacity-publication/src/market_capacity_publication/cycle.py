@@ -17,6 +17,8 @@ listing's local status".
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import threading
 from collections.abc import Awaitable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
@@ -62,6 +64,10 @@ class PublicationCycleReport:
         }
 
 
+class PublicationCycleStopped(RuntimeError):
+    """The cycle a callback belongs to was cancelled, so its call cannot complete."""
+
+
 class PublicationCycleDriver:
     """Runs the synchronous publication runner under an async storefront.
 
@@ -70,18 +76,52 @@ class PublicationCycleDriver:
     passes each coroutine it needs to :meth:`call`, which runs it on the bound
     loop and returns its result. Calling :meth:`call` on the loop's own thread
     would deadlock, so it is only for callbacks.
+
+    A worker thread cannot be cancelled, so cancelling the cycle stops it at
+    its callbacks instead: the call waiting on the loop fails at once with
+    :class:`PublicationCycleStopped`, and so does every later call, so the
+    runner unwinds and the thread ends. Without that, a call whose coroutine
+    the loop never completes -- a loop closing behind a cancelled cycle --
+    would hold the thread forever, and an interpreter exit with it.
     """
 
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._lock = threading.Lock()
+        self._pending: set[concurrent.futures.Future[Any]] = set()
+        self._stopped = False
 
     def call(self, awaitable: Awaitable[T]) -> T:
-        if self._loop is None:
-            raise RuntimeError("a publication cycle is not running")
-        return asyncio.run_coroutine_threadsafe(
-            awaitable,  # type: ignore[arg-type]
-            self._loop,
-        ).result()
+        with self._lock:
+            if self._loop is None:
+                raise RuntimeError("a publication cycle is not running")
+            if self._stopped:
+                if asyncio.iscoroutine(awaitable):
+                    awaitable.close()
+                raise PublicationCycleStopped("the publication cycle was cancelled")
+            future = asyncio.run_coroutine_threadsafe(
+                awaitable,  # type: ignore[arg-type]
+                self._loop,
+            )
+            self._pending.add(future)
+        try:
+            return future.result()
+        except concurrent.futures.CancelledError as exc:
+            if self._stopped:
+                raise PublicationCycleStopped(
+                    "the publication cycle was cancelled"
+                ) from exc
+            raise
+        finally:
+            with self._lock:
+                self._pending.discard(future)
+
+    def _stop(self) -> None:
+        with self._lock:
+            self._stopped = True
+            pending = tuple(self._pending)
+        for future in pending:
+            future.cancel()
 
     async def run(
         self,
@@ -94,17 +134,23 @@ class PublicationCycleDriver:
         close_stale: bool = True,
         skip_open: bool = False,
     ) -> PublicationCycleResult:
-        self._loop = asyncio.get_running_loop()
-        return await asyncio.to_thread(
-            run_publication_cycle,
-            tuple(sources),
-            db_path=db_path,
-            base_url=base_url,
-            build_payload=build_payload,
-            publish_listing=publish_listing,
-            close_stale=close_stale,
-            skip_open=skip_open,
-        )
+        with self._lock:
+            self._loop = asyncio.get_running_loop()
+            self._stopped = False
+        try:
+            return await asyncio.to_thread(
+                run_publication_cycle,
+                tuple(sources),
+                db_path=db_path,
+                base_url=base_url,
+                build_payload=build_payload,
+                publish_listing=publish_listing,
+                close_stale=close_stale,
+                skip_open=skip_open,
+            )
+        except asyncio.CancelledError:
+            self._stop()
+            raise
 
 
 async def converge_registries(
@@ -135,6 +181,7 @@ async def converge_registries(
 
 __all__ = [
     "PublicationCycleDriver",
+    "PublicationCycleStopped",
     "PublicationCycleReport",
     "converge_registries",
 ]

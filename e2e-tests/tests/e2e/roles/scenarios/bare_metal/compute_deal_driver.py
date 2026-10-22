@@ -22,7 +22,11 @@ from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTI
 from compute_provisioning_contracts import ConnectionSubmission, HostCreate
 from market_resource_pools_contracts import PoolCreate
 
-from tests.e2e.roles.helpers.compute_deal import DealLease, SiteCapacity
+from tests.e2e.roles.helpers.compute_deal import (
+    DealLease,
+    SiteCapacity,
+    advance_storefront,
+)
 from tests.e2e.roles.helpers.compute_deal_stages import DURATION_HOURS
 
 BARE_METAL = "bare_metal"
@@ -89,6 +93,7 @@ class BareMetalComputeDealDriver:
         publication view names its host and physical machine, as the storefront
         checks a scheduled resource against the accepted terms.
         """
+        held_before = self._held_generation()
         self.site_operator.create_pool(
             PoolCreate(
                 id=self.pool_id,
@@ -142,11 +147,21 @@ class BareMetalComputeDealDriver:
                 },
             )
         )
-        # Bare-metal publication reads each site's projection on every pass, so
-        # there is no projection to refresh; the site must answer it.
+        # The storefront reads the site's projection from the state its poller
+        # holds, and the scenario holds that poller: one step of it loads the
+        # new supply, which publication and the seller's inventory guard read.
+        stepped = advance_storefront(self.storefront_admin_client, "site-projections")
+        held = stepped["sites"][self.site_id]["resource_pool"]
+        assert held["state"] == "loaded", stepped
+        # The step fetched the generation carrying the new pool and machine,
+        # not merely confirmed the one held before the supply was declared.
+        assert (held["revision"], held["digest"]) != held_before, (held_before, stepped)
+
+    def _held_generation(self) -> tuple[Any, Any]:
+        """The resource-pool generation the storefront holds for the lane's site."""
         health = self.storefront_admin_client.get_health()
-        state = health.site_projections[self.site_id]["resource_pool"]["state"]
-        assert state == "loaded", health.site_projections
+        held = health.site_projections[self.site_id]["resource_pool"]
+        return held.get("revision"), held.get("digest")
 
     # -- negotiation --------------------------------------------------------
 

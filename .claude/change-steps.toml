@@ -1,0 +1,181 @@
+# The skill and permissions of each step of an OpenSpec change when it runs
+# unattended, through scripts/run_change_step.py.
+#
+# An unattended run uses Claude Code's `dontAsk` permission mode with only the
+# project's settings loaded: a tool call no `allow` rule names is denied and
+# recorded in the run's `permission_denials`, so a step needing a tool it was
+# not given ends `stopped` instead of waiting on a prompt nobody will answer. A
+# chained command runs only when every command in it is allowed. `deny`
+# rules win over `allow` rules; they are the "never" lines of each step's skill,
+# and a push other than validation's guarded `make push-branch` is denied to
+# every step.
+#
+# Interactive runs of a step do not read this file: the owner's own permission
+# settings apply to them, with prompts. A step's permissions change here, by the
+# owner, as a tracked change, and no step may edit this file or the project's
+# Claude Code settings; a rule the owner grants for one resumed run is passed on
+# that run's command line and noted on its log line, never added here.
+#
+# Rules use Claude Code's permission rule syntax. Each step's rules are its own
+# plus `common`'s. Contract: openspec/specs/change-workflow/spec.md, "Unattended
+# runs are held to their step's permissions".
+
+# Every step reads the repository and its history, and checks the change index.
+[common]
+allow = [
+  "Read", "Glob", "Grep", "Skill",
+  "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
+  "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
+  "Bash(git merge-base*)", "Bash(git check-ignore*)",
+  "Bash(python3 scripts/find_change.py*)", "Bash(python3 scripts/change_next_step.py*)", "Bash(make change-cost*)",
+  "Bash(python3 scripts/run_change_step.py log*)",
+  "Bash(make round-view-closed*)", "Bash(make check-change-index)",
+  "Bash(openspec validate *)", "Bash(openspec instructions *)", "Bash(openspec list*)",
+  "Bash(openspec show *)", "Bash(openspec status*)",
+  "Bash(ls *)", "Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)",
+  "Bash(grep *)", "Bash(echo *)", "Bash(diff *)", "Bash(find *)",
+  # The rest of the read-only text toolbox the steps reach for, and the git
+  # reads in their `-C <dir>` form. A chain runs only when every command in it
+  # is allowed, so a leading `cd` is allowed as the no-op it is: it grants
+  # nothing to the commands after it.
+  "Bash(sed -n *)", "Bash(awk *)", "Bash(cut *)", "Bash(sort *)", "Bash(uniq *)",
+  "Bash(tr *)", "Bash(cd *)",
+  "Bash(git -C * status*)", "Bash(git -C * log*)", "Bash(git -C * diff*)",
+  "Bash(git -C * show*)",
+]
+deny = [
+  "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
+  "Bash(git stash*)", "Bash(git clean*)", "Bash(git rebase*)",
+  "Bash(make round-view)", "Bash(make round-view *)", "Bash(make round-done*)",
+  "Edit(.claude/**)", "Write(.claude/**)",
+  # find reads unless an action deletes, runs, or writes.
+  "Bash(find * -delete*)", "Bash(find * -exec*)", "Bash(find * -ok*)",
+  "Bash(find * -fprint*)", "Bash(find * -fls*)",
+  # The diff family writes its output to a file with --output.
+  "Bash(git diff*--output*)", "Bash(git show*--output*)", "Bash(git log*--output*)",
+  "Bash(git -C *--output*)",
+  # sed reads only with -n; its in-place forms edit the file.
+  "Bash(sed -i*)", "Bash(sed * -i*)", "Bash(sed *--in-place*)",
+]
+
+# Design writes the change's documents and commits nothing; the owner commits
+# design-phase work. A design blocked on a prerequisite writes the
+# prerequisite's proposal in a worktree on a new branch from dev, never on the
+# blocked branch.
+# Review runs on Codex in its read-only sandbox, falling back to Claude when Codex is
+# unavailable. The Claude reviewer only reads: no edit, and nothing beyond common's
+# read-only commands.
+[steps.review]
+skill = "change-review"
+models = [
+  { harness = "codex",  model = "gpt-6-sol",       effort = "high" },
+  { harness = "claude", model = "claude-opus-5-5", effort = "high" },
+]
+allow = ["Bash(make check-doc-citations*)", "Bash(make check-comment-hygiene)",
+         "Bash(make check-tasks*)", "Bash(make check-architecture)"]
+deny = ["Edit"]
+
+[steps.design]
+skill = "change-design"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  # Read-only lens vocabulary extraction from intervention ledgers on stdin.
+  "Bash(python3 -c \"import sys,json; print(sorted({json.loads(l)['lens'] for l in sys.stdin if l.strip()}))\")",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(git worktree add ../*-proposal -b propose-* dev)",
+  "Bash(make -C ../*-proposal check-change-index)",
+  # A prerequisite's or follow-up's proposal is new files in a new directory of
+  # the worktree, so the step creates them as well as editing them.
+  "Bash(mkdir -p ../*-proposal/openspec/changes/*)",
+  "Edit(../*-proposal/openspec/**)", "Write(../*-proposal/openspec/**)",
+  "Bash(helm version*)",
+]
+deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
+
+# Planning resumes the design step's session, which holds the design's context.
+[steps.plan]
+skill = "change-plan"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+resume_from = "design"
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+]
+deny = ["Bash(git commit*)", "Bash(make push-branch*)"]
+
+# Triage fixes what the owner accepts and commits it, so it has implementation's
+# rules beside design's.
+[steps.triage]
+skill = "change-triage"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(make check-*)",
+  "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)", "Bash(make dist*)",
+  "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)",
+  "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
+  "Bash(helm version*)",
+]
+deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+
+[steps.implement]
+skill = "change-implement"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+allow = [
+  "Edit", "Write", "Task",
+  "Bash(make check-*)", "Bash(make test*)", "Bash(make -C * test*)", "Bash(make lock*)",
+  "Bash(make dist*)", "Bash(make -C * dist*)", "Bash(make reinit*)", "Bash(uv run pytest *)",
+  "Bash(uv run --no-project --with pytest pytest *)", "Bash(uv sync*)",
+  "Bash(git add *)", "Bash(git commit *)", "Bash(git mv *)", "Bash(make typecheck*)",
+  "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)", "Bash(helm version*)",
+]
+deny = ["Bash(make push-branch*)", "Bash(make run-e2e*)"]
+
+# Validation never changes the commit: it writes only its own record, and its
+# one push is the guarded push of the change's branch.
+[steps.validate]
+skill = "change-validate"
+models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+allow = [
+  "Edit(openspec/changes/**/reviews/*-validation.md)",
+  "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(make push-branch)",
+  "Bash(make run-e2e)", "Bash(make round-e2e-baseline)", "Bash(make fetch-e2e-logs*)",
+  "Bash(make dist-clean)",
+  "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
+  "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",
+]
+deny = ["Bash(make lock*)", "Bash(git commit*)", "Bash(git add*)",
+        "Bash(docker push*)", "Bash(helm push*)"]
+
+# Closeout changes documentation only; a part that needs code returns the change
+# to implementation.
+[steps.closeout]
+skill = "change-closeout"
+models = [{ harness = "claude", model = "claude-opus-5-5", effort = "high" }]
+allow = [
+  "Edit(openspec/**)", "Edit(docs/**)",
+  "Edit(AGENTS.md)",
+  "Bash(bunx @fission-ai/openspec@1.14.0 *)",
+  "Bash(npx --yes @fission-ai/openspec@1.14.0 *)", "Bash(npx -y @fission-ai/openspec@1.14.0 *)", "Bash(openspec archive *)",
+  "Bash(make check-*)", "Bash(python3 scripts/check_*)",
+  "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)"]
+
+# Archive cleanup drafts the pull request; the owner creates it.
+[steps.archive-cleanup]
+skill = "change-archive-cleanup"
+models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]
+allow = [
+  "Edit(openspec/changes/README.md)",
+  "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
+  "Edit(openspec/changes/archive/*/interventions.jsonl)",
+  "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)",
+]
+deny = ["Bash(make push-branch*)", "Bash(gh pr create*)"]

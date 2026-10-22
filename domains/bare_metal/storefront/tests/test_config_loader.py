@@ -1,0 +1,312 @@
+"""The bare-metal storefront's configuration loader.
+
+Settings are read from the packaged defaults and the configuration files under
+``XDG_CONFIG_HOME``, then the loader's environment override layer. Every value
+below is a development fixture and must never be used on a public network.
+"""
+
+from __future__ import annotations
+
+import pytest
+from market_identity import Ed25519Signer
+
+from arkhai_bare_metal_storefront.config import (
+    IDENTITY_CREDENTIAL_ENV,
+    BareMetalConfigurationError,
+    identity_credential,
+    load_storefront_settings,
+)
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
+from storefront_configuration import (
+    ADMIN,
+    SELLER,
+    SELLER_CREDENTIAL,
+    publishable_configuration,
+    write_configuration,
+)
+
+WALLET_KEY = "0x" + "55" * 32
+# Development fixture: the payments service identity the storefront pins.
+PAYMENTS_SERVICE = Ed25519Signer(b"\x07" * 32)
+DISPUTE_ACCOUNT = "33333333-3333-4333-8333-333333333333"
+
+
+def _payments_section() -> dict:
+    return {
+        "enabled": True,
+        "service_url": "http://127.0.0.1:9",
+        "service_identity": PAYMENTS_SERVICE.identity.model_dump(mode="json"),
+        "fee_bps": 250,
+        "dispute_authority": DISPUTE_ACCOUNT,
+        "development_auth": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("toml", "expected"),
+    [
+        pytest.param("[Settlement.arkhai_payments]\nlivemode = true\n", True, id="declared live"),
+        pytest.param(None, False, id="undeclared"),
+    ],
+)
+def test_the_payments_mode_in_the_files_reaches_the_composed_stage(
+    monkeypatch, tmp_path, toml, expected
+):
+    document = publishable_configuration(tmp_path / "storefront.db")
+    document["Settlement"] = {
+        "schema_version": 1,
+        "priority": ["arkhai.payments.v1"],
+        "arkhai_payments": _payments_section(),
+    }
+    write_configuration(monkeypatch, tmp_path, document, toml=toml)
+
+    settings = load_storefront_settings()
+    composition = BareMetalStorefrontSettlementComposition.from_raw_config(settings.settlement)
+
+    assert composition.arkhai_payments_stage().config.livemode is expected
+
+
+def test_the_packaged_defaults_state_every_interval(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path)
+
+    settings = load_storefront_settings()
+
+    assert settings.base_url == "http://localhost:8000"
+    assert settings.port == 8000
+    assert settings.db_path == "bare-metal-storefront.db"
+    assert settings.negotiation_timeout_seconds == 1800
+    assert settings.negotiation_watchdog_interval == 60
+    assert settings.settlement_servicing_interval_seconds == 30
+    assert settings.payment_reconciliation_interval == 30
+    assert settings.capacity.poll_interval == 5
+    assert settings.capacity.publication_interval_seconds == 30
+    assert settings.capacity.confirmation_window_seconds == 15
+    assert settings.capacity.placement == "fill_first"
+    # No lease bound is shipped: a pool that resolves none is held, not refused.
+    assert settings.pricing.default_max_duration_seconds is None
+    assert settings.registry.urls == []
+    assert settings.settlement == {"schema_version": 1, "priority": []}
+
+
+def test_each_file_layers_over_the_one_before(monkeypatch, tmp_path):
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"base_url": "http://rendered:8000", "pricing": {"default_max_duration_seconds": 7200}},
+        toml='base_url = "http://operator:8000"\n\n[capacity]\npoll_interval = 2\n',
+    )
+
+    settings = load_storefront_settings()
+
+    # storefront.json, the rendered document, wins over storefront.toml ...
+    assert settings.base_url == "http://rendered:8000"
+    # ... and each keeps what the other does not state, over the defaults.
+    assert settings.capacity.poll_interval == 2
+    assert settings.capacity.publication_interval_seconds == 30
+    assert settings.pricing.default_max_duration_seconds == 7200
+
+
+def test_the_secret_overlay_wins_on_a_conflicting_key(monkeypatch, tmp_path):
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"Wallet": {"address": "0x" + "33" * 20}, "base_url": "http://rendered:8000"},
+        secrets=f'base_url = "http://overlay:8000"\n\n[Wallet]\nprivate_key = "{WALLET_KEY}"\n',
+    )
+
+    settings = load_storefront_settings()
+
+    assert settings.base_url == "http://overlay:8000"
+    assert settings.wallet.address == "0x" + "33" * 20
+    assert settings.wallet.private_key == WALLET_KEY
+    # The key is a secret: it is never part of the settings' representation.
+    assert WALLET_KEY not in repr(settings)
+
+
+def test_the_environment_override_layer_applies_over_every_file(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 2}})
+    monkeypatch.setenv("STOREFRONT_CAPACITY__POLL_INTERVAL", "7")
+    monkeypatch.setenv("STOREFRONT_NEGOTIATION_WATCHDOG_INTERVAL", "45")
+    monkeypatch.setenv(
+        "STOREFRONT_IDENTITY__PRINCIPAL__IDENTIFIER",
+        f"@str {SELLER.identity.identifier}",
+    )
+    monkeypatch.setenv("STOREFRONT_IDENTITY__PRINCIPAL__SCHEME", "eip191")
+
+    settings = load_storefront_settings()
+
+    assert settings.capacity.poll_interval == 7
+    assert settings.negotiation_watchdog_interval == 45
+    assert settings.identity.principal == SELLER.identity
+
+
+def test_the_signing_credential_is_never_a_setting(monkeypatch, tmp_path):
+    write_configuration(monkeypatch, tmp_path, publishable_configuration(tmp_path / "db"))
+    monkeypatch.setenv(IDENTITY_CREDENTIAL_ENV, SELLER_CREDENTIAL)
+
+    settings = load_storefront_settings()
+
+    assert SELLER_CREDENTIAL not in settings.model_dump_json()
+    assert SELLER_CREDENTIAL not in repr(settings)
+    # The composition root reads it apart from settings and hands it to the signer.
+    assert identity_credential() == SELLER_CREDENTIAL
+    assert settings.signer(identity_credential()).identity == SELLER.identity
+
+
+def test_a_missing_credential_is_named(monkeypatch):
+    monkeypatch.delenv(IDENTITY_CREDENTIAL_ENV, raising=False)
+
+    with pytest.raises(BareMetalConfigurationError, match=IDENTITY_CREDENTIAL_ENV):
+        identity_credential()
+
+
+def test_section_and_key_names_are_read_in_any_case(monkeypatch, tmp_path):
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"Capacity": {"Poll_Interval": 3, "Sites": {"Site-A": "http://a.test"}}},
+    )
+
+    settings = load_storefront_settings()
+
+    assert settings.capacity.poll_interval == 3
+    # A site ID is a name, not a key, and keeps its spelling.
+    assert settings.capacity.sites == {"Site-A": "http://a.test"}
+
+
+@pytest.mark.parametrize(
+    ("document", "named"),
+    [
+        pytest.param({"capacity": {"poll_interval": 0}}, "capacity.poll_interval",
+                     id="a zero interval"),
+        pytest.param({"capacity": {"source_confirmation_seconds": -1}},
+                     "capacity.source_confirmation_seconds", id="a negative window"),
+        pytest.param({"capacity": {"source_confirmation_seconds": 1e11}},
+                     "capacity.source_confirmation_seconds",
+                     id="a window too long to apply to an instant"),
+        pytest.param({"capacity": {"poll_interval": 1e11}}, "capacity.poll_interval",
+                     id="an interval too long to apply to an instant"),
+        pytest.param({"negotiation_timeout_seconds": 1e11},
+                     "negotiation_timeout_seconds",
+                     id="a timeout the watchdog could not subtract from now"),
+        pytest.param({"capacity": {"poll_interval": 1e-7}}, "capacity.poll_interval",
+                     id="an interval that rounds to no time"),
+        pytest.param({"negotiation_watchdog_interval": True},
+                     "negotiation_watchdog_interval", id="a boolean interval"),
+        pytest.param({"pricing": {"default_max_duration_seconds": "86400"}},
+                     "pricing.default_max_duration_seconds", id="a bound as text"),
+        pytest.param({"Identity": {"principal": {"scheme": "eip191", "identifier": "x"}}},
+                     "identity.principal", id="a malformed principal"),
+    ],
+)
+def test_a_setting_that_cannot_be_read_is_refused_by_key(
+    monkeypatch, tmp_path, document, named
+):
+    write_configuration(monkeypatch, tmp_path, document)
+
+    with pytest.raises(BareMetalConfigurationError, match=named):
+        load_storefront_settings()
+
+
+def test_the_confirmation_window_is_three_poll_intervals_unless_stated(
+    monkeypatch, tmp_path
+):
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 2}})
+    derived = load_storefront_settings().capacity
+
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"capacity": {"poll_interval": 2, "source_confirmation_seconds": 3600}},
+    )
+    stated = load_storefront_settings().capacity
+
+    assert derived.source_confirmation_seconds is None
+    assert derived.confirmation_window_seconds == 6
+    assert stated.confirmation_window_seconds == 3600
+
+
+def test_a_refusal_carries_no_secret_value_in_its_exception_chain(monkeypatch, tmp_path):
+    """A wallet key that cannot be read is refused by key, and the refusal has
+    no exception context: the ValidationError behind it keeps the value."""
+    write_configuration(monkeypatch, tmp_path, {"Wallet": {"private_key": [WALLET_KEY]}})
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "wallet.private_key" in str(refused.value)
+    assert WALLET_KEY not in str(refused.value)
+    assert "55" * 32 not in str(refused.value)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
+
+
+def test_a_derived_window_too_long_to_apply_is_refused_by_its_interval(
+    monkeypatch, tmp_path
+):
+    """Three poll intervals of 3e10 seconds exceed the longest duration a
+    setting may state, though one does not: unstated, the window is refused at
+    load, naming the interval it derives from, rather than overflowing at the
+    first recheck. Stated, the same interval is accepted."""
+    write_configuration(monkeypatch, tmp_path, {"capacity": {"poll_interval": 3e10}})
+
+    with pytest.raises(BareMetalConfigurationError) as refused:
+        load_storefront_settings()
+
+    assert "capacity: " in str(refused.value)
+    assert "poll_interval sets source_confirmation_seconds" in str(refused.value)
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {"capacity": {"poll_interval": 3e10, "source_confirmation_seconds": 3600}},
+    )
+    assert load_storefront_settings().capacity.confirmation_window_seconds == 3600
+
+
+def test_a_key_the_storefront_does_not_read_is_ignored(monkeypatch, tmp_path):
+    """As VM's loader ignores one, so a release still starts on configuration a
+    newer release wrote; the chart's values schema refuses a misspelling."""
+    write_configuration(
+        monkeypatch,
+        tmp_path,
+        {
+            "capacity": {"poll_interval": 3, "drift_check_seconds": 60},
+            "Wallet": {"ssh_public_key": "ssh-ed25519 AAAA test"},
+            "agent_id": "bob",
+        },
+    )
+
+    settings = load_storefront_settings()
+
+    assert settings.capacity.poll_interval == 3
+    assert settings.wallet.address == ""
+
+
+def test_the_retired_variables_are_not_read_as_settings(monkeypatch, tmp_path):
+    """The variables bare metal read before its configuration files share no
+    prefix with the override layer, so one left in a deployment is never read:
+    it neither breaks loading nor overrides a setting."""
+    write_configuration(monkeypatch, tmp_path, {"db_path": "configured.db"})
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_SETTLEMENT", '{"schema_version": 1}')
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_CHAINS", '{"anvil": {}}')
+    monkeypatch.setenv("BARE_METAL_STOREFRONT_DB_PATH", "/elsewhere.db")
+
+    settings = load_storefront_settings()
+
+    assert settings.db_path == "configured.db"
+    assert settings.settlement == {"schema_version": 1, "priority": []}
+    assert settings.chains == {}
+
+
+def test_administrators_are_every_subjects_principals(monkeypatch, tmp_path):
+    document = publishable_configuration(tmp_path / "db")
+    document["Identity"]["administrators"]["second"] = {
+        "principals": [SELLER.identity.model_dump(mode="json")]
+    }
+    write_configuration(monkeypatch, tmp_path, document)
+
+    principals = load_storefront_settings().administrator_principals()
+
+    assert principals.identities == (ADMIN.identity, SELLER.identity)

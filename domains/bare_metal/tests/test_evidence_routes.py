@@ -150,4 +150,3 @@ def test_a_client_refuses_a_role_no_reader_signs_as():
         SyncBareMetalEvidenceClient(_Recording({}), role="service").lease_ready_evidence(
             DIGEST
         )
-

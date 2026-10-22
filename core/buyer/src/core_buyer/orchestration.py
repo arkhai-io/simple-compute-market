@@ -60,7 +60,11 @@ DEFAULT_SETTLEMENT_TIMEOUT = 600.0  # 10 minutes
 BuildEscrowProposalFn = Callable[[dict[str, Any]], Any | None]
 EncodeEscrowProposalFn = Callable[[Any], dict[str, Any]]
 DecodeOpaquePayloadFn = Callable[[dict[str, Any]], Any]
-BuildEscrowTermsFn = Callable[[Any, str | None, int, int], list[Any]]
+# Materialize the seller-accepted escrow proposal into opaque term payloads:
+# (accepted proposal, the selected listing, agreed amount, duration seconds).
+# The listing is passed so the mechanism holds the terms it builds to what the
+# listing advertises, rather than to whatever the proposal names.
+BuildEscrowTermsFn = Callable[[Any, dict[str, Any], int, int], list[Any]]
 CreateEscrowFn = Callable[[list[Any]], list[str]]
 SettlementRecipientFn = Callable[[Any], str | None]
 BuildSettlementPayloadFn = Callable[[str, Any], dict[str, Any]]
@@ -502,8 +506,22 @@ def _negotiate_matches(
                 match,
                 {"settlement_selection": settlement_selection.model_dump(mode="json")},
             )
-            if selected_option is not None:
-                advertised_option = SettlementOption.model_validate(selected_option)
+            if selected_option is None:
+                # A selection naming nothing the listing advertises has no rate
+                # or acceptance contract to negotiate or revalidate against.
+                attempts.append(
+                    {
+                        "seller_url": seller_url,
+                        "listing_id": listing_id,
+                        "error": "unadvertised_settlement_selection",
+                    }
+                )
+                return NegotiationOutcome(
+                    status="exited",
+                    negotiation_id=None,
+                    reason="unadvertised_settlement_selection",
+                )
+            advertised_option = SettlementOption.model_validate(selected_option)
         if advertised_option is not None and revalidate_settlement is not None:
             try:
                 await revalidate_settlement(match, advertised_option)
@@ -936,7 +954,7 @@ def _settle_one(
         try:
             escrows = build_escrow_terms(
                 accepted_proposal,
-                terms.seller_wallet_address,
+                match,
                 terms.agreed_amount,
                 duration_seconds,
             )

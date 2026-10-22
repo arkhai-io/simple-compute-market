@@ -14,7 +14,9 @@ This module owns what is genuinely API-credits vocabulary:
 * ``credit_quota_guard`` — the inventory-guard analog: requested
   quantity ≤ the quota resource's available units in the captured
   capacity snapshot. Advisory, like every negotiation-time check —
-  issuance re-reserves authoritatively.
+  issuance re-reserves authoritatively. Not applicable when no snapshot
+  was captured, which is how a listing availability does not bound
+  reaches it.
 * ``key_owned_by_buyer_principal`` — the seller-default ownership guard:
   for an existing-key claim, the captured key record's canonical owner
   must equal the authenticated negotiation principal. The guard is
@@ -208,7 +210,11 @@ def credit_quota_guard(
     history: list[NegotiationRound],
     context: NegotiationContext,
 ) -> NegotiationStep:
-    """Veto when the quota snapshot can't cover the requested quantity."""
+    """Veto when the quota snapshot can't cover the requested quantity.
+
+    Applies only where a snapshot was captured: the storefront captures one
+    only for a listing whose backing says availability bounds it.
+    """
     listing_resource = coerce_resource_dict(context.listing.get("listing_resource"))
     if listing_resource.get("kind") != "api_credits.v1":
         return None, context
@@ -218,8 +224,11 @@ def credit_quota_guard(
         return None, context  # round-0 guard already rejected fresh threads
     quantity = int(quantity)
 
+    snapshot = context.available_resources or {}
+    if "resources" not in snapshot:
+        return None, context
     resource_id = listing_resource.get("resource_id")
-    rows = (context.available_resources or {}).get("resources") or []
+    rows = snapshot.get("resources") or []
     for row in rows:
         if resource_id and str(row.get("resource_id")) != str(resource_id):
             continue

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
+import logging
+import sqlite3
 
 import httpx
 import pytest
@@ -15,6 +18,16 @@ from storefront_client.client import StorefrontClientError
 from storefront_client.models import HealthResponse
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
+from arkhai_bare_metal_storefront.lifecycle_steps import (
+    PUBLICATION,
+    PublicationWake,
+    bare_metal_loop_controller,
+)
+from arkhai_bare_metal_storefront.publication import (
+    BareMetalPublicationCycle,
+    BareMetalPublicationError,
+)
+from arkhai_bare_metal_storefront.publication_composition import compose_publication_cycle
 from arkhai_bare_metal_storefront.publication_service import BareMetalRegistryConfiguration
 from arkhai_bare_metal_storefront.runtime import (
     BareMetalStorefrontRuntime,
@@ -27,7 +40,19 @@ from arkhai_bare_metal_storefront.server import (
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from held_loops import held_loop_controller
 from settlement_compositions import alkahest_composition
+from site_trust import seeded_sites
+from test_publication_cycle import (
+    REGISTRY_URL,
+    SELLER_WALLET,
+    RecordingRegistries,
+    Site,
+    alkahest_publication,
+    member,
+    pool,
+    projections_over,
+)
 
 
 def _app(runtime: BareMetalStorefrontRuntime):
@@ -178,68 +203,62 @@ async def test_health_is_truthful_about_uncomposed_authorities(tmp_path) -> None
         "fulfillment": "unavailable",
     }
     assert health.paused is False
-    assert health.resource_count == 0
+    assert "resource_count" not in health.extra
     assert health.site_projections == {}
 
 
-class _Site:
-    """A site authority's typed client, answering the projection version."""
+def _sited_runtime(path: str, sites: dict) -> BareMetalStorefrontRuntime:
+    """A runtime holding the projections of ``sites``, which startup loads.
 
-    def __init__(self, *, revision: int = 0, error: Exception | None = None) -> None:
-        self._revision = revision
-        self._error = error
-
-    async def resource_pool_projection_version(self) -> dict[str, object]:
-        if self._error is not None:
-            raise self._error
-        return {"revision": self._revision, "digest": f"digest-{self._revision}"}
-
-    async def snapshot(self) -> list[dict[str, object]]:
-        raise AssertionError("health must not read the aggregate capacity projection")
-
-
-class _Sites:
-    def __init__(self, sites: dict[str, _Site]) -> None:
-        self._sites = sites
-
-    def site(self, site_id: str) -> _Site:
-        return self._sites[site_id]
-
-    async def snapshot(self) -> list[dict[str, object]]:
-        raise AssertionError("health must not read the aggregate capacity projection")
-
-
-def _sited_runtime(path: str, sites: dict[str, _Site]) -> BareMetalStorefrontRuntime:
-    runtime = _runtime(path)
-    return BareMetalStorefrontRuntime(
-        db=runtime.db,
-        domain=runtime.domain,
-        seller_principal=runtime.seller_principal,
-        admin_principals=runtime.admin_principals,
-        storefront_url=runtime.storefront_url,
-        marketplace_signer=SELLER_SIGNER,
-        seller_evm_address=runtime.seller_evm_address,
+    The state wakes the runtime's publication loop, as the composition root
+    wires it.
+    """
+    wake = PublicationWake()
+    return dataclasses.replace(
+        _runtime(path),
+        publication_wake=wake,
         site_bindings=tuple(
             BareMetalSiteBinding(
                 site_id=site_id,
-                # A development identity; never used on any public network.
-                authority_principal=ADMIN_SIGNER.identity,
+                service_peer=f"{site_id}-peer",
                 authority_url=f"http://{site_id}:8000",
             )
             for site_id in sites
         ),
-        capacity_client=_Sites(sites),
+        site_projections=projections_over(sites, on_resource_pool_change=wake),
         fulfillment_client=object(),
+        loop_controller_factory=held_loop_controller,
     )
 
 
-async def test_every_answering_site_is_reported_loaded(tmp_path) -> None:
-    runtime = _sited_runtime(
-        str(tmp_path / "storefront.db"),
-        {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
-    )
+def _sites(**serving):
+    """Site doubles by ID, each serving one pool at the given revision, or
+    failing when given ``None``."""
+    sites = {}
+    for site_id, revisions in serving.items():
+        site = Site(pool("pool-1", member("r1", "pool-1")))
+        for _ in range(1, revisions or 1):
+            site.serve(pool("pool-1", member("r1", "pool-1")))
+        if revisions is None:
+            site.fail()
+        sites[site_id.replace("_", "-")] = site
+    return sites
 
-    health = await _health(runtime)
+
+async def test_every_site_held_is_reported_loaded_and_health_calls_no_site(tmp_path) -> None:
+    """Health reports both projection families of every site as the storefront
+    holds them, and reading it calls no site. Spec scenario "An operator checks
+    inventory readiness"."""
+    sites = _sites(site_a=3, site_b=5)
+    runtime = _sited_runtime(str(tmp_path / "storefront.db"), sites)
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        loaded = {site_id: site.calls for site_id, site in sites.items()}
+        async with StorefrontClient(
+            "http://seller", transport=httpx.ASGITransport(app=app)
+        ) as client:
+            health = await client.get_health()
+        called = {site_id: site.calls for site_id, site in sites.items()}
 
     projections = health.site_projections
     assert set(projections) == {"site-a", "site-b"}
@@ -250,7 +269,9 @@ async def test_every_answering_site_is_reported_loaded(tmp_path) -> None:
         "digest-3",
     )
     assert site_a["fetched_at"] is not None
+    assert projections["site-a"]["capacity_bucket"]["state"] == "loaded"
     assert projections["site-b"]["resource_pool"]["revision"] == 5
+    assert called == loaded
     assert "site_projection" not in health.checks
     assert health.checks["fulfillment"] == "ok"
 
@@ -264,24 +285,15 @@ async def test_one_site_unavailable_is_reported_outside_the_health_gate(
     test does not depend on unrelated checks being healthy.
     """
     healthy = await _health(
-        _sited_runtime(
-            str(tmp_path / "healthy.db"),
-            {"site-a": _Site(revision=3), "site-b": _Site(revision=5)},
-        )
+        _sited_runtime(str(tmp_path / "healthy.db"), _sites(site_a=3, site_b=5))
     )
     one_down = await _health(
-        _sited_runtime(
-            str(tmp_path / "one-down.db"),
-            {
-                "site-a": _Site(revision=3),
-                "site-b": _Site(error=ConnectionError("connection refused")),
-            },
-        )
+        _sited_runtime(str(tmp_path / "one-down.db"), _sites(site_a=3, site_b=None))
     )
 
     site_b = one_down.site_projections["site-b"]["resource_pool"]
     assert site_b["state"] == "unavailable"
-    assert "connection refused" in site_b["last_error"]
+    assert "site unreachable" in site_b["last_error"]
     assert one_down.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
     assert one_down.checks == healthy.checks
     assert one_down.status == healthy.status
@@ -305,6 +317,8 @@ class _RecordingCycle:
 
 
 def _stepped_runtime(path: str, log: list[str], gate: asyncio.Event | None = None):
+    """A runtime whose publication cycles are recorded, its loops held from the
+    start so only a step runs one."""
     runtime = _runtime(path)
     names = iter(("first", "second", "third"))
     return dataclasses.replace(
@@ -312,6 +326,7 @@ def _stepped_runtime(path: str, log: list[str], gate: asyncio.Event | None = Non
         publication_cycle_factory=lambda _runtime: _RecordingCycle(
             log, next(names), gate
         ),
+        loop_controller_factory=held_loop_controller,
     )
 
 
@@ -357,7 +372,7 @@ async def test_a_loop_the_storefront_does_not_run_is_not_found(tmp_path) -> None
 
 
 class _ObservedLock(asyncio.Lock):
-    """The runtime's publication lock, reporting each attempt to acquire it.
+    """A lock a publication step takes, reporting each attempt to acquire it.
 
     Lets a test wait until a second request is actually blocked on the lock,
     rather than yielding and hoping it got there.
@@ -380,12 +395,17 @@ class _ObservedLock(asyncio.Lock):
 
 
 async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) -> None:
+    """The loop controller's cycle lock, the one ``run_cycle`` holds for a
+    timer's cycle and a step's alike, serializes the steps: the second request
+    waits on it while the first cycle runs."""
     log: list[str] = []
     gate = asyncio.Event()
     lock = _ObservedLock()
     runtime = dataclasses.replace(
         _stepped_runtime(str(tmp_path / "storefront.db"), log, gate),
-        publication_lock=lock,
+        loop_controller_factory=lambda: held_loop_controller(
+            cycle_lock_factory=lambda name: lock if name == PUBLICATION else asyncio.Lock()
+        ),
     )
     app = _app(runtime)
 
@@ -401,6 +421,419 @@ async def test_concurrent_publication_steps_run_one_after_the_other(tmp_path) ->
             await asyncio.gather(first, second)
 
     assert log == ["start first", "end first", "start second", "end second"]
+
+
+class _ReportedCycle(BareMetalPublicationCycle):
+    """The production cycle, reporting each pass that completes: the seam a test
+    waits on instead of a timer."""
+
+    def __init__(self, *, completed: asyncio.Queue, **composed: object) -> None:
+        super().__init__(**composed)
+        self._completed = completed
+
+    async def run(self, *, dry_run: bool = False) -> dict[str, object]:
+        report = await super().run(dry_run=dry_run)
+        if not dry_run:
+            self._completed.put_nowait(report)
+        return report
+
+
+@dataclasses.dataclass(frozen=True)
+class _RecordedRegistries(BareMetalRegistryConfiguration):
+    """The runtime's registry configuration, its fan-out replaced by a recording
+    registry: the one collaborator ``compose_publication_cycle`` is given in
+    place of the real one. The sites and chain clients stay at the test doubles
+    the other app tests use."""
+
+    recording: RecordingRegistries = dataclasses.field(default_factory=RecordingRegistries)
+
+    def client_factory(self, signer):
+        return self.recording
+
+
+class _ObservedCycles:
+    """Composes each publication cycle through the production composition, from
+    the runtime's held projections, settlement terms, and registry
+    configuration, as a cycle that reports each completed pass.
+
+    The runtime is given this factory, so its default -- ``compose_publication_cycle``
+    itself when ``publication_cycle_factory`` is ``None`` -- is bypassed; the two
+    differ only in the cycle class, which here reports each pass.
+    """
+
+    def __init__(self) -> None:
+        self.registry_configuration = _RecordedRegistries(
+            authorities={REGISTRY_URL: _REGISTRY_TRUST}
+        )
+        self.registries = self.registry_configuration.recording
+        self.completed: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+    def __call__(self, runtime: BareMetalStorefrontRuntime) -> BareMetalPublicationCycle:
+        return compose_publication_cycle(
+            runtime,
+            cycle_factory=functools.partial(_ReportedCycle, completed=self.completed),
+        )
+
+    async def next_cycle(self) -> dict[str, object]:
+        return await asyncio.wait_for(self.completed.get(), timeout=5)
+
+
+def _published(report: dict[str, object]) -> list[dict[str, object]]:
+    return [item for item in report["actions"] if item["action"] == "publish"]
+
+
+def _timed_runtime(
+    tmp_path, monkeypatch, site: Site, cycles: _ObservedCycles, **changes
+):
+    """A runtime over one site whose loops run on their timers from the start,
+    publication's interval far longer than any test waits.
+
+    It publishes under Alkahest settlement, composed as the storefront composes
+    it, to the registry ``cycles`` records; settlement servicing sweeps on an
+    interval no test waits out.
+    """
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
+    fields = {
+        "seller_evm_address": SELLER_WALLET,
+        "settlement_composition": composition,
+        "publication_clauses": clauses,
+        "default_max_duration_seconds": 3600,
+        "settlement_servicing_interval_seconds": 3600,
+        "registry_configuration": cycles.registry_configuration,
+        "publication_cycle_factory": cycles,
+        "loop_controller_factory": bare_metal_loop_controller,
+        "publication_interval_seconds": 3600,
+    }
+    return dataclasses.replace(
+        _sited_runtime(str(tmp_path / "storefront.db"), {"site-a": site}),
+        **{**fields, **changes},
+    )
+
+
+async def test_a_site_declaring_new_supply_is_published_by_the_timer(
+    tmp_path, monkeypatch
+) -> None:
+    """With the loops running, a pool a site declares is published with no
+    operator command: the poller's timer sees the site's new generation and
+    wakes publication, whose interval has not passed, and the timer's cycle is
+    the one the production composition builds from the runtime. Spec scenario
+    "A bare-metal site declares new supply"."""
+    site = Site(pool("pool-0"))
+    cycles = _ObservedCycles()
+    runtime = _timed_runtime(
+        tmp_path,
+        monkeypatch,
+        site,
+        cycles,
+        site_projection_poll_interval_seconds=0.05,
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        # The timer's first cycle, over what startup loaded: nothing to publish.
+        first = await cycles.next_cycle()
+        site.serve(pool("pool-1", member("r1", "pool-1")))
+        woken = await cycles.next_cycle()
+        outcome = runtime.loops.last_outcome(PUBLICATION)
+
+    assert _published(first) == []
+    (published,) = _published(woken)
+    assert published["source"]["physical_resource_id"] == "r1"
+    assert [operation for operation, _ in cycles.registries.operations()] == ["publish"]
+    assert (outcome.trigger, outcome.completed) == ("timer", True)
+
+
+async def test_the_projection_step_while_held_polls_and_publication_waits_for_resume(
+    tmp_path, monkeypatch
+) -> None:
+    """Stepping the held site-projection poller runs exactly its cycle: it
+    polls, sees the site's change, and wakes publication, which stays held and
+    publishes only once the loops resume. Spec scenarios "The projection step is
+    run while held" and "The loop is held".
+
+    The hold is read from the controller: the pause reports publication at its
+    gate, which its timer reads again under the cycle lock before any cycle, so
+    no cycle starts while the pause stands, and its last outcome is still the
+    first cycle's. Publication's interval is an hour, so only the wake runs the
+    cycle that follows the resume."""
+    site = Site(pool("pool-0"))
+    cycles = _ObservedCycles()
+    runtime = _timed_runtime(tmp_path, monkeypatch, site, cycles)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        await cycles.next_cycle()
+        first = runtime.loops.last_outcome(PUBLICATION)
+        async with _admin_client(app) as admin:
+            paused = await admin.admin_pause_lifecycle_loops()
+            site.serve(pool("pool-1", member("r1", "pool-1")))
+            calls = site.calls
+            stepped = await admin.admin_run_lifecycle_cycle("site-projections")
+            held = runtime.loops.snapshot()[PUBLICATION]
+            await admin.admin_resume_lifecycle_loops()
+            resumed = await cycles.next_cycle()
+
+    assert paused["loops"]["publication"] == "paused"
+    assert site.calls > calls
+    assert stepped["sites"]["site-a"]["resource_pool"]["revision"] == 2
+    assert held.state == "paused"
+    assert held.last_outcome is first
+    (published,) = _published(resumed)
+    assert published["source"]["physical_resource_id"] == "r1"
+
+
+class _FailingCycle:
+    """A publication cycle that fails once it has started, naming a site's URL."""
+
+    async def run(self, *, dry_run: bool = False) -> dict[str, object]:
+        raise ConnectionError("http://site-a.internal:8081 refused the connection")
+
+
+async def test_a_failed_publication_cycle_is_reported_in_status_with_its_stage(
+    tmp_path,
+) -> None:
+    """A stepped cycle that cannot be composed fails in ``compose`` with the
+    storefront's own publication error, whose message status discloses; one
+    failing on another exception is reported by type alone, its message (a
+    site URL) kept out. Spec scenarios "A stepped cycle fails" and "A cycle
+    fails on an unexpected exception"."""
+    uncomposed = dataclasses.replace(
+        _runtime(str(tmp_path / "uncomposed.db")),
+        loop_controller_factory=held_loop_controller,
+    )
+    failing = dataclasses.replace(
+        _runtime(str(tmp_path / "failing.db")),
+        publication_cycle_factory=lambda _runtime: _FailingCycle(),
+        loop_controller_factory=held_loop_controller,
+    )
+    reported = []
+    for runtime in (uncomposed, failing):
+        app = _app(runtime)
+        async with app.router.lifespan_context(app):
+            async with _admin_client(app) as admin:
+                with pytest.raises(StorefrontClientError):
+                    await admin.admin_run_lifecycle_cycle("publication")
+                reported.append((await admin.get_system_status()).lifecycle[PUBLICATION])
+
+    refused, failed = reported
+    assert refused["state"] == "paused"
+    assert refused["last_outcome"]["trigger"] == "step"
+    assert (refused["last_outcome"]["completed"], refused["last_outcome"]["stage"]) == (
+        False,
+        "compose",
+    )
+    assert refused["last_outcome"]["error"] == {
+        "type": "BareMetalPublicationError",
+        "message": "no registry is configured for publication",
+    }
+    # The double names no stage of its own, so it fails in the step's compose.
+    assert failed["last_outcome"]["stage"] == "compose"
+    assert failed["last_outcome"]["error"] == {"type": "ConnectionError", "message": None}
+    assert "site-a.internal" not in str(failed)
+
+
+class _CycleFailures(logging.Handler):
+    """Sets ``failed`` each time the loop controller it is given logs a failed
+    timer cycle of publication: the seam a test waits on instead of the timer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = asyncio.Event()
+        self.logger = logging.getLogger(f"{__name__}.loops.{id(self)}")
+        self.logger.addHandler(self)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.getMessage().startswith(f"[LIFECYCLE] {PUBLICATION} timer cycle failed"):
+            self.failed.set()
+
+    def controller(self):
+        return bare_metal_loop_controller(logger=self.logger)
+
+
+async def test_status_reports_a_running_loop_whose_timer_cycles_fail(
+    tmp_path, monkeypatch
+) -> None:
+    """With the loops running, another process holding the storefront's
+    database locked fails each publication cycle the timer runs; status reports
+    the loop as running and its last cycle as failed, in ``compose``, by the
+    error's type, with no operator step. Spec scenario "Publication fails every
+    cycle".
+
+    A registry that cannot be reached does not fail a cycle: the cycle records
+    the failed publish and converges on the next one."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    cycles = _ObservedCycles()
+    failures = _CycleFailures()
+    runtime = _timed_runtime(
+        tmp_path, monkeypatch, site, cycles, loop_controller_factory=failures.controller
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        await cycles.next_cycle()
+        holder = sqlite3.connect(runtime.db.db_path, isolation_level=None)
+        try:
+            holder.execute("BEGIN EXCLUSIVE")
+            runtime.publication_wake()
+            await asyncio.wait_for(failures.failed.wait(), timeout=30)
+        finally:
+            holder.close()
+        async with _admin_client(app) as admin:
+            status = await admin.get_system_status()
+
+    publication = status.lifecycle[PUBLICATION]
+    assert publication["state"] == "running"
+    outcome = publication["last_outcome"]
+    assert (outcome["trigger"], outcome["completed"], outcome["stage"]) == (
+        "timer",
+        False,
+        "compose",
+    )
+    assert outcome["error"] == {"type": "OperationalError", "message": None}
+    assert status.publication_derivation == {}
+
+
+def _derivation_runtime(tmp_path, monkeypatch, sites: dict, **changes):
+    """A runtime over ``sites`` publishing under Alkahest to a recorded
+    registry, each cycle composed as production composes it, its loops held."""
+    composition, clauses = alkahest_publication(tmp_path, monkeypatch, SELLER_SIGNER)
+    fields = {
+        "seller_evm_address": SELLER_WALLET,
+        "settlement_composition": composition,
+        "publication_clauses": clauses,
+        "default_max_duration_seconds": 3600,
+        "settlement_servicing_interval_seconds": 3600,
+        "registry_configuration": _RecordedRegistries(
+            authorities={REGISTRY_URL: _REGISTRY_TRUST}
+        ),
+    }
+    return dataclasses.replace(
+        _sited_runtime(str(tmp_path / "storefront.db"), sites), **{**fields, **changes}
+    )
+
+
+async def test_status_reports_a_refused_generation_as_loaded_with_the_sites_hold(
+    tmp_path, monkeypatch
+) -> None:
+    """A site whose held generation bare metal refuses is reported loaded in
+    the projection status and, in the latest derivation, held with the refusal
+    as its reason, while a site that derived cleanly holds nothing. Spec
+    scenario "A bare-metal site serves a generation bare metal refuses"."""
+    sites = {
+        "site-a": Site(
+            pool(
+                "pool-vm",
+                member("a1", "pool-vm", view_pool_id="pool-1"),
+                advertisable_modes=("vm",),
+            )
+        ),
+        "site-b": Site(pool("pool-1", member("b1", "pool-1"))),
+    }
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert status.site_projections["site-a"]["resource_pool"]["state"] == "loaded"
+    derivation = status.publication_derivation
+    (hold,) = derivation["site-a"]["holds"]
+    assert hold["reason"] == "site_projection_refused"
+    assert hold["error"]
+    assert derivation["site-b"] == {"holds": [], "refusals": [], "reports": []}
+
+
+async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
+    tmp_path, monkeypatch
+) -> None:
+    """A pool resolving no lease bound is reported held, by its reason, once a
+    cycle has run; a preview records nothing, so before that status reports no
+    derivation. Spec scenario "A bare-metal pool resolves no lease bound"."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(
+        tmp_path, monkeypatch, sites, default_max_duration_seconds=None
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            before = (await admin.get_system_status()).publication_derivation
+            await admin.admin_dry_run_lifecycle_cycle("publication")
+            previewed = (await admin.get_system_status()).publication_derivation
+            await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert before == {} and previewed == {}
+    (hold,) = status.publication_derivation["site-a"]["holds"]
+    assert hold == {"pool_id": "pool-1", "reason": "pool_lease_bound_missing"}
+    assert {name: loop["state"] for name, loop in status.lifecycle.items()} == {
+        "negotiation_watchdog": "paused",
+        "publication": "paused",
+        "settlement_servicing": "paused",
+        "site_projection_poller": "paused",
+    }
+
+
+async def test_status_reports_a_pool_resolving_no_settlement_clause_held(
+    tmp_path, monkeypatch
+) -> None:
+    """A pool whose override states no clauses, with none configured, is held
+    at compose with its own reason, and its listing is neither published nor
+    refused later in the cycle. Spec "A storefront that cannot publish refuses
+    to start": a pool that resolves no clauses from any tier is held and
+    reported per site."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites, publication_clauses=())
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    (hold,) = status.publication_derivation["site-a"]["holds"]
+    assert hold == {"pool_id": "pool-1", "reason": "pool_settlement_clauses_missing"}
+    assert report["counts"].get("publish") is None
+    assert report["counts"].get("refuse") is None
+
+
+async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status(
+    tmp_path, monkeypatch
+) -> None:
+    """The derivation status reports is the last cycle's: a cycle that fails
+    before it has read every site clears the one before it, so status never
+    pairs a failed outcome with an earlier cycle's holds."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    composed = iter((True, False))
+
+    def factory(runtime):
+        if next(composed):
+            return compose_publication_cycle(runtime)
+        raise BareMetalPublicationError("the settlement composition is unavailable")
+
+    runtime = _derivation_runtime(
+        tmp_path,
+        monkeypatch,
+        sites,
+        default_max_duration_seconds=None,
+        publication_cycle_factory=factory,
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            await admin.admin_run_lifecycle_cycle("publication")
+            derived = (await admin.get_system_status()).publication_derivation
+            with pytest.raises(StorefrontClientError):
+                await admin.admin_run_lifecycle_cycle("publication")
+            status = await admin.get_system_status()
+
+    assert derived["site-a"]["holds"] != []
+    assert status.publication_derivation == {}
+    outcome = status.lifecycle[PUBLICATION]["last_outcome"]
+    assert (outcome["completed"], outcome["stage"]) == (False, "compose")
 
 
 class _NothingDue:
@@ -443,6 +876,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
             assert paused["paused"] is True
             assert paused["loops"] == {
                 "negotiation_watchdog": "paused",
+                "publication": "paused",
                 "settlement_servicing": "paused",
             }
 
@@ -460,6 +894,7 @@ async def test_the_pause_holds_every_loop_and_each_step_runs_while_held(tmp_path
                 "paused": False,
                 "loops": {
                     "negotiation_watchdog": "running",
+                    "publication": "running",
                     "settlement_servicing": "running",
                 },
             }
@@ -489,20 +924,38 @@ async def test_the_publication_preview_runs_one_dry_pass(tmp_path) -> None:
     assert log == ["start first (dry run)", "end first"]
 
 
-async def test_startup_registers_exactly_the_loops_it_starts(tmp_path) -> None:
+async def test_startup_starts_every_loop_on_the_controllers_timer(tmp_path) -> None:
+    """Every loop the runtime composes is a timer the controller runs over the
+    step its route runs, the site-projection poller and publication among them,
+    and shutdown stops every one."""
     runtime, _repository = _runtime_with_servicing(str(tmp_path / "storefront.db"))
+    runtime = dataclasses.replace(
+        runtime,
+        site_projections=_sited_runtime(
+            str(tmp_path / "unused.db"), _sites(site_a=1)
+        ).site_projections,
+        loop_controller_factory=held_loop_controller,
+    )
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        assert runtime.loops.registered_loop_names() == [
-            "negotiation_watchdog",
-            "settlement_servicing",
-        ]
-        assert runtime.loops.step_routes() == {
-            "negotiation-watchdog": "negotiation_watchdog",
-            "publication": "publication",
-            "settlement-servicing": "settlement_servicing",
-        }
+        started = runtime.loops.registered_loop_names()
+        routes = runtime.loops.step_routes()
+
+    assert started == [
+        "negotiation_watchdog",
+        "publication",
+        "settlement_servicing",
+        "site_projection_poller",
+    ]
+    assert routes == {
+        "negotiation-watchdog": "negotiation_watchdog",
+        "publication": "publication",
+        "settlement-servicing": "settlement_servicing",
+        "site-projections": "site_projection_poller",
+    }
+    # Shutdown stopped and awaited every timer.
+    assert runtime.loops.registered_loop_names() == []
 
 
 async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_path) -> None:
@@ -510,28 +963,29 @@ async def test_a_storefront_without_settlement_servicing_steps_no_such_loop(tmp_
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        assert runtime.loops.registered_loop_names() == ["negotiation_watchdog"]
+        assert runtime.loops.registered_loop_names() == ["negotiation_watchdog", "publication"]
         async with _admin_client(app) as admin:
             with pytest.raises(StorefrontClientError) as refused:
                 await admin.admin_run_lifecycle_cycle("settlement-servicing")
     assert refused.value.status_code == 404
 
 
+# A development identity; never used on any public network.
 SITE_SIGNER = Eip191Signer(bytes.fromhex("44" * 32))
 
 
-def _status_runtime(path: str, **changes) -> BareMetalStorefrontRuntime:
+# A second site authority's key, also a development identity.
+SITE_B_SIGNER = Eip191Signer(bytes.fromhex("45" * 32))
+
+
+def _status_runtime(path: str, *, authorities=None, **changes) -> BareMetalStorefrontRuntime:
+    runtime = _runtime(path)
+    # The site reads status as its service peer, seeded as startup seeds it.
+    bindings, trust = seeded_sites(
+        runtime.db.db_path, authorities or {"site-a": SITE_SIGNER.identity}
+    )
     return dataclasses.replace(
-        _runtime(path),
-        site_bindings=(
-            BareMetalSiteBinding(
-                site_id="site-a",
-                # A development identity; never used on any public network.
-                authority_principal=SITE_SIGNER.identity,
-                authority_url="http://site-a:8000",
-            ),
-        ),
-        **changes,
+        runtime, site_bindings=bindings, service_peer_trust=trust, **changes
     )
 
 
@@ -571,16 +1025,18 @@ async def test_status_reports_what_a_deal_depends_on_and_health_does_not(
     assert health.provisioning_contract_version is None
 
 
+_REGISTRY_TRUST = RegistryAuthorityTrust(
+    authority="registry",
+    principals=TrustedIdentitySet(
+        identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
+    ),
+)
+
+
 async def test_an_unreachable_registry_degrades_status(tmp_path) -> None:
     unreachable = BareMetalRegistryConfiguration(
         # Nothing listens on the discard port, so the connection is refused.
-        url="http://127.0.0.1:9",
-        trust=RegistryAuthorityTrust(
-            authority="registry",
-            principals=TrustedIdentitySet(
-                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
-            ),
-        ),
+        authorities={"http://127.0.0.1:9": _REGISTRY_TRUST},
     )
     runtime = _status_runtime(
         str(tmp_path / "storefront.db"), registry_configuration=unreachable
@@ -611,19 +1067,56 @@ def test_a_registry_reply_that_is_not_signed_is_reported_unverifiable() -> None:
     """The registry client verifies every reply, so an unsigned one reads as
     the client's own 502 rather than as whatever status it carried."""
     configuration = BareMetalRegistryConfiguration(
-        url="http://registry",
-        trust=RegistryAuthorityTrust(
-            authority="registry",
-            principals=TrustedIdentitySet(
-                identities=(Identity(scheme="eip191", identifier="0x" + "aa" * 20),)
-            ),
-        ),
+        authorities={"http://registry": _REGISTRY_TRUST},
     )
     transport = httpx.MockTransport(lambda _request: httpx.Response(503, text="down"))
 
     result = asyncio.run(configuration.reachability(SELLER_SIGNER, transport=transport))
 
     assert result == "http_502"
+
+
+def test_status_reads_every_registry_and_reports_the_first_that_fails() -> None:
+    """Publication reaches every configured registry, so its status asks each:
+    one answering is not enough while another does not."""
+    asked: list[str] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.host)
+        return httpx.Response(503, text="down")
+
+    configuration = BareMetalRegistryConfiguration(
+        authorities={
+            "http://registry-a": _REGISTRY_TRUST,
+            "http://registry-b": _REGISTRY_TRUST,
+        },
+    )
+
+    result = asyncio.run(
+        configuration.reachability(SELLER_SIGNER, transport=httpx.MockTransport(answer))
+    )
+
+    assert result == "http_502"
+    assert asked == ["registry-a"], "the first failure is reported without asking on"
+
+
+async def test_every_configured_sites_peer_reads_status(tmp_path) -> None:
+    """The read names no site, so with two sites each bound to its own peer,
+    site B's peer reads status as site A's does."""
+    runtime = _status_runtime(
+        str(tmp_path / "storefront.db"),
+        authorities={"site-a": SITE_SIGNER.identity, "site-b": SITE_B_SIGNER.identity},
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _status_client(app, SITE_SIGNER, "service") as site_a:
+            read_by_a = await site_a.get_system_status()
+        async with _status_client(app, SITE_B_SIGNER, "service") as site_b:
+            read_by_b = await site_b.get_system_status()
+
+    assert read_by_a.checks["database"] == "ok"
+    assert read_by_b.checks["database"] == "ok"
+    assert read_by_b.settlement_manual_required is None
 
 
 async def test_a_configured_site_reads_status_as_a_service_and_another_cannot(

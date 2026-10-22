@@ -96,35 +96,34 @@
 - [ ] 9.6 Run `make dist-arkhai-core-storefront dist-domains`, clean wheelhouse installation/startup, wheel-content and dependency review, storefront image startup/health, `make test-deployment-packaging`, Helm one/two-domain renders, Compose config rendering, and affected configured typing checks. Verify no editable path, source mount, duplicate server, or disabled-domain wait remains.
 - [ ] 9.7 Run the complete VM and bare-metal contract/canonical-client integration suites and the repository smoke path from staged artifacts. Attribute every failure to this change, a prerequisite, environment, or an unrelated baseline failure with the exact unrun/failed command.
 - [ ] 9.8 Cross-check `proposal.md`'s six modified capabilities against the six delta-spec directories and every requirement heading/scenario; then run `openspec validate multi-domain-storefront-composition --strict` and `openspec validate --all --strict`, reporting unrelated pre-existing active-change failures separately.
+- [ ] 9.9 **Comment hygiene and import placement, before the pre-closeout review.** Run `make check-comment-hygiene` and read the comments this change added for any that narrate the review or migration that introduced them; move each import the change added to module level unless a verified circular import or a recorded lazy-load reason keeps it local. Closeout only confirms both.
 
 ## 10. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`, complete this section only after Section 9 proves the behavior.
 
-- [ ] 10.1 **Comment hygiene.** Run `make check-comment-hygiene`; directly read every changed comment/docstring around registry selection, migration, site routing, and recovery; remove change/task/history wording, temporary commentary, obsolete singleton/fallback explanations, and any review tombstones before completion.
-- [ ] 10.2 **Import placement.** Review every import added or touched across core and both contributions, move function-local imports to module scope where safe, verify any retained local import through an actual circular-import or deliberate lazy-load test, rerun the affected suites, and confirm core/kit/domain dependency direction including `TYPE_CHECKING`.
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
+- [ ] 10.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read the comments this change added for any that narrate the review or migration that introduced them — directly read every changed comment/docstring around registry selection, migration, site routing, and recovery for change/task/history wording, temporary commentary, obsolete singleton/fallback explanations, and review tombstones. Do not edit code here: anything to rewrite returns the change to implementation.
+- [ ] 10.2 **Import placement — confirm.** Check the imports this change added across core and both contributions for any still local without a recorded reason, and confirm core/kit/domain dependency direction including `TYPE_CHECKING`. One that should move returns the change to implementation.
 - [x] 10.3 **Documentation compliance and promotion.** Synchronized the six verified deltas into their owning permanent specs, promoted rationale into each companion architecture, and updated `docs/development/{ARCHITECTURE,DEPLOYMENT_AND_CONFIG,TESTING}.md` with current compute-family behavior and proof boundaries.
+  Archival uses `--skip-specs`: this task synchronized the specification by hand.
 - [x] 10.4 **Narrative compression.** Recorded durable alternatives and dispositions in `design.md`; compressed completed Sections 1–8 to final behavior/evidence and retained only exact external producer and parent-validation blockers.
 - [x] 10.5 **Roadmap currency.** Updated Goal 3 with the implemented shared storefront boundary and retained the `bare-metal-buyer-domain`, bare-metal producer, and Compute-40 live-proof gaps; exact permanent destinations are recorded in the Design Promotion Record.
-- [ ] 10.6 **Promotion record and final closeout.** Replace `design.md`'s planned Design Promotion Record rows with exact accepted headings, mark every material decision permanent/temporary/superseded/rejected, confirm no production code references `openspec/changes`, rerun affected focused/integration/package/type/render/E2E checks plus strict change/all validation after promotion, disclose anything unrun, and leave the change ready for review/sync/archive with no temporary compatibility alias, singleton, domain branch copy, fake fulfillment, or default fallback.
-- [ ] 10.7 **Campaign index currency** (part seven, added when `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven). Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend rather than replace implementation history. Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md` to match its state at completion, or record the disposition here if its status and campaign placement are both unchanged.
-- [ ] 10.8 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=multi-domain-storefront-composition` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 10.9 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
+- [ ] 10.6 **Promotion.** The permanent documents this change owes were written in 10.3 — the six owning `spec.md` files, each companion `architecture.md`, and `docs/development/{ARCHITECTURE,DEPLOYMENT_AND_CONFIG,TESTING}.md`; write any the later parts show still owed, and complete the design-promotion record: replace `design.md`'s planned Design Promotion Record rows with exact accepted headings, mark every material decision permanent/temporary/superseded/rejected, and confirm no production code references `openspec/changes` and no temporary compatibility alias, singleton, domain branch copy, fake fulfillment, or default fallback remains. The six `spec.md` files the deltas cover were synchronized by hand in 10.3, so the archive in 10.11 skips them; the record names them all the same.
+- [ ] 10.7 **Campaign index currency.** Update this change's row, and its campaign's dependency graph, in `openspec/changes/README.md`, or record that both are unchanged. Other rows' `Depends on` are left alone: archive cleanup releases dependents after the closeout gate.
+- [ ] 10.8 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=multi-domain-storefront-composition` and resolve
+      every match, then `openspec validate multi-domain-storefront-composition --strict`.
+- [ ] 10.9 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change
+      (`test_multi_domain_storefront.py`, 9.4), or an explicit blocker naming its cause
+      and the change that owns it, with the validations it gates treated as unrun.
 - [ ] 10.10 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 10.11 **Archival.** Last, once every other part is checked: `openspec archive
+      multi-domain-storefront-composition -y --skip-specs` moves the change under
+      `openspec/changes/archive/` without merging the deltas, which 10.3 synchronized
+      by hand; point the index row at the archived directory, and run
+      `openspec validate --specs --strict`.

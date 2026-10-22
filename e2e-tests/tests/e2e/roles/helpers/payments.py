@@ -1,4 +1,7 @@
-"""Explicit payments policy shared by the payment deal scenarios."""
+"""Explicit payments policy for payment deal scenarios: the API-credit
+scenario reads it here, and other payment scenarios may reuse it."""
+
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -8,8 +11,12 @@ from market_identity import Identity, IdentityScheme
 from e2e_harness.settings import settings
 from tests.e2e.roles.buyer_cli import _toml_quote
 
-_PAYMENTS_KEYS = (
-    "SERVICE_URL",
+# Whether a payments target is configured at all; with none, payment scenarios
+# are blocked rather than failed, which is what a pipeline without one runs.
+_TARGET_KEY = "SERVICE_URL"
+# Everything else a configured payments run supplies itself: the service policy
+# it pins and its parties' accounts and credentials.
+_REQUIRED_KEYS = (
     "SERVICE_IDENTITY",
     "DISPUTE_AUTHORITY",
     "BUYER_ACCOUNT",
@@ -24,12 +31,44 @@ def payment_setting(name: str, default: object = "") -> object:
     return default if value is None or value == "" else value
 
 
-def configured_payments() -> ArkhaiPaymentsConfig:
-    """Return the explicit service policy, blocking only an unavailable target."""
-    missing = [key for key in _PAYMENTS_KEYS if not payment_setting(key)]
+def payment_flag(name: str) -> bool:
+    """Read PAYMENTS.<name> as a boolean, failing on anything but one.
+
+    A settings file may hold the text "false", which `bool()` reads as true.
+    """
+    value = payment_setting(name, False)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "false"):
+        return text == "true"
+    pytest.fail(f"PAYMENTS.{name} must be true or false, not {value!r}")
+
+
+def target_ready(url: str) -> bool:
+    """Whether the payments service at `url` reports itself ready."""
+    try:
+        health = httpx.get(url + "/health", timeout=5.0, trust_env=False)
+        return health.status_code == 200 and health.json().get("status") == "ok"
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
+def configured_payments(
+    *, ready: Callable[[str], bool] = target_ready
+) -> ArkhaiPaymentsConfig:
+    """Return the explicit service policy, blocking only an absent or unready target.
+
+    With no target configured the scenario is blocked. With one configured, a
+    missing setting the run supplies itself is a broken configuration, so it
+    fails, naming the setting, before the target is asked whether it is ready.
+    """
+    if not payment_setting(_TARGET_KEY):
+        pytest.skip(f"blocked: PAYMENTS.{_TARGET_KEY} not configured")
+    missing = [key for key in _REQUIRED_KEYS if not payment_setting(key)]
     if missing:
-        pytest.skip(f"blocked: PAYMENTS.{', PAYMENTS.'.join(missing)} not configured")
-    url = str(payment_setting("SERVICE_URL")).rstrip("/")
+        pytest.fail(f"PAYMENTS.{', PAYMENTS.'.join(missing)} not configured")
+    url = str(payment_setting(_TARGET_KEY)).rstrip("/")
     config = ArkhaiPaymentsConfig(
         enabled=True,
         service_url=url,
@@ -39,18 +78,13 @@ def configured_payments() -> ArkhaiPaymentsConfig:
         ),
         fee_bps=int(str(payment_setting("FEE_BPS", 250))),
         dispute_authority=str(payment_setting("DISPUTE_AUTHORITY")),
-        development_auth=bool(payment_setting("DEVELOPMENT_AUTH", False)),
+        development_auth=payment_flag("DEVELOPMENT_AUTH"),
         api_key_env=str(payment_setting("API_KEY_ENV")) or None,
-        livemode=bool(payment_setting("LIVEMODE", False)),
+        livemode=payment_flag("LIVEMODE"),
     )
     if not config.development_auth and not config.api_key_env:
         pytest.fail("PAYMENTS.API_KEY_ENV is required without DEVELOPMENT_AUTH")
-    try:
-        health = httpx.get(url + "/health", timeout=5.0, trust_env=False)
-        ready = health.status_code == 200 and health.json().get("status") == "ok"
-    except (httpx.HTTPError, ValueError):
-        ready = False
-    if not ready:
+    if not ready(url):
         pytest.skip(f"blocked: payments service at {url} is not ready")
     return config
 

@@ -15,6 +15,11 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
+from arkhai_vms_listings.reconciler import (
+    ReconciliationScope,
+    closed_available_listing_ids,
+    stale_open_listing_ids,
+)
 from core_storefront.auth import AuthenticatedPrincipal
 from core_storefront.identity_authority import (
     IdentityAuthorityError,
@@ -31,16 +36,15 @@ from core_storefront.models.system_models import (
     IdentityStatusResponse,
 )
 from core_storefront.stage_log import stage_event
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi_utils.cbv import cbv
 from market_identity import RotationRequest
 
 import market_storefront.container as _container
 from market_storefront.services.capacity_client import (
-    listing_source_projection,
     site_capacity_buckets,
+    site_pool_projection,
 )
-from market_storefront.services.site_projection_cache import refresh_site_projections
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
 from market_storefront.failure_actions import (
     FulfillmentFailureContext,
@@ -53,8 +57,6 @@ from market_storefront.models.capacity_admin_models import (
     FulfillmentEventResponse,
     FulfillmentFailedEventRequest,
     FulfillmentStartedEventRequest,
-    ImportResourcesResponse,
-    ImportRowError,
     InterruptDealRequest,
     InterruptDealResponse,
     ReleaseReservationsResponse,
@@ -82,22 +84,19 @@ from market_pool_overrides import (
 from market_capacity_publication import (
     CapacityAdminRouteError,
     CapacityAdminRouteService,
-    CapacityBinding,
     CapacityBindingError,
+    PublicationBinding,
+    SiteProjectionState,
     remote_site_clients,
 )
-from market_storefront.settlement_composition import (
-    build_storefront_publication_clause_compiler,
+from market_resource_pools_contracts.backing import (
+    CapacityNotAdmittedError,
+    admitted_backing,
 )
-from market_storefront.utils.config import ESCROW_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
-# States that the release-reservations endpoints transition back to
-# ``available``. ``reserved`` is the in-flight provisioning hold;
-# ``leased`` is the post-fulfillment hold for the duration of the lease.
-# Anything else (``available``, ``deleted``, etc.) is a no-op.
-_HELD_STATES = frozenset({"reserved", "leased"})
+# Site-ledger reservation states that still hold capacity.
 _INTERRUPTIBLE_HELD_STATES = frozenset(
     {"reserved", "provisioning", "leased", "releasing"}
 )
@@ -163,10 +162,31 @@ class AdminController:
         capacity_runtime=Depends(  # noqa: B008
             lambda: _container.resolved_capacity_runtime
         ),
+        site_projections=Depends(  # noqa: B008
+            lambda: _container.resolved_site_projections
+        ),
+        service_peer_trust=Depends(  # noqa: B008
+            lambda: _container.resolved_service_peer_trust
+        ),
         _key: None = Depends(require_admin_key),
     ) -> None:
         self._db = db
         self._capacity_runtime = capacity_runtime
+        self._site_projections = site_projections
+        self._service_peer_trust = service_peer_trust
+
+    def _changing_identity_authority(self) -> StorefrontIdentityAuthority:
+        """The identity authority a rotation or retirement commits through.
+
+        It is the service-peer trust's, so a change to a site's peer reaches
+        the principals that site's responses and callbacks are verified
+        against as soon as it commits.
+        """
+        if self._service_peer_trust is None:
+            raise HTTPException(
+                status_code=503, detail="service-peer trust is not composed"
+            )
+        return self._service_peer_trust.identity_authority()
 
     @staticmethod
     def _operator(request: Request) -> AuthenticatedPrincipal:
@@ -192,7 +212,7 @@ class AdminController:
         try:
             return await asyncio.to_thread(
                 rotate_identity,
-                StorefrontIdentityAuthority(self._db.db_path),
+                self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
                 now=int(time.time()),
@@ -237,7 +257,7 @@ class AdminController:
         try:
             return await asyncio.to_thread(
                 retire_rotated_identity,
-                StorefrontIdentityAuthority(self._db.db_path),
+                self._changing_identity_authority(),
                 request=body,
                 operator=operator.principal,
                 now=int(time.time()),
@@ -450,13 +470,19 @@ class AdminController:
         summary="Pull site-authority projections now (admin)",
     )
     async def refresh_site_projections(self) -> dict[str, Any]:
-        """Reload every site projection and report what each site now holds.
+        """Run the projection poller's cycle now and report what each site holds.
 
         Projections are pull-synchronized on a poller interval. A caller that
         has just declared capacity at the site authority would otherwise wait
         that interval out, and a caller holding the lifecycle loops paused
         would wait forever: the poller that would pull it is one of the loops
-        being held. Neither is a wait a test may take.
+        being held. Neither is a wait a test may take. So this runs the
+        poller's cycle through the loop controller, held or not, as the
+        `site-projections` step does: a timer cycle already polling finishes
+        first and this one polls after it, so the answer reflects a change the
+        caller made before asking. Every site's families are polled in place, a
+        site that cannot be reached keeps its last generation as `stale`, and a
+        resource-pool change wakes publication.
 
         Returns the per-site load state so a caller asserts the pull happened
         rather than assuming it. A site reporting `not_loaded`, `unavailable`,
@@ -465,15 +491,13 @@ class AdminController:
         are indistinguishable downstream, which is how an inventory failure
         becomes a negotiation failure several stages away.
         """
-        from market_storefront.services.site_projection_cache import (
-            load_site_projections,
-            projection_status_summary,
-        )
-
-        await load_site_projections(self._db)
-        summary = projection_status_summary()
+        try:
+            cycle = await _lifecycle_routes().run_cycle("site-projections")
+        except LifecycleRouteError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        summary = cycle["sites"]
         logger.info(
-            "[ADMIN] Site projections refreshed on demand: %s",
+            "[ADMIN] Site projections polled on demand: %s",
             {
                 site: {family: view.get("state") for family, view in families.items()}
                 for site, families in summary.items()
@@ -550,89 +574,6 @@ class AdminController:
             )
         except PoolOverrideRouteError as exc:
             raise self._http(exc) from exc
-
-    @router.post(
-        "/portfolio/resources/import",
-        response_model=ImportResourcesResponse,
-        summary="Bulk-import compute resources from a CSV file (admin)",
-    )
-    async def import_resources(
-        self,
-        file: UploadFile = File(  # noqa: B008
-            ..., description="Compute resource CSV file."
-        ),
-    ) -> ImportResourcesResponse:
-        """Upload a CSV file and upsert resource rows into the portfolio.
-
-        Upsert semantics: rows present in the file are inserted or updated;
-        rows absent from the file are not touched. Always upserts regardless
-        of whether the table is already populated — use this to force a
-        clobber of the current inventory.
-
-        The CSV must contain at minimum a ``resource_type`` column. Rows that
-        fail schema validation are counted in ``failed_count`` and skipped
-        without rolling back successfully imported rows. The first failing
-        rows surface via ``errors[]`` (capped at 50) so the caller doesn't
-        have to attach a debugger to see what went wrong.
-
-        Example::
-
-            curl -X POST http://localhost:8001/api/v1/admin/portfolio/resources/import \\
-                 -H "X-Admin-Key: <key>" \\
-                 -F "file=@/path/to/resources.csv"
-        """
-        try:
-            csv_content = (await file.read()).decode("utf-8")
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400, detail=f"Could not read uploaded file: {exc}"
-            ) from exc
-        try:
-            report = await self._db.upsert_resources_from_csv_content(
-                csv_content=csv_content,
-                source_label=f"admin-import:{file.filename or 'upload'}",
-                templates=ESCROW_TEMPLATES,
-                settlement_compiler=build_storefront_publication_clause_compiler(),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        logger.info(
-            "[ADMIN] Resource import: %d imported, %d failed, %d total rows (file=%s)",
-            report.get("imported_count", 0),
-            report.get("failed_count", 0),
-            report.get("total_rows", 0),
-            file.filename,
-        )
-        # Surface up to 50 per-row failures so operators can see what's
-        # wrong without shell access. The full report.rows[] is also
-        # logged below, capped lower per line.
-        failed_rows = [
-            row for row in report.get("rows") or [] if not row.get("imported")
-        ]
-        errors_payload = [
-            ImportRowError(
-                row_number=int(row.get("row_number") or 0),
-                resource_id=row.get("resource_id"),
-                resource_type=row.get("resource_type"),
-                errors=list(row.get("errors") or []),
-            )
-            for row in failed_rows[:50]
-        ]
-        for row in failed_rows[:20]:
-            logger.warning(
-                "[ADMIN] CSV row %s (%s) failed: %s",
-                row.get("row_number"),
-                row.get("resource_id") or "<no id>",
-                "; ".join(row.get("errors") or []),
-            )
-        if report.get("imported_count"):
-            await self._mirror_resources_to_site_authority("import")
-        return ImportResourcesResponse(
-            imported_count=report.get("imported_count", 0),
-            failed_count=report.get("failed_count", 0),
-            total_rows=report.get("total_rows", 0),
-            errors=errors_payload,
-        )
 
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
@@ -731,12 +672,17 @@ class AdminController:
             raise RuntimeError("capacity runtime is unavailable")
         return self._capacity_runtime
 
+    def _projections(self) -> SiteProjectionState:
+        if self._site_projections is None:
+            raise RuntimeError("site projection state is unavailable")
+        return self._site_projections
+
     async def _reservation_binding(
         self,
         *,
         site_id: str,
         capacity_reservation_id: str,
-    ) -> tuple[dict[str, Any] | None, CapacityBinding, str | None]:
+    ) -> tuple[dict[str, Any] | None, PublicationBinding, str | None]:
         """Resolve one reservation through its supplied authority and durable listing."""
         from market_site_client import SiteCapacityClientError
         from market_storefront.services.capacity_client import (
@@ -755,29 +701,18 @@ class AdminController:
         listing_id = deal_ref.get("listing_id")
         if isinstance(listing_id, str) and listing_id.strip():
             binding = await capacity_binding_for_listing(self._db, listing_id)
-            if not isinstance(binding, CapacityBinding):
-                raise CapacityBindingError(
-                    "a reservation cannot belong to a listing with no admission "
-                    "authority"
-                )
             if binding.site_id != site_id:
                 raise CapacityBindingError(
                     "reservation authority disagrees with the durable listing binding"
                 )
             return reservation, binding, listing_id
+        # A reservation with no listing exists only because the site admitted
+        # it, so its binding takes the backing an admitted reservation implies.
         source_id = str((reservation or {}).get("resource_id") or capacity_reservation_id)
-        return reservation, CapacityBinding(site_id, "vm", source_id), None
-
-    async def _mirror_resources_to_site_authority(self, source: str) -> None:
-        """Compatibility no-op for callers completing local admin mutations.
-
-        Provisioning inventory is authoritative and storefront projections are
-        pull-synchronized. Storefront admin mutations must not push inventory
-        into the provisioning ledger.
-        """
-        logger.debug(
-            "[ADMIN] Skipping deprecated storefront inventory push after %s",
-            source,
+        return (
+            reservation,
+            PublicationBinding(site_id, "vm", source_id, admitted_backing()),
+            None,
         )
 
     async def _apply_fulfillment_event(
@@ -814,6 +749,8 @@ class AdminController:
                     result.setdefault(
                         "gpu_count", released.get("allocated_gpu_count")
                     )
+        except CapacityNotAdmittedError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except CapacityBindingError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except Exception as exc:
@@ -854,11 +791,6 @@ class AdminController:
     def _capacity(self) -> Any:
         return self._runtime().client()
 
-    def _site_topology(self) -> tuple[str | None, int]:
-        """Return the configured home site and exact site count."""
-        sites = self._runtime().site_ids
-        return next(iter(sites), None), len(sites)
-
     async def _member_availability(self) -> dict | None:
         """Aggregated site availability, or None when unobtainable.
 
@@ -876,34 +808,31 @@ class AdminController:
             return None
 
     async def _close_oversized_compute_listings(self, changed_site: str) -> list[str]:
-        """Close the capacity-backed listings ``changed_site``'s change made stale.
+        """Close the listings availability bounds that ``changed_site``'s change made stale.
 
         The site's cached projection predates the change this operation just made,
         so it is refreshed first; reconciling against it unrefreshed would report
         nothing now and let a later operation report these closes as its own.
         """
-        from arkhai_vms_listings.reconciler import stale_open_listing_ids
-
-
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
-        await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        site_projections = self._projections()
+        await site_projections.refresh_site(changed_site)
+        projection = site_pool_projection(site_projections)
         closed_listing_ids = stale_open_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             configured_sites=self._runtime().site_ids,
             member_availability=availability,
             # The same source publication derives from, so reconciliation here
             # cannot close a listing publication would keep.
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
-            backed_only=True,
+            site_capacity_buckets=site_capacity_buckets(site_projections),
+            scope=ReconciliationScope.AVAILABILITY,
             shape_feasible=vm_shape_feasibility(),
+            admissibility_default=_container.resolved_admissibility_default,
         )
         for listing_id in closed_listing_ids:
             await self._db.update_listing(
@@ -914,27 +843,24 @@ class AdminController:
         return closed_listing_ids
 
     async def _reopen_available_compute_listings(self, changed_site: str) -> list[str]:
-        """Reopen the capacity-backed listings ``changed_site``'s change made
-        available again, after refreshing that site's cached projection."""
-        from arkhai_vms_listings.reconciler import closed_available_listing_ids
-
-
-        home_site, _ = self._site_topology()
-        if home_site is None:
+        """Reopen the listings availability bounds that ``changed_site``'s change
+        made available again, after refreshing that site's cached projection."""
+        if not self._runtime().site_ids:
             return []
         availability = await self._member_availability()
         if availability is None:
             return []
-        await refresh_site_projections(changed_site)
-        projection = listing_source_projection()
+        site_projections = self._projections()
+        await site_projections.refresh_site(changed_site)
+        projection = site_pool_projection(site_projections)
         reopened_listing_ids = closed_available_listing_ids(
             self._db.db_path,
-            home_site=home_site,
             member_availability=availability,
             site_pool_projection=projection,
-            site_capacity_buckets=site_capacity_buckets() if projection is not None else None,
+            site_capacity_buckets=site_capacity_buckets(site_projections),
             shape_feasible=vm_shape_feasibility(),
             configured_sites=self._runtime().site_ids,
+            admissibility_default=_container.resolved_admissibility_default,
         )
         for listing_id in reopened_listing_ids:
             await self._db.update_listing(
@@ -1084,6 +1010,7 @@ class AdminController:
                 source="admin_event",
             ),
             capacity=self._runtime(),
+            site_projections=self._site_projections,
         )
         if "release_capacity" in configured_failure_actions() and result.state is None:
             raise HTTPException(
@@ -1151,6 +1078,8 @@ class AdminController:
                 reserved = await self._runtime().reserve(
                     binding, claim=claim, deal_ref=deal_ref
                 )
+            except CapacityNotAdmittedError:
+                raise
             except CapacityBindingError as exc:
                 raise CapacityBindingError(
                     f"Listing {listing_id!r} is mapped to site "
@@ -1222,16 +1151,13 @@ class AdminController:
     @router.post(
         "/portfolio/release-reservations",
         response_model=ReleaseReservationsResponse,
-        summary="Release every held compute resource back to available (admin)",
+        summary="Release every held site reservation (admin)",
     )
     async def release_reservations(self) -> ReleaseReservationsResponse:
-        """Release every held reservation and reset held local rows.
+        """Release every held reservation at every configured site.
 
         Releases each ``reserved``, ``provisioning``, ``leased``, or
-        ``releasing`` reservation at every configured site, then returns
-        local resource rows still ``reserved`` or ``leased`` to
-        ``available`` so the local listing view stops advertising them as
-        held. Rows in any other state are left alone, and repeating the call
+        ``releasing`` reservation in each site's ledger. Repeating the call
         releases nothing new.
 
         This is fleet-wide cleanup: end-to-end teardown between runs against
@@ -1239,23 +1165,11 @@ class AdminController:
         holds is known to be gone. A single reservation is released by the
         provisioning service's ``capacity_released`` event instead.
         """
-        released = list(await self._release_site_ledger_holds())
-
-        for r in await self._db.list_resources():
-            if r.get("state") not in _HELD_STATES:
-                continue
-            resource_id = str(r["resource_id"])
-            await self._db.apply_resource_transition(
-                resource_id=resource_id,
-                event_type="reservation_released_by_admin",
-                idempotency_key=f"admin-release:{resource_id}:{r.get('updated_at', '')}",
-                set_state="available",
-            )
-            released.append(resource_id)
+        released = await self._release_site_ledger_holds()
 
         if released:
             logger.info(
-                "[ADMIN] Released %d held resource(s): %s",
+                "[ADMIN] Released %d site reservation(s): %s",
                 len(released),
                 released,
             )

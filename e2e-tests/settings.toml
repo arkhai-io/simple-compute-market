@@ -114,9 +114,11 @@ service_url     = ""   # credits service (keys/credits/quota)
 storefront_url  = ""   # credits seller storefront
 
 # ---------------------------------------------------------------------------
-# Arkhai payments target shared by the payment scenarios. Six target/party keys
-# are required; the scenario reports blocked rather than run against a partial or
-# unreachable target. Credentials are hex Ed25519 seeds supplied by the lane.
+# Arkhai payments target shared by the payment scenarios. A blank service_url
+# means no target, and the scenarios report blocked and skip, as they do for an
+# unready one. With it set, service_identity, dispute_authority, buyer_account
+# and both marketplace credentials are required; a missing one fails the
+# scenario, naming it. Credentials are hex Ed25519 seeds supplied by the lane.
 # ---------------------------------------------------------------------------
 [default.payments]
 service_url                   = ""   # payments service origin

@@ -22,101 +22,84 @@ image:
   pullPolicy: IfNotPresent
 
 # ---------------------------------------------------------------------------
-# Storefront agent(s). The list models per-process identity, not role —
-# only sellers run a storefront, so the typical deploy has one entry.
-# Operators running multiple seller identities on one cluster (sharded
-# by region, by hardware fleet, etc.) add more entries. Buyers do not
-# appear here at all: the buyer-side surface is the `market` CLI, run
-# as a one-shot client process (or a Job for E2E tests).
+# Storefront agents, keyed by agent name. The map models per-process identity,
+# not role -- only sellers run a storefront, so the typical deploy has one
+# agent. Operators running multiple seller identities on one cluster (sharded
+# by region, by hardware fleet, etc.) add more keys. Buyers do not appear here
+# at all: the buyer-side surface is the `market` CLI, run as a one-shot client
+# process (or a Job for E2E tests).
 #
-# Each entry renders one Deployment and Service. `config` is the storefront's own
-# configuration, in its own key names, and passes through to a ConfigMap as
-# storefront.json: the chart adds only what the release knows (the agent's port
-# and Service URL, the internal registry and provisioning URLs, a `default`
-# capacity site, and db_path under persistence.mountPath) where it is absent,
-# and the storefront validates the rest when it starts. `config` is public: the
-# values schema refuses settings the storefront marks secret, which belong in
-# the Secret overlay named by `secret`. Write integers above 2^53 as strings;
-# every number in a values file passes through a float.
-agents:
-  - name: bob
-    port: 8001
-    component: seller
-    identity:
-      credentialSecret:
-        name: arkhai-bob-identity
-        key: credential
-    # Trust for the release's internal registry, which the chart writes under
-    # that registry's derived URL. Required while `config` names no
-    # registry.urls; it must include global.registryIdentity.
-    internalRegistryTrust:
-      authority: registry-a
-      principals:
-        - scheme: eip191
-          identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
-    # Non-identity runtime secrets remain in a separately managed overlay.
-    # The chart never accepts or renders private signing material.
-    secret:
-      createSecret: false
-      secretName: arkhai-bob-runtime
-      configKey: storefront.secrets.toml
-      # Compute resource inventory as raw CSV content. Injected at startup
-      # when the resources table is empty (idempotent — skipped on restart
-      # if resources are already present). Use make deploy with
-      # RESOURCES_CSV_FILE=/path/to/resources.csv to set this via --set-file.
-      # Leave empty to start with no inventory (seed via the import API later).
-      resourcesCsvInline: ""
-      # Write-scoped API key for the listing registry, rendered into the
-      # secrets TOML as [registry.auth] keyed by the first registry URL.
-      # Required when the registry sets requireWriteApiKey. Never commit a
-      # real token; inject via --set at render/deploy time.
-      registryAuthToken: ""
-    config:
-      agent_id: bob
-      log_file_path: ./logs/bob.log
-      resources_csv_path: /app/src/market_storefront/data/kvm1-machine.csv
-      storefront_domains:
-        - contribution: vms
-          offering_mode: vm
-          domain_identity: compute.v1
-          contract_version: "1.0"
-        - contribution: bare_metal
-          offering_mode: bare_metal
-          domain_identity: bare_metal.v1
-          contract_version: "1.0"
-      Identity:
-        principal:
-          scheme: eip191
-          identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
-        service_peers:
-          provisioning_default:
-            role: service
-            site_id: default
-            principals:
-              - scheme: eip191
-                identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-        administrators:
-          operator:
-            principals:
-              - scheme: eip191
-                identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
-      provisioning:
-        mode: mock
-        identity:
-          principals:
-            - scheme: eip191
-              identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
-      negotiation:
-        policies:
-          - has_matching_inventory_guard
-          - escrow_shape_guard
-          - bisection
-      Settlement:
-        priority: []
+# A map rather than a list because Helm merges maps key by key and replaces
+# lists whole: an overlay states only what it changes in one agent, and setting
+# a key to null removes it, the agent's own name included. The chart ships no
+# agent; the umbrella chart's values declare the release's agents. A list of
+# agents is refused, naming this shape.
+#
+# Each agent renders one Deployment and Service, named for its key. `config` is
+# the storefront's own configuration, in its own key names, and passes through
+# to a ConfigMap as storefront.json: the chart adds only what the release knows
+# (the agent's port and Service URL, the internal registry and provisioning
+# URLs, a `default` capacity site, and db_path under persistence.mountPath)
+# where it is absent, and the storefront validates the rest when it starts.
+# `config` is public: the values schema refuses settings the storefront marks
+# secret, which belong in the Secret overlay named by `secret`. Write integers
+# above 2^53 as strings; every number in a values file passes through a float.
+#
+#   agents:
+#     bob:
+#       port: 8001
+#       component: seller
+#       identity:
+#         credentialSecret:
+#           name: arkhai-bob-identity
+#           key: credential
+#       # Trust for the release's internal registry, which the chart writes
+#       # under that registry's derived URL. Required while `config` names no
+#       # registry.urls; it must include global.registryIdentity.
+#       internalRegistryTrust:
+#         authority: registry-a
+#         principals:
+#           - scheme: eip191
+#             identifier: "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+#       # Non-identity runtime secrets remain in a separately managed overlay.
+#       # The chart never accepts or renders private signing material.
+#       secret:
+#         createSecret: false
+#         secretName: arkhai-bob-runtime
+#         configKey: storefront.secrets.toml
+#         # Write-scoped API key for the listing registry, rendered into the
+#         # secrets TOML as [registry.auth] keyed by the first registry URL.
+#         # Required when the registry sets requireWriteApiKey. Never commit a
+#         # real token; inject via --set at render/deploy time.
+#         registryAuthToken: ""
+#       # An existing ConfigMap holding an Alkahest address book, mounted
+#       # read-only at mountPath; an empty name mounts nothing. A chain's
+#       # alkahest_address_config_path and [Settlement.alkahest]'s
+#       # address_config_path name <mountPath>/<key>.
+#       alkahestAddressBook:
+#         configMapName: ""
+#         key: alkahest_addresses.json
+#         mountPath: /etc/arkhai/alkahest
+#       config:
+#         agent_id: bob
+#         Identity:
+#           principal:
+#             scheme: eip191
+#             identifier: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+#           service_peers:
+#             provisioning_default:
+#               role: service
+#               site_id: default
+#               principals:
+#                 - scheme: eip191
+#                   identifier: "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+#         Settlement:
+#           priority: []
+agents: {}
 
 # ---------------------------------------------------------------------------
 # Helm smoke-test configuration.
-# targetAgentName empty = first configured agent. activeProfiles empty =
+# targetAgentName empty = the first agent by name. activeProfiles empty =
 # "helm,<selected-component>-secret". secretName empty = selected agent Secret.
 # ---------------------------------------------------------------------------
 tests:
@@ -169,6 +152,10 @@ affinity: {}
 # ---------------------------------------------------------------------------
 persistence:
   enabled: true
+  # Annotates the PVC helm.sh/resource-policy: keep, so `helm uninstall` leaves
+  # the volume and a reinstall recovers its state. Local deployments set it false
+  # (helm/local-values.yaml), so an uninstall starts the next deploy from nothing.
+  retainOnUninstall: true
   storageClass: ""
   size: 1Gi
   accessMode: ReadWriteOnce

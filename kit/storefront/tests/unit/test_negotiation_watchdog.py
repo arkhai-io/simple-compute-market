@@ -4,11 +4,9 @@ import asyncio
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from functools import partial
 
 import pytest
 
-from core_storefront.app_startup import StorefrontBackgroundTask
 from market_storefront_kit import (
     NegotiationWatchdogPolicy,
     StorefrontLoopController,
@@ -261,26 +259,23 @@ async def test_a_long_interval_does_not_delay_the_pause(tmp_path):
     repository = Repository(path)
     loops = StorefrontLoopController()
     policy = NegotiationWatchdogPolicy(timeout_seconds=60, interval_seconds=3600)
-    loops.start_loop(
-        StorefrontBackgroundTask(
-            name="negotiation_watchdog",
-            task_factory=partial(
-                run_negotiation_watchdog,
-                repository,
-                policy,
-                paused=loops.loop_gate("negotiation_watchdog"),
-                wait=loops.idle,
-            ),
+    # The runner gates for itself, so it runs under a declared name, which a
+    # pause waits for.
+    runner = asyncio.create_task(
+        run_negotiation_watchdog(
+            repository,
+            policy,
+            paused=loops.declare("negotiation_watchdog"),
+            wait=loops.idle,
         )
     )
-    handles = list(loops._handles.values())
     try:
         states = await asyncio.wait_for(loops.pause(), timeout=1)
         assert states == {"negotiation_watchdog": "paused"}
         assert repository.updates == []
     finally:
-        loops.clear_loops()
-        await asyncio.gather(*handles, return_exceptions=True)
+        runner.cancel()
+        await asyncio.gather(runner, return_exceptions=True)
 
 
 @pytest.mark.asyncio

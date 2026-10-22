@@ -1,0 +1,95 @@
+# Overlay for a local development deployment (`make deploy-local`), layered on
+# values.yaml. Persistent volumes are not retained when the release is
+# uninstalled, so uninstalling and deploying again starts every service from no
+# state rather than from whatever an earlier deployment of other code wrote.
+#
+# Bob also sells here. A storefront with no enabled settlement mechanism refuses
+# to start, and the chart defaults enable none, so this overlay enables Alkahest
+# on the Anvil chain the dev-env chart deploys, with that chart's address book
+# mounted, and contact exchange. Agents are keyed by name and Helm merges maps
+# key by key, so only what differs from Bob's agent in values.yaml is stated.
+storefront:
+  persistence:
+    retainOnUninstall: false
+  agents:
+    bob:
+      # The dev-env chart's ConfigMap of its Anvil's contract addresses; both
+      # address paths below name the file it mounts.
+      alkahestAddressBook:
+        configMapName: arkhai-node-operator-dev-env-alkahest-addresses
+        key: alkahest_anvil_addresses.json
+        mountPath: /etc/arkhai/alkahest
+      config:
+        # Development values only, never for a public network: the address is
+        # Anvil's deterministic account 2, whose key every Anvil instance
+        # publishes, and the chain is the release's own Anvil. The key itself
+        # is the one value Alkahest needs that the chart never renders: the
+        # agent's Secret overlay, arkhai-bob-runtime, carries it as
+        # storefront.secrets.toml's [Wallet] private_key = "<account 2's key>"
+        # (`make -C helm topology-secrets` creates it, with the smoke test's
+        # config-seller-secret.yml beside it).
+        Wallet:
+          address: "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        Chains:
+          anvil:
+            rpc_url: http://arkhai-node-operator-dev-env:8545
+            chain_id: 31337
+            alkahest_address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+        pricing:
+          # The dev chain's deterministic test token, as the Compose lane sells.
+          settlements:
+            - mechanism: alkahest.v1
+              asset: "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+              rate: "100"
+              per: hour
+              mechanism_input:
+                chain: anvil
+                escrow_kind: erc20_escrow_obligation_default
+        Settlement:
+          schema_version: 1
+          priority:
+            - alkahest.v1
+            - contact-exchange.v1
+          alkahest:
+            enabled: true
+            address_config_path: /etc/arkhai/alkahest/alkahest_anvil_addresses.json
+            oracle_gated: false
+            trusted_oracle_addresses: []
+            interruptible: false
+            interruptible_oracle_addresses: []
+          # Offered only on listings whose clauses select it, such as a pool
+          # override's. A development contact on a reserved domain.
+          contact:
+            enabled: true
+            origins:
+              default:
+                contact_payload:
+                  email: bob-sales@seller.invalid
+            profiles:
+              default:
+                channel: email
+                terms: Quoted per engagement; reply within one business day.
+provisioning:
+  persistence:
+    retainOnUninstall: false
+registry:
+  persistence:
+    retainOnUninstall: false
+  # The registry smoke test signs its reads as the release's development buyer.
+  # Its credential is never here: it layers the e2e-tests chart's out-of-band
+  # Secret's config-e2e-secret.yml, whose buyer.marketplace_credential
+  # ("<Anvil account 1's key>", quoted: YAML reads an unquoted 0x-prefixed value
+  # as an integer) the deal test reads too, so one Secret holds the one copy.
+  # `make -C helm topology-secrets` creates that Secret from Anvil's
+  # deterministic development accounts (never for a public network);
+  # `topology-check`, `test`, and `test-module MODULE=registry` require it.
+  tests:
+    credentialProfile:
+      secretName: arkhai-e2e-credentials
+      profile: e2e-secret
+api-credits-registry:
+  persistence:
+    retainOnUninstall: false
+bare-metal-storefront:
+  persistence:
+    retainOnUninstall: false

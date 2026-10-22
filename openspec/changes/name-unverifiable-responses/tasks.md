@@ -92,6 +92,10 @@
 
 ## 4. Closeout
 
+Per `openspec/README.md#plan-closeout-requirements`.
+
+Listed in an earlier order; closeout works the parts in `openspec/README.md`'s order.
+
 - [x] 4.1 Hygiene clean, strict validation, lint clean on every touched file
       (five pre-existing errors remain in files this change does not touch).
       The provider's throughput constraint is recorded in
@@ -101,33 +105,40 @@
       currently reach it. Suites: core buyer 115, storefront client 30, core
       storefront 148, e2e unit 97, VM buyer 196, VM storefront 941, bare-metal
       buyer 11, bare-metal storefront 122.
-- [ ] 4.2 **Campaign index currency** (part seven, added when
-      `openspec/README.md#plan-closeout-requirements` was extended from six parts to seven).
-      Appended rather than folded into an existing task, per `AGENTS.md`'s rule to amend
-      rather than replace implementation history. This change has no row in
-      `openspec/changes/README.md`; add one under the campaign that owns it with its status
-      and acceptance boundary, or record here why it stands outside every campaign.
-
-- [ ] 4.3 **Documentation citations.** Run
-      `make check-doc-citations CHANGE=name-unverifiable-responses` and resolve every match.
-      An unresolvable citation is a blocking defect under `AGENTS.md`'s
-      cross-reference rule, and the target also rejects a citation whose
-      target is a *tombstone*: a tombstoned file still exists on disk while
-      its content is gone, so a plain existence test cannot fail on a
-      rename-to-tombstone.
-- [ ] 4.4 **End-to-end pipeline.** Confirm the end-to-end pipeline passes and
-      record the evidence: the run, its result, and the scenarios that
-      exercise this change's behaviour. Green unit and integration suites do
-      not substitute -- this is the tier that catches a wire contract whose
-      two sides disagree, a service that starts cleanly and cannot settle,
-      and a configuration gap no in-process test can see. If the pipeline
-      cannot run for a reason unrelated to this change, record that as an
-      explicit blocker naming the cause and the change that owns it, and
-      treat the validations it gates as unrun rather than passed.
+- [ ] 4.2 **Campaign index currency.** Update this change's row, and its campaign's
+      dependency graph, in `openspec/changes/README.md`, or record that both are
+      unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
+      dependents after the closeout gate.
+- [ ] 4.3 **Documentation citations.** After promotion, run
+      `make check-doc-citations CHANGE=name-unverifiable-responses` and resolve every match, then
+      `openspec validate name-unverifiable-responses --strict`.
+- [ ] 4.4 **End-to-end pipeline.** Record the passing run the latest validation names,
+      its result, and the scenarios that exercise this change, or an explicit blocker
+      naming its cause and the change that owns it, with the validations it gates
+      treated as unrun.
 - [ ] 4.5 **Packaging.** Run `make check-packaging` and resolve every failure it
-      reports: environment and image installs derive their internal packages from
-      their locks, every lock is current, and every Python version selection reads
-      the root declaration.
+      reports (a failure needing a code or lock change returns the change to
+      implementation).
+- [ ] 4.6 **Import placement — confirm.** Check the imports this change added for any
+      still local without a recorded reason. One that should move returns the change to
+      implementation.
+- [ ] 4.7 **Documentation compliance.** Re-check this change's accepted decisions
+      against `openspec/README.md`'s placement rules, and the permanent documents
+      against the code they describe.
+- [ ] 4.8 **Narrative compression.** Compress completed-task notes to final behavior,
+      material validation evidence, unresolved or deferred work, and
+      permanent-documentation destinations, moving durable rationale into `design.md`
+      first.
+- [ ] 4.9 **Promotion.** Write the permanent documents this change owes — none beyond
+      the `storefront-publication` specification, since the hosted credential payload
+      guide the record names was removed with hosted settlement — and complete the
+      design-promotion record. A `spec.md` the deltas cover
+      (`openspec/specs/storefront-publication/spec.md`) is written by the archive in
+      4.10, not by hand; the record names it all the same.
+- [ ] 4.10 **Archival.** Last, once every other part is checked: `openspec archive
+      name-unverifiable-responses -y` merges the deltas into `openspec/specs/` and moves the
+      change under `openspec/changes/archive/`; point the index row at the archived
+      directory, and run `openspec validate --specs --strict`.
 ## Design promotion record
 
 | Accepted decision | Permanent location |
