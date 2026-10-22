@@ -21,13 +21,18 @@ A chain's result is one of:
 
 The probe also holds the storefront's live map of chain clients. A chain whose
 client could not be constructed has its client constructed again at each probe
-until that succeeds, and the map is updated in place, so every consumer handed
-the map reaches the rebuilt client without a restart.
+until that succeeds, bounded by the RPC timeout, and the map is updated in
+place, so every consumer handed the map reaches the rebuilt client without a
+restart. Until then the chain reads ``alkahest.chain_unreachable``, whatever
+its JSON-RPC calls answer.
 
 The JSON-RPC calls go over each chain's ``rpc_url`` directly rather than
 through a chain client, because a probe must answer for a chain whose client
-does not exist. :func:`probe_addresses_sync` is the one-shot form an operator's
-chain check uses.
+does not exist. A websocket ``rpc_url`` is called over HTTP at the same host,
+port, and path (``ws://`` as ``http://``, ``wss://`` as ``https://``), so a
+provider serving the two on different endpoints reads as unreachable.
+:func:`probe_addresses_sync` is the one-shot form an operator's chain check
+uses.
 """
 
 from __future__ import annotations
@@ -254,18 +259,42 @@ class AlkahestChainProbe:
 
     async def _probe(self, chain_name: str) -> str:
         chain = self._chains[chain_name]
-        if chain_name not in self._clients and self._build_client is not None:
-            try:
-                self._clients[chain_name] = await asyncio.to_thread(
-                    self._build_client, chain_name
-                )
-            except Exception as exc:  # each chain's construction is isolated
-                logger.warning(
-                    "[ALKAHEST] client for chain %s could not be constructed: %s",
-                    chain_name,
-                    type(exc).__name__,
-                )
-        return await asyncio.to_thread(self._probe_sync, chain)
+        has_client = await self._construct_missing_client(chain_name)
+        result = await asyncio.to_thread(self._probe_sync, chain)
+        # Servicing settles through the client, not the HTTP calls: a chain
+        # whose client could not be built reads unreachable whatever its HTTP
+        # side answers, so its listings are held and the next step builds again.
+        if result == CHAIN_REACHABLE and not has_client:
+            return CHAIN_UNREACHABLE
+        return result
+
+    async def _construct_missing_client(self, chain_name: str) -> bool:
+        """Construct the chain's client if the map lacks one; whether it has one.
+
+        A probe given no constructor has none it could build, and reports what
+        the chain answers. Construction is bounded by the RPC timeout, since a
+        websocket client connects while it is built and an endpoint that
+        accepts the connection but never upgrades it would otherwise hold the
+        step, and with it the loop's cycle lock, for good. A worker thread
+        cannot be stopped, so a construction that finishes after its timeout is
+        discarded: the map takes only the result the probe awaited.
+        """
+        if chain_name in self._clients or self._build_client is None:
+            return True
+        try:
+            client = await asyncio.wait_for(
+                asyncio.to_thread(self._build_client, chain_name),
+                timeout=self._timeout,
+            )
+        except Exception as exc:  # each chain's construction is isolated
+            logger.warning(
+                "[ALKAHEST] client for chain %s could not be constructed: %s",
+                chain_name,
+                type(exc).__name__,
+            )
+            return False
+        self._clients[chain_name] = client
+        return True
 
     def _probe_sync(self, chain: ProbedChain) -> str:
         try:

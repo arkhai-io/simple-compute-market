@@ -452,6 +452,19 @@ naming the model, rather than refusing startup.
   while Alkahest is unready
 - **THEN** no release condition is derived for them and no Alkahest option is published
 
+#### Scenario: A VM listing request supplies its escrows
+
+- **WHEN** a VM operator creates a listing with accepted escrows supplied and no clauses
+  while Alkahest is ready
+- **THEN** the listing advertises the release condition the Alkahest mechanism derives for
+  each escrow's chain, as for an escrow its clauses compile
+
+#### Scenario: A listing request supplies release conditions
+
+- **WHEN** a VM operator's create request supplies `demands`
+- **THEN** the storefront refuses the request, since the conditions a listing advertises
+  are derived from the storefront's own configuration, and creates no listing
+
 ### Requirement: API-credit listing creation waits for or names an unreachable mechanism
 
 An API-credit storefront's configured seed listing MUST be created by a lifecycle loop

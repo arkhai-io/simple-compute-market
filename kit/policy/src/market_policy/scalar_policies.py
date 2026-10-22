@@ -955,19 +955,23 @@ def accept_unpriced_selection_middleware(
     the exact selection of such an option is accepted here, after the guards
     that check the selection and the inventory behind it. Any other proposal
     passes through to the rest of the chain.
+
+    What is judged and accepted is the buyer's opening, which an acceptance
+    settles: a counter selecting an unpriced option after a priced opening
+    would otherwise be accepted at the counter's amount against the opening.
     """
-    proposal = _peer_proposal(history)
-    if not isinstance(proposal, dict) or not isinstance(
-        proposal.get("settlement_selection"), dict
+    opening = pinned_proposal(history)
+    if not isinstance(opening, dict) or not isinstance(
+        opening.get("settlement_selection"), dict
     ):
         return None, context
-    option = _settlement_option_for_selection(context.listing or {}, proposal)
+    option = _settlement_option_for_selection(context.listing or {}, opening)
     if option is None or option_uses_scalar_amount(option):
         return None, context
     return (
         NegotiationDecision(
             action="accept",
-            proposal=dict(proposal),
+            proposal=dict(opening),
             reason="unpriced_selection",
         ),
         context,
@@ -983,6 +987,10 @@ def accept_exact_listing_middleware(
 
     With no peer proposal yet (the buyer-side round-0 opening), proposes
     our pinned escrow unchanged — exactly what the listing advertised.
+
+    A settlement selection is judged, and accepted, as the peer's opening
+    selected it: an acceptance settles the opening, so a counter naming
+    another option supplies at most the amount, never the option priced.
     """
     proposal = _peer_proposal(history)
     if not isinstance(proposal, dict):
@@ -1000,8 +1008,10 @@ def accept_exact_listing_middleware(
         )
 
     listing = context.listing or {}
-    if isinstance(proposal.get("settlement_selection"), dict):
-        matched_option = _settlement_option_for_selection(listing, proposal)
+    opening = pinned_proposal(history)
+    basis = opening if opening is not None else proposal
+    if isinstance(basis.get("settlement_selection"), dict):
+        matched_option = _settlement_option_for_selection(listing, basis)
         if matched_option is None:
             return (
                 NegotiationDecision(
@@ -1029,7 +1039,7 @@ def accept_exact_listing_middleware(
             return (
                 NegotiationDecision(
                     action="accept",
-                    proposal=_set_proposal_amount(proposal, expected_amount),
+                    proposal=_set_proposal_amount(basis, expected_amount),
                     reason="exact_listing",
                 ),
                 context,
@@ -1037,7 +1047,7 @@ def accept_exact_listing_middleware(
         return (
             NegotiationDecision(
                 action="accept",
-                proposal=dict(proposal),
+                proposal=dict(basis),
                 reason="exact_listing",
             ),
             context,

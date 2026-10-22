@@ -344,6 +344,23 @@ def test_the_escrow_helper_funds_nothing_the_sellers_plan_does_not_commit_to() -
     assert events[-1][0] == "escrow_create_failed"
 
 
+def test_the_escrow_helper_funds_nothing_when_the_seller_sends_no_plan() -> None:
+    """A seller accepts an escrow only with its plan; without one the check that
+    catches buyer and seller deriving different escrows cannot run."""
+    events: list[tuple[str, dict]] = []
+    hook = _escrow_settle_hook(
+        build=lambda *_args: pytest.fail("derived without a plan to hold it to"),
+        check=lambda *_args: pytest.fail("checked against no plan"),
+        create=lambda _terms: pytest.fail("an escrow was funded without the seller's plan"),
+    )
+
+    result = hook(_escrow_negotiation(None), lambda name, body: events.append((name, body)))
+
+    assert result.status == "exited"
+    assert result.reason.startswith("seller_plan_missing")
+    assert events[-1][0] == "escrow_create_failed"
+
+
 def test_missing_accepted_entry_fails_before_domain_effects() -> None:
     outcome = NegotiationOutcome(
         status="agreed", negotiation_id="N1", agreement=_agreement("absent.v1"),

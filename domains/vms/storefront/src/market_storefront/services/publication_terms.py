@@ -23,7 +23,11 @@ from arkhai_vms_listings.pricing_resolution import (
     configured_family_rate_problems as _configured_family_rate_problems,
 )
 from arkhai_vms_listings.reconciler import PoolHintResolutionSettings
-from market_alkahest import ALKAHEST_CONFIG_KEY, publication_release_conditions
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    ALKAHEST_MECHANISM_ID,
+    release_conditions,
+)
 from market_capability_admissibility import Declaration, parse_declaration
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -304,25 +308,33 @@ def configured_family_rate_problems() -> list[str]:
     return _configured_family_rate_problems(defaults if isinstance(defaults, dict) else {})
 
 
-def demands_for_publication_clauses(
-    clauses: tuple[SettlementPublicationClause, ...],
+def demands_for_published_escrows(
+    accepted_escrows: list[dict[str, Any]],
     *,
     readiness: tuple[MechanismReadiness, ...],
     wallet_address: str,
 ) -> list[dict[str, Any]]:
-    """The release conditions a listing publishing ``clauses`` advertises.
+    """The release conditions a listing publishing ``accepted_escrows`` advertises.
 
-    The Alkahest mechanism derives them from ``[Settlement.alkahest]``, the
-    seller wallet, and each chain's address book, one per chain an Alkahest
-    clause publishes on, and only while ``readiness`` reports Alkahest ready:
-    an unready mechanism's clauses publish no option to release.
+    ``accepted_escrows`` are every Alkahest escrow the listing publishes, those
+    its clauses compiled and those its create request supplied alike. The
+    Alkahest mechanism derives one condition per chain they name from
+    ``[Settlement.alkahest]``, the seller wallet, and the chain's address book,
+    and only while ``readiness`` reports Alkahest ready: an unready mechanism
+    publishes no escrow to release. A create request never supplies the
+    conditions, so a listing advertises only what the storefront's own
+    configuration can settle.
     """
+    if not any(
+        status.mechanism == ALKAHEST_MECHANISM_ID and status.ready
+        for status in readiness
+    ):
+        return []
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(), role="seller")
-    return publication_release_conditions(
+    return release_conditions(
         config.mechanism_config(ALKAHEST_CONFIG_KEY),
-        clauses,
-        readiness=readiness,
+        chain_names={str(escrow["chain_name"]) for escrow in accepted_escrows},
         chains=CHAINS,
         wallet_address=wallet_address,
     )

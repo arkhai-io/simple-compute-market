@@ -522,6 +522,25 @@ Every other reader of a deal's settlement terms after acceptance reads the same 
 With the settle paths reading the plan, nothing after acceptance re-materializes under a
 listing's `demands`, which VM and bare metal publication refresh in place.
 
+Settled in round 1's triage (85 F5, the codec): verification still finds the escrow
+contract's codec through the seller's current address book, and the guarantee is what
+verification can honour. A change to the release policy, the wallet, or the release
+condition's address-book entries changes nothing for an accepted deal; an address book
+that stops naming the escrow contract a deal funded leaves that deal unverifiable, as it
+leaves it uncollectable, since the SDK client collects through the same address
+configuration. That is a limit beside decision 19's, recorded there: the buyer's escrow
+stays reclaimable at expiry, so the exposure is the seller's own. Recording the escrow kind
+in the plan was rejected: it would carry verification one step further and stall the deal
+at collection, while adding a plan field both parties derive and compare.
+
+Settled in round 1's triage (85 F17): VM resolves a continuation against the listing as
+it now stands, and a publication cycle repricing the opening's option changes the
+option's identity. Its round hook refuses such a continuation by name,
+`pinned_option_withdrawn`, before any policy, rather than pricing it from no option.
+Continuing against the opening's listing record in VM too, as bare metal does, would give
+the compute domains one continuation semantics; no change owns it, and it is recorded as
+an unowned row in `ROADMAP.md`'s Goal 4 at closeout.
+
 Rejected: handing it to `version-accepted-artifacts`, whose subject is evolving stored
 accepted artifacts across releases rather than which reference verification reads; handing
 it to `move-escrow-into-alkahest`, which has no design yet.
@@ -545,11 +564,13 @@ re-derives the mandate and requires equality.
   the back-fill that synthesized it from the plan.
 - The buyer always materializes the escrow itself, through `kit/alkahest`, from its
   accepted proposal or selection and the listing's advertised release condition.
-- Where the seller sent a plan, the buyer requires its own derivation to equal the plan's
-  obligation before funding. The domain-supplied plan check `core/buyer` already declares,
-  `AdvertisedPlanValidatorFn`, runs on every branch that receives a plan and on resume
-  rather than only on the selection branch, and API credits supplies it as VM does;
-  `core/buyer` gains no import of `kit/alkahest`.
+- The buyer requires its own derivation to equal the seller's plan obligation before
+  funding, on every path that funds an escrow: `core/buyer`'s escrow settle hook runs a
+  required plan-check port over the buyer's own derivation before any escrow is created,
+  and every resume derives through `kit/alkahest`, which holds the derivation to the
+  recorded plan. A seller accepts an escrow only with its plan, so an acceptance carrying
+  none is refused before funding, `seller_plan_missing` (85 F12). `core/buyer` gains no
+  import of `kit/alkahest`.
 - The run-log records the selected listing's advertised release conditions at acceptance.
   A resumed run derives the escrow from the Agreement's selected option and those
   conditions, checking the recorded seller plan against them, rather than refusing or
@@ -614,9 +635,28 @@ three domains and bare metal's chain-blind fallback, verification's default-kind
 and `_accepted_escrow_for_proposal`'s zero-address case. This closes Goal 6's unowned
 roadmap gap on how such a proposal is priced: it is refused.
 
-The rationale is the wire, not the clients: no buyer in this repository sends an unpinned
-proposal, but the protocol admitted one, and anything the wire admits must be handled
-whichever client sent it.
+The rationale is the wire, not the clients: the storefront client filled in the zero
+address for a caller naming no escrow, so lane deals sent unpinned proposals, and whatever
+the client, the wire must refuse one.
+
+Deals accepted with their escrow contract unpinned before this release can no longer be
+verified: their plan names the zero address, which no codec resolves. They are a cutover,
+not a migration (round 1's triage, 85 F5): their escrows stay reclaimable by the buyer at
+expiry. Bare metal has not been released as a domain, so no deployed bare-metal deal is
+affected.
+
+Settled in round 1's triage (85 F6): what can settle is the listing's, and policies decide
+only whether and at what price to deal within what the listing offers. So the seller-side
+kit entry points, `authorize_escrow_proposal` and the acceptance's plan materialization
+through it, refuse an escrow outside the listing's `accepted_escrows`, or with a literal
+field such as the token other than its entry's (`escrow_not_in_accepted_set`,
+`escrow_field_mismatch`, in the `ReleaseConditionError` family), whatever policies ran, a
+custom seller hook's included; and bare metal always runs `escrow_shape_guard` first, after
+its inventory guard, as VM and API credits run their default guards, so the early,
+explained refusal no longer depends on a seller's chain. A buyer's own derivation, which
+may carry only the recorded release conditions, is unchanged: it is held to the seller's
+plan. Treating an omitted guard as consent to any token was rejected: no seller could
+price that, and a seller wanting a second token lists it.
 
 Settled in implementation (Section 8): a proposal selecting nothing the listing offers is
 priced from no entry and no floor. VM and API credits give an escrow proposal selecting
@@ -658,6 +698,17 @@ derived conditions before readiness and refused every candidate per cycle. In AP
 this covers the escrows a listing request supplies as well as those its clauses compile,
 so an unready Alkahest yields no API-credit escrow option on either path.
 
+Settled in round 1's triage (85 F9): VM's operator create derives the conditions for
+every escrow it publishes, those its clauses compile and those the request supplies
+alike, under the readiness the escrows were judged on, as API credits does. The create
+request keeps its `demands` field and refuses a supplied value, as it refuses supplied
+`settlement_options`: a listing advertises only what the storefront's own
+`[Settlement.alkahest]` configuration can settle. The published listing's `demands` and
+the buyer proposal's selected `demand` are unchanged. A listing paying a seller address
+other than the storefront's configured one would be a new feature in its own change.
+Keeping supplied `demands` and refusing one that differs from the derivation was rejected:
+it keeps an input the storefront can only compare and refuse.
+
 Two startup refusals move to readiness: bare metal's refusal of a configured section
 missing its address, chains, or key, and every storefront's refusal of an undeliverable
 release model. The second was justified because a configured section owns the deals
@@ -676,7 +727,9 @@ governs publication only, so two known limits follow:
   seller unable to service or collect them; a buyer's escrow stays reclaimable at expiry,
   so the exposure is the seller's own. Startup does not refuse on open obligations, which
   would make it depend on stored deal state and restore the dependency on Alkahest; the
-  blocker naming the missing input is the operator's signal.
+  blocker naming the missing input is the operator's signal. An address book that stops
+  naming the escrow contract an open deal funded is the same limit (decision 16, 85 F5):
+  the deal can be neither verified nor collected.
 - An API-credit listing's options are fixed when it is created and never re-derived, so
   one whose Alkahest becomes unready keeps advertising its Alkahest option until its
   seller closes it. Deals accepted on it verify against their committed plan and settle
@@ -764,6 +817,26 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     negotiate, and a process with no loops would never have a probe result.
 - **Timeouts.** Each RPC call is bounded, 5 seconds by default; a timed-out run records
   an unreachable result and is retried at the next interval, never in a tight loop.
+  Settled in round 1's triage (85 F8): the probe's construction of a missing client is
+  bounded by the same timeout, since a websocket client connects while it is built, and
+  a construction that finishes late is discarded rather than filling the map.
+- **A chain needs its client** (85 F7). Servicing settles through the client, so a chain
+  whose client the probe could not construct reads `alkahest.chain_unreachable` whatever
+  its JSON-RPC calls answer; a probe given no constructor, because the policy lacks the
+  wallet key, reports what the chain answers, beside the key's own blocker. A websocket
+  `rpc_url` is probed over HTTP at the same host, port, and path; a provider serving the
+  two on different endpoints reads unreachable, which `DEPLOYMENT_AND_CONFIG.md` states at
+  closeout. A configurable probe endpoint was not added.
+- **What status readiness means** (85 F10). Readiness judges the chains what is being
+  published names: the escrows a candidate publishes, or one `chain_name`. With no
+  publication input it judges every configured chain, since servicing an accepted deal
+  needs whichever chain it was accepted on, and a composition's `default_chain` selects
+  nothing there. Every storefront's status asks with no publication input, so `ready`
+  means every configured chain is reachable and deployed, and publication keeps judging a
+  candidate's own chains. Readiness stays per mechanism, so a candidate's Alkahest options
+  on all its chains wait for every one of them; the `settlement-configuration` companion
+  records that limit at closeout. Per-chain readiness was not taken up: it would change the
+  readiness contract every mechanism shares.
 
 Rejected: one kit startup check refusing every case (makes a seller who does not want
 Alkahest depend on its section being usable); per-candidate refusal at publication;

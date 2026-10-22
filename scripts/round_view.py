@@ -238,6 +238,11 @@ def done(root: Path) -> Closed:
             "`make round-done` again")
     stray = tuple(_git(root, "rev-list", "--reverse", f"{view.head}..{current}").split())
     _git(root, "reset", "--quiet", "--mixed", view.head)
+    # An intent-to-add entry for an empty file records the empty blob, the
+    # same object the round's commit records, so the reset leaves it and its
+    # flag in place and the unchanged file reads as an edit. Rebuilding the
+    # index from the round's tree clears every such entry; the files stay.
+    _git(root, "read-tree", view.head)
     _git_path(root, STATE).unlink()
     return Closed(view, stray)
 

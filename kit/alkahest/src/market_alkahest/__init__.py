@@ -7,13 +7,14 @@ from .chain_probe import (
     ALKAHEST_CHAIN_PROBE_ROUTE,
     AlkahestChainProbe,
     ChainProbeResult,
+    JsonRpcCall,
     ProbedChain,
+    json_rpc_call,
 )
 from .claim_hooks import AlkahestConditionalEscrowClient
 from .escrow_verification import (
     EscrowVerificationError,
     verify_escrow_against_plan,
-    verify_escrow_for_settlement,
 )
 from .fulfillment_publisher import (
     AlkahestFulfillmentPublisher,
@@ -28,7 +29,6 @@ from .release_conditions import (
     configured_release_model,
     publication_release_conditions,
     release_conditions,
-    require_deliverable_release_model,
 )
 from .settlement_config import (
     ALKAHEST_CONFIG_KEY,
@@ -50,6 +50,7 @@ __all__ = [
     "EscrowVerificationError",
     "FulfillmentPublication",
     "INTERRUPTIBLE_RELEASE",
+    "JsonRpcCall",
     "ORACLE_GATED_RELEASE",
     "ProbedChain",
     "RECIPIENT_RELEASE",
@@ -57,9 +58,8 @@ __all__ = [
     "ReleaseModelError",
     "configured_release_model",
     "create_alkahest_registration",
+    "json_rpc_call",
     "publication_release_conditions",
     "release_conditions",
-    "require_deliverable_release_model",
     "verify_escrow_against_plan",
-    "verify_escrow_for_settlement",
 ]

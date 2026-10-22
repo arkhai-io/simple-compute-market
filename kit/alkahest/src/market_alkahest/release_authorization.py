@@ -67,10 +67,94 @@ def require_pinned_escrow(proposal: EscrowProposal | Mapping[str, Any] | Any) ->
         )
 
 
+class EscrowNotAcceptedError(ReleaseConditionError):
+    """An escrow proposal names an escrow its listing does not accept.
+
+    A listing's ``accepted_escrows`` state the contracts it settles through and
+    the literal fields, such as an ERC-20 escrow's token, each one fixes. A
+    seller policy decides whether and at what price to deal within what the
+    listing offers; what can settle is the listing's, so a plan is never
+    materialized for a contract the listing does not accept, or with a literal
+    field other than its entry's, whatever policies ran. It is a
+    ``ReleaseConditionError`` so every caller translating that family refuses it
+    the same way. The message starts with ``escrow_not_in_accepted_set`` or
+    ``escrow_field_mismatch``.
+    """
+
+
 def _listing_value(listing: Any, key: str) -> Any:
     if isinstance(listing, Mapping):
         return listing.get(key)
     return getattr(listing, key, None)
+
+
+def _proposal_value(proposal: Any, key: str) -> Any:
+    if isinstance(proposal, Mapping):
+        return proposal.get(key)
+    return getattr(proposal, key, None)
+
+
+def _accepted_entries(listing: Any) -> list[Mapping[str, Any]]:
+    raw = _listing_value(listing, "accepted_escrows")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    entries = [
+        item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        for item in raw
+    ]
+    return [entry for entry in entries if isinstance(entry, Mapping)]
+
+
+def _literal_comparable(value: Any) -> Any:
+    if isinstance(value, str) and value.strip()[:2].lower() == "0x":
+        return value.strip().lower()
+    return value
+
+
+def require_accepted_escrow(
+    proposal: EscrowProposal | Mapping[str, Any] | Any, *, listing: Any
+) -> None:
+    """Refuse ``proposal`` unless ``listing`` accepts its escrow as proposed.
+
+    The proposal's chain and escrow contract must be one of the listing's
+    ``accepted_escrows`` (a list or its stored JSON text; absent or unreadable
+    accepts none), and every literal field that entry fixes must equal the
+    proposal's, addresses compared case-insensitively. Raises
+    ``EscrowNotAcceptedError``.
+    """
+    chain = _proposal_value(proposal, "chain_name")
+    address = _proposal_value(proposal, "escrow_address")
+    target = address.lower() if isinstance(address, str) else ""
+    matched = next(
+        (
+            entry
+            for entry in _accepted_entries(listing)
+            if entry.get("chain_name") == chain
+            and isinstance(entry.get("escrow_address"), str)
+            and entry["escrow_address"].lower() == target
+        ),
+        None,
+    )
+    if matched is None:
+        raise EscrowNotAcceptedError(
+            f"escrow_not_in_accepted_set: (chain={chain!r}, address={address!r}) "
+            "is not one of the listing's accepted escrows"
+        )
+    required = matched.get("literal_fields") or {}
+    offered = _proposal_value(proposal, "literal_fields") or {}
+    if not isinstance(required, Mapping):
+        return
+    for key, value in required.items():
+        if _literal_comparable(offered.get(key)) != _literal_comparable(value):
+            raise EscrowNotAcceptedError(
+                f"escrow_field_mismatch: field {key!r} - proposed "
+                f"{offered.get(key)!r}, the listing's accepted escrow requires {value!r}"
+            )
 
 
 def advertised_release_conditions(listing: Any) -> list[Any]:

@@ -947,13 +947,19 @@ except StorefrontStartupError as exc:
     print(json.dumps({"refusal": str(exc)}))
     raise SystemExit(0)
 from market_settlement_runtime import MechanismReadiness
-from market_storefront.services.publication_terms import demands_for_publication_clauses
+from market_storefront.services.publication_terms import demands_for_published_escrows
 from market_storefront.utils.config import get_evm_wallet_address, settlement_publication_defaults
 # Readiness turns on what the render does not carry -- a reachable chain and the
 # Secret overlay's wallet key -- so the probe derives as a ready Alkahest would.
 ready = MechanismReadiness(mechanism="alkahest.v1", configured=True, enabled=True, ready=True)
-demands = demands_for_publication_clauses(
-    settlement_publication_defaults(),
+# Each configured Alkahest clause publishes an escrow on its chain.
+escrows = [
+    {"chain_name": clause.mechanism_input["chain"]}
+    for clause in settlement_publication_defaults()
+    if clause.mechanism == "alkahest.v1"
+]
+demands = demands_for_published_escrows(
+    escrows,
     readiness=(ready,),
     wallet_address=get_evm_wallet_address(),
 )

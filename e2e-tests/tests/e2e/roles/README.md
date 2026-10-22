@@ -125,5 +125,10 @@ unit results are not substituted.
 
 ```console
 make -C e2e-tests test-buyer-machine \
-  BUYER_MODULE=e2e_alkahest_escrow_codecs
+  BUYER_MODULE="e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle"
 ```
+
+`e2e_alkahest_trusted_oracle` settles one ERC-20 escrow through the
+trusted-oracle arbiter, the SDK path the oracle-gated release model uses. It is
+the only scenario that runs a real chain for that path; no storefront or local
+suite starts a chain of its own.

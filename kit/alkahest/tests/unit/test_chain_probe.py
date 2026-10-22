@@ -6,6 +6,7 @@ on a public network.
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -287,3 +288,67 @@ async def test_a_missing_client_is_rebuilt_on_a_later_probe_in_the_live_map() ->
     assert clients == {"anvil": "client:anvil"}
     await probe.step()
     assert attempts == ["anvil", "anvil"]
+
+
+@pytest.mark.asyncio
+async def test_a_chain_whose_client_cannot_be_built_reads_unreachable() -> None:
+    """Servicing settles through the client, so a chain whose RPC answers but
+    whose client construction fails is not ready."""
+    built: list[str] = []
+
+    def build(chain_name: str) -> object:
+        if not built:
+            built.append("refused")
+            raise ConnectionError("websocket upgrade refused")
+        return f"client:{chain_name}"
+
+    probe = _probe(Rpc(), build_client=build, clients={})
+
+    await probe.step()
+    assert probe.result("anvil").result == CHAIN_UNREACHABLE
+    await probe.step()
+    assert probe.result("anvil").result == CHAIN_REACHABLE
+
+
+@pytest.mark.asyncio
+async def test_a_probe_with_no_constructor_reports_what_the_chain_answers() -> None:
+    probe = _probe(Rpc(), clients={})
+
+    await probe.step()
+
+    assert probe.result("anvil").result == CHAIN_REACHABLE
+
+
+@pytest.mark.asyncio
+async def test_a_hung_construction_is_bounded_and_holds_no_other_chain() -> None:
+    """A construction that never returns times out as unreachable, the other
+    chain's result is still recorded, and its late result is discarded."""
+    release = threading.Event()
+
+    def build(chain_name: str) -> object:
+        if chain_name == "stuck":
+            release.wait(timeout=5)
+            return "client:stuck-late"
+        return f"client:{chain_name}"
+
+    clients: dict[str, object] = {}
+    probe = AlkahestChainProbe(
+        [
+            ProbedChain(name="stuck", rpc_url="http://stuck.test", chain_id=31337),
+            ProbedChain(name="anvil", rpc_url="http://anvil.test", chain_id=31337),
+        ],
+        json_rpc=Rpc(timeout=0.05),
+        required_addresses=lambda _chain: {"escrow": ESCROW, "arbiter": ARBITER},
+        clock=Clock(),
+        build_client=build,
+        clients=clients,
+        rpc_timeout_seconds=0.05,
+    )
+    try:
+        await probe.step()
+
+        assert probe.result("stuck").result == CHAIN_UNREACHABLE
+        assert probe.result("anvil").result == CHAIN_REACHABLE
+        assert clients == {"anvil": "client:anvil"}
+    finally:
+        release.set()

@@ -10,8 +10,6 @@ plugs into the same registry. These tests pin down:
   touching the existing flow.
 - RecipientArbiterCodec encoding: SDK RecipientArbiterDemandData bytes
   round-trips through eth_abi.decode back to the same address.
-- Legacy verification's recipient obligation dispatches through the codec:
-  the produced demand bytes match what the codec returns directly.
 """
 
 from dataclasses import dataclass
@@ -28,11 +26,9 @@ from market_alkahest.alkahest import (
     known_arbiter_kinds,
     register_arbiter_codec,
 )
-from market_alkahest.escrow_verification import _legacy_recipient_obligation_data
 
 
 _SELLER_WALLET = "0x" + "ab" * 20
-_TOKEN = "0x" + "cd" * 20
 _ARBITER_ADDR = "0x" + "ef" * 20
 
 
@@ -149,86 +145,3 @@ def test_recipient_codec_ignores_price_and_duration():
     a = codec.encode_demand(AgreementContext(_SELLER_WALLET, 100, 60))
     b = codec.encode_demand(AgreementContext(_SELLER_WALLET, 999999, 3600 * 24 * 30))
     assert a == b
-
-
-# ---------------------------------------------------------------------------
-# legacy recipient obligation dispatch
-# ---------------------------------------------------------------------------
-
-
-def test_legacy_recipient_obligation_data_dispatches_through_codec(restore_registry):
-    """Replace the recipient codec with a sentinel and verify the
-    builder calls it (rather than reaching past the registry into
-    legacy helpers)."""
-    captured: dict = {}
-
-    class _CapturingCodec:
-        kind = "recipient_arbiter"
-
-        def resolve_address(self, chain_name, *, config_path):
-            captured["resolve"] = (chain_name, config_path)
-            return _ARBITER_ADDR
-
-        def encode_demand(self, agreement):
-            captured["agreement"] = agreement
-            return b"\xca\xfe\xba\xbe"
-
-    register_arbiter_codec(_CapturingCodec())
-
-    obligation_data = _legacy_recipient_obligation_data(
-        seller_wallet=_SELLER_WALLET,
-        agreed_amount=500,
-        duration_seconds=7200,
-        token_contract_address=_TOKEN,
-        chain_name="some_chain",
-        addr_config_path="/tmp/addrs.json",
-    )
-
-    # Dispatch happened.
-    assert captured["resolve"] == ("some_chain", "/tmp/addrs.json")
-    assert captured["agreement"].seller_wallet == _SELLER_WALLET
-    assert captured["agreement"].agreed_amount == 500
-    assert captured["agreement"].duration_seconds == 7200
-
-    # Codec's outputs landed in the obligation_data dict.
-    assert obligation_data["arbiter"] == _ARBITER_ADDR
-    assert obligation_data["demand"] == "0xcafebabe"
-    # Non-codec fields still come from the builder.
-    assert obligation_data["token"] == _TOKEN
-    # agreed_amount is the absolute payment in base units — no further scaling.
-    assert obligation_data["amount"] == 500
-
-
-def test_legacy_recipient_obligation_data_raises_for_unknown_arbiter_kind():
-    with pytest.raises(ValueError, match="nonexistent_arbiter"):
-        _legacy_recipient_obligation_data(
-            seller_wallet=_SELLER_WALLET,
-            agreed_amount=1000,
-            duration_seconds=3600,
-            token_contract_address=_TOKEN,
-            chain_name="some_chain",
-            arbiter_kind="nonexistent_arbiter",  # not registered
-        )
-
-
-def test_legacy_recipient_obligation_data_amount_unchanged_by_codec_swap(restore_registry):
-    """The amount comes straight from the negotiated agreed_amount —
-    swapping arbiters doesn't change it."""
-    class _NoopCodec:
-        kind = "recipient_arbiter"
-
-        def resolve_address(self, chain_name, *, config_path):
-            return _ARBITER_ADDR
-
-        def encode_demand(self, agreement):
-            return b""
-
-    register_arbiter_codec(_NoopCodec())
-    result = _legacy_recipient_obligation_data(
-        seller_wallet=_SELLER_WALLET,
-        agreed_amount=500,
-        duration_seconds=1800,
-        token_contract_address=_TOKEN,
-        chain_name="some_chain",
-    )
-    assert result["amount"] == 500

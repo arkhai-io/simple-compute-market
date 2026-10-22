@@ -34,11 +34,13 @@ without its materialized plan: a plan that cannot be materialized refuses the ac
 exact settlement selection of a mechanism whose deals need a plan is accepted only with that
 plan; only a mechanism that settles from the Agreement alone is accepted without one. An escrow
 proposal MUST name the escrow contract it funds: a proposal naming none, or the zero address,
-MUST be refused, by the seller's escrow-shape policy where it runs and, independently of any
-seller policy, by plan materialization, while a negotiation that carries no escrow proposal is
-unaffected. An escrow proposal naming a contract the listing does not accept, including against a
-listing accepting none, MUST be refused before any seller decision accepts it, and no listing
-entry prices it.
+MUST be refused, by the seller's escrow-shape policy, which every domain runs ahead of its
+configured policies, and, independently of any seller policy, by plan materialization, while a
+negotiation that carries no escrow proposal is unaffected. An escrow proposal naming a contract the listing does not accept, including against a
+listing accepting none, or a literal field such as its token other than that accepted entry's,
+MUST be refused before any seller decision accepts it, by the seller's escrow-shape policy, which
+every domain runs ahead of its configured policies, and, independently of any seller policy, by
+plan materialization; no listing entry prices such a proposal.
 
 #### Scenario: A proposal substitutes the recipient
 
@@ -65,16 +67,22 @@ entry prices it.
 - **THEN** the seller refuses it, naming `escrow_not_in_accepted_set`, and no listing entry
   prices it
 
-#### Scenario: A seller without the shape policy receives an unpinned proposal
+#### Scenario: A proposal names the listing's escrow in another token
 
-- **WHEN** a seller's negotiation policies omit the escrow-shape guard and a buyer's Alkahest
-  proposal names no escrow address
+- **WHEN** a buyer's Alkahest proposal names an escrow contract the listing accepts with a token
+  other than the one that entry fixes, whatever policies the seller configures
+- **THEN** the seller refuses it, naming `escrow_field_mismatch`, and no plan is materialized
+
+#### Scenario: A policy accepts an unpinned proposal
+
+- **WHEN** a seller's policies would accept a buyer's Alkahest proposal that names no escrow
+  address
 - **THEN** plan materialization refuses it and no obligation is accepted
 
 #### Scenario: The seller configures no escrow-shape policy
 
-- **WHEN** a seller's negotiation policies omit the escrow-shape guard and a buyer selects an
-  unauthorized release condition
+- **WHEN** a seller's configured policies would accept a buyer's proposal selecting an
+  unauthorized release condition, whatever guard runs ahead of them
 - **THEN** plan materialization refuses it and no obligation is accepted
 
 #### Scenario: The plan cannot be materialized
@@ -132,3 +140,16 @@ decision accepts it.
 - **WHEN** a buyer's counter names an option other than the one its opening selected
 - **THEN** the seller's reference amount, and whether the round bargains an amount, remain the
   opening's
+
+#### Scenario: A counter selects an unpriced option after a priced opening
+
+- **WHEN** a buyer opens on an option with an amount rate and counters selecting an option with
+  none, naming an amount of its own
+- **THEN** the seller does not accept the counter as an unpriced selection, and any acceptance
+  settles the opening's option at an amount bargained against the opening's reference
+
+#### Scenario: A continuation's option was repriced since the opening
+
+- **WHEN** a seller's publication reprices the option a VM negotiation's opening selected, and
+  the buyer continues
+- **THEN** the seller refuses the round, naming `pinned_option_withdrawn`, before any decision

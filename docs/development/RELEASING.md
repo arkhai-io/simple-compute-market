@@ -170,6 +170,14 @@ Moving a package to 1.0.0 is a deliberate decision that sets its
 compatibility commitment, not a consequence of shipping an incompatible
 change.
 
+A change bumps each package it changes at most once, measured against the
+package's version on the branch the change merges into: that is the version a
+release sees. A package already bumped on the change's branch is bumped again
+only when a later edit needs a larger bump than the one it has, such as an
+incompatible edit to a package bumped only for a fix, and exact pins on it move
+only with that bump. Bumping an unreleased version again changes nothing a
+release sees and moves every exact pin on it for nothing.
+
 ### Import package renames
 
 These releases moved each package to one import package under `src/`. The old

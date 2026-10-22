@@ -20,7 +20,6 @@ from market_alkahest import (
     configured_release_model,
     publication_release_conditions,
     release_conditions,
-    require_deliverable_release_model,
 )
 from market_settlement_runtime import (
     MechanismReadiness,
@@ -158,8 +157,6 @@ def test_oracle_gated_and_interruptible_are_mutually_exclusive(chains):
         configured_release_model(config)
     with pytest.raises(ReleaseModelError, match="mutually exclusive"):
         _conditions(config, chains, ["anvil"])
-    with pytest.raises(ReleaseModelError, match="mutually exclusive"):
-        require_deliverable_release_model(config, {RECIPIENT_RELEASE})
 
 
 @pytest.mark.parametrize(
@@ -172,30 +169,6 @@ def test_oracle_gated_and_interruptible_are_mutually_exclusive(chains):
 )
 def test_each_section_selects_one_model(policy, model):
     assert configured_release_model(_config(**policy)) == model
-
-
-def test_a_model_the_domain_declares_is_returned():
-    config = _config(oracle_gated=True, trusted_oracle_addresses=[ORACLE])
-
-    assert (
-        require_deliverable_release_model(
-            config, {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}
-        )
-        == ORACLE_GATED_RELEASE
-    )
-    assert require_deliverable_release_model(None, {RECIPIENT_RELEASE}) == RECIPIENT_RELEASE
-
-
-def test_a_model_the_domain_does_not_declare_is_refused_by_name():
-    with pytest.raises(ReleaseModelError, match="'interruptible' release model"):
-        require_deliverable_release_model(
-            _config(interruptible=True), {RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}
-        )
-
-
-def test_a_declaration_naming_an_unknown_model_is_refused():
-    with pytest.raises(ValueError, match="unknown Alkahest release models"):
-        require_deliverable_release_model(None, {RECIPIENT_RELEASE, "escrowless"})
 
 
 def _clause(mechanism: str, **mechanism_input) -> SettlementPublicationClause:

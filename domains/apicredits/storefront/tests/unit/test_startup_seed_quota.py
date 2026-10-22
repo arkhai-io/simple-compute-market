@@ -38,6 +38,7 @@ from apicredits_storefront.listing_seed import (
 )
 from apicredits_storefront.services.listing_service import SettlementMechanismUnreachable
 from apicredits_storefront.utils import config as storefront_config
+from tests._settings_overrides import settings_overrides
 
 _SELLER_SIGNER = Ed25519Signer(bytes.fromhex("22" * 32))
 _AUTHORITY_SIGNER = Ed25519Signer(bytes.fromhex("33" * 32))
@@ -299,3 +300,67 @@ async def test_the_seed_finishes_on_a_listing_already_there(seeded):
     assert again["attempts"] == 1
     assert listings.calls == []
     assert registrations.calls == 0
+
+
+_SITE_A = "http://site-a:8082"
+_SITE_B = "http://site-b:8082"
+
+
+def _capacity_sites(**urls: str) -> dict:
+    """``[capacity.sites]`` naming each site's URL, each trusting the authority
+    signer."""
+    authority = _AUTHORITY_SIGNER.identity.model_dump(mode="json")
+    return {
+        site_id: {"url": url, "expected_authorities": {"identities": [authority]}}
+        for site_id, url in urls.items()
+    }
+
+
+@pytest.mark.parametrize(
+    ("sites", "named", "expected"),
+    [
+        ({"a": _SITE_A}, "", _SITE_A),
+        ({"a": _SITE_A, "b": _SITE_B}, "b", _SITE_B),
+    ],
+    ids=["the only site", "the named site"],
+)
+def test_the_seed_registers_at_its_site(sites, named, expected):
+    with settings_overrides(
+        capacity__sites=_capacity_sites(**sites), capacity__seed_site=named
+    ):
+        assert listing_seed.capacity_authority_site().url == expected
+
+
+@pytest.mark.parametrize(
+    ("sites", "named", "message"),
+    [
+        ({"a": _SITE_A, "b": _SITE_B}, "", "seed_site is required"),
+        ({"a": _SITE_A}, "missing", "unknown capacity.seed_site 'missing'"),
+    ],
+    ids=["several sites and none named", "an unknown site named"],
+)
+def test_a_seed_site_the_configuration_cannot_name_is_refused(sites, named, message):
+    """Resolved when the seed registers, so the step gives up rather than
+    stopping startup."""
+    with settings_overrides(
+        capacity__sites=_capacity_sites(**sites), capacity__seed_site=named
+    ), pytest.raises(RuntimeError, match=message):
+        listing_seed.capacity_authority_site()
+
+
+@pytest.mark.asyncio
+async def test_the_seeds_listing_is_found_beyond_the_first_page():
+    """Every open listing is read, so a storefront with more open listings than
+    one page still finds the seeded one rather than creating it again."""
+    rows = [
+        {"listing_id": f"L-{index}", "listing_resource": {"resource_id": f"other-{index}"}}
+        for index in range(listing_seed._LISTING_PAGE)
+    ] + [{"listing_id": "L-seed", "listing_resource": json.dumps({"resource_id": "demo-quota"})}]
+
+    class _Db:
+        async def list_listings(self, *, status, limit, offset):
+            assert status == "open"
+            return rows[offset : offset + limit]
+
+    assert await listing_seed._listing_for(_Db(), "demo-quota") == "L-seed"
+    assert await listing_seed._listing_for(_Db(), "absent") is None

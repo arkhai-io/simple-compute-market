@@ -31,11 +31,13 @@ from market_alkahest.plans import (
     require_escrow_terms_fund_plan,
 )
 from market_alkahest.release_authorization import (
+    EscrowNotAcceptedError,
     ReleaseConditionError,
     UnpinnedEscrowError,
     authorized_release_condition,
     authorized_release_conditions,
     recorded_release_conditions,
+    require_accepted_escrow,
     require_pinned_escrow,
     selected_release_condition,
 )
@@ -47,6 +49,7 @@ from market_alkahest.schemas import (
 )
 
 __all__ = [
+    "EscrowNotAcceptedError",
     "ReleaseConditionError",
     "ReleaseConditionsUnrecordedError",
     "SettlementPlanMaterializationError",
@@ -112,17 +115,24 @@ def derive_accepted_escrow_terms(
     when the proposal was accepted (``release_conditions_record``): the release
     conditions it advertised. The escrow is materialized under the one they
     authorize on the proposal's chain, as the seller materialized its plan, and
-    where the seller sent a plan the derivation must equal it
-    (``require_escrow_terms_fund_plan``). Raises
-    ``ReleaseConditionsUnrecordedError`` when no conditions were recorded,
-    ``ReleaseConditionError`` when they authorize none, and ``ValueError`` when
-    the record cannot be read or the plan differs.
+    the derivation must equal the seller's plan
+    (``require_escrow_terms_fund_plan``). A seller accepts an escrow only with
+    its plan, so a run that recorded none is refused rather than funded
+    unchecked. Raises ``ReleaseConditionsUnrecordedError`` when no conditions
+    were recorded, ``ReleaseConditionError`` when they authorize none, and
+    ``ValueError`` when the record cannot be read, no plan was recorded
+    (``seller_plan_missing``), or the plan differs.
     """
     release_conditions = recorded_release_conditions(listing_record)
     if release_conditions is None:
         raise ReleaseConditionsUnrecordedError(
             "release_conditions_unrecorded: the run was accepted before its "
             "listing's release conditions were recorded; start a new run"
+        )
+    if settlement_plan is None:
+        raise ValueError(
+            "seller_plan_missing: the seller accepted the escrow without its "
+            "settlement plan"
         )
     terms = materialize_escrow_terms_from_proposal(
         proposal=_escrow_proposal(accepted_proposal),
@@ -131,8 +141,7 @@ def derive_accepted_escrow_terms(
         duration_seconds=duration_seconds,
         addr_config_path=addr_config_path,
     )
-    if settlement_plan is not None:
-        require_escrow_terms_fund_plan(terms, settlement_plan)
+    require_escrow_terms_fund_plan(terms, settlement_plan)
     return terms
 
 
@@ -147,10 +156,15 @@ def authorize_escrow_proposal(
     the proposal's chain, and replaced by the listing's form of it; a proposal
     selecting none takes the listing's authorized condition. A proposal naming
     no escrow contract is refused (``UnpinnedEscrowError``), whatever condition
-    it selects. Raises ``ReleaseConditionError``.
+    it selects, and so is one naming a contract the listing does not accept or
+    a literal field other than its entry's (``EscrowNotAcceptedError``). This
+    is the seller's chokepoint: every acceptance materializes through it, so
+    the plan holds to the listing whatever seller policies ran. Raises
+    ``ReleaseConditionError``.
     """
     model = _escrow_proposal(proposal)
     require_pinned_escrow(model)
+    require_accepted_escrow(model, listing=listing)
     condition = authorized_release_condition(
         listing,
         chain_name=model.chain_name,

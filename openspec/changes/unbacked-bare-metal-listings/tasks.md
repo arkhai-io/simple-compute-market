@@ -323,6 +323,20 @@ Section 3 notes (handoff):
   relock them. The owner widened this session's egress, after which both resolved.
 - **Seam.** Tests run only through `make` targets here, so a single failing test is read
   from the target's log, not rerun alone.
+- **Round 1's triage.** 85 F14: `require_deliverable_release_model` and its tests are
+  removed, and the `release_conditions` docstring names readiness as the only check of a
+  release model; nothing outside tests called it. 91 O1: the two chain-backed tests of
+  `domains/vms/storefront/tests/integration/test_alkahest.py`, which drove the Alkahest
+  SDK through a trusted-oracle settlement against a chain the SDK spawns and so failed
+  wherever Node.js and Anvil are absent, move to the end-to-end tier as
+  `scenarios/core/test_alkahest_trusted_oracle.py` (marker
+  `e2e_alkahest_trusted_oracle`, in the VM lane's module list), which runs the same
+  escrow, fulfillment, arbitration, and collection against the lane's Anvil with its
+  funded buyer and seller and Anvil account #0 as the oracle. They exercise the SDK and the
+  chain, not the storefront, so no integration test is owed in their place. Not added to
+  the Helm `e2e` step's selection, whose release may not fund the seller. Section 3's
+  "Not covered by any section" note on a VM create's supplied `demands` is answered by
+  85 F9 (Section 5). Evidence: the round's note under Section 10.
 
 ## 4. Alkahest probes its chains apart from readiness
 
@@ -549,6 +563,31 @@ Section 4 notes (handoff):
   kept as recorded under 4.5, since the permanent "only when invoked or enabled" sentence
   governs the status command's checks and a disabled section's servicing already uses its
   chains.
+- **Round 1's triage.** 85 F7: a chain whose client the probe could not construct reads
+  `alkahest.chain_unreachable` whatever its RPC answers (`_probe` in `chain_probe.py`);
+  a probe with no constructor reports what the chain answers; the module docstring states
+  the `ws`→`http` probe mapping. 85 F8: `_construct_missing_client` builds a client in a
+  worker thread under `asyncio.wait_for` with the probe's timeout, and only a construction
+  that finished in time enters the map. 85 F10: with no `accepted_escrows` and no
+  `chain_name`, readiness judges every configured chain (`_selected_chain_names`;
+  `default_chain` no longer selects there), and every storefront's status asks with no
+  publication input — bare metal's status now passes `clauses=()` rather than its
+  clauses. 85 F3: VM's `VmCompositionSeams` and API credits' new
+  `ApiCreditCompositionSeams` carry the Alkahest client constructor and the JSON-RPC
+  call, and bare metal's `build_runtime_from_configuration` takes `chain_json_rpc`;
+  `build_alkahest_clients` takes `constructor=`. Tests: kit unit
+  (`test_chain_probe.py`: a construction failure reads unreachable, no constructor, a
+  hung construction across two chains; `test_settlement_config.py`: no publication input
+  judges every chain, with and without `default_chain`); VM unit composition
+  (`test_alkahest_chain_probe_composition.py`: the probe, its client map, and the loop
+  registered through the real `_build_settlement_composition`, stepped through
+  `lifecycle_steps.alkahest_chain_probe_step` — VM has no harness starting its whole
+  application with seams, so this is the composition boundary, not the started app); API
+  credits integration (`test_alkahest_release_conditions.py`: the started application
+  through `StorefrontClient`, its probe and seed sharing one map, status naming an
+  unanswering second chain); bare metal composition (`test_app_composition.py`: the
+  configured runtime's registered probe loop run through `loops.run_cycle`, and status
+  naming an unanswering second chain). Evidence: the round's note under Section 10.
 
 ## 5. Each storefront derives Alkahest options only from ready clauses
 
@@ -764,6 +803,22 @@ Section 5 notes (handoff):
   kept, since each case is a distinct configuration path at that level. The disabled
   readiness's repeated ID and secret checks and its extra preflight per readiness call
   were kept, since a disabled preflight reads only configuration and one address file.
+- **Round 1's triage.** 85 F9: a VM create derives its release conditions from the
+  storefront's `[Settlement.alkahest]` configuration whenever it publishes Alkahest
+  options, supplied escrows or clause-derived alike
+  (`publication_terms.demands_for_published_escrows`, called from
+  `listing_service.derive_listing`), and a create carrying `demands` is refused with 400;
+  the request model keeps the field, and the listing's `demands` and a buyer proposal's
+  `demand` are unchanged on the wire. That also answers 88 V1: the multi-registry
+  listings, created with supplied escrows and no `demands`, now advertise the derived
+  condition. The four VM scenarios that passed `demands=` at create no longer do. The
+  API-credit test's module patches of `_build_alkahest_chain_probe` are replaced by
+  `ApiCreditCompositionSeams` (85 F3, Section 4). Tests: VM integration
+  (`test_listings_api.py` `TestCreateListingReleaseConditions`: supplied escrows with no
+  clauses get the derived condition under a ready Alkahest, none under an unready one, and
+  supplied `demands` are refused with 400, through the typed client). The Helm
+  render probe (`helm/charts/storefront/tests/test_render.py`) derives through
+  `demands_for_published_escrows`. Evidence: the round's note under Section 10.
 
 ## 6. API credits publishes once its dependencies answer
 
@@ -903,8 +958,10 @@ mechanism"). Touches the API-credit storefront.
 - [x] 6.5 Versions: `arkhai-apicredits-storefront`; `make lock`.
       0.13.0; `make lock` refreshed every lock.
 - [x] 6.6 **Verify.** `make test-apicredits`; `make test`; `make check-packaging`.
-      End-to-end: `e2e_credits_deal` and `e2e_credits_payment_deal` run on the seeded
-      listing, so their passing proves the step publishes once dependencies answer.
+      End-to-end: `e2e_credits_deal` runs on the seeded listing, so its passing proves
+      the step publishes once dependencies answer (`e2e_credits_payment_deal` skips
+      without a payments target, and the seed offers only Alkahest; corrected in round
+      1's triage, 85 F2).
       Results:
       - `make test-apicredits` all passed (storefront 215, after both reviews' fixes).
       - `make check-packaging` passed.
@@ -977,6 +1034,21 @@ Section 6 notes (handoff):
   which completes as a no-op; the controller has no way to stop a timer loop. The
   ERROR record and the step's report (`state: given_up`, the error's type) remain.
   A controller that lets a step end its loop would keep it visible; no task names one.
+- **Round 1's triage.** 85 F2: the credits deal's discovery no longer races the seed.
+  `test_credits_deal_buyer_cli.py`'s `_seed_published` steps `alkahest-chain-probe`, then
+  `listing-seed`, through the storefront's administrator `run-cycle` before discovering,
+  as the residual-race note above proposed; the lane's configuration
+  (`e2e-tests/config/config-docker.yml`) gains the API-credit storefront's identifier and
+  administrator credential, the credential being the development dev-env identity
+  already committed for it, and the API-credit conftest a `credits_storefront_admin`
+  fixture. 6.6's evidence line now names only `e2e_credits_deal`. 85 F13: the seed's
+  lookup of its own listing pages through the storefront's listings (`_LISTING_PAGE`,
+  500 at a time) rather than reading one page. Tests: API credits unit
+  (`test_startup_seed_quota.py`: the seed resolves its configured site, and finds its
+  listing past the first page); integration (`test_alkahest_release_conditions.py`: a
+  restarted storefront's seed finds the listing it published and publishes no second);
+  end-to-end, `e2e_credits_deal` (unrun here). Evidence: the round's note under
+  Section 10.
 
 ## 7. Settlement verifies against the plan committed at acceptance
 
@@ -1219,6 +1291,22 @@ Section 7 notes (handoff):
 - **The dry-run request lost fields**: an older caller of `verify_settle` sending the
   terms is refused 422. The only callers are the storefronts' tests and the e2e
   Stage07b, all updated.
+- **Round 1's triage.** 85 F5: the two handoff questions above are settled in
+  `design.md` decisions 16 and 18. Verification keeps finding the escrow's codec through
+  the current address book, and the `settlement-servicing` delta now guarantees only
+  what that allows (a policy, wallet, or release-condition address-book change after
+  acceptance changes nothing; an address book that stops naming the funded contract
+  leaves the deal unverifiable, its escrow reclaimable), with a scenario moving the
+  arbiter after acceptance; an unpinned deal accepted before this release is a cutover,
+  bare metal never having been released; the module docstring states the address-book
+  limit. 85 F14 settled the first note: the listing form of verification
+  (`verify_escrow_for_settlement`, its token extraction, and its legacy recipient
+  helper) is removed with its tests, its release-authorization cases carried by
+  `authorize_escrow_proposal`'s, and VM's `utils/escrow_verification.py` re-exports only
+  the plan form. Tests: kit unit
+  (`test_native_escrow_verification.py`: an arbiter moved after acceptance still
+  verifies against the plan); VM unit (`test_escrow_verification.py`, now over the plan
+  form). Evidence: the round's note under Section 10.
 
 ## 8. An escrow proposal naming no escrow contract is refused
 
@@ -1495,6 +1583,30 @@ Section 8 notes (handoff):
   longer verify, and this section removes the last path that accepted them.
 - **`kit/storefront` now has `tests/integration/`**, holding Section 4's SDK
   construction test, moved with `git mv` under a permanent name.
+- **Round 1's triage.** 85 F1: `accept_unpriced_selection` judges and accepts the pinned
+  opening, and `accept_exact_listing`'s selection branch settles the opening's option
+  at the latest proposal's amount, so a counter selecting an unpriced option after a
+  priced opening is no longer accepted at its own amount. 85 F6: `kit/alkahest`'s
+  `authorize_escrow_proposal`, which the acceptance's plan materialization runs, holds an
+  escrow proposal to the listing's accepted entry, `escrow_not_in_accepted_set` or
+  `escrow_field_mismatch` (`require_accepted_escrow`), whatever policies ran; bare metal
+  runs `escrow_shape_guard` beside `has_matching_inventory_guard` as a required guard
+  ahead of its configured policies, and its default policies are `("listed_price",)`. A
+  plan materialized without a seller plan's input (`derive_accepted_escrow_terms` given
+  none) refuses `seller_plan_missing` (85 F12, Section 9). 85 F17: VM's round hook refuses
+  a continuation whose opening's option the listing no longer offers,
+  `pinned_option_withdrawn`, before any policy. Decision 18's rationale is corrected
+  (85 F4). Tests: kit unit (`test_selection_scalar.py`: an unpriced counter after a priced
+  opening is not accepted, and the exact-listing branch settles the opening;
+  `test_release_authorization.py`: an escrow outside the accepted set, another token,
+  and a listing accepting none; `test_plans.py`); VM integration
+  (`test_negotiate_controller.py` `TestCounterNamingAnotherOption`: the unpriced counter,
+  which answered `accept` against the old kit, and a continuation after a repriced
+  option, through `NegotiationRuntime` and the typed client); bare metal integration
+  (`test_http_negotiation.py`, through the typed client: with only `listed_price`
+  configured, a substituted recipient is refused `selected_demand_not_allowed` and
+  another token `escrow_field_mismatch`, and nothing is accepted). Evidence: the round's
+  note under Section 10.
 
 ## 9. A buyer funds only what it derives
 
@@ -1736,6 +1848,16 @@ Section 9 notes (handoff):
   testability refactor; moving `escrow_cli create`'s `make_create_escrow_fn` import out of
   its pre-existing call-time block; and the three storefronts' bump in this section
   although each was already bumped and unreleased, which is harmless.
+- **Round 1's triage.** 85 F12: a seller's accept reply carrying no settlement plan is
+  refused before funding on every path: `core/buyer`'s `_settle_one` ends the run naming
+  `seller_plan_missing` (event `escrow_create_failed`) and the plan check is no longer
+  conditional on a plan being present, and `kit/alkahest`'s
+  `derive_accepted_escrow_terms` raises `seller_plan_missing` for a resume with no
+  recorded plan. 85 F4: decision 17's superseded bullet is rewritten to what was built,
+  and the `buyer-orchestration` delta requires the plan on every funding path with a
+  scenario for a reply carrying none. Tests: core unit (`test_orchestrator.py`: a reply
+  with no plan creates no escrow); kit unit (`test_plans.py`: a resume with no recorded
+  plan). Evidence: the round's note under Section 10.
 
 ## 10. The provisioning service refuses unserved providers and signs failures
 
@@ -1833,10 +1955,14 @@ Touches `kit/resource-pools`, the provisioning service, and `kit/site`.
 
 Section 10 notes (handoff):
 
-- **The body read is inside the `try`.** A streaming route that fails mid-body is a
-  failure after authentication too, so both middlewares catch it there; the status line
-  was not yet sent, since the middleware buffers the body before answering. No test uses
-  a streaming route.
+- **A failure after a streamed response has started is not caught.** A route that fails
+  before starting its response is answered with the signed 500. Once a route has sent
+  its response start, Starlette's `BaseHTTPMiddleware` stores the route's exception and
+  ends the body stream instead of raising into `call_next`'s caller, and re-raises it
+  only after sending, so the middleware would sign, and the provisioning service record,
+  a truncated body under the original status. No route streams; one that does needs the
+  middleware to check for that failure or to refuse streamed responses (corrected in
+  round 1's triage, 85 F15).
 - **Fresh-context check.** Fixed: the startup and site-kit test labels and claims above,
   the API-credits case moved onto the real application with its log asserted, the
   provider check's docstring and startup log line, and `ResourcePool` imported from its
@@ -1853,6 +1979,51 @@ Section 10 notes (handoff):
   transport re-raising a route's exception. Only the one provisioning test did, among the
   suites run; a suite outside them that drives the provisioning service or a `kit/site`
   gate and expects the exception would now see a 500.
+- **Round 1's triage: fixes concerning no section, and the round's evidence.** 85 F15
+  corrected the first note above. 85 F11: `docs/development/RELEASING.md` states that a
+  change bumps each package at most once against the branch it merges into; every package
+  this round touched already carries a minor bump over `dev`, so none is bumped again and
+  no lock changed. 73 R2: `docs/agents/change-workflow.md` names the two call shapes the
+  harness refuses on its own. 77 R1: the workflow wrapper turns SIGTERM into a `stopped`
+  outcome naming the signal (`scripts/change_workflow/wrapper.py`), with a unit test.
+  83 R1: `round-done` rebuilds the index from the round head after its reset
+  (`scripts/round_view.py`), with a unit test of a round adding an empty file. Each
+  section's own fixes are in its round-1 note (Sections 3–9). Test fixtures the fixes
+  invalidated were updated: VM buyer unit fixtures now carry the seller's plan their
+  stubbed derivation funds, as Alkahest-kit `EscrowTerms` (85 F12); VM unit and API-credit
+  unit listing fixtures accept the escrow they propose (85 F6); a VM unit test unpacks the
+  create parser's three values (85 F9); an API-credit unit test stubs the services builder
+  with its seams argument (85 F3).
+  **Evidence** (`make dist` first; no lock refresh owed): unit and library tests —
+  `make -C kit test-policy test-alkahest test-storefront` 95, 413, and 127 passed;
+  `make test-core` 120, 145, 217 (2 skipped), and 65 passed; `make test-vms-domain` 53;
+  `make test-vms-buyer` 207; `make test-e2e-unit` 38; `make test-release-tooling` 1081 (11
+  skipped). Unit and integration — `make test-bare-metal` passed (storefront 449, the
+  others 134, 11, 40); `make test-apicredits` passed (storefront 229, service 73, the
+  others 41, 30, 8, 1, and the middleware ports). `domains/vms/storefront/tests/unit/test_listing_token_extraction.py`,
+  which tested only the removed listing form's token extraction, and
+  `tests/integration/test_alkahest.py`, moved to `e2e_alkahest_trusted_oracle`, are
+  deleted; `make test-storefront` then passed, unit 1099 (1 skipped) and integration 455.
+  `make test` then passed every suite and failed only at `make test-deployment-packaging`'s
+  Helm render (`helm: No such file or directory`); Helm is absent here, so the Helm render
+  probe's edit is unrun. `make check-packaging` and
+  `make check-comment-hygiene` passed; `make check-change` fails only on the two citations
+  Sections 13 and 22 create. End-to-end: unrun here; the fix commit's validation runs the
+  lanes, including `multi_registry` (88 V1), `e2e_credits_deal` (85 F2), and the new
+  `e2e_alkahest_trusted_oracle` (91 O1).
+  **Fresh-context check** of the diff against `da1929a`: no comment-hygiene, layering, or
+  public-repository finding. Fixed: function-local imports the round's tests added
+  (`test_chain_probe.py`, bare metal's `test_app_composition.py`, the wrapper test); a VM
+  integration fixture replacing `publication_terms.CHAINS` (now `patch.dict` on the one
+  shared mapping) and the API-credit seed-site tests replacing `listing_seed`'s module
+  names (now `settings_overrides` over `[capacity]`); the `negotiation-protocol` delta
+  still saying the escrow-shape policy runs only "where it runs" and two scenarios
+  starting from a seller omitting the guard, which no domain can now configure (now:
+  plan materialization refuses whatever the policies would accept); bare metal's status
+  test not asserting the unanswering chain's own result. Its point that these
+  round-1 notes pointed at a Section 10 note that did not exist was read before this note
+  was written. The kit Alkahest, bare-metal, API-credit, VM integration, and release
+  tooling suites were rerun after these fixes.
 
 ## 11. Storefronts start degraded rather than waiting on their dependencies
 
@@ -2416,7 +2587,11 @@ change to implementation.
       creation, so an unready mechanism's option stays advertised until the seller closes
       it" owned by "Unowned — needs a new change", and Goal 6's "Current state" stating that
       settlement verifies against the committed plan, buyers fund only what they derive, and
-      an unusable Alkahest section is unready. Name each in the design-promotion record.
+      an unusable Alkahest section is unready. Goal 4 gains the row "A negotiation's
+      continuation is resolved against the listing as currently stored in VM and against
+      the opening's in bare metal, so a repriced option ends a VM negotiation that bare
+      metal would continue" owned by "Unowned — needs a new change", unless a change owns it
+      by closeout (round 1's triage, 85 F17). Name each in the design-promotion record.
 - [ ] 23.6 **Campaign index currency.** `openspec/changes/README.md`: this change's row and
       notes current, the Goal 7 campaign graph naming it current, and the two-seller scenario
       still recorded as unowned; other rows' `Depends on` are left to archive cleanup; `make
@@ -2464,7 +2639,9 @@ change to implementation.
         service waits in process either; "Storefront startup and site trust" — a service
         refuses to start when its own configuration or stored state is incoherent, the
         removed `fail_on_unreachable` and `preflight_timeout` settings, the Alkahest probe
-        interval and timeout, the degraded start in "System status", and the rewritten
+        interval and timeout, that the probe reads a `ws://` or `wss://` chain URL over
+        `http://` or `https://` on the same host (round 1's triage, 85 F7), the degraded
+        start in "System status", and the rewritten
         `publication_derivation` passage; "Storefront listing shapes and pool overrides" —
         its `publication_derivation` passage; "Release topology" — Helm test pods carry no
         workload selector label; "Introduction delivery" — the bare-metal lane's mail sink
@@ -2497,7 +2674,10 @@ change to implementation.
         stage convention.
       - `openspec/specs/settlement-configuration/architecture.md`: "Readiness, publication,
         and selection" — why the chain probe runs apart from readiness, and what each
-        blocker kind tells the publication runner.
+        blocker kind tells the publication runner; that status judges every configured
+        chain while publication judges the chains its clauses name, and the limit that
+        one unreachable chain makes Alkahest unready for every chain a publication names
+        together (round 1's triage, 85 F10).
       - `openspec/specs/buyer-orchestration/architecture.md`: "Persisted runs" — the
         run-log's opaque `listing_record`, written when negotiation starts and at
         acceptance and read back per listing on resume, and a resumed amount taken exactly

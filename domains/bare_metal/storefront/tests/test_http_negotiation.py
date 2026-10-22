@@ -1068,9 +1068,10 @@ def _nothing_accepted(runtime: BareMetalStorefrontRuntime) -> None:
         ).fetchone()[0] == 0
 
 
-async def test_a_substituted_recipient_is_refused_without_the_shape_guard(
+async def test_a_substituted_recipient_is_refused_whatever_chain_is_configured(
     tmp_path,
 ) -> None:
+    """A chain naming only a decider still runs the escrow-shape guard."""
     runtime = _materializing_runtime(
         str(tmp_path / "storefront.db"), policies=["listed_price"]
     )
@@ -1084,7 +1085,39 @@ async def test_a_substituted_recipient_is_refused_without_the_shape_guard(
             )
 
     assert refused.value.status_code == 409
-    assert "release_condition" in str(refused.value)
+    assert "selected_demand_not_allowed" in str(refused.value)
+    _nothing_accepted(runtime)
+
+
+async def test_an_escrow_in_another_token_is_refused_whatever_chain_is_configured(
+    tmp_path,
+) -> None:
+    """A deal priced in the listing's token cannot be escrowed in another: the
+    guard always runs, and the plan materialization holds the escrow to the
+    listing's accepted entry beneath it."""
+    runtime = _materializing_runtime(
+        str(tmp_path / "storefront.db"), policies=["listed_price"]
+    )
+    await _insert_listing(runtime, demands=[_recipient_condition(SELLER_WALLET)])
+    app = _app(runtime)
+    other_token = "0x" + "c3" * 20
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.negotiate_new(
+                    listing_id="listing-1",
+                    initial_amount=100,
+                    provision_terms=_opening()["provision_terms"],
+                    token=other_token,
+                    chain_name="anvil",
+                    escrow_address=ESCROW,
+                    proposal_fields={"token": other_token},
+                    demands=[_recipient_condition(SELLER_WALLET)],
+                )
+
+    assert refused.value.status_code == 409
+    assert "escrow_field_mismatch" in str(refused.value)
     _nothing_accepted(runtime)
 
 
@@ -1104,11 +1137,10 @@ async def test_a_listing_authorizing_no_condition_accepts_none(tmp_path) -> None
     _nothing_accepted(runtime)
 
 
-async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
+async def test_an_opening_selecting_the_listings_condition_is_settled_under_it(
     tmp_path,
 ) -> None:
-    """Without the shape guard, which refuses a pinned escrow selecting no
-    advertised condition, materialization settles one under the listing's."""
+    """The plan materializes the advertised condition the opening selected."""
     runtime = _materializing_runtime(
         str(tmp_path / "storefront.db"), policies=["listed_price"]
     )
@@ -1117,7 +1149,7 @@ async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
     app = _app(runtime)
 
     async with app.router.lifespan_context(app):
-        accepted = await _open_at_the_listed_rate(app)
+        accepted = await _open_at_the_listed_rate(app, demands=[authorized])
 
     assert accepted["action"] == "accept"
     (obligation,) = accepted["settlement_plan"]["obligations"]

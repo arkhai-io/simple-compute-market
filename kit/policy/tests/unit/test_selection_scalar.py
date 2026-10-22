@@ -274,6 +274,74 @@ def test_a_selection_of_no_advertised_option_passes_through() -> None:
     assert decision is None
 
 
+def _priced_opening_then(counter: dict[str, Any]) -> list[NegotiationRound]:
+    return [
+        NegotiationRound(
+            round_number=0,
+            sender="them",
+            action="initial",
+            proposal=_selection_proposal(_SCALAR_OPTION, {"amount": 50}),
+        ),
+        NegotiationRound(
+            round_number=1, sender="us", action="counter", proposal={"fields": {"amount": "100"}}
+        ),
+        NegotiationRound(round_number=2, sender="them", action="counter", proposal=counter),
+    ]
+
+
+def test_a_counter_selecting_an_unpriced_option_is_not_accepted_after_a_priced_opening() -> None:
+    """An acceptance settles the opening, so a counter naming an unpriced option
+    with an amount of its own must not be accepted at that amount."""
+    history = _priced_opening_then(_selection_proposal(_NON_SCALAR_OPTION, {"amount": 1}))
+
+    decision, _ = accept_unpriced_selection_middleware(history, _context(100))
+
+    assert decision is None
+
+
+def test_an_unpriced_opening_is_accepted_as_opened_whatever_a_counter_carries() -> None:
+    opening = _selection_proposal(_NON_SCALAR_OPTION)
+    history = [
+        NegotiationRound(round_number=0, sender="them", action="initial", proposal=opening),
+        NegotiationRound(round_number=1, sender="us", action="counter", proposal=dict(opening)),
+        NegotiationRound(
+            round_number=2,
+            sender="them",
+            action="counter",
+            proposal=_selection_proposal(_NON_SCALAR_OPTION, {"amount": 1}),
+        ),
+    ]
+
+    decision, _ = accept_unpriced_selection_middleware(history, _context())
+
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal == opening
+
+
+def test_exact_accept_prices_a_counter_against_the_opening_selection() -> None:
+    """A counter selecting an unpriced option after a priced opening is held to
+    the opening's reference amount, and the opening is what is accepted."""
+    unpriced_counter = _priced_opening_then(
+        _selection_proposal(_NON_SCALAR_OPTION, {"amount": 1})
+    )
+    decision, _ = accept_exact_listing_middleware(unpriced_counter, _context(100.0))
+    assert decision is not None
+    assert decision.action == "reject"
+    assert decision.reason.startswith("exact_listing:amount_mismatch")
+
+    at_reference = _priced_opening_then(
+        _selection_proposal(_NON_SCALAR_OPTION, {"amount": 100})
+    )
+    decision, _ = accept_exact_listing_middleware(at_reference, _context(100.0))
+    assert decision is not None
+    assert decision.action == "accept"
+    assert decision.proposal["settlement_selection"]["option_id"] == _SCALAR_OPTION[
+        "option_id"
+    ]
+    assert decision.proposal["fields"]["amount"] == "100"
+
+
 def test_bisection_alone_never_accepts_an_unpriced_selection() -> None:
     """Why the guard exists: a scalar terminal waits for an amount that an
     unpriced option never carries, and counters instead."""

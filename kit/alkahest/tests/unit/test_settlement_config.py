@@ -278,6 +278,41 @@ async def test_only_the_chains_the_clauses_select_are_read() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "selection",
+    [{}, {"default_chain": "anvil"}],
+    ids=["no default", "a default chain"],
+)
+async def test_with_no_publication_input_every_configured_chain_is_judged(
+    selection: dict,
+) -> None:
+    """Status asks with no publication input, and servicing an accepted deal
+    needs whichever chain it was accepted on, so a down chain no clause
+    publishes on is still reported."""
+    probe = _StubProbe(
+        {
+            "anvil": ChainProbeResult("reachable", _PROBED_AT),
+            "base_sepolia": ChainProbeResult("alkahest.chain_unreachable", _PROBED_AT),
+        }
+    )
+
+    blockers = await _blockers(
+        AlkahestSettlementConfig(enabled=True),
+        _seller_resources(
+            chain_probe=probe,
+            chains={
+                "anvil": {"rpc_url": "http://anvil.test"},
+                "base_sepolia": {"rpc_url": "http://base.test"},
+            },
+            chain_name=None,
+            **selection,
+        ),
+    )
+
+    assert blockers == {("alkahest.chain_unreachable", "reachability")}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("policy", "resources", "expected"),
     [
         (

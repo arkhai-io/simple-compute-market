@@ -26,6 +26,7 @@ from market_policy.scalar_policies import (
 )
 from market_policy.negotiation_middleware import (
     NegotiationContext,
+    NegotiationDecision,
     NegotiationMiddleware,
     NegotiationRound,
     load_negotiation_chain,
@@ -283,6 +284,31 @@ async def _run_default_seller_round_policy(
     # What is priced, and whether it is bargained by amount, is the pinned
     # opening's: an acceptance settles that opening whatever a counter names.
     pinned = pinned_proposal(history)
+    direction = _direction_from_strategy_label(strategy_label)
+    if (
+        pinned is not None
+        and any(item.sender == "us" for item in history)
+        and _selected_option(listing, pinned) is None
+    ):
+        # A continuation is resolved against the listing as it now stands, and
+        # a publication cycle that repriced the opening's option changed its
+        # identity. Pricing it from no option would hand a decider a zero
+        # reference, so the round is refused naming why; the opening guards
+        # refuse an opening selecting nothing for their own reasons.
+        return SellerRoundResult(
+            our_amount=0,
+            strategy_label=strategy_label,
+            direction=direction,
+            chain_label="pinned_option_withdrawn",
+            decision=NegotiationDecision(
+                action="reject",
+                reason=(
+                    "pinned_option_withdrawn: the listing no longer offers the "
+                    "option the opening selected"
+                ),
+            ),
+            intermediate={"uses_scalar_amount": True},
+        )
     uses_scalar_amount = proposal_uses_scalar_amount(
         listing_dict if isinstance(listing_dict, dict) else {},
         pinned,
@@ -296,7 +322,6 @@ async def _run_default_seller_round_policy(
         )
         if uses_scalar_amount else 0
     )
-    direction = _direction_from_strategy_label(strategy_label)
 
     chain = _load_storefront_chain(
         negotiation_config=negotiation_config,

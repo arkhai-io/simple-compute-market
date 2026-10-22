@@ -92,7 +92,6 @@ from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
-    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
@@ -187,19 +186,6 @@ ACCEPTED_ESCROWS = [
         "rates": [{"field": "amount", "per": "hour", "value": str(DEMAND_RESOURCE["amount"])}],
     }
 ]
-
-
-def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [
-        {
-            "chain_name": "anvil",
-            "arbiter": get_recipient_arbiter(
-                "anvil",
-                config_path=_ALKAHEST_ADDRESSES_PATH,
-            ).lower(),
-            "demand_data": {"recipient": seller_wallet.lower()},
-        }
-    ]
 
 
 DURATION_HOURS = 1
@@ -519,7 +505,7 @@ class TestStage00h_ProvisioningStorefrontLink:
 
 class TestStage02b_CreateListingPaused:
     def test_02b_create_listing_paused_local_only(
-        self, storefront_admin_client, storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
+        self, storefront_admin_client, storefront_seller_client, registry_client, deal_state: DealState
     ):
         """Create listing with paused=True; confirm locally visible and registry absent.
 
@@ -535,7 +521,6 @@ class TestStage02b_CreateListingPaused:
             listing_resource=OFFER_RESOURCE,
             capacity_source=capacity_source_for(OFFER_RESOURCE),
             accepted_escrows=ACCEPTED_ESCROWS,
-            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )

@@ -83,7 +83,8 @@ async def _default_settlement_provider() -> list[dict[str, Any]] | None:
     """Each composed mechanism's readiness, as its registration projects it.
 
     Readiness reads the Alkahest chain probe's last results and calls no chain,
-    so a status read never waits on one.
+    so a status read never waits on one. Status names nothing being published,
+    so Alkahest's readiness answers for every configured chain.
     """
     composition = _container.resolved_settlement_composition
     if composition is None:

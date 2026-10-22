@@ -299,6 +299,14 @@ _PROBE_MESSAGES = {
 
 
 def _selected_chain_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
+    """The chains readiness judges.
+
+    What is being published names its chains: escrows a listing publishes, or
+    one ``chain_name``. With no publication input, readiness answers whether
+    Alkahest can serve everything the storefront configures, so it judges every
+    configured chain: servicing an accepted deal needs whichever chain the deal
+    was accepted on. A composition's ``default_chain`` selects nothing here.
+    """
     chains = resources.get("chains")
     if not isinstance(chains, Mapping) or not chains:
         return ()
@@ -312,9 +320,9 @@ def _selected_chain_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
             if name not in names:
                 names.append(name)
         return tuple(names)
-    selected = resources.get("chain_name") or resources.get("default_chain")
-    if selected is None and len(chains) == 1:
-        selected = next(iter(chains))
+    selected = resources.get("chain_name")
+    if selected is None:
+        return tuple(str(name) for name in chains)
     if not isinstance(selected, str) or selected not in chains:
         return ()
     return (selected,)

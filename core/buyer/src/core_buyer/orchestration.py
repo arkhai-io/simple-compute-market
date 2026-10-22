@@ -907,6 +907,21 @@ def _settle_one(
             rounds=outcome.rounds,
             attempts=attempts,
         )
+    # A seller accepts an escrow only with the plan it committed to, so a reply
+    # without one breaks the protocol, and funding then would skip the one
+    # check that catches buyer and seller deriving different escrows.
+    if outcome.settlement_plan is None:
+        message = "seller_plan_missing: the seller accepted an escrow without its settlement plan"
+        on_event("escrow_create_failed", {"error": message})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_amount=outcome.agreed_amount,
+            reason=message,
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
 
     escrow_recipient = settlement_recipient(accepted_proposal)
 
@@ -965,23 +980,22 @@ def _settle_one(
             rounds=outcome.rounds,
             attempts=attempts,
         )
-    if outcome.settlement_plan is not None:
-        try:
-            check_escrows_fund_plan(escrows, outcome.settlement_plan)
-        except Exception as exc:
-            message = str(exc)
-            if not message.startswith("seller_plan_mismatch"):
-                message = f"seller_plan_mismatch: {message}"
-            on_event("escrow_create_failed", {"error": message})
-            return BuyResult(
-                status="exited",
-                negotiation_id=outcome.negotiation_id,
-                seller_url=seller_url,
-                agreed_amount=outcome.agreed_amount,
-                reason=message,
-                rounds=outcome.rounds,
-                attempts=attempts,
-            )
+    try:
+        check_escrows_fund_plan(escrows, outcome.settlement_plan)
+    except Exception as exc:
+        message = str(exc)
+        if not message.startswith("seller_plan_mismatch"):
+            message = f"seller_plan_mismatch: {message}"
+        on_event("escrow_create_failed", {"error": message})
+        return BuyResult(
+            status="exited",
+            negotiation_id=outcome.negotiation_id,
+            seller_url=seller_url,
+            agreed_amount=outcome.agreed_amount,
+            reason=message,
+            rounds=outcome.rounds,
+            attempts=attempts,
+        )
 
     on_event(
         "escrow_create_start",

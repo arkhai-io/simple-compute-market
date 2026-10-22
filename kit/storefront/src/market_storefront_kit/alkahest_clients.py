@@ -100,8 +100,16 @@ def build_alkahest_clients(
     policy: AlkahestClientPolicy,
     *,
     logger: LoggerLike | None = None,
+    constructor: Callable[
+        [AlkahestClientPolicy], Callable[[str], Any] | None
+    ] = alkahest_client_constructor,
 ) -> dict[str, Any]:
-    """Build every usable configured client and isolate per-chain failures."""
+    """Build every usable configured client and isolate per-chain failures.
+
+    ``constructor`` gives the per-chain construction, the SDK boundary; a
+    storefront hands its chain probe the same one, so the clients built at
+    start and those the probe rebuilds come from one place.
+    """
 
     active_logger = logger or logging.getLogger(__name__)
     missing = _missing_requirements(policy)
@@ -118,7 +126,7 @@ def build_alkahest_clients(
             )
         return {}
 
-    construct = alkahest_client_constructor(policy)
+    construct = constructor(policy)
     if construct is None:
         return {}
     clients: dict[str, Any] = {}

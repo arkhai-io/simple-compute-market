@@ -33,7 +33,13 @@ from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
-from market_alkahest import ALKAHEST_CONFIG_KEY, AlkahestChainProbe, ProbedChain
+from market_alkahest import (
+    ALKAHEST_CONFIG_KEY,
+    AlkahestChainProbe,
+    JsonRpcCall,
+    ProbedChain,
+    json_rpc_call,
+)
 from market_storefront_kit import (
     AlkahestChain,
     AlkahestClientPolicy,
@@ -140,21 +146,30 @@ def _alkahest_client_policy() -> AlkahestClientPolicy | None:
     )
 
 
-def _build_alkahest_clients() -> dict[str, Any]:
+AlkahestClientConstructor = Callable[
+    [AlkahestClientPolicy], Callable[[str], Any] | None
+]
+
+
+def _build_alkahest_clients(constructor: AlkahestClientConstructor) -> dict[str, Any]:
     policy = _alkahest_client_policy()
     if policy is None:
         return {}
-    return build_alkahest_clients(policy, logger=logger)
+    return build_alkahest_clients(policy, logger=logger, constructor=constructor)
 
 
 def _build_alkahest_chain_probe(
     alkahest_clients: dict[str, Any],
+    *,
+    constructor: AlkahestClientConstructor,
+    json_rpc: JsonRpcCall,
 ) -> AlkahestChainProbe | None:
     """The chain probe over every configured chain, owning ``alkahest_clients``.
 
     Composed whenever ``[Settlement.alkahest]`` is configured, enabled or not:
     a disabled section still services the obligations accepted under it, which
-    need their chains' clients.
+    need their chains' clients. ``constructor`` and ``json_rpc`` are its two
+    boundaries, the SDK and the chain's JSON-RPC endpoint.
     """
     section = (
         build_storefront_settlement_registry()
@@ -166,12 +181,11 @@ def _build_alkahest_chain_probe(
     policy = _alkahest_client_policy()
     return AlkahestChainProbe(
         [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
-        build_client=(
-            alkahest_client_constructor(policy) if policy is not None else None
-        ),
+        build_client=(constructor(policy) if policy is not None else None),
         clients=alkahest_clients,
         interval_seconds=section.probe_interval_seconds,
         rpc_timeout_seconds=section.rpc_timeout_seconds,
+        json_rpc=json_rpc,
     )
 
 
@@ -293,13 +307,14 @@ class VmStorefrontServices:
 
 @dataclass(frozen=True, slots=True)
 class VmCompositionSeams:
-    """What the composition root reads its service-peer trust and its startup
-    refusal through.
+    """What the composition root reads its service-peer trust, its startup
+    refusal, and its Alkahest chains through.
 
     The defaults are production's: the configured service peers, the durable
-    trust over the storefront's database, and the refusal of a configuration
-    that states a retired setting or could never publish. A test of the root's
-    wiring supplies compatible objects instead of patching the module.
+    trust over the storefront's database, the refusal of a configuration that
+    states a retired setting or could never publish, the SDK's per-chain client
+    construction, and JSON-RPC over each chain's ``rpc_url``. A test of the
+    root's wiring supplies compatible objects instead of patching the module.
     """
 
     service_peer_configs: Callable[[], ServicePeerConfigs] = get_service_peer_configs
@@ -307,6 +322,8 @@ class VmCompositionSeams:
         ServicePeerTrust
     )
     startup_refusal: Callable[[], None] = require_publishable_storefront
+    alkahest_client_constructor: AlkahestClientConstructor = alkahest_client_constructor
+    alkahest_json_rpc: JsonRpcCall = json_rpc_call
 
 
 def _build_vm_services(
@@ -332,10 +349,14 @@ def _build_vm_services(
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
-    alkahest_clients = _build_alkahest_clients()
+    alkahest_clients = _build_alkahest_clients(seams.alkahest_client_constructor)
     # The probe owns the client map from here: every consumer below is handed
     # this one dict, which the probe updates in place as it rebuilds clients.
-    alkahest_chain_probe = _build_alkahest_chain_probe(alkahest_clients)
+    alkahest_chain_probe = _build_alkahest_chain_probe(
+        alkahest_clients,
+        constructor=seams.alkahest_client_constructor,
+        json_rpc=seams.alkahest_json_rpc,
+    )
     from market_storefront.services.capacity_client import build_capacity_runtime_for
 
     # Each site's responses and callbacks are verified against its service

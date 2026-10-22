@@ -18,17 +18,16 @@ listing sells, so every domain that composes Alkahest derives it here:
 
 A domain delivers only some of these models; an interruptible deal, for
 instance, presumes a listing that can be preempted. Each domain's Alkahest
-seller entry therefore declares the models it delivers. A composition checks the
-configured model against them either at startup, with
-:func:`require_deliverable_release_model`, or at readiness, by passing them to
-the Alkahest preflight as ``deliverable_release_models``, which reports a model
-outside them as a configuration blocker. :func:`publication_release_conditions`
+seller entry therefore declares the models it delivers, and a composition passes
+them to the Alkahest preflight as ``deliverable_release_models``, which reports a
+model outside them as a configuration blocker: an undeliverable model costs the
+seller Alkahest, never the storefront. :func:`publication_release_conditions`
 derives conditions only while Alkahest is ready.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from market_settlement_runtime import MechanismReadiness, SettlementPublicationClause
@@ -49,29 +48,6 @@ from .settlement_config import (
     ReleaseModelError,
     configured_release_model,
 )
-
-
-def require_deliverable_release_model(
-    config: AlkahestSettlementConfig | None,
-    deliverable: Collection[str],
-) -> str:
-    """Return the configured release model, refusing one the domain cannot deliver.
-
-    ``deliverable`` is the set a domain's Alkahest seller entry declares. The
-    refusal names the configured model, so a storefront that composes this
-    check at startup reports which setting it cannot honour.
-    """
-    unknown = set(deliverable) - RELEASE_MODELS
-    if unknown:
-        raise ValueError(f"unknown Alkahest release models {sorted(unknown)}")
-    model = configured_release_model(config)
-    if model not in deliverable:
-        raise ReleaseModelError(
-            f"Settlement.alkahest configures the {model!r} release model, which "
-            "this storefront's domain cannot deliver (it delivers "
-            f"{', '.join(repr(name) for name in sorted(deliverable)) or 'none'})"
-        )
-    return model
 
 
 def _first(addresses: tuple[str, ...]) -> str:
@@ -197,5 +173,4 @@ __all__ = [
     "configured_release_model",
     "publication_release_conditions",
     "release_conditions",
-    "require_deliverable_release_model",
 ]

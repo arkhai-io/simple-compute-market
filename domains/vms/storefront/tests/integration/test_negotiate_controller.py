@@ -183,7 +183,10 @@ async def _upsert_bound_listing(
     literal_fields: dict | None = None,
     demands: list[dict] | None = _AUTHORIZED,
     extra_rates: tuple[dict, ...] = (),
+    unpriced_escrow_address: str | None = None,
 ) -> None:
+    """Seed an open bound listing with one priced Alkahest option, and with a
+    second, unpriced one on ``unpriced_escrow_address`` when it is given."""
     _declare_source(
         listing_id,
         gpu_model=declared_gpu_model,
@@ -212,13 +215,23 @@ async def _upsert_bound_listing(
             {"field": "amount", "per": "hour", "value": str(demand_amount)}
         ]) + list(extra_rates),
     }
-    body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
-            "rates": [RateValue.model_validate(rate) for rate in entry["rates"]],
-            "params": {"accepted_escrow": entry}}
-    option = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+    entries = [entry]
+    if unpriced_escrow_address is not None:
+        entries.append({
+            "chain_name": "anvil", "escrow_address": unpriced_escrow_address,
+            "literal_fields": {"token": _TOKEN}, "rates": [],
+        })
+    options = []
+    for each in entries:
+        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+                "rates": [RateValue.model_validate(rate) for rate in each["rates"]],
+                "params": {"accepted_escrow": each}}
+        options.append(
+            SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+        )
     await db.upsert_listing_with_binding(
         binding=binding,
-        settlement_options=[option.model_dump(mode="json")],
+        settlement_options=[option.model_dump(mode="json") for option in options],
         status="open",
         created_at=datetime.now().isoformat(),
         updated_at=datetime.now().isoformat(),
@@ -246,7 +259,8 @@ async def _upsert_bound_listing(
                         {"field": "amount", "per": "hour", "value": str(demand_amount)}
                     ]
                 ),
-            }
+            },
+            *(dict(each) for each in entries[1:]),
         ],
         fulfillment_resource=None,
         max_duration_seconds=max_duration_seconds,
@@ -256,9 +270,10 @@ async def _upsert_bound_listing(
     )
 
 
-async def _selection(db, listing_id):
+async def _selection(db, listing_id, index: int = 0):
     listing = await db.load_listing(listing_id=listing_id)
-    return {"mechanism": "alkahest.v1", "option_id": listing["settlement_options"][0]["option_id"],
+    return {"mechanism": "alkahest.v1",
+            "option_id": listing["settlement_options"][index]["option_id"],
             "expiration_unix": 1_800_000_000}
 
 
@@ -719,6 +734,88 @@ class TestNegotiateContinue:
             )
 
         assert exc_info.value.status_code == 400
+
+
+class TestCounterNamingAnotherOption:
+    """An acceptance settles the buyer's opening, so a counter naming another
+    option changes neither what is priced nor what is accepted."""
+
+    async def test_a_counter_selecting_an_unpriced_option_is_not_accepted_at_its_amount(
+        self, client, db
+    ):
+        c, db = client
+        await _upsert_bound_listing(
+            db, "neg-two-options", demand_amount=5000,
+            unpriced_escrow_address="0x" + "22" * 20,
+        )
+        opened = await c.negotiate_new(
+            listing_id="neg-two-options",
+            settlement_selection=await _selection(db, "neg-two-options"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_address=_ESCROW,
+            demands=_AUTHORIZED,
+        )
+        assert opened["action"] == "counter", opened
+
+        countered = await c.negotiate_continue(
+            opened["negotiation_id"],
+            action="counter",
+            proposal={"fields": {"amount": "1"}},
+            settlement_selection=await _selection(db, "neg-two-options", index=1),
+        )
+
+        assert countered["action"] != "accept"
+        with sqlite3.connect(db.db_path) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM negotiation_threads "
+                "WHERE agreement_bytes IS NOT NULL OR settlement_plan IS NOT NULL"
+            ).fetchone()[0] == 0
+
+    async def test_a_continuation_after_its_option_is_repriced_is_refused_naming_it(
+        self, client, db
+    ):
+        """A publication cycle repricing the opening's option changes its
+        identity, so the round is refused by name rather than decided against a
+        zero reference."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-repriced", demand_amount=5000)
+        opened = await c.negotiate_new(
+            listing_id="neg-repriced",
+            settlement_selection=await _selection(db, "neg-repriced"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            token=_TOKEN,
+            chain_name="anvil",
+            escrow_address=_ESCROW,
+            demands=_AUTHORIZED,
+        )
+        assert opened["action"] == "counter", opened
+        repriced_entry = {
+            "chain_name": "anvil", "escrow_address": _ESCROW,
+            "literal_fields": {"token": _TOKEN},
+            "rates": [{"field": "amount", "per": "hour", "value": "6000"}],
+        }
+        body = {"mechanism": "alkahest.v1", "asset": _TOKEN,
+                "rates": [RateValue.model_validate(rate) for rate in repriced_entry["rates"]],
+                "params": {"accepted_escrow": repriced_entry}}
+        repriced = SettlementOption(option_id=derive_settlement_option_id(**body), **body)
+        await db.update_listing(
+            listing_id="neg-repriced",
+            settlement_options=[repriced.model_dump(mode="json")],
+            accepted_escrows=[repriced_entry],
+        )
+
+        countered = await c.negotiate_continue(
+            opened["negotiation_id"],
+            action="counter",
+            proposal={"fields": {"amount": "4500"}},
+        )
+
+        assert countered["action"] == "reject"
+        assert countered["reason"].startswith("pinned_option_withdrawn")
 
 
 class TestUnbackedListingNegotiation:

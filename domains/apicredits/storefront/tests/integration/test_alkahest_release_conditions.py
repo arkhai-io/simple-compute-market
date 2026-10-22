@@ -7,7 +7,8 @@ reaches. Three seams stand in for what lies beyond the storefront: the quota
 site's capacity runtime, which the listing service resolves through
 ``build_capacity_runtime``; the startup tasks, which preflight the credits
 service and start the timer loops; and the chain probe's JSON-RPC transport,
-the boundary to the chain, which answers as a deployed chain does. The anvil
+the boundary to the chain, supplied through the app's composition seams and
+answering as a deployed chain does. The anvil
 chain's address book is the development chain's. Every address and key here is
 a deterministic development value, never used on a public network.
 """
@@ -21,7 +22,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from market_alkahest import AlkahestChainProbe, ProbedChain, ReleaseModelError
+from market_alkahest import ReleaseModelError
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_config.config_loader import ChainConfig
@@ -120,17 +121,6 @@ def storefront(tmp_path, monkeypatch):
         "build_capacity_runtime",
         lambda factory: _QuotaRuntime({"svc-quota": 42}),
     )
-    probe_for = server._build_alkahest_chain_probe
-
-    def probe_over_the_deployed_chain(section, clients):
-        built = probe_for(section, clients)
-        return AlkahestChainProbe(
-            [ProbedChain.from_config(name, chain) for name, chain in storefront_config.CHAINS.items()],
-            clients=built.clients,
-            json_rpc=_deployed_chain,
-        )
-
-    monkeypatch.setattr(server, "_build_alkahest_chain_probe", probe_over_the_deployed_chain)
     identity = SELLER_SIGNER.identity
     with _replaced(
         identity={
@@ -158,19 +148,22 @@ def storefront(tmp_path, monkeypatch):
         yield db_path
 
 
-def _app():
+def _app(seams=None):
+    # The chain probe's JSON-RPC transport is the composition's seam to the
+    # chain; the SDK builds its clients over the HTTP rpc_url without calling it.
     return server.build_api_credits_storefront_app(
         registry=server.build_api_credits_storefront_registry(
             domain=get_market_domain_contract()
-        )
+        ),
+        seams=seams or server.ApiCreditCompositionSeams(alkahest_json_rpc=_deployed_chain),
     )
 
 
 @asynccontextmanager
-async def _started(settlement: dict, *, probed: bool = True):
+async def _started(settlement: dict, *, probed: bool = True, seams=None):
     """The started storefront under ``settlement``, its chain probed once
     unless ``probed`` is false."""
-    app = _app()
+    app = _app(seams)
     with _replaced(settlement=settlement):
         async with app.router.lifespan_context(app):
             probe = container.resolved_alkahest_chain_probe
@@ -400,3 +393,109 @@ async def test_the_seed_waits_for_its_chain_and_publishes_once_a_probe_reaches_i
     assert [escrow["chain_name"] for escrow in listing.extra["accepted_escrows"]] == ["anvil"]
     # Registered once: the ledger re-asserts a registration it already holds.
     assert [request["resource_id"] for request in registered] == ["svc-quota"]
+
+
+class _Chains:
+    """Each chain's JSON-RPC endpoint and the SDK's construction over it: a
+    chain answers once it is in ``answering``, and until then refuses both."""
+
+    def __init__(self, urls: dict[str, str]) -> None:
+        self.names_by_url = {url: name for name, url in urls.items()}
+        self.answering: set[str] = set()
+
+    def rpc(self, rpc_url, method, params, timeout):
+        if self.names_by_url[rpc_url] not in self.answering:
+            raise ConnectionRefusedError("connection refused")
+        return _deployed_chain(rpc_url, method, params, timeout)
+
+    def constructor(self, _policy):
+        def construct(chain_name: str) -> object:
+            if chain_name not in self.answering:
+                raise ConnectionRefusedError("websocket upgrade refused")
+            return f"client:{chain_name}"
+
+        return construct
+
+    def seams(self):
+        return server.ApiCreditCompositionSeams(
+            alkahest_client_constructor=self.constructor, alkahest_json_rpc=self.rpc
+        )
+
+
+def _alkahest_status(status) -> dict:
+    (alkahest,) = [item for item in status.settlement if item["mechanism"] == "alkahest.v1"]
+    return alkahest
+
+
+async def test_the_composition_and_the_loop_share_one_probe_over_one_client_map(storefront):
+    """The real composition reads readiness from the probe the registered
+    ``alkahest-chain-probe`` loop steps, and holds that probe's own client map:
+    a chain whose client cannot be built is unreachable, and once a stepped
+    probe builds it the composition holds the client and Alkahest is ready."""
+    chains = _Chains({"anvil": ANVIL.rpc_url})
+    async with _started(_settlement(), probed=False, seams=chains.seams()) as (
+        _listings,
+        _public,
+        admin,
+    ):
+        await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+        refused = _alkahest_status(await admin.get_system_status())
+        chains.answering.add("anvil")
+        await admin.admin_run_lifecycle_cycle("alkahest-chain-probe")
+        reached = _alkahest_status(await admin.get_system_status())
+        probe = container.resolved_alkahest_chain_probe
+        composition = container.resolved_settlement_composition
+
+    assert [blocker["code"] for blocker in refused["blockers"]] == ["alkahest.chain_unreachable"]
+    assert reached["ready"] is True
+    assert composition.mechanism_resources["clients"] is probe.clients
+    assert probe.clients == {"anvil": "client:anvil"}
+
+
+async def test_status_reports_a_configured_chain_no_listing_publishes_on(storefront):
+    """Status names nothing being published, so a second configured chain that
+    does not answer is reported, as servicing a deal accepted on it would need."""
+    second = ChainConfig(
+        name="base_sepolia",
+        rpc_url="http://base.test",
+        chain_id=31337,
+        alkahest_address_config_path=str(anvil_address_book_path()),
+    )
+    chains = _Chains({"anvil": ANVIL.rpc_url, "base_sepolia": second.rpc_url})
+    chains.answering.add("anvil")
+    with patch.dict(storefront_config.CHAINS, {"anvil": ANVIL, "base_sepolia": second}):
+        async with _started(_settlement(), seams=chains.seams()) as (_listings, _public, admin):
+            status = _alkahest_status(await admin.get_system_status())
+
+    assert [blocker["code"] for blocker in status["blockers"]] == ["alkahest.chain_unreachable"]
+    assert status["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"
+    assert (
+        status["public_details"]["chain_probe"]["base_sepolia"]["result"]
+        == "alkahest.chain_unreachable"
+    )
+
+
+async def test_a_restarted_storefront_finds_its_seeded_listing_and_creates_no_second(
+    storefront,
+):
+    """The seed finds the listing its earlier run created in the storefront's
+    own database, so a restart neither registers the quota again nor creates a
+    second listing."""
+    registered = []
+
+    async def register(**request):
+        registered.append(request)
+
+    with _replaced(seed=dict(SEED_LISTING)):
+        async with _started(_settlement()) as (_listings, _public, admin):
+            container.resolved_listing_seed.register_quota = register
+            first = await admin.admin_run_lifecycle_cycle("listing-seed")
+        async with _started(_settlement()) as (_listings, public, admin):
+            container.resolved_listing_seed.register_quota = register
+            again = await admin.admin_run_lifecycle_cycle("listing-seed")
+            open_listings = await public.list_listings(status="open")
+
+    assert (first["state"], again["state"]) == ("done", "done")
+    assert again["listing_id"] == first["listing_id"]
+    assert len(registered) == 1
+    assert [listing.listing_id for listing in open_listings.listings] == [first["listing_id"]]

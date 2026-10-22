@@ -6,14 +6,10 @@ escrow contract's codec and asserts the on-chain obligation_data dict-matches
 one obligation of the settlement plan committed when the deal was accepted.
 The plan, not the listing as it stands now, is what the buyer funded: a seller
 who changes release policy, wallet, or address book afterwards cannot make a
-correctly funded escrow fail verification.
-
-``verify_escrow_for_settlement`` is the form that materializes the expected
-obligation from a proposal under the release condition a listing authorizes.
-It reads the listing as it stands rather than what was committed, so no
-settlement path verifies through it. A legacy thread with no proposal
-expects a recipient condition paying the seller's wallet, without consulting
-the listing. Both forms share the codec lookup and the comparison below.
+correctly funded escrow fail verification. The address book is read only to
+find the escrow contract's codec, so an address book that stops naming the
+contract a deal funded leaves that deal unverifiable; the buyer's escrow stays
+reclaimable at expiry.
 
 Verification is two-phase:
 
@@ -27,20 +23,17 @@ Verification is two-phase:
    hard-coded checks; adding new arbiter / escrow kinds only requires
    registering their codecs, not changing this verifier.
 
-An expected obligation that carries an ``expiration_unix`` — every plan
-obligation and every proposal-materialized one — must also match the
-attestation's expiration time exactly; only the legacy path, which has no
-agreed expiry to compare, skips it.
+Every plan obligation carries an ``expiration_unix``, which must also match
+the attestation's expiration time exactly.
 
 On any mismatch raises ``EscrowVerificationError``. The caller maps that
 to HTTP 400 — settlement aborts before any DB side effect or chain
-write. ``get_obligation_fn`` and ``build_obligation_data_fn`` are
-injectable test seams; no production caller passes them.
+write. ``get_obligation_fn`` is an injectable test seam; no production
+caller passes it.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any
@@ -50,14 +43,6 @@ from market_alkahest.plans import (
     ALKAHEST_MECHANISM,
     SettlementPlan,
     settlement_obligation_to_escrow_terms,
-)
-from market_alkahest.release_authorization import (
-    UnpinnedEscrowError,
-    require_pinned_escrow,
-)
-from market_alkahest.schemas import (
-    accepted_recipient_address,
-    accepted_token_address,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,30 +91,6 @@ def _normalize_bytes(value: Any) -> str | None:
         except ValueError:
             return None
     return None
-
-
-def _extract_token_contract_from_listing(listing: dict[str, Any]) -> str:
-    """Pull the negotiated token contract address from the seller's
-    listing's primary accepted-escrow entry.
-
-    Used as the fallback when the buyer didn't include an
-    ``escrow_proposal`` on the negotiation thread. With a proposal in
-    hand the verifier reads ``proposal.literal_fields["token"]`` directly.
-    """
-    accepted = listing.get("accepted_escrows")
-    if isinstance(accepted, str):
-        try:
-            accepted = json.loads(accepted)
-        except Exception:
-            accepted = None
-    if isinstance(accepted, list) and accepted:
-        addr = accepted_token_address(accepted[0])
-        if addr:
-            return addr
-    raise EscrowVerificationError(
-        "Cannot extract token contract address from listing — "
-        "no accepted_escrows[0] token literal"
-    )
 
 
 _ADDRESS_FIELDS = {
@@ -262,48 +223,6 @@ def _read_chain_obligation_data(obligation: Any) -> dict[str, Any]:
     elif attestation_value is not None:
         raw["attestationUid"] = attestation_value
     return _normalize_obligation_data(raw)
-
-
-def _legacy_recipient_obligation_data(
-    *,
-    recipient: str | None = None,
-    seller_wallet: str | None = None,
-    agreed_amount: int,
-    duration_seconds: int,
-    token_contract_address: str,
-    chain_name: str,
-    addr_config_path: str | None = None,
-    arbiter_kind: str = "recipient_arbiter",
-) -> dict[str, Any]:
-    """Expected obligation_data for a legacy thread that carries no proposal.
-
-    The ERC20 escrow paying ``recipient`` (the seller's own wallet) under the
-    registered ``arbiter_kind`` codec, with ``agreed_amount`` the absolute
-    payment total in base units of ``token_contract_address``:
-
-        {arbiter, demand: "0x" + <codec demand bytes>, token, amount}
-
-    Private to verification: a condition a proposal names is never encoded
-    here, only materialized under the release condition its listing
-    authorizes. The listing is not consulted on this path.
-    """
-    effective_recipient = recipient or seller_wallet
-    if not effective_recipient:
-        raise ValueError("recipient must be supplied to build payment obligation data")
-    codec = _codecs.get_arbiter_codec(arbiter_kind)
-    agreement = _codecs.AgreementContext(
-        recipient=effective_recipient,
-        agreed_amount=int(agreed_amount),
-        duration_seconds=duration_seconds,
-    )
-    arbiter_address = codec.resolve_address(chain_name, config_path=addr_config_path)
-    demand_bytes = codec.encode_demand(agreement)
-    return {
-        "arbiter": arbiter_address,
-        "demand": "0x" + demand_bytes.hex(),
-        "token": token_contract_address,
-        "amount": int(agreed_amount),
-    }
 
 
 def _escrow_codec(
@@ -480,197 +399,5 @@ async def verify_escrow_against_plan(
         alkahest_client=alkahest_client,
         get_obligation_fn=get_obligation_fn,
         candidates=candidates,
-        now_unix=now_unix,
-    )
-
-
-async def verify_escrow_for_settlement(
-    *,
-    escrow_uid: str,
-    seller_wallet: str,
-    agreed_price: int,
-    agreed_duration_seconds: int,
-    listing: dict[str, Any],
-    alkahest_client: Any,
-    chain_name: str,
-    alkahest_address_config_path: str | None,
-    escrow_proposal: Any = None,
-    escrow_kind: str = "erc20_escrow_obligation_default",
-    now_unix: int | None = None,
-    get_obligation_fn: Any = None,
-    build_obligation_data_fn: Any = None,
-) -> int:
-    """Read the on-chain escrow and assert it matches the negotiated terms.
-
-    Parameters
-    ----------
-    escrow_uid:
-        The 0x-prefixed 32-byte attestation uid handed to us by the buyer.
-    seller_wallet:
-        Our wallet address; the RecipientArbiter recipient of the expected
-        obligation_data on a legacy thread with no proposal.
-    agreed_price, agreed_duration_seconds:
-        From the negotiation thread; ``agreed_price`` is the absolute
-        payment amount in base units (the DB column name is retained
-        from before the per-hour → absolute refactor — semantically it
-        is now the amount, not a rate). Together with the proposal's
-        token + arbiter and the chain config they determine the entire
-        expected obligation_data dict.
-    listing:
-        The seller's listing row (after ``load_listing``). With a proposal,
-        its ``demands`` authorize the release condition the expected
-        obligation is materialized under, so an escrow under any condition
-        the listing does not authorize fails verification. Without one
-        (legacy threads), it is the source of the payment token.
-    alkahest_client:
-        An ``AlkahestClient`` already bound to the right chain.
-    chain_name, alkahest_address_config_path:
-        Used to resolve the canonical arbiter + escrow contract
-        addresses for the chain (a static config lookup, not an RPC call).
-    escrow_proposal:
-        The buyer's ``EscrowProposal``, persisted on the negotiation
-        thread at /negotiate/new. When present, the verifier materializes
-        the same concrete ``EscrowTerms`` shape the buyer used, under the
-        release condition ``listing`` authorizes, and compares
-        its ``obligation_data`` with the chain-read obligation, read through
-        the codec of the contract it names; a proposal naming no contract is
-        refused. None for legacy threads — verifier falls back to the
-        listing-derived token and the ``escrow_kind`` default.
-    escrow_kind:
-        Fallback escrow slot name when ``escrow_proposal`` is None.
-        Today ``"erc20_escrow_obligation_default"`` is
-        registered.
-    now_unix:
-        Override for ``time.time()`` (test seam).
-    get_obligation_fn / build_obligation_data_fn:
-        Test seams. ``get_obligation_fn`` defaults to the registered
-        escrow-kind codec's ``get_obligation`` (returns the decoded
-        ``{"attestation", "data"}`` shape). ``build_obligation_data_fn``
-        defaults to the canonical helper that constructs the expected
-        obligation_data dict.
-
-    Raises
-    ------
-    EscrowVerificationError
-        On any mismatch. Caller should map to HTTP 400.
-    """
-    if alkahest_client is None:
-        raise EscrowVerificationError(
-            "AlkahestClient not configured — cannot verify escrow on chain"
-        )
-
-    # The proposal (when present) is the source of truth: its
-    # (chain_name, escrow_address) identifies the escrow contract and
-    # its literal_fields / fields supply the buyer-committed values.
-    # Legacy threads with no proposal fall back to the kwarg defaults
-    # + a listing-derived token.
-    effective_recipient = seller_wallet
-    _codec = None
-    expected_obligation_raw: dict[str, Any] | None = None
-    expected_candidates: list[tuple[int, dict[str, Any], int | None]] = []
-    if escrow_proposal is not None:
-        # An escrow is read at the contract its proposal names; a proposal
-        # naming none has no contract to read.
-        try:
-            require_pinned_escrow(escrow_proposal)
-        except UnpinnedEscrowError as exc:
-            raise EscrowVerificationError(str(exc)) from exc
-        _codec = _escrow_codec(
-            escrow_proposal.chain_name,
-            escrow_proposal.escrow_address,
-            alkahest_address_config_path,
-        )
-        effective_escrow_kind = _codec.kind
-        proposal_recipient = accepted_recipient_address(escrow_proposal)
-        if proposal_recipient:
-            effective_recipient = proposal_recipient
-        if build_obligation_data_fn is not None:
-            proposal_token = accepted_token_address(escrow_proposal)
-            if not isinstance(proposal_token, str) or not proposal_token:
-                raise EscrowVerificationError(
-                    f"escrow proposal for {escrow_uid} omitted token "
-                    f"(literal_fields['token'] missing); cannot verify "
-                    f"against chain"
-                )
-            effective_token = proposal_token
-        if build_obligation_data_fn is None:
-            try:
-                expected_terms = _codecs.materialize_escrow_terms_from_proposal(
-                    proposal=escrow_proposal,
-                    listing=listing,
-                    agreed_amount=int(agreed_price),
-                    duration_seconds=int(agreed_duration_seconds),
-                    addr_config_path=alkahest_address_config_path,
-                )
-            except Exception as exc:
-                raise EscrowVerificationError(
-                    f"Cannot construct expected obligation_data for "
-                    f"chain={chain_name!r}: {exc}"
-                ) from exc
-            expected_candidates = [
-                (
-                    index,
-                    _normalize_obligation_data(term.obligation_data),
-                    int(term.expiration_unix),
-                )
-                for index, term in enumerate(expected_terms)
-            ]
-    else:
-        effective_escrow_kind = escrow_kind
-        effective_token = _extract_token_contract_from_listing(listing)
-
-    if get_obligation_fn is None:
-        if _codec is None:
-            try:
-                _codec = _codecs.get_escrow_kind_codec(effective_escrow_kind)
-            except ValueError as exc:
-                raise EscrowVerificationError(
-                    f"Cannot read escrow {escrow_uid}: {exc}"
-                ) from exc
-
-        get_obligation_fn = _codec_reader(_codec)
-
-    if (
-        not expected_candidates
-        and expected_obligation_raw is None
-        and not effective_recipient
-    ):
-        raise EscrowVerificationError(
-            "Escrow recipient is not configured — cannot verify escrow demand"
-        )
-
-    if not expected_candidates and expected_obligation_raw is None:
-        # Legacy thread with no concrete proposal; keep the old ERC20 path.
-        obligation_data_builder = build_obligation_data_fn
-        if obligation_data_builder is None:
-            obligation_data_builder = _legacy_recipient_obligation_data
-        try:
-            expected_obligation_raw = obligation_data_builder(
-                recipient=effective_recipient,
-                agreed_amount=int(agreed_price),
-                duration_seconds=int(agreed_duration_seconds),
-                token_contract_address=effective_token,
-                chain_name=chain_name,
-                addr_config_path=alkahest_address_config_path,
-                arbiter_kind="recipient_arbiter",
-            )
-        except Exception as exc:
-            raise EscrowVerificationError(
-                f"Cannot construct expected obligation_data for chain={chain_name!r}: {exc}"
-            ) from exc
-    if expected_obligation_raw is not None:
-        expected_candidates.append(
-            (
-                len(expected_candidates),
-                _normalize_obligation_data(expected_obligation_raw),
-                None,
-            )
-        )
-
-    return await _match_on_chain(
-        escrow_uid=escrow_uid,
-        alkahest_client=alkahest_client,
-        get_obligation_fn=get_obligation_fn,
-        candidates=expected_candidates,
         now_unix=now_unix,
     )

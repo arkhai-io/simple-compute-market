@@ -9,21 +9,17 @@ import pytest
 
 from market_alkahest.alkahest import (
     encode_recipient_demand,
-    get_erc20_escrow_obligation_default,
     get_recipient_arbiter,
     materialize_escrow_terms_from_proposal,
     materialize_escrow_terms_payload_from_proposal,
 )
 from market_alkahest.dev_chain import anvil_address_book_path
-from market_alkahest.escrow_verification import (
-    EscrowVerificationError,
-    verify_escrow_for_settlement,
-)
 from market_alkahest.plans import (
     materialize_settlement_plan_from_proposal,
     settlement_plan_payload_from_proposal,
 )
 from market_alkahest.proposals import (
+    EscrowNotAcceptedError,
     ReleaseConditionError,
     UnpinnedEscrowError,
     accepted_escrow_artifacts_from_proposal,
@@ -51,7 +47,16 @@ def _condition(recipient: str = _SELLER, **overrides) -> dict:
     }
 
 
-_LISTING = {"demands": [_condition()]}
+#: The escrow every listing below accepts, which the proposals name.
+_ACCEPTED = [{"chain_name": "anvil", "escrow_address": _ESCROW, "literal_fields": {"token": _TOKEN}}]
+
+
+def _listing(**fields) -> dict:
+    """A listing accepting ``_ACCEPTED`` with ``fields``, such as its demands."""
+    return {"accepted_escrows": _ACCEPTED, **fields}
+
+
+_LISTING = _listing(demands=[_condition()])
 
 
 def _proposal(**overrides) -> EscrowProposal:
@@ -127,15 +132,61 @@ def test_an_escrow_naming_no_contract_is_refused(escrow_address, selected) -> No
 def test_the_unpinned_refusal_is_a_release_condition_error() -> None:
     """Every caller already translating that family refuses it the same way."""
     assert issubclass(UnpinnedEscrowError, ReleaseConditionError)
+    assert issubclass(EscrowNotAcceptedError, ReleaseConditionError)
+
+
+@pytest.mark.parametrize(
+    ("proposal", "listing", "reason"),
+    [
+        (_proposal(escrow_address="0x" + "22" * 20), _LISTING, "escrow_not_in_accepted_set"),
+        (_proposal(chain_name="base_sepolia"), _LISTING, "escrow_not_in_accepted_set"),
+        (_proposal(), {"demands": [_condition()]}, "escrow_not_in_accepted_set"),
+        (
+            _proposal(),
+            {"demands": [_condition()], "accepted_escrows": "not json"},
+            "escrow_not_in_accepted_set",
+        ),
+        (
+            _proposal(literal_fields={"token": "0x" + "cc" * 20}),
+            _LISTING,
+            "escrow_field_mismatch",
+        ),
+        (_proposal(literal_fields={}), _LISTING, "escrow_field_mismatch"),
+    ],
+    ids=[
+        "an unlisted contract",
+        "the listed contract on another chain",
+        "a listing accepting none",
+        "unreadable accepted escrows",
+        "another token",
+        "no token",
+    ],
+)
+def test_an_escrow_the_listing_does_not_accept_is_refused(proposal, listing, reason) -> None:
+    """The plan holds to the listing's accepted entry whatever seller policies ran,
+    so a deal priced in one token cannot be escrowed in another."""
+    with pytest.raises(EscrowNotAcceptedError, match=f"^{reason}"):
+        authorize_escrow_proposal(proposal, listing=listing)
+    with pytest.raises(EscrowNotAcceptedError, match=f"^{reason}"):
+        _accepted_artifacts(proposal, listing)
+
+
+def test_an_accepted_escrow_is_matched_whatever_the_address_case() -> None:
+    shouted = _proposal(
+        escrow_address=_ESCROW.upper().replace("0X", "0x"),
+        literal_fields={"token": _TOKEN.upper().replace("0X", "0x")},
+    )
+
+    assert authorize_escrow_proposal(shouted, listing=_LISTING).demand is not None
 
 
 @pytest.mark.parametrize(
     "listing",
     [
-        {},
-        {"demands": None},
-        {"demands": []},
-        {"demands": [_condition(chain_name="base_sepolia")]},
+        _listing(),
+        _listing(demands=None),
+        _listing(demands=[]),
+        _listing(demands=[_condition(chain_name="base_sepolia")]),
     ],
     ids=["no demands", "null demands", "empty demands", "another chain only"],
 )
@@ -169,7 +220,7 @@ def test_a_listing_authorizing_no_condition_on_the_chain_refuses(listing) -> Non
 )
 def test_a_listing_whose_conditions_cannot_be_read_refuses(demands) -> None:
     with pytest.raises(ReleaseConditionError, match="release_condition_unreadable"):
-        authorize_escrow_proposal(_proposal(), listing={"demands": demands})
+        authorize_escrow_proposal(_proposal(), listing=_listing(demands=demands))
 
 
 def test_conditions_stored_as_json_and_unscoped_ones_are_read() -> None:
@@ -288,14 +339,14 @@ _MATERIALIZERS = pytest.mark.parametrize(
             _LISTING,
             "release_condition_not_authorized",
         ),
-        (_condition(), {"demands": []}, "release_condition_not_advertised"),
-        (None, {}, "release_condition_not_advertised"),
+        (_condition(), _listing(demands=[]), "release_condition_not_advertised"),
+        (None, _listing(), "release_condition_not_advertised"),
         (
             _condition(),
-            {"demands": [_condition(chain_name="base_sepolia")]},
+            _listing(demands=[_condition(chain_name="base_sepolia")]),
             "release_condition_not_advertised",
         ),
-        (None, {"demands": "not json"}, "release_condition_unreadable"),
+        (None, _listing(demands="not json"), "release_condition_unreadable"),
     ],
     ids=[
         "substituted recipient",
@@ -360,53 +411,3 @@ def test_materialization_called_directly_encodes_the_listings_condition(
 def test_no_materializer_can_be_called_without_its_listing(materialize) -> None:
     listing = inspect.signature(materialize).parameters["listing"]
     assert listing.default is inspect.Parameter.empty
-
-
-async def test_settlement_verification_refuses_a_condition_its_listing_does_not_authorize(
-) -> None:
-    async def _never_read(_client, _uid):
-        raise AssertionError("the chain is read only for an authorized condition")
-
-    escrow = get_erc20_escrow_obligation_default("anvil", config_path=_BOOK)
-    for proposal, listing in (
-        (_proposal(escrow_address=escrow, demand=_condition(_BUYER)), _LISTING),
-        (_proposal(escrow_address=escrow), {"demands": []}),
-    ):
-        with pytest.raises(EscrowVerificationError, match="release_condition_"):
-            await verify_escrow_for_settlement(
-                escrow_uid="0x" + "ab" * 32,
-                seller_wallet=_SELLER,
-                agreed_price=100,
-                agreed_duration_seconds=3600,
-                listing=listing,
-                alkahest_client=object(),
-                chain_name="anvil",
-                alkahest_address_config_path=_BOOK,
-                escrow_proposal=proposal,
-                get_obligation_fn=_never_read,
-            )
-
-
-@_UNPINNED
-async def test_settlement_verification_refuses_an_escrow_naming_no_contract(
-    escrow_address,
-) -> None:
-    """The listing form reads the escrow at the contract its proposal names, and
-    resolves no default kind for a proposal naming none."""
-
-    async def _never_read(_client, _uid):
-        raise AssertionError("the chain is read only at a named contract")
-
-    with pytest.raises(EscrowVerificationError, match="escrow_contract_unpinned"):
-        await verify_escrow_for_settlement(
-            escrow_uid="0x" + "ab" * 32,
-            seller_wallet=_SELLER,
-            agreed_price=100,
-            agreed_duration_seconds=3600,
-            listing=_LISTING,
-            alkahest_client=object(),
-            chain_name="anvil",
-            alkahest_address_config_path=_BOOK,
-            escrow_proposal=_proposal(escrow_address=escrow_address),
-            get_obligation_fn=_never_read,
-        )

@@ -86,9 +86,13 @@ a timeout. Alkahest readiness MUST read each chain's
 last probe result and MUST NOT call a chain itself. A chain not yet probed since start
 MUST read as a reachability blocker. A result MUST NOT expire while the loops are held. A
 chain whose client could not be constructed MUST be probed, and its client rebuilt, at
-each probe until construction succeeds, and every consumer of the storefront's Alkahest
-clients MUST read them through the map the probe updates, so the storefront recovers
-without a restart. Status MUST report each chain's last result and when it was taken.
+each probe until construction succeeds, each construction bounded by the same timeout;
+until it succeeds the chain MUST read as a reachability blocker whatever its RPC answers,
+and every consumer of the storefront's Alkahest clients MUST read them through the map the
+probe updates, so the storefront recovers without a restart. Readiness MUST judge the
+chains a publication names, and with no publication input every configured chain; every
+storefront's status MUST evaluate readiness with no publication input, and report each
+chain's last result and when it was taken.
 
 #### Scenario: Readiness is evaluated for many candidates
 
@@ -101,6 +105,20 @@ without a restart. Status MUST report each chain's last result and when it was t
   answers
 - **THEN** Alkahest is unready with a reachability blocker until a probe succeeds, then
   ready, without a restart
+
+#### Scenario: A chain answers but its client cannot be built
+
+- **WHEN** a chain's RPC answers the probe's calls but its client's construction fails or
+  does not finish within the timeout
+- **THEN** Alkahest is unready with a reachability blocker for that chain, and the next
+  probe that constructs the client makes it ready, without a restart
+
+#### Scenario: A configured chain no listing publishes on stops answering
+
+- **WHEN** a storefront configures two chains, its listings publish on one, and the other
+  stops answering
+- **THEN** status reports Alkahest unready with a reachability blocker, since servicing a
+  deal accepted on that chain needs it, while publication on the answering chain goes on
 
 #### Scenario: A scenario holds the loops
 

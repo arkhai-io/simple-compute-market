@@ -38,7 +38,6 @@ from market_alkahest.dev_chain import anvil_address_book_path
 
 from market_alkahest.alkahest import (
     get_alkahest_network,
-    get_recipient_arbiter,
     resolve_alkahest_address_config,
 )
 from e2e_harness.settings import settings
@@ -149,19 +148,6 @@ def _run_log_digest(run: MarketRun) -> str:
         }
         lines.append(" ".join(f"{k}={v!r}" for k, v in fields.items()))
     return "run-log events:\n  " + "\n  ".join(lines)
-
-
-def _recipient_demands(seller_wallet: str) -> list[dict]:
-    return [
-        {
-            "chain_name": "anvil",
-            "arbiter": get_recipient_arbiter(
-                "anvil",
-                config_path=_ALKAHEST_ADDRESSES_PATH,
-            ).lower(),
-            "demand_data": {"recipient": seller_wallet.lower()},
-        }
-    ]
 
 
 DURATION_HOURS = 1
@@ -291,7 +277,7 @@ class TestStageB1a_ExecutorHostRegistry:
 class TestStageB2_PublishListing:
     def test_b2_create_and_publish_listing(
         self, storefront_admin_client,
-        storefront_seller_client, seller_wallet, registry_client, deal_state: DealState
+        storefront_seller_client, registry_client, deal_state: DealState
     ):
         """Create the listing paused, resume to publish, confirm in registry.
 
@@ -305,7 +291,6 @@ class TestStageB2_PublishListing:
             listing_resource=OFFER_RESOURCE,
             capacity_source=capacity_source_for(OFFER_RESOURCE),
             accepted_escrows=ACCEPTED_ESCROWS,
-            demands=_recipient_demands(seller_wallet),
             max_duration_seconds=DURATION_HOURS * 3600,
             paused=True,
         )

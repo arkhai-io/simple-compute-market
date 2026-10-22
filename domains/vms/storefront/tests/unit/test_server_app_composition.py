@@ -228,7 +228,7 @@ async def test_lifespan_publishes_and_clears_exact_contract_without_cross_app_le
         lambda: built.setdefault("signer", signer),
     )
     monkeypatch.setattr(server, "set_stage_event_db_path", lambda _path: None)
-    monkeypatch.setattr(server, "_build_alkahest_clients", lambda: {})
+    monkeypatch.setattr(server, "_build_alkahest_clients", lambda _constructor: {})
     monkeypatch.setattr(
         capacity_client_module,
         "build_capacity_runtime_for",

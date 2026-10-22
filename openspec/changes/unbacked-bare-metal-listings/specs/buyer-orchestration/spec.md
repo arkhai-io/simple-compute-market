@@ -5,12 +5,14 @@
 A buyer MUST fund an Alkahest escrow only from terms it derives itself, through its
 domain's mechanism hooks, from its accepted proposal or selection and the release
 condition the selected listing advertised, and MUST NOT fund terms a seller supplied.
-Where the seller's accept reply carries a settlement plan, the buyer MUST require its
+The buyer MUST require the seller's accept reply to carry a settlement plan, and its
 derivation to equal the plan's obligation before funding, on every path that funds an
-escrow, through the plan check its domain supplies. A buyer MUST record the selected
-listing's advertised release conditions in its run-log at acceptance, and a resumed run
-MUST derive the escrow from the Agreement's selected option and those recorded conditions.
-A resumed run whose run-log predates them and records no escrow MUST NOT fund one: it
+escrow, through the plan check its domain supplies; a reply carrying none MUST be refused
+before funding, naming `seller_plan_missing`. A buyer MUST record the selected listing's
+advertised release conditions in its run-log at acceptance, and a resumed run MUST derive
+the escrow from its recorded accepted proposal and those recorded conditions, at the
+recorded Agreement's exact amount, and hold it to the recorded seller plan. A resumed run
+whose run-log predates the recorded conditions and records no escrow MUST NOT fund one: it
 MUST end naming that the run was accepted before release conditions were recorded.
 
 #### Scenario: A seller's plan names another recipient
@@ -25,11 +27,18 @@ MUST end naming that the run was accepted before release conditions were recorde
 - **THEN** the buyer derives the escrow, checks it against the seller's plan, and funds
   its own derivation
 
+#### Scenario: A seller's accept reply carries no plan
+
+- **WHEN** a seller accepts an Alkahest escrow and its reply carries no settlement plan
+- **THEN** the buyer creates no escrow and ends the run naming `seller_plan_missing`
+
 #### Scenario: A run is resumed with only an accepted proposal
 
-- **WHEN** a buyer resumes a run whose run-log holds the accepted proposal and the
-  listing's recorded release conditions but no escrow
-- **THEN** it derives the escrow from them and creates it, rather than refusing
+- **WHEN** a buyer resumes a run whose run-log holds the accepted proposal, the Agreement,
+  the seller's plan, and the listing's recorded release conditions, but no escrow
+- **THEN** it derives the escrow from the accepted proposal and the recorded conditions at
+  the Agreement's exact amount, requires it to equal the seller's plan, and creates it,
+  rather than refusing
 
 #### Scenario: A run-log predates recorded release conditions
 

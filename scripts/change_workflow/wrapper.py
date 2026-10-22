@@ -22,7 +22,11 @@ structured outcome".
 
 from __future__ import annotations
 
+import signal
 import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -42,6 +46,36 @@ from change_workflow.subagents import subagent_denials
 
 def step_prompt(rules: StepRules, change: str, arguments: str = "") -> str:
     return f"/{rules.skill} {change}" + (f" {arguments}" if arguments else "")
+
+
+class Terminated(BaseException):
+    """The wrapper was told to stop by a signal while its run went on."""
+
+
+@contextmanager
+def _termination_ends_the_run() -> Iterator[None]:
+    """Turn SIGTERM into `Terminated` while a run goes on.
+
+    A process killed by SIGTERM's default action writes nothing, and a log whose
+    last line is a run's question cannot tell a run still going from one that
+    died. Raised in the wrapper, the signal ends the run as any interruption
+    does: the runner stops the session it can no longer watch, and the run is
+    logged `stopped`, naming the signal, with the session to resume. SIGKILL
+    cannot be caught, so a run killed that way still leaves no line. Signal
+    handlers can be set only on the main thread; elsewhere nothing changes.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: Any) -> None:
+        raise Terminated(f"received {signal.Signals(signum).name}")
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def run_outcome(status: int, result: dict[str, Any] | None, schema: dict[str, Any],
@@ -197,12 +231,43 @@ class Wrapper:
         transcript = next_transcript(log.parent, step)
         progress = transcript.with_suffix(".progress")
         named = transcript.relative_to(log.parent).as_posix()
+        attempts: list[Stream] = []
+        with _termination_ends_the_run():
+            outcome, status, failure, model, stream, passed_over = self._attempt_models(
+                rules, prompt, schema, models, session, granted, transcript, progress,
+                attempts,
+            )
+        extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
+        if passed_over:
+            extra["unavailable"] = passed_over
+        extra.update(self._cost(attempts or [stream], session, before))
+        try:
+            log = log_path(self.root, change)
+        except StepError:
+            # A change found under neither name keeps the log the run started
+            # with, so the run still ends with a line.
+            pass
+        line = record_outcome(log, step, outcome, session=stream.session or session,
+                              commit=self.head(self.root), extra=extra, schema=schema,
+                              clock=self.clock)
+        if failure is not None and not isinstance(failure, Exception):
+            raise failure
+        return line
+
+    def _attempt_models(self, rules: StepRules, prompt: str, schema: dict[str, Any],
+                        models: Sequence[Model], session: str | None,
+                        granted: Sequence[str], transcript: Path, progress: Path,
+                        attempts: list[Stream],
+                        ) -> tuple[Entry, int | None, BaseException | None, Model, Stream,
+                                   list[Entry]]:
+        """Run the turn on the first available of `models`: its outcome, exit
+        status, any failure, the model last tried, its stream, and the models
+        passed over. Every attempt's stream is appended to `attempts`."""
         failure: BaseException | None = None
         passed_over: list[Entry] = []
         outcome: Entry = {}
         status: int | None = None
         stream = Stream(transcript, progress, self.clock, self.echo)
-        attempts: list[Stream] = []
         model = models[0]
         for model in models:
             for attempt in range(NETWORK_RETRIES + 1):
@@ -250,22 +315,7 @@ class Wrapper:
                 f"{entry['model']}: {entry['reason']}" for entry in passed_over)
             outcome = {"outcome": "stopped", "message": reason, "reason": reason,
                        "denials": self._denials(stream, session)}
-        extra = {**(extra or {}), **model.entry(), "exit_status": status, "transcript": named}
-        if passed_over:
-            extra["unavailable"] = passed_over
-        extra.update(self._cost(attempts or [stream], session, before))
-        try:
-            log = log_path(self.root, change)
-        except StepError:
-            # A change found under neither name keeps the log the run started
-            # with, so the run still ends with a line.
-            pass
-        line = record_outcome(log, step, outcome, session=stream.session or session,
-                              commit=self.head(self.root), extra=extra, schema=schema,
-                              clock=self.clock)
-        if failure is not None and not isinstance(failure, Exception):
-            raise failure
-        return line
+        return outcome, status, failure, model, stream, passed_over
 
     def _denials(self, stream: Stream, session: str | None) -> list[dict[str, Any]]:
         """The run's denials: the parent's own, from its stream, then those its

@@ -9,6 +9,7 @@ individual routers.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -19,7 +20,12 @@ from core_storefront.domain_registry import (
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_alkahest import AlkahestChainProbe, ProbedChain
+from market_alkahest import (
+    AlkahestChainProbe,
+    JsonRpcCall,
+    ProbedChain,
+    json_rpc_call,
+)
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
 from market_storefront_kit import (
@@ -91,6 +97,24 @@ def run_serve(host: str = "0.0.0.0", port: int | None = None) -> None:
     )
 
 
+AlkahestClientConstructor = Callable[
+    [AlkahestClientPolicy], Callable[[str], Any] | None
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ApiCreditCompositionSeams:
+    """What the composition root reaches its Alkahest chains through.
+
+    The defaults are production's: the SDK's per-chain client construction and
+    JSON-RPC over each chain's ``rpc_url``. A test of the root's wiring supplies
+    compatible objects instead of patching the module.
+    """
+
+    alkahest_client_constructor: AlkahestClientConstructor = alkahest_client_constructor
+    alkahest_json_rpc: JsonRpcCall = json_rpc_call
+
+
 @dataclass(frozen=True, slots=True)
 class ApiCreditsStorefrontServices:
     """Lifespan-owned API-credit services bound to one domain contract."""
@@ -132,25 +156,37 @@ def _alkahest_client_policy() -> AlkahestClientPolicy:
     )
 
 
-def _build_alkahest_clients() -> dict[str, Any]:
-    return build_alkahest_clients(_alkahest_client_policy(), logger=logger)
+def _build_alkahest_clients(constructor: AlkahestClientConstructor) -> dict[str, Any]:
+    return build_alkahest_clients(
+        _alkahest_client_policy(), logger=logger, constructor=constructor
+    )
 
 
 def _build_alkahest_chain_probe(
-    section: Any, alkahest_clients: dict[str, Any]
+    section: Any,
+    alkahest_clients: dict[str, Any],
+    *,
+    constructor: AlkahestClientConstructor,
+    json_rpc: JsonRpcCall,
 ) -> AlkahestChainProbe:
-    """The chain probe over every configured chain, owning ``alkahest_clients``."""
+    """The chain probe over every configured chain, owning ``alkahest_clients``.
+
+    ``constructor`` and ``json_rpc`` are its two boundaries, the SDK and the
+    chain's JSON-RPC endpoint.
+    """
     return AlkahestChainProbe(
         [ProbedChain.from_config(name, chain) for name, chain in CHAINS.items()],
-        build_client=alkahest_client_constructor(_alkahest_client_policy()),
+        build_client=constructor(_alkahest_client_policy()),
         clients=alkahest_clients,
         interval_seconds=section.probe_interval_seconds,
         rpc_timeout_seconds=section.rpc_timeout_seconds,
+        json_rpc=json_rpc,
     )
 
 
 def _build_api_credit_services(
     domain: MarketDomainContract,
+    seams: ApiCreditCompositionSeams = ApiCreditCompositionSeams(),
 ) -> ApiCreditsStorefrontServices:
     # Before anything is constructed: a renamed setting, a capacity
     # configuration that cannot be read, or a contradictory Alkahest release
@@ -173,11 +209,14 @@ def _build_api_credit_services(
     )
     alkahest_chain_probe: AlkahestChainProbe | None = None
     if alkahest_enabled:
-        alkahest_clients = _build_alkahest_clients()
+        alkahest_clients = _build_alkahest_clients(seams.alkahest_client_constructor)
         # The probe owns the client map from here: every consumer below is
         # handed this one dict, which it updates in place.
         alkahest_chain_probe = _build_alkahest_chain_probe(
-            alkahest_section, alkahest_clients
+            alkahest_section,
+            alkahest_clients,
+            constructor=seams.alkahest_client_constructor,
+            json_rpc=seams.alkahest_json_rpc,
         )
     else:
         alkahest_clients = {}
@@ -343,8 +382,13 @@ def build_api_credits_storefront_registry(
 def build_api_credits_storefront_app(
     *,
     registry: StorefrontDomainRegistry,
+    seams: ApiCreditCompositionSeams = ApiCreditCompositionSeams(),
 ) -> Any:
-    """Build the API-credit app from one frozen domain registration."""
+    """Build the API-credit app from one frozen domain registration.
+
+    ``seams`` defaults to production's Alkahest client construction and chain
+    transport.
+    """
 
     registration = registry.resolve_mode("api_credits")
     domain = registration.contract
@@ -354,7 +398,7 @@ def build_api_credits_storefront_app(
             raise RuntimeError(
                 "storefront kit supplied a domain outside the API-credit registration"
             )
-        return _build_api_credit_services(selected)
+        return _build_api_credit_services(selected, seams)
 
     return build_composed_storefront_app(
         StorefrontComposition(

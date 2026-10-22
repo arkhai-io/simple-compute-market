@@ -157,18 +157,33 @@ async def _register_at_configured_site(
     )
 
 
+_LISTING_PAGE = 500
+
+
 async def _listing_for(db: Any, resource_id: str) -> str | None:
-    """The open listing in ``db`` that derives from ``resource_id``, if any."""
-    for row in await db.list_listings(status="open", limit=500) or []:
-        listing_resource = row.get("listing_resource") or {}
-        if isinstance(listing_resource, str):
-            try:
-                listing_resource = json.loads(listing_resource)
-            except (ValueError, TypeError):
-                listing_resource = {}
-        if isinstance(listing_resource, dict) and listing_resource.get("resource_id") == resource_id:
-            return str(row.get("listing_id"))
-    return None
+    """The open listing in ``db`` that derives from ``resource_id``, if any.
+
+    Every open listing is read, page by page: a seeded listing missed here is
+    one the seed would create a second time.
+    """
+    offset = 0
+    while True:
+        rows = await db.list_listings(status="open", limit=_LISTING_PAGE, offset=offset) or []
+        for row in rows:
+            listing_resource = row.get("listing_resource") or {}
+            if isinstance(listing_resource, str):
+                try:
+                    listing_resource = json.loads(listing_resource)
+                except (ValueError, TypeError):
+                    listing_resource = {}
+            if (
+                isinstance(listing_resource, dict)
+                and listing_resource.get("resource_id") == resource_id
+            ):
+                return str(row.get("listing_id"))
+        if len(rows) < _LISTING_PAGE:
+            return None
+        offset += _LISTING_PAGE
 
 
 def _seed_escrows(seed: Mapping[str, Any]) -> list[dict[str, Any]]:

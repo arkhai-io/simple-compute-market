@@ -47,7 +47,9 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
     container = SimpleNamespace(domain=domain)
     events: list[str] = []
 
-    monkeypatch.setattr(server, "_build_api_credit_services", lambda selected: container)
+    monkeypatch.setattr(
+        server, "_build_api_credit_services", lambda selected, _seams: container
+    )
 
     async def start(selected):
         assert selected is container
@@ -84,7 +86,7 @@ def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
     )
 
     with settings_overrides(**{"wallet.private_key": "secret"}):
-        clients = server._build_alkahest_clients()
+        clients = server._build_alkahest_clients(lambda _policy: None)
 
     assert tuple(clients) == ("anvil",)
     assert captured[0].chains[0].name == "anvil"

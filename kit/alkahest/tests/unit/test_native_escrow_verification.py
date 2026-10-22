@@ -1,10 +1,9 @@
 """A native-token escrow verifies against its decoded obligation.
 
-Runs the proposal a seller derives from its accepted escrow entry through the
-listing form of the settlement verifier, and the plan a seller commits when it
-accepts that proposal through the plan form, with the chain read replaced by
-the SDK's own decoded obligation type, against the development chain's address
-book.
+Runs the plan a seller commits when it accepts the proposal derived from its
+accepted escrow entry through the settlement verifier, with the chain read
+replaced by the SDK's own decoded obligation type, against the development
+chain's address book.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.escrow_verification import (
     EscrowVerificationError,
     verify_escrow_against_plan,
-    verify_escrow_for_settlement,
 )
 from market_alkahest.plans import materialize_settlement_plan_from_proposal
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
@@ -67,46 +65,10 @@ def _native_proposal() -> EscrowProposal:
     )
 
 
-async def _verify(proposal: EscrowProposal) -> int:
-    # The SDK decodes a native escrow's amount as a decimal string.
-    data = NativeTokenEscrowObligationData(
-        _arbiter(), encode_recipient_demand(_SELLER), str(_AMOUNT),
-    )
-    attestation = SimpleNamespace(revocation_time=0, expiration_time=_EXPIRATION)
-
-    async def _get_obligation(client, uid):
-        return {"attestation": attestation, "data": data}
-
-    return await verify_escrow_for_settlement(
-        escrow_uid="0x" + "ab" * 32,
-        seller_wallet=_SELLER,
-        agreed_price=_AMOUNT,
-        agreed_duration_seconds=3600,
-        listing=_LISTING,
-        alkahest_client=object(),
-        chain_name=_CHAIN,
-        alkahest_address_config_path=_ADDRESSES,
-        escrow_proposal=proposal,
-        now_unix=_EXPIRATION - 3600,
-        get_obligation_fn=_get_obligation,
-    )
-
-
 def test_a_native_entry_names_no_token() -> None:
     proposal = _native_proposal()
     assert "token" not in proposal.fields
     assert "token" not in (proposal.literal_fields or {})
-
-
-async def test_a_native_escrow_from_the_listing_entry_verifies() -> None:
-    assert await _verify(_native_proposal()) == 0
-
-
-async def test_a_key_the_chain_lacks_is_named_in_the_mismatch() -> None:
-    proposal = _native_proposal().model_copy(update={"fields": {"token": None}})
-    with pytest.raises(EscrowVerificationError) as exc:
-        await _verify(proposal)
-    assert "token: chain=<absent> expected=None" in str(exc.value)
 
 
 # --- Verification against the plan committed at acceptance ------------------
@@ -162,6 +124,13 @@ async def test_an_escrow_funding_the_committed_plan_verifies() -> None:
     assert await _verify_plan(_plan(_native_proposal()), _chain_client(_funded())) == 0
 
 
+async def test_a_key_the_chain_lacks_is_named_in_the_mismatch() -> None:
+    proposal = _native_proposal().model_copy(update={"fields": {"token": None}})
+    with pytest.raises(EscrowVerificationError) as exc:
+        await _verify_plan(_plan(proposal), _chain_client(_funded()))
+    assert "token: chain=<absent> expected=None" in str(exc.value)
+
+
 def _book_with_moved_arbiter(tmp_path) -> str:
     """The development address book with its recipient arbiter redeployed."""
     book = json.loads(Path(_ADDRESSES).read_text())
@@ -172,50 +141,21 @@ def _book_with_moved_arbiter(tmp_path) -> str:
     return str(changed_book)
 
 
-@pytest.mark.parametrize(
-    ("change", "named"),
-    [
-        # The accepted proposal selected the condition paying the old wallet,
-        # which the changed listing no longer authorizes.
-        pytest.param("wallet", "release_condition_not_authorized", id="seller wallet"),
-        pytest.param("arbiter", "arbiter", id="address book arbiter"),
-    ],
-)
-async def test_a_listing_changed_since_acceptance_does_not_change_what_verifies(
-    tmp_path, change, named
+async def test_an_arbiter_moved_in_the_address_book_does_not_change_what_verifies(
+    tmp_path,
 ) -> None:
-    """The committed plan verifies after the seller pays another wallet, or after
-    its address book moves the arbiter; the listing form, deriving from the
-    listing and address book as they now stand, refuses the same escrow over the
-    term that changed."""
+    """The committed plan names its arbiter, so it verifies after the seller's
+    address book moves the arbiter; the book is read only to find the escrow
+    contract's codec. The plan reads no listing, so a seller paying another
+    wallet since acceptance changes nothing either."""
     plan = _plan(_native_proposal())
-    addresses = _book_with_moved_arbiter(tmp_path) if change == "arbiter" else _ADDRESSES
-    recipient = _OTHER_WALLET if change == "wallet" else _SELLER
-    changed_listing = {
-        "demands": [{
-            "chain_name": _CHAIN,
-            "arbiter": _arbiter().lower(),
-            "demand_data": {"recipient": recipient.lower()},
-        }],
-    }
 
     assert (
-        await _verify_plan(plan, _chain_client(_funded()), addresses=addresses) == 0
-    )
-    with pytest.raises(EscrowVerificationError) as refused:
-        await verify_escrow_for_settlement(
-            escrow_uid="0x" + "ab" * 32,
-            seller_wallet=recipient,
-            agreed_price=_AMOUNT,
-            agreed_duration_seconds=3600,
-            listing=changed_listing,
-            alkahest_client=_chain_client(_funded()),
-            chain_name=_CHAIN,
-            alkahest_address_config_path=addresses,
-            escrow_proposal=_native_proposal(),
-            now_unix=_EXPIRATION - 3600,
+        await _verify_plan(
+            plan, _chain_client(_funded()), addresses=_book_with_moved_arbiter(tmp_path)
         )
-    assert named in str(refused.value)
+        == 0
+    )
 
 
 @pytest.mark.parametrize(

@@ -42,6 +42,15 @@ Every step but the review opens an interactive Claude Code session. With
 to the change's workflow log. `make plan` unattended resumes the design step's
 session; `FRESH=1` starts a fresh one. The review always runs unattended.
 
+An unattended step runs one command per Bash call, and does a read the permissions
+refuse through the Read tool instead. Two shapes are refused by the harness itself,
+whatever the step's rules allow, and each costs a denial on the run's line: a
+`find` over `/` or `/etc`, and a path that climbs with `..` after a `cd`
+(`cd <dir>; cat ../tasks.md`, or `cd ..`). Read such a file with the Read tool, or
+name its path from the repository root. A wrapper stopped by SIGTERM logs its run
+`stopped`, naming the signal, with the session to resume; one killed by SIGKILL
+leaves no line.
+
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
 implementation, its review beside validation of the same commit, and one triage of

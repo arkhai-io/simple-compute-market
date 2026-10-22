@@ -106,6 +106,7 @@ markers = [
     "e2e_vm_introduction: VM lane — backed and unbacked VM listings found by one rate-bounded query; an unbacked listing's introduction negotiated and revealed through the `market` CLI, delivered to the buyer's sink and mailed to the seller through Mailpit",
     "e2e_bare_metal_introduction: Bare-metal lane — an introduction offered by pool override, revealed with its retention disclosed, then deleted by an operator and by the held, stepped retention sweep",
     "e2e_alkahest_escrow_codecs: Real Alkahest escrow codec create/read scenario",
+    "e2e_alkahest_trusted_oracle: An ERC-20 escrow released by the trusted-oracle arbiter and collected, against the dev chain",
     "e2e_non_erc20_settlement: Full settlement path for scalar non-ERC20 Alkahest escrow variants",
     "smoke: Quick smoke tests",
     "slow: Tests that may take longer due to RPC latency",

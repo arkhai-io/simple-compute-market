@@ -49,7 +49,7 @@ from market_settlement_runtime import (
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.publication_terms import (
-    demands_for_publication_clauses,
+    demands_for_published_escrows,
 )
 from market_storefront.utils.config import (
     CHAINS,
@@ -404,7 +404,6 @@ class ListingService:
         Any,
         list[dict[str, Any]],
         list[dict[str, Any]],
-        list[dict[str, Any]],
     ]:
         from arkhai_vms_listings.models import ComputeResource
 
@@ -427,15 +426,15 @@ class ListingService:
             )
         if not request.accepted_escrows and not getattr(request, "settlements", ()):
             raise ValueError("at least one settlement input is required")
-        demands = [
-            d.model_dump(mode="json") if hasattr(d, "model_dump") else dict(d)
-            for d in (request.demands or [])
-        ]
+        if request.demands:
+            raise ValueError(
+                "demands are derived from the storefront's [Settlement.alkahest] "
+                "configuration and are not accepted in a create request"
+            )
         return (
             listing_resource,
             list(request.accepted_escrows),
             [],
-            demands,
         )
 
 
@@ -558,7 +557,7 @@ class ListingService:
             request,
             composition=composition,
         )
-        listing_resource, _accepted_inputs, _settlement_inputs, demands = (
+        listing_resource, _accepted_inputs, _settlement_inputs = (
             self._parse_listing_resource_and_escrows(request)
         )
         # Read first: the source's site becomes the listing binding's origin,
@@ -574,15 +573,15 @@ class ListingService:
             composition=composition,
             origin=str(capacity_source["site_id"]),
         )
-        if canonical_clauses:
-            # Derived after readiness, under the readiness the options were
-            # built with, so an unready Alkahest advertises no condition and
-            # refuses no candidate.
-            demands = demands_for_publication_clauses(
-                canonical_clauses,
-                readiness=readiness,
-                wallet_address=get_evm_wallet_address() or "",
-            )
+        # Derived after readiness, under the readiness the options were built
+        # with, for every escrow published whether a clause compiled it or the
+        # request supplied it, so an unready Alkahest advertises no condition
+        # and refuses no candidate.
+        demands = demands_for_published_escrows(
+            accepted_escrows,
+            readiness=readiness,
+            wallet_address=get_evm_wallet_address() or "",
+        )
 
         if (
             capacity_source["pool_id"] != listing_resource.pool_id

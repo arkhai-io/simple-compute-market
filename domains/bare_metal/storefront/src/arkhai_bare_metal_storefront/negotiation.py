@@ -4,8 +4,9 @@ The domain's own checks (duration bounds, access method, SSH key, no
 buyer-supplied access authority) run first and refuse for their own reasons;
 then a configured chain decides the price. The chain always begins with
 ``has_matching_inventory_guard``, which reads the negotiation runtime's check of
-the listing against its source for the round. The default chain accepts at or
-above the listed rate and exits below it; a chain ending in ``bisection``
+the listing against its source for the round, then ``escrow_shape_guard``, which
+holds the buyer's escrow to one the listing accepts. The default chain accepts at
+or above the listed rate and exits below it; a chain ending in ``bisection``
 counters.
 """
 
@@ -35,10 +36,16 @@ from market_policy.negotiation_middleware import (
 from market_policy.scalar_policies import proposal_uses_scalar_amount
 from market_policy.seller_round import SellerRoundResult
 
-#: The seller chain when none is configured: the escrow shape, then the listed rate.
-DEFAULT_SELLER_POLICIES: tuple[str, ...] = ("escrow_shape_guard", "listed_price")
-#: Prepended to every chain, so no configuration can drop the source check.
-REQUIRED_SELLER_GUARDS: tuple[str, ...] = ("has_matching_inventory_guard",)
+#: The seller chain's decider when none is configured: the listed rate.
+DEFAULT_SELLER_POLICIES: tuple[str, ...] = ("listed_price",)
+#: Prepended to every chain, in this order, so no configuration can drop the
+#: source check or the escrow-shape check. Policies decide whether and at what
+#: price to deal within what the listing offers; whether an escrow is one the
+#: listing accepts is the listing's, never a seller's preference.
+REQUIRED_SELLER_GUARDS: tuple[str, ...] = (
+    "has_matching_inventory_guard",
+    "escrow_shape_guard",
+)
 
 
 def seller_policy_names(configured: Any = None) -> list[str]:

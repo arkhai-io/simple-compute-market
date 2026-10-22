@@ -69,9 +69,14 @@ def _anvil_proposal(**overrides) -> EscrowProposal:
     return EscrowProposal(**data)
 
 
-# The listing the proposals are negotiated against: it authorizes the dev
-# chain's recipient condition paying the seller.
-_LISTING = {"demands": [_recipient_condition(_SELLER)]}
+# The listing the proposals are negotiated against: it accepts their escrow
+# and authorizes the dev chain's recipient condition paying the seller.
+_LISTING = {
+    "accepted_escrows": [
+        {"chain_name": "anvil", "escrow_address": _ESCROW, "literal_fields": {"token": _TOKEN}}
+    ],
+    "demands": [_recipient_condition(_SELLER)],
+}
 
 
 def _materialize(proposal: EscrowProposal, listing: dict = _LISTING) -> SettlementPlan:
@@ -283,7 +288,7 @@ def test_an_unmaterializable_condition_refuses_the_artifacts() -> None:
     with pytest.raises(ValueError, match="release_condition_unreadable"):
         accepted_escrow_artifacts_from_proposal(
             proposal=_anvil_proposal(),
-            listing={"demands": [_recipient_condition("")]},
+            listing={**_LISTING, "demands": [_recipient_condition("")]},
             agreed_amount=7_200_000,
             duration_seconds=3600,
             chain_config_paths={"anvil": _ANVIL_BOOK},
@@ -411,6 +416,20 @@ def test_a_resumed_run_refuses_a_plan_its_conditions_do_not_derive() -> None:
             agreed_amount=7_200_000,
             duration_seconds=3600,
             settlement_plan=_plan_paying_another_recipient(),
+            addr_config_path=_ANVIL_BOOK,
+        )
+
+
+def test_a_resumed_run_that_recorded_no_seller_plan_is_refused() -> None:
+    """A seller accepts an escrow only with its plan, so a run recording none
+    is refused rather than funded without the skew check."""
+    with pytest.raises(ValueError, match="^seller_plan_missing"):
+        derive_accepted_escrow_terms(
+            accepted_proposal=_accepted(),
+            listing_record=release_conditions_record(_LISTING),
+            agreed_amount=7_200_000,
+            duration_seconds=3600,
+            settlement_plan=None,
             addr_config_path=_ANVIL_BOOK,
         )
 

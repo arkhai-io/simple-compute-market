@@ -4,6 +4,8 @@ answer: the wrapper's command and the outcome it logs."""
 from __future__ import annotations
 
 import json
+import os
+import signal
 import uuid
 from pathlib import Path
 
@@ -13,7 +15,7 @@ from change_workflow.common import StepError
 from change_workflow.log import log_path, note_orchestrator, read_log, record_outcome
 from change_workflow.outcome import harness_schema, load_schema, outcome_problems
 from change_workflow.steps import Model, load_steps
-from change_workflow.wrapper import Wrapper
+from change_workflow.wrapper import Terminated, Wrapper
 from change_workflow_fixtures import (CHANGE, COMMIT, LIMIT, NETWORK, OPUS, SESSION, VALID,
                                       FakeClaude, clock, event_lines, failed_run, make_wrapper,
                                       not_installed, option, option_rules,
@@ -290,6 +292,31 @@ def test_a_run_that_cannot_start_is_logged_stopped(tmp_path: Path) -> None:
     assert line["reason"] == ("no model of the step is available: claude-opus-5-5: claude is "
                               "not installed")
     assert line["unavailable"] == [{**OPUS.entry(), "reason": "claude is not installed"}]
+
+
+def test_a_run_whose_wrapper_is_terminated_is_logged_stopped_naming_the_signal(
+    tmp_path: Path,
+) -> None:
+    """A wrapper killed by SIGTERM's default action would write nothing, and the
+    log would read the run as still waiting on its previous outcome."""
+    def terminated(command, cwd, feed) -> int:
+        for line in event_lines(VALID["finished"], result=False):
+            feed(line)
+        os.kill(os.getpid(), signal.SIGTERM)
+        raise AssertionError("SIGTERM did not end the run")
+
+    previous = signal.getsignal(signal.SIGTERM)
+    wrapper = Wrapper(root=make_wrapper(tmp_path, FakeClaude()).root, runner=terminated,
+                      head=lambda _: COMMIT, clock=clock, echo=None)
+    with pytest.raises(Terminated):
+        wrapper.run("implement", CHANGE)
+
+    (line,) = read_log(log_path(tmp_path, CHANGE))
+    assert line["outcome"] == "stopped"
+    assert line["reason"] == "the run did not finish: Terminated: received SIGTERM"
+    assert line["session"] == SESSION
+    # The handler is the wrapper's only while a run goes on.
+    assert signal.getsignal(signal.SIGTERM) is previous
 
 
 def test_a_file_the_run_cannot_find_is_no_unavailability(tmp_path: Path) -> None:

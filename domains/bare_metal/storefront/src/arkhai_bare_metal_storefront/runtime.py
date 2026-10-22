@@ -16,9 +16,11 @@ from core_storefront.service_peers import ServicePeerTrust, seed_service_peers
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     AlkahestChainProbe,
+    JsonRpcCall,
     ProbedChain,
     ReleaseModelError,
     create_alkahest_registration,
+    json_rpc_call,
 )
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
@@ -741,12 +743,13 @@ class BareMetalStorefrontRuntime:
         }
         report["publication_derivation"] = self.publication_derivation.latest()
         # Readiness reads the chain probe's last results and calls no chain.
+        # Status names nothing being published, so readiness answers for every
+        # configured chain, which servicing accepted deals needs, as every
+        # storefront's status does.
         report["settlement"] = (
             [
                 status.safe_projection()
-                for status in await self.settlement_composition.readiness(
-                    clauses=self.publication_clauses
-                )
+                for status in await self.settlement_composition.readiness(clauses=())
             ]
             if self.settlement_composition is not None
             else None
@@ -837,6 +840,7 @@ def build_runtime_from_configuration(
     build_chain_client: Callable[
         [AlkahestClientPolicy], Callable[[str], Any] | None
     ] = alkahest_client_constructor,
+    chain_json_rpc: JsonRpcCall = json_rpc_call,
     site_clients: SiteClientFactories = SiteClientFactories(),
 ) -> BareMetalStorefrontRuntime:
     """Compose the runtime from the storefront's configuration files.
@@ -847,7 +851,8 @@ def build_runtime_from_configuration(
     before the signer, the settlement composition, or the database.
     ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
     the chains the storefront settles on, ``build_chain_client`` the
-    constructor the chain probe rebuilds a missing client with, and
+    constructor the chain probe rebuilds a missing client with,
+    ``chain_json_rpc`` the probe's JSON-RPC transport to each chain, and
     ``site_clients`` each site's clients, the boundary to the site authorities.
 
     The service-peer trust is built here and holds nothing until the server
@@ -923,6 +928,7 @@ def build_runtime_from_configuration(
             clients=chain_clients,
             interval_seconds=alkahest_section.probe_interval_seconds,
             rpc_timeout_seconds=alkahest_section.rpc_timeout_seconds,
+            json_rpc=chain_json_rpc,
         )
     else:
         stale = [name for name, present in supplied.items() if present]

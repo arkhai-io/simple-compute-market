@@ -89,12 +89,14 @@ test-container-module:
 # passes its own.
 NETWORK ?= simple-market-service_default
 BUYER_MODULE ?= e2e_deal_buyer_cli or e2e_buy
-# The VM lane's scenarios. `e2e_alkahest_escrow_codecs` needs only the chain and
-# stays here; `multi_registry` reads VM's two registries;
+# The VM lane's scenarios. `e2e_alkahest_escrow_codecs` and
+# `e2e_alkahest_trusted_oracle` need only the chain and its funded buyer and
+# seller wallets, and stay here; `multi_registry` reads VM's two registries;
 # `e2e_non_erc20_settlement` settles native-token and ERC1155 escrows against
 # the dev chain's own deployments.
 E2E_MODULE ?= e2e_deal or e2e_deal_buyer_cli or e2e_buy or multi_registry \
               or e2e_compute_dynamic_listings or e2e_alkahest_escrow_codecs \
+              or e2e_alkahest_trusted_oracle \
               or e2e_listing_shapes or e2e_vm_introduction \
               or e2e_non_erc20_settlement
 # The API-credit lane's scenarios. The payment deal is blocked without a
