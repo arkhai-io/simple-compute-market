@@ -125,7 +125,13 @@ Rules the owner grants for a fresh run go on its target as
 records them as `granted`, and the step's next run is held to its table again.
 Always start a fresh run through its target, never the script directly: the target
 checks the change, refuses while a round view is open, and passes `SECTIONS`,
-`FRESH`, and `HELM_ALL_SCENARIOS` on.
+`FRESH`, `SESSION_ID`, and `HELM_ALL_SCENARIOS` on.
+Each implementation run starts a fresh session unless the owner directs the work to
+an earlier implementation session: the next section to a session they judge small
+enough, or a fix to the session that made the edits. Then pass that run's `session`
+from its log line as `SESSION_ID=<id>` beside `SECTIONS` or `ARGUMENTS`; the wrapper
+continues it on its model and refuses one waiting on the owner, which is resumed
+with the answer instead. Never continue a session on your own judgement.
 For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
 likewise: the review runs on its row's models, Codex first and Claude when Codex is
 unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
@@ -182,7 +188,10 @@ outcome; its free-text `next` is not a routing command.
 Read every outcome to know what to do next, and show each message to the owner as
 written, its options, evidence, and recommendation intact. Do not summarize it,
 add a position of your own, or answer a leaf's question for the owner; send the
-owner's reply back as written. Design and triage stay conversations with the
+owner's reply back as written. A line carrying `earlier` is a run whose session
+took more turns after reporting — a wake-up, a background command finishing — and
+is logged from its last: show each earlier message too, before the last, since the
+report is often the earlier one. Design and triage stay conversations with the
 owner. A triage records in its file's `## Next` whether the change advances or
 another review round runs, and the computation routes on that; there is no gate
 to bring to the owner, and a triage with nothing to dispose of advances without

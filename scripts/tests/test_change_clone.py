@@ -592,6 +592,23 @@ def test_removal_copies_what_grew_since_archive_cleanup_copied_it(workspace: Pat
         '{"step": "archive-cleanup"}\n{"step": "orchestrator"}\n')
 
 
+def test_named_evidence_the_clone_lacks_is_reported_and_does_not_refuse_removal(
+        workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Deleting the clone cannot lose evidence it does not hold, so evidence named
+    # by a record and held nowhere is named in the report rather than refused.
+    clone = _merged_clone(workspace)
+    pruned = Path(".snapshot/validation/fedcba987654")
+    (clone / REVIEWS / "03-validation.md").write_text(
+        f"- **Commit:** {pruned.name}3210 on feat/seed-pool\n", "utf-8")
+
+    assert clones.main(["remove", CHANGE], root=workspace) == 0
+
+    assert not clone.exists()
+    assert not (workspace / pruned).exists()
+    assert ("Named by the records but not in this clone, so not copied: "
+            f"{pruned.as_posix()}") in capsys.readouterr().out
+
+
 def test_a_record_that_differs_in_the_workspace_refuses_removal(workspace: Path) -> None:
     clone = _merged_clone(workspace)
     (workspace / REVIEWS).mkdir(parents=True)

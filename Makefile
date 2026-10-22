@@ -953,9 +953,9 @@ plan: ## Open a Claude Code planning session for an OpenSpec change; unattended,
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
-implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve, and SESSION_ID continues that implementation session instead (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [SESSION_ID=<id>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(if $(strip $(SESSION_ID)), --session '$(subst ','\'',$(strip $(SESSION_ID)))')$(STEP_GRANTS),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
 
 triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null

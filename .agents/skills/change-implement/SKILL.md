@@ -1,6 +1,6 @@
 ---
 name: change-implement
-description: Implement the sections of an OpenSpec change's tasks.md a session is given, in a fresh session — load the guidance, the change, and each section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit each section on its own for review; or, given a merge's conflicted files and no sections, resolve them and conclude the merge. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
+description: Implement the sections of an OpenSpec change's tasks.md a session is given, in a fresh session or one the owner names to continue — load the guidance, the change, and each section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit each section on its own for review; or, given a merge's conflicted files and no sections, resolve them and conclude the merge. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
 ---
 
 # Implementing the sections of an OpenSpec change
@@ -14,6 +14,11 @@ session grows and collapses after it compacts, which is the owner's to weigh in
 settling the cadence; say so when a session grows large. Either way, everything
 the next session needs goes back into the change's files before a section is
 committed.
+
+The owner may send further sections, or a fix to edits you made, to a session that
+has already finished. Treat that as a new invocation: read the change's files again
+where they may have changed — `tasks.md`, the design, the reviews' triage — as the
+branch may have moved, and follow every step below for the new work.
 
 ## Running unattended
 

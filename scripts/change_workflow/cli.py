@@ -2,7 +2,7 @@
 module that does its work.
 
 `run` and `resume` run a step through the wrapper, either granting rules for that
-one run with `--allow`; `review` runs a review, `log` and `note` read and write the
+one run with `--allow`; `run --session` continues a named implementation session; `review` runs a review, `log` and `note` read and write the
 workflow log, `watch` follows the steps as they run, and `denials` reports a run's
 denials. A command that runs a step prints the line it logged on stdout, its
 progress going to stderr, and exits non-zero when that line is `stopped`.
@@ -69,6 +69,9 @@ def _parser() -> argparse.ArgumentParser:
                      help="text added to the skill's invocation after the change")
     run.add_argument("--fresh", action="store_true",
                      help="start a fresh session for a step that resumes another's")
+    run.add_argument("--session", default="",
+                     help="implementation only: continue this session, one of the change's "
+                          "implementation runs not waiting on the owner")
     run.add_argument("--allow", action="append", default=[],
                      help="permission rules granted for this run alone, several separated "
                           "by ';'")
@@ -154,7 +157,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             arguments = " ".join(part for part in (words, args.arguments) if part)
             line = wrapper.run(args.step, args.change, arguments=arguments,
                                sections=sections, fresh=args.fresh,
-                               granted=split_rules(args.allow))
+                               granted=split_rules(args.allow),
+                               continuing=args.session.strip() or None)
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "review":

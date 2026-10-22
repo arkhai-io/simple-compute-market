@@ -571,6 +571,13 @@ def validate_ci(validation: Validation, *, workflow: str, after_run: int,
     if run["status"] != "completed":
         return _no_ci_evidence(validation, f"run {run['id']} is {run['status']}, not "
                                "completed, so its jobs have not all finished")
+    # A run can fail outside every job — a workflow that cannot start, or a failed
+    # run whose jobs `gh` returned empty — and comparing no failed job would pass it.
+    if (run["conclusion"] not in ci_evidence.NOT_FAILED
+            and not any(job.failed for job in run_jobs.values())):
+        return _no_ci_evidence(validation, f"run {run['id']} concluded {run['conclusion']} "
+                               f"but reported no failed job among its {len(run_jobs)} "
+                               + ("job" if len(run_jobs) == 1 else "jobs"))
     # A baseline that cannot be read leaves the run's own evidence worth keeping,
     # every failure then uncomparable.
     baseline_jobs, no_baseline = _ci_baseline(

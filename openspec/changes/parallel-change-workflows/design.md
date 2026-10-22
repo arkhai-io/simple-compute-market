@@ -449,11 +449,14 @@ a transitional case).
 
 `make change-clone-remove CHANGE=<change>`, run by the owner after the merge,
 first runs the history synchronization (D11, 26 F1), then refuses unless every file
-of the clone's `reviews/` and named evidence is in the workspace with identical
-contents (17 F4), the branch is merged into `origin/dev`, and the clone has no
-commit `origin` lacks and no uncommitted change; a record the synchronization
-refused for differing contents is named, and nothing is deleted. Archive cleanup
-does not remove the clone, since the pull request may need another round.
+of the clone's `reviews/` and of the named evidence it holds is in the workspace
+with identical contents (17 F4), the branch is merged into `origin/dev`, and the
+clone has no commit `origin` lacks and no uncommitted change; a record the
+synchronization refused for differing contents is named, and nothing is deleted.
+Named evidence the clone does not hold is named in the report and does not refuse
+removal (114 F1): deleting the clone cannot lose it, and refusing would keep a clone
+forever over evidence held nowhere. Archive cleanup does not remove the clone, since
+the pull request may need another round.
 
 ### D7 — Every shared resource is per change, shared safely, or checked
 
@@ -861,9 +864,10 @@ state alone. On the owner's word the session records a decision naming the
 conflicted files and runs `make implement CHANGE=<change> UNATTENDED=1
 ARGUMENTS='resolve the merge conflicts in <files>'`: the `implement` target gains
 `ARGUMENTS`, passed as `--arguments`. The wrapper starts each implementation run in
-a fresh session; a resume reaches only a waiting run. `change-implement` gains a
-merge mode with no sections: resolve the conflicts, run the suites of the sections
-owning the conflicted files, conclude the merge with `git commit`, and push.
+a fresh session unless the run names one to continue (112 O1, below); a resume
+reaches only a waiting run. `change-implement` gains a merge mode with no sections:
+resolve the conflicts, run the suites of the sections owning the conflicted files,
+conclude the merge with `git commit`, and push.
 Rejected: calling the script directly (skips the target's guards, as D19 rejects);
 aborting the merge for implementation to redo it (implementation would make a merge
 the owner asked the orchestrating session to make, and needs `git merge`).
@@ -874,6 +878,43 @@ replaced); committing a stopped run's partial work too (a stop is usually resume
 and its own session finishes the section); keeping partial work uncommitted on a
 return (no session is left to commit it, and a dirty clone blocks every later
 step's guarded push and validation).
+
+### 112 O1 — An implementation session is continued by its id, on the owner's word
+
+Round 3's owner asked for section 8B to go to 8A's finished session, whose context
+was small enough, and nothing could: a run started fresh, and a resume reached only
+a waiting run. `make implement CHANGE=<change> UNATTENDED=1 SECTIONS=<ids>
+SESSION_ID=<id>` (`run implement --session <id>`) continues the named session with
+the step's prompt for those sections, or with `ARGUMENTS`, on the model its run used,
+since a session cannot move between harnesses; the line records `continues`, the seq
+of the run it continues. The session is named, never inferred, so it may be any of
+the change's implementation runs: the next section's, or the session that made the
+edits a later finding concerns, which holds their context. The wrapper refuses an id
+with no implementation run in the change's log; any session while implementation's
+latest run waits on the owner, since its answer goes through `resume`, which reaches
+only that latest run; a step other than implementation; and `--fresh` beside it. The orchestrating session continues a session only on the
+owner's word: the cadence is the owner's, and a growing session is the degradation
+"Sections are slices, sessions are the owner's" weighs. Rejected: a bare
+`CONTINUE=1` taking the latest run, guarded on `HEAD` being its commit (it cannot
+reach an earlier session, nor one whose branch moved since); recording the round
+with both sections in one session (decided before the first session runs, so it
+cannot extend a session after its size is seen); continuing by default within a
+round (sessions grow with no one choosing it).
+
+### 109 R1 / 111 R1 — A run's earlier outcomes are kept beside its last
+
+Two of round 3's sessions reported, then ended on a wake-up they had scheduled as a
+fallback for `make test`, and that turn's "nothing left to wait for" became the
+logged outcome; their reports reached no log line. The wrapper logs a run from its
+last turn, as before, so routing is unchanged, and keeps each earlier turn's outcome
+— its `outcome`, `message`, `next`, `reason`, `awaiting` — under `earlier` on the
+line; a run that exited non-zero keeps even its last turn's there, since its line is
+the wrapper's own `stopped`. The orchestrating session shows the owner the earlier
+messages before the last. The unattended prompt the wrapper gives every run says a
+background command wakes the session when it ends, so a step never schedules a
+wake-up to wait for one. Rejected: the wrapper choosing a "substantive" outcome (a
+guess that hides the later turn); denying `ScheduleWakeup` in the step table (covers
+wake-ups only, and adds a denial to read on every run that tries one).
 
 ### The implementation cadence
 

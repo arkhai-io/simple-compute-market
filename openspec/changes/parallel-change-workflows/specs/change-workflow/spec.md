@@ -26,9 +26,10 @@ are a prefix of the clone's, and MUST NOT otherwise overwrite a file there,
 refusing and naming any whose contents differ. A step that reads another change's
 or an earlier change's records MUST look for them in its own checkout and then in
 the owner's workspace. A clone MUST be removed only on the owner's command; the
-removal MUST first repeat the copy, and MUST proceed only once the clone's records
-and named evidence are in the workspace with identical contents, its branch is
-merged, and it holds no commit and no change its `origin` lacks.
+removal MUST first repeat the copy, and MUST proceed only once the clone's records,
+and the named evidence it holds, are in the workspace with identical contents, its
+branch is merged, and it holds no commit and no change its `origin` lacks; named
+evidence the clone does not hold MUST be named in the removal's report.
 
 #### Scenario: Feature work begins on a change
 
@@ -198,7 +199,11 @@ passes and name that evidence as owed by validation in the section's notes. The 
 MUST NOT prescribe in `tasks.md` how sections are distributed across agent sessions or
 review rounds.
 A session implementing sections MUST begin with no prior conversation and read the
-repository guidance documents, the change, and its sections; how many sessions
+repository guidance documents, the change, and its sections, unless the owner
+directs the work to an implementation session of the change named by its id, one
+not waiting on the owner, which then continues with the new sections or
+instructions on the model it ran on, reading the change's files again where they
+may have changed; how many sessions
 implement the work, and how much each round covers before it is reviewed, MUST be
 settled in the design discussion as the change's implementation cadence, the
 plan's sections ordered by it, and planning's outcome MUST carry the mapping of the
@@ -219,6 +224,16 @@ for it, push it, and return the change.
 - **THEN** it records any handoff in the section's task notes, a fresh-context
   check of the section's diff passes, and the section is committed; the session
   continues into the next section it was given, or stops
+
+#### Scenario: The owner sends the next section to a finished session
+
+- **WHEN** the session that implemented section 2 finished, and the owner directs
+  section 3 to it
+- **THEN** the orchestrating session runs `make implement CHANGE=<change>
+  UNATTENDED=1 SECTIONS=3 SESSION_ID=<its session>`, the wrapper continues that
+  session on its model, and the run's log line names the run it continues; a
+  session that waits on the owner's answer is refused, its answer going through a
+  resume, and so is any session while another implementation run waits
 
 #### Scenario: A plan maps a two-round cadence
 
@@ -547,7 +562,9 @@ its workflow log, so that a new session resumes the change from them alone. It M
 run the next step the next-step computation names, and MUST advance without the
 owner wherever the computation names a step. It MUST bring every question a step
 raises to the owner, showing each step's message as written, and MUST NOT answer a
-design question or decide or state a position on a finding. It MAY create the
+design question or decide or state a position on a finding, and MUST show the
+earlier outcomes a run's line keeps beside its last. It MUST continue a named
+implementation session only on the owner's word. It MAY create the
 change's clone and branch, and MAY commit changes to the workflow itself — skills,
 the step table — what else the owner explicitly asks for, and merges of `dev` the
 owner asks for, in the change's clone, on its branch, pushing each through the
@@ -634,6 +651,93 @@ for.
 - **WHEN** a step's run finished and left a tracked edit uncommitted
 - **THEN** the orchestrating session brings it to the owner as a defect of that step,
   and commits it only if the owner asks
+
+### Requirement: Unattended step runs end with a structured outcome
+
+A step MAY be run unattended, through one wrapper, as its leaf skill in a
+non-interactive session. Every unattended run MUST end with an outcome that conforms
+to the repository's outcome schema and is one of: finished, with the next step;
+a question for the owner; a proposed return to an earlier phase; blocked on a
+prerequisite; or stopped, with its reason and any tools it was denied. The wrapper
+MUST append each outcome, with the run's session and commit, to the change's
+workflow log, and MUST record a stopped outcome itself for a run that ends without
+one. A run whose session took further turns after an outcome — a background
+command finishing, a wake-up — MUST be logged with its last outcome, and MUST keep
+each earlier one on its line. Where the workflow log and the change's files
+disagree, the files MUST prevail.
+Every outcome's denials MUST be taken from the run's own record of denied tools,
+over every turn of the run, each with the harness's reason for it.
+A review run's outcome MUST name the review record that run published; a review run
+that published none MUST be recorded as stopped, and an earlier record MUST NOT count
+as its result.
+A question MUST be answered by resuming the same session with the owner's answer.
+A proposed return MUST NOT change the change's status until the owner confirms it;
+the confirmation MUST be recorded in the workflow log as a decision naming the run
+it resolves and the step it directs, and the step so directed sets the status.
+A decision that resolves a run MUST name it, and MUST NOT resolve any other; a
+decision that reads a run's denials MUST name that run; a decision that directs a
+review MUST name its kind.
+An interactive run of a step MUST behave as it does without the wrapper.
+
+#### Scenario: Validation needs an environmental remedy
+
+- **WHEN** an unattended validation finds an environmental failure
+- **THEN** it ends with a question naming the remedy, and once the owner answers, the
+  same session resumes with the answer and takes only the action named
+
+#### Scenario: A run crashes
+
+- **WHEN** an unattended run exits without producing an outcome
+- **THEN** the workflow log records a stopped outcome with its exit status
+
+#### Scenario: A wake-up follows a run's report
+
+- **WHEN** an implementation run reports its section finished, and a wake-up it
+  scheduled starts another turn that ends with "nothing left to wait for"
+- **THEN** the run's line carries that last outcome with the section's report kept
+  under `earlier`, and the orchestrating session shows the owner both
+
+#### Scenario: Implementation finds a design question
+
+- **WHEN** an unattended implementation run finds that a task needs a decision the
+  design does not make
+- **THEN** it ends with a proposed return to design, and the change's status is
+  unchanged until the owner confirms the return
+
+#### Scenario: The owner confirms a return
+
+- **WHEN** an implementation run at seq 50 ended with a proposed return to design
+  and the owner confirms it, recorded as
+  `{"seq": 51, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "resolves": 50, "next": "design", "decision": "return to design confirmed", "reason": "task 0.4 needs a provider decision the design does not make"}`
+- **THEN** the next-step computation names design until it has run, and the
+  design step sets the status
+
+#### Scenario: A confirmation names no run
+
+- **WHEN** a confirmation line with `next: design` and no `resolves` is attempted
+- **THEN** the log's writer refuses it, since the returned run at seq 50 would
+  otherwise keep waiting and the computation would name the owner, never design
+
+#### Scenario: The owner directs a repeat review
+
+- **WHEN** the owner asks the orchestrating session for a pre-closeout review
+  again outside a triage, recorded as
+  `{"seq": 61, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "next": "review", "kind": "pre-closeout", "decision": "review again", "reason": "the reviewer should see the triage"}`,
+  naming no run, since no run waits on it
+- **THEN** the next-step computation names the pre-closeout review until it has run
+
+#### Scenario: A directed review names no kind
+
+- **WHEN** a decision line with `next: review` and no `kind` is attempted
+- **THEN** the log's writer refuses it, since the computation could name no review
+  from it
+
+#### Scenario: A decision about one run leaves another waiting
+
+- **WHEN** a validation run has asked a question and a review run beside it stopped,
+  and a decision resolves the review's stop
+- **THEN** the validation's question still waits, and is answered by resuming its
+  session
 
 ### Requirement: Unattended runs are held to their step's permissions
 

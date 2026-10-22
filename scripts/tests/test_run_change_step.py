@@ -110,6 +110,25 @@ def test_implementation_is_given_its_sections(tmp_path: Path) -> None:
     assert read_log(log_path(tmp_path, CHANGE))[0]["sections"] == [1, 2, 3]
 
 
+def test_the_command_continues_a_named_implementation_session(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    assert main(["run", "implement", CHANGE, "--sections", "8A"], root=tmp_path,
+                wrapper=wrapper) == 0
+
+    assert main(["run", "implement", CHANGE, "--sections", "8B", "--session", "i-1"],
+                root=tmp_path, wrapper=wrapper) == 0
+    assert main(["run", "implement", CHANGE, "--session", "other"], root=tmp_path,
+                wrapper=wrapper) == 1
+
+    assert claude.commands[1][2] == f"/change-implement {CHANGE} section 8B"
+    assert option(claude.commands[1], "--resume") == "i-1"
+    assert read_log(log_path(tmp_path, CHANGE))[1]["continues"] == 1
+    assert "no implementation run of session other" in capsys.readouterr().err
+
+
 def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["question"], session="d-1"), 0),
                         (event_lines(VALID["finished"], session="d-1"), 0))
@@ -199,7 +218,7 @@ def _make_n(*arguments: str, keep_checks: bool = False) -> list[str]:
     """
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
-                          "ALLOW", "ARGUMENTS",
+                          "ALLOW", "ARGUMENTS", "SESSION_ID",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
@@ -276,6 +295,15 @@ def test_implementation_is_given_its_arguments_beside_its_grants() -> None:
                    "ALLOW=Bash(make lock)") == [
         'python3 scripts/run_change_step.py run implement "X" '
         "--arguments 'resolve the merge conflicts in scripts/a.py' --allow 'Bash(make lock)'"]
+
+
+def test_implementation_continues_the_session_it_is_given() -> None:
+    assert _make_n("implement", "CHANGE=X", "UNATTENDED=1", "SECTIONS=8B",
+                   "SESSION_ID=7847eee6-37e9-4d7c-9e01-6fc854509adf") == [
+        'python3 scripts/run_change_step.py run implement "X" --sections "8B" '
+        "--session '7847eee6-37e9-4d7c-9e01-6fc854509adf'"]
+    # An interactive session is the owner's own; it continues none.
+    assert "--session" not in _make_n("implement", "CHANGE=X", "SESSION_ID=s-1")[0]
 
 
 def test_a_granted_rule_and_arguments_reach_the_script_as_written(tmp_path: Path) -> None:

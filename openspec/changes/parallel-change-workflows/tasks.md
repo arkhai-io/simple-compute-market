@@ -1748,6 +1748,14 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       archive-cleanup row's comment and the preamble's permissions sentence (8.6).
       Section 9 records the pilot's history copy and figure from its archive
       cleanup on this tooling.
+      Round 3 triage (114 F1): removal goes on when a record names evidence the
+      clone does not hold — deleting the clone cannot lose it, and refusing would
+      keep a clone forever over evidence held nowhere — and the report names it;
+      the delta's clone requirement and D6 now say "the named evidence it holds".
+      `test_change_clone.py` (repository level) gains a removal whose second
+      validation record names an evidence directory held nowhere: the clone is
+      removed and the printed report names the directory. The round's checks are
+      in 8B.9's round 3 triage note.
 
 ## 8A. Evidence only a push produces, owed by validation
 
@@ -2069,6 +2077,16 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       validate-ci` through their `make validate-*` rule; it only reads GitHub
       and writes under `.snapshot/`, so it was left. Section 8B's fresh run
       grant is how a validation granted a missing `gh` rule would get it.
+      Validation 115 was the part's first real run: the owed job passed, and the
+      4 failures of jobs not owed were classed `inherited` against dev's run at
+      the merge base, so the job-name prefix and `--json` fields above held.
+      Round 3 triage (114 F2): a run that concluded other than success yet
+      reported no failed job — none, or an empty `jobs` list — passed as "no job
+      failed"; `validate_ci` now reports it as producing no evidence, which fails
+      the part. `test_validate_slice.py` (unit, runner and reader injected): a
+      failed run with no jobs, and with one job that passed, each failing the part
+      with `no_evidence` set before any baseline is listed. The round's checks are
+      in 8B.9's round 3 triage note.
 
 ## 8B. Grants for a fresh run, and the commit and merge rules
 
@@ -2242,6 +2260,55 @@ owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
         whether the check should follow the clone lookup is for review.
       - No test runs a merge-mode `implement` run's prompt or the routing after
         it; 8B.9 asks for neither.
+      Round 3 triage (112 O1; 109 R1 / 111 R1), decided with the owner and
+      recorded in the design's blocks of those labels:
+      - 112 O1: `make implement … UNATTENDED=1 SESSION_ID=<id>` (`run implement
+        --session <id>`, `Wrapper.run(continuing=…)`) continues the named
+        implementation session with the step's prompt for its sections or
+        `ARGUMENTS`, on the model its run used, recording `continues`; refused for
+        an id with no implementation run in the log, for any session while
+        implementation's latest run waits on the owner (a resume reaches only
+        that run), for another step, and beside `--fresh`. The orchestrate skill
+        continues a session only on the owner's word; the implement skill reads a
+        continued invocation as a new one; the guide gains "Continuing an
+        implementation session"; D20.3 and the delta's sessions requirement and
+        orchestrator requirement say so, with the scenario "The owner sends the
+        next section to a finished session".
+      - 109 R1 / 111 R1: the wrapper logs a run from its last turn and keeps every
+        earlier turn's outcome, across attempts, under `earlier`; the unattended
+        prompt (`harness.py`) says never to end the turn or schedule a wake-up to
+        wait for a background command; the orchestrate skill and the guide relay
+        `earlier`; the delta modifies "Unattended step runs end with a structured
+        outcome", with the scenario "A wake-up follows a run's report".
+      Evidence. Unit, with a fake Claude: in `test_change_workflow_wrapper.py`, a
+      report followed by a wake-up's turn kept under `earlier`, none for one
+      turn, and a crash after a report keeping it; continuing a named finished
+      session past a later one (its `--resume`, model, prompt, `continues`); no
+      session continued while an implementation run waits, whether that session
+      or another; a stop resolved by a decision line not holding the session
+      back; the refusals for an unknown session, another step, and `--fresh`. In
+      `test_run_change_step.py`, `run --session` continuing and refusing through
+      the command line; through `make -n` over the real `Makefile`, `SESSION_ID`
+      reaching the command line as `--session`, and interactively nothing. With
+      114 F1 (8.7) and 114 F2 (8A.9): `uv run --no-project --with pytest pytest
+      -q scripts/tests`: 1552 passed; `make test`: passed, every suite, `make -C
+      helm test-render` included, run again after the fresh-context fixes; `make
+      check-packaging`: passed, before those fixes, which touched only scripts,
+      their tests, skills, and documents; `make check-agent-skills`, `make
+      check-comment-hygiene`, and `make check-change
+      CHANGE=parallel-change-workflows`: passed. A fresh-context check of the
+      diff against `3ba6c5ddf` found no blocking defect and found, all fixed:
+      continuing one session stranding another's open question; the `earlier`
+      rule placed in the orchestrator's requirement rather than the wrapper's;
+      10.9 naming no destination for the two design blocks; the unattended
+      sentence readable as licence to end a turn; a retried attempt's report
+      lost from `earlier`; the implement skill's description and the guide's
+      opening saying every run starts fresh; the CI comment's scope and an
+      unpluralised count; this change's section numbers in a delta scenario; and
+      wording and reflow. Declined: refusing `SESSION_ID` on an interactive
+      `make implement`, where the owner resumes a session with `claude --resume`
+      themselves. End to end: none; the next implementation run the owner sends
+      to a session, and the next run a wake-up follows, are its working evidence.
 
 ## 9. The pilot's evidence and the containerization decision
 
@@ -2301,8 +2368,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         "Each change is worked in its own clone" and "Each Helm validation is
         isolated in its change's namespace" added; "Implementation sections and
         sessions", "Validation observes a committed slice", "Triage of an
-        implementation round", "An orchestrating session advances one change", and
-        "Unattended runs are held to their step's permissions" modified. By hand:
+        implementation round", "An orchestrating session advances one change",
+        "Unattended step runs end with a structured outcome", and "Unattended runs
+        are held to their step's permissions" modified. By hand:
         the Purpose paragraph gains clones, and "Evidence" gains
         `scripts/change_clone.py` (`make change-clone`, `make change-clone-remove`),
         `scripts/change_history.py` (`make change-history`),
@@ -2324,7 +2392,12 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         78 F2) and for the `ci` part (D15–D17: no publishing workflow dispatchable,
         the owed jobs judged, every other failure compared by test ID and exception
         type with a `dev` run the branch contains, and why); "Sections are slices,
-        sessions are the owner's" for evidence owed by validation (D14, D18);
+        sessions are the owner's" for evidence owed by validation (D14, D18), and
+        its "Each session still starts with no prior conversation" amended for an
+        implementation session the owner names to continue, and why it is named
+        rather than inferred (112 O1); "Steps run headless and resume with the
+        owner's answers" for a run's earlier outcomes kept beside its last and the
+        unattended prompt's rule against waiting on a wake-up (109 R1 / 111 R1);
         "Pushing is guarded, never repaired" for each step committing and pushing
         its own work, why the steps once did not, and the branch as the guard
         against unfinished work, only `dev` protected (D8, D20 rules 1–5);

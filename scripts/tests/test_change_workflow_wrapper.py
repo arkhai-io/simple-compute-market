@@ -100,6 +100,37 @@ def test_a_malformed_outcome_is_logged_stopped(tmp_path: Path) -> None:
     assert line["message"] == "Done.\n\n" + line["reason"]
 
 
+def test_a_turn_after_the_report_keeps_the_report_as_earlier(tmp_path: Path) -> None:
+    # A wake-up the step scheduled fires after it reported, and its turn ends the run.
+    report = {"outcome": "finished", "message": "The section is committed; make test passed.",
+              "next": "The next section."}
+    woke = {"outcome": "finished", "message": "Nothing left to wait for.",
+            "next": "The next section."}
+    claude = FakeClaude((event_lines(report) + event_lines(woke), 0))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert (line["outcome"], line["message"]) == ("finished", "Nothing left to wait for.")
+    assert line["earlier"] == [report]
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_run_of_one_turn_has_no_earlier(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    assert "earlier" not in make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+
+def test_a_run_that_crashes_after_reporting_keeps_the_report(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]) + event_lines(result=False), 137))
+
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
+
+    assert line["outcome"] == "stopped"
+    assert line["earlier"] == [{key: VALID["finished"][key] for key in ("outcome", "message",
+                                                                         "next")}]
+
+
 def test_a_stop_without_denials_is_logged_as_the_step_gave_it(tmp_path: Path) -> None:
     # The wrapper sets the denials on every outcome, so a step need not give them.
     recorded = [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": {"command": "make lock"}}]
@@ -221,6 +252,72 @@ def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
 
     assert line["sections"] == [2]
     assert "granted" not in line
+
+
+def test_implementation_continues_a_finished_session_it_names(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    first = wrapper.run("implement", CHANGE, arguments="section 8A", sections=["8A"])
+    wrapper.run("implement", CHANGE, arguments="section 8B", sections=["8B"])
+
+    # The later session is not the one continued: the session is named, not inferred.
+    line = wrapper.run("implement", CHANGE, arguments="section 8C", sections=["8C"],
+                       continuing="i-1")
+
+    command = claude.commands[2]
+    assert command[2] == f"/change-implement {CHANGE} section 8C"
+    assert option(command, "--resume") == "i-1"
+    assert (option(command, "--model"), option(command, "--effort")) == (
+        first["model"], first["effort"])
+    assert (line["session"], line["continues"], line["sections"]) == ("i-1", first["seq"],
+                                                                      ["8C"])
+
+
+@pytest.mark.parametrize("continuing", ["i-1", "i-2"])
+def test_no_session_is_continued_while_an_implementation_run_waits(
+        tmp_path: Path, continuing: str) -> None:
+    # Continuing another session would leave the question unresumable, since a
+    # resume reaches only implementation's latest run.
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-2"), 0),
+                        (event_lines(VALID["question"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+    asked = wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=f"seq {asked['seq']}.*resume it with the answer"):
+        wrapper.run("implement", CHANGE, continuing=continuing)
+    assert len(claude.commands) == 2
+
+
+def test_a_stop_a_decision_resolved_does_not_hold_a_session_back(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["stopped"], session="i-1"), 0),
+                        (event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    stopped = wrapper.run("implement", CHANGE)
+    note_orchestrator(log_path(tmp_path, CHANGE), "left for a fix later", "owner's word",
+                      resolves=stopped["seq"])
+
+    line = wrapper.run("implement", CHANGE, arguments="fix the parser", continuing="i-1")
+
+    assert (line["session"], line["continues"]) == ("i-1", stopped["seq"])
+
+
+@pytest.mark.parametrize("step,session,fresh,match", [
+    ("implement", "nobody", False, "no implementation run of session nobody"),
+    ("validate", "i-1", False, "only implementation continues"),
+    ("implement", "i-1", True, "cannot also start fresh"),
+])
+def test_continuing_is_refused_for_a_session_it_cannot_continue(
+        tmp_path: Path, step: str, session: str, fresh: bool, match: str) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"], session="i-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("implement", CHANGE)
+
+    with pytest.raises(StepError, match=match):
+        wrapper.run(step, CHANGE, continuing=session, fresh=fresh)
+    assert len(claude.commands) == 1
 
 
 def test_a_resume_names_the_waiting_run_not_the_last(tmp_path: Path) -> None:

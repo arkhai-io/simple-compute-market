@@ -1319,6 +1319,21 @@ def test_a_run_not_yet_completed_is_reported_as_producing_no_evidence(tmp_path: 
     assert "in_progress, not completed" in summary.evidence["no_evidence"]
 
 
+@pytest.mark.parametrize("jobs", [[], [(OWED_JOB, [])]], ids=["no jobs", "no failed job"])
+def test_a_failed_run_with_no_failed_job_is_reported_as_producing_no_evidence(
+        tmp_path: Path, jobs: list) -> None:
+    fake = CIFake(run=jobs, conclusion="failure")
+
+    summary = _ci(tmp_path, fake)
+
+    assert not summary.passed
+    counted = "1 job" if jobs else "0 jobs"
+    assert (f"run {CI_RUN} concluded failure but reported no failed job among its "
+            f"{counted}") in summary.evidence["no_evidence"]
+    assert "failures" not in _results(summary)
+    assert not any(read[:3] == ["gh", "run", "list"] for read in fake.reads)
+
+
 def test_a_fetch_that_keeps_no_run_is_reported_as_producing_no_evidence(
         tmp_path: Path) -> None:
     fake = CIFake(run=[(VMS_JOB, [])], fetch_keeps_nothing=True)

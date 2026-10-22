@@ -17,8 +17,10 @@ Each step is a leaf skill under `.agents/skills/`, loaded by Claude Code from
 `.claude/skills/` and by Codex from `.codex/skills/`, both links to the one source
 (`make check-agent-skills` fails otherwise). A skill does one step and stops. The
 owner starts a step by hand, or lets the orchestrating session start each in turn
-(below). Start each in a fresh session unless its row says otherwise, so it reads
-the change's files rather than an earlier session's memory.
+(below). Start each in a fresh session unless its row says otherwise, or you send
+implementation's work to a session you name ("Continuing an implementation
+session", below), so it reads the change's files rather than an earlier session's
+memory.
 
 | Step | Skill | Start it with | Writes |
 |---|---|---|---|
@@ -182,6 +184,25 @@ It resolves them, runs the suites of the sections owning them, concludes the
 merge, and pushes. While the merge is in progress, `make change-next`, run in the
 checkout holding the merge — the change's clone, for a change worked there — names
 you, "a merge is in progress", whatever else the change's state says.
+
+**Continuing an implementation session.** An implementation run starts a fresh
+session unless you send the work to an earlier one: the next section to a session
+small enough to carry it, or a fix to the session that made the edits, whose context
+holds them. The orchestrating session does so only on your word, naming the session
+from its run's log line:
+
+```text
+make implement CHANGE=<change> UNATTENDED=1 SECTIONS=8B SESSION_ID=<session>
+```
+
+The wrapper continues it on the model it ran on and records `continues`, the seq of
+the run it continues. It refuses a session with no implementation run in the
+change's log, and one waiting on your answer, which is resumed with the answer.
+
+**A run's earlier outcomes.** A finished background command or a wake-up can give
+a session another turn after it reported. The run's line is logged from its last
+turn, and keeps each earlier turn's outcome under `earlier`; the orchestrating
+session shows you those messages too.
 
 **Reading the cost.** `make change-cost CHANGE=<change>` totals the change's
 unattended runs by step, by round, and by whether a run opened its session, missed
