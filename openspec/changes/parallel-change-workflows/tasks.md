@@ -1258,7 +1258,7 @@ in 7.2), and `scripts/tests/`.
       Output: `<change>.log` for each run and `report.json` under
       `.snapshot/parallel-validation/<UTC time>/` in the invoking checkout; exit 0
       when every check passed, 1 otherwise, 2 on a refusal.
-- [ ] 7.3 Verification. Unit: 7.2's report over fake summaries and cluster reads,
+- [x] 7.3 Verification. Unit: 7.2's report over fake summaries and cluster reads,
       including a run that touched the other's namespace. System: one run of `make
       validate-parallel` (planned as `check-parallel-validation`, renamed in 7.2)
       over two clones on the development cluster,
@@ -1465,13 +1465,31 @@ in 7.2), and `scripts/tests/`.
       needs the wheelhouse first, are left: the first is a comment of a script
       this section does not otherwise touch, and the second is closeout's
       promotion (10.9).
-      Still to run: attempt 2 of the system run, and so the Helm scenarios in
-      two namespaces at once. The clones hold 297c64fa1, which lacks this fix,
-      so each needs it fast-forwarded in and `make init-bare-metal-storefront`
-      run before `make validate-parallel CLONES="<clone> <clone>"`, which an
-      implementation step may run (`make validate-*`), is run again; this task
-      stays unchecked until a run passes. The check takes two clones, so this
+      On the owner's word the orchestrating session fast-forwarded both clones
+      to b1c1e044d and ran `make init-bare-metal-storefront` in each (exit 0).
+      System, on the development cluster (`docker-desktop`), attempt 2 of `make
+      validate-parallel` over the two clones, both at b1c1e044d, passed every
+      check (`.snapshot/parallel-validation/20261022T072048Z/`, exit 0):
+      `together` — both runs 07:20:48 to 07:22:58 and 07:22:59 UTC, their
+      scenario pods running together; `results` — each Helm part passed,
+      attempt 1 under `.snapshot/validation/b1c1e044d142/helm/1/` in its clone;
+      `namespaces` — `validate-seed-default-pool-at-runtime` and
+      `validate-resolve-compute-family-findings`; `tags` — each run's pods on
+      its own five images, `arkhai:{compute-provisioning,dev-env,e2e-tests,
+      registry,storefront}-<change>`, the overlays sharing none; `scenario
+      pods` — `arkhai-node-operator-e2e-tests-e2e-scenarios` in each namespace,
+      on its own `e2e-tests` image, exit 0, each passing `contracts`' and
+      `e2e_alkahest_escrow_codecs`' 13 tests (239 deselected); `untouched` —
+      in each namespace one revision of `arkhai-node-operator` since the check
+      started, its volumes and pods made during its own run on its own images,
+      its workloads at zero. Each namespace's deploy was a first install (attempt
+      1 never reached one), so the upgrade over a namespace left at zero and the
+      refused-upgrade fallback were again not exercised; the only warnings were
+      `metrics` (no metrics source on this cluster, so no memory recorded) and
+      `capacity` (no figure recorded). The check takes two clones, so this
       change, worked in the owner's workspace, is not one of them.
+      End to end: `contracts` and `e2e_alkahest_escrow_codecs`, run in both
+      namespaces at once by this run.
       End-to-end scenarios: `contracts` and `e2e_alkahest_escrow_codecs`, the Helm
       run's served list, in both namespaces at once — by the system run alone; no
       pipeline scenario exercises the check or the skill.
