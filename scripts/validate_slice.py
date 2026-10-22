@@ -30,6 +30,12 @@ commit; it is untracked, so the checkout is unchanged.
   always keeps the namespace's evidence and scales its workloads to zero, leaving
   objects and volumes for the next validation to replace.
 
+`capacity` validates nothing. Archive cleanup runs it to record, in
+`helm/validation-capacity.toml`, the memory the change's latest validation
+measured, which the capacity preflight compares with the node; when that
+validation measured none, no metrics source answering, it leaves any recorded
+figure as it is and says so.
+
 Validation has full control of the environment it runs in: it scales, deletes,
 and replaces whatever its change's namespace holds without asking. What it never
 changes is the commit, or another namespace.
@@ -57,10 +63,12 @@ import threading
 import time
 import tomllib
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
 import change_namespace
+from find_change import REVIEWS, ChangeNotFound, change_directory
 
 ROOT = Path(__file__).resolve().parents[1]
 LOG_ROOT = Path(".snapshot/validation")
@@ -308,21 +316,101 @@ def write_capacity(path: Path, figure: CapacityFigure) -> None:
                     f"change = {json.dumps(figure.change)}\n", "utf-8")
 
 
+def _timestamp(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
+_RECORD_NUMBER = re.compile(r"^(\d+)-validation\.md$")
+_RECORD_COMMIT = re.compile(r"^- \*\*Commit:\*\*\s*([0-9a-f]{12,40})\b", re.M)
+
+
+def latest_helm_summary(root: Path, change: str) -> tuple[Path | None, str]:
+    """The `summary.json` of the latest Helm attempt of the commit the change's latest
+    validation record names, or None with why there is none."""
+    try:
+        reviews = change_directory(root, change) / REVIEWS
+    except ChangeNotFound as exc:
+        raise ValidationError(str(exc)) from exc
+    numbered = sorted((int(match[1]), entry) for entry in
+                      (reviews.iterdir() if reviews.is_dir() else [])
+                      if (match := _RECORD_NUMBER.match(entry.name)))
+    if not numbered:
+        return None, f"{change} has no validation record"
+    record = numbered[-1][1]
+    commit = _RECORD_COMMIT.search(record.read_text("utf-8"))
+    if not commit:
+        return None, f"{record.relative_to(root)} names no validated commit"
+    attempts = sorted((int(entry.name), entry) for entry in
+                      (root / LOG_ROOT / commit[1][:12] / "helm").glob("*")
+                      if entry.name.isdigit() and (entry / "summary.json").is_file())
+    if not attempts:
+        return None, f"the latest validation of {change}, {record.name}, ran no Helm part"
+    summary = attempts[-1][1] / "summary.json"
+    return summary, f"from {summary.relative_to(root)}"
+
+
+def _instant(text: object) -> str | None:
+    """`text` as a UTC timestamp, or None when it is not one."""
+    try:
+        moment = datetime.fromisoformat(text) if isinstance(text, str) else None
+    except ValueError:
+        return None
+    return _timestamp(moment) if moment is not None and moment.tzinfo else None
+
+
+def capacity_figure(root: Path, change: str) -> tuple[CapacityFigure | None, str]:
+    """The figure the change's latest validation measured, or None, with why."""
+    summary, source = latest_helm_summary(root, change)
+    if summary is None:
+        return None, source
+    try:
+        memory = json.loads(summary.read_text("utf-8")).get("memory") or {}
+    except (OSError, ValueError, AttributeError) as exc:
+        raise ValidationError(f"{summary.relative_to(root)} cannot be read: {exc}") from exc
+    peak = memory.get("peak_bytes") if isinstance(memory, dict) else None
+    if not isinstance(peak, int) or isinstance(peak, bool) or peak <= 0:
+        return None, (f"{summary.relative_to(root)} records no memory: no metrics source "
+                      "answered on its cluster")
+    # A summary that does not say when it measured is dated by the file, which the
+    # Helm part writes as it ends.
+    measured_at = _instant(memory.get("measured_at")) or _timestamp(
+        datetime.fromtimestamp(summary.stat().st_mtime, timezone.utc))
+    return CapacityFigure(peak, measured_at, change), source
+
+
+def record_capacity(root: Path, change: str, path: Path | None = None) -> str:
+    """Write the figure the change's latest validation measured into the capacity file,
+    or, when it measured none, leave any recorded figure as it is; say which."""
+    path = path or root / CAPACITY_FILE
+    figure, source = capacity_figure(root, change)
+    if figure is None:
+        return f"No memory figure recorded: {source}; {CAPACITY_FILE} is unchanged."
+    write_capacity(path, figure)
+    return (f"Recorded {figure.memory_bytes} bytes, measured {figure.measured_at} by "
+            f"{change}'s validation, in {CAPACITY_FILE} ({source}).")
+
+
 def _say(line: str) -> None:
     # Flushed at once: a part's output is read while it runs, often through a
     # pipe, where a buffered line would appear only when the part ends.
     print(line, flush=True)
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class Validation:
     def __init__(self, part: str, *, root: Path = ROOT, runner: Runner = _run_logged,
                  read: Reader = _read, clock: Callable[[], float] = time.monotonic,
-                 echo: Callable[[str], None] = _say) -> None:
+                 echo: Callable[[str], None] = _say,
+                 now: Callable[[], datetime] = _utc_now) -> None:
         self.root = root
         self.run = runner
         self.read = read
         self.clock = clock
         self.echo = echo
+        self.now = now
         commit = read(["git", "rev-parse", "HEAD"]).strip()
         part_dir = root / LOG_ROOT / commit[:12] / part
         earlier = [int(entry.name) for entry in part_dir.glob("*")
@@ -941,6 +1029,8 @@ def _sample_memory(validation: Validation, run: HelmRun, *, warn: bool = True) -
     memory = validation.summary.memory
     memory.setdefault("samples_bytes", []).append(used)
     memory["peak_bytes"] = max(memory["samples_bytes"])
+    # When the measurement ended, which the capacity figure records it by.
+    memory["measured_at"] = _timestamp(validation.now())
 
 
 def _after_scenarios(validation: Validation, run: HelmRun) -> None:
@@ -1084,9 +1174,11 @@ def render(summary: Summary) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("part", choices=("local", "helm"))
+    parser.add_argument("part", choices=("local", "helm", "capacity"),
+                        help="`capacity` validates nothing: it records the memory the "
+                             "change's latest validation measured, for archive cleanup")
     parser.add_argument("--context", default=DEFAULT_HELM_CONTEXT,
                         help="the only kube context the Helm part may deploy to")
     parser.add_argument("--change",
@@ -1096,6 +1188,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="run every pipeline scenario on Helm rather than the ones the "
                              "default charts serve; for establishing which those are")
     args = parser.parse_args(argv)
+    if args.part == "capacity":
+        if not args.change:
+            parser.error("capacity needs --change")
+        try:
+            print(record_capacity(root, args.change))
+        except (ValidationError, ValueError) as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        return 0
     try:
         if args.change:
             change_namespace.namespace(args.change)

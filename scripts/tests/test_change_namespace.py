@@ -154,8 +154,24 @@ def test_the_command_also_writes_the_overlay(tmp_path: Path,
     assert capsys.readouterr().out == "validate-pilot\n"
 
 
+def test_a_changes_images_are_its_own_tags_of_each_image_built_here() -> None:
+    images = change_namespace.change_images("foo")
+
+    assert "arkhai:storefront-foo" in images and "arkhai:compute-provisioning-foo" in images
+    assert len(images) == len(change_namespace.BUILT_IMAGES)
+    # A change whose name ends in this one's keeps its images.
+    assert "arkhai:storefront-bar-foo" not in images
+
+
+def test_the_command_prints_the_images_instead(capsys: pytest.CaptureFixture[str]) -> None:
+    assert change_namespace.main(["pilot", "--images"]) == 0
+
+    assert capsys.readouterr().out.splitlines() == change_namespace.change_images("pilot")
+
+
 def test_the_command_refuses_a_name_that_is_not_a_change(
         capsys: pytest.CaptureFixture[str]) -> None:
+    assert change_namespace.main(["Not_A_Change", "--images"]) == 2
     assert change_namespace.main(["Not_A_Change"]) == 2
 
     captured = capsys.readouterr()

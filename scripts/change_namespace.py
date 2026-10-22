@@ -15,6 +15,8 @@ under its bare tag, which another change's build may have written.
 
 `change_namespace.py <change>` prints the namespace, as `helm/Makefile` derives it
 from `CHANGE=`; `--image-overlay <path>` also writes the change's overlay there.
+`--images` prints instead every image a change's validation build tags, which
+`make -C helm teardown` removes.
 
 Contract: openspec/specs/change-workflow/spec.md, "Each Helm validation is isolated
 in its change's namespace".
@@ -38,6 +40,14 @@ LABEL_LIMIT = 63
 HASH_LENGTH = 8
 # The image name every image the build targets write carries.
 BUILT_HERE = "arkhai"
+# The bare tag of every image `make build-dev`, the build a change's validation
+# runs, writes with the change's suffix. Teardown removes exactly these rather than
+# every tag ending in the suffix, which would also take the images of a change
+# whose name ends in this one's: `arkhai:storefront-bar-foo` is `bar-foo`'s
+# storefront, not `foo`'s. A test holds the list to what the build writes.
+BUILT_IMAGES = ("apicredits-sample-app", "apicredits-service", "apicredits-storefront",
+                "bare-metal-storefront", "compute-provisioning", "dev-env", "e2e-tests",
+                "registry", "storefront")
 _CHANGE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _KEY = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z0-9_.-]+):(?P<value>.*)$")
 
@@ -61,6 +71,12 @@ def namespace(change: str) -> str:
 def image_suffix(change: str) -> str:
     """What every image tag a change's build writes ends with."""
     return "-" + _checked(change)
+
+
+def change_images(change: str) -> list[str]:
+    """Every image a change's validation build tags, `arkhai:<tag>-<change>`."""
+    suffix = image_suffix(change)
+    return [f"{BUILT_HERE}:{tag}{suffix}" for tag in BUILT_IMAGES]
 
 
 def image_tags(values: str) -> dict[tuple[str, ...], str]:
@@ -136,8 +152,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("change")
     parser.add_argument("--image-overlay", type=Path, metavar="PATH",
                         help="also write the change's image overlay to PATH")
+    parser.add_argument("--images", action="store_true",
+                        help="print every image the change's validation build tags instead")
     args = parser.parse_args(argv)
     try:
+        if args.images:
+            print("\n".join(change_images(args.change)))
+            return 0
         name = namespace(args.change)
         if args.image_overlay:
             write_image_overlay(args.change, args.image_overlay)

@@ -103,6 +103,11 @@ archived change. The reviews to triage are its numbered records in `reviews/` â€
 `NN-<kind>.md` â€” that have no `NN-<kind>.triage.md` beside them. Never read
 `reviews/transcripts/`: those are raw reviewer sessions, not records.
 
+Another change's records, when a finding or a diagnosis rests on them, are where
+`python3 scripts/find_change.py --records <change>` says: this checkout's, or, from
+a change's clone, the owner's workspace's, which holds the history of every
+cleaned-up change.
+
 When the owner pastes a review from elsewhere, save it verbatim as the change's
 next numbered record, `NN-<kind>-external.md`, numbered after every file in
 `reviews/` and `reviews/transcripts/`, so later reviews read it as history. Never

@@ -19,6 +19,8 @@ from typing import Sequence
 
 import pytest
 
+import change_namespace
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HELM = REPO_ROOT / "helm"
 SUFFIX = "-pilot"
@@ -120,6 +122,17 @@ def test_an_aggregate_target_suffixes_its_own_images_and_passes_the_suffix_down(
     for project in AGGREGATE_TARGETS[target]:
         assert f"cd {project} && make build IMAGE_SUFFIX={SUFFIX}" in suffixed
         assert f"cd {project} && make build IMAGE_SUFFIX=\n" in bare + "\n"
+
+
+def test_teardowns_image_list_is_every_image_a_changes_validation_build_tags() -> None:
+    # Validation builds with `make build-dev`: its own images, and each subproject's
+    # it delegates to, whose recipes `make -n` prints rather than runs.
+    commands = _make_n("build-dev", f"IMAGE_SUFFIX={SUFFIX}")
+    built = _tags(commands)
+    for project in re.findall(rf"cd (\S+) && make build IMAGE_SUFFIX={SUFFIX}", commands):
+        built += _tags(_make_n("build", f"IMAGE_SUFFIX={SUFFIX}", directory=REPO_ROOT / project))
+
+    assert sorted(set(built)) == change_namespace.change_images(SUFFIX[1:])
 
 
 def test_the_storefronts_uncached_build_appends_the_suffix() -> None:
@@ -381,6 +394,73 @@ def test_resume_of_a_namespace_stating_no_workloads_fails(tmp_path: Path,
 
     assert resumed.returncode != 0 and "states Deployment or StatefulSet" in resumed.stderr
     assert not (tmp_path / "kubectl.log").exists()
+
+
+def _fake_docker(bin_dir: Path, present: Sequence[str], *, refuse: str = "") -> Path:
+    log = bin_dir / "docker.log"
+    _executable(bin_dir, "docker", f"""echo "$*" >> {log}
+case "$1 $2" in
+  "image inspect") case " {' '.join(present)} " in *" $3 "*) exit 0;; esac; exit 1;;
+  "image rm") [ "$3" = "{refuse}" ] && {{ echo "image is in use" >&2; exit 1; }}; exit 0;;
+esac
+exit 1
+""")
+    return log
+
+
+def test_teardown_deletes_the_changes_namespace_and_the_images_it_built(
+        tmp_path: Path) -> None:
+    log = tmp_path / "kubectl.log"
+    _fake_kubectl(tmp_path, log)
+    present = ["arkhai:storefront-pilot", "arkhai:e2e-tests-pilot"]
+    docker_log = _fake_docker(tmp_path, present)
+
+    torn_down = _make("teardown", "CHANGE=pilot", path=tmp_path)
+
+    assert torn_down.returncode == 0, torn_down.stderr
+    assert log.read_text().splitlines() == [
+        f"delete namespace {NAMESPACE} --context docker-desktop --ignore-not-found --wait"]
+    calls = docker_log.read_text().splitlines()
+    assert [call for call in calls if call.startswith("image inspect")] == [
+        f"image inspect {image}" for image in change_namespace.change_images("pilot")]
+    assert [call for call in calls if call.startswith("image rm")] == [
+        "image rm arkhai:e2e-tests-pilot", "image rm arkhai:storefront-pilot"]
+    assert "arkhai:registry-pilot is not here" in torn_down.stdout
+
+
+def test_teardown_deletes_only_in_the_context_it_is_given(tmp_path: Path) -> None:
+    log = tmp_path / "kubectl.log"
+    _fake_kubectl(tmp_path, log)
+    _fake_docker(tmp_path, [])
+
+    torn_down = _make("teardown", "CHANGE=pilot", "HELM_CONTEXT=elsewhere", path=tmp_path)
+
+    assert torn_down.returncode == 0, torn_down.stderr
+    assert log.read_text().splitlines() == [
+        f"delete namespace {NAMESPACE} --context elsewhere --ignore-not-found --wait"]
+
+
+def test_teardown_fails_over_an_image_it_could_not_remove_after_trying_the_rest(
+        tmp_path: Path) -> None:
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log")
+    present = ["arkhai:dev-env-pilot", "arkhai:storefront-pilot"]
+    docker_log = _fake_docker(tmp_path, present, refuse="arkhai:dev-env-pilot")
+
+    torn_down = _make("teardown", "CHANGE=pilot", path=tmp_path)
+
+    assert torn_down.returncode != 0
+    assert "image is in use" in torn_down.stderr
+    assert "image rm arkhai:storefront-pilot" in docker_log.read_text().splitlines()
+
+
+def test_teardown_without_a_change_is_refused_and_touches_nothing(tmp_path: Path) -> None:
+    _fake_kubectl(tmp_path, tmp_path / "kubectl.log")
+    docker_log = _fake_docker(tmp_path, [])
+
+    refused = _make("teardown", path=tmp_path)
+
+    assert refused.returncode != 0 and "teardown needs CHANGE=<change>" in refused.stderr
+    assert not (tmp_path / "kubectl.log").exists() and not docker_log.exists()
 
 
 @pytest.mark.parametrize("exists", [False, True])

@@ -1545,7 +1545,7 @@ change's namespace"). Touches a new `scripts/change_history.py`,
 `change-triage`, `change-closeout`, `change-orchestrate`), `.claude/change-steps.toml`,
 `docs/agents/change-workflow.md`, `AGENTS.md`, and `scripts/tests/`.
 
-- [ ] 8.1 `scripts/change_history.py sync <change>` (`make change-history
+- [x] 8.1 `scripts/change_history.py sync <change>` (`make change-history
       CHANGE=`), run in a clone: copy into the workspace, at the same paths, the
       archived change's whole `reviews/` and the evidence its records name
       (`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`); copy what is
@@ -1553,16 +1553,45 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       that is a byte-for-byte prefix of the clone's, and refuse, naming each, any
       other difference, never overwriting; copy nothing rebuildable (D11, 17 F4,
       26 F1).
-- [ ] 8.2 `find_change.py --records <change>`: the change's records in the checkout,
+      Note: the evidence the records name is read from every file directly in
+      `reviews/` — a cited `.snapshot/validation/<dir>` or `.snapshot/e2e-logs/<run>`
+      path, a validation record's `**Commit:**` (its evidence under the first twelve
+      characters, as `validate_slice.py` keeps it), and its `**Pipeline:** run <id>`
+      — since a validation record names its commit and run rather than the paths;
+      transcripts are not read for it, as they cite whatever a session read, another
+      clone's evidence included. Named evidence the clone lacks is reported, not
+      refused. Only regular files are copied — a link, to a file or a directory, is
+      refused and named — each aside and renamed so a session reading the
+      workspace never finds a half-copy (a crash can leave the aside file); a
+      refused file does not stop the others, and the command exits 1 naming each. A change not yet archived is refused:
+      its history moves at archive cleanup.
+- [x] 8.2 `find_change.py --records <change>`: the change's records in the checkout,
       then in the workspace through the `workspace` remote; every skill that reads
       another change's or an earlier change's records uses it (D11).
-- [ ] 8.3 `scripts/change_clone.py remove <change>` (`make change-clone-remove
+      Note: the records are the directory holding `reviews/`, so the workspace's
+      archive copy is found beside the change's active directory from its branch;
+      the workspace's is printed as an absolute path. `workspace_of` moved from
+      `change_clone.py` into `find_change.py`, which both it and the new
+      `change_history.py` import, since `change_clone.py`'s removal imports the
+      history script and the two would otherwise import each other; importers of
+      `change_clone.workspace_of` are unchanged. The skills reading another change's
+      records — design, planning, the review, triage, closeout — say to find them
+      with it; the orchestrating skill says where a done change's history went and
+      that clone removal is the owner's.
+- [x] 8.3 `scripts/change_clone.py remove <change>` (`make change-clone-remove
       CHANGE=`), run by the owner in the workspace: run 8.1 first; refuse, deleting
       nothing and naming what is missing, unless every file of the clone's
       `reviews/` and named evidence is in the workspace with identical contents, the
       branch is merged into `origin/dev`, and the clone has no commit `origin` lacks
       and no uncommitted change (D6).
-- [ ] 8.4 Teardown and the figure: `make -C helm teardown CHANGE=<change>` deletes the
+      Note: also refused, before anything is copied, a run in progress in the clone
+      and a bootstrap still running, since deleting the clone would kill the one and
+      break the other; and, after the copy, a stash, which is a commit `origin`
+      lacks that no branch holds. `origin` is fetched (with prune) before the merge
+      and unpushed checks, which read `--branches --not --remotes=origin`. A refusal
+      after the copy carries the copy's report, which the command prints beside the
+      problems.
+- [x] 8.4 Teardown and the figure: `make -C helm teardown CHANGE=<change>` deletes the
       change's namespace and its `-<change>` images; archive cleanup writes the
       figure from the change's latest validation's `summary.json` into
       `helm/validation-capacity.toml` with when and from which change, through the
@@ -1570,7 +1599,25 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       empty, it writes nothing, leaves any recorded figure as it is, and reports
       that it recorded none (D4, 37 F3, 78 F2; replanned against the reviewed
       design: the figure is conditional on a measurement).
-- [ ] 8.5 `change-archive-cleanup`: after its commit and the pull-request draft,
+      Note: `make -C helm teardown CHANGE=` deletes the namespace
+      (`--ignore-not-found --wait`) and removes, of the images `change_namespace.py
+      <change> --images` lists, each that is present, failing after trying the rest
+      when one cannot be removed; it refuses without `CHANGE`, so it never deletes
+      `default`. The list is the bare tags `make build-dev` writes with the suffix
+      (`BUILT_IMAGES`, held to the build by a test), not every tag ending in the
+      suffix, which would also take the images of a change whose name ends in this
+      one's. The figure: archive cleanup's planned rules (8.6) let it edit
+      `helm/validation-capacity.toml` but run no script, so "through the writer of
+      6.4" could not run unattended. Put to the owner, who chose a target: `make
+      record-capacity CHANGE=` (`validate_slice.py capacity --change`) reads the
+      change's latest `NN-validation.md`, its `**Commit:**`, and the summary of that
+      commit's last Helm attempt, and writes `memory.peak_bytes` through
+      `write_capacity` with `measured_at` and the change, or writes nothing and says
+      why (no Helm part; no measurement, for want of a metrics source). The Helm
+      part now records `memory.measured_at`, the time of its last sample; a summary
+      without it is dated by the file. The orchestrator's table edit (8.6) allows
+      `make record-capacity*` in place of the `Edit` rule; D8 records the choice.
+- [x] 8.5 `change-archive-cleanup`: after its commit and the pull-request draft,
       write the capacity figure when the latest validation measured one and commit
       it, tear the namespace and images down, push, then run `make change-history`
       as its last act; with no measurement, its report and the draft say that no
@@ -1579,11 +1626,33 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       time (D4, D11, 37 F3, 78 F2; replanned likewise). `docs/agents/change-workflow.md` and `AGENTS.md`'s
       "Change workflow" say the owner's workspace holds the history of every
       cleaned-up change, and the guide gains clone removal.
-- [ ] 8.6 `.claude/change-steps.toml` (the orchestrator's, as the preamble says): archive
+      Note: the skill's steps are now the index commit and its push (5), the draft
+      (6), `make record-capacity` and its commit (7), with its outcome — the figure,
+      or no figure and the reason the target gave — and, for a recorded figure, the
+      later-`measured_at` merge rule added to the draft's notes, `make -C helm
+      teardown` (8, a failure reported with its rerun rather than retried), the
+      figure commit's push (9), and `make change-history` last (10), only for a
+      change whose `.git/config` names a `workspace` remote — a change worked in the
+      workspace has its history there. The push stays at step 5 so that a run that
+      dies after the index commit leaves nothing unpushed; a rerun on a row already
+      `archived` skips the Advance and Validated checks and goes on from step 7,
+      appending to the draft rather than rewriting it, since a rewritten file could
+      no longer be extended in the workspace. A refused file is reported and the
+      step still finishes, since clone removal refuses until it is reconciled. The guide's "A change in its own clone"
+      gains "History and removal", its table row and review-directory paragraph
+      say where history goes, and `AGENTS.md`'s "Change workflow" says the
+      workspace holds every cleaned-up change's history and how to find records.
+- [x] 8.6 `.claude/change-steps.toml` (the orchestrator's, as the preamble says): archive
       cleanup gains `make change-history*`, `make -C helm teardown*`, and
       `Edit(helm/validation-capacity.toml)`; every step gains `python3
       scripts/find_change.py --records *` (D8).
-- [ ] 8.7 Verification. Repository level (a workspace and a clone): a first copy; a
+      Correction, on the owner's word (8.4): archive cleanup gains `make
+      record-capacity*` in place of `Edit(helm/validation-capacity.toml)`. The
+      orchestrator's edit was in the worktree, and is committed with this section.
+      Left for the orchestrator: the preamble's "a step's permissions change here,
+      by the owner" and the archive-cleanup row's comment, which does not yet name
+      the figure, the teardown, or the history copy.
+- [x] 8.7 Verification. Repository level (a workspace and a clone): a first copy; a
       second after the log and a transcript grew, extending them; a conflicting file
       refused and named, nothing overwritten; removal refused for each missing
       condition and run after the synchronization; `--records` finding the
@@ -1593,6 +1662,92 @@ change's namespace"). Touches a new `scripts/change_history.py`,
       scripts/tests`; `make check-agent-skills`; a fresh-context read of the changed
       skills against D11 and the delta's clone requirement; `make test`. No
       end-to-end scenario covers it.
+      Evidence. `scripts/tests/test_change_history.py`, 16 passed, repository level
+      (real Git: a workspace with a bare `origin` and a clone made by
+      `change_clone.create`, its spawn injected): a first copy of the records,
+      transcripts included, and of the evidence they name — the validated commit's,
+      a cited one, and the pipeline run's — to the same paths, an unnamed evidence
+      directory and the run's zip left; named evidence the clone lacks reported; a
+      second copy extending the log and a transcript that grew, adding a new
+      record, and leaving six files; two conflicting files refused and named, left
+      as they were, the rest copied, and both listed by `differences`; a directory
+      where the clone has a file, and a link to a file and to a directory, each
+      refused; a change not archived, and an archive without records, refused; the
+      command copying and reporting, failing over a refusal, and refusing outside a
+      clone; `--records` finding the clone's records, then the workspace's, and a
+      cleaned-up change's from another clone, and refusing records found nowhere;
+      which evidence records name, read from text (unit). `test_find_change.py`, 22
+      passed, unit: the records directory of an active change, the archive copy
+      beside an active directory without records, none, an archive copy twice
+      refused, the checkout before the workspace (the workspace lookup injected),
+      and `--records` not combined with another restriction.
+      `test_change_clone.py`, 55 passed, repository level: removal after the copy,
+      with what grew since extended; the settings link deleted and the workspace's
+      settings kept; a merge `origin` holds that the clone had not fetched letting
+      the clone go (the fetch shown); refused, the clone kept, for a differing
+      record (the rest copied all the same), a branch not merged, a commit `origin`
+      lacks, uncommitted changes, a stash, a marker branch the clone lacks, and an
+      `origin` that cannot be fetched (the copy's report kept); refused before any
+      copy for a run in progress, a running bootstrap, another change's clone, a
+      change not archived, no clone, a directory not a clone, and a clone as
+      workspace; the command line reporting a refusal and a removal. The aside
+      copy's partial-file protection is shown only by no aside file left behind,
+      and `rmtree` failing is untested. `test_change_build_and_helm_targets.py`,
+      integration through the real `helm/Makefile` against fake `kubectl` and
+      `docker` on `PATH` (the process boundary): teardown deleting the namespace in
+      `docker-desktop`, and in a `HELM_CONTEXT` given, removing the images present
+      and naming the absent, failing over an image it could not remove after
+      trying the rest, and refused without `CHANGE`, nothing run; and, through
+      `make -n`, the image list equal to every tag `make build-dev` writes with a
+      suffix. `test_change_namespace.py`, 23 passed, unit: a change's images and
+      `--images`. `test_validate_slice.py`, unit with the runner and reader
+      injected: the figure from the latest record's commit's last Helm attempt,
+      with its time and change, over an older record; with no measurement, no Helm
+      part, and no validation record, nothing written, the recorded figure left as
+      it was, and the reason said; a summary without a timestamp dated by the file;
+      memory that is not a measurement recording nothing; `measured_at` the last
+      sample's time; the command. `uv run --no-project --with pytest pytest -q
+      scripts/tests`: 1442 passed after both fresh-context checks' fixes. `make
+      test`: passed, every suite, `make -C helm test-render` included, run before
+      those fixes, which touched only scripts and their tests, `helm/Makefile`'s
+      teardown, skills, and documents; after them `make -C helm test-render`
+      passed again. `make check-packaging`, `make check-agent-skills`, and `make
+      check-comment-hygiene`: passed. `make check-change`: only the citations of
+      the scripts section 8A creates (`scripts/ci_evidence.py`,
+      `scripts/tests/test_ci_evidence.py`). End to end: none — no scenario in
+      `e2e-tests/` exercises the history copy, removal, the figure, or teardown;
+      the pilot's archive cleanup is their working evidence (9.1).
+      The first fresh-context check found, and this section fixed: teardown ran in
+      whatever kube context was current (now `HELM_CONTEXT`, `docker-desktop`);
+      archive cleanup's push moved after the figure left a window a rerun could
+      not close (the push is back at step 5, and a rerun goes on from step 7);
+      `record-capacity` failed with no validation record and the skill gave "for
+      want of a metrics source" as every reason (now the target's reason);
+      malformed memory and a `measured_at` that is no timestamp; a failed fetch
+      losing the copy's report; `rmtree` unguarded; a symlinked directory silently
+      skipped; the guide's order of removal's refusals; the settings-link test
+      checking nothing; and the untested refusals and the last-sample time, now
+      tested. Declined: calling the history tests "repository level", the term
+      sections 1–3 use; the `Contract:` lines naming the delta's requirement, which
+      the archive promotes. The second check found, and this section fixed: a rerun
+      stopped at step 1's Validated check by its own figure commit; a rerun's
+      rewrite of the draft, which the copy would then refuse; the aside copy's
+      stated reason; an unused constant; the guide's table row lacking "for a
+      change worked in its own clone"; and the 8.5 note's account of the push.
+      Declined: a crashed attempt's summary being skipped for an earlier attempt of
+      the same commit, which is still that commit's measurement; the small
+      duplication of the record-commit pattern and of `workspace_of`'s Git calls,
+      each module keeping its own reads.
+      Handoff: unverified — that an unattended Claude step or the Codex review can
+      read the absolute workspace path `--records` prints for another change's
+      records; the pilot's sessions will show it, and a denial would name the call.
+      Left for the orchestrator (`.claude/`): `Bash(python3 scripts/find_change.py
+      --records *)` in `common` is already covered by `Bash(python3
+      scripts/find_change.py*)`; `Bash(make -C helm teardown*)` also admits a
+      `HELM_CONTEXT=` naming another context, so a narrower rule may be wanted; the
+      archive-cleanup row's comment and the preamble's permissions sentence (8.6).
+      Section 9 records the pilot's history copy and figure from its archive
+      cleanup on this tooling.
 
 ## 8A. Evidence only a push produces, owed by validation
 

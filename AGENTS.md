@@ -202,6 +202,12 @@ orchestrating session, `make orchestrate CHANGE=<change>`. See
 `docs/agents/change-workflow.md` for which skill each step uses, orchestrating a
 change, the review files, and the intervention ledger.
 
+A change worked in its own clone keeps its records there until archive cleanup
+copies them into the owner's workspace, which holds the history of every
+cleaned-up change. A change's records are untracked: find them with `python3
+scripts/find_change.py --records <change>`, which looks in the current checkout,
+then in the owner's workspace.
+
 ### Issue tracker
 
 GitHub Issues handle intake and triage through the `gh` CLI. See `docs/agents/issue-tracker.md`.

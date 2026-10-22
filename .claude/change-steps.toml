@@ -23,6 +23,7 @@
 [common]
 allow = [
   "Read", "Glob", "Grep", "Skill",
+  "Bash(python3 scripts/find_change.py --records *)",
   "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git show*)",
   "Bash(git rev-parse*)", "Bash(git branch --show-current)", "Bash(git ls-files*)",
   "Bash(git merge-base*)", "Bash(git check-ignore*)",
@@ -176,5 +177,7 @@ allow = [
   "Edit(openspec/changes/archive/*/reviews/pull-request.md)",
   "Edit(openspec/changes/archive/*/interventions.jsonl)",
   "Bash(make check-*)", "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
+  "Bash(make change-history*)", "Bash(make -C helm teardown*)",
+  "Bash(make record-capacity*)",
 ]
 deny = ["Bash(gh pr create*)"]

@@ -32,7 +32,7 @@ the change's files rather than an earlier session's memory.
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
 | Closeout review | `change-review` | `make review CHANGE=<change> KIND=closeout` | `reviews/NN-closeout.md` |
-| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md` |
+| Archive cleanup | `change-archive-cleanup` | `make archive-cleanup CHANGE=<change>` | the index (dependents released, row `archived`), any waiver as a ledger line, one commit, `reviews/pull-request.md`; the capacity figure its latest validation measured (`make record-capacity`), in a commit of its own, or none when nothing was measured; then tears down the change's validation namespace and images (`make -C helm teardown`) and, for a change worked in its own clone, copies its history into your workspace (`make change-history`) |
 | Orchestration | `change-orchestrate` | `make orchestrate CHANGE=<change>` | the change's clone and branch, `orchestrator` and `round` lines in the workflow log, the owner's notes on a round, the ledger line of a waived design review, workflow commits on your word, its own observations of the tooling |
 
 Every step but the review opens an interactive Claude Code session. With
@@ -202,6 +202,26 @@ moved off the round's base by an amend, reset, or rebase. Triage pulls your
 commits into the clone, fast-forward only, and presents each as one of your points
 on the round.
 
+**History and removal.** A change's records and evidence are untracked, so no
+merge carries them out of its clone. Archive cleanup, as its last act, runs `make
+change-history CHANGE=<change>` in the clone, which copies the archived change's
+`reviews/` and the validation evidence its records name
+(`.snapshot/validation/<commit>/`, `.snapshot/e2e-logs/<run>/`) into your
+workspace at the same paths. Your workspace therefore holds the history of every
+cleaned-up change, and a session working another change finds it with `python3
+scripts/find_change.py --records <change>`, which looks in its own checkout first,
+then in your workspace. The copy is safe to run again: it copies what is missing,
+leaves what is the same, extends a file the clone has since grown — the workflow log
+and transcripts only grow — and refuses, naming it and overwriting nothing, any file
+that differs otherwise. Once the change has merged, remove its clone with `make
+change-clone-remove CHANGE=<change>` in your workspace. It refuses at once while a
+run is in progress in the clone or its bootstrap is still running. Otherwise it
+copies the history again first, then deletes the clone only when every file of that
+history is in your workspace with the clone's contents, the branch is merged into
+`origin`'s `dev`, and the clone holds no commit `origin` lacks, no uncommitted
+change, and no stash; otherwise it names each problem and deletes nothing. Archive
+cleanup never removes the clone, since the pull request may need another round.
+
 **A change worked in the workspace.** A change can still be worked in your
 workspace with no clone, its branch checked out there; the tooling tells the cases
 apart by whether a clone holds the change's branch. Its round view resets that
@@ -290,7 +310,9 @@ publishes nothing and is kept beside its transcript as
 `transcripts/NN-<kind>.rejected.md`. A numbered review is the
 only record of its findings. Transcripts are kept for the owner's export of the
 change's history, and no review or triage step reads them. Archive cleanup leaves
-the directory in place.
+the directory in place; for a change worked in its own clone it also copies it into
+your workspace, which holds the history of every cleaned-up change ("History and
+removal", above).
 
 `workflow.jsonl` is written by `scripts/run_change_step.py` alone: each run's
 outcome with its session, commit, model, cost, and denials; each `round` line; and

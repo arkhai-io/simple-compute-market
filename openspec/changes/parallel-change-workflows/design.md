@@ -508,8 +508,11 @@ does not remove the clone, since the pull request may need another round.
   to their allow lists; `design` and `plan` gain `git add` and `git commit`, since
   both commit their work under the first bullet; `triage` and
   `implement` gain `git pull --ff-only workspace *`; `archive-cleanup` gains
-  `make change-history`, the namespace teardown target, and
-  `Edit(helm/validation-capacity.toml)`. The orchestrating session makes and
+  `make change-history`, the namespace teardown target, and `make
+  record-capacity`, which writes the capacity figure through the tested writer —
+  on the owner's word during implementation, in place of an edit of
+  `helm/validation-capacity.toml` by hand, since finding the latest validation's
+  measurement is a lookup a script does reliably. The orchestrating session makes and
   commits these on the owner's word. A `git -C` read stays unallowed (36 R2): an
   allow rule's wildcard after `-C` also spans a push, which no deny rule names in
   that form, and a step already runs in the checkout it reads; the step skills'

@@ -1,6 +1,6 @@
 ---
 name: change-archive-cleanup
-description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, and draft the merge commit message and pull request description. Use when a closeout triage records `Advance` and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
+description: Clean up an archived OpenSpec change once its closeout review's triage has advanced it — release the changes that depend on it, set its index row to `archived`, keep its reviews, commit, draft the merge commit message and pull request description, record the capacity figure its latest validation measured, tear down its validation namespace and images, push, and copy its history into the owner's workspace. Use when a closeout triage records `Advance` and the change's row still says `in closeout`, when the owner says "clean up the archive of <change>", or when `make archive-cleanup` invokes you.
 ---
 
 # Cleaning up an archived change
@@ -11,10 +11,14 @@ lands when its index row says `archived`, and this skill writes that. It does wh
 closeout deliberately left until the review agreed — releasing the changes that
 wait on this one — and prepares the change to merge.
 
-Archive cleanup changes the campaign index only, and the change's ledger when the
-owner waives its validation check (step 1). The archived change, its specs, and
-the permanent documents are as the closeout review read them; a defect found now
-in any of them is not this skill's to fix — stop and tell the owner.
+Archive cleanup changes the campaign index, the change's ledger when the owner
+waives its validation check (step 1), and the capacity figure in
+`helm/validation-capacity.toml` when the change's latest validation measured one
+(step 7). It then tears down the change's validation namespace and images, and,
+for a change worked in its own clone, copies the change's history into the owner's
+workspace as its last act. The archived change, its specs, and the permanent
+documents are as the closeout review read them; a defect found now in any of them
+is not this skill's to fix — stop and tell the owner.
 
 ## Running unattended
 
@@ -50,10 +54,13 @@ the session, and every turn ends with an outcome matching
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
   a wildcard after `-C` would also span a push.
-- **The end is an outcome.** When the cleanup is committed and pushed and the pull
-  request drafted, end with `finished`, `next` naming the owner creating the pull
-  request; you never create it. A row already `archived` (step 1) ends `finished` too,
-  saying cleanup had run.
+- **The end is an outcome.** When the cleanup and any figure are committed and
+  pushed, the pull request drafted, and the history copied (step 10), end with
+  `finished`, `next` naming the owner creating the pull request; you never create
+  it. A failed teardown and a history copy that refused a file end `finished` too,
+  with what failed and how to rerun it in the message. A row already `archived`
+  (step 1) ends `finished` once steps 7 to 10 have run again, saying the rest of
+  cleanup had run.
 
 ## 1. Check that cleanup may start
 
@@ -67,7 +74,10 @@ the session, and every turn ends with an outcome matching
   directory under `openspec/changes/archive/`. Read every file of the change from
   there.
 - **Status.** The change's row in `openspec/changes/README.md` is `in closeout`. A
-  row already `archived` means cleanup ran: say so and stop.
+  row already `archived` means steps 3 to 6 ran, after the checks below held: say
+  so, skip the Advance and Validated checks — a figure step 7 committed would
+  otherwise read as an unvalidated change — and go on from step 7, each step after
+  it being safe to repeat.
 - **Advance.** Every numbered closeout review in the change's `reviews/` —
   `NN-closeout.md`, `NN-closeout-external.md` — has a triage file beside it, and
   the latest one's `## Next` begins `Advance` — a file from before `## Next`, ending
@@ -125,8 +135,9 @@ followed by anything still owned elsewhere that the old notes named. Mark the ch
 `(archived)` in every campaign dependency graph that shows it.
 
 Leave the change's `reviews/` where it is, transcripts included: it is untracked, so
-it costs the repository nothing, and it is the only copy of the review history
-until an export flow exists.
+it costs the repository nothing, and it is the review history until an export flow
+exists. For a change worked in its own clone, step 10 copies it into the owner's
+workspace.
 
 Run `make check-change-index` and `make check-doc-citations CHANGE=<change>`; both
 must report nothing. The citation check reads only the change's own documents, so
@@ -160,11 +171,65 @@ open it, and the drafts cover this change only.
 Write both to `reviews/pull-request.md` in the archived change, beside the review
 history, and show them in the report.
 
-## 7. Report
+## 7. Record the capacity figure
+
+Run `make record-capacity CHANGE=<change>`. It reads the change's latest validation
+record, and the summary of the last Helm attempt of the commit it names. When that
+attempt measured the namespace's memory, it writes the figure, with when it was
+measured and this change's name, into `helm/validation-capacity.toml`, replacing
+any earlier one; commit that file alone, the message naming the change and the
+figure. When there is nothing to record — no metrics source answered on the
+cluster, the validation ran no Helm part, or there is no validation record — the
+target writes nothing and says why: leave any recorded figure as it is, and commit
+nothing. A non-zero exit means a record or summary could not be read: say so in
+the report, record nothing, and go on. Run again after an earlier run, it writes
+the same figure, and a file unchanged is not committed.
+
+Add to the pull request description's notes, in `reviews/pull-request.md`, what it
+reported — on a rerun, as a line appended to the file rather than an edit of what
+is there, since an earlier run may have copied the file into the owner's workspace,
+where only a file that grew is brought up to date: the figure recorded, or that no figure was recorded and the reason it
+gave. When a figure was recorded, say too that a merge conflict over
+`helm/validation-capacity.toml` keeps the figure whose `measured_at` is later.
+
+## 8. Tear down the validation namespace
+
+Run `make -C helm teardown CHANGE=<change>`. It deletes the change's validation
+namespace, with its release, volumes, and Secrets, in the kube context validation
+deploys to (`docker-desktop`) whatever context is current, and removes the images
+its validation built under the change's tags; nothing else is touched. A namespace or
+image already gone is not a failure. When it fails — Docker or the cluster not
+answering, an image in use — do not retry or work around it: say so in the report,
+with the command to rerun once the cause is gone, and go on.
+
+## 9. Push
+
+When step 7 committed a figure, push it with `make push-branch`, the guarded push
+of exactly `HEAD`; if it refuses, stop and report its reasons.
+
+## 10. Copy the history, last
+
+A change worked in its own clone — its `.git/config` names a `[remote "workspace"]`
+— keeps its records and evidence only there, untracked. As the last act, after
+everything above, run `make change-history CHANGE=<change>`: it copies the archived
+change's `reviews/` and the validation evidence its records name into the owner's
+workspace, at the same paths, where sessions working other changes find them. It is
+safe to repeat: files already there are left, files that grew are extended, and a
+file that differs otherwise is refused, named, and never overwritten. Report each
+refused file: the owner reconciles it, and removing the clone refuses until they
+do. What the workflow writes after this — the outcome of this run, a later round on
+the pull request — reaches the workspace with the next copy, which removing the
+clone (`make change-clone-remove`, the owner's) makes first. A change worked in the
+owner's workspace has its history there already: skip this step.
+
+## 11. Report
 
 Tell the owner:
 
 - each dependent released, its status before and after, and why;
 - any row whose notes were rewritten;
-- the commit, and the index and citation checks' results;
+- the commits, and the index and citation checks' results;
+- the capacity figure recorded, or that none was, and why;
+- the teardown's result;
+- the history copy's result, each refused file named;
 - the two drafts, and anything on the branch that the pull request would also carry.

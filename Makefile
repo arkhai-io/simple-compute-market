@@ -20,7 +20,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-clone-remove change-history record-capacity change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -973,6 +973,15 @@ change-watch: ## Follow the progress of an OpenSpec change's steps as they run, 
 change-clone: ## Create a change's own clone beside the owner's workspace, or finish one left incomplete, and start its bootstrap in the background; run in the workspace (CHANGE=<change> [BRANCH=feat/<change>] [FROM=dev])
 	@python3 scripts/change_clone.py create "$(CHANGE)" $(if $(strip $(BRANCH)),--branch "$(BRANCH)") $(if $(strip $(FROM)),--from "$(FROM)")
 
+change-clone-remove: ## Delete a merged change's clone, copying its history into the workspace first; refuses, deleting nothing, while the clone holds anything else; run in the workspace (CHANGE=<change>)
+	@python3 scripts/change_clone.py remove "$(CHANGE)"
+
+record-capacity: ## Record in helm/validation-capacity.toml the memory a change's latest validation measured, with when and from which change; when it measured none, leave the file as it is and say so; run by archive cleanup (CHANGE=<change>)
+	@python3 scripts/validate_slice.py capacity --change "$(CHANGE)"
+
+change-history: ## Copy an archived change's records and the validation evidence they name from its clone into the owner's workspace, extending files that grew and refusing any that differ; run in the clone (CHANGE=<change>)
+	@python3 scripts/change_history.py sync "$(CHANGE)"
+
 change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
@@ -981,7 +990,7 @@ change-cost: ## Report what an OpenSpec change's unattended runs cost, by step a
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_cost.py "$(CHANGE)"
 
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived (CHANGE=<change> [UNATTENDED=1])
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived, the capacity figure recorded, its validation namespace torn down, and its history copied into the owner's workspace (CHANGE=<change> [UNATTENDED=1])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
 	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
 

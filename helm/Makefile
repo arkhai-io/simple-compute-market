@@ -37,7 +37,8 @@ TEST_VOLUMES := arkhai-buyer-profiles
 TEST_VOLUME_SIZE := 100Mi
 
 .PHONY: init template deploy deploy-local undeploy check-local-secrets test test-render \
-	topology-up topology-down topology-check topology-secrets forward unforward resume
+	topology-up topology-down topology-check topology-secrets forward unforward resume \
+	teardown
 
 ## Update Helm dependencies declared in Chart.yaml
 init:
@@ -94,6 +95,29 @@ deploy-local:
 ## release is installed.
 undeploy:
 	helm uninstall $(RELEASE) --namespace $(NAMESPACE) --wait --ignore-not-found
+
+## Delete a change's validation namespace, with every release, volume, and Secret
+## in it, and remove each image the change's validation built under its tags
+## (../scripts/change_namespace.py --images); archive cleanup runs it once the
+## change has landed. It takes CHANGE=<change> only, so it never deletes
+## `default`, and deletes only in HELM_CONTEXT, the context validation deploys to,
+## whatever context is current. Succeeds when the namespace or an image is already
+## gone, and fails when any image could not be removed, after trying the rest.
+HELM_CONTEXT ?= docker-desktop
+teardown:
+ifeq ($(CHANGE),)
+	$(error teardown needs CHANGE=<change>: it deletes that change's validation namespace, never $(NAMESPACE))
+endif
+	kubectl delete namespace $(NAMESPACE) --context $(HELM_CONTEXT) --ignore-not-found --wait
+	@status=0; \
+	for image in $$(python3 ../scripts/change_namespace.py $(CHANGE) --images); do \
+		if docker image inspect "$$image" >/dev/null 2>&1; then \
+			docker image rm "$$image" || status=1; \
+		else \
+			echo "$$image is not here"; \
+		fi; \
+	done; \
+	exit $$status
 
 ## Fail, naming each one, unless every out-of-band Secret in LOCAL_SECRETS and
 ## every PersistentVolumeClaim in LOCAL_VOLUMES (none unless given) exists.

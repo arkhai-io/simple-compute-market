@@ -116,6 +116,10 @@ Read in full, even if you believe you know it:
   and its `architecture.md` companion when one exists.
 - The change's row, campaign, and every row that lists it in `Depends on`, in
   `openspec/changes/README.md`.
+- Another change's records, where the closeout's evidence or promotion rests on
+  them, wherever `python3 scripts/find_change.py --records <change>` says they are:
+  this checkout, or, from a change's clone, the owner's workspace, which holds the
+  history of every cleaned-up change.
 
 ## 3. Work through the closeout task
 

@@ -79,6 +79,11 @@ places that matter, so read all of this first, in full:
   check every factual claim the design makes about the current system.
 - Each change listed in the row's `Depends on`, at least its `proposal.md` and
   `design.md`.
+- Another change's records, where the design rests on them — a dependency's
+  reviews, an earlier change's findings or validation. They are untracked, so they
+  are where that change was worked: `python3 scripts/find_change.py --records
+  <change>` prints where, this checkout's or, from a change's clone, the owner's
+  workspace's, which holds the history of every cleaned-up change.
 
 If a dependency gates `design` and has not reached `archived`, stop and tell
 the owner: designing now risks designing work the

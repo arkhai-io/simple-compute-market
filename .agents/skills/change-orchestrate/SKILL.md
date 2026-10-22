@@ -240,7 +240,13 @@ in, since a session is keyed by its checkout's path: `cd <clone> && claude
 in the workspace otherwise. Never resume concurrently. On handback reread the
 files and log and recompute rather than presuming the direct conversation's
 result. For `done`, report the archived change and stop; the owner creates its
-pull request.
+pull request. For a change worked in its clone, archive cleanup has copied its
+history into the workspace, where sessions working other changes find it
+(`python3 scripts/find_change.py --records <change>`); lines and records written in
+the clone after it reach the workspace with the next `make -C <clone> change-history
+CHANGE=<change>`, or when the owner removes the clone after the merge with `make
+change-clone-remove CHANGE=<change>`, which copies them first. Removing a clone is
+the owner's alone: never run it.
 
 ## Read every denial before advancing
 

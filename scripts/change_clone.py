@@ -32,9 +32,17 @@ a failed bootstrap and leaves a running or succeeded one alone; a failed one is
 never retried by itself, since `make init` failing is almost always the
 environment, and a silent retry would hide it.
 
+`remove`, run by the owner in the workspace once the change has merged, deletes
+the clone. It copies the change's history into the workspace first
+(`change_history.py`), then refuses, deleting nothing and naming each problem,
+unless every file of that history is in the workspace with the clone's contents,
+the branch is merged into `origin`'s `dev`, and the clone holds no commit `origin`
+lacks, no uncommitted change, no stash, and no run in progress: anything else would
+be lost with it.
+
 `clone_of` and `bootstrap_state` are what the next-step computation and the round
-view read; `workspace_of` tells a clone from any other checkout. Importing the
-module does nothing.
+view read; `workspace_of`, which `find_change.py` defines, tells a clone from any
+other checkout. Importing the module does nothing.
 
 Contract: openspec/specs/change-workflow/spec.md, "Each change is worked in its
 own clone".
@@ -45,6 +53,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -52,8 +61,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
+from change_history import HistoryError, Synced, differences, report, sync
+from change_workflow.running import runs_in_progress
+from find_change import WORKSPACE_REMOTE, workspace_of
+
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_REMOTE = "workspace"
 DEFAULT_FROM = "dev"
 BOOTSTRAP_COMMAND = ("make", "init")
 SETTINGS = Path(".claude/settings.local.json")
@@ -74,6 +86,14 @@ class CloneError(RuntimeError):
     """The clone was refused or could not be made; nothing was deleted."""
 
 
+class RemovalRefused(CloneError):
+    """The clone holds what deleting it would lose; its history was copied all the same."""
+
+    def __init__(self, message: str, synced: Synced) -> None:
+        super().__init__(message)
+        self.synced = synced
+
+
 @dataclass(frozen=True)
 class Bootstrap:
     state: str
@@ -86,6 +106,12 @@ class Created:
     branch: str
     done: tuple[str, ...]
     bootstrap: Bootstrap
+
+
+@dataclass(frozen=True)
+class Removed:
+    clone: Path
+    synced: Synced
 
 
 def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -127,17 +153,6 @@ def _toplevel(directory: Path) -> Path | None:
 def _remote_url(checkout: Path, remote: str) -> str | None:
     result = _git(checkout, "remote", "get-url", remote, check=False)
     return result.stdout.strip() if result.returncode == 0 else None
-
-
-def workspace_of(checkout: Path) -> Path | None:
-    """The workspace a checkout is a clone of, read from its `workspace` remote;
-    None for a checkout that is no change's clone."""
-    if _toplevel(checkout) is None:
-        return None
-    url = _remote_url(checkout, WORKSPACE_REMOTE)
-    if not url or not Path(url).is_dir():
-        return None
-    return Path(url).resolve()
 
 
 def _is_clone_of(directory: Path, workspace: Path) -> bool:
@@ -439,6 +454,71 @@ def create(workspace: Path, change: str, *, branch: str | None = None,
     return Created(target, branch, tuple(done), state)
 
 
+def _left_behind(clone: Path, branch: str) -> list[str]:
+    """What deleting the clone would lose beyond its history: a branch not merged,
+    commits `origin` lacks, a stash, uncommitted changes."""
+    _git(clone, "fetch", "--quiet", "--prune", "origin")
+    merged_into = f"refs/remotes/origin/{DEFAULT_FROM}"
+    problems = []
+    head = _ref(clone, f"refs/heads/{branch}")
+    if head is None:
+        problems.append(f"{branch} is not a branch of the clone, so its merge cannot be shown")
+    elif _ref(clone, merged_into) is None or not _ancestor(clone, head, merged_into):
+        problems.append(f"{branch} is not merged into origin/{DEFAULT_FROM}")
+    unpushed = _git(clone, "rev-list", "--branches", "--not", "--remotes=origin").stdout.split()
+    if unpushed:
+        problems.append(f"{len(unpushed)} commit(s) origin lacks, the latest "
+                        f"{unpushed[0][:12]}")
+    if _ref(clone, "refs/stash"):
+        problems.append("a stash")
+    if dirty := _uncommitted(clone):
+        problems.append("uncommitted changes:\n" + "\n".join(f"  {line}" for line in dirty))
+    return problems
+
+
+def remove(workspace: Path, change: str) -> Removed:
+    """Delete the change's clone, copying its history into the workspace first, once
+    nothing in the clone would be lost with it."""
+    _check_name(change)
+    workspace = workspace.resolve()
+    if workspace_of(workspace) is not None:
+        raise CloneError(f"{workspace} is itself a change's clone; run this in the owner's "
+                         "workspace")
+    target = clone_directory(workspace, change)
+    if not target.is_dir() or not _is_clone_of(target, workspace):
+        raise CloneError(f"{target} is not a clone of {workspace}; nothing was deleted")
+    recorded = _marker(target)
+    if recorded.get("change") not in (None, change):
+        raise CloneError(f"{target} is the clone of {recorded['change']}, not {change}; "
+                         "nothing was deleted")
+    if runs := runs_in_progress(target):
+        raise CloneError(f"{target} has a run in progress, so nothing was deleted: "
+                         + "; ".join(run.describe() for run in runs))
+    if bootstrap_state(target).state == RUNNING:
+        raise CloneError(f"{target}'s bootstrap is still running; nothing was deleted")
+    try:
+        synced = sync(target, workspace, change)
+        missing = differences(target, workspace, change)
+    except HistoryError as exc:
+        raise CloneError(f"{exc}; nothing was deleted") from exc
+    problems = [f"history: {line}" for line in missing]
+    try:
+        problems += _left_behind(target, recorded.get("branch") or default_branch(change))
+    except CloneError as exc:
+        problems.append(str(exc))
+    if problems:
+        raise RemovalRefused(f"{target} holds what deleting it would lose, or could not "
+                             "be shown not to, so nothing was deleted:\n"
+                             + "\n".join(f"- {problem}" for problem in problems), synced)
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        raise RemovalRefused(f"{target} was only partly deleted: {exc}; its history is "
+                             "in the workspace, and what is left holds nothing else",
+                             synced) from exc
+    return Removed(target, synced)
+
+
 def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     actions = parser.add_subparsers(dest="action", required=True)
@@ -448,7 +528,23 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
                           help="the change's branch; feat/<change> by default")
     creating.add_argument("--from", dest="from_ref", default=DEFAULT_FROM,
                           help="where a new branch starts; dev by default")
+    removing = actions.add_parser("remove", help="delete a merged change's clone once its "
+                                  "history is in the workspace")
+    removing.add_argument("change")
     args = parser.parse_args(argv)
+    if args.action == "remove":
+        try:
+            removed = remove(root, args.change)
+        except RemovalRefused as error:
+            print(report(error.synced, root.resolve()))
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        except CloneError as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        print(report(removed.synced, root.resolve()))
+        print(f"Removed the clone of {args.change}: {removed.clone}.")
+        return 0
     try:
         created = create(root, args.change, branch=args.branch or None,
                          from_ref=args.from_ref or DEFAULT_FROM)

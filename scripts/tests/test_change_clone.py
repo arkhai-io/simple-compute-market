@@ -20,6 +20,7 @@ from typing import Sequence
 import pytest
 
 import change_clone as clones
+from change_workflow import running
 
 CHANGE = "seed-pool"
 BRANCH = f"feat/{CHANGE}"
@@ -53,8 +54,10 @@ def workspace(tmp_path: Path) -> Path:
     _git(tmp_path, "init", "-q", "--bare", "-b", "dev", str(origin))
     work = tmp_path / "work"
     _git(tmp_path, "init", "-q", "-b", "dev", str(work))
-    # The settings link is ignored, as the repository ignores .claude/'s local files.
-    (work / ".gitignore").write_text(".claude/settings.local.json\n", "utf-8")
+    # Ignored as the repository ignores them: the settings link, and a change's
+    # records and evidence.
+    (work / ".gitignore").write_text(
+        ".claude/settings.local.json\n.snapshot/\nopenspec/changes/**/reviews/\n", "utf-8")
     _commit(work, "README.md", "1\n")
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "-q", "origin", "dev")
@@ -519,3 +522,247 @@ def test_the_command_line_reports_the_clone_and_its_bootstrap(
         workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert clones.main(["create", "bad/name"], root=workspace) == 1
     assert "not a change name" in capsys.readouterr().err
+
+
+# Removing a clone.
+
+REVIEWS = Path("openspec/changes/archive/2026-10-22-seed-pool/reviews")
+EVIDENCE = Path(".snapshot/validation/0123456789ab")
+
+
+def _merged_clone(workspace: Path) -> Path:
+    """A clone whose change is archived, with its records and named evidence, and
+    whose branch is merged into origin's dev."""
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", f"{BRANCH}:{BRANCH}", f"{BRANCH}:dev")
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "02-validation.md").write_text(
+        "- **Commit:** 0123456789abcdef on feat/seed-pool\n", "utf-8")
+    (clone / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n', "utf-8")
+    (clone / EVIDENCE).mkdir(parents=True)
+    (clone / EVIDENCE / "summary.json").write_text("{}\n", "utf-8")
+    return clone
+
+
+def _refused(workspace: Path, match: str) -> clones.RemovalRefused:
+    with pytest.raises(clones.RemovalRefused, match=match) as raised:
+        clones.remove(workspace, CHANGE)
+    return raised.value
+
+
+def test_a_merged_clone_is_removed_once_its_history_is_copied(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+
+    removed = clones.remove(workspace, CHANGE)
+
+    assert removed.clone == clone and not clone.exists()
+    assert sorted(removed.synced.copied) == sorted([
+        (REVIEWS / "02-validation.md").as_posix(), (REVIEWS / "workflow.jsonl").as_posix(),
+        (EVIDENCE / "summary.json").as_posix()])
+    assert (workspace / REVIEWS / "workflow.jsonl").read_text("utf-8") == (
+        '{"step": "archive-cleanup"}\n')
+    assert (workspace / EVIDENCE / "summary.json").is_file()
+
+
+def test_removal_deletes_the_settings_link_and_not_the_settings(workspace: Path) -> None:
+    settings = workspace / ".claude/settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('{"permissions": {}}\n', "utf-8")
+    clone = _merged_clone(workspace)
+    assert (clone / ".claude/settings.local.json").is_symlink()
+
+    clones.remove(workspace, CHANGE)
+
+    assert settings.read_text("utf-8") == '{"permissions": {}}\n'
+
+
+def test_removal_copies_what_grew_since_archive_cleanup_copied_it(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    (workspace / REVIEWS).mkdir(parents=True)
+    (workspace / REVIEWS / "workflow.jsonl").write_text('{"step": "archive-cleanup"}\n',
+                                                        "utf-8")
+    log = clone / REVIEWS / "workflow.jsonl"
+    log.write_text(log.read_text("utf-8") + '{"step": "orchestrator"}\n', "utf-8")
+
+    removed = clones.remove(workspace, CHANGE)
+
+    assert removed.synced.extended == [(REVIEWS / "workflow.jsonl").as_posix()]
+    assert (workspace / REVIEWS / "workflow.jsonl").read_text("utf-8") == (
+        '{"step": "archive-cleanup"}\n{"step": "orchestrator"}\n')
+
+
+def test_a_record_that_differs_in_the_workspace_refuses_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    (workspace / REVIEWS).mkdir(parents=True)
+    (workspace / REVIEWS / "workflow.jsonl").write_text('{"step": "design"}\n', "utf-8")
+
+    refused = _refused(workspace, "workflow.jsonl: the workspace's copy differs")
+
+    assert clone.is_dir()
+    # The rest of the history was copied all the same.
+    assert (workspace / REVIEWS / "02-validation.md").is_file()
+    assert refused.synced.copied
+
+
+def test_a_branch_not_merged_refuses_removal(workspace: Path) -> None:
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", BRANCH)
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "workflow.jsonl").write_text("{}\n", "utf-8")
+
+    _refused(workspace, f"{BRANCH} is not merged into origin/dev")
+
+    assert clone.is_dir()
+    # The synchronization ran first all the same.
+    assert (workspace / REVIEWS / "workflow.jsonl").is_file()
+
+
+def test_a_commit_origin_lacks_refuses_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    unpushed = _commit(clone, "later.txt", "after the merge\n")
+
+    _refused(workspace, rf"1 commit\(s\) origin lacks, the latest {unpushed[:12]}")
+
+    assert clone.is_dir()
+
+
+def test_uncommitted_changes_refuse_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    (clone / "README.md").write_text("in progress\n", "utf-8")
+
+    _refused(workspace, "uncommitted changes:\n   M README.md")
+
+    assert (clone / "README.md").read_text("utf-8") == "in progress\n"
+
+
+def test_a_stash_refuses_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    (clone / "README.md").write_text("set aside\n", "utf-8")
+    _git(clone, "stash", "-q")
+
+    _refused(workspace, "- a stash")
+
+    assert clone.is_dir()
+
+
+def test_a_run_in_progress_refuses_removal_before_anything_is_copied(
+        workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+
+    with running.recorded_run(running.runs_directory(clone), "review", CHANGE):
+        with pytest.raises(clones.CloneError, match="has a run in progress"):
+            clones.remove(workspace, CHANGE)
+
+    assert clone.is_dir() and not (workspace / REVIEWS).exists()
+
+
+def test_a_running_bootstrap_refuses_removal_before_anything_is_copied(
+        workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    _git_file(clone, clones.BOOTSTRAP_STATUS).unlink()
+
+    with pytest.raises(clones.CloneError, match="bootstrap is still running"):
+        clones.remove(workspace, CHANGE)
+
+    assert clone.is_dir() and not (workspace / REVIEWS).exists()
+
+
+def test_the_clone_of_another_change_is_not_removed(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    marker = _git_file(clone, clones.MARKER)
+    marker.write_text(json.dumps({"change": "another", "branch": BRANCH}), "utf-8")
+
+    with pytest.raises(clones.CloneError, match="is the clone of another"):
+        clones.remove(workspace, CHANGE)
+
+    assert clone.is_dir()
+
+
+def test_a_branch_the_clone_lacks_refuses_removal(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+    marker = _git_file(clone, clones.MARKER)
+    marker.write_text(json.dumps({"change": CHANGE, "branch": "feat/gone"}), "utf-8")
+
+    _refused(workspace, "feat/gone is not a branch of the clone")
+
+    assert clone.is_dir()
+
+
+def test_an_origin_that_cannot_be_read_refuses_removal_after_the_copy(
+        workspace: Path, tmp_path: Path) -> None:
+    clone = _merged_clone(workspace)
+    _git(clone, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+
+    refused = _refused(workspace, "git fetch --quiet --prune origin failed")
+
+    assert clone.is_dir()
+    assert refused.synced.copied and (workspace / REVIEWS / "workflow.jsonl").is_file()
+
+
+def test_a_merge_origin_shows_only_once_fetched_lets_the_clone_go(workspace: Path,
+                                                                   tmp_path: Path) -> None:
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", BRANCH)
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "workflow.jsonl").write_text("{}\n", "utf-8")
+    # The pull request merges on origin, which the clone has not fetched.
+    elsewhere = tmp_path / "elsewhere"
+    _git(tmp_path, "clone", "-q", "-b", "dev", str(tmp_path / "origin.git"), str(elsewhere))
+    _git(elsewhere, "merge", "-q", "--no-ff", "-m", "merge", f"origin/{BRANCH}")
+    _git(elsewhere, "push", "-q", "origin", "dev")
+
+    clones.remove(workspace, CHANGE)
+
+    assert not clone.exists()
+
+
+def test_a_change_that_is_not_archived_refuses_removal(workspace: Path) -> None:
+    clone = _create(workspace).clone
+    (clone / f"openspec/changes/{CHANGE}/reviews").mkdir(parents=True)
+
+    with pytest.raises(clones.CloneError, match="not archived"):
+        clones.remove(workspace, CHANGE)
+
+    assert clone.is_dir()
+
+
+def test_removing_what_is_not_the_changes_clone_is_refused(workspace: Path) -> None:
+    directory = clones.clone_directory(workspace, CHANGE)
+
+    with pytest.raises(clones.CloneError, match="is not a clone of"):
+        clones.remove(workspace, CHANGE)
+    directory.mkdir(parents=True)
+    (directory / "notes.txt").write_text("someone's work\n", "utf-8")
+    with pytest.raises(clones.CloneError, match="is not a clone of"):
+        clones.remove(workspace, CHANGE)
+
+    assert (directory / "notes.txt").is_file()
+
+
+def test_removing_from_a_clone_is_refused(workspace: Path) -> None:
+    clone = _merged_clone(workspace)
+
+    with pytest.raises(clones.CloneError, match="itself a change's clone"):
+        clones.remove(clone, CHANGE)
+
+    assert clone.is_dir()
+
+
+def test_the_command_line_reports_a_removal_and_a_refusal(
+        workspace: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    clone = _merged_clone(workspace)
+    (clone / "README.md").write_text("in progress\n", "utf-8")
+
+    assert clones.main(["remove", CHANGE], root=workspace) == 1
+    refused = capsys.readouterr()
+    assert "3 file(s) copied" in refused.out
+    assert "nothing was deleted" in refused.err
+
+    _git(clone, "checkout", "-q", "README.md")
+    assert clones.main(["remove", CHANGE], root=workspace) == 0
+    removed = capsys.readouterr().out
+    assert "3 already there" in removed
+    assert f"Removed the clone of {CHANGE}: {clone}." in removed

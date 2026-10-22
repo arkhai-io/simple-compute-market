@@ -53,6 +53,11 @@ Read all of this before forming a view:
   did not write them and must not rely on remembering them. Never read
   `reviews/transcripts/`: those are raw sessions, not records, and reading them
   would carry an earlier reviewer's reasoning into yours.
+- Another change's records, where a claim rests on them — a dependency's findings,
+  an earlier change's validation. They are untracked, so they are where that change
+  was worked: `python3 scripts/find_change.py --records <change>` prints where, this
+  checkout's or, from a change's clone, the owner's workspace's, which holds the
+  history of every cleaned-up change.
 - For every capability the change names or touches: `openspec/specs/<capability>/spec.md`
   and its `architecture.md` companion when one exists.
 - The code the change cites, and the code it changes or would change. Read enough

@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -28,6 +29,7 @@ NAMESPACE = "validate-pilot"
 RELEASE = "arkhai-node-operator"
 POD = f"{RELEASE}-e2e-tests-e2e-scenarios"
 GIB = 2**30
+NOW = datetime(2026, 10, 22, 7, 0, tzinfo=timezone.utc)
 
 
 class Fake:
@@ -240,7 +242,7 @@ def _validation(tmp_path: Path, fake: Fake, part: str,
                 echo: object = lambda line: None) -> object:
     clock = iter(float(n) for n in range(1000))
     return validator.Validation(part, root=tmp_path, runner=fake.run, read=fake.read,
-                                clock=lambda: next(clock), echo=echo)
+                                clock=lambda: next(clock), echo=echo, now=lambda: NOW)
 
 
 def _storefront_env(tmp_path: Path, *, skip: str | None = None) -> None:
@@ -701,7 +703,8 @@ def test_a_passing_run_keeps_the_evidence_and_scales_to_zero(tmp_path: Path) -> 
         f"deployment/{RELEASE}-registry app=")
     # Sampled once the release is ready, and after the scenarios; the peak is the larger.
     assert summary.memory == {"samples_bytes": [400 * 2**20, 700 * 2**20],
-                              "peak_bytes": 700 * 2**20}
+                              "peak_bytes": 700 * 2**20,
+                              "measured_at": "2026-10-22T07:00:00+00:00"}
     assert set(fake.workloads[NAMESPACE].values()) == {0}
     written = json.loads((logs / "summary.json").read_text("utf-8"))
     assert written["namespace"] == NAMESPACE and written["memory"]["peak_bytes"] == 700 * 2**20
@@ -963,6 +966,136 @@ def test_a_malformed_capacity_figure_is_refused(tmp_path: Path, body: str) -> No
 
     with pytest.raises(validator.ValidationError):
         validator.read_capacity(path)
+
+
+# Archive cleanup's figure, from the change's latest validation, over a fake checkout:
+# its records and the Helm attempts' summaries they name.
+ARCHIVED_REVIEWS = Path("openspec/changes/archive/2026-10-22-pilot/reviews")
+OLDER = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _validated(root: Path, number: int, commit: str, *attempts: dict) -> None:
+    reviews = root / ARCHIVED_REVIEWS
+    reviews.mkdir(parents=True, exist_ok=True)
+    (reviews / f"{number:02d}-validation.md").write_text(
+        f"# Validation\n\n- **Commit:** {commit} on feat/pilot\n", "utf-8")
+    for attempt, memory in enumerate(attempts, 1):
+        directory = root / validator.LOG_ROOT / commit[:12] / "helm" / str(attempt)
+        directory.mkdir(parents=True)
+        (directory / "summary.json").write_text(json.dumps({"memory": memory}), "utf-8")
+
+
+def _figure_file(root: Path) -> Path:
+    path = root / validator.CAPACITY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    validator.write_capacity(path, validator.CapacityFigure(
+        GIB, "2026-10-01T00:00:00+00:00", "an-earlier-change"))
+    return path
+
+
+def test_the_figure_is_the_latest_validations_last_helm_attempt_with_its_time_and_change(
+        tmp_path: Path) -> None:
+    _validated(tmp_path, 3, OLDER, {"peak_bytes": 9 * GIB, "measured_at": "early"})
+    _validated(tmp_path, 7, COMMIT, {"peak_bytes": GIB, "measured_at": "first"},
+               {"peak_bytes": 2 * GIB, "measured_at": "2026-10-22T06:00:00+00:00"})
+    path = _figure_file(tmp_path)
+
+    said = validator.record_capacity(tmp_path, CHANGE)
+
+    assert validator.read_capacity(path) == validator.CapacityFigure(
+        2 * GIB, "2026-10-22T06:00:00+00:00", CHANGE)
+    assert said.startswith(f"Recorded {2 * GIB} bytes, measured 2026-10-22T06:00:00+00:00")
+
+
+def test_with_no_measurement_nothing_is_written_and_the_figure_is_left_as_it_was(
+        tmp_path: Path) -> None:
+    _validated(tmp_path, 7, COMMIT, {})
+    path = _figure_file(tmp_path)
+    before = path.read_text("utf-8")
+
+    said = validator.record_capacity(tmp_path, CHANGE)
+
+    assert path.read_text("utf-8") == before
+    assert said.startswith("No memory figure recorded:") and "no metrics source" in said
+
+
+def test_with_no_measurement_and_no_figure_the_file_stays_without_one(tmp_path: Path) -> None:
+    _validated(tmp_path, 7, COMMIT, {})
+
+    validator.record_capacity(tmp_path, CHANGE)
+
+    assert not (tmp_path / validator.CAPACITY_FILE).exists()
+
+
+def test_a_validation_with_no_helm_part_records_nothing(tmp_path: Path) -> None:
+    _validated(tmp_path, 7, COMMIT)
+
+    assert "ran no Helm part" in validator.record_capacity(tmp_path, CHANGE)
+
+
+@pytest.mark.parametrize("measured_at", [None, "then", "2026-10-22T06:00:00"])
+def test_a_summary_not_saying_when_it_measured_is_dated_by_the_file(
+        tmp_path: Path, measured_at: str | None) -> None:
+    memory = {"peak_bytes": GIB} | ({"measured_at": measured_at} if measured_at else {})
+    _validated(tmp_path, 7, COMMIT, memory)
+    summary = tmp_path / validator.LOG_ROOT / COMMIT[:12] / "helm/1/summary.json"
+    os.utime(summary, (NOW.timestamp(), NOW.timestamp()))
+
+    figure, _ = validator.capacity_figure(tmp_path, CHANGE)
+
+    assert figure == validator.CapacityFigure(GIB, "2026-10-22T07:00:00+00:00", CHANGE)
+
+
+@pytest.mark.parametrize("memory", [[1], {"peak_bytes": "1Gi"}, {"peak_bytes": True}])
+def test_a_summary_whose_memory_is_not_a_measurement_records_nothing(
+        tmp_path: Path, memory: object) -> None:
+    _validated(tmp_path, 7, COMMIT, memory)
+
+    assert validator.capacity_figure(tmp_path, CHANGE)[0] is None
+
+
+def test_a_change_with_no_validation_record_records_nothing_and_says_why(
+        tmp_path: Path) -> None:
+    (tmp_path / ARCHIVED_REVIEWS).mkdir(parents=True)
+    path = _figure_file(tmp_path)
+    before = path.read_text("utf-8")
+
+    said = validator.record_capacity(tmp_path, CHANGE)
+
+    assert said == (f"No memory figure recorded: {CHANGE} has no validation record; "
+                    f"{validator.CAPACITY_FILE} is unchanged.")
+    assert path.read_text("utf-8") == before
+
+
+def test_the_measurement_time_is_the_last_samples(tmp_path: Path) -> None:
+    moments = iter([datetime(2026, 10, 22, 6, minute, tzinfo=timezone.utc)
+                    for minute in range(60)])
+    fake = Fake(memory=("400Mi", "700Mi"))
+    _storefront_env(tmp_path)
+    validation = validator.Validation("helm", root=tmp_path, runner=fake.run, read=fake.read,
+                                      clock=lambda: 0.0, echo=lambda line: None,
+                                      now=lambda: next(moments))
+
+    summary = validator.validate_helm(validation, change=CHANGE, sleep=lambda seconds: None,
+                                      credentials=lambda: None, capacity=_capacity(tmp_path))
+
+    assert len(summary.memory["samples_bytes"]) == 2
+    assert summary.memory["measured_at"] == "2026-10-22T06:01:00+00:00"
+
+
+def test_the_command_records_the_figure_for_a_change(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _validated(tmp_path, 7, COMMIT, {"peak_bytes": GIB, "measured_at": "then"})
+    (tmp_path / validator.CAPACITY_FILE).parent.mkdir()
+
+    assert validator.main(["capacity", "--change", CHANGE], root=tmp_path) == 0
+
+    assert capsys.readouterr().out.startswith(f"Recorded {GIB} bytes")
+    assert validator.read_capacity(tmp_path / validator.CAPACITY_FILE).change == CHANGE
+    assert validator.main(["capacity", "--change", "absent"], root=tmp_path) == 1
+    assert "no change 'absent'" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        validator.main(["capacity"], root=tmp_path)
 
 
 @pytest.mark.parametrize("quantity, expected", [

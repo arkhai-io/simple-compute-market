@@ -110,3 +110,59 @@ def test_the_two_restrictions_cannot_be_combined(tmp_path: Path) -> None:
     root = _tree(tmp_path, "shape-bounds")
 
     assert finder.main(["--active", "--archived", "shape-bounds"], root) == 2
+    assert finder.main(["--active", "--records", "shape-bounds"], root) == 2
+
+
+# A change's records.
+
+def test_an_active_changes_records_are_its_reviews(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "shape-bounds/reviews")
+
+    assert finder.records_directory(root, "shape-bounds") == (
+        root / "openspec/changes/shape-bounds/reviews")
+
+
+def test_records_beside_an_active_directory_without_them_are_the_archives(
+        tmp_path: Path) -> None:
+    # The owner's workspace: the change's active directory from its branch, and the
+    # archive copy its clone's cleanup made, which alone holds the records.
+    root = _tree(tmp_path, "shape-bounds", "archive/2026-10-14-shape-bounds/reviews",
+                 "archive/2026-09-01-shape-bounds")
+
+    assert finder.records_directory(root, "shape-bounds") == (
+        root / "openspec/changes/archive/2026-10-14-shape-bounds/reviews")
+
+
+def test_a_change_with_no_records_here_has_none(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "shape-bounds", "archive/2026-10-14-shape-bounds")
+
+    assert finder.records_directory(root, "shape-bounds") is None
+
+
+def test_records_archived_twice_are_refused(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "archive/2026-09-01-shape-bounds/reviews",
+                 "archive/2026-10-14-shape-bounds/reviews")
+
+    with pytest.raises(finder.ChangeNotFound, match="more than once"):
+        finder.records_directory(root, "shape-bounds")
+
+
+def test_records_are_looked_for_in_the_checkout_before_the_workspace(tmp_path: Path) -> None:
+    here = _tree(tmp_path / "clone", "shape-bounds/reviews")
+    there = _tree(tmp_path / "work", "archive/2026-10-14-shape-bounds/reviews",
+                  "archive/2026-10-14-other/reviews")
+    workspace = {here: there}.get
+
+    assert finder.find_records(here, "shape-bounds", workspace) == (
+        here / "openspec/changes/shape-bounds/reviews")
+    assert finder.find_records(here, "other", workspace) == (
+        there / "openspec/changes/archive/2026-10-14-other/reviews")
+
+
+def test_records_outside_a_clone_are_looked_for_in_the_checkout_alone(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "shape-bounds")
+
+    with pytest.raises(finder.ChangeNotFound) as raised:
+        finder.find_records(root, "shape-bounds", lambda _: None)
+
+    assert "workspace" not in str(raised.value)

@@ -112,7 +112,11 @@ the files are what the implementer will see:
 - the permanent spec and architecture companion of every capability the change
   touches, and `openspec/specs/README.md`;
 - the code each decision changes: enough to name the files, the package
-  boundaries, and the existing tests a section extends.
+  boundaries, and the existing tests a section extends;
+- another change's records, where a section rests on them — a dependency's
+  validation evidence, say — wherever `python3 scripts/find_change.py --records
+  <change>` says they are: this checkout, or, from a change's clone, the owner's
+  workspace, which holds the history of every cleaned-up change.
 
 ## 3. Record the conversation before planning from it
 
