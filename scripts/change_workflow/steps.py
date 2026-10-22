@@ -4,8 +4,9 @@ is held to, and the models it runs on.
 The table is `.claude/change-steps.toml`, the workflow's policy. Each step's rules
 are its own plus `common`'s, and each row names its models in priority order,
 each with its harness and effort. The loader refuses a row the policy forbids: a
-model the workflow never runs on, two models of one vendor, or Codex on any step
-but the review.
+model the workflow never runs on, two models of one vendor, Codex, pi, or a bb
+thread on any step but the review, or an OpenAI model on pi through any provider
+but `openai-codex`.
 
 Contract: openspec/specs/change-workflow/spec.md, "Unattended runs are held to
 their step's permissions".
@@ -22,7 +23,17 @@ from typing import Any
 from change_workflow.common import ROOT, STEPS, Entry, StepError
 
 STEP_TABLE = ROOT / ".claude" / "change-steps.toml"
-HARNESSES = ("claude", "codex")
+HARNESSES = ("claude", "codex", "pi", "bb")
+# Harnesses that run the review alone. Codex holds it to read-only by its sandbox;
+# pi and a bb thread only by the review's prompt, which suffices for a step whose
+# only output is its final message, and for no step that commits or relocks.
+REVIEW_ONLY = ("codex", "pi", "bb")
+# What a bb provider runs on, as a vendor: an outage or a usage limit of one takes
+# down every model it serves.
+_BB_PROVIDERS = {"codex": "openai", "claude-code": "anthropic"}
+# pi's providers by the account they bill: `openai-codex` is the ChatGPT
+# subscription Codex also uses, and the API providers are other accounts.
+_PI_PROVIDERS = {"openai-codex": "openai", "anthropic": "anthropic"}
 # Models the workflow never runs on, whatever a row says.
 _FORBIDDEN_MODEL = re.compile(r"fable|astra", re.I)
 
@@ -40,6 +51,25 @@ class Model:
         return {"harness": self.harness, "model": self.model,
                 **({"effort": self.effort} if self.effort else {})}
 
+    @property
+    def vendor(self) -> str:
+        """The account the model runs on, which one outage or usage limit takes down.
+
+        Codex and pi's `openai-codex` provider share one OpenAI subscription, and
+        Claude Code and pi's `anthropic` provider one Anthropic account. A pi model
+        is `<provider>/<model>`, and a bb thread's `<bb provider>/<its model>`.
+        """
+        if self.harness == "codex":
+            return "openai"
+        if self.harness == "claude":
+            return "anthropic"
+        provider, _, rest = self.model.partition("/")
+        if self.harness == "bb":
+            if provider == "pi":
+                return Model("pi", rest).vendor
+            return _BB_PROVIDERS.get(provider, provider)
+        return _PI_PROVIDERS.get(provider, provider)
+
 
 @dataclass(frozen=True)
 class StepRules:
@@ -52,6 +82,17 @@ class StepRules:
     models: tuple[Model, ...] = ()
     # The step whose last session this step resumes, rather than starting fresh.
     resume_from: str | None = None
+
+
+def pi_provider_problem(model: Model) -> str | None:
+    """Why `model` runs an OpenAI model on pi outside the subscription, or None."""
+    pi_model = (model.model if model.harness == "pi"
+                else model.model.partition("/")[2] if model.harness == "bb"
+                and model.model.startswith("pi/") else None)
+    if pi_model and pi_model.partition("/")[0] == "openai":
+        return (f"names {model.model}, an OpenAI model on pi's per-token openai provider; "
+                "use openai-codex/…, the subscription")
+    return None
 
 
 def load_steps(path: Path = STEP_TABLE) -> dict[str, StepRules]:
@@ -99,8 +140,10 @@ def _models(path: Path, name: str, entries: Any) -> tuple[Model, ...]:
 
     A harness is one vendor's, so two entries of one harness are two models of one
     vendor: an outage or a usage limit takes both down, and the second is no
-    fallback. Codex runs only the review, the one step its read-only sandbox can
-    hold to its limits; a writing sandbox cannot refuse a commit or a relock.
+    fallback. Codex, pi, and bb threads run only the review: Codex's writing
+    sandbox cannot refuse a commit or a relock, and pi and bb hold a run to its
+    limits only by its prompt. An OpenAI model on pi runs through `openai-codex`,
+    the subscription, never an API account billed per token.
     """
     row = f"{path}'s {name} row"
     if not isinstance(entries, list) or not entries:
@@ -119,11 +162,20 @@ def _models(path: Path, name: str, entries: Any) -> tuple[Model, ...]:
             raise StepError(f"{row} gives {entry['model']} an effort that is not a name")
         if _FORBIDDEN_MODEL.search(entry["model"]):
             raise StepError(f"{row} names {entry['model']}, a model the workflow never runs on")
-        if entry["harness"] == "codex" and name != "review":
-            raise StepError(f"{row} names a Codex model; Codex runs only the review")
-        models.append(Model(entry["harness"], entry["model"], effort))
-    harnesses = [model.harness for model in models]
-    if len(set(harnesses)) != len(harnesses):
+        if entry["harness"] in REVIEW_ONLY and name != "review":
+            shown = {"codex": "Codex", "bb": "A bb thread"}.get(entry["harness"],
+                                                                entry["harness"])
+            raise StepError(f"{row} names a {entry['harness']} model; {shown} runs only "
+                            "the review")
+        model = Model(entry["harness"], entry["model"], effort)
+        if entry["harness"] in ("pi", "bb") and "/" not in entry["model"]:
+            raise StepError(f"{row} names {entry['harness']} model {entry['model']!r}; "
+                            "expected <provider>/<model>")
+        if problem := pi_provider_problem(model):
+            raise StepError(f"{row} {problem}")
+        models.append(model)
+    vendors = [model.vendor for model in models]
+    if len(set(vendors)) != len(vendors):
         raise StepError(f"{row} names two models of one vendor, which an outage or a usage "
                         "limit takes down together")
     return tuple(models)

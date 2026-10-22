@@ -3,6 +3,8 @@ a review, and its outcome is logged."""
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from typing import Sequence
 
@@ -677,3 +679,213 @@ def test_a_reviewer_that_cannot_start_is_logged_stopped_with_head(tmp_path: Path
 
     assert (line["outcome"], line["commit"]) == ("stopped", HEAD)
     assert line["reason"] == "the review did not finish: PermissionError: codex"
+
+
+
+# pi and bb: run by the owner's choice, or a review row naming them.
+
+def pi_review(text: str, *, error: str | None = None, cost: float = 0.25):
+    """pi ending a review run with `text` as its final assistant message."""
+    calls: list[list[str]] = []
+
+    def runner(command, cwd: Path, feed) -> int:
+        calls.append(list(command))
+        tool = {"type": "message_end", "message": {
+            "role": "assistant", "stopReason": "toolUse",
+            "content": [{"type": "text", "text": "Reading the change."},
+                        {"type": "toolCall", "name": "read"}],
+            "usage": {"totalTokens": 100, "cost": {"total": 0.05}}}}
+        final = {"type": "message_end", "message": {
+            "role": "assistant", "stopReason": "error" if error else "stop",
+            "content": [] if error else [{"type": "text", "text": text}],
+            **({"errorMessage": error} if error else {}),
+            "usage": {"totalTokens": 900, "cost": {"total": cost}}}}
+        for event in ({"type": "session", "id": command[command.index("--session-id") + 1]},
+                      tool, final):
+            feed(json.dumps(event) + "\n")
+        return 1 if error else 0
+    runner.calls = calls  # type: ignore[attr-defined]
+    return runner
+
+
+def bb_review(text: str, thread: str = "thr_review1"):
+    """bb starting or continuing a review thread whose final output is `text`."""
+    calls: list[tuple[list[str], str | None]] = []
+
+    def runner(command, stdin, log: Path) -> tuple[int, str]:
+        calls.append((list(command), stdin))
+        verb = command[2]
+        if command[1] == "project":
+            return 0, json.dumps([])
+        if verb == "spawn":
+            return 0, json.dumps({"id": thread, "status": "running"})
+        if verb == "tell":
+            return 0, json.dumps({"ok": True})
+        if verb == "wait":
+            return 0, json.dumps({"threadId": thread, "matched": True})
+        return 0, json.dumps({"output": text})
+    runner.calls = calls  # type: ignore[attr-defined]
+    return runner
+
+
+def test_a_review_on_pi_is_published_with_its_session_and_cost(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    pi = pi_review(review_text())
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          model="openai-codex/gpt-6.1-sol", effort="high", pi=pi,
+                          head=lambda _: HEAD, echo=None)
+
+    command = pi.calls[0]
+    assert command[:2] == ["pi", "-p"]
+    assert option(command, "--model") == "openai-codex/gpt-6.1-sol:high"
+    assert option(command, "--skill").endswith(".agents/skills/change-review")
+    assert command[-1] == f"Use the change-review skill. Review kind: design. Change: {CHANGE}."
+    session = option(command, "--session-id")
+    text = next(reviews_of(root).glob("*.md")).read_text("utf-8")
+    assert text.startswith(review_text().rstrip("\n"))
+    assert f"<!-- reviewer-session: pi:{session} -->" in text
+    assert "<!-- reviewer: pi openai-codex/gpt-6.1-sol high -->" in text
+    assert "<!-- reviewer-override: owner -->" in text
+    assert (line["outcome"], line["harness"], line["session"]) == ("finished", "pi",
+                                                                  f"pi:{session}")
+    assert line["cost"] == {"usd": 0.3, "tokens": 1000}
+
+
+def test_a_later_pi_review_continues_the_pi_reviewers_session(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    first = pi_review(review_text())
+    run_review(CHANGE, "design", root=root, model="anthropic/claude-opus-5-5", pi=first,
+               head=lambda _: HEAD, echo=None)
+    again = pi_review(review_text())
+
+    run_review(CHANGE, "design", root=root, model="anthropic/claude-opus-5-5", pi=again,
+               head=lambda _: HEAD, echo=None)
+
+    assert option(again.calls[0], "--session-id") == option(first.calls[0], "--session-id")
+    assert "01-design" in again.calls[0][-1]
+
+
+def test_a_pi_reviewer_that_is_not_signed_in_publishes_nothing(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock,
+                          model="anthropic/claude-opus-5-5",
+                          pi=pi_review("", error="401 Unauthorized: invalid api key"),
+                          head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert "401 Unauthorized" in line["reason"]
+    assert not [p for p in reviews_of(root).iterdir() if p.suffix == ".md"]
+
+
+def test_a_review_as_a_bb_thread_is_started_waited_on_and_read(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BB_PROJECT_ID", "proj_test")
+    monkeypatch.setenv("BB_THREAD_ID", "thr_parent")
+    root = repository(tmp_path)
+    bb = bb_review(review_text())
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, harness="bb",
+                          model="pi/anthropic/claude-opus-5-5", effort="high", bb=bb,
+                          head=lambda _: HEAD, echo=None)
+
+    (spawn, prompt), *rest = bb.calls
+    assert spawn[:3] == ["bb", "thread", "spawn"]
+    assert (option(spawn, "--provider"), option(spawn, "--model"),
+            option(spawn, "--reasoning-level"), option(spawn, "--environment")) == (
+        "pi", "anthropic/claude-opus-5-5", "high", str(root))
+    assert (option(spawn, "--project"), option(spawn, "--parent-thread")) == ("proj_test",
+                                                                               "thr_parent")
+    assert prompt is not None and prompt.endswith(
+        f"Use the change-review skill. Review kind: design. Change: {CHANGE}.")
+    assert "Do not edit any file." in prompt
+    assert [command[2] for command, _ in rest] == ["wait", "output"]
+    assert option(rest[0][0], "--status") == "idle"
+    text = next(reviews_of(root).glob("*.md")).read_text("utf-8")
+    assert "<!-- reviewer-session: bb:thr_review1 -->" in text
+    assert "<!-- reviewer: bb pi/anthropic/claude-opus-5-5 high -->" in text
+    assert (line["outcome"], line["harness"], line["session"]) == ("finished", "bb",
+                                                                  "bb:thr_review1")
+    assert "cost" not in line
+
+
+def test_a_later_bb_review_tells_the_earlier_thread(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    run_review(CHANGE, "design", root=root, harness="bb", model="codex/gpt-6.1-sol",
+               bb=bb_review(review_text()), head=lambda _: HEAD, echo=None)
+    again = bb_review(review_text())
+
+    run_review(CHANGE, "design", root=root, harness="bb", model="codex/gpt-6.1-sol",
+               bb=again, head=lambda _: HEAD, echo=None)
+
+    tell, prompt = again.calls[0]
+    assert tell[:4] == ["bb", "thread", "tell", "thr_review1"]
+    assert prompt is not None and "01-design" in prompt
+
+
+def test_a_bb_project_is_found_by_the_checkouts_remote(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BB_PROJECT_ID", raising=False)
+    root = repository(tmp_path)
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "git@example:o/r.git"],
+                   check=True)
+    projects = [{"id": "proj_other", "gitRemoteUrl": "git@example:o/x.git"},
+                {"id": "proj_this", "gitRemoteUrl": "git@example:o/r.git"}]
+    bb = bb_review(review_text())
+
+    def runner(command, stdin, log: Path) -> tuple[int, str]:
+        if command[1] == "project":
+            return 0, json.dumps(projects)
+        return bb(command, stdin, log)
+
+    run_review(CHANGE, "design", root=root, harness="bb", model="codex/gpt-6.1-sol",
+               bb=runner, head=lambda _: HEAD, echo=None)
+
+    assert option(bb.calls[0][0], "--project") == "proj_this"
+
+
+def test_a_bb_thread_that_fails_is_not_waited_on_further(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+    calls: list[str] = []
+
+    def runner(command, stdin, log: Path) -> tuple[int, str]:
+        calls.append(command[2])
+        if command[1] == "project":
+            return 0, "[]"
+        if command[2] == "spawn":
+            return 0, json.dumps({"id": "thr_x"})
+        if command[2] == "wait":
+            return 1, json.dumps({"ok": False, "error": {"message": "timed out"}})
+        return 0, json.dumps({"thread": {"id": "thr_x", "status": "error"}})
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, harness="bb",
+                          model="codex/gpt-6.1-sol", bb=runner, head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert calls[-2:] == ["wait", "show"]
+
+
+def test_a_bb_thread_with_no_output_publishes_nothing(tmp_path: Path) -> None:
+    root = repository(tmp_path)
+
+    line = review_and_log(CHANGE, "design", root=root, clock=clock, harness="bb",
+                          model="claude-code/claude-opus-5-5", bb=bb_review(""),
+                          head=lambda _: HEAD, echo=None)
+
+    assert line["outcome"] == "stopped"
+    assert not [p for p in reviews_of(root).iterdir() if p.suffix == ".md"]
+
+
+def test_the_owners_harness_takes_the_rows_entry_or_needs_a_model() -> None:
+    rules = load_steps()["review"]
+
+    assert review_models(rules, harness="claude") == (Model("claude", "claude-opus-5-5",
+                                                            "high"),)
+    assert review_models(rules, "anthropic/claude-opus-5-5") == (
+        Model("pi", "anthropic/claude-opus-5-5", None),)
+    with pytest.raises(ReviewError, match="no pi model"):
+        review_models(rules, harness="pi")
+    with pytest.raises(ReviewError, match="<provider>/<model>"):
+        review_models(rules, "claude-opus-5-5", harness="bb")

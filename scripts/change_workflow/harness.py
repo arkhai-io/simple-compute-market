@@ -1,9 +1,12 @@
-"""The two harnesses a step runs on, and how each says it cannot serve a model.
+"""The harnesses a step runs on, and how each says it cannot serve a model.
 
 A step runs as a headless Claude Code session (`claude -p`), held to its rules
 under the `dontAsk` permission mode, told to end its turn with an outcome matching
 the outcome schema, and streaming its events. A review runs first in Codex's
 read-only sandbox (`codex exec`), whose plain output is condensed into progress.
+The owner may run a review on pi (`pi -p`, its JSON events the transcript) or as
+a bb thread (`bb thread spawn`, then `wait` and `output`), which the owner can
+watch and join.
 A harness that is missing, not signed in, or at its usage limit cannot serve its
 model, and the run falls to the next model of its row; a network error says
 nothing of the model's availability, so it is retried on the same model and never
@@ -218,6 +221,109 @@ class Progress:
         if len(lines) > self.MESSAGE_LINES:
             shown.append(f"» … ({len(lines) - self.MESSAGE_LINES} more lines in the transcript)")
         return shown
+
+
+def pi_command(prompt: str, model: Model, skill: Path, session: str, system: str) -> list[str]:
+    """The headless pi command for one review run on `model`, a `<provider>/<model>`.
+
+    pi names its session by `--session-id`, creating it when it is new and
+    continuing it when it exists, so a fresh run and a continued one differ only in
+    the id. Its JSON event stream is the transcript; the review is its last
+    assistant message. Project-local files are trusted for the run, since the
+    reviewer reads the repository it runs in.
+    """
+    target = f"{model.model}:{model.effort}" if model.effort else model.model
+    return ["pi", "-p", "--approve", "--mode", "json", "--model", target,
+            "--skill", str(skill), "--session-id", session,
+            "--append-system-prompt", system, prompt]
+
+
+def pi_result(text: str) -> tuple[str | None, str]:
+    """A pi run's final assistant text, from its JSON events, and its errors.
+
+    The final message is the last assistant message that ends a turn with text
+    rather than a tool call. Errors are the messages pi records on a failed
+    assistant message and its own non-JSON lines, which is where a missing sign-in
+    or a usage limit shows.
+    """
+    final: str | None = None
+    errors: list[str] = []
+    for line in text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            if line.strip():
+                errors.append(line.strip())
+            continue
+        if not isinstance(event, dict) or event.get("type") != "message_end":
+            continue
+        message = event.get("message") or {}
+        if message.get("role") != "assistant":
+            continue
+        if message.get("errorMessage"):
+            errors.append(str(message["errorMessage"]))
+        said = "".join(part.get("text", "") for part in message.get("content") or []
+                       if isinstance(part, dict) and part.get("type") == "text")
+        if said.strip() and message.get("stopReason") != "toolUse":
+            final = said
+    return final, "\n".join(errors)
+
+
+# Runs a bb command, its stdin given, writing the command and its output to the
+# transcript, and returns its exit status and standard output.
+BbRunner = Callable[[Sequence[str], str | None, Path], tuple[int, str]]
+
+
+def bb_start_command(model: Model, root: Path, title: str, project: str | None,
+                     parent: str | None) -> list[str]:
+    """The command that starts a review as a bb thread, its prompt read from stdin.
+
+    The thread runs in the checkout under review, on `model`'s bb provider and
+    that provider's model, `<bb provider>/<model>`, and is linked to the thread that
+    started the review when there is one, so the owner can watch it there.
+    """
+    provider, _, name = model.model.partition("/")
+    command = ["bb", "thread", "spawn", "--json", "--prompt-file", "-",
+               "--provider", provider, "--model", name, "--environment", str(root),
+               "--title", title]
+    if project:
+        command += ["--project", project]
+    if model.effort:
+        command += ["--reasoning-level", model.effort]
+    if parent:
+        command += ["--parent-thread", parent]
+    return command
+
+
+def bb_continue_command(thread: str, model: Model) -> list[str]:
+    """The command that sends a continuing review's prompt to its earlier thread."""
+    command = ["bb", "thread", "tell", thread, "--json", "--message-file", "-",
+               "--mode", "auto"]
+    if model.effort:
+        command += ["--reasoning-level", model.effort]
+    return command
+
+
+def bb_wait_command(thread: str, timeout: str = "60s") -> list[str]:
+    return ["bb", "thread", "wait", thread, "--status", "idle", "--timeout", timeout, "--json"]
+
+
+def bb_show_command(thread: str) -> list[str]:
+    return ["bb", "thread", "show", thread, "--json"]
+
+
+def bb_output_command(thread: str) -> list[str]:
+    return ["bb", "thread", "output", thread, "--json"]
+
+
+def run_bb(command: Sequence[str], stdin: str | None, log: Path) -> tuple[int, str]:
+    # Appended: a review's commands share one transcript, each line headed by the
+    # command that wrote it.
+    result = subprocess.run(list(command), cwd=ROOT, input=stdin, capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", check=False)
+    with log.open("a", encoding="utf-8") as stream:
+        stream.write("$ " + " ".join(command) + "\n" + result.stdout + result.stderr + "\n")
+    return result.returncode, result.stdout
 
 
 def run_codex(command: Sequence[str], log: Path) -> int:
