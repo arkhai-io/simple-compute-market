@@ -7,7 +7,6 @@ release are separate operations; mock access is never evidence of real SSH.
 from __future__ import annotations
 
 import base64
-import json
 import os
 import time
 from typing import Any
@@ -15,7 +14,6 @@ from typing import Any
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
-from core_buyer.negotiation_client import AuthenticatedHTTPError
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run, read_run_identity
 from market_arkhai_payments import (
@@ -52,6 +50,11 @@ from tests.e2e.roles.helpers.domain_deal import (
     assert_market_run_succeeded,
     ordered_events,
     require_state,
+)
+from tests.e2e.roles.helpers.payment_compensation import (
+    PurchaseCompensation,
+    fulfillment_or_none,
+    refund_may_clear,
 )
 from tests.e2e.roles.helpers.payments import (
     configured_payments,
@@ -179,27 +182,6 @@ def _seller_refund(negotiation_id: str):
         return storefront.refund_settlement(negotiation_id)
 
 
-def _purchase_from_run_log(cli: BuyerCli) -> tuple[str | None, str | None]:
-    """The purchase's negotiation and payment transaction, as its run log recorded them.
-
-    Read from the buyer's run directory rather than from a stage's state, so cleanup
-    finds a deal the buy command approved even when the command failed or timed out,
-    or a later assertion did, before any stage recorded it.
-    """
-    negotiation_id = transaction_id = None
-    for path in sorted(cli.run_dir.glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("event") == "agreement_accepted":
-                negotiation_id = event.get("negotiation_id")
-            elif event.get("event") == "payment_approved":
-                transaction_id = event.get("transaction_id")
-    return negotiation_id, transaction_id
-
-
 @pytest.fixture(scope="module")
 def payment_supply(
     payments_config, payment_buyer_cli, payment_fulfillment, payment_deal_state, payment_run,
@@ -269,50 +251,30 @@ def payment_supply(
         yield driver
     finally:
         # A deal the refund stage did not finish is still outstanding at the
-        # payments service and the site: refund it, then release its host.
-        # Whether a host was delivered is read before the refund, while an
-        # undelivered deal still answers "no fulfillment" rather than "not
-        # verified"; refund and release are idempotent, so neither needs to
-        # know how far the stages got.
-        outstanding: dict[str, Any] = {}
-
-        def find_outstanding() -> None:
-            if payment_deal_state.teardown is not None:
-                return
-            negotiation_id, transaction_id = _purchase_from_run_log(payment_buyer_cli)
-            outstanding.update(negotiation_id=negotiation_id, transaction_id=transaction_id)
-            if not transaction_id:
-                return  # without an approved payment no host can have been delivered
-            try:
-                payment_fulfillment.status(negotiation_id)
-            except AuthenticatedHTTPError as error:
-                if error.status_code != 404:
-                    raise
-                outstanding["delivered"] = False  # settlement started no fulfillment
-
-        def refund_outstanding() -> None:
-            if outstanding.get("transaction_id"):
-                _seller_refund(outstanding["negotiation_id"])
-
-        def release_outstanding() -> None:
-            negotiation_id = outstanding.get("negotiation_id")
-            if not outstanding.get("transaction_id") or outstanding.get("delivered") is False:
-                return
-            status = payment_fulfillment.status(negotiation_id)
-            if status["state"] != "released":
-                _release(
-                    payment_fulfillment, negotiation_id, str(status["fulfillment_id"]),
-                    provisioning_client, storefront_admin_client,
-                )
-
+        # payments service and the site.
+        compensation = PurchaseCompensation(
+            run_dir=payment_buyer_cli.run_dir,
+            status=lambda negotiation_id: fulfillment_or_none(
+                payment_fulfillment.status, negotiation_id,
+            ),
+            refund=_seller_refund,
+            release=lambda negotiation_id, status: _release(
+                payment_fulfillment, negotiation_id, str(status["fulfillment_id"]),
+                provisioning_client, storefront_admin_client,
+            ),
+            retryable=refund_may_clear,
+        )
         # Resuming held loops runs last and always, so a failing step above it
         # cannot leave them stopped for the lane's next module.
         run_cleanup(
             [
-                ("find the outstanding purchase", find_outstanding),
-                ("refund the outstanding purchase", refund_outstanding),
-                ("release the outstanding purchase's host", release_outstanding),
-                ("remove the mock rules", driver.disarm_gates),
+                *compensation.steps(settled=payment_deal_state.teardown is not None),
+                # Deleting a rule that is already gone reports it not deleted;
+                # only a real failure raises, and it is reported like any step's.
+                ("remove the access-grant mock rule", lambda: provisioning_test_client
+                 .delete_bare_metal_mock_rule(driver.create_rule_id)),
+                ("remove the access-reclaim mock rule", lambda: provisioning_test_client
+                 .delete_bare_metal_mock_rule(driver.teardown_rule_id)),
                 ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
                 ("remove the pool override", lambda: overrides.delete_pool_override(
                     driver.site_id, driver.pool_id, "bare_metal",

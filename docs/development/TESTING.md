@@ -316,10 +316,13 @@ project of its own:
   `e2e_bare_metal_payment_deal` scenario uses a wallet-free profiled buyer for
   one fixed-term USD/6 purchase, receipt-gated mock access, same-transaction and
   same-fulfillment re-drive through `settle_agreement`, then seller refund and
-  separate physical teardown with restored whole-host capacity. When a run
-  fails before its refund call finishes, the module's cleanup finds the
+  separate physical teardown with restored whole-host capacity. Unless the
+  refund stage completed the deal's teardown, the module's cleanup finds the
   purchase in the buyer's run log, refunds it if the log records the payment
-  approved, and releases its host if one was delivered; each cleanup step is
+  approved — retrying for a bounded time while the seller has not yet verified
+  it or a service is unavailable — and releases its host if one was delivered;
+  a refund that still fails fails the run with the negotiation and
+  transaction for an operator. Each cleanup step is
   attempted even after an earlier one fails, and the loops the module paused
   resume last.
   Unconfigured payments remain a named blocked prerequisite; no real SSH claim
