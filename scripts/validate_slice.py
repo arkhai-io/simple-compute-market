@@ -11,7 +11,8 @@ the tree — `make test` and the end-to-end image build both sync project
 environments, which may rewrite a lock — and so can something outside it, such as a
 commit or a branch switch in the same checkout.
 
-Both parts start with `make dist-clean`. The wheelhouse in `.dist` is shared by
+The local and Helm parts start with `make dist-clean`; the `ci` part builds
+nothing. The wheelhouse in `.dist` is shared by
 every branch built in the checkout, and environments sync internal packages with an
 upgrade, so a higher version another branch left there would be installed in place
 of the one this commit builds. Removing it makes every wheel tested come from the
@@ -29,6 +30,13 @@ commit; it is untracked, so the checkout is unchanged.
   namespace, reaching services by name, so no local port is used. Afterwards it
   always keeps the namespace's evidence and scales its workloads to zero, leaving
   objects and volumes for the next validation to replace.
+- `ci` reads a CI workflow's run of the commit, which validation dispatched
+  (`ci_evidence.py dispatch`): it waits for the run newer than the one recorded
+  before the dispatch, keeps the run's log and each job's, and compares every
+  failure with the same job in the latest completed `dev` run of code the branch
+  contains (`ci_evidence`). It passes when the run produced evidence and every
+  failure is one that run shows too; whether the jobs a plan owes passed, and
+  showed what they owe, is the validating agent's to judge from their logs.
 
 `capacity` validates nothing. Archive cleanup runs it to record, in
 `helm/validation-capacity.toml`, the memory the change's latest validation
@@ -40,7 +48,9 @@ Validation has full control of the environment it runs in: it scales, deletes,
 and replaces whatever its change's namespace holds without asking. What it never
 changes is the commit, or another namespace.
 
-Each part stops at its first failure and keeps each attempt's output apart, under
+Each part stops at its first failure, except that the `ci` part goes on past a
+baseline it could not read, since the run's own evidence is still worth keeping.
+Each part keeps each attempt's output apart, under
 `.snapshot/validation/<short commit>/<part>/<attempt>/`, so a rerun never overwrites
 the evidence of the run before it. It prints one line as each step starts and one
 as it ends, so a part can be watched while it runs, then a summary, which it also
@@ -64,10 +74,12 @@ import time
 import tomllib
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Callable, Sequence
 
 import change_namespace
+import ci_evidence
 from find_change import REVIEWS, ChangeNotFound, change_directory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,6 +127,8 @@ TAIL_LINES = 40
 DIST_CLEAN = ("dist-clean", ["make", "dist-clean"])
 _SKIP_LINE = re.compile(r"^skip:.*$", re.M)
 _MARKER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# What of a CI job's name is not kept in the name of its log's file.
+_JOB_FILE = re.compile(r"[^A-Za-z0-9._-]+")
 # What a Helm upgrade the chart refuses, rather than one that failed, prints: a
 # change Kubernetes does not apply in place, such as a Deployment's selector.
 _UPGRADE_REFUSED = re.compile(r"field is immutable", re.I)
@@ -507,6 +521,190 @@ def validate_local(validation: Validation) -> Summary:
     return validation.finish()
 
 
+def validate_ci(validation: Validation, *, workflow: str, after_run: int,
+                contains: Callable[[str, str], bool] | None = None) -> Summary:
+    """Keep the evidence of a dispatched CI run of the commit, every failure classed
+    against the same job in the latest completed `dev` run of code the branch holds.
+
+    `contains(ancestor, commit)` says whether the commit contains another; by
+    default Git's answer in the checkout.
+    """
+    contains = contains or (lambda ancestor, commit: ci_evidence.is_ancestor(
+        ancestor, commit, runner=partial(subprocess.run, cwd=validation.root)))
+    evidence = validation.summary.evidence
+    evidence.update(workflow=workflow, run=None, baseline=None, jobs=[], classes={},
+                    no_evidence=None)
+    if not validation.clean("clean before"):
+        return validation.finish()
+    try:
+        ci_evidence.refuse_unlisted(workflow)
+    except ci_evidence.CIError as exc:
+        validation.fail("workflow", str(exc))
+        return _after_part(validation)
+    commit = validation.summary.commit
+    runs = validation.log_dir / "runs"
+    # Only the dispatch's run: a pull request's run of the same head commit tests a
+    # merge of the branch, not the commit.
+    if validation.step("fetch", _ci_fetch(workflow, runs, "--after-run", str(after_run),
+                                          "--event", "workflow_dispatch")).result != "passed":
+        if validation.commit_changed():
+            return _after_part(validation)
+        return _no_ci_evidence(validation, f"no {workflow} run of {commit[:12]} newer than "
+                               f"run {after_run} was listed, or its log was not fetched; "
+                               "the fetch step's log says which")
+    fetched = sorted(entry for entry in (runs.iterdir() if runs.is_dir() else [])
+                     if entry.is_dir())
+    if len(fetched) != 1:
+        return _no_ci_evidence(validation, f"the fetch left {len(fetched)} runs in {runs}")
+    found = _ci_run(validation, "run", fetched[0])
+    if found is None:
+        return _no_ci_evidence(validation, "the run that was fetched could not be read")
+    run, run_jobs, job_logs = found
+    evidence["run"] = run
+    if run["commit"] != commit:
+        validation.fail("run commit", f"run {run['id']} is of {run['commit'][:12]}, not the "
+                        f"validated commit {commit[:12]}")
+        return _after_part(validation)
+    if run["conclusion"] == "cancelled":
+        return _no_ci_evidence(validation, f"run {run['id']} was cancelled, as by a newer "
+                               "dispatch on the same branch, so its jobs did not finish")
+    if run["status"] != "completed":
+        return _no_ci_evidence(validation, f"run {run['id']} is {run['status']}, not "
+                               "completed, so its jobs have not all finished")
+    # A baseline that cannot be read leaves the run's own evidence worth keeping,
+    # every failure then uncomparable.
+    baseline_jobs, no_baseline = _ci_baseline(
+        validation, workflow, runs, contains,
+        needed=any(job.failed for job in run_jobs.values()))
+    if changed := validation.commit_changed():
+        validation.fail("checkout", changed)
+        return _after_part(validation)
+    compared = ci_evidence.compare(run_jobs, baseline_jobs, no_baseline)
+    for job in compared:
+        job["log"] = job_logs.get(job["name"])
+    evidence["jobs"] = compared
+    evidence["classes"] = ci_evidence.classes(compared)
+    unexplained = [f"{job['name']}: {_failure_name(failure)}, {failure['class']}"
+                   for job in compared for failure in job["failures"]
+                   if failure["class"] != ci_evidence.INHERITED]
+    counts = ", ".join(f"{count} {name}" for name, count in evidence["classes"].items())
+    if unexplained:
+        validation.fail("failures", f"{counts}; not failing so in the baseline:\n"
+                        + "\n".join(unexplained))
+    else:
+        validation.note("failures", f"{counts}; every failure also fails so in the baseline"
+                        if any(job["failures"] for job in compared) else "no job failed")
+    return _after_part(validation)
+
+
+def _ci_fetch(workflow: str, runs: Path, *selection: str) -> list[str]:
+    # The fetch waits for the run to be listed and to finish, then keeps its whole
+    # log under `<runs>/<run id>/`.
+    return ["python3", "scripts/fetch-e2e-logs.py", "--workflow", workflow,
+            "--output-dir", str(runs), *selection]
+
+
+def _no_ci_evidence(validation: Validation, reason: str) -> Summary:
+    validation.summary.evidence["no_evidence"] = reason
+    validation.fail("evidence", f"the run produced no evidence: {reason}")
+    return _after_part(validation)
+
+
+def _failure_name(failure: dict) -> str:
+    if failure.get("test"):
+        return f"{failure['test']} ({failure.get('type') or 'no exception type printed'})"
+    return f"step {failure.get('step') or 'unknown'}: " + "; ".join(failure.get("errors") or [])
+
+
+def _ci_run(validation: Validation, name: str, directory: Path
+            ) -> tuple[dict, dict[str, ci_evidence.Job], dict[str, str]] | None:
+    """A fetched run: its record, its jobs, and the log kept of each job."""
+    run_id = directory.name
+    try:
+        payload = json.loads(validation.read([
+            "gh", "run", "view", run_id, "--json",
+            "databaseId,headSha,headBranch,status,conclusion,jobs"]))
+        log = (directory / "actions.log").read_text("utf-8", errors="replace")
+    except (ValidationError, ValueError, OSError) as exc:
+        validation.fail(name, f"could not read run {run_id}: {exc}")
+        return None
+    if not isinstance(payload, dict):
+        validation.fail(name, f"gh run view {run_id} returned no run")
+        return None
+    (directory / "run.json").write_text(json.dumps(payload, indent=2) + "\n", "utf-8")
+    jobs = ci_evidence.read_jobs(payload, log)
+    logs: dict[str, str] = {}
+    for number, job in enumerate(jobs.values(), 1):
+        stem = _JOB_FILE.sub("_", job.name).strip("_") or "job"
+        path = directory / "jobs" / f"{stem}.log"
+        if str(path.relative_to(validation.root)) in logs.values():
+            path = path.with_name(f"{stem}-{number}.log")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(job.lines) + "\n", "utf-8")
+        logs[job.name] = str(path.relative_to(validation.root))
+    record = {"id": int(run_id) if run_id.isdigit() else run_id,
+              "commit": str(payload.get("headSha") or ""),
+              "branch": payload.get("headBranch"), "status": payload.get("status"),
+              "conclusion": payload.get("conclusion"),
+              "log": str((directory / "actions.log").relative_to(validation.root))}
+    validation.note(name, f"run {run_id} of {record['commit'][:12]} on {record['branch']}: "
+                    f"{record['status']}, {record['conclusion']}; {len(jobs)} jobs")
+    return record, jobs, logs
+
+
+def _ci_baseline(validation: Validation, workflow: str, runs: Path,
+                 contains: Callable[[str, str], bool], *, needed: bool
+                 ) -> tuple[dict[str, ci_evidence.Job] | None, str]:
+    """The baseline run's jobs, recorded in the evidence; or None, with why there
+    are none to compare with.
+
+    The record names the baseline whatever the run's result; but when no job of
+    the run failed there is nothing to compare, so a baseline that cannot be
+    chosen, fetched, or read is then a warning rather than a failure.
+    """
+    since = len(validation.summary.steps)
+    jobs, reason = _choose_baseline(validation, workflow, runs, contains)
+    if not needed and jobs is None:
+        for step in validation.summary.steps[since:]:
+            if step.result == "failed":
+                step.result = "warning"
+        validation.summary.passed = not any(step.result == "failed"
+                                            for step in validation.summary.steps)
+    return jobs, reason
+
+
+def _choose_baseline(validation: Validation, workflow: str, runs: Path,
+                     contains: Callable[[str, str], bool]
+                     ) -> tuple[dict[str, ci_evidence.Job] | None, str]:
+    commit = validation.summary.commit
+    try:
+        listed = json.loads(validation.read([
+            "gh", "run", "list", "--workflow", workflow, "--branch",
+            ci_evidence.BASELINE_BRANCH, "--status", "completed", "--limit",
+            str(ci_evidence.RUN_LIST_LIMIT), "--json",
+            "databaseId,headSha,conclusion,event"]))
+        if not isinstance(listed, list):
+            raise ValidationError(f"gh run list gave {type(listed).__name__}, not a run list")
+        chosen = ci_evidence.baseline_run(listed, lambda ancestor: contains(ancestor, commit))
+    except (ValidationError, ValueError, ci_evidence.CIError) as exc:
+        validation.fail("baseline", f"could not choose a baseline run: {exc}")
+        return None, "no baseline run could be chosen: the baseline step says why"
+    if chosen is None:
+        validation.warn("baseline", f"no completed {ci_evidence.BASELINE_BRANCH} run of "
+                        f"{workflow} among its latest {ci_evidence.RUN_LIST_LIMIT} has a head "
+                        "commit the validated commit contains, so no failure can be compared")
+        return None, ci_evidence.NO_BASELINE
+    baseline = f"the baseline, {ci_evidence.BASELINE_BRANCH}'s run {chosen['id']}"
+    if validation.step("baseline fetch", _ci_fetch(workflow, runs, "--run-id",
+                                                   str(chosen["id"]))).result != "passed":
+        return None, f"{baseline}, could not be fetched"
+    found = _ci_run(validation, "baseline", runs / str(chosen["id"]))
+    if found is None:
+        return None, f"{baseline}, was fetched but could not be read"
+    validation.summary.evidence["baseline"] = found[0]
+    return found[1], ci_evidence.NO_BASELINE
+
+
 @dataclass
 class HelmRun:
     """What one Helm part works on: its change's namespace, release, and images."""
@@ -589,7 +787,7 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                           *((step, ["make", "-C", project, "reinit"])
                             for step, project, _ in LOADER_ENVIRONMENTS)):
         if validation.step(name, command).result != "passed":
-            return _after_helm(validation)
+            return _after_part(validation)
     render = validation.step("test-render", run.make("test-render"))
     if render.result == "passed" and render.log:
         skipped = _SKIP_LINE.findall((validation.root / render.log).read_text("utf-8"))
@@ -599,7 +797,7 @@ def validate_helm(validation: Validation, *, change: str | None = None,
             render.tail = skipped
             validation.summary.passed = False
     if validation.failed:
-        return _after_helm(validation)
+        return _after_part(validation)
 
     overlay = _write_overlay(validation, run, selected)
     try:
@@ -611,10 +809,10 @@ def validate_helm(validation: Validation, *, change: str | None = None,
                 validation.note("e2e", "no scenario is selected for the Helm run")
     finally:
         _after_scenarios(validation, run)
-    return _after_helm(validation)
+    return _after_part(validation)
 
 
-def _after_helm(validation: Validation) -> Summary:
+def _after_part(validation: Validation) -> Summary:
     validation.clean("clean after")
     return validation.finish()
 
@@ -1171,14 +1369,38 @@ def render(summary: Summary) -> str:
     if scenarios:
         lines.append(f"  scenarios pod {scenarios['pod']}: exit {scenarios['exit_code']}, "
                      f"log {scenarios['log']}")
+    if summary.part == "ci":
+        lines += _render_ci(summary.evidence)
     return "\n".join(lines)
+
+
+def _render_ci(evidence: dict) -> list[str]:
+    lines = []
+    for name in ("run", "baseline"):
+        run = evidence.get(name)
+        if run:
+            lines.append(f"  {name:<8} {evidence.get('workflow')} run {run['id']} of "
+                         f"{run['commit'][:12]}: {run['conclusion']}, log {run['log']}")
+    for job in evidence.get("jobs") or []:
+        if job["failures"]:
+            lines.append(f"  job     {job['name']}: {job['conclusion']}, log {job['log']}"
+                         + (f" ({job['reason']})" if job["reason"] else ""))
+            lines += [f"          {failure['class']:<12} {_failure_name(failure)}"
+                      for failure in job["failures"]]
+    return lines
 
 
 def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("part", choices=("local", "helm", "capacity"),
+    parser.add_argument("part", choices=("local", "helm", "ci", "capacity"),
                         help="`capacity` validates nothing: it records the memory the "
                              "change's latest validation measured, for archive cleanup")
+    parser.add_argument("--workflow",
+                        help=f"the CI workflow the `ci` part reads a run of: one of "
+                             f"{', '.join(ci_evidence.DISPATCHABLE)}")
+    parser.add_argument("--after-run", type=int,
+                        help="the `ci` part reads only a run newer than this one: the newest "
+                             "run on the branch before the dispatch")
     parser.add_argument("--context", default=DEFAULT_HELM_CONTEXT,
                         help="the only kube context the Helm part may deploy to")
     parser.add_argument("--change",
@@ -1197,12 +1419,18 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         return 0
+    if args.part == "ci" and (not args.workflow or args.after_run is None):
+        parser.error("ci needs --workflow and --after-run: without the run recorded before "
+                     "the dispatch, an earlier run of the same commit could be read")
     try:
         if args.change:
             change_namespace.namespace(args.change)
         validation = Validation(args.part)
         if args.part == "local":
             summary = validate_local(validation)
+        elif args.part == "ci":
+            summary = validate_ci(validation, workflow=args.workflow,
+                                  after_run=args.after_run)
         else:
             summary = validate_helm(validation, change=args.change,
                                     context=args.context or DEFAULT_HELM_CONTEXT,

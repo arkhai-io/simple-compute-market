@@ -173,7 +173,24 @@ design.
 - names the end-to-end scenarios (pytest markers in `e2e-tests/`) that exercise
   the section's behaviour once deployed, or says that none does and whether one is
   owed. Validation runs the Helm checks and the pipeline on every commit; it reads
-  this list to report whether the pipeline's result is evidence for the section.
+  this list to report whether the pipeline's result is evidence for the section;
+- names in its verification only evidence an implementation session can produce.
+  Evidence only a push produces — a CI workflow run such as `tests.yml`'s, which a
+  change branch's push does not trigger — goes on its own `Owed by validation:`
+  line of the verification task, beside `End-to-end:`, giving the workflow, the
+  job, and what the job must show:
+
+  ```
+  Owed by validation: `tests.yml`, job `release · deployment contracts` —
+  `azure/setup-helm` installs v4.3.0, and `make -C helm test-render` prints
+  `helm v4.3.0` before the first render and passes.
+  ```
+
+  It gates no task: once the section is complete, every validation of the change
+  dispatches the workflow and judges the job, and a round advances only on a
+  passing validation. Only a workflow `scripts/ci_evidence.py` lists can be owed,
+  since validation dispatches no other; owing another is a design question
+  (section 3).
 
 **Order by real dependencies, then by the cadence.** Lower layers before the layers
 composing them — foundation kit before kit before domain before composition root —

@@ -146,7 +146,7 @@ models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }
 allow = [
   "Edit(openspec/changes/**/reviews/*-validation.md)",
   "Bash(make validate-*)", "Bash(make check-push-ready)", "Bash(make push-branch)",
-  "Bash(make run-e2e)", "Bash(make fetch-e2e-logs*)",
+  "Bash(make run-e2e)", "Bash(make run-ci *)", "Bash(make fetch-e2e-logs*)",
   "Bash(make dist-clean)",
   "Bash(gh run list*)", "Bash(gh run view *)", "Bash(gh auth status*)",
   "Bash(docker *)", "Bash(kubectl *)", "Bash(helm *)",

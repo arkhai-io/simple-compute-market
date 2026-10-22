@@ -139,6 +139,17 @@ Work through the section's tasks in order. For each:
   `e2e-tests/` that exercise its behaviour once deployed, including any the section
   added, or that none does. Validation reads this to say whether the pipeline's
   result is evidence for the section.
+- Confirm or correct, the same way, the section's `Owed by validation:` lines:
+  evidence only a push produces, such as a CI workflow run a change branch's push
+  does not trigger, named by its workflow, its job, and what the job must show.
+  Every validation of the change dispatches each one once the section is complete
+  and judges it, so a line naming the wrong job or observation misdirects them all.
+  A verification task that demands such evidence itself — an older plan, or a slip
+  — is checked on the section's own evidence once that passes, and the push-only
+  evidence is written as an `Owed by validation:` line in the section's notes; it
+  never holds the task open, since no implementation session can produce it. Only
+  a workflow `scripts/ci_evidence.py` lists can be owed: owing another is a design
+  question (step 4).
 
 Never delete or rewrite a completed task; amend it with a correction note when
 something it established changes.

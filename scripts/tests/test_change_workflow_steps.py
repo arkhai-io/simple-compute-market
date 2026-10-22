@@ -132,6 +132,13 @@ def test_each_committing_step_pushes_only_through_the_guarded_push() -> None:
                            else []), name
 
 
+def test_only_validation_dispatches_a_ci_workflow() -> None:
+    """The dispatch itself refuses a workflow off its list; the table keeps every
+    other step from dispatching at all."""
+    for name, rules in load_steps().items():
+        assert _allows(rules, "make run-ci WORKFLOW=tests.yml") == (name == "validate"), name
+
+
 def test_every_step_that_commits_its_work_may_commit_and_no_other() -> None:
     for name, rules in load_steps().items():
         commits = name in COMMITTING

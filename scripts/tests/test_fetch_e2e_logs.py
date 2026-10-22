@@ -260,6 +260,50 @@ def test_an_explicit_commit_replaces_head(
     assert ["gh", "run", "watch", "41"] in runner.commands
 
 
+def test_a_tests_yml_fetch_keeps_its_whole_log_and_asks_for_no_lane_artifact(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runner = FakeRunner()
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--workflow", "tests.yml",
+                         "--after-run", "41"], runner=runner) == 0
+
+    assert (tmp_path / "42" / "actions.log").read_text("utf-8") == "actions log\n"
+    assert ["gh", "run", "view", "42", "--log"] in runner.commands
+    assert not any(command[:3] == ["gh", "run", "download"] for command in runner.commands)
+    assert "artifact" not in capsys.readouterr().err
+    listing = next(command for command in runner.commands if command[:3] == ["gh", "run", "list"])
+    assert listing[listing.index("--workflow") + 1] == "tests.yml"
+
+
+def test_an_event_filter_passes_over_a_pull_requests_run_of_the_same_commit(
+    tmp_path: Path
+) -> None:
+    runner = FakeRunner(runs=[
+        {"databaseId": 44, "headBranch": "feature/test", "headSha": HEAD,
+         "event": "pull_request"},
+        {"databaseId": 43, "headBranch": "feature/test", "headSha": HEAD,
+         "event": "workflow_dispatch"},
+    ])
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--workflow", "tests.yml",
+                         "--event", "workflow_dispatch"], runner=runner) == 0
+    assert ["gh", "run", "watch", "43"] in runner.commands
+    with pytest.raises(SystemExit):
+        fetcher.main(["--output-dir", str(tmp_path), "--run-id", "43", "--event", "push"],
+                     runner=runner)
+
+
+def test_a_tests_yml_run_whose_log_cannot_be_fetched_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runner = FakeRunner(fail_actions_log=True)
+
+    assert fetcher.main(["--output-dir", str(tmp_path), "--workflow", "tests.yml",
+                         "--run-id", "77"], runner=runner) == 1
+    assert "no logs could be fetched for tests.yml workflow run 77" in capsys.readouterr().err
+
+
 def test_make_target_delegates_to_python_helper() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text("utf-8")
     target = makefile.split("fetch-e2e-logs:", 1)[1].split("prune-tombstones:", 1)[0]

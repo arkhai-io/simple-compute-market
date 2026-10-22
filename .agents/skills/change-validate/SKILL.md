@@ -1,6 +1,6 @@
 ---
 name: change-validate
-description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it and run the end-to-end pipeline, run the local and Helm validation parts meanwhile, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
+description: Validate the commit at HEAD of an OpenSpec change before its implementation is triaged — push it and run the end-to-end pipeline and every CI workflow its complete sections owe, run the local and Helm validation parts meanwhile, diagnose every failure from its logs, settle environmental failures with the owner, and write reviews/NN-validation.md. Never edits, relocks, commits, or fixes the commit. Use after implementation sections are committed, beside an implementation review, when the owner says "validate <change>", or when `make validate` invokes you.
 ---
 
 # Validating a committed slice
@@ -92,6 +92,18 @@ moves nothing here, and validation runs beside it.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
   runs every pipeline scenario rather than only those the default charts serve, to
   find which the charts serve now (step 3).
+- **Owed CI evidence.** Evidence only a push produces — a CI workflow's run, which a
+  change branch's push does not trigger — is owed by validation rather than gating a
+  task. Read the change's `tasks.md`, as the clean worktree holds it at `HEAD`, and
+  note every `Owed by validation:` line of a section whose tasks are all checked:
+  the workflow, the job, what the job must show, and the section and task owing
+  it. Every validation of the change dispatches them, a fix commit's included,
+  since a later commit can break what an earlier one showed. With none, the record's
+  CI part is `ci not owed` and nothing is dispatched. Only the workflows
+  `scripts/ci_evidence.py` lists (`DISPATCHABLE`) can be dispatched; none publishes.
+  A line owing another is refused by `make run-ci`, which names the list: its
+  observation is then absent, a `V<n>` of unknown cause for triage to take to
+  design, since only the owner extends the list.
 
 ## 2. Start the pipeline first
 
@@ -113,6 +125,12 @@ The pipeline is by far the slowest part, so it runs while everything else does:
    Run it as written, with no shell redirect of its output: a redirect is a
    write no rule admits unattended, and the harness keeps a background command's
    output in a file, which is what the wait below reads.
+5. For each workflow owed (step 1), `make run-ci WORKFLOW=<file>`: it dispatches
+   the workflow on the branch, refusing one off the list, and first prints the
+   newest run of it there as `CI_AFTER_RUN=<id>`. Then `make validate-ci
+   WORKFLOW=<file> CI_AFTER_RUN=<that ID>`, in the background, beside the pipeline:
+   the `ci` part waits for the run of `HEAD` newer than that ID, and for it to
+   finish (step 3).
 
 Run long commands in the background and wait for them to finish, rather than
 inside a call that will time out. Wait inside one Bash call, with a blocking
@@ -190,6 +208,34 @@ and whether they changed since the namespace's previous validation
 (`evidence.resources.changed`); and the namespace's sampled memory, when a metrics
 source measured it (`memory.peak_bytes`).
 
+The `ci` part started in step 2 runs beside these, waiting on GitHub rather than
+the machine; it is waited for like them, on its `ci validation of <commit>,
+attempt <n>:` line. It reads only the dispatch's run, never a pull request's run
+of the same commit, which tests a merge. Its attempt keeps, under `runs/<run>/`,
+the run's whole log (`actions.log`), its jobs and steps as GitHub reports them
+(`run.json`), and each job's log (`jobs/<job>.log`); and the same for the
+baseline, the latest completed `dev` run of the workflow, not a pull request's,
+whose head commit `HEAD` contains — usually the merge base — skipping a newer
+`dev` run of code the branch lacks. `summary.json`'s `evidence` names the run and
+its conclusion, the baseline and its commit, and for each job its conclusion,
+failing steps, error lines, and failures — each failing test's ID and exception
+type from pytest's short summary, or, for a job that printed none, its failing
+step with the runner's error lines — each classed `inherited` (the baseline's same
+job fails that test with the same type and outcome, or that step with the same
+error lines), `new`, or `uncomparable` (no baseline, or one that could not be
+chosen, fetched, or read; a job the baseline lacks or skipped; a job of which
+either log holds no line; a failing test whose line names no exception type; a
+job failing at no named step; error lines saying only that the step failed; or
+one side naming failing tests where the other names only the same step failing);
+the job's `reason`, or the failure's, says why. When no job failed, a baseline
+that could not be had is only a warning. The part passes when the run produced evidence and
+every failure is `inherited`: it says nothing of whether an owed job passed and
+showed what it owes, which is yours to judge. A run with no evidence fails the
+part's `evidence` step, `evidence.no_evidence` saying why: the fetch failed (a run
+never listed, or its log not fetched; the `fetch` step's log says which), the
+fetch kept no run, the run could not be read, or it was cancelled or is not
+completed.
+
 ## 4. Diagnose every failure
 
 For each failed step and each failing pipeline scenario, read its log — the step
@@ -253,6 +299,23 @@ report every warning step under `## Helm`, with what it means for the run:
 sample failed), `evidence` (that evidence was not kept, and its key is empty), and
 `scenario pod` (its exit status could not be read).
 
+**The CI part.** Judge each owed job from its log under `jobs/`: it passed, and
+its log shows what the `Owed by validation:` line says it must. A named job that
+failed, or an observation its log does not show, is a `V<n>`, caused by the commit
+or of unknown cause, whatever its failures' classes — an owed job failing on `dev`
+too still owes what it owes. Every other failing job's failures are read by class:
+`inherited` is already failing on `dev`, reported under `## CI` naming the
+baseline and never a finding; `new` is diagnosed like any failure — commit,
+environment, or unknown — from the job's log; `uncomparable` is of unknown cause,
+so a `V<n>`, and triaged. A run that produced no evidence for a reason the logs
+place outside the commit — `gh` not signed in, a runner outage, a run cancelled by
+a newer dispatch on the same branch, a run never listed — is environmental (step
+5): its remedy is signing in, waiting out the outage, or dispatching again, and
+the rerun is `make run-ci`, then `make validate-ci` with the new `CI_AFTER_RUN`.
+A fetch that kept no run, or a run that could not be read, is diagnosed from the
+`fetch` and `run` steps' logs like any failure, and is of unknown cause when they
+do not place it.
+
 ## 5. Settle environmental failures with the owner
 
 A failure you diagnose as environmental with good confidence is not a finding about
@@ -308,8 +371,9 @@ backticks or emphasis around either.
 
 - **Commit:** <full commit> on <branch>
 - **Result:** passed | failed | inconclusive — <one line why>
-- **Parts:** local <result> · helm <result> · pipeline <result>
+- **Parts:** local <result> · helm <result> · pipeline <result> · ci <result> | ci not owed
 - **Pipeline:** run <id>, <conclusion>
+- **CI:** <workflow> run <id>, <conclusion> — <the owed jobs' result>; <the jobs failing not owed, and whether every failure is also in dev's run> (omit when nothing is owed)
 
 ## Local
 
@@ -331,6 +395,18 @@ Not run against Helm: <scenario> — <what the charts do not provide>; …
 
 <each lane, with the scenarios it ran and their results>
 
+## CI
+
+<omit when nothing is owed>
+
+| Workflow | Run | Owed by | Job | Owed observation | Result |
+|---|---|---|---|---|---|
+| <file> | <id> | §<section>, <task> | <job> | <what the job must show> | passed \| failed |
+
+Baseline: dev's <file> run `<id>` at `<short commit>` (<the merge base, or how it relates to it>); or: no completed dev run of code the branch contains.
+
+Not owed: `<job>` — <conclusion>, <each failure: the test and its exception type, or the failing step, with its class and, for an inherited one, how it fails in the baseline>; …
+
 ## Coverage of this change
 
 | Scenario | Basis | Lane | Result |
@@ -347,7 +423,7 @@ the attempt that followed; or `None.`>
 
 ### V1 — <the failure in one line>
 
-- **Part:** local | helm | pipeline
+- **Part:** local | helm | pipeline | ci
 - **Evidence:** <attempt, log paths, and the lines that show it>
 - **Cause:** commit | unknown
 
@@ -360,7 +436,12 @@ the attempt that followed; or `None.`>
 
 Only failures caused by the commit, or of unknown cause, go under `## Failures`,
 labelled `V<n>` so triage can carry them beside review findings; write `None.` when
-there are none. Environmental failures go under `## Environment` and are never
+there are none. The `ci` part's result is `passed` when every owed job passed and
+showed its observation and no other failure is a finding, `failed` with a `V<n>`,
+and `inconclusive` when its run produced no evidence and the owner declined the
+rerun. What a section owes is read from `tasks.md`, never written there: a line
+that names the wrong job or workflow is reported, and the plan's correction is
+implementation's. Environmental failures go under `## Environment` and are never
 findings.
 
 When the run used `HELM_ALL_SCENARIOS=1`, the scenarios outside the served list
@@ -374,7 +455,8 @@ Report a list that should grow under "About the validation".
 ## 8. Report
 
 Tell the owner the commit, the result and each part's, the pipeline run and its
-conclusion, the coverage of the change, the scenarios not run against Helm, each
+conclusion, each CI run with its owed observations and its baseline, the coverage
+of the change, the scenarios not run against Helm, each
 environmental failure and how it was settled, each failure with its diagnosis, and
 anything under "About the validation". Then say what comes next. When this is a
 round's validation beside its review, or it has a `V<n>`: the implementation

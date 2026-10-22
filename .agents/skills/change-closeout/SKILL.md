@@ -162,9 +162,12 @@ list its parts in another order; work in this order, and note it on the section.
   divergence; reassigning is the owner's decision, so put it to them.
 - **End-to-end pipeline.** Record the run the latest passing validation names, its
   result, and the scenarios that exercise the change, from the validation record's
-  coverage section. Closeout changes no code, so that run still describes the code
-  the closeout commit carries; say whether it names the pre-closeout commit or an
-  earlier one the owner waived.
+  coverage section. Record too, from that record's `## CI`, each observation the
+  change's sections owed by validation (`Owed by validation:` in `tasks.md`): the
+  workflow's run, the job and what it showed, and the `dev` baseline its other
+  failures were compared with. Closeout changes no code, so those runs still
+  describe the code the closeout commit carries; say whether they name the
+  pre-closeout commit or an earlier one the owner waived.
 
 A part that needs a decision the change does not make — an open question the plan
 left to closeout, or a disposition the triage deferred to it — is put to the owner

@@ -27,7 +27,7 @@ the change's files rather than an earlier session's memory.
 | Planning | `change-plan` | `make plan CHANGE=<change>`, once the design review's triage advances the change | `tasks.md`, ending with the closeout task, one commit |
 | Implementation | `change-implement` | `make implement CHANGE=<change> [SECTION=<n> \| SECTIONS=<n-m>]` | each section's code and tests, its task notes, one commit per section |
 | Implementation review | `change-review` | `make review CHANGE=<change> KIND=implementation` | `reviews/NN-implementation.md` |
-| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD` and runs the pipeline |
+| Validation | `change-validate` | `make validate CHANGE=<change>` | `reviews/NN-validation.md`; pushes `HEAD`, runs the pipeline (`make run-e2e`, `make fetch-e2e-logs`), and dispatches and reads each CI workflow the change's complete sections owe (`make run-ci`, `make validate-ci`) |
 | Triage | `change-triage` | `make triage CHANGE=<change>` | `reviews/NN-<kind>.triage.md` ending with `## Next`, `interventions.jsonl`, accepted fixes in one commit, the index row when a phase-closing review's triage advances the change; whatever it edited that no fix commit holds, in one commit of its own |
 | Pre-closeout review | `change-review` | `make review CHANGE=<change> KIND=pre-closeout` | `reviews/NN-pre-closeout.md` |
 | Closeout | `change-closeout` | `make closeout CHANGE=<change>` | permanent documents, the promotion record, the archived change, one commit |
@@ -46,6 +46,20 @@ Every step that commits — design, planning, implementation, triage, closeout, 
 archive cleanup — pushes each commit right after through `make push-branch`, the
 guarded push of exactly `HEAD`, the only push a step may make. A pushed branch
 starts nothing: validation dispatches the end-to-end pipeline itself.
+
+Validation dispatches CI workflows too, for evidence only a run of one produces.
+`make run-ci WORKFLOW=<file>` dispatches a workflow on the current branch and
+prints the newest run of it there before the dispatch as `CI_AFTER_RUN`; it
+refuses any workflow `scripts/ci_evidence.py` does not list, naming the list, which
+holds `tests.yml` and nothing that publishes, and only you extend it. `make
+validate-ci WORKFLOW=<file> CI_AFTER_RUN=<id>` is validation's `ci` part: it waits
+for the dispatch's run of `HEAD` newer than that one, keeps its job logs under
+`.snapshot/validation/<short commit>/ci/`, and classes each failure — a failing test's
+ID and exception type from pytest's short summary, or a failing step with its
+error lines — against the
+same job in the latest completed `dev` run of the workflow whose commit the branch
+contains: `inherited` when that run fails it the same way, `new`, or
+`uncomparable`.
 
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
@@ -263,6 +277,19 @@ never sets them. A pre-closeout review refuses until the latest validation passe
 and names `HEAD`, or an ancestor that differs only in the change's ledger and
 reviews; `UNVALIDATED=1` overrides that. `make design-review CHANGE=<change>` is
 shorthand for `KIND=design`.
+
+A plan names evidence only a push produces — a CI workflow's run, which a change
+branch's push does not trigger — on its own line of a section's verification task,
+beside `End-to-end:`: `Owed by validation:`, the workflow, the job, and what the
+job must show. It gates no task. Once every task of the section is checked, every
+validation of the change dispatches the workflow and judges the job, and its record
+gains a `ci` part on its `Parts` line, a `**CI:**` line, and a `## CI` section:
+each owed job and its observation with its result, the `dev` baseline run and its
+commit, and every other failing job's failures with their class. An `inherited`
+failure is already failing on `dev` and is no finding; a `new` one is diagnosed
+like any failure, and an `uncomparable` one is of unknown cause, so triaged. With
+nothing owed, the part reads `ci not owed`. Closeout records the owed observations
+from the latest passing validation's `## CI`.
 
 A review run elsewhere — in a browser session, by another tool — is pasted into
 triage, which saves it verbatim as the next record, `NN-<kind>-external.md`, and

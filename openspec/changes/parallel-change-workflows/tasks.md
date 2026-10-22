@@ -1760,16 +1760,25 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
 `.agents/skills/` (`change-plan`, `change-implement`, `change-validate`,
 `change-closeout`), `docs/agents/change-workflow.md`, and `scripts/tests/`.
 
-- [ ] 8A.1 `scripts/ci_evidence.py`: the dispatchable list (`tests.yml`) and
+- [x] 8A.1 `scripts/ci_evidence.py`: the dispatchable list (`tests.yml`) and
       `dispatch <workflow>`, which refuses a workflow not on the list, naming the
       list, records the newest run of the workflow on the branch and prints its ID,
       and runs `gh workflow run <workflow> --ref <branch>`; `make run-ci
       WORKFLOW=<file>` runs it (D15).
-- [ ] 8A.2 The fetch: `scripts/fetch-e2e-logs.py --workflow <file>` downloads the
+      Note: `DISPATCHABLE`; the ID is printed as `CI_AFTER_RUN=<id>`, 0 when the
+      branch has no run of the workflow; a refusal runs nothing and exits 2, a
+      detached `HEAD` is refused before any dispatch. `make run-ci` has `make
+      round-view-closed` as its prerequisite, as `make run-e2e` does.
+- [x] 8A.2 The fetch: `scripts/fetch-e2e-logs.py --workflow <file>` downloads the
       run's whole log (`gh run view --log`) and, for a workflow other than
       `e2e.yml`, asks for none of the end-to-end lanes' artifacts, so a missing one
       is not warned about (D15).
-- [ ] 8A.3 The comparison in `scripts/ci_evidence.py`, over the fetched logs: each
+      Note: the whole log was already downloaded for any workflow; the lane
+      artifacts are now asked for only of `e2e.yml`'s runs, and the script's
+      messages name the workflow, or no workflow, rather than "E2E". It also
+      gains `--event`, taking only runs triggered so; the `ci` part passes
+      `workflow_dispatch`, and the pipeline's fetch is unchanged.
+- [x] 8A.3 The comparison in `scripts/ci_evidence.py`, over the fetched logs: each
       job's failures — every pytest short-summary line, `FAILED <id> - <type>:
       <message>`, as the test ID and the exception type; for a job printing none,
       the failing step and its error lines; the baseline — the latest completed run
@@ -1779,7 +1788,50 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       the same test ID with the same exception type, `new` when it does not, and
       `uncomparable` when there is no baseline or the job printed no short summary
       on either side (D16, 78 F1, 83 F1).
-- [ ] 8A.4 Validation's `ci` part: `validate_slice.py ci --workflow <file>
+      Note: `read_jobs` takes each job's conclusion and failing steps from `gh run
+      view --json jobs` and its lines from the whole log, whose lines `gh` prefixes
+      with the job's and the step's names and a timestamp (read past a byte-order
+      mark and colour codes). Only lines inside a `short test summary info` block
+      are read, so a line starting `FAILED` elsewhere is not a failure; `ERROR`
+      lines (an error outside the test body) count as failures beside `FAILED`; a
+      test ID's bracketed parameters may hold spaces. On CI (`CI` set) pytest
+      prints each entry's whole crash message, which may run over several lines;
+      only lines matching `FAILED`/`ERROR` are read as entries, and the block ends
+      only at pytest's closing count, matched as `-q` prints it (counts of named
+      outcomes, then `in <n>s`, with or without its rule), at a runner line
+      (`##[…`), or where its step ends, so a message line cannot end it early.
+      The type is the message's leading `<name>:`, or a message that is only an
+      exception's name (`TimeoutError`, `asyncio.CancelledError`, raised with no
+      message), and a plain failed `assert`, which pytest prints as the assertion
+      itself, is `AssertionError`. A line naming no type — pytest trims lines off
+      CI, dropping a long ID's message — makes that failure `uncomparable`, since
+      D16 rejects comparing by the ID alone. A test is compared by ID, type, and
+      outcome, so one erroring where `dev` fails it is `new`.
+      Correction to the task's wording, from the fresh-context checks: D16 and the
+      delta compare a job printing no failing test by its failing step and error
+      lines, so such a job — a TypeScript or Rust job, a setup step — is not always
+      `uncomparable`: it is `inherited` when the baseline's same job failed at the
+      same step with the same `##[error]` lines, and `new` when that job passed,
+      or failed only at other steps, or there with other error lines. Failing
+      tests are likewise `new` beside a baseline job that failed only at other
+      steps. Every failure is `uncomparable` when there is no baseline (or it
+      could not be chosen, fetched, or read, the reason saying which), when the
+      baseline has no job of that name or skipped it, when either run's log holds
+      no line of the job (as if `gh`'s log named jobs otherwise than `--json
+      jobs`), when either job failed at no named step, when a step's error lines
+      say only that it failed (the runner's `Process completed with exit code
+      <n>.`, all a TypeScript or Rust job's new failing test may leave), or when
+      one side names failing tests and the other only the same step failing; a
+      baseline job that passed makes every failure `new`. A job
+      with failing tests is compared by them alone, not also by its failing steps:
+      a `tests.yml` job stops at its first failing step.
+      Choosing the baseline (`baseline_run`) skips a cancelled `dev` run, which
+      completed without its jobs finishing, and a pull request's, which tests a
+      merge rather than its head commit; ancestry (`is_ancestor`) is `git
+      merge-base --is-ancestor` after `git rev-parse --verify --quiet`, so a commit
+      the checkout lacks is no ancestor, and any other Git exit is an error, not an
+      answer.
+- [x] 8A.4 Validation's `ci` part: `validate_slice.py ci --workflow <file>
       --after-run <id>` (`make validate-ci WORKFLOW=<file> CI_AFTER_RUN=<id>`,
       which the validate step's `make validate-*` rule already allows) writes an
       attempt under `.snapshot/validation/<short commit>/ci/<attempt>/` like the
@@ -1788,9 +1840,37 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       is cancelled, never listed, or not fetched is reported as producing no
       evidence. Judging the owed observations is the validating agent's, from the
       job logs (D15, D16).
-- [ ] 8A.5 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
+      Note: the part fetches both runs with `fetch-e2e-logs.py` — the dispatched
+      one with its new `--event workflow_dispatch`, so a pull request's run of the
+      same head commit, which tests a merge, is never taken — into the attempt's
+      `runs/<run>/` — `actions.log`, `run.json`, and `jobs/<job>.log` — so the
+      history copy, which copies the validated commit's
+      `.snapshot/validation/<commit>/`, carries them with no rule of its own.
+      `summary.json`'s `evidence` holds `workflow`, `run`, `baseline`, `jobs`
+      (each with its conclusion, failing steps, error lines, classed failures, a
+      reason when they share one, and its log), `classes`, and `no_evidence`. The
+      part passes when the run produced evidence and every failure is
+      `inherited`; a `new` or `uncomparable` one fails its `failures` step, naming
+      each, and an owed job is the agent's to judge whatever the part says. Also
+      refused: a workflow off the list (nothing run), a run of another commit,
+      and `ci` without `--workflow` or `--after-run`, since without the run before
+      the dispatch an earlier run of the same commit could be read. A run not yet
+      `completed`, a fetch that kept no run, and a run that cannot be read are no
+      evidence too. No baseline is a `baseline` warning; a baseline that cannot be
+      chosen (a listing that fails or is not a list, a failing ancestry check),
+      fetched, or read fails its step, and the part still compares with
+      none, keeping the run's own evidence, every failure `uncomparable` with that
+      reason — the one place a part goes on past a failed step; when no job of the
+      run failed, such a baseline step is a warning, nothing needing comparison.
+      `HEAD` moving after the fetch fails a `checkout` step and stops the part. The
+      helper closing a part is now `_after_part`, shared by the Helm and `ci`
+      parts.
+- [x] 8A.5 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
       validate gains `Bash(make run-ci *)` (D15).
-- [ ] 8A.6 `change-validate`: read every `Owed by validation:` line of a section
+      Note: the orchestrator's edit was in the worktree as the session started and
+      is committed with this section. `test_change_workflow_steps.py` gains a test
+      that validation alone may run `make run-ci`.
+- [x] 8A.6 `change-validate`: read every `Owed by validation:` line of a section
       whose tasks are all checked at `HEAD`; with none, the part is `ci not owed`;
       otherwise, per workflow, `make run-ci` once the push is done, then `make
       validate-ci`, beside the pipeline; judge each named job and its observation,
@@ -1800,7 +1880,13 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       environmental, put to the owner with its remedy; the record's `Parts` line
       gains `ci <result>`, its header a `**CI:**` line, and its body `## CI`, as
       D16's example shows; `tasks.md` is never edited (D14, D16, D17).
-- [ ] 8A.7 `change-plan`: a section's verification names only evidence an
+      Note: the owed lines are read in step 1, the dispatch and `make validate-ci`
+      started in step 2 beside the pipeline, what the part keeps described in step
+      3, the judging in step 4's "The CI part", and the record's `Parts`, `**CI:**`,
+      `## CI`, and the `ci` result in step 7. A line owing a workflow off the list
+      is refused by `make run-ci`, its observation absent, a `V<n>` of unknown
+      cause for triage to take to design.
+- [x] 8A.7 `change-plan`: a section's verification names only evidence an
       implementation session can produce, and evidence only a push produces on an
       `Owed by validation:` line — workflow, job, what the job must show — beside
       `End-to-end:`; a workflow not on `scripts/ci_evidence.py`'s list cannot be
@@ -1811,10 +1897,17 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       `change-closeout`: the end-to-end part records the owed observations from the
       latest passing validation's `## CI`, as it records the pipeline run (D14,
       D18).
-- [ ] 8A.8 `docs/agents/change-workflow.md`: in "Skills", `make run-ci` and `make
+      Note: `change-plan`'s "Sections are slices" gains the bullet with D14's
+      example line; `change-implement`'s step 3 the confirmation beside the
+      end-to-end one; `change-closeout`'s end-to-end part the owed observations
+      with their runs and baseline.
+- [x] 8A.8 `docs/agents/change-workflow.md`: in "Skills", `make run-ci` and `make
       validate-ci` beside the pipeline targets; in "Reviews", the `Owed by
       validation:` line and the record's `## CI` (D14, D16).
-- [ ] 8A.9 Verification. Unit, with an injected runner, in
+      Note: the Validation row names the pipeline's and the CI targets, and a
+      paragraph after the push paragraph says what each does and that only the
+      owner extends the list.
+- [x] 8A.9 Verification. Unit, with an injected runner, in
       `scripts/tests/test_ci_evidence.py`: a listed workflow dispatched on the
       branch and a publishing one refused, naming the list, nothing run; parsing
       short-summary lines; a baseline chosen as the newest `dev` run whose commit
@@ -1833,6 +1926,149 @@ contains. Touches a new `scripts/ci_evidence.py`, `scripts/fetch-e2e-logs.py`,
       Owed by validation: `tests.yml`, job `release · deployment contracts` — the
       job passes, and the record's `## CI` names the baseline `dev` run and its
       commit, and classes every failure of the jobs not owed.
+      Evidence. `scripts/tests/test_ci_evidence.py`, 47 passed, unit (Git and `gh`
+      injected as a fake runner): a listed workflow dispatched on the branch after
+      its newest run there is recorded and printed as `CI_AFTER_RUN`, and 0 for a
+      branch with none; `publish-pypi.yml`, `e2e.yml`, and no workflow refused,
+      naming the list, nothing run, and the command line's exit 2 for the first
+      two; a detached
+      `HEAD` refused before any dispatch; the list holding `tests.yml` alone; the
+      baseline the newest `dev` run the branch contains, skipping a newer one it
+      does not, skipping a cancelled run and a pull request's, and none; ancestry
+      true and false, a commit the checkout lacks never asked of `merge-base`, and
+      a failing `merge-base` and a failing `rev-parse` each an error;
+      short-summary lines read as test ID and type — a type, a bracketed
+      parameter holding ` - `, an `ERROR` line, a dotted type, a long ID with no
+      message, pytest's `Failed:`, a `SKIPPED` line not a failure, a plain `assert`
+      as `AssertionError`, an exception's bare name (dotted too) as its type and a
+      bare word not; entries whose messages run over several lines — among them
+      lines reading like a count (`3 attempts in 5.0s`, `5 failed in 2.0s, then
+      …`) and a rule — hiding no later entry; pytest's closing count, bare and
+      ruled, ending the summary; a summary with no closing count ending with its
+      step and at a runner line; only the summary block read, past the timestamp, the
+      byte-order mark, and colour, another job's lines apart; a job printing no
+      summary keeping its failing step and error lines; and the delta's five
+      scenarios — "Owed CI evidence beside jobs that fail on `dev`", "A job not owed
+      fails only on the branch", "A new failure in a job that already fails on
+      `dev`", "A test that fails on `dev` fails another way on the branch", "No `dev`
+      run of the branch's code" — as classes over fixture logs; a job printing no
+      failing test compared by its step: `inherited` at the same step with the
+      same error lines, `new` beside a passing baseline job, other error lines, a
+      baseline failing only another step, and a baseline naming failing tests at
+      another step; failing tests `new` beside a baseline failing only a later
+      step; failing tests beside a baseline job that timed out at the same step
+      printing none, and a failing step beside a baseline naming failing tests at
+      it, each `uncomparable`; a job failing at no named step and a job the
+      baseline skipped `uncomparable`; a job of which the run's or the
+      baseline's log holds no line, and a step whose error lines on both sides
+      say only that it failed, `uncomparable`; the caller's reason for no
+      baseline kept; a job the baseline lacks; a failure naming no type
+      `uncomparable` beside an `inherited` one; a bare `KeyError` where `dev`
+      raises a bare `TimeoutError`, and a test erroring where `dev` fails it,
+      each `new`; and passing and skipped jobs.
+      `scripts/tests/test_fetch_e2e_logs.py`, 20 passed, unit (`gh` faked at the
+      process boundary): a `tests.yml` fetch keeps the whole log, lists
+      `tests.yml`'s runs, asks for no lane artifact, and warns of none; `--event
+      workflow_dispatch` passing over a newer pull request's run of the same
+      commit, and refused beside `--run-id`; a `tests.yml` run whose log cannot
+      be fetched fails. `scripts/tests/
+      test_validate_slice.py`, the `ci` part's orchestration with the runner and
+      reader injected — a fake fetch leaving each run's `actions.log`, a fake `gh`
+      answering the run, its jobs, and the `dev` listing — integration as
+      `TESTING.md` defines it for orchestration, as section 6 named it: the
+      summary's run, baseline, classed jobs, and classes, the job's log file, the
+      run's `run.json`, the written `summary.json`, every step's result, the fetch
+      after the recorded run, of the dispatch only, then the baseline's by ID, the
+      `dev` listing read with its events, and the rendered lines; a failure the
+      baseline lacks failing the part, naming it alone; no baseline a warning,
+      every failure `uncomparable`, nothing more fetched; a baseline whose fetch
+      fails, one fetched but unreadable, a listing that is not a list, and a
+      failing ancestry check each failing its step and leaving every failure
+      `uncomparable`, the reason saying which; a baseline that cannot be fetched
+      only a warning when no job failed, the part passing; `HEAD` moving while
+      the baseline is fetched failing a `checkout` step, no job compared; no
+      evidence from a
+      cancelled run, a run not yet completed, a fetch that exits non-zero (one
+      case standing for a run never listed and one not fetched, which the part
+      tells apart only by the fetch's log), a fetch that keeps no run, and a run
+      that cannot be read, the first and the fetch failures read no further; a
+      run of another commit refused; a workflow off
+      the list refused, nothing run; the command line refusing `ci` without either
+      argument; and, through `make -n` over the real Makefile, `make validate-ci`
+      and `make run-ci` running their scripts. `scripts/tests/
+      test_change_workflow_steps.py`, unit over the real step table: validation
+      alone may run `make run-ci`. Not shown: a real `gh run view --log` of
+      `tests.yml` and a real `--json jobs`; the fixtures follow the format of an
+      `e2e.yml` log fetched earlier (`<job>\t<step>\t<timestamp> <line>`), and the
+      validation this line owes exercises the real ones. `uv run --no-project
+      --with pytest pytest -q scripts/tests`: 1512 passed after the three
+      fresh-context checks' fixes. `make test`: passed, every suite, `make -C helm
+      test-render` included, before the fixes and again after the last. `make
+      check-packaging`, `make check-agent-skills`, and `make check-change`:
+      passed, citations included, now that the scripts this section creates exist.
+      The fresh-context read of the diff — the changed skills among it — against
+      D14–D18 and the delta's two modified requirements found no breach of
+      layering, imports, comments, or packaging, and found, all fixed: a job
+      printing no failing test was always `uncomparable`, where D16 and the
+      delta compare it by its failing step and error lines (the plan's 8A.3 had
+      narrowed it; corrected there); a baseline that could not be listed, fetched,
+      or read was reported as no `dev` run of the branch's code; the module
+      docstring's "both parts" and "each part stops at its first failure", which
+      the `ci` part made untrue; a fetch message still saying "E2E"; and evidence
+      claims beyond their tests — the not-completed run, a fetch keeping no run, an
+      unreadable run, exit 2 for `e2e.yml`, and one fetch failure claimed as two
+      cases — now tested or narrowed. Declined: classing a job's failing steps
+      beside its failing tests, since a `tests.yml` job stops at its first
+      failing step. A second check, after those fixes, found and this section
+      fixed: the summary parser ended a block at an entry's second line, while
+      pytest on CI prints each entry's whole, often multi-line, message, so a
+      failure listed after one could be missed and the part pass over it; the
+      notes' "80 columns" premise, false on CI, where nothing is trimmed and
+      `tests.yml` sets `COLUMNS: '200'` besides; failing tests beside a baseline
+      failing only a later step called `uncomparable` rather than `new`; a
+      skipped baseline job read as passing; a job failing at no named step
+      always `new`; a `dev` listing that is not a list reported as no baseline;
+      `git cat-file`'s exit 128 for a missing commit indistinguishable from any
+      other failure (now `rev-parse --verify --quiet`, exit 1); a pull request's
+      run of the same head commit, which tests a merge, able to be taken as the
+      run or the baseline (now `--event workflow_dispatch` on the fetch, and pull
+      requests' runs skipped as baselines); the skill's no-evidence list and its
+      treating every no-evidence case as environmental; the guide's
+      `<commit>` path; and evidence claims beyond their tests, now tested. A third
+      check, after those, found and this section fixed: two steps failing the
+      same way with nothing said but the runner's exit line — or with no line of
+      the job in either log, as a job-name mismatch would leave — were
+      `inherited`, so a new TypeScript or Rust test failure could pass (now
+      `uncomparable`); the summary's end rule matched a message line such as `3
+      attempts in 5.0s`, hiding the entries after it (now pytest's count alone);
+      an exception raised with no message had no type, and two typeless failures
+      were compared by ID alone, which D16 rejects (now the bare name is the type,
+      and a typeless failure `uncomparable`); the outcome was not compared; a
+      `HEAD` move after the fetch stopped the part without failing it; a
+      baseline that could not be had failed a run in which nothing failed (now a
+      warning); a docstring sentence with no verb and one that would go stale;
+      the fetch's docstring not naming `--event`; and the notes' claims about
+      them. End to end: none of `e2e-tests/`; the
+      owed line is confirmed — `release · deployment contracts` is that job's
+      `name:` in `.github/workflows/tests.yml` — and this round's validation is
+      the part's first real run.
+      Handoff: unverified until that run — `gh run view --log`'s prefix for
+      `tests.yml`'s job names (`py · <name>`, matched exactly against `--json
+      jobs`'s `name`), and the `--json` fields read (`jobs[].name`,
+      `conclusion`, `status`, `steps[].name`, `steps[].conclusion`); this step
+      could run no `gh` to check them, and a mismatch would show as every failed
+      job `uncomparable`, its reason saying the log holds no line of it, and the
+      part failing. The multi-line summary entries follow pytest's own
+      source (`_get_line_with_reprcrash_message`, untrimmed when `CI` is set),
+      not a real `tests.yml` log. A baseline older than GitHub's log
+      retention cannot be fetched, which fails `baseline fetch` and leaves every
+      failure `uncomparable`. For closeout (10.9): the companion
+      `architecture.md`'s "Each part therefore starts from `make dist-clean`" is
+      no longer true of the `ci` part, which builds nothing. Implementation and
+      triage reach `make
+      validate-ci` through their `make validate-*` rule; it only reads GitHub
+      and writes under `.snapshot/`, so it was left. Section 8B's fresh run
+      grant is how a validation granted a missing `gh` rule would get it.
 
 ## 8B. Grants for a fresh run, and the commit and merge rules
 

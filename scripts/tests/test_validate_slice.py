@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
@@ -1109,6 +1110,342 @@ def test_memory_quantities_are_read_in_bytes(quantity: str, expected: int) -> No
 def test_a_value_that_is_not_a_memory_quantity_is_refused() -> None:
     with pytest.raises(ValueError):
         validator.memory_bytes("lots")
+
+
+# --- the ci part ------------------------------------------------------------------
+
+CI_RUN, BASELINE_RUN, AFTER_RUN = 500, 80, 41
+DEV_COMMIT = "1111111111111111111111111111111111111111"
+OWED_JOB = "release · deployment contracts"
+VMS_JOB = "py · vms-storefront"
+TIMEOUT = "FAILED tests/test_vm.py::test_slow - TimeoutError: timed out"
+
+
+def _ci_log(*jobs: tuple[str, Sequence[str]]) -> str:
+    """A run's whole log, as `gh run view --log` prints it: each failure of a job in
+    its short test summary."""
+    lines = []
+    for job, failures in jobs:
+        texts = ["collected 12 items"]
+        if failures:
+            texts += ["=========================== short test summary info "
+                      "============================", *failures, f"{len(failures)} failed"]
+        lines += [f"{job}\tRun tests\t2026-10-22T07:00:00.1234567Z {text}" for text in texts]
+    return "\n".join(lines) + "\n"
+
+
+def _ci_jobs(*jobs: tuple[str, Sequence[str]]) -> list[dict]:
+    return [{"name": job, "conclusion": "failure" if failures else "success",
+             "steps": [{"name": "Run tests", "conclusion": "failure" if failures else "success"}]}
+            for job, failures in jobs]
+
+
+class CIFake:
+    """The checkout and GitHub, as the ci part's fetches and reads see them: the
+    dispatched run of the commit, and the dev runs listed for a baseline."""
+
+    def __init__(self, *, run: Sequence[tuple[str, Sequence[str]]],
+                 baseline: Sequence[tuple[str, Sequence[str]]] = (),
+                 conclusion: str = "failure", status: str = "completed",
+                 head_sha: str = COMMIT, dev_runs: list[dict] | None = None,
+                 fetch_fails: bool = False, fetch_keeps_nothing: bool = False,
+                 baseline_fetch_fails: bool = False, unreadable: str | None = None,
+                 head_moves_at_baseline: bool = False) -> None:
+        self.head = COMMIT
+        # A commit or branch switch while the baseline is fetched.
+        self.head_moves_at_baseline = head_moves_at_baseline
+        self.runs = {str(CI_RUN): (run, head_sha, conclusion, status),
+                     str(BASELINE_RUN): (baseline, DEV_COMMIT, "failure", "completed")}
+        self.dev_runs = (dev_runs if dev_runs is not None else
+                         [{"databaseId": 90, "headSha": "2" * 40, "conclusion": "failure"},
+                          {"databaseId": BASELINE_RUN, "headSha": DEV_COMMIT,
+                           "conclusion": "failure"}])
+        self.fetch_fails = fetch_fails
+        # A fetch that exits 0 yet leaves no run's directory.
+        self.fetch_keeps_nothing = fetch_keeps_nothing
+        self.baseline_fetch_fails = baseline_fetch_fails
+        # The run ID whose `gh run view` fails.
+        self.unreadable = unreadable
+        self.commands: list[list[str]] = []
+        self.reads: list[list[str]] = []
+
+    def run(self, command: Sequence[str], log: Path) -> int:
+        command = list(command)
+        self.commands.append(command)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text(f"{log.stem} output\n", "utf-8")
+        assert command[:2] == ["python3", "scripts/fetch-e2e-logs.py"], command
+        if self.head_moves_at_baseline and "--run-id" in command:
+            self.head = "f" * 40
+        if self.fetch_fails or (self.baseline_fetch_fails and "--run-id" in command):
+            return 1
+        if self.fetch_keeps_nothing:
+            return 0
+        run_id = (str(CI_RUN) if "--after-run" in command
+                  else command[command.index("--run-id") + 1])
+        directory = Path(command[command.index("--output-dir") + 1]) / run_id
+        directory.mkdir(parents=True)
+        (directory / "actions.log").write_text(_ci_log(*self.runs[run_id][0]), "utf-8")
+        return 0
+
+    def read(self, command: Sequence[str]) -> str:
+        command = list(command)
+        self.reads.append(command)
+        if command == ["git", "rev-parse", "HEAD"]:
+            return self.head + "\n"
+        if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
+            return ""
+        if command[:3] == ["gh", "run", "view"]:
+            if command[3] == self.unreadable:
+                raise validator.ValidationError(f"{' '.join(command)} failed: not found")
+            jobs, sha, conclusion, status = self.runs[command[3]]
+            return json.dumps({"databaseId": int(command[3]), "headSha": sha,
+                               "headBranch": "feat/pilot", "status": status,
+                               "conclusion": conclusion, "jobs": _ci_jobs(*jobs)})
+        if command[:3] == ["gh", "run", "list"]:
+            return json.dumps(self.dev_runs)
+        raise AssertionError(f"unexpected read: {command}")
+
+
+def _ci(tmp_path: Path, fake: CIFake, workflow: str = "tests.yml") -> object:
+    return validator.validate_ci(_validation(tmp_path, fake, "ci"), workflow=workflow,
+                                 after_run=AFTER_RUN,
+                                 contains=lambda ancestor, commit: ancestor == DEV_COMMIT)
+
+
+def _ci_attempt(tmp_path: Path) -> Path:
+    return tmp_path / ".snapshot/validation" / COMMIT[:12] / "ci" / "1"
+
+
+def test_the_ci_part_keeps_the_run_its_baseline_and_each_jobs_classed_failures(
+        tmp_path: Path) -> None:
+    jobs = [(OWED_JOB, []), (VMS_JOB, [TIMEOUT])]
+    fake = CIFake(run=jobs, baseline=jobs)
+
+    summary = _ci(tmp_path, fake)
+
+    assert summary.passed
+    runs = _ci_attempt(tmp_path) / "runs"
+    assert fake.commands == [
+        ["python3", "scripts/fetch-e2e-logs.py", "--workflow", "tests.yml", "--output-dir",
+         str(runs), "--after-run", str(AFTER_RUN), "--event", "workflow_dispatch"],
+        ["python3", "scripts/fetch-e2e-logs.py", "--workflow", "tests.yml", "--output-dir",
+         str(runs), "--run-id", str(BASELINE_RUN)],
+    ]
+    assert ["gh", "run", "list", "--workflow", "tests.yml", "--branch", "dev", "--status",
+            "completed", "--limit", "100", "--json",
+            "databaseId,headSha,conclusion,event"] in fake.reads
+    evidence = summary.evidence
+    assert evidence["run"] == {
+        "id": CI_RUN, "commit": COMMIT, "branch": "feat/pilot", "status": "completed",
+        "conclusion": "failure",
+        "log": str((runs / str(CI_RUN) / "actions.log").relative_to(tmp_path))}
+    assert (evidence["baseline"]["id"], evidence["baseline"]["commit"]) == (BASELINE_RUN,
+                                                                            DEV_COMMIT)
+    by_name = {job["name"]: job for job in evidence["jobs"]}
+    assert by_name[OWED_JOB]["failures"] == []
+    assert by_name[VMS_JOB]["failures"] == [{"test": "tests/test_vm.py::test_slow",
+                                             "type": "TimeoutError", "outcome": "FAILED",
+                                             "class": "inherited"}]
+    assert evidence["classes"] == {"inherited": 1, "new": 0, "uncomparable": 0}
+    job_log = tmp_path / by_name[VMS_JOB]["log"]
+    assert job_log == runs / str(CI_RUN) / "jobs" / "py_vms-storefront.log"
+    assert TIMEOUT in job_log.read_text("utf-8")
+    assert json.loads((runs / str(CI_RUN) / "run.json").read_text("utf-8"))["headSha"] == COMMIT
+    kept = json.loads((_ci_attempt(tmp_path) / "summary.json").read_text("utf-8"))
+    assert kept["evidence"]["classes"] == evidence["classes"]
+    assert _results(summary) == {"clean before": "passed", "fetch": "passed",
+                                 "run": "passed", "baseline fetch": "passed",
+                                 "baseline": "passed", "failures": "passed",
+                                 "clean after": "passed"}
+    rendered = validator.render(summary)
+    assert f"baseline tests.yml run {BASELINE_RUN} of {DEV_COMMIT[:12]}" in rendered
+    assert "inherited    tests/test_vm.py::test_slow (TimeoutError)" in rendered
+
+
+def test_a_failure_the_baseline_does_not_show_fails_the_part_naming_it(tmp_path: Path) -> None:
+    other = "FAILED tests/test_vm.py::test_other - KeyError: 'listing'"
+
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [TIMEOUT, other])],
+                                   baseline=[(VMS_JOB, [TIMEOUT])]))
+
+    assert not summary.passed
+    detail = _step(summary, "failures").detail
+    assert detail.startswith("1 inherited, 1 new, 0 uncomparable")
+    assert f"{VMS_JOB}: tests/test_vm.py::test_other (KeyError), new" in detail
+    assert "test_slow" not in detail
+
+
+def test_with_no_dev_run_of_the_branchs_code_every_failure_is_uncomparable(
+        tmp_path: Path) -> None:
+    fake = CIFake(run=[(VMS_JOB, [TIMEOUT])],
+                  dev_runs=[{"databaseId": 90, "headSha": "2" * 40, "conclusion": "failure"}])
+
+    summary = _ci(tmp_path, fake)
+
+    assert not summary.passed
+    assert _results(summary)["baseline"] == "warning"
+    assert summary.evidence["baseline"] is None
+    assert summary.evidence["classes"] == {"inherited": 0, "new": 0, "uncomparable": 1}
+    assert len(fake.commands) == 1
+
+
+def test_a_cancelled_run_is_reported_as_producing_no_evidence(tmp_path: Path) -> None:
+    fake = CIFake(run=[(VMS_JOB, [])], conclusion="cancelled")
+
+    summary = _ci(tmp_path, fake)
+
+    assert not summary.passed
+    assert "cancelled" in summary.evidence["no_evidence"]
+    assert _step(summary, "evidence").detail.startswith("the run produced no evidence")
+    assert not any(read[:3] == ["gh", "run", "list"] for read in fake.reads)
+
+
+def test_a_run_never_listed_or_not_fetched_is_reported_as_producing_no_evidence(
+        tmp_path: Path) -> None:
+    fake = CIFake(run=[], fetch_fails=True)
+
+    summary = _ci(tmp_path, fake)
+
+    assert not summary.passed
+    assert f"newer than run {AFTER_RUN} was listed" in summary.evidence["no_evidence"]
+    assert not any(read[:2] == ["gh", "run"] for read in fake.reads)
+
+
+def test_a_run_not_yet_completed_is_reported_as_producing_no_evidence(tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [])], conclusion="", status="in_progress"))
+
+    assert not summary.passed
+    assert "in_progress, not completed" in summary.evidence["no_evidence"]
+
+
+def test_a_fetch_that_keeps_no_run_is_reported_as_producing_no_evidence(
+        tmp_path: Path) -> None:
+    fake = CIFake(run=[(VMS_JOB, [])], fetch_keeps_nothing=True)
+
+    summary = _ci(tmp_path, fake)
+
+    assert not summary.passed
+    assert "the fetch left 0 runs" in summary.evidence["no_evidence"]
+    assert not any(read[:2] == ["gh", "run"] for read in fake.reads)
+
+
+def test_a_fetched_run_that_cannot_be_read_is_reported_as_producing_no_evidence(
+        tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [])], unreadable=str(CI_RUN)))
+
+    assert not summary.passed
+    assert "could not be read" in summary.evidence["no_evidence"]
+    assert "not found" in _step(summary, "run").detail
+
+
+def test_a_baseline_that_cannot_be_fetched_leaves_every_failure_uncomparable_saying_so(
+        tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [TIMEOUT])], baseline=[(VMS_JOB, [TIMEOUT])],
+                                   baseline_fetch_fails=True))
+
+    assert not summary.passed
+    assert _results(summary)["baseline fetch"] == "failed"
+    assert summary.evidence["baseline"] is None
+    job = summary.evidence["jobs"][0]
+    assert job["failures"][0]["class"] == "uncomparable"
+    assert job["reason"] == f"the baseline, dev's run {BASELINE_RUN}, could not be fetched"
+
+
+def test_a_baseline_that_cannot_be_fetched_is_only_a_warning_when_no_job_failed(
+        tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(OWED_JOB, [])], conclusion="success",
+                                   baseline_fetch_fails=True))
+
+    assert summary.passed
+    assert _results(summary)["baseline fetch"] == "warning"
+    assert _step(summary, "failures").detail == "no job failed"
+
+
+def test_a_commit_while_the_baseline_is_fetched_fails_the_part_and_stops_it(
+        tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(OWED_JOB, [])], conclusion="success",
+                                   baseline=[(OWED_JOB, [])], head_moves_at_baseline=True))
+
+    assert not summary.passed
+    assert "not the validated commit" in _step(summary, "checkout").detail
+    assert summary.evidence["jobs"] == []
+
+
+def test_a_baseline_fetched_but_unreadable_says_so(tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [TIMEOUT])], baseline=[(VMS_JOB, [TIMEOUT])],
+                                   unreadable=str(BASELINE_RUN)))
+
+    assert not summary.passed
+    assert _results(summary)["baseline"] == "failed"
+    assert summary.evidence["jobs"][0]["reason"] == (
+        f"the baseline, dev's run {BASELINE_RUN}, was fetched but could not be read")
+
+
+@pytest.mark.parametrize("dev_runs, contains, problem", [
+    ({"databaseId": 80}, None, "not a run list"),
+    ([{"databaseId": BASELINE_RUN, "headSha": DEV_COMMIT, "conclusion": "failure"}],
+     "raise", "merge-base exited 128"),
+])
+def test_a_baseline_that_cannot_be_chosen_fails_its_step_and_compares_with_none(
+        tmp_path: Path, dev_runs: object, contains: str | None, problem: str) -> None:
+    def broken(ancestor: str, commit: str) -> bool:
+        raise validator.ci_evidence.CIError("git merge-base exited 128: broken")
+
+    fake = CIFake(run=[(VMS_JOB, [TIMEOUT])], dev_runs=dev_runs)
+    summary = validator.validate_ci(
+        _validation(tmp_path, fake, "ci"), workflow="tests.yml", after_run=AFTER_RUN,
+        contains=broken if contains else (lambda ancestor, commit: ancestor == DEV_COMMIT))
+
+    assert not summary.passed
+    assert problem in _step(summary, "baseline").detail
+    job = summary.evidence["jobs"][0]
+    assert job["failures"][0]["class"] == "uncomparable"
+    assert "could be chosen" in job["reason"]
+    assert len(fake.commands) == 1
+
+
+def test_a_run_of_another_commit_is_not_read_as_the_commits(tmp_path: Path) -> None:
+    summary = _ci(tmp_path, CIFake(run=[(VMS_JOB, [])], head_sha="f" * 40))
+
+    assert not summary.passed
+    assert "not the validated commit" in _step(summary, "run commit").detail
+    assert summary.evidence["jobs"] == []
+
+
+def test_a_workflow_validation_may_not_dispatch_is_refused_and_nothing_runs(
+        tmp_path: Path) -> None:
+    fake = CIFake(run=[])
+
+    summary = _ci(tmp_path, fake, workflow="publish-pypi.yml")
+
+    assert not summary.passed
+    assert "it may dispatch: tests.yml" in _step(summary, "workflow").detail
+    assert fake.commands == []
+
+
+def test_the_ci_command_line_needs_the_workflow_and_the_run_before_the_dispatch(
+        tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        validator.main(["ci", "--workflow", "tests.yml"], root=tmp_path)
+    with pytest.raises(SystemExit):
+        validator.main(["ci", "--after-run", "41"], root=tmp_path)
+
+
+@pytest.mark.parametrize("arguments, command", [
+    (["validate-ci", "WORKFLOW=tests.yml", "CI_AFTER_RUN=41"],
+     'python3 scripts/validate_slice.py ci --workflow "tests.yml" --after-run "41"'),
+    (["run-ci", "WORKFLOW=tests.yml"], 'python3 scripts/ci_evidence.py dispatch "tests.yml"'),
+])
+def test_the_ci_targets_run_their_scripts(arguments: list[str], command: str) -> None:
+    environment = {name: value for name, value in os.environ.items()
+                   if name not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL", "CHANGE")}
+
+    printed = subprocess.run(["make", "-n", "-s", "--no-print-directory", *arguments],
+                             cwd=REPO_ROOT, env=environment, capture_output=True, text=True,
+                             check=True).stdout
+
+    assert printed.strip().splitlines()[-1] == command
 
 
 # --- the credential helper, the markers, and the targets ------------------------
