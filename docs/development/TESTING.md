@@ -837,6 +837,22 @@ and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 
 This repository is public, and every test target it runs in public CI or a public build MUST pass without credentials for a private repository, image or package. A scenario that needs a private service's internals (its source, images, development-mode auth, operator test funds, or ledger reads) lives in that service's repository, which may depend on SCM's public artifacts. SCM's own e2e may run against a service's public test deployment, readiness-gated: it reports the unmet prerequisite when no target is configured or reachable. Otherwise SCM tests the client side against the service's published contract (schemas and test vectors) and a test double at the client kit's boundary.
 
+The API-credit payment scenario reads its payments policy through
+`e2e-tests/tests/e2e/roles/helpers/payments.py`, which other payment scenarios
+may reuse. A blank PAYMENTS.SERVICE_URL means no payments target is configured,
+and the scenario reports a blocked skip, never an Alkahest fallback: that is
+what the pipeline runs. With SERVICE_URL set, SERVICE_IDENTITY,
+DISPUTE_AUTHORITY, BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and
+SELLER_MARKETPLACE_CREDENTIAL are required, and a missing one fails the
+scenario by name before the target's `/health` is checked (timeout 5 seconds,
+environment proxies disabled); an unready target is again a blocked skip.
+FEE_BPS defaults to 250; LIVEMODE and DEVELOPMENT_AUTH default to false, are
+read as strict booleans, and LIVEMODE is emitted explicitly in buyer TOML.
+DEVELOPMENT_AUTH and API_KEY_ENV are mutually exclusive. The helper serializes
+only the named payments table, not domain configuration or payer selection.
+See [shared payment-scenario configuration](../../e2e-tests/README.md#shared-payment-scenario-configuration)
+for environment and runner setup.
+
 **Current example:** complete deals settled through the Arkhai payments service are qualified by that service's own suite. Here, `kit/arkhai-payments` checks conformance against the service's published vectors, vendored and identified by content hash in `kit/arkhai-payments/schema/SOURCE.md`.
 
 ## Offline Review Validation

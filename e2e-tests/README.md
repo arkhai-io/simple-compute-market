@@ -57,6 +57,32 @@ ACTIVE_PROFILES=staging,staging-secrets
 # loads: config.yml → config-staging.yml → config-staging-secrets.yml
 ```
 
+### Shared payment-scenario configuration
+
+The API-credit payment scenario reads the `PAYMENTS` section (environment
+prefix `ARKHAI_PAYMENTS__`) through `tests/e2e/roles/helpers/payments.py`, which
+other payment scenarios may reuse. SERVICE_URL names the payments target; leave
+it blank and the scenario reports `blocked` and skips. With it set, supply the
+other five: SERVICE_IDENTITY (public Ed25519 receipt signer), DISPUTE_AUTHORITY,
+BUYER_ACCOUNT, BUYER_MARKETPLACE_CREDENTIAL and SELLER_MARKETPLACE_CREDENTIAL;
+a missing one fails the scenario, naming it. Marketplace credentials are
+independent of payment account IDs.
+
+FEE_BPS defaults to 250. LIVEMODE and DEVELOPMENT_AUTH default to false and
+must be `true` or `false`; generated buyer tables explicitly pin the receipt
+mode. Choose either DEVELOPMENT_AUTH=true (literal loopback service URL only) or
+API_KEY_ENV naming the buyer's bearer-key environment variable, never both.
+Forward the named variable into the test runner yourself; host environment
+variables are not inherited by the buyer-machine container.
+
+An unreachable or unready `/health` also reports `blocked` and skips; invalid
+policy fails rather than selecting another settlement mechanism. The shared
+serializer writes only a named payments table — `Settlement.arkhai_payments`,
+or `bare_metal.arkhai_payments`, which it supports for a bare-metal buyer — and
+the scenario supplies domain settings and payer.
+See [Private Service Dependencies](../docs/development/TESTING.md#private-service-dependencies)
+for the public testing boundary.
+
 ### Secret injection (Kubernetes / Vault)
 
 In a Kubernetes environment, mount secrets as a file into `CONFIG_DIRECTORY`:
