@@ -369,9 +369,10 @@ request; inference must reserve a worst-case charge, run the request, and settle
 from measured usage, because the cost is unknown until the response is complete
 and a single request can exceed a key's balance.
 
-The campaign therefore proceeds in a fixed order: define the vocabulary; build
-an `api` family vocabulary and kit by refactoring API credits onto it, with the
-API-credits digests pinned byte-for-byte first; compose the inference roles on
+The campaign therefore proceeds in a fixed order: define the vocabulary; take
+the `api` family vocabulary and kit that Goal 4's `compose-api-family-kit`
+builds by refactoring API credits onto it, with the API-credits digests pinned
+byte-for-byte first; compose the inference roles on
 the kit and prove one deal at a flat charge per request; replace the flat charge
 with hold-then-settle metering; package the seller path thinly; qualify the
 market. An earlier order copied the API-credits roles into inference first and
@@ -385,7 +386,6 @@ for readiness.
 | Open gap | Owned by |
 |---|---|
 | No inference vocabulary: domain identity, model-card listing, rate card, provision intent, usage record and charge derivation, usage evidence, registry filter specification | [`add-inference-domain-contract`](../../openspec/changes/add-inference-domain-contract/) |
-| API credits has no family: issuance, the key authority, the gate client, and the storefront's issuance composition are namespaced to it, and the authority mirrors the digest function, so a second API-selling domain can only copy them | [`compose-api-family-kit`](../../openspec/changes/compose-api-family-kit/) |
 | No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
 | No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
 | Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
