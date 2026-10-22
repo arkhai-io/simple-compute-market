@@ -145,7 +145,6 @@ def _runtime(path: str) -> BareMetalStorefrontRuntime:
                 "seller_principal": kwargs["seller_principal"].model_dump(mode="json"),
                 "obligations": [],
             },
-            "accepted_escrow_terms": [],
         },
     )
 
@@ -1125,6 +1124,8 @@ async def test_an_opening_naming_no_condition_is_settled_under_the_listings(
     data = obligation["params"]["obligation_data"]
     assert data["arbiter"].lower() == authorized["arbiter"].lower()
     assert data["demand"] == "0x" + encode_recipient_demand(SELLER_WALLET).hex()
+    # The plan is the seller's committed copy; no escrow terms ride beside it.
+    assert "accepted_escrow_terms" not in accepted
 
 
 async def test_a_condition_no_escrow_can_be_settled_under_refuses_the_round(

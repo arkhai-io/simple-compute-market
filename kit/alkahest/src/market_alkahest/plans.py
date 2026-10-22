@@ -7,12 +7,13 @@ it converts between the envelope and this kit's typed ``EscrowTerms``
 shape and materializes whole plans from negotiated proposals.
 
 The plan models here are structural mirrors of the ``market_core``
-carriers (same field names, same wire serialization, same legacy
-coercions): the kit must not import market-core, and the determinism
-contract is structural — both sides derive byte-identical payloads.
+carriers (same field names, same wire serialization): the kit must not
+import market-core, and the determinism contract is structural — both sides
+derive byte-identical payloads.
 """
 
 from __future__ import annotations
+from collections.abc import Mapping
 from copy import deepcopy
 
 from typing import Any, Literal
@@ -22,7 +23,6 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
-    model_validator,
 )
 
 from .alkahest import materialize_escrow_terms_from_proposal
@@ -81,43 +81,6 @@ class SettlementObligation(BaseModel):
     def _serialize_obligation_amount(self, v: int | None) -> str | None:
         return _serialize_uint256_str(v)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_escrow_terms(cls, value: Any) -> Any:
-        """LEGACY: flat ``EscrowTerms`` dicts normalize into the envelope.
-
-        Mirrors the market-core coercion byte-for-byte; see there for
-        the contract. Removed with the client-wheel wire bump.
-        """
-        if not isinstance(value, dict):
-            return value
-        if "mechanism" in value or "escrow_contract" not in value:
-            return value
-
-        data = dict(value)
-        maker = data.pop("maker", "buyer")
-        obligation_data = data.pop("obligation_data", {}) or {}
-        params: dict[str, Any] = {
-            "escrow_contract": data.pop("escrow_contract"),
-            "obligation_data": obligation_data,
-        }
-        if data.get("chain_name") is not None:
-            params["chain_name"] = data.pop("chain_name")
-        else:
-            data.pop("chain_name", None)
-
-        amount = obligation_data.get("amount")
-        return {
-            "payer": maker,
-            "claimant": "seller" if maker == "buyer" else "buyer",
-            "amount": amount if isinstance(amount, (int, str)) else None,
-            "asset": obligation_data.get("token"),
-            "expiration_unix": data.pop("expiration_unix", None),
-            "mechanism": ALKAHEST_MECHANISM,
-            "params": params,
-            **data,
-        }
-
 
 class SettlementPlan(BaseModel):
     """Structural mirror of ``market_core.schemas.SettlementPlan``."""
@@ -130,28 +93,37 @@ class SettlementPlan(BaseModel):
         description="Off-chain servicing duties. Opaque envelope.",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_legacy_terms_list(cls, value: Any) -> Any:
-        """LEGACY: bare ``list[EscrowTerms]`` wraps into a plan."""
-        if isinstance(value, list):
-            return {"obligations": value}
-        return value
-
 
 def escrow_terms_to_settlement_obligation(
     terms: EscrowTerms | dict[str, Any],
 ) -> SettlementObligation:
-    """Wrap this kit's typed alkahest shape in the mechanism envelope."""
-    payload = (
-        terms.model_dump() if isinstance(terms, EscrowTerms) else dict(terms)
-    )
-    obligation_data = dict(payload.get("obligation_data") or {})
+    """Wrap this kit's typed alkahest shape in the mechanism envelope.
+
+    The maker funds the escrow and the other side claims it; the asset is the
+    escrowed token and the amount its obligation amount, which travels in its
+    decimal-string uint256 form.
+    """
+    model = terms if isinstance(terms, EscrowTerms) else EscrowTerms.model_validate(terms)
+    obligation_data = dict(model.obligation_data)
     amount = obligation_data.get("amount")
     if isinstance(amount, int) and not isinstance(amount, bool):
         obligation_data["amount"] = str(amount)
-    payload["obligation_data"] = obligation_data
-    return SettlementObligation.model_validate(payload)
+        amount = obligation_data["amount"]
+    params: dict[str, Any] = {
+        "escrow_contract": model.escrow_contract,
+        "obligation_data": obligation_data,
+    }
+    if model.chain_name is not None:
+        params["chain_name"] = model.chain_name
+    return SettlementObligation(
+        payer=model.maker,
+        claimant="seller" if model.maker == "buyer" else "buyer",
+        amount=amount if isinstance(amount, str) else None,
+        asset=obligation_data.get("token"),
+        expiration_unix=model.expiration_unix,
+        mechanism=ALKAHEST_MECHANISM,
+        params=params,
+    )
 
 
 def settlement_obligation_to_escrow_terms(
@@ -199,6 +171,80 @@ def escrow_terms_from_settlement_plan(
         else SettlementPlan.model_validate(plan)
     )
     return [settlement_obligation_to_escrow_terms(ob) for ob in plan_model.obligations]
+
+
+def _comparable_obligation_value(value: Any) -> Any:
+    """An obligation-data value with address and byte hex compared case-insensitively.
+
+    Only ``0x``-prefixed strings are lowercased; any other string must match exactly.
+    """
+    if isinstance(value, str):
+        return value.lower() if value[:2].lower() == "0x" else value
+    if isinstance(value, Mapping):
+        return {str(key): _comparable_obligation_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_comparable_obligation_value(item) for item in value]
+    return value
+
+
+def _comparable_terms(terms: EscrowTerms) -> dict[str, Any]:
+    obligation_data = dict(terms.obligation_data)
+    amount = obligation_data.get("amount")
+    if isinstance(amount, str) and amount.isdecimal():
+        obligation_data["amount"] = int(amount)
+    return {
+        "maker": terms.maker,
+        "chain_name": terms.chain_name,
+        "escrow_contract": terms.escrow_contract.lower(),
+        "expiration_unix": terms.expiration_unix,
+        "obligation_data": _comparable_obligation_value(obligation_data),
+    }
+
+
+def require_escrow_terms_fund_plan(
+    terms: list[EscrowTerms | dict[str, Any]],
+    plan: Any,
+) -> None:
+    """Refuse unless ``terms`` are exactly the escrows ``plan`` commits to.
+
+    ``terms`` are what a buyer derived for itself from its accepted proposal or
+    selection and the listing's release condition; ``plan`` is the seller's
+    committed copy. Every escrow must agree in maker, chain, contract, expiry,
+    and obligation data, so a plan naming another arbiter, recipient, token, or
+    amount than the buyer derived is caught before anything is funded. ``plan``
+    is this kit's ``SettlementPlan``, its wire form, or any other model of the
+    shared settlement-plan contract, such as core's, which is read through its
+    wire form. Raises ``ValueError`` starting ``seller_plan_mismatch`` and
+    naming the first escrow and field that differ.
+    """
+    if not isinstance(plan, SettlementPlan) and hasattr(plan, "model_dump"):
+        plan = plan.model_dump(mode="json")
+    derived = [
+        _comparable_terms(
+            item if isinstance(item, EscrowTerms) else EscrowTerms.model_validate(item)
+        )
+        for item in terms
+    ]
+    planned = [_comparable_terms(item) for item in escrow_terms_from_settlement_plan(plan)]
+    if len(derived) != len(planned):
+        raise ValueError(
+            f"seller_plan_mismatch: the plan commits to {len(planned)} escrow(s), "
+            f"the buyer derived {len(derived)}"
+        )
+    for index, (mine, theirs) in enumerate(zip(derived, planned)):
+        for field in ("maker", "chain_name", "escrow_contract", "expiration_unix"):
+            if mine[field] != theirs[field]:
+                raise ValueError(
+                    f"seller_plan_mismatch: escrow {index} {field} differs from the "
+                    "buyer's derivation"
+                )
+        mine_data, theirs_data = mine["obligation_data"], theirs["obligation_data"]
+        for key in sorted(set(mine_data) | set(theirs_data)):
+            if mine_data.get(key) != theirs_data.get(key):
+                raise ValueError(
+                    f"seller_plan_mismatch: escrow {index} obligation field {key!r} "
+                    "differs from the buyer's derivation"
+                )
 
 
 def materialize_settlement_plan_from_proposal(

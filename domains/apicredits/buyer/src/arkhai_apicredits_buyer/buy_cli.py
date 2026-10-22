@@ -27,8 +27,9 @@ from core_buyer import (
 from core_buyer.deal_helpers import is_negotiation_complete
 from core_buyer.orchestration import make_negotiate_hook, make_settle_hook, make_escrow_settle_hook
 from core_buyer.run_log import RunLog
+from market_alkahest.plans import require_escrow_terms_fund_plan
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowProposal
 from market_alkahest.token import TokenResolutionError, resolve_token
 from rich.console import Console
 from rich.panel import Panel
@@ -45,7 +46,13 @@ from .cli_helpers import resolve_prices_from_matches
 from .common import resolve_config_value
 from .payments import configured_payer_account
 from .settle_cli import render_credentials, run_settle_from_log
-from .settlement_composition import BUYER_STAGES, resolve_buyer_settlement_policy, validate_buyer_acceptance, select_buyer_proposal
+from .settlement_composition import (
+    BUYER_STAGES,
+    accepted_listing_record,
+    resolve_buyer_settlement_policy,
+    validate_buyer_acceptance,
+    select_buyer_proposal,
+)
 
 
 def _confirm_settlement_interactive(
@@ -613,8 +620,8 @@ def register(credits_app: typer.Typer) -> None:
             chain=negotiation_chain,
             decode_provision_terms=ApiCreditsProvisionTerms.model_validate,
             decode_escrow_proposal=EscrowProposal.model_validate,
-            decode_escrow_terms=EscrowTerms.model_validate,
             validate_acceptance=validate_buyer_acceptance,
+            accepted_listing_record=accepted_listing_record,
         )
         alkahest_settle_hook = None
         if alkahest_available:
@@ -625,6 +632,7 @@ def register(credits_app: typer.Typer) -> None:
                 unit_count=float(quantity),
                 duration_seconds=0,
                 build_escrow_terms=build_escrow_terms,
+                check_escrows_fund_plan=require_escrow_terms_fund_plan,
                 create_escrow=create_escrow,
                 settlement_recipient=accepted_proposal_recipient,
                 build_settlement_payload=make_alkahest_settlement_payload_fn(

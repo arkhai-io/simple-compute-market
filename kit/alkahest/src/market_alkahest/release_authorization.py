@@ -73,6 +73,64 @@ def _listing_value(listing: Any, key: str) -> Any:
     return getattr(listing, key, None)
 
 
+def advertised_release_conditions(listing: Any) -> list[Any]:
+    """Every release condition ``listing`` advertises, as a buyer records them.
+
+    ``demands`` as a list or as its stored JSON text, each condition in its wire
+    form. An absent or unreadable value advertises none, so a record of it
+    authorizes nothing when ``authorized_release_conditions`` reads it back.
+    """
+    raw = _listing_value(listing, "demands")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [
+        item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        for item in raw
+    ]
+
+
+_RELEASE_CONDITIONS = "release_conditions"
+
+
+def release_conditions_record(listing: Any) -> dict[str, Any]:
+    """What a buyer records about ``listing`` to derive its escrow on resume.
+
+    The listing's advertised release conditions, under the one key
+    ``recorded_release_conditions`` reads back; the buyer's run carries the
+    record opaquely.
+    """
+    return {_RELEASE_CONDITIONS: advertised_release_conditions(listing)}
+
+
+def recorded_release_conditions(record: Mapping[str, Any] | None) -> list[Any] | None:
+    """The release conditions ``record`` holds, or None when it holds none.
+
+    ``record`` is what ``release_conditions_record`` wrote. None, or a record
+    without the conditions, is a run that recorded none. A record that is not an
+    object, or conditions that are not a list, raise ``ValueError`` naming
+    ``release_conditions_unreadable``.
+    """
+    if record is None:
+        return None
+    if not isinstance(record, Mapping):
+        raise ValueError(
+            "release_conditions_unreadable: the recorded listing record is not an object"
+        )
+    raw = record.get(_RELEASE_CONDITIONS)
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            "release_conditions_unreadable: the recorded release conditions are not a list"
+        )
+    return list(raw)
+
+
 def _comparable(value: Any) -> Any:
     """A condition's value with address and byte hex compared case-insensitively."""
     if isinstance(value, Mapping):

@@ -45,10 +45,12 @@ class DealContext:
     token_contract: str | None = None
     token_decimals: float | None = None
     accepted_escrow_proposal: dict[str, Any] | None = None
-    # Canonical mechanism-neutral settlement carrier plus the optional
-    # legacy flat term payload recorded on older wire exchanges.
+    # The seller's committed settlement plan, which a resumed run compares
+    # with its own derivation and never funds in its place.
     settlement_plan: dict[str, Any] | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    # What the selected settlement entry recorded about the listing at
+    # acceptance, opaque to core; None when the run recorded nothing.
+    listing_record: dict[str, Any] | None = None
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
     agreement: dict[str, Any] | None = None
@@ -157,6 +159,34 @@ def settlement_acceptance_fields(
     }
 
 
+def exact_agreed_amount(deal: DealContext) -> int | None:
+    """The accepted amount in base units, read exactly.
+
+    From the accepted Agreement where the run recorded it: the run-log's
+    ``agreed_amount`` passes through a float, which cannot hold an 18-decimal
+    amount.
+    """
+    if deal.agreement is not None:
+        return Agreement.model_validate(deal.agreement).amount
+    return int(deal.agreed_amount) if deal.agreed_amount is not None else None
+
+
+def _recorded_listing_record(run_id: str, ev: dict[str, Any]) -> dict[str, Any] | None:
+    """What ``ev`` records about its listing, or None when it records nothing.
+
+    Opaque to core: an object the selected settlement entry wrote and reads
+    back on resume.
+    """
+    raw = ev.get("listing_record")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise typer.BadParameter(
+            f"Run-log {run_id!r} has a malformed recorded listing record."
+        )
+    return dict(raw)
+
+
 def _parse_publisher_trust(value: Any) -> TrustedIdentitySet:
     if isinstance(value, TrustedIdentitySet):
         return value
@@ -244,7 +274,7 @@ def load_deal_context(
     token_decimals: float | None = None
     accepted_escrow_proposal: dict[str, Any] | None = None
     settlement_plan: dict[str, Any] | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    listing_record: dict[str, Any] | None = None
     accepted_provision_terms: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
     accepted_agreement: dict[str, Any] | None = None
@@ -255,7 +285,7 @@ def load_deal_context(
     last_status: str | None = None
 
     def _capture_accepted_terms(ev: dict[str, Any]) -> None:
-        nonlocal accepted_escrow_proposal, settlement_plan, accepted_escrow_terms
+        nonlocal accepted_escrow_proposal, settlement_plan, listing_record
         nonlocal accepted_provision_terms, settlement_selection
         nonlocal settlement_operation_identities
         nonlocal accepted_agreement, agreement_bytes, settlement_data
@@ -326,23 +356,13 @@ def load_deal_context(
                 )
             settlement_operation_identities = identities
 
-        raw_terms = ev.get("accepted_escrow_terms")
-        if raw_terms is not None:
-            if not isinstance(raw_terms, list) or not all(
-                isinstance(item, dict) for item in raw_terms
-            ):
+        candidate_record = _recorded_listing_record(run_id, ev)
+        if candidate_record is not None:
+            if listing_record is not None and listing_record != candidate_record:
                 raise typer.BadParameter(
-                    f"Run-log {run_id!r} has malformed accepted escrow terms."
+                    f"Run-log {run_id!r} has conflicting recorded listing records."
                 )
-            candidate_terms = [dict(item) for item in raw_terms]
-            if (
-                accepted_escrow_terms is not None
-                and accepted_escrow_terms != candidate_terms
-            ):
-                raise typer.BadParameter(
-                    f"Run-log {run_id!r} has conflicting accepted escrow terms."
-                )
-            accepted_escrow_terms = candidate_terms
+            listing_record = candidate_record
 
         raw_proposal = ev.get("accepted_escrow_proposal")
         if raw_proposal is not None:
@@ -555,13 +575,6 @@ def load_deal_context(
         source_registry_authority=source_registry_authority,  # type: ignore[arg-type]
     )
 
-    # Pre-plan logs carry only the flat opaque terms; the generic carrier
-    # can preserve those payloads without decoding their mechanism schema.
-    if settlement_plan is None and accepted_escrow_terms:
-        settlement_plan = SettlementPlan.model_validate(
-            accepted_escrow_terms
-        ).model_dump()
-
     if settlement_plan is not None:
         expected_identities = tuple(
             settlement_acceptance_fields(
@@ -597,7 +610,7 @@ def load_deal_context(
         token_decimals=token_decimals,
         accepted_escrow_proposal=accepted_escrow_proposal,
         settlement_plan=settlement_plan,
-        accepted_escrow_terms=accepted_escrow_terms,
+        listing_record=listing_record,
         accepted_provision_terms=accepted_provision_terms,
         settlement_selection=settlement_selection,
         agreement=accepted_agreement,
@@ -662,7 +675,9 @@ class NegotiationResumePoint:
     accepted_escrow_proposal: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
     settlement_plan: dict[str, Any] | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
+    # What the selected settlement entry recorded about the resumed listing
+    # when its negotiation started, opaque to core; None when nothing was.
+    listing_record: dict[str, Any] | None = None
 
 
 def is_negotiation_complete(run_id: str, *, signer: Signer) -> bool:
@@ -708,14 +723,15 @@ def load_negotiation_resume_point(
     accepted_provision_terms: dict[str, Any] | None = None
     accepted_escrow_proposal: dict[str, Any] | None = None
     settlement_selection: dict[str, Any] | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
     settlement_plan: dict[str, Any] | None = None
+    # Keyed by listing: a `market buy` run records one per listing it tries.
+    listing_records: dict[str | None, dict[str, Any]] = {}
 
     policy: str | None = None
 
     def _capture_reply_terms(their: dict[str, Any]) -> None:
         nonlocal accepted_provision_terms, accepted_escrow_proposal
-        nonlocal settlement_selection, settlement_plan, accepted_escrow_terms
+        nonlocal settlement_selection, settlement_plan
 
         raw_provision = their.get("accepted_provision_terms")
         if raw_provision is not None:
@@ -786,22 +802,18 @@ def load_negotiation_resume_point(
                 )
             settlement_plan = candidate_plan.model_dump(mode="json")
 
-        raw_terms = their.get("accepted_escrow_terms")
-        if raw_terms is not None:
-            if not isinstance(raw_terms, list) or not all(
-                isinstance(item, dict) for item in raw_terms
-            ):
-                raise typer.BadParameter(
-                    f"Run-log {run_id!r} has malformed accepted escrow terms."
-                )
-            candidate = [dict(item) for item in raw_terms]
-            if accepted_escrow_terms is not None and accepted_escrow_terms != candidate:
-                raise typer.BadParameter(
-                    f"Run-log {run_id!r} has conflicting accepted escrow terms."
-                )
-            accepted_escrow_terms = candidate
-
     for ev in events:
+        candidate_record = _recorded_listing_record(run_id, ev)
+        if candidate_record is not None:
+            record_listing = (
+                str(ev["listing_id"]) if ev.get("listing_id") else listing_id
+            )
+            existing_record = listing_records.get(record_listing)
+            if existing_record is not None and existing_record != candidate_record:
+                raise typer.BadParameter(
+                    f"Run-log {run_id!r} has conflicting recorded listing records."
+                )
+            listing_records[record_listing] = candidate_record
         for name in (
             "publisher_id",
             "source_registry_url",
@@ -986,5 +998,5 @@ def load_negotiation_resume_point(
         accepted_escrow_proposal=accepted_escrow_proposal,
         settlement_selection=settlement_selection,
         settlement_plan=settlement_plan,
-        accepted_escrow_terms=accepted_escrow_terms,
+        listing_record=listing_records.get(listing_id),
     )

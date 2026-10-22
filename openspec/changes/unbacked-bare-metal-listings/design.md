@@ -563,6 +563,28 @@ re-derives the mandate and requires equality.
 Removing the field is benign for an older buyer, which falls back to its own
 `build_escrow_terms` derivation when the reply carries none.
 
+Settled in implementation (Section 9): the plan check runs where funds move rather than by
+widening `AdvertisedPlanValidatorFn`, which is unchanged and still checks the selection
+branch at acceptance. `core/buyer`'s escrow settle hook takes a required plan-check port,
+which each buyer fills with `kit/alkahest`'s `require_escrow_terms_fund_plan` and which runs
+over the buyer's own derivation before any escrow is created; every resume path derives
+through the kit's `derive_accepted_escrow_terms`, which holds the derivation to the recorded
+plan. API credits therefore supplies the check through its settle hook, not a plan
+validator: its buyer opens with escrow proposals, which the selection-branch validator never
+sees. The run-log carries what the selected settlement entry records about its listing as one
+opaque `listing_record`, written and read by `kit/alkahest` (`release_conditions_record`,
+`recorded_release_conditions`), so core never names a release condition. The record and a
+resume's reading of it are promoted at closeout to the `buyer-orchestration` companion
+(23.9). `market buy` writes
+it when negotiation starts and in an agreed completion; the negotiate CLIs write it at run
+start and run end, whatever the outcome; a resume reads the record of the listing it resumes.
+A resumed derivation takes the agreed amount exactly from the recorded Agreement, since the
+run-log's `agreed_amount` passes through a float, and derives from the run's recorded
+accepted proposal rather than from the Agreement's selected option: the release condition
+comes from the buyer's own record of the listing and the amount from the Agreement, while the
+escrow contract, token, and expiry are the accepted proposal's, which the buyer's round guard
+already held to its opening, and the result must still equal the seller's plan.
+
 The settlement plan stays in the reply as the seller's committed copy the buyer compares
 against, which also detects derivation skew between buyer and seller before funds move.
 An Agreement carrying the release condition and expiry, so that a reply carries nothing
@@ -932,6 +954,10 @@ closeout edited this change:
   configuration file for the best-price timeout — is a content judgement no check sees; it
   stays recorded in `ARCHITECTURE.md`'s "Where the current tree diverges" and in that
   change's proposal, and is unchanged.
+- `move-escrow-into-alkahest`'s other `ARCHITECTURE.toml` exception row, excusing
+  `arkhai-core`'s `alkahest.v1` vocabulary for the legacy escrow wire coercions, is deleted
+  in Section 9: decision 17 removes those coercions with the reply's escrow terms, so the row
+  excuses nothing and the architecture check requires its removal.
 
 ### Permanent documentation
 
@@ -1010,6 +1036,9 @@ Promoted at closeout:
   `kit/storefront` as the first shared stage convention.
 - The `settlement-configuration` companion: why the Alkahest chain probe runs apart from
   readiness, and what each blocker kind tells the publication runner.
+- The `buyer-orchestration` companion: the run-log's opaque listing record and its per-listing
+  resume, the exact resumed amount, and the plan check as a port on the escrow settle hook;
+  `ARCHITECTURE.md`'s `kit/alkahest` paragraph: the kit writes and reads that record.
 - The bare-metal seller quickstart's unbacked passage, rewritten as how to list unbacked
   machines; both seller quickstarts' `publication_derivation` passages.
 - `docs/development/ROADMAP.md`: Goal 7's current state and gap row; Goal 6's unowned row

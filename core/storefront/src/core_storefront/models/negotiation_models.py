@@ -51,9 +51,8 @@ class NegotiateNewResponse(BaseModel):
     after the seller validated it.
 
     ``settlement_plan`` is the negotiated outcome's canonical carrier
-    (mechanism-neutral obligations); ``accepted_escrow_terms`` is its
-    LEGACY flat-alkahest mirror, kept for buyers that predate the plan
-    carrier and removed with the client-wheel wire bump.
+    (mechanism-neutral obligations): the seller's committed copy, which a
+    buyer compares with its own derivation and never funds in its place.
 
     ``settlement_data`` carries an opaque seller-owned payload for the
     selected settlement stage.
@@ -69,7 +68,6 @@ class NegotiateNewResponse(BaseModel):
     accepted_escrow_proposal: EscrowProposal | None = None
     settlement_selection: SettlementSelection | None = None
     settlement_plan: SettlementPlan | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None
@@ -94,7 +92,6 @@ class NegotiateContinueResponse(BaseModel):
     accepted_escrow_proposal: EscrowProposal | None = None
     settlement_plan: SettlementPlan | None = None
     settlement_selection: SettlementSelection | None = None
-    accepted_escrow_terms: list[dict[str, Any]] | None = None
     agreement: Agreement | None = None
     agreement_bytes: str | None = None
     settlement_data: dict[str, Any] | None = None

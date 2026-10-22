@@ -7,7 +7,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
-from market_alkahest.schemas import EscrowProposal, EscrowTerms, accepted_demands
+from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
 logger = logging.getLogger(__name__)
 
@@ -101,32 +101,6 @@ def make_buyer_payment_escrow_terms_fn(
         )
 
     return _build
-
-
-def resumed_proposal_refusal(proposal: Mapping[str, Any]) -> str:
-    """Why a resumed run creates no escrow from an accepted proposal alone.
-
-    An escrow is materialized only under the release condition its listing
-    authorizes. A run-log records the seller's accepted proposal but not the
-    listing it was negotiated against, so with no accepted escrow terms there is
-    nothing to authorize the proposal's condition against, and no escrow is
-    created from it.
-    """
-    selected = accepted_demands(proposal)
-    if len(selected) > 1:
-        return (
-            "release_condition_ambiguous: the accepted escrow proposal selects "
-            "several release conditions"
-        )
-    if not selected:
-        return (
-            "release_condition_unselected: the accepted escrow proposal names no "
-            "release condition"
-        )
-    return (
-        "the run-log records no accepted escrow terms, and not the listing that "
-        "authorizes the accepted proposal's release condition"
-    )
 
 
 def make_create_escrow_fn(

@@ -1505,14 +1505,27 @@ run-log (D17; `negotiation-protocol` "The accept reply carries no escrow terms";
 (`market_core`), `core/storefront`, `core/buyer`, the VM and API-credit buyers, and bare
 metal's reply.
 
-- [ ] 9.1 Producers: `kit/alkahest/.../proposals.py` `accepted_escrow_artifacts_from_proposal`
+- [x] 9.1 Producers: `kit/alkahest/.../proposals.py` `accepted_escrow_artifacts_from_proposal`
       stops building the field; `plans.py`'s and `core/src/market_core/schemas.py`'s legacy
       coercions (`_coerce_legacy_escrow_terms`, `_coerce_legacy_terms_list`) go, and
       `escrow_terms_to_settlement_obligation` and `core/buyer`'s `deal_helpers.py` build the
       obligation explicitly rather than through them; `core_storefront/models/negotiation_models.py`
       `NegotiateNewResponse` and `NegotiateContinueResponse` lose the field and its
       docstring; bare metal's `_ESCROW_RESPONSE_ARTIFACTS` drops it (D17).
-- [ ] 9.2 `core/buyer`: `negotiation_client.py` (`NegotiationOutcome`,
+      Done. The kit's artifacts are now the proposal, the accepted proposal, and the plan,
+      with no escrow terms; `escrow_terms_to_settlement_obligation` builds the envelope field
+      by field; core's
+      `_ALKAHEST_MECHANISM` went with the coercions, and `deal_helpers.py`'s pre-plan back-fill
+      went rather than being rewritten, since nothing reads flat terms any more. A flat terms
+      dict or a bare list no longer parses as an obligation or plan, in core or the kit.
+      **Also changed:** `docs/development/ARCHITECTURE.toml`'s exception row excusing
+      `arkhai-core`'s `alkahest.v1` vocabulary for those coercions excused nothing and the
+      architecture check required its deletion; the row was `move-escrow-into-alkahest`'s,
+      recorded in design D26. Unit: core `test_settlement_plan.py` (rewritten: the flat
+      shapes are refused, the envelope round-trips); kit `test_plans.py` (a bare terms list
+      is refused as a plan and flat terms as an obligation; the artifacts carry exactly the
+      proposal, the accepted proposal, and the plan).
+- [x] 9.2 `core/buyer`: `negotiation_client.py` (`NegotiationOutcome`,
       `parse_accepted_terms_from_reply`, `ResumeState`, the reply parse and resume, the three
       accept branches), `orchestration.py` (`_settle_one` always derives through
       `build_escrow_terms`; the negotiate hook), and `deal_helpers.py` (`DealContext`,
@@ -1521,20 +1534,111 @@ metal's reply.
       resume, not only the selection branch; its callable receives what a derivation needs
       (the accepted proposal or selection, the agreed amount and duration), and
       `core/buyer` gains no import of `kit/alkahest` (D17).
-- [ ] 9.3 The run-log: `negotiation_completed` and both negotiate CLIs' `run_ended` record
+      Done, with the plan check placed where funds move rather than as written:
+      - **Differed:** `AdvertisedPlanValidatorFn` is unchanged and still runs on the selection
+        branch at acceptance. The requirement is a check "before funding, on every path that
+        funds an escrow", and every such path now runs one: `make_escrow_settle_hook` takes a
+        required `check_escrows_fund_plan` port, which `_settle_one` runs over its own
+        derivation whenever the seller sent a plan, refusing as `seller_plan_mismatch` before
+        `create_escrow`; the resume paths (9.3, 9.4) check through the kit's derivation. A
+        negotiation-time check on the escrow branch would repeat the same derivation earlier
+        without guarding anything the funding-time check does not.
+      - `parse_accepted_terms_from_reply` returns four values and never reads the field;
+        `negotiate_with_seller` and `make_negotiate_hook` lose `decode_escrow_terms`.
+      - `make_negotiate_hook` takes `accepted_listing_record(listing, proposal)`, the
+        selected entry's record of the listing, written opaquely as `listing_record` in
+        `negotiation_started` and an agreed `negotiation_completed` (9.3). `core/buyer`
+        imports nothing from `kit/alkahest` and names no release condition.
+      Unit: `test_orchestrator.py` (the helper funds exactly what it derives after checking it
+      against the plan, and funds nothing, exiting `seller_plan_mismatch`, when the check
+      refuses); `test_settlement_acceptance.py` (the reply parse ignores escrow terms an
+      accept reply carries, well formed or not, and the outcome has no field for them; no
+      round or accept branch is driven with them). No test drives
+      `_negotiate_matches` itself: it calls `negotiate_with_seller` with no injection seam,
+      so the hook's recording is covered only through the domains' stage records (9.4).
+- [x] 9.3 The run-log: `negotiation_completed` and both negotiate CLIs' `run_ended` record
       the selected listing's advertised release conditions; `load_deal_context` and the
       resume point read them; a resumed run derives from the Agreement's selected option and
       those conditions and checks any recorded seller plan against them; a run-log accepted
       without recorded conditions and not yet funded is refused before funding, naming that
       a new run is needed; a run whose escrow exists resumes (D17).
-- [ ] 9.4 VM buyer (`settlement_stages.py` `enrich_deal`, `_accepted_proposal_chain`,
+      Done.
+      - Recorded as one opaque `listing_record`, which `kit/alkahest` writes and reads:
+        `release_conditions_record(listing)` holds the listing's advertised conditions,
+        read by `advertised_release_conditions` (a list or stored JSON text; unreadable
+        records none, which then authorizes nothing), and `recorded_release_conditions`
+        reads them back, refusing a record that is not an object or conditions that are not
+        a list. Core names no release condition. `market buy` writes the record in
+        `negotiation_started` as well as an agreed `negotiation_completed`, and both
+        negotiate CLIs in `run_started` as well as `run_ended`, so a run resumed
+        mid-negotiation still holds it; a resumed negotiation carries its first run's record.
+      - `DealContext.listing_record` reads it from the accepted events, refusing conflicting
+        records. `NegotiationResumePoint.listing_record` keeps one record per listing and
+        returns the resumed listing's, since a `market buy` run records every listing it
+        tries and those may advertise different conditions.
+      - The kit's `derive_accepted_escrow_terms` takes the record, derives a resumed escrow
+        from the accepted proposal and its conditions, and holds it to the recorded plan
+        (`require_escrow_terms_fund_plan`, new in `plans.py`: maker, chain, contract,
+        expiry, and every obligation field, `0x` hex case-insensitively and every other
+        string exactly). No record, or one without the conditions key, raises
+        `ReleaseConditionsUnrecordedError` (`release_conditions_unrecorded: … start a new
+        run`); a record holding an empty list, as for a listing advertising none, is
+        refused as `release_condition_not_advertised`. A run whose escrow exists skips
+        derivation and resumes, as before.
+      - **Differed:** a resumed run derives from its recorded accepted proposal, not from
+        the Agreement's selected option, as the task and the delta word it; design D17's
+        Section 9 paragraph says why the inputs suffice.
+      - **Also changed:** a resumed derivation takes the agreed amount exactly from the
+        recorded Agreement, through core's new `exact_agreed_amount`: the run-log's
+        `agreed_amount` passes through a float, which cannot hold an 18-decimal amount and
+        would have failed the plan check.
+      Unit: kit `test_plans.py` (the derivation funds the seller's plan; a plan paying another
+      recipient, another amount, or no escrow is refused naming the field; a resumed run
+      derives from its record, refuses a plan it does not derive, and refuses a run with no
+      record or no conditions in it; the record round-trips and an unreadable one is
+      refused; the conditions reader); core `test_identity_recovery.py` (a deal carries its
+      record and an older run none; conflicting or non-object records are refused; a resume
+      point carries the record made at the run's start, and a `market buy` resume carries the
+      record of the listing it resumes, not another's; the exact amount of an 18-decimal
+      Agreement survives where the float does not).
+- [x] 9.4 VM buyer (`settlement_stages.py` `enrich_deal`, `_accepted_proposal_chain`,
       `_resume_alkahest`, `_refuse_without_release_condition`; `escrow_client.py`;
       `escrow_cli.py`; `buyer_client.py`; `negotiate_cli.py`; `buy_cli.py`;
       `buy_orchestrator.py`) and API-credit buyer (`settlement_stages.py`
       `AlkahestBuyerStage.enrich`, `settle_cli.py`, `negotiate_cli.py`, `buyer_client.py`,
       `buy_cli.py`, `escrow_client.py`) stop reading the field; API credits supplies a plan
       validator over `kit/alkahest`'s `validate_selected_escrow_plan` as VM does (D17).
-- [ ] 9.5 Tests (unit): `core/buyer/tests/unit/test_settlement_acceptance.py`,
+      Done.
+      - Both domains' Alkahest stages gain `listing_record` (the kit's
+        `release_conditions_record`) and their payment stages an empty one; both settle hooks
+        pass the kit's `require_escrow_terms_fund_plan` as the plan check. Each domain's
+        `accepted_listing_record` dispatches to the selected entry: VM through the match's
+        selected option, API credits through the proposal's kind (an escrow proposal is
+        Alkahest's, a selection names its mechanism).
+      - VM's `_resume_alkahest` and `escrow_cli create` share `derive_resumed_escrow_terms`
+        (`settlement_stages.py`), each with its own refusal; API credits' `settle_cli`
+        derives the same way. Both `resumed_proposal_refusal` helpers went, now unused.
+      - **Differed:** API credits supplies the plan check through its settle hook, not a plan
+        validator: its buyer opens with escrow proposals, which the selection-branch validator
+        never sees (9.2).
+      - `escrow_cli.py` imports `derive_resumed_escrow_terms` at module level: no import
+        cycle prevents it, since `settlement_stages` imports none of `escrow_cli`'s importers.
+      Unit: VM `test_release_condition_refusals.py` (a run recording no conditions is refused
+      as `release_conditions_unrecorded` on both resume paths, `escrow create` and `settle`;
+      `escrow create` funds exactly the seller's plan derived from recorded conditions; both
+      paths refuse a plan paying another recipient as `seller_plan_mismatch`, `escrow
+      create` funding nothing); VM `test_negotiate_stage_dispatch.py` (`market negotiate`
+      records the selected stage's listing record at run start and end, the Alkahest
+      conditions or an empty record for payments); API credits `test_settle_credentials.py`
+      (the three settle cases through `run_settle_from_log`) and
+      `test_settlement_composition.py` (an escrow proposal records the listing's conditions,
+      a payment selection nothing). These CLI tests patch the commands' module attributes,
+      as the files' existing tests do: the commands take no injected collaborators. No test
+      drives API credits' `negotiate` CLI recording, or the carry-forward of a resumed run's
+      record by VM's `negotiate --from` or `buy --from`; only the resume point's reading of
+      it is tested (9.3). `escrow_cli create` keeps its pre-existing call-time import block,
+      `make_create_escrow_fn` among it, which the file's tests patch through.
+- [x] 9.5 Tests (unit): `core/buyer/tests/unit/test_settlement_acceptance.py`,
       `test_identity_recovery.py`, `test_orchestrator.py` — a seller plan naming another
       arbiter or recipient than the listing advertised is refused before funding on the
       escrow-proposal and selection branches and on resume; an older run-log is refused;
@@ -1545,14 +1649,93 @@ metal's reply.
       in VM `tests/integration/test_negotiate_controller.py` and `test_publication_loop.py`
       and bare metal `tests/test_http_negotiation.py` assert the reply carries no
       `accepted_escrow_terms` (D17).
-- [ ] 9.6 Versions: `arkhai-kit-alkahest`, `arkhai-core`, `arkhai-core-storefront`,
+      Done, as listed under 9.1 to 9.4, plus the application-integration replies: VM
+      `test_negotiate_controller.py` (two accepts, the plan's obligation now asserted on its
+      own fields) and `test_publication_loop.py`, and bare metal `test_http_negotiation.py`'s
+      materializing accept, all assert no `accepted_escrow_terms` (no API-credit storefront
+      test asserts it of its reply; the kit producer test covers what it sends); bare metal's
+      `test_domain_runtime.py`, `test_settlement.py`, and `test_http_negotiation.py` fakes no
+      longer return the field. **Differed:** `test_resume_helpers.py`,
+      `test_buy_resume_cli.py`, `test_buy_orchestrator.py`, `test_buyer_client*.py`,
+      `test_negotiation_flow.py`, and `test_negotiate_cli.py` needed no change and pass. The
+      mismatch is refused at funding (`test_orchestrator.py`, the kit, VM's `escrow create`
+      and `settle`, API credits' `settle`), not at the selection branch's acceptance, where
+      the existing validator still runs (9.2). "A funded run resumes" keeps its existing
+      coverage (a run whose escrow exists skips derivation; VM
+      `test_vm_settlement_helpers.py`). No test drives a whole `market buy` against a
+      mismatching seller through `_negotiate_matches`, and the live API-credit escrow path
+      (`buy_cli`'s settle hook) is covered only by `e2e_credits_deal`, unrun here.
+- [x] 9.6 Versions: `arkhai-kit-alkahest`, `arkhai-core`, `arkhai-core-storefront`,
       `arkhai-core-buyer` (and the exact pin in `domains/bare_metal/buyer`),
       `arkhai-vms-buyer`, `arkhai-apicredits-buyer`, the three storefronts; `make lock`.
-- [ ] 9.7 **Verify.** `make -C kit test-alkahest`; `make test-core`; `make test-vms-buyer`,
+      Bumped: `arkhai-core` 0.5.0 (a flat shape no longer parses), whose exact pin moved in
+      `arkhai-core-registry` (0.4.1) and `arkhai-core-registry-client` (0.12.3), bumped for
+      it, and in `arkhai-kit-settlement-runtime`, `arkhai-kit-contact-exchange`, and
+      `arkhai-kit-arkhai-payments`, already bumped and unreleased here; the registry-client
+      pin moved in `arkhai-core-buyer` and `arkhai-bare-metal-buyer`. VM storefront 0.22.0
+      (its bare-metal pin with it), bare-metal storefront 0.22.0 (`arkhai-core-storefront`
+      floor 0.16.0), API-credit storefront 0.16.0. `arkhai-core-buyer` 0.6.0,
+      `arkhai-vms-buyer` 0.8.0, and `arkhai-apicredits-buyer` 0.6.0: this section's changes
+      to them are incompatible (a removed field and keyword, a new required hook argument, a
+      four-value reply parse, removed helpers), which before 1.0 takes a minor bump, though
+      each was already patch-bumped and unreleased here; bare metal's exact
+      `arkhai-core-buyer` pin moved with it. Floors: both buyers on
+      `arkhai-core-buyer>=0.6.0` and `arkhai-kit-alkahest>=0.10.0`. **Not bumped:**
+      `arkhai-kit-alkahest` (already minor-bumped to 0.10.0), `arkhai-core-storefront`, and
+      `arkhai-bare-metal-buyer`, already bumped and unreleased on this branch. `make lock`.
+- [x] 9.7 **Verify.** `make -C kit test-alkahest`; `make test-core`; `make test-vms-buyer`,
       `make test-apicredits`, `make test-storefront`, `make test-bare-metal`; `make test`;
       `make check-packaging`. End-to-end: `e2e_deal_buyer_cli`, `e2e_buy`, and
       `e2e_credits_deal` fund through the buyer's own derivation, and
       `e2e_bare_metal_mock_deal` through the typed client.
+      Results (`make dist` and `make lock` first; the last six rerun after the fresh-context
+      fixes):
+      - `make -C kit test-settlement-runtime test-contact-exchange test-arkhai-payments`:
+        111, 127, 84 passed; `make test-registry` 128 and 125 passed.
+      - `make -C kit test-alkahest` 413 passed; `make test-core` passed (120, 144, 217 with
+        2 skipped, 65).
+      - `make test-vms-buyer` 207; `make test-apicredits` passed (buyer 30, storefront 221,
+        the rest unchanged); `make test-bare-metal` passed (storefront 446); `make
+        test-e2e-unit` 38.
+      - `make test-storefront`: unit 1119 (1 skipped); integration 450 with the two
+        environmental `test_alkahest.py` failures (no Node.js or Anvil here).
+      - `make test`: not run whole; the suites above cover every project whose code, pins, or
+        locks changed. Core's mypy typecheck (`make -C core typecheck`) was denied in this
+        unattended run and is unrun. `make check-packaging` passed; `make check-change`
+        fails only on the two citations Sections 13 and 22 create.
+      - End-to-end, unrun: `e2e_deal_buyer_cli` and `e2e_buy` (VM, selections) and
+        `e2e_credits_deal` (API credits, escrow proposals) are expected to fund the escrow
+        the buyer derives and checks against the seller's plan; `e2e_bare_metal_mock_deal`
+        funds through the typed client and is unaffected but for the reply. No scenario
+        changed.
+
+Section 9 notes (handoff):
+
+- **The plan check sits at funding, not at acceptance** (9.2's differed note). A reviewer
+  may want the escrow branch checked at acceptance too; it would add a second derivation
+  in `negotiate_with_seller` that funding already performs.
+- **Release conditions are recorded through a domain hook, as one opaque record.** Core
+  writes and reads the selected entry's `listing_record` whole; `kit/alkahest` owns both
+  its writer and its reader, so no release condition is named in core. The first draft
+  recorded `release_conditions` as a core-named field; the fresh-context check flagged it
+  as Alkahest knowledge in core, and also that merging every event's record would refuse a
+  `market buy` resume whose earlier listings advertised other conditions.
+- **Old run-logs.** A run accepted but unfunded before this section records no listing
+  record and is refused with `release_conditions_unrecorded`; one with a plan in the
+  pre-plan flat shape no longer loads at all, since the coercions went. Neither has funds
+  at stake.
+- **The exception row deleted from `ARCHITECTURE.toml` belonged to
+  `move-escrow-into-alkahest`** (design D26); that change's other rows and its content
+  divergence stand.
+- **Fresh-context checks.** Two ran; the second, after the record and version fixes,
+  found no layering, comment, or version breach, and its accuracy points are fixed: plan
+  comparison lowercases only `0x` hex, core's hook docstring and fixtures name no Alkahest
+  concept, and the notes above state what their tests do not cover. Declined from both:
+  replacing the CLI tests' module patches with injection, since the commands have no seam
+  and the files' existing tests patch the same way, which the round's triage may want as a
+  testability refactor; moving `escrow_cli create`'s `make_create_escrow_fn` import out of
+  its pre-existing call-time block; and the three storefronts' bump in this section
+  although each was already bumped and unreleased, which is harmless.
 
 ## 10. The provisioning service refuses unserved providers and signs failures
 
@@ -2235,6 +2418,14 @@ change to implementation.
       - `openspec/specs/settlement-configuration/architecture.md`: "Readiness, publication,
         and selection" — why the chain probe runs apart from readiness, and what each
         blocker kind tells the publication runner.
+      - `openspec/specs/buyer-orchestration/architecture.md`: "Persisted runs" — the
+        run-log's opaque `listing_record`, written when negotiation starts and at
+        acceptance and read back per listing on resume, and a resumed amount taken exactly
+        from the Agreement; "Configured mechanism choice and buyer actions" — the plan check
+        as a required port on the escrow settle hook, run where funds move, beside the
+        selection-branch validator. `docs/development/ARCHITECTURE.md`'s `kit/alkahest`
+        paragraph (under "Kit areas") — the kit writes and reads a buyer's record of a
+        listing's release conditions, so core carries it opaquely.
       - `docs/bare-metal-seller-quickstart.md` "Start and inspect": the unbacked passage
         rewritten as how to list unbacked machines, and its `publication_derivation`
         passage; `docs/seller-quickstart.md`'s `publication_derivation` passages.

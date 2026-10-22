@@ -311,14 +311,6 @@ reason = "The refund and token-transfer helpers move to the Alkahest kit."
 
 [[exceptions]]
 rule = "vocabulary"
-project = "arkhai-core"
-target = "alkahest.v1"
-owner = "move-escrow-into-alkahest"
-since = 2026-10-13
-reason = "The legacy escrow wire coercions leave the core schemas with the escrow fields."
-
-[[exceptions]]
-rule = "vocabulary"
 project = "arkhai-kit-config"
 target = "alkahest.v1"
 owner = "deduplicate-dynaconf-bootstrap"

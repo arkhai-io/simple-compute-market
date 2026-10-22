@@ -666,7 +666,8 @@ async def test_an_unbacked_listing_publishes_and_negotiates_to_acceptance(tmp_pa
             )
 
         assert result["action"] == "accept"
-        assert result["accepted_escrow_terms"]
+        assert result["settlement_plan"]["obligations"]
+        assert "accepted_escrow_terms" not in result
         assert await _backing(world, listing_id) == "unbacked"
         assert world.site.reservations == {}
         assert (

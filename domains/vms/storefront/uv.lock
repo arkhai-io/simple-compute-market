@@ -196,7 +196,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-bare-metal-storefront"
-version = "0.21.0"
+version = "0.22.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-bare-metal" },
@@ -230,7 +230,7 @@ dependencies = [
     { name = "uvicorn" },
 ]
 wheels = [
-    { path = "arkhai_bare_metal_storefront-0.21.0-py3-none-any.whl" },
+    { path = "arkhai_bare_metal_storefront-0.22.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -274,18 +274,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
+    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-buyer"
-version = "0.5.1"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -299,12 +299,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_core_buyer-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_core_buyer-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.12.2"
+version = "0.12.3"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -312,7 +312,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.12.2-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.12.3-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -649,7 +649,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-buyer"
-version = "0.7.1"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py" },
@@ -672,7 +672,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_vms_buyer-0.7.1-py3-none-any.whl" },
+    { path = "arkhai_vms_buyer-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -726,7 +726,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms-storefront"
-version = "0.21.0"
+version = "0.22.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -806,7 +806,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-bare-metal", specifier = ">=0.10.0" },
-    { name = "arkhai-bare-metal-storefront", specifier = "==0.21.0" },
+    { name = "arkhai-bare-metal-storefront", specifier = "==0.22.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },

@@ -647,20 +647,17 @@ class TestNegotiateNew:
         assert result["action"] == "accept"
         assert "amount" not in result["proposal"]["fields"]
         assert result["accepted_escrow_proposal"]["literal_fields"] == literals
-        assert "amount" not in result["accepted_escrow_terms"][0]["obligation_data"]
 
-        # The canonical plan carrier rides alongside the legacy terms
-        # mirror and stays byte-consistent with it.
-        plan = result["settlement_plan"]
-        assert len(plan["obligations"]) == len(result["accepted_escrow_terms"])
-        ob = plan["obligations"][0]
-        legacy = result["accepted_escrow_terms"][0]
+        # The plan is the seller's committed copy; no escrow terms ride beside
+        # it for a buyer to fund in place of its own derivation.
+        assert "accepted_escrow_terms" not in result
+        (ob,) = result["settlement_plan"]["obligations"]
         assert ob["mechanism"] == "alkahest.v1"
-        assert ob["payer"] == legacy["maker"]
+        assert ob["payer"] == "buyer"
         assert ob["claimant"] == "seller"
-        assert ob["expiration_unix"] == legacy["expiration_unix"]
-        assert ob["params"]["escrow_contract"] == legacy["escrow_contract"]
-        assert ob["params"]["obligation_data"] == legacy["obligation_data"]
+        assert ob["expiration_unix"] == 1_800_000_000
+        assert ob["params"]["escrow_contract"].lower() == escrow_address.lower()
+        assert "amount" not in ob["params"]["obligation_data"]
 
     async def test_inventory_with_wrong_attributes_is_refused(self, client, db):
         """An available resource with the wrong gpu_model doesn't satisfy
@@ -772,7 +769,8 @@ class TestUnbackedListingNegotiation:
             )
 
         assert result["action"] == "accept"
-        assert result["accepted_escrow_terms"]
+        assert result["settlement_plan"]["obligations"]
+        assert "accepted_escrow_terms" not in result
         assert site_requests == []
         assert await db.load_capacity_hold(negotiation_id=result["negotiation_id"]) is None
 

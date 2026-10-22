@@ -1,7 +1,7 @@
 """Settlement proposal materialization over the Alkahest codec layer.
 
 Turns negotiated ``EscrowProposal``s into the accepted-escrow response
-artifacts (settlement plan + legacy flat terms) and builds the buyer's
+artifacts (the accepted proposal and its settlement plan) and builds the buyer's
 round-0 proposal from a listing's ``accepted_escrows`` entry. Shared by
 every domain that settles through an Alkahest escrow.
 
@@ -23,27 +23,32 @@ from typing import Any
 from market_alkahest.alkahest import (
     address_to_slot,
     encode_authorized_release_condition,
+    materialize_escrow_terms_from_proposal,
 )
 from market_alkahest.plans import (
     escrow_terms_from_settlement_plan,
     materialize_settlement_plan_from_proposal,
+    require_escrow_terms_fund_plan,
 )
 from market_alkahest.release_authorization import (
     ReleaseConditionError,
     UnpinnedEscrowError,
     authorized_release_condition,
     authorized_release_conditions,
+    recorded_release_conditions,
     require_pinned_escrow,
     selected_release_condition,
 )
 from market_alkahest.schemas import (
     EscrowProposal,
+    EscrowTerms,
     accepted_demands,
     accepted_token_address,
 )
 
 __all__ = [
     "ReleaseConditionError",
+    "ReleaseConditionsUnrecordedError",
     "SettlementPlanMaterializationError",
     "UnpinnedEscrowError",
     "accepted_escrow_artifacts_from_proposal",
@@ -51,7 +56,9 @@ __all__ = [
     "authorized_escrow_proposal_at_amount",
     "authorized_release_condition",
     "authorized_release_conditions",
+    "derive_accepted_escrow_terms",
     "escrow_proposal_from_accepted_entry",
+    "require_escrow_terms_fund_plan",
     "proposal_is_oracle_gated",
     "proposal_is_splitter_gated",
     "selected_release_condition",
@@ -71,12 +78,62 @@ class SettlementPlanMaterializationError(ValueError):
     """
 
 
+class ReleaseConditionsUnrecordedError(ValueError):
+    """A run was accepted before its listing's release conditions were recorded.
+
+    A buyer derives the escrow it funds from its accepted proposal and the
+    release conditions its listing advertised at acceptance. A run that recorded
+    none has nothing to derive from, and funding the seller's terms in their
+    place would fund what the buyer never checked, so the run is refused and a
+    new one is needed. The message starts with ``release_conditions_unrecorded``.
+    """
+
+
 def _escrow_proposal(proposal: EscrowProposal | Mapping[str, Any] | Any) -> EscrowProposal:
     if isinstance(proposal, EscrowProposal):
         return proposal
     return EscrowProposal.model_validate(
         proposal.model_dump() if hasattr(proposal, "model_dump") else proposal
     )
+
+
+def derive_accepted_escrow_terms(
+    *,
+    accepted_proposal: EscrowProposal | Mapping[str, Any],
+    listing_record: Mapping[str, Any] | None,
+    agreed_amount: int | None,
+    duration_seconds: int,
+    settlement_plan: Any = None,
+    addr_config_path: str | None = None,
+) -> list[EscrowTerms]:
+    """The escrow a buyer funds for an accepted proposal, held to the seller's plan.
+
+    ``listing_record`` is what the buyer recorded about the selected listing
+    when the proposal was accepted (``release_conditions_record``): the release
+    conditions it advertised. The escrow is materialized under the one they
+    authorize on the proposal's chain, as the seller materialized its plan, and
+    where the seller sent a plan the derivation must equal it
+    (``require_escrow_terms_fund_plan``). Raises
+    ``ReleaseConditionsUnrecordedError`` when no conditions were recorded,
+    ``ReleaseConditionError`` when they authorize none, and ``ValueError`` when
+    the record cannot be read or the plan differs.
+    """
+    release_conditions = recorded_release_conditions(listing_record)
+    if release_conditions is None:
+        raise ReleaseConditionsUnrecordedError(
+            "release_conditions_unrecorded: the run was accepted before its "
+            "listing's release conditions were recorded; start a new run"
+        )
+    terms = materialize_escrow_terms_from_proposal(
+        proposal=_escrow_proposal(accepted_proposal),
+        listing={"demands": list(release_conditions)},
+        agreed_amount=agreed_amount,
+        duration_seconds=duration_seconds,
+        addr_config_path=addr_config_path,
+    )
+    if settlement_plan is not None:
+        require_escrow_terms_fund_plan(terms, settlement_plan)
+    return terms
 
 
 def authorize_escrow_proposal(
@@ -360,19 +417,6 @@ def accepted_escrow_artifacts_from_proposal(
             service_terms=service_terms,
         )
         out["settlement_plan"] = plan.model_dump(mode="json")
-        # Legacy escrow terms remain part of the signed JSON response until
-        # the client wire carrier is retired. Keep uint256 fields in their
-        # canonical decimal-string form at that boundary.
-        accepted_terms: list[dict[str, Any]] = []
-        for terms in escrow_terms_from_settlement_plan(plan):
-            payload = terms.model_dump(mode="json")
-            obligation_data = dict(payload.get("obligation_data") or {})
-            amount = obligation_data.get("amount")
-            if isinstance(amount, int) and not isinstance(amount, bool):
-                obligation_data["amount"] = str(amount)
-            payload["obligation_data"] = obligation_data
-            accepted_terms.append(payload)
-        out["accepted_escrow_terms"] = accepted_terms
     except ReleaseConditionError:
         # A condition the listing does not authorize keeps its own reason.
         raise

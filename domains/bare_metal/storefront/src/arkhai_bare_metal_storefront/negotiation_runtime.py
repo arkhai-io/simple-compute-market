@@ -87,7 +87,6 @@ EXACT_SELECTION_STRATEGY = "bare_metal_exact_selection"
 #: What an accepted escrow opening answers with, besides the decision.
 _ESCROW_RESPONSE_ARTIFACTS = (
     "settlement_plan",
-    "accepted_escrow_terms",
     "accepted_escrow_proposal",
 )
 

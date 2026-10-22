@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from market_alkahest.plans import (
@@ -13,17 +15,29 @@ from market_alkahest.plans import (
     escrow_terms_from_settlement_plan,
     escrow_terms_to_settlement_obligation,
     materialize_settlement_plan_from_proposal,
+    require_escrow_terms_fund_plan,
     settlement_obligation_to_escrow_terms,
     split_settlement_obligation_into_intervals,
 )
-from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
+from market_alkahest.alkahest import (
+    encode_recipient_demand,
+    get_recipient_arbiter,
+    materialize_escrow_terms_from_proposal,
+)
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_alkahest.proposals import (
     ReleaseConditionError,
+    ReleaseConditionsUnrecordedError,
     SettlementPlanMaterializationError,
     accepted_escrow_artifacts_from_proposal,
     authorized_escrow_proposal_at_amount,
+    derive_accepted_escrow_terms,
     escrow_proposal_from_accepted_entry,
+)
+from market_alkahest.release_authorization import (
+    advertised_release_conditions,
+    recorded_release_conditions,
+    release_conditions_record,
 )
 from market_alkahest.schemas import EscrowProposal, EscrowTerms
 
@@ -139,16 +153,19 @@ def test_unwrap_rejects_foreign_mechanisms() -> None:
         escrow_terms_from_settlement_plan(SettlementPlan(obligations=[ob]))
 
 
-def test_plan_view_accepts_legacy_terms_list() -> None:
-    terms = _terms()
-    out = escrow_terms_from_settlement_plan([terms.model_dump()])
-    assert out == [terms]
+def test_plan_view_refuses_a_bare_terms_list() -> None:
+    """A plan is read only in its own shape, never from flat terms."""
+    with pytest.raises(ValueError):
+        escrow_terms_from_settlement_plan([_terms().model_dump()])
+
+
+def test_an_obligation_is_read_only_in_its_own_shape_never_from_flat_terms() -> None:
+    with pytest.raises(ValueError):
+        SettlementObligation.model_validate(_terms().model_dump(mode="json"))
 
 
 def test_plan_materialization_matches_terms_materialization() -> None:
     """Both sides may derive either artifact; they must agree byte-for-byte."""
-    from market_alkahest.alkahest import materialize_escrow_terms_from_proposal
-
     proposal = EscrowProposal(
         chain_name="anvil",
         escrow_address=_ESCROW,
@@ -306,8 +323,146 @@ def test_accepted_artifacts_always_carry_their_plan() -> None:
 
     (obligation,) = artifacts["settlement_plan"]["obligations"]
     assert int(obligation["params"]["obligation_data"]["amount"]) == 7_200_000
-    assert artifacts["accepted_escrow_terms"]
-    assert "accepted_escrow_terms_error" not in artifacts
+    # The plan is the seller's committed copy; no escrow terms travel beside it.
+    assert set(artifacts) == {"proposal", "accepted_escrow_proposal", "settlement_plan"}
+
+
+def _accepted() -> EscrowProposal:
+    return EscrowProposal.model_validate(
+        accepted_escrow_artifacts_from_proposal(
+            proposal=_anvil_proposal(),
+            listing=_LISTING,
+            agreed_amount=7_200_000,
+            duration_seconds=3600,
+            chain_config_paths={"anvil": _ANVIL_BOOK},
+        )["accepted_escrow_proposal"]
+    )
+
+
+def _derived(amount: int = 7_200_000) -> list[EscrowTerms]:
+    return materialize_escrow_terms_from_proposal(
+        proposal=_accepted(),
+        listing=_LISTING,
+        agreed_amount=amount,
+        duration_seconds=3600,
+        addr_config_path=_ANVIL_BOOK,
+    )
+
+
+def _plan_paying_another_recipient() -> SettlementPlan:
+    """A seller's plan released to a recipient the listing does not advertise."""
+    other = _recipient_condition(_BUYER_RECIPIENT)
+    return _materialize(_anvil_proposal(demand=other), listing={"demands": [other]})
+
+
+def test_the_buyers_derivation_funds_the_sellers_plan() -> None:
+    require_escrow_terms_fund_plan(_derived(), _materialize(_accepted()))
+
+
+@pytest.mark.parametrize(
+    ("derived", "plan", "field"),
+    [
+        pytest.param(_derived, _plan_paying_another_recipient, "demand", id="another recipient"),
+        pytest.param(
+            lambda: _derived(amount=1), lambda: _materialize(_accepted()), "amount",
+            id="another amount",
+        ),
+        pytest.param(lambda: [], lambda: _materialize(_accepted()), "escrow(s)", id="no escrow"),
+    ],
+)
+def test_a_plan_the_buyer_did_not_derive_is_refused(derived, plan, field) -> None:
+    with pytest.raises(ValueError, match="seller_plan_mismatch") as refused:
+        require_escrow_terms_fund_plan(derived(), plan())
+    assert field in str(refused.value)
+
+
+def test_a_plan_is_compared_case_insensitively_only_in_its_hex() -> None:
+    data = _terms().obligation_data
+    plan = SettlementPlan(obligations=[escrow_terms_to_settlement_obligation(
+        _terms(obligation_data={**data, "token": _TOKEN.upper().replace("0X", "0x"), "label": "Seller"})
+    )])
+
+    require_escrow_terms_fund_plan([_terms(obligation_data={**data, "label": "Seller"})], plan)
+    with pytest.raises(ValueError, match="seller_plan_mismatch"):
+        require_escrow_terms_fund_plan([_terms(obligation_data={**data, "label": "seller"})], plan)
+
+
+def test_a_resumed_run_derives_from_its_recorded_conditions() -> None:
+    plan = _materialize(_accepted())
+
+    terms = derive_accepted_escrow_terms(
+        accepted_proposal=_accepted().model_dump(mode="json"),
+        listing_record=release_conditions_record(_LISTING),
+        agreed_amount=7_200_000,
+        duration_seconds=3600,
+        settlement_plan=plan.model_dump(mode="json"),
+        addr_config_path=_ANVIL_BOOK,
+    )
+
+    assert terms == escrow_terms_from_settlement_plan(plan)
+
+
+def test_a_resumed_run_refuses_a_plan_its_conditions_do_not_derive() -> None:
+    """The seller's recorded plan pays another recipient than the advertised one."""
+    with pytest.raises(ValueError, match="seller_plan_mismatch"):
+        derive_accepted_escrow_terms(
+            accepted_proposal=_accepted(),
+            listing_record=release_conditions_record(_LISTING),
+            agreed_amount=7_200_000,
+            duration_seconds=3600,
+            settlement_plan=_plan_paying_another_recipient(),
+            addr_config_path=_ANVIL_BOOK,
+        )
+
+
+@pytest.mark.parametrize(
+    "record", [None, {}], ids=["no record", "a record without conditions"]
+)
+def test_a_run_accepted_before_conditions_were_recorded_is_refused(record) -> None:
+    with pytest.raises(ReleaseConditionsUnrecordedError, match="release_conditions_unrecorded"):
+        derive_accepted_escrow_terms(
+            accepted_proposal=_accepted(),
+            listing_record=record,
+            agreed_amount=7_200_000,
+            duration_seconds=3600,
+            settlement_plan=_materialize(_accepted()),
+            addr_config_path=_ANVIL_BOOK,
+        )
+
+
+def test_a_listing_record_reads_back_the_conditions_it_recorded() -> None:
+    record = release_conditions_record(_LISTING)
+
+    assert recorded_release_conditions(record) == [_recipient_condition(_SELLER)]
+    assert recorded_release_conditions(None) is None
+    assert recorded_release_conditions({}) is None
+
+
+@pytest.mark.parametrize(
+    "record",
+    [["not", "an", "object"], {"release_conditions": "not a list"}],
+    ids=["a record that is not an object", "conditions that are not a list"],
+)
+def test_an_unreadable_listing_record_is_refused(record) -> None:
+    with pytest.raises(ValueError, match="release_conditions_unreadable"):
+        recorded_release_conditions(record)
+
+
+@pytest.mark.parametrize(
+    ("demands", "recorded"),
+    [
+        pytest.param([_recipient_condition(_SELLER)], [_recipient_condition(_SELLER)], id="a list"),
+        pytest.param(
+            json.dumps([_recipient_condition(_SELLER)]),
+            [_recipient_condition(_SELLER)],
+            id="stored JSON text",
+        ),
+        pytest.param(None, [], id="absent"),
+        pytest.param("not json", [], id="unreadable"),
+    ],
+)
+def test_a_listing_records_the_conditions_it_advertises(demands, recorded) -> None:
+    assert advertised_release_conditions({"demands": demands}) == recorded
 
 
 def test_the_proposal_at_an_amount_is_authorized_without_building_a_plan() -> None:

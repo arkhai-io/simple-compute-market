@@ -85,7 +85,7 @@ def test_settlement_hook_consumes_common_context(monkeypatch) -> None:
                 "obligations": [{"mechanism": "alkahest.v1"}],
                 "service_terms": {},
             },
-            "accepted_escrow_terms": [],
+            "accepted_escrow_proposal": {"kind": "accepted"},
         }
 
     monkeypatch.setattr(
@@ -119,7 +119,7 @@ def test_settlement_hook_consumes_common_context(monkeypatch) -> None:
         build_plan=partial(domain_runtime._build_settlement_from_context, listing=listing),
     )
 
-    assert artifacts.supplemental == {"accepted_escrow_terms": []}
+    assert artifacts.supplemental == {"accepted_escrow_proposal": {"kind": "accepted"}}
     assert calls == [
         {
             "proposal": {"kind": "proposal"},

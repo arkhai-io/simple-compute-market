@@ -138,18 +138,18 @@ wheels = [
 
 [[package]]
 name = "arkhai-core"
-version = "0.4.1"
+version = "0.5.0"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
+    { path = "arkhai_core-0.5.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-registry-client"
-version = "0.12.2"
+version = "0.12.3"
 source = { registry = "../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -157,7 +157,7 @@ dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_core_registry_client-0.12.2-py3-none-any.whl" },
+    { path = "arkhai_core_registry_client-0.12.3-py3-none-any.whl" },
 ]
 
 [[package]]

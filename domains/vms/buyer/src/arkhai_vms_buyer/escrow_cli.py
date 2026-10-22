@@ -18,6 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .common import resolve_config_value
+from .settlement_stages import derive_resumed_escrow_terms
 
 
 escrow_app = typer.Typer(no_args_is_help=True)
@@ -69,22 +70,6 @@ def _resolve_escrow_context_from_run(
 
     chain_name = None
     escrow_address = None
-    if isinstance(deal.accepted_escrow_terms, list) and deal.accepted_escrow_terms:
-        terms = next(
-            (
-                item
-                for item in deal.accepted_escrow_terms
-                if isinstance(item, dict) and item.get("maker") == "buyer"
-            ),
-            deal.accepted_escrow_terms[0],
-        )
-        if isinstance(terms, dict):
-            raw_chain = terms.get("chain_name")
-            raw_address = terms.get("escrow_contract")
-            if isinstance(raw_chain, str) and raw_chain:
-                chain_name = raw_chain
-            if isinstance(raw_address, str) and raw_address:
-                escrow_address = raw_address
     if isinstance(deal.accepted_escrow_proposal, dict):
         raw_chain = deal.accepted_escrow_proposal.get("chain_name")
         raw_address = deal.accepted_escrow_proposal.get("escrow_address")
@@ -303,16 +288,16 @@ def reclaim_cmd(
 
 
 def _refuse_without_release_condition(log: object, reason: str) -> None:
-    """Stop escrow creation that has no accepted release condition to use.
+    """Stop escrow creation the buyer cannot derive and check for itself.
 
-    A seller settles an escrow only under the release condition it accepted, so
-    an escrow created under any other would never be released to it; refusing
-    here leaves nothing on chain.
+    A buyer funds only the escrow it derives from its accepted proposal and the
+    release conditions its listing advertised at acceptance, held to the
+    seller's recorded plan; refusing here leaves nothing on chain.
     """
     error = (
-        f"Cannot create the escrow: {reason}. A resumed run creates an escrow "
-        "only from the seller's accepted escrow terms recorded in its run-log; "
-        "re-run negotiation so they are captured."
+        f"Cannot create the escrow: {reason}. A resumed run creates only the "
+        "escrow it derives from its accepted proposal and the release conditions "
+        "its run-log recorded at acceptance."
     )
     log.event("escrow_release_condition_missing", error=error)
     typer.secho(error, err=True, fg=typer.colors.RED)
@@ -382,10 +367,7 @@ def create_cmd(
 
     from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
     from .buy_orchestrator import AgreedTerms
-    from .escrow_client import (
-        make_create_escrow_fn,
-        resumed_proposal_refusal,
-    )
+    from .escrow_client import make_create_escrow_fn
     from .common import (
         chain_by_name,
         resolve_recovery_buyer_identity,
@@ -411,20 +393,11 @@ def create_cmd(
         else (int(deal.token_decimals) if deal.token_decimals is not None else None)
     )
     proposal_chain = None
-    if isinstance(deal.accepted_escrow_terms, list) and deal.accepted_escrow_terms:
-        first_terms = deal.accepted_escrow_terms[0]
-        if isinstance(first_terms, dict):
-            raw_chain = first_terms.get("chain_name")
-            if isinstance(raw_chain, str) and raw_chain:
-                proposal_chain = raw_chain
     if isinstance(deal.accepted_escrow_proposal, dict):
         raw_chain = deal.accepted_escrow_proposal.get("chain_name")
         if isinstance(raw_chain, str) and raw_chain:
             proposal_chain = raw_chain
-    if (
-        deal.accepted_escrow_terms is not None
-        or deal.accepted_escrow_proposal is not None
-    ):
+    if deal.accepted_escrow_proposal is not None:
         if not (chain_name_flag or proposal_chain):
             typer.secho(
                 "Accepted escrow proposal in run-log has no chain_name; pass --chain.",
@@ -525,24 +498,13 @@ def create_cmd(
         )
     )
 
-    if deal.accepted_escrow_terms is not None:
-        from market_alkahest.schemas import EscrowTerms
-
-        escrow_terms_list = [
-            EscrowTerms.model_validate(item) for item in deal.accepted_escrow_terms
-        ]
-    elif deal.accepted_escrow_proposal is not None:
-        _refuse_without_release_condition(
-            log, resumed_proposal_refusal(deal.accepted_escrow_proposal)
-        )
-    else:
-        # An escrow is created only under the release condition the seller
-        # accepted; with neither accepted terms nor an accepted proposal there
-        # is none to create it under, and none is assumed.
-        _refuse_without_release_condition(
-            log,
-            "the run-log records no accepted escrow terms or proposal",
-        )
+    escrow_terms_list = derive_resumed_escrow_terms(
+        deal,
+        log,
+        duration_seconds=effective_duration_seconds,
+        addr_config_path=chain.alkahest_addr_config,
+        refuse=_refuse_without_release_condition,
+    )
 
     create_escrow = make_create_escrow_fn(
         private_key=chain.buyer_private_key,

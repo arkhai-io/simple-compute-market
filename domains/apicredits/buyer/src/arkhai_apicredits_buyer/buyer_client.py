@@ -13,7 +13,7 @@ from core_buyer.negotiation_client import (
     negotiate_with_seller as _core_negotiate_with_seller,
 )
 from arkhai_apicredits.negotiation import ApiCreditsProvisionTerms
-from market_alkahest.schemas import EscrowProposal, EscrowTerms
+from market_alkahest.schemas import EscrowProposal
 from .escrow_client import encode_escrow_proposal
 from .settlement_composition import validate_buyer_acceptance
 
@@ -47,7 +47,6 @@ class NegotiationOutcome(CoreNegotiationOutcome):
 
     accepted_provision_terms: ApiCreditsProvisionTerms | None = None
     accepted_escrow_proposal: EscrowProposal | None = None
-    accepted_escrow_terms: list[EscrowTerms] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = super().to_dict()
@@ -59,10 +58,6 @@ class NegotiationOutcome(CoreNegotiationOutcome):
             payload["accepted_escrow_proposal"] = (
                 self.accepted_escrow_proposal.model_dump()
             )
-        if self.accepted_escrow_terms is not None:
-            payload["accepted_escrow_terms"] = [
-                term.model_dump() for term in self.accepted_escrow_terms
-            ]
         return payload
 
 
@@ -78,10 +73,6 @@ def negotiate_with_seller(**kwargs) -> NegotiationOutcome:
         "decode_escrow_proposal",
         lambda value: _validate_model(EscrowProposal, value),
     )
-    kwargs.setdefault(
-        "decode_escrow_terms",
-        lambda value: _validate_model(EscrowTerms, value),
-    )
     core_outcome = _core_negotiate_with_seller(**kwargs)
     values = {
         field.name: getattr(core_outcome, field.name)
@@ -95,9 +86,4 @@ def negotiate_with_seller(**kwargs) -> NegotiationOutcome:
         values["accepted_escrow_proposal"] = _validate_model(
             EscrowProposal, core_outcome.accepted_escrow_proposal
         )
-    if core_outcome.accepted_escrow_terms is not None:
-        values["accepted_escrow_terms"] = [
-            _validate_model(EscrowTerms, term)
-            for term in core_outcome.accepted_escrow_terms
-        ]
     return NegotiationOutcome(**values)
