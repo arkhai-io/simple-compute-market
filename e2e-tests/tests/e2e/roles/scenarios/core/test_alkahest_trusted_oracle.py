@@ -1,9 +1,11 @@
 """Settle an Alkahest escrow through a trusted oracle against compose Anvil.
 
-The oracle-gated release model rests on these SDK calls: an ERC-20 escrow
-released by the trusted-oracle arbiter, a fulfillment, a request for
-arbitration, the oracle's decision, and collection. No storefront runs here;
-the scenario needs only the chain and its baked deployments.
+The escrow's release condition is the one ``kit/alkahest`` derives for an
+oracle-gated seller, and encodes as every plan does, so the scenario proves
+that condition against the deployed trusted-oracle arbiter: an ERC-20 escrow
+under it, a fulfillment, a request for arbitration, the oracle's decision, and
+collection. No storefront runs here; the scenario needs only the chain and its
+baked deployments.
 """
 from __future__ import annotations
 
@@ -11,13 +13,11 @@ import time
 import uuid
 
 import pytest
-from alkahest_py import (
-    AlkahestClient,
-    ArbitrationMode,
-    TrustedOracleArbiterDemandData,
-)
+from alkahest_py import AlkahestClient, ArbitrationMode
 from eth_account import Account
+from market_alkahest import AlkahestSettlementConfig, release_conditions
 from market_alkahest.alkahest import (
+    encode_authorized_release_condition,
     get_alkahest_network,
     resolve_alkahest_address_config,
 )
@@ -57,18 +57,33 @@ async def test_an_escrow_released_by_a_trusted_oracle_is_collected() -> None:
     seller = _client(str(settings.SELLER.PRIVATE_KEY))
     oracle = _client(_ANVIL_ORACLE_PRIVATE_KEY)
     oracle_address = Account.from_key(_ANVIL_ORACLE_PRIVATE_KEY).address
-    address_config = resolve_alkahest_address_config(
-        get_alkahest_network(_CHAIN_NAME), config_path=_ALKAHEST_ADDRESSES_PATH
+    seller_address = Account.from_key(str(settings.SELLER.PRIVATE_KEY)).address
+    conditions = release_conditions(
+        AlkahestSettlementConfig(
+            enabled=True,
+            oracle_gated=True,
+            trusted_oracle_addresses=(oracle_address,),
+        ),
+        chain_names={_CHAIN_NAME},
+        chains={_CHAIN_NAME: {"alkahest_address_config_path": _ALKAHEST_ADDRESSES_PATH}},
+        wallet_address=seller_address,
+    )
+    arbiter_address, demand = encode_authorized_release_condition(
+        {"demands": conditions},
+        chain_name=_CHAIN_NAME,
+        config_path=_ALKAHEST_ADDRESSES_PATH,
+    )
+    # Arbitration is keyed by the fulfillment and the inner demand the
+    # condition carries, so each run's new fulfillment needs no unique demand.
+    inner_demand = bytes.fromhex(
+        str(conditions[0]["demand_data"]["data"]).removeprefix("0x")
     )
 
     price = {"address": _MOCK_ERC20_A, "value": 100}
     await buyer.erc20.util.approve(price, "escrow")
-    inner_demand = f"trusted oracle scenario {uuid.uuid4()}".encode("utf-8")
     arbiter = {
-        "arbiter": address_config.arbiters_addresses.trusted_oracle_arbiter,
-        "demand": TrustedOracleArbiterDemandData(
-            oracle_address, inner_demand
-        ).encode_self(),
+        "arbiter": arbiter_address,
+        "demand": bytes.fromhex(demand.removeprefix("0x")),
     }
     escrow = await buyer.erc20.escrow.default.permit_and_create(
         price, arbiter, int(time.time()) + 3600

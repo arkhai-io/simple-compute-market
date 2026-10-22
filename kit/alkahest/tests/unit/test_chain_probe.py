@@ -6,7 +6,9 @@ on a public network.
 
 from __future__ import annotations
 
+import asyncio
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -321,8 +323,9 @@ async def test_a_probe_with_no_constructor_reports_what_the_chain_answers() -> N
 
 @pytest.mark.asyncio
 async def test_a_hung_construction_is_bounded_and_holds_no_other_chain() -> None:
-    """A construction that never returns times out as unreachable, the other
-    chain's result is still recorded, and its late result is discarded."""
+    """A construction that does not return in time reads unreachable, the other
+    chain's result is still recorded, and the map holds only the client built in
+    time."""
     release = threading.Event()
 
     def build(chain_name: str) -> object:
@@ -350,5 +353,63 @@ async def test_a_hung_construction_is_bounded_and_holds_no_other_chain() -> None
         assert probe.result("stuck").result == CHAIN_UNREACHABLE
         assert probe.result("anvil").result == CHAIN_REACHABLE
         assert clients == {"anvil": "client:anvil"}
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_construction_that_never_returns_is_started_once_and_holds_no_shared_worker() -> None:
+    """Every later probe finds the construction still running and starts no
+    other, and work on the loop's default executor still completes: here a
+    single worker, which a construction holding it would starve."""
+    release = threading.Event()
+    started: list[str] = []
+
+    def build(chain_name: str) -> object:
+        started.append(chain_name)
+        release.wait(timeout=5)
+        return f"client:{chain_name}"
+
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=1))
+    probe = _probe(
+        Rpc(timeout=0.02), build_client=build, clients={}, rpc_timeout_seconds=0.02
+    )
+    try:
+        for _ in range(5):
+            await probe.step()
+            assert probe.result("anvil").result == CHAIN_UNREACHABLE
+
+        assert started == ["anvil"]
+        assert await asyncio.to_thread(lambda: "default executor answers") == (
+            "default executor answers"
+        )
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_a_construction_that_finishes_late_is_adopted_by_the_next_probe() -> None:
+    release = threading.Event()
+    started: list[str] = []
+
+    def build(chain_name: str) -> object:
+        started.append(chain_name)
+        release.wait(timeout=5)
+        return f"client:{chain_name}"
+
+    clients: dict[str, object] = {}
+    probe = _probe(
+        Rpc(timeout=1.0), build_client=build, clients=clients, rpc_timeout_seconds=1.0
+    )
+    try:
+        await probe.step()
+        assert probe.result("anvil").result == CHAIN_UNREACHABLE
+
+        release.set()
+        await probe.step()
+
+        assert probe.result("anvil").result == CHAIN_REACHABLE
+        assert clients == {"anvil": "client:anvil"}
+        assert started == ["anvil"]
     finally:
         release.set()

@@ -85,9 +85,11 @@ configured probe interval and an explicit step probing at once, with every call 
 a timeout. Alkahest readiness MUST read each chain's
 last probe result and MUST NOT call a chain itself. A chain not yet probed since start
 MUST read as a reachability blocker. A result MUST NOT expire while the loops are held. A
-chain whose client could not be constructed MUST be probed, and its client rebuilt, at
-each probe until construction succeeds, each construction bounded by the same timeout;
-until it succeeds the chain MUST read as a reachability blocker whatever its RPC answers,
+chain whose client could not be constructed MUST be probed at each probe until its
+client's construction succeeds, a probe finding no construction running starting one and
+waiting for it no longer than the same timeout; at most one construction per chain MUST
+run at a time, a probe finding one still running MUST start no other, and a construction
+finishing after its probe's wait MUST be adopted by a later probe; until it succeeds the chain MUST read as a reachability blocker whatever its RPC answers,
 and every consumer of the storefront's Alkahest clients MUST read them through the map the
 probe updates, so the storefront recovers without a restart. Readiness MUST judge the
 chains a publication names, and with no publication input every configured chain; every
@@ -112,6 +114,12 @@ chain's last result and when it was taken.
   does not finish within the timeout
 - **THEN** Alkahest is unready with a reachability blocker for that chain, and the next
   probe that constructs the client makes it ready, without a restart
+
+#### Scenario: A client's construction never returns
+
+- **WHEN** a chain's client construction never returns, across many probes
+- **THEN** only that one construction runs, the chain reads as a reachability blocker at
+  each probe, and the storefront's other work goes on
 
 #### Scenario: A configured chain no listing publishes on stops answering
 

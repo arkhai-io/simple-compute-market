@@ -337,6 +337,14 @@ Section 3 notes (handoff):
   the Helm `e2e` step's selection, whose release may not fund the seller. Section 3's
   "Not covered by any section" note on a VM create's supplied `demands` is answered by
   85 F9 (Section 5). Evidence: the round's note under Section 10.
+- **Round 1's second triage.** 122 F3: `test_alkahest_trusted_oracle.py` no longer
+  builds its arbiter and demand with the SDK alone. It derives the release condition an
+  oracle-gated seller advertises through `kit/alkahest`'s `release_conditions`, and
+  encodes it through `encode_authorized_release_condition`, as every plan is encoded, so
+  the scenario proves the kit's condition against the deployed trusted-oracle arbiter. The
+  arbitration request carries the condition's own inner data, which is empty; each run's
+  fulfillment is new, so no unique demand is needed. Evidence: the second triage's note
+  under Section 10.
 
 ## 4. Alkahest probes its chains apart from readiness
 
@@ -588,6 +596,21 @@ Section 4 notes (handoff):
   unanswering second chain); bare metal composition (`test_app_composition.py`: the
   configured runtime's registered probe loop run through `loops.run_cycle`, and status
   naming an unanswering second chain). Evidence: the round's note under Section 10.
+- **Round 1's second triage.** 122 F1: 85 F8's fix bounded the wait but started a new
+  construction, on the loop's default executor, at every probe, so a construction that
+  never returns would fill that executor, which every database call shares, within
+  minutes. `AlkahestChainProbe` now keeps each chain's pending construction: it runs on a
+  daemon thread of its own (`_start_construction`), a probe waits for it no longer than
+  the RPC timeout (`asyncio.wait`, which leaves it running), a probe finding it still
+  running starts no other and reads the chain unreachable, and a probe finding it
+  finished adopts its client or, if it failed, reads the chain unreachable, and the next
+  probe builds again. The `settlement-configuration`
+  delta's requirement says so, with the scenario "A client's construction never returns";
+  decision 19's timeout bullet records it. Tests: kit unit (`test_chain_probe.py`: five
+  probes over a never-returning constructor start one construction, with the loop's
+  default executor reduced to one worker and still answering; a construction finishing
+  after its probe's wait is adopted by the next probe, which reads the chain reachable).
+  122 F4 is planned in 11.5. Evidence: the second triage's note under Section 10.
 
 ## 5. Each storefront derives Alkahest options only from ready clauses
 
@@ -1607,6 +1630,14 @@ Section 8 notes (handoff):
   configured, a substituted recipient is refused `selected_demand_not_allowed` and
   another token `escrow_field_mismatch`, and nothing is accepted). Evidence: the round's
   note under Section 10.
+- **Round 1's second triage.** 122 F6: the `negotiation-protocol` delta attributes the
+  refusal of an escrow outside the listing's accepted entries to the seller's acceptance,
+  through which every plan a seller materializes passes, rather than to plan
+  materialization in general: `materialize_escrow_terms_from_proposal` and the plan forms
+  built on it hold an escrow to its pin and release condition only, since a buyer's
+  derivation carries no accepted entries, and their docstring now says that a seller
+  authorizes the proposal with `authorize_escrow_proposal` before materializing it.
+  Documentation only; no test changes.
 
 ## 9. A buyer funds only what it derives
 
@@ -1858,6 +1889,10 @@ Section 9 notes (handoff):
   scenario for a reply carrying none. Tests: core unit (`test_orchestrator.py`: a reply
   with no plan creates no escrow); kit unit (`test_plans.py`: a resume with no recorded
   plan). Evidence: the round's note under Section 10.
+- **Round 1's second triage.** 122 F5: decision 17's resume bullet, which 85 F4's
+  correction missed, now says a resumed run derives from its recorded accepted proposal
+  and the recorded conditions at the Agreement's exact amount, held to the recorded seller
+  plan, as the delta and the decision's own settled paragraph do.
 
 ## 10. The provisioning service refuses unserved providers and signs failures
 
@@ -2024,6 +2059,32 @@ Section 10 notes (handoff):
   round-1 notes pointed at a Section 10 note that did not exist was read before this note
   was written. The kit Alkahest, bare-metal, API-credit, VM integration, and release
   tooling suites were rerun after these fixes.
+- **Round 1's second triage: the round's evidence.** The fixes for 122 F1, F3, F5, and F6
+  are in the second-triage notes of Sections 4, 3, 9, and 8; 122 F2 is task 11.9 and
+  122 F4 is in 11.5. No package is bumped (`docs/development/RELEASING.md`) and no lock
+  changed. **Evidence** (`make check-packaging` first, which rebuilds the wheels): unit —
+  `make -C kit test-alkahest` 415 passed, with the two new probe cases; `make test` passed
+  every suite (among them `kit/alkahest` 415, the VM storefront unit 1099 (1 skipped) and
+  integration 455, the bare-metal storefront 449, the API-credit storefront 229,
+  `make test-e2e-unit` 38) and failed only at `make test-deployment-packaging`'s Helm render
+  (`helm: No such file or directory`), as in the first triage. `make check-packaging` and
+  `make check-comment-hygiene` passed; `make check-change` fails only on the two citations
+  Sections 13 and 22 create. End-to-end: unrun here; `e2e_alkahest_trusted_oracle`'s kit
+  derivation (122 F3) is proven by the fix commit's validation.
+  **Fresh-context check** of the diff against `e15a5b2`: no concurrency defect, the
+  scenario's kit calls matching their signatures, and both new probe tests failing on the
+  old code. Fixed: a hung-construction test docstring still saying a late result is
+  discarded; this note's Section 4 entry claiming a failed late construction is rebuilt in
+  the same probe (the next probe rebuilds it); the delta's "rebuilt at each probe"
+  contradicting "start no other"; a constructor raising a `BaseException` leaving the chain
+  "still being constructed" for good (now delivered as an error); the materializer's
+  docstring saying a seller materializes "through" `authorize_escrow_proposal`, which only
+  authorizes; the late-adoption test's wait raised to one second. Declined: guarding
+  `_constructions` against two concurrent steps, which the loop's cycle lock already
+  excludes, and a probe stepped on a second event loop starting a second construction,
+  which no storefront does. `make -C kit test-alkahest`, `make test-storefront`,
+  `make check-packaging`, and `make check-comment-hygiene` were rerun after these fixes
+  and passed.
 
 ## 11. Storefronts start degraded rather than waiting on their dependencies
 
@@ -2069,7 +2130,12 @@ settings, a cookbook, and the `deployment-state` delta.
       `StorefrontClient.get_system_status` reports the registry check failing, the site's
       projection families unknown, Alkahest unready with `alkahest.chain_unreachable`, and
       the publication cycle failed, with no listing closed; once the chain answers, a stepped
-      `alkahest-chain-probe` makes Alkahest ready without a restart. API credits
+      `alkahest-chain-probe` makes Alkahest ready without a restart. The VM app is built by
+      `build_vm_storefront_app` over `VmCompositionSeams` whose `alkahest_json_rpc` and
+      `alkahest_client_constructor` are test stubs, the stub switched to answering before
+      the stepped probe, with no module patch: this is the started-application test of
+      VM's probe wiring that `test_alkahest_chain_probe_composition.py` stands in for
+      (122 F4, the residue of 85 F3), which stays as the composition's unit test. API credits
       `tests/integration/test_lifecycle_status.py`: it starts with its credits service
       unreachable and `listing-seed` waits (D20, D19).
 - [ ] 11.6 The `deployment-state` delta: the permanent requirement "A storefront chart
@@ -2081,8 +2147,30 @@ settings, a cookbook, and the `deployment-state` delta.
       passes (D20; a correction of the delta to the reviewed decision).
 - [ ] 11.7 Versions: `arkhai-vms-storefront`, `arkhai-apicredits-storefront`; the chart
       versions per the charts' own convention; `make lock`.
+- [ ] 11.9 One derivation of release conditions for published escrows (122 F2). The rule
+      "derive a condition for every published Alkahest escrow's chain, only while the
+      readiness it was published under reports Alkahest ready" is written three times:
+      VM's `publication_terms.demands_for_published_escrows`, API credits'
+      `SettlementComposition.release_conditions` with its `alkahest_ready`, and bare metal's
+      `_release_conditions` through `kit/alkahest`'s `publication_release_conditions` over
+      its clauses. Add to `kit/alkahest/src/market_alkahest/release_conditions.py`
+      `escrow_release_conditions(config, accepted_escrows, *, readiness, chains,
+      wallet_address)`, returning nothing unless Alkahest is ready and otherwise one
+      condition per chain the escrows name, through `release_conditions` (which refuses an
+      unconfigured chain); export it, and remove `publication_release_conditions` and its
+      export. VM's `listing_service.py`, API credits' composition (its
+      `release_conditions` method stays as the seam and calls the kit), and bare metal's
+      `settlement_composition.py`, passing its accepted escrows, call it;
+      `demands_for_published_escrows` goes, and `alkahest_ready` unless something else
+      reads it. Tests: the kit unit cases of `publication_release_conditions` move to the
+      new function, with an unready readiness and an unconfigured chain; each domain's
+      existing case that an unready Alkahest advertises nothing stays and now covers the
+      shared rule. `design.md` decision 19's sentence naming the three callers of
+      `publication_release_conditions` is corrected to the new function. No version bump:
+      each package already carries this change's (`docs/development/RELEASING.md`).
 - [ ] 11.8 **Verify.** `make -C helm test-render` (chart render); `make test-storefront`,
-      `make test-apicredits`; `make test`; `make check-packaging`. End-to-end: every VM-lane
+      `make test-apicredits`; for 11.9, `make -C kit test-alkahest` and
+      `make test-bare-metal`; `make test`; `make check-packaging`. End-to-end: every VM-lane
       and API-credit-lane scenario starts on the changed startup. The local Helm topology
       run of D14 — `make helm-topology-up` and `make helm-topology-check` on this round's
       commit, no init containers on the VM storefront — is the maintainer's at this round's

@@ -21,10 +21,13 @@ A chain's result is one of:
 
 The probe also holds the storefront's live map of chain clients. A chain whose
 client could not be constructed has its client constructed again at each probe
-until that succeeds, bounded by the RPC timeout, and the map is updated in
-place, so every consumer handed the map reaches the rebuilt client without a
-restart. Until then the chain reads ``alkahest.chain_unreachable``, whatever
-its JSON-RPC calls answer.
+until that succeeds, and the map is updated in place, so every consumer handed
+the map reaches the rebuilt client without a restart. A probe waits for a
+construction no longer than the RPC timeout, and at most one construction per
+chain runs at a time: one still running when the wait ends is left to finish on
+its own thread, and a later probe adopts its client. Until the map holds one
+the chain reads ``alkahest.chain_unreachable``, whatever its JSON-RPC calls
+answer.
 
 The JSON-RPC calls go over each chain's ``rpc_url`` directly rather than
 through a chain client, because a probe must answer for a chain whose client
@@ -40,6 +43,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
@@ -217,6 +221,7 @@ class AlkahestChainProbe:
         self._required_addresses = required_addresses
         self._clock = clock
         self._results: dict[str, ChainProbeResult] = {}
+        self._constructions: dict[str, asyncio.Future[Any]] = {}
 
     @property
     def clients(self) -> MutableMapping[str, Any]:
@@ -272,20 +277,32 @@ class AlkahestChainProbe:
         """Construct the chain's client if the map lacks one; whether it has one.
 
         A probe given no constructor has none it could build, and reports what
-        the chain answers. Construction is bounded by the RPC timeout, since a
+        the chain answers. The wait is bounded by the RPC timeout, since a
         websocket client connects while it is built and an endpoint that
         accepts the connection but never upgrades it would otherwise hold the
-        step, and with it the loop's cycle lock, for good. A worker thread
-        cannot be stopped, so a construction that finishes after its timeout is
-        discarded: the map takes only the result the probe awaited.
+        step, and with it the loop's cycle lock, for good. A thread cannot be
+        stopped, so a construction still running when the wait ends is kept
+        rather than started again: a construction that never returns holds one
+        thread for its chain instead of one per probe, and one that finishes
+        late is adopted by the next probe.
         """
         if chain_name in self._clients or self._build_client is None:
             return True
-        try:
-            client = await asyncio.wait_for(
-                asyncio.to_thread(self._build_client, chain_name),
-                timeout=self._timeout,
+        pending = self._constructions.get(chain_name)
+        if pending is None or pending.get_loop() is not asyncio.get_running_loop():
+            pending = self._start_construction(chain_name)
+            self._constructions[chain_name] = pending
+        # ``wait`` leaves the construction running on timeout, where
+        # ``wait_for`` would cancel the future the next probe adopts.
+        await asyncio.wait((pending,), timeout=self._timeout)
+        if not pending.done():
+            logger.warning(
+                "[ALKAHEST] client for chain %s is still being constructed", chain_name
             )
+            return False
+        del self._constructions[chain_name]
+        try:
+            client = pending.result()
         except Exception as exc:  # each chain's construction is isolated
             logger.warning(
                 "[ALKAHEST] client for chain %s could not be constructed: %s",
@@ -295,6 +312,46 @@ class AlkahestChainProbe:
             return False
         self._clients[chain_name] = client
         return True
+
+    def _start_construction(self, chain_name: str) -> asyncio.Future[Any]:
+        """Construct the chain's client on a thread of its own.
+
+        A daemon thread rather than the loop's default executor: a construction
+        that never returns would otherwise hold a worker every database call
+        shares, and a pool's worker is joined when the process exits.
+        """
+        loop = asyncio.get_running_loop()
+        pending: asyncio.Future[Any] = loop.create_future()
+        build_client = self._build_client
+        assert build_client is not None
+
+        def settle(client: Any, error: Exception | None) -> None:
+            if pending.done():
+                return
+            if error is None:
+                pending.set_result(client)
+            else:
+                pending.set_exception(error)
+
+        def construct() -> None:
+            # Whatever the constructor raises reaches the probe, or the chain
+            # would read as still being constructed for good.
+            try:
+                client, error = build_client(chain_name), None
+            except Exception as exc:
+                client, error = None, exc
+            except BaseException as exc:
+                client = None
+                error = RuntimeError(f"construction raised {type(exc).__name__}")
+            try:
+                loop.call_soon_threadsafe(settle, client, error)
+            except RuntimeError:  # the loop closed while the client was built
+                pass
+
+        threading.Thread(
+            target=construct, name=f"alkahest-client-{chain_name}", daemon=True
+        ).start()
+        return pending
 
     def _probe_sync(self, chain: ProbedChain) -> str:
         try:

@@ -40,7 +40,8 @@ negotiation that carries no escrow proposal is unaffected. An escrow proposal na
 listing accepting none, or a literal field such as its token other than that accepted entry's,
 MUST be refused before any seller decision accepts it, by the seller's escrow-shape policy, which
 every domain runs ahead of its configured policies, and, independently of any seller policy, by
-plan materialization; no listing entry prices such a proposal.
+the seller's acceptance, through which every plan a seller materializes passes; no listing
+entry prices such a proposal.
 
 #### Scenario: A proposal substitutes the recipient
 

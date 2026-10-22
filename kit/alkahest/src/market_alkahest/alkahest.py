@@ -932,6 +932,13 @@ def materialize_escrow_terms_from_proposal(
     authorizing none, a selection it does not authorize, and a condition the
     codecs cannot encode raise ``ReleaseConditionError`` before any obligation
     data is built.
+
+    The escrow is not held to an entry of the listing's ``accepted_escrows``:
+    a buyer derives from a record carrying only the release conditions, and
+    holds the result to the seller's plan instead. A seller authorizes the
+    proposal with :func:`market_alkahest.proposals.authorize_escrow_proposal`,
+    which also refuses an escrow outside the listing's accepted entries, before
+    materializing it.
     """
     require_pinned_escrow(proposal)
     # The release condition is the one the listing authorizes, and nothing

@@ -572,9 +572,9 @@ re-derives the mandate and requires equality.
   none is refused before funding, `seller_plan_missing` (85 F12). `core/buyer` gains no
   import of `kit/alkahest`.
 - The run-log records the selected listing's advertised release conditions at acceptance.
-  A resumed run derives the escrow from the Agreement's selected option and those
-  conditions, checking the recorded seller plan against them, rather than refusing or
-  funding blindly.
+  A resumed run derives the escrow from its recorded accepted proposal and those
+  conditions, at the recorded Agreement's exact amount, and holds it to the recorded
+  seller plan, rather than refusing or funding blindly.
 - A run-log that predates the recorded conditions is refused before funding, naming the
   reason: the run was accepted before release conditions were recorded, so a new run is
   needed. Resuming it as before would fund the seller's terms unchecked. Only runs
@@ -817,9 +817,14 @@ so the field is wire-safe. Reachability is produced by one chain probe in `kit/a
     negotiate, and a process with no loops would never have a probe result.
 - **Timeouts.** Each RPC call is bounded, 5 seconds by default; a timed-out run records
   an unreachable result and is retried at the next interval, never in a tight loop.
-  Settled in round 1's triage (85 F8): the probe's construction of a missing client is
-  bounded by the same timeout, since a websocket client connects while it is built, and
-  a construction that finishes late is discarded rather than filling the map.
+  Settled in round 1's triage (85 F8): the probe waits for its construction of a missing
+  client no longer than the same timeout, since a websocket client connects while it is
+  built. Settled in round 1's second triage (122 F1): a thread cannot be stopped, so at
+  most one construction per chain runs, on a daemon thread of its own rather than the
+  loop's default executor, which every database call shares; a probe finding it still
+  running starts no other, and a later probe adopts a construction that finishes late.
+  Starting one per probe would let a construction that never returns fill the default
+  executor within minutes and stall the whole storefront.
 - **A chain needs its client** (85 F7). Servicing settles through the client, so a chain
   whose client the probe could not construct reads `alkahest.chain_unreachable` whatever
   its JSON-RPC calls answer; a probe given no constructor, because the policy lacks the
