@@ -60,14 +60,16 @@ STOREFRONT_PROJECT = "domains/vms/storefront"
 STOREFRONT_PYTHON = Path(STOREFRONT_PROJECT, ".venv/bin/python")
 # The end-to-end pipeline's scenario selections, one per lane; the Helm run reads
 # them from e2e-tests/Makefile so the two lists cannot drift apart.
-PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE")
+PIPELINE_MARKER_VARIABLES = ("E2E_MODULE", "E2E_BARE_METAL_MODULE",
+                             "E2E_APICREDITS_MODULE")
 # The scenarios run against the Helm deployment. The local release enables
 # Alkahest and contact exchange for its one storefront, but the charts deploy no
 # second storefront and registry, none of the API-credits and bare-metal services,
 # and forward no Mailpit, so a scenario that needs any of those cannot pass there.
 # Every other pipeline scenario is reported as not run against Helm, never as
 # passed. A scenario joins this list when the Helm deployment serves what it needs.
-HELM_SCENARIOS = ("contracts", "e2e_alkahest_escrow_codecs")
+HELM_SCENARIOS = ("contracts", "e2e_alkahest_escrow_codecs",
+                  "e2e_alkahest_trusted_oracle")
 NOT_SERVED = ("the default charts do not serve it: no settlement mechanism, and not "
               "every service the pipeline's compose stacks run")
 # The local ports `make -C helm forward` binds. Port-forwards start in the
@@ -322,8 +324,11 @@ def validate_helm(validation: Validation, *, context: str = DEFAULT_HELM_CONTEXT
     except ValidationError as exc:
         validation.fail("scenarios", str(exc))
         return validation.finish()
-    # `scenarios=None` runs every pipeline scenario, to find which the charts serve.
-    selected = list(markers if scenarios is None else scenarios)
+    # `scenarios=None` runs every pipeline scenario, to find which the charts serve,
+    # and the served list with it, which may hold checks no pipeline lane runs, such
+    # as `contracts`.
+    selected = (markers + [name for name in HELM_SCENARIOS if name not in markers]
+                if scenarios is None else list(scenarios))
     validation.summary.not_run = {marker: NOT_SERVED for marker in markers
                                   if marker not in selected}
 
@@ -545,7 +550,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--context", default=DEFAULT_HELM_CONTEXT,
                         help="the only kube context the Helm part may deploy to")
     parser.add_argument("--all-scenarios", action="store_true",
-                        help="run every pipeline scenario on Helm rather than the ones the "
+                        help="run every pipeline scenario on Helm as well as the ones the "
                              "default charts serve; for establishing which those are")
     args = parser.parse_args(argv)
     try:

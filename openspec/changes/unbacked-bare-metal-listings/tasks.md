@@ -333,10 +333,11 @@ Section 3 notes (handoff):
   `e2e_alkahest_trusted_oracle`, in the VM lane's module list), which runs the same
   escrow, fulfillment, arbitration, and collection against the lane's Anvil with its
   funded buyer and seller and Anvil account #0 as the oracle. They exercise the SDK and the
-  chain, not the storefront, so no integration test is owed in their place. Not added to
-  the Helm `e2e` step's selection, whose release may not fund the seller. Section 3's
-  "Not covered by any section" note on a VM create's supplied `demands` is answered by
-  85 F9 (Section 5). Evidence: the round's note under Section 10.
+  chain, not the storefront, so no integration test is owed in their place. It is in the
+  Helm `e2e` step's served list as well: it passed against the charts at `9aa024e` under
+  `HELM_ALL_SCENARIOS=1` (132 F1). Section 3's "Not covered by any section" note on a VM
+  create's supplied `demands` is answered by 85 F9 (Section 5). Evidence: the round's note
+  under Section 10.
 - **Round 1's second triage.** 122 F3: `test_alkahest_trusted_oracle.py` no longer
   builds its arbiter and demand with the SDK alone. It derives the release condition an
   oracle-gated seller advertises through `kit/alkahest`'s `release_conditions`, and
@@ -345,6 +346,17 @@ Section 3 notes (handoff):
   arbitration request carries the condition's own inner data, which is empty; each run's
   fulfillment is new, so no unique demand is needed. Evidence: the second triage's note
   under Section 10.
+- **Round 1's third triage.** 132 F1: the round-1 note's reason for keeping
+  `e2e_alkahest_trusted_oracle` off the Helm `e2e` step, that the release may not fund the
+  seller, did not hold: the Helm chain loads the same baked state as compose, and the
+  scenario passed there at `9aa024e` under `HELM_ALL_SCENARIOS=1`. It joins
+  `HELM_SCENARIOS` in `scripts/validate_slice.py`, and the note above states it. The same
+  validation showed the all-scenarios selection incomplete: `PIPELINE_MARKER_VARIABLES`
+  now reads `E2E_APICREDITS_MODULE` too, so the API-credit scenarios appear in a Helm
+  summary's `not_run` map and run under `HELM_ALL_SCENARIOS=1`, and that mode now runs the
+  served list beside the pipeline's scenarios, so `contracts`, in no lane, is no longer
+  dropped. Unit cases in `scripts/tests/test_validate_slice.py`. Evidence: the third
+  triage's note under Section 10.
 
 ## 4. Alkahest probes its chains apart from readiness
 
@@ -2085,6 +2097,27 @@ Section 10 notes (handoff):
   which no storefront does. `make -C kit test-alkahest`, `make test-storefront`,
   `make check-packaging`, and `make check-comment-hygiene` were rerun after these fixes
   and passed.
+- **Round 1's third triage: the round's evidence.** The validation of `9aa024e`
+  (`134-validation`) passed: local, the served Helm scenarios, and all three pipeline
+  lanes, the kit-derived trusted-oracle scenario (122 F3) passing in the VM lane and on
+  Helm. The fix for 132 F1 is in Section 3's third-triage note; it changes only the
+  validation tooling and a note. **Evidence:** unit — `make test-release-tooling`
+  (`scripts/tests`, with the updated `test_validate_slice.py`) 1081 passed, 11 skipped;
+  `make test` passed every suite and failed only at `make test-deployment-packaging`'s
+  Helm render (`helm: No such file or directory`), as in the earlier triages.
+  `make check-packaging` and `make check-comment-hygiene` passed; `make check-change`
+  fails only on the two citations Sections 13 and 22 create. End-to-end: the served list's
+  new entry runs in the fix commit's Helm validation.
+  **Fresh-context check** of the diff against `9aa024e`: no correctness defect; the
+  selection has no duplicates, and the trusted-oracle scenario leaves `not_run`. Fixed:
+  the marker variables put in the pipeline's lane order (VM, bare metal, API credits), as
+  `pipeline_markers` promises; the selection's comment overstating that the served list
+  lies outside the lanes (only `contracts` does); `change-validate`'s instruction still
+  saying the all-scenarios run replaces the served list; this triage's note in Section 3
+  reflowed. Declined: refreshing `helm-e2e-pipeline-parity`'s proposal, which describes
+  the Helm run's selection as it was; that change's design owns its account of the current
+  system. `make test-release-tooling`, `make check-packaging`, and
+  `make check-comment-hygiene` were rerun after these fixes and passed.
 
 ## 11. Storefronts start degraded rather than waiting on their dependencies
 

@@ -21,6 +21,7 @@ _SPEC.loader.exec_module(validator)
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 VM_MARKERS = "e2e_deal or multi_registry or e2e_listing_shapes"
 BARE_METAL_MARKERS = "e2e_bare_metal_publication"
+APICREDITS_MARKERS = "e2e_credits_deal"
 
 
 class Fake:
@@ -41,7 +42,8 @@ class Fake:
         self.head = COMMIT
         self.context = context
         self.markers = markers or {"E2E_MODULE": VM_MARKERS,
-                                   "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS}
+                                   "E2E_BARE_METAL_MODULE": BARE_METAL_MARKERS,
+                                   "E2E_APICREDITS_MODULE": APICREDITS_MARKERS}
         self.nodes = nodes
         self.docker_up = docker_up
         # The release's volumes before the uninstall, as (name, retention policy),
@@ -248,11 +250,12 @@ def test_helm_runs_every_step_and_the_pipeline_scenarios_it_can_serve(tmp_path: 
         "make -C helm undeploy",
         "make -C helm deploy-local",
         "make -C helm forward",
-        "make -C e2e-tests test-module MODULE=contracts or e2e_alkahest_escrow_codecs",
+        "make -C e2e-tests test-module MODULE=contracts or e2e_alkahest_escrow_codecs or "
+        "e2e_alkahest_trusted_oracle",
         "make -C helm unforward",
     ]
     assert set(summary.not_run) == {"e2e_deal", "multi_registry", "e2e_listing_shapes",
-                                    "e2e_bare_metal_publication"}
+                                    "e2e_credits_deal", "e2e_bare_metal_publication"}
     assert "not run multi_registry" in validator.render(summary)
 
 
@@ -490,6 +493,7 @@ def test_the_pipeline_marker_variables_exist_and_are_plain_disjunctions() -> Non
     markers = validator.pipeline_markers(validator._read)
 
     assert "e2e_deal" in markers
+    assert "e2e_credits_deal" in markers
     assert "e2e_bare_metal_publication" in markers
 
 
@@ -500,14 +504,18 @@ def test_every_helm_scenario_is_a_declared_marker() -> None:
         assert f'"{marker}:' in declared
 
 
-def test_all_scenarios_runs_every_pipeline_scenario(tmp_path: Path) -> None:
+def test_all_scenarios_runs_every_pipeline_scenario_and_the_served_list(
+    tmp_path: Path,
+) -> None:
     _storefront_env(tmp_path)
     fake = Fake()
     summary = _helm(tmp_path, fake, scenarios=None)
 
     assert summary.not_run == {}
     assert ("make -C e2e-tests test-module MODULE=e2e_deal or multi_registry or "
-            "e2e_listing_shapes or e2e_bare_metal_publication") in fake.ran()
+            "e2e_listing_shapes or e2e_bare_metal_publication or e2e_credits_deal or "
+            "contracts or e2e_alkahest_escrow_codecs or e2e_alkahest_trusted_oracle"
+            ) in fake.ran()
 
 
 def test_make_targets_delegate_to_the_script() -> None:

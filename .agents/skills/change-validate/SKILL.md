@@ -83,8 +83,8 @@ run `make round-done`.
   that commit; if `HEAD` moves while you work, stop: the evidence no longer belongs
   to one commit.
 - **Instructions.** If the invocation says `HELM_ALL_SCENARIOS=1`, the Helm part
-  runs every pipeline scenario rather than only those the default charts serve, to
-  find which the charts serve now (step 3).
+  runs every pipeline scenario and the served list together, to find which the
+  charts serve now (step 3).
 
 ## 2. Start the pipeline first
 
