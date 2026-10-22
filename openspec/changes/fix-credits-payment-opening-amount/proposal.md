@@ -26,7 +26,10 @@ None.
 
 ### Modified Capabilities
 
-None recorded. The permanent `negotiation-protocol` and `settlement-servicing` specifications already require the seller's reference amount to come from the selected option's rate and an accepted Agreement to keep its exact mechanism, option, and parameters; this change repairs the buyer so it meets them.
+- `buyer-orchestration`: negotiation opens from the selected advertised option, an unmatched selection exits before negotiating, and a buy command's match cap counts only candidates the buyer can settle with.
+- `test-compatibility`: a payment scenario blocks only on an absent or unready payments target; with one configured, a missing scenario-owned setting fails.
+
+The permanent `negotiation-protocol` and `settlement-servicing` specifications already require the seller's reference amount to come from the selected option's rate and an accepted Agreement to keep its exact mechanism, option, and parameters; this change repairs the buyer so it meets them.
 
 ## Dependencies and Related Changes
 
@@ -47,11 +50,12 @@ Touches `core/buyer` orchestration, the API-credit buyer's buy command and payme
 ## Permanent documentation impact
 
 - [ ] `docs/development/ARCHITECTURE.md`
-- [ ] Existing subsystem specification — pending the design review's triage
+- [x] Existing subsystem specification — `buyer-orchestration`, `test-compatibility`
 - [ ] New subsystem specification
-- [x] `docs/development/TESTING.md` — payment-scenario configuration (written by PR #270)
+- [x] `docs/development/TESTING.md` and `e2e-tests/README.md` — payment-scenario configuration
 
 ### Knowledge to promote
 
-- Payment scenarios share one explicit, readiness-gated payments policy — `docs/development/TESTING.md` (written; its accuracy is under the design review's triage).
-- Buyer orchestration resolves a selection to its advertised option before negotiating — destination decided in triage, if any beyond the existing specifications.
+- A selection resolves to its advertised option before negotiating, and an unmatched one exits (D1, D8) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta.
+- The match cap counts candidates the buyer can settle with (D7) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta; `market credits buy --help`.
+- Payment scenarios block only on an absent or unready target (D6) — `openspec/specs/test-compatibility/spec.md`, through this change's delta; `docs/development/TESTING.md#private-service-dependencies` and `e2e-tests/README.md`.
