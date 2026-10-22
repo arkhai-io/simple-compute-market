@@ -214,29 +214,30 @@ SELLER_MARKETPLACE_CREDENTIAL must resolve to the lane's pinned seller scheme;
 the purchase buyer is a separate wallet-free Ed25519 profile. An unconfigured
 public CI run reports a named blocked payments prerequisite, not success.
 
-The fixture declares a distinct backed whole host and publishes only a
-USD 1.00/hour option for a one-hour term. The installed
-`market bare-metal buy` emits `run_started → agreement_accepted → payment_approved → run_ended(status=agreed)`.
-Delivery reads use that purchase's signer and fulfillment transport.
-Re-drive recovers the original run's retained profile and calls the shared
-`settle_agreement` client, keeping both transaction and fulfillment unchanged;
-there is no bare-metal settle command. Seller refund reverses the held once
-payment, then a separate buyer teardown converges mock reclaim and site capacity
-release. Unless the refund stage completed the deal's teardown, the module's cleanup
-finds the purchase in the buyer's run log; when the log records the payment
-approved, it refunds the payment (a repeat refund returns the same result), then
-reads the purchase's fulfillment and releases a host it finds. A host it cannot read
-or tear down — a delivery that stopped, or is still starting, before its fulfillment
-was recorded, say — is
-reported as a failed step for the provisioning service to recover. A refund the seller refuses because it has
-not yet verified the payment, or because the payments service or the storefront is
-unavailable, is retried for 60 seconds, as is a refusal that turns out final; a
-refund that still fails, retried or not,
-fails the run naming the negotiation and transaction, for an operator to reverse
-any hold that remains and release any host the seller delivers for it afterwards. Cleanup then removes its mock rules, drains, and removes its
-pool override, and resumes the loops it paused last. Each step is attempted even
-after an earlier one fails, and the failures are reported together; removing a mock
-rule that is already gone is not a failure.
+The fixture declares a distinct backed whole host and publishes only a USD
+1.00/hour option for a one-hour term. The installed `market bare-metal buy`
+emits `run_started → agreement_accepted → payment_approved →
+run_ended(status=agreed)`. Delivery reads use that purchase's signer and
+fulfillment transport. Re-drive recovers the original run's retained profile
+and calls the shared `settle_agreement` client, keeping both transaction and
+fulfillment unchanged; there is no bare-metal settle command. Seller refund
+reverses the held once payment, then a separate buyer teardown converges mock
+reclaim and site capacity release. Unless the refund stage completed the deal's
+teardown, the module's cleanup finds the purchase in the buyer's run log; when
+the log records the payment approved, it refunds the payment (a repeat refund
+returns the same result), then reads the purchase's fulfillment and releases a
+host it finds. A host it cannot read or tear down — a delivery that stopped, or
+is still starting, before its fulfillment was recorded, say — is reported as a
+failed step for the provisioning service to recover. A refund the seller
+refuses because it has not yet verified the payment, or because the payments
+service or the storefront is unavailable, is retried for 60 seconds, as is a
+refusal that turns out final; a refund that still fails, retried or not, fails
+the run naming the negotiation and transaction, for an operator to reverse any
+hold that remains and release any host the seller delivers for it afterwards.
+Cleanup then removes its mock rules, drains, and removes its pool override, and
+resumes the loops it paused last. Each step is attempted even after an earlier
+one fails, and the failures are reported together; removing a mock rule that is
+already gone is not a failure.
 This is mock grant/reclaim evidence, not SSH qualification. The canonical
 Alkahest mock-deal scenario remains selected unchanged.
 
