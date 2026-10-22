@@ -26,7 +26,7 @@ None.
 
 ### Modified Capabilities
 
-- `buyer-orchestration`: negotiation opens from the selected advertised option, an unmatched selection exits before negotiating, and a buy command's match cap counts only candidates the buyer can settle with.
+- `buyer-orchestration`: negotiation opens from the selected advertised option, an unmatched selection exits before negotiating, a buy command's match cap counts only candidates the buyer can settle with, and `market credits buy` stops selecting at that cap.
 - `test-compatibility`: a payment scenario blocks only on an absent or unready payments target; with one configured, a missing scenario-owned setting fails.
 
 The permanent `negotiation-protocol` and `settlement-servicing` specifications already require the seller's reference amount to come from the selected option's rate and an accepted Agreement to keep its exact mechanism, option, and parameters; this change repairs the buyer so it meets them.
@@ -57,5 +57,5 @@ Touches `core/buyer` orchestration, the API-credit buyer's buy command and payme
 ### Knowledge to promote
 
 - A selection resolves to its advertised option before negotiating, and an unmatched one exits (D1, D8) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta.
-- The match cap counts candidates the buyer can settle with (D7) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta; `market credits buy --help`.
+- The match cap counts candidates the buyer can settle with, and credit purchases stop selecting at it (D7) — `openspec/specs/buyer-orchestration/spec.md`, through this change's delta; `market credits buy --help`.
 - Payment scenarios block only on an absent or unready target (D6) — `openspec/specs/test-compatibility/spec.md`, through this change's delta; `docs/development/TESTING.md#private-service-dependencies` and `e2e-tests/README.md`; `openspec/specs/test-compatibility/architecture.md#payment-evidence-ownership`, at closeout.

@@ -16,9 +16,18 @@ When a domain's buyer hook selects a settlement option, buyer orchestration MUST
 
 ### Requirement: The match cap counts candidates the buyer can settle with
 
-A buy command's limit on the matches it tries MUST count only candidates with a usable settlement choice: a candidate with none MUST NOT take one of the tries. Settlement selection MUST stop once that many usable candidates are found, so no buyer is prompted, and no settlement prerequisite is read, for a candidate past the limit.
+A buy command's limit on the matches it tries MUST count only candidates with a usable settlement choice: a candidate with none MUST NOT take one of the tries.
 
 #### Scenario: Some discovered listings cannot be settled with
 
 - **WHEN** a buyer limits a purchase to N matches and some earlier discovered listings advertise no option the buyer can use
-- **THEN** the buyer negotiates with up to N listings that do, in discovery order, and evaluates no listing after the Nth usable one
+- **THEN** the buyer negotiates with up to N listings that do, and no unusable listing takes one of the N tries
+
+### Requirement: Credit purchases stop selecting at the match cap
+
+`market credits buy` MUST choose settlement for discovered listings in discovery order and stop once its match limit's worth of usable candidates is found, so no buyer is prompted, and no settlement prerequisite is read, for a listing past the limit.
+
+#### Scenario: More usable listings are discovered than the limit
+
+- **WHEN** a credit buyer limits a purchase to N matches and more than N discovered listings have a usable settlement choice
+- **THEN** selection evaluates no listing after the Nth usable one
