@@ -20,7 +20,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -993,6 +993,11 @@ validate-local: round-view-closed ## Validate HEAD without changing the checkout
 
 validate-helm: round-view-closed ## Validate HEAD on the Helm charts in the change's namespace: preflights, the change's images, render checks, the release upgraded from zero over deleted volumes, the pipeline's scenarios as a pod there (CHANGE=<change> HELM_CONTEXT=docker-desktop [HELM_ALL_SCENARIOS=1])
 	@python3 scripts/validate_slice.py helm --context "$(HELM_CONTEXT)" $(if $(CHANGE),--change "$(CHANGE)") $(if $(filter 1,$(HELM_ALL_SCENARIOS)),--all-scenarios)
+
+# It deploys, so it is named as a validation and its script outside `check_*`:
+# six steps' rules allow any `make check-*`, and closeout's `python3 scripts/check_*`.
+validate-parallel: ## Run two changes' clones' Helm parts at the same moment and report whether each kept to its own namespace, tags, and scenario pod, and what it left in its namespace (CLONES="<clone> <clone>" HELM_CONTEXT=docker-desktop)
+	@python3 scripts/validate_parallel.py --context "$(HELM_CONTEXT)" $(CLONES)
 
 check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached change branch that may be pushed to its own name
 	@python3 scripts/check_push_ready.py check

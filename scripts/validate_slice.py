@@ -666,8 +666,8 @@ def _capacity_preflight(validation: Validation, run: HelmRun, path: Path) -> boo
         validation.fail("capacity",
                         f"environmental: deploying would not fit: {sizes}. Running now: "
                         f"{', '.join(running)}. Scale one of them to zero (`kubectl scale "
-                        "--namespace <namespace> --replicas=0 deployment --all`), or rerun "
-                        "once one is down")
+                        "--namespace <namespace> --replicas=0 deployments,statefulsets "
+                        f"--selector {run.selector}`), or rerun once one is down")
         return False
     validation.note("capacity", f"fits: {sizes}" + (f"; running now: {', '.join(running)}"
                                                     if running else ""))

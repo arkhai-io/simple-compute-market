@@ -17,11 +17,13 @@ change's own. When a repository guard refuses — a dirty worktree, a detached
 means something unexpected happened in the repository, and fixing it would hide
 that.
 
-**The environment is yours to control.** Validation assumes full control of the
-developer's machine: the Docker daemon, the allowed kube context, the release in
-it, the port-forwards, and the wheelhouse in `.dist`. The scripts stop
-port-forwards and uninstall the release without asking. One change is validated at
-a time; nothing else should be building in the checkout while you run.
+**The environment is yours to control, within your change.** Validation assumes
+full control of its checkout's wheelhouse in `.dist`, of the images tagged for its
+change, and of its change's namespace in the allowed kube context: the scripts
+scale, delete, and replace what that namespace holds without asking. Another
+change may be validated beside you, in its own clone, namespace, and tags, sharing
+the Docker daemon, the node's memory, and the CPU; you never touch its namespace or
+images, and nothing else should be building in your checkout while you run.
 
 ## Running unattended
 
@@ -121,11 +123,14 @@ turn ended with a part in flight is logged as a stop. A single call blocks for
 at most ten minutes, and the pipeline can take longer, so when the `tail` times
 out, repeat it, still without ending the turn. Never a shell loop: `bash -c` has
 no allow rule unattended and will not get one, since no rule admits a loop
-without admitting any command. The Helm part finishes within one call, so it
-runs in the foreground. A running part prints one
-line as each step starts and one as it ends, so its output shows how far it has
-got; each step's log is in the attempt's directory under `.snapshot/validation/`,
-named when the part starts.
+without admitting any command. The Helm part can outlast one call too — its
+scenarios may take up to thirty minutes, and another change's validation may share
+the machine — so it runs in the background and is waited for the same way, on its
+`<part> validation of <commit>, attempt <n>: PASSED` or `FAILED` line, or the
+`ERROR:` line of a part that could not start. A running
+part prints one line as each step starts, naming the step's log under
+`.snapshot/validation/`, and one as it ends, so its output shows how far it has
+got.
 
 ## 3. Run the local and Helm parts
 
@@ -134,18 +139,33 @@ Docker and CPU. Both start with `make dist-clean`, so every wheel tested is buil
 from this commit rather than left in `.dist` by another branch.
 
 1. `make validate-local` — `make check-packaging`, then `make test`.
-2. `make validate-helm`, or `make validate-helm HELM_ALL_SCENARIOS=1` when the
-   invocation asked for it. Preflights first, before anything slow: the kube
-   context (`HELM_CONTEXT`, `docker-desktop` unless the owner names another), the
-   storefront environment, the Docker daemon, a `Ready` node, the chart's
-   out-of-band Secrets, a warning if the Docker credential helper does not answer,
-   the port-forwards stopped and their ports free, and no release volume carrying
-   `helm.sh/resource-policy: keep` — one would survive the uninstall and hand its
-   state to the new deployment. Then the images, the storefront environment
-   reinstalled from them, the render checks with the chart-to-loader check running
-   this commit's code, the release uninstalled and its volumes gone, a local
-   deployment from no persistent state, the pipeline's scenarios against the
-   forwarded services, and unforward.
+2. `make validate-helm CHANGE=<change>`, adding `HELM_ALL_SCENARIOS=1` when the
+   invocation asked for it. It runs in the change's own namespace,
+   `validate-<change>` (a name longer than a namespace allows is cut and ends in
+   a short hash), which its summary names. Preflights first,
+   before anything slow: the kube context (`HELM_CONTEXT`, `docker-desktop` unless
+   the owner names another), the storefront environment, the Docker daemon, a
+   `Ready` node, Foundry's `cast`, which derives the namespace's Secrets, a
+   warning if the Docker credential helper does not answer, and the capacity
+   preflight: a warning when no metrics source answers (`metrics`), so no memory
+   is recorded; a warning when `helm/validation-capacity.toml` records no figure
+   (`capacity`), so the check is skipped; and otherwise the namespaces running
+   the validation release, plus this one, times the figure, against the node's
+   allocatable memory. Then the images, built under the change's own tags; the
+   storefront environment reinstalled from them; the render checks, with the
+   chart-to-loader check running this commit's code; the release replaced —
+   workloads an earlier run left up scaled to zero, its pods and volumes deleted
+   and gone, the namespace's Secrets created, the release upgraded in place from
+   zero (or uninstalled and installed when the chart refuses the upgrade, a
+   warning on the `deploy` step), resumed, and each workload rolled out; the
+   served scenarios as a pod in the namespace (`helm test`, reaching services by
+   name); and, once the release has been touched, whatever the deploy or the
+   scenarios did, the namespace's evidence kept and its workloads scaled to zero —
+   only the scale-down when the checkout is no longer the commit. A part that
+   stops before it touches the release, at a preflight, the build, or the render
+   checks, keeps no namespace evidence. Only a run without `CHANGE`, in
+   `default`, refuses first a release volume carrying
+   `helm.sh/resource-policy: keep`, which an owner's own deploy left there.
 
 Run the Helm part even when the local part failed, so one triage sees every
 failure — unless the local part failed because the worktree was not clean or
@@ -155,7 +175,18 @@ changed" or "HEAD is now …": the tree is no longer the commit, so stop.
 Each attempt of a part writes its summary and every step's log under
 `.snapshot/validation/<short commit>/<part>/<attempt>/`, and prints that path. The
 Helm part lists the pipeline scenarios it did not run because the charts cannot
-serve them; those are never passes.
+serve them; those are never passes. Its attempt also keeps the namespace's
+evidence: the scenario pod's log and exit status (`scenarios.log`,
+`scenarios.exit`, and `evidence.scenarios` in `summary.json`, its step passing
+only on the pod's own exit status of 0); every pod's log under `pods/`, with a
+restarted container's previous log; each pod's status (`pods.json`); the
+namespace's events (`events.log`) and the nodes' (`node-events.log`); the
+validation release's workloads in every other namespace, with their replicas, at
+the preflight and at the end (`evidence.other_namespaces_at_start`,
+`evidence.other_namespaces`); the rendered requests and limits (`resources.txt`)
+and whether they changed since the namespace's previous validation
+(`evidence.resources.changed`); and the namespace's sampled memory, when a metrics
+source measured it (`memory.peak_bytes`).
 
 ## 4. Diagnose every failure
 
@@ -174,14 +205,60 @@ such as pod logs and events. Establish:
 Read failures from the logs; never report only an exit status. Unknown is never
 treated as environment: a failure you cannot place is triaged.
 
+**The Helm part's memory.** Another change's validation may run on the same node,
+and two capacity preflights can pass together, so a pod can still fail for memory.
+Classify such a failure from the attempt's evidence, never from the symptom alone,
+since a commit that raises a request, lowers a limit, or leaks fails the same way:
+
+- **Environment**, when a pod could not be scheduled for memory — `events.log` has
+  `FailedScheduling` naming insufficient memory, which says the node's allocatable
+  memory is already taken — or was evicted for memory — `events.log` has
+  `Evicted` naming the node low on memory, which the node's memory pressure in
+  `node-events.log` confirms when its events were still kept — while another
+  change's namespace had the validation release up: a `validate-…` namespace
+  other than this one with a replica above zero in
+  `evidence.other_namespaces_at_start` or `evidence.other_namespaces`. Those are
+  read at the preflight and at the end, not at the failure, so say which showed
+  it. The owner's own release in `default` is not another change's validation. The remedy is
+  scaling that namespace's release to zero (`kubectl scale --namespace <namespace>
+  --replicas=0 deployments,statefulsets --selector
+  app.kubernetes.io/instance=<release>`), or rerunning once its validation has
+  ended. When the commit also changed the rendered requests or limits
+  (`evidence.resources.changed`), say so beside the remedy: the rerun with nothing
+  else running is what tells contention from the commit's own demand, and a pod
+  that again cannot be scheduled then is the commit's.
+- **Commit**, when a container was killed at its own limit — `pods.json` gives
+  `OOMKilled` as a container's last or current termination reason,
+  `resources.txt` gives that container a memory limit, and `node-events.log`
+  shows no system out-of-memory kill or memory pressure on the node at the time;
+  read its `pods/<pod>.previous.log` for what it was doing — or when, outside the
+  case above, the commit changed the rendered requests or limits
+  (`evidence.resources.changed` is true: compare `resources.txt` with the
+  previous validation's file it names).
+- **Unknown** otherwise — an `OOMKilled` with no limit or beside the node's own
+  memory pressure, contention only from `default`, or evidence an `evidence`
+  warning left empty — so `failed` and triaged.
+
+A `capacity` step that failed with a detail beginning `environmental:` is the
+preflight finding the release would not fit: an environmental failure, put to the
+owner with the remedy the detail gives. A `capacity` failure without that prefix —
+an unreadable capacity file, or the cluster's memory or other namespaces that
+could not be read — is diagnosed like any failure. A warning is not a failure;
+report every warning step under `## Helm`, with what it means for the run:
+`credential helper` (image builds may fail to look up registry credentials),
+`metrics` (no memory recorded), `capacity` (the capacity check skipped), `deploy`
+(the upgrade was refused and the release uninstalled and installed), `memory` (a
+sample failed), `evidence` (that evidence was not kept, and its key is empty), and
+`scenario pod` (its exit status could not be read).
+
 ## 5. Settle environmental failures with the owner
 
 A failure you diagnose as environmental with good confidence is not a finding about
 the change, and triage cannot fix it. Settle it now:
 
 1. Stop, and tell the owner the failure, its evidence, and the remedy — for
-   example, the retained volume to delete, the process holding a port, the daemon
-   to restart.
+   example, another change's namespace to scale to zero, a volume that outlived
+   its deletion (`volumes gone`) to delete, the daemon to restart.
 2. Wait for the owner's word: either the owner carries out the remedy, or names the
    action for you to take. Take only the action named.
 3. Rerun that part. It is a new attempt with its own directory; the earlier
@@ -239,10 +316,14 @@ backticks or emphasis around either.
 
 ## Helm
 
+Namespace: <the summary's namespace>. Scenario pod: <pod>, exit <status>. Peak
+memory: <bytes, or none measured>. Warnings: <each warning step and what it means,
+or none>.
+
 | Attempt | Step | Result | Duration |
 |---|---|---|---|
 
-Not run against Helm: <scenario> — <what the charts or `make forward` do not provide>; …
+Not run against Helm: <scenario> — <what the charts do not provide>; …
 
 ## Pipeline
 

@@ -1187,9 +1187,10 @@ chart under `helm/charts/`, and `scripts/tests/test_validate_slice.py`.
 
 Delivers D4's classification of a memory failure and D9's scripted check of two
 concurrent validations. Touches `.agents/skills/change-validate/`, a new
-`scripts/check_parallel_validation.py`, and `scripts/tests/`.
+`scripts/validate_parallel.py` (planned as `check_parallel_validation.py`; renamed
+in 7.2), and `scripts/tests/`.
 
-- [ ] 7.1 `change-validate`: the Helm part runs for its change (`CHANGE=`); a pod
+- [x] 7.1 `change-validate`: the Helm part runs for its change (`CHANGE=`); a pod
       that could not be scheduled or was evicted while another change's namespace
       had workloads up and the node's allocatable memory was exhausted is
       environmental, its remedy scaling that namespace to zero or rerunning once it
@@ -1197,17 +1198,234 @@ concurrent validations. Touches `.agents/skills/change-validate/`, a new
       rendered requests or limits, is the commit's; anything else is of unknown
       cause, so `failed` and triaged; the preflight's warnings are reported as such
       (D4, 26 F2).
-- [ ] 7.2 `scripts/check_parallel_validation.py <clone> <clone>` (`make
+      Note: the skill now runs `make validate-helm CHANGE=<change>` and describes
+      section 6's part as it is — `cast` and the capacity preflight with its
+      `metrics` and `capacity` warnings, the release replaced from zero, the
+      scenario pod, the evidence kept and the scale to zero, the retained-volume
+      refusal only without `CHANGE` — in place of the forwarded release in
+      `default`. Its opening says validation controls its change's namespace and
+      tags and never another change's, and drops "one change is validated at a
+      time". Step 3 lists what a Helm attempt keeps (`scenarios.log`,
+      `scenarios.exit`, `pods/`, `pods.json`, `events.log`, `node-events.log`,
+      `evidence.other_namespaces_at_start` and `other_namespaces`, `resources.txt`
+      with `evidence.resources.changed`, `memory.peak_bytes`); step 4 gains "The
+      Helm part's memory", the three classes read from those files, and the
+      capacity step's `environmental:` detail as an environmental failure; step
+      5's remedy examples name scaling another change's namespace; the record's
+      `## Helm` gains a line for the namespace, the scenario pod, peak memory, and
+      the warnings.
+- [x] 7.2 `scripts/validate_parallel.py <clone> <clone>` (`make
+      validate-parallel`; planned as `check_parallel_validation.py` and `make
       check-parallel-validation`): runs both clones' Helm parts at the same moment on
       the development cluster and reports, from their summaries and the cluster,
       separate namespaces, tags, and scenario pods, and that neither's release,
       volumes, or pods were touched by the other (D9).
+      Note: renamed because it deploys. Design, planning, triage, implementation,
+      closeout, and archive cleanup are each allowed `make check-*`, and closeout
+      `python3 scripts/check_*`, so the planned names would have let any of them
+      deploy two releases; `make validate-*` is already implementation's,
+      triage's, and validation's, and no step's rule names `python3
+      scripts/validate_*`. Recorded in D9. The target is `make validate-parallel
+      CLONES="<clone> <clone>" [HELM_CONTEXT=…]`. A clone is one `make
+      change-clone` made — its `workspace` remote names the workspace,
+      `change_clone.clone_of` returns it for its directory's name, and its
+      bootstrap has `succeeded` — and the two must be of different changes. Both
+      `make -C <clone> validate-helm CHANGE=<change>` runs start before either is
+      waited for, with `MAKEFLAGS`, `CHANGE`, and the other variables `make` hands
+      down removed from their environment; each run's end is taken by its own
+      thread. Then six checks, each failing alone on a read it cannot make:
+      `together` (the runs overlapped, and whether the scenario pods' run times
+      did, from their terminated state); `results` (each part passed, else its
+      failed steps or its log's end); `namespaces` (each summary's is the one its
+      change derives, and they differ); `tags` (the attempts' `images.json`
+      overlays share no tag, and every `arkhai` image in each attempt's
+      `pods.json` is one of its own overlay's tags); `scenario pods` (each, read
+      from the cluster, is in its own namespace, on its own image, exit 0);
+      `untouched` (in each namespace after both ended: exactly one Helm revision
+      since the check started, every volume and pod created within its own run's
+      window, no pod on another overlay's image, every claim its kept pods
+      mounted still present, and its workloads at zero; a namespace whose own
+      Helm part did not pass is not judged, and fails the check). Every cluster
+      read names `HELM_CONTEXT` (`kubectl --context`, `helm --kube-context`). It
+      reads the cluster only after both runs, and the runs overlap almost
+      entirely, so the creation times separate nothing between them: a
+      disturbance shows only by what it left — a second revision, a pod on the
+      other's images, a missing claim, a workload up again — and one that left
+      nothing, such as an uninstall and install by the other run or a pod its
+      ReplicaSet recreated, is not shown; that each run's own commands name only
+      its namespace is `test_validate_slice.py`'s. A run that cannot be launched
+      is reported beside the other, which is still waited for.
+      Output: `<change>.log` for each run and `report.json` under
+      `.snapshot/parallel-validation/<UTC time>/` in the invoking checkout; exit 0
+      when every check passed, 1 otherwise, 2 on a refusal.
 - [ ] 7.3 Verification. Unit: 7.2's report over fake summaries and cluster reads,
       including a run that touched the other's namespace. System: one run of `make
-      check-parallel-validation` over two clones on the development cluster,
+      validate-parallel` (planned as `check-parallel-validation`, renamed in 7.2)
+      over two clones on the development cluster,
       recorded here. A fresh-context read of `change-validate` against D4 and the
       delta's Helm requirement. `make check-agent-skills`; `make test`. End to end:
       the Helm scenarios of 6.5, in both namespaces at once.
+      Evidence so far: `scripts/tests/test_validate_parallel.py`, 45 passed.
+      Integration as `TESTING.md` defines it for orchestration — the check's run
+      with the launcher and the cluster reader injected at the process boundary,
+      and the clock and the clone lookup injected as controls (a fake leaving each run's log,
+      `summary.json`, `images.json`, and `pods.json` in its clone, and answering
+      the cluster's reads per namespace, refusing a `kubectl` read without
+      `--context docker-desktop` or a `helm` one without `--kube-context`): two
+      isolated runs passing all six checks, with the `together`, `results`,
+      `namespaces`, `tags`, and `scenario pods` details asserted whole and
+      `untouched` naming one revision in each; every cluster read naming the
+      context; both runs launched before either is waited for, each with its
+      command and directory; each run's end taken as it ends (the first run's
+      wait returns only once the second's end was taken, and the second's end
+      is the earlier); a run that cannot be launched reported beside the other,
+      which was waited for and judged, its own namespace not judged; the report
+      and both logs kept together; scenario pods that ran apart said to; a
+      namespace holding of its release what its own run did not leave, six ways,
+      each failing `untouched` alone, naming that namespace, while the other
+      namespace reports one revision — four the other run's touch (the release
+      upgraded a second time, a pod on the other's images, a mounted volume
+      deleted, a workload up again) and two leftovers (a pod made after its run, a
+      volume made before the check); another release's pod, volume, and running
+      workload in the namespace, made before the check, not judged; one
+      namespace's history unreadable, not a list, or its release unreadable, each
+      failing `untouched` alone, naming it, while the other namespace reports;
+      kept pod statuses that are not JSON or hold an item that is not a pod
+      failing `tags` and `untouched` alone, and a container with no image name
+      failing `tags` alone; a summary that is not a mapping read as none; overlays
+      sharing a tag, a pod on a tag outside its overlay, and no kept pod
+      statuses each failing `tags`; a run in another namespace; a failed part
+      named with its failed steps, and one that wrote no summary with its log's
+      end; a scenario pod exiting 1, one that cannot be read, one with no status,
+      and one on the other's image. Unit: the constructor's three refusals (one
+      clone, one change twice, a name that is not a change's) and the command
+      line's exit 2, for one clone and for clones that do not exist; three
+      timestamp forms and a refusal. Integration against
+      the real boundary: a run's environment carrying no `MAKEFLAGS` or `CHANGE`
+      (a real subprocess), and the target's command (`make -n`). Library
+      integration over real Git (a workspace with a bare `origin`, clones made by
+      `change_clone.create` with the bootstrap's spawn injected), the level
+      sections 1–3 call repository level: a clone whose bootstrap succeeded is of
+      its change; one whose bootstrap failed, one with another branch checked
+      out, and the workspace itself are refused.
+      `scripts/tests/test_validate_slice.py` (the capacity remedy's new wording,
+      below). `uv run --no-project --with
+      pytest pytest -q scripts/tests`: 1376 passed after both diff checks' fixes.
+      `make check-agent-skills` and `make check-comment-hygiene`: passed. `make
+      test`, after `make dist-clean` and `make dist`, and before the capacity
+      remedy's wording in `validate_slice.py` and both diff checks' fixes, which
+      touched only scripts and their tests (covered by the script suite above),
+      the Makefile target, the skill, and documents: every suite passed, `make -C helm test-render` included
+      (Helm v4.3.0, no skip). Its first run had failed the VM storefront's two
+      values-schema drift tests and rewritten `domains/vms/storefront/uv.lock` to
+      `arkhai-kit-arkhai-payments` 0.3.0, a wheel another branch had left in
+      `.dist` (this branch builds 0.2.0): environmental, the lock put back as
+      committed by hand and the wheelhouse rebuilt from this commit. `make
+      check-packaging`: passed, before and after the diff check's fixes. `make
+      check-change`: only the citations of the scripts sections 8 and 8A create
+      (`change_history.py`, `ci_evidence.py`, `test_ci_evidence.py`).
+      The fresh-context read of `change-validate` against D4, D7, and the delta's
+      Helm requirement found no instruction that touches another change's
+      namespace without the owner's word, and found, all fixed: the namespace
+      said to be printed first (it is in the summary, and a long name is cut and
+      hashed); the evidence said to be kept always (only once the release has
+      been touched); the skill's remedy (`deployment,statefulset --all`) and the
+      script's (`deployment --all`) disagreeing — the script's would leave a
+      StatefulSet up and, in `default`, scale an owner's other releases, so
+      `validate_slice.py`'s capacity remedy now names the release's selector,
+      `deployments,statefulsets --selector app.kubernetes.io/instance=<release>`,
+      as the skill's does; only the preflight's warnings covered (now every
+      warning step, `deploy`, `memory`, `evidence`, and `scenario pod` included,
+      each with its meaning) and a `capacity` failure without `environmental:`
+      unaddressed; in the classification, node exhaustion read from
+      `node-events.log` where `FailedScheduling` is a pod event, `OOMKilled` taken
+      as proof of a container's own limit (now also its limit in `resources.txt`
+      and no node memory pressure or system kill, else unknown), no order where
+      contention and changed resources meet, and the owner's release in
+      `default` counting as another change's; and two stale lines — the Helm
+      part run in the foreground (it can outlast one call, so it now runs in the
+      background and is waited for on its result line or `ERROR:` line) and the
+      retained volume in `default` as a remedy example the skill no longer
+      reaches. Correction: the order was first written as changed resources
+      before contention; the diff's fresh-context check found that contradicts
+      the delta scenario "Two validations pass the preflight together", so a pod
+      unscheduled or evicted for memory while another change's release is up is
+      environmental whatever the resources, a resource change is named beside
+      the remedy, and the rerun with nothing else running tells contention from
+      the commit's own demand. That orders contention before a resource change,
+      the order the delta scenario requires; D4 states none.
+      The fresh-context check of the diff found, and this section fixed: the
+      script's planned `check_*` name, which closeout's `python3 scripts/check_*`
+      allows, kept open the deployment the target's rename closed (now
+      `validate_parallel.py`, recorded in D9); the Makefile comment's reason (the
+      `check-*` steps "only read") false; the window comment claiming Helm
+      records whole seconds; three reads failing silently (the release, the
+      overlay, and the kept pod statuses, the last leaving the missing-claim test
+      vacuous), now each failing the check that needs it, naming the read; a
+      launch that raised, a wait that raised, a summary that is not a mapping, a
+      step with no name, and a pod with no status, each of which would have
+      ended the report with a traceback; a namespace whose own part did not pass
+      reported as disturbed (now not judged); the check's own cluster reads not
+      naming `HELM_CONTEXT`, nor dropping the inherited `MAKEFLAGS`; the help
+      text claiming more than the check shows; a second container in the
+      fixture's scenario pod, which the chart's has not; and evidence claims —
+      orchestration with fakes at the process boundary called unit (now
+      integration, as section 6 named it), "each check's detail" and "the other
+      checks passing" beyond their assertions (now asserted), an "unreadable
+      namespace" test that made both unreadable (now one, the other shown
+      reporting), "refusals before anything is launched" where no launch could
+      happen (now the constructor's refusals), and "each run's end taken by its
+      own thread" untested (now tested). Declined: a `round-view-closed`
+      prerequisite on `make validate-parallel` — each clone's own `make
+      validate-helm` refuses an open view in its clone, and the check moves
+      nothing in the checkout it runs from; tolerance for clock skew between the
+      host and the API server — objects are made minutes into a run, and a skew
+      that large would show as a failure to read, not a pass.
+      A second check of the diff, after those fixes, found and this section
+      fixed: malformed kept pod statuses (an item that is not a pod, an image
+      that is not a name, evidence that is not a mapping) still able to end the
+      report from `tags`; a clone path that does not exist ending the command
+      line with a traceback rather than exit 2; `untouched` judging every pod,
+      volume, and workload in the namespace where the Helm part replaces only
+      the release's labelled ones and the test volume — another release there
+      would have failed a correct run, so it now judges the release's labelled
+      objects and the claims its pods mounted; the docstring not naming an
+      uninstall and install by the other run as unseen; the eviction class
+      requiring node events that may have expired (now confirming, not
+      required) and not saying the other namespaces' replicas are read at the
+      preflight and the end rather than at the failure; and evidence wording —
+      the clone lookup said to be injected at the process boundary, two of the
+      six disturbance cases leftovers rather than the other run's touch, the
+      order "with no new order", and when `make test` ran. Left for the owner,
+      below: that `make validate-*`, which implementation and triage hold, now
+      also reaches `make validate-parallel`, which scales and deletes in two
+      changes' namespaces, neither of them necessarily the step's own.
+      Not run: the system run, and so the Helm scenarios in two namespaces at
+      once. No clone exists — `<workspace>.changes/` is absent and the pilot's
+      branch has not been created — and this step may not run `make
+      change-clone`. The check takes two clones, while D9 works this change in
+      the owner's workspace and only the pilot in a clone, so the pairing D9
+      plans — this change beside the pilot — cannot be run by it as it stands;
+      two clones of different changes need the owner. Once they exist and have
+      bootstrapped, `make validate-parallel CLONES="<clone> <clone>"`, which an
+      implementation step may run (`make validate-*`), is the run this task
+      records; it stays unchecked until then.
+      End-to-end scenarios: `contracts` and `e2e_alkahest_escrow_codecs`, the Helm
+      run's served list, in both namespaces at once — by the system run alone; no
+      pipeline scenario exercises the check or the skill.
+      Handoff: the `MAKEFLAGS` route means a validation started as `make validate
+      CHANGE=<change>` reaches its namespace even if a skill omitted `CHANGE`,
+      but the skill now names it. The check reads its clones' summaries and the
+      cluster after both runs, so a disturbance during the runs that leaves no
+      trace — a read of the other's Service, say — is not shown; that each run's
+      commands name only its own namespace is section 6's evidence. 10.9's
+      "Evidence" now names `scripts/validate_parallel.py`, and its guide entry
+      `make validate-parallel` beside the clone targets. Its `helm history`
+      handling was checked only against hand-written fixtures, not a real Helm
+      4.3 history, which the system run will exercise. Open for the owner: the
+      clones the system run needs, and whether implementation and triage should
+      keep reaching `make validate-parallel` through `make validate-*` (a deny
+      rule for it in their rows is the orchestrator's edit, under `.claude/`).
 
 ## 8. History in the owner's workspace, clone removal, and teardown
 
@@ -1488,7 +1706,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         the Purpose paragraph gains clones, and "Evidence" gains
         `scripts/change_clone.py` (`make change-clone`, `make change-clone-remove`),
         `scripts/change_history.py` (`make change-history`),
-        `scripts/change_namespace.py`, `scripts/check_parallel_validation.py`,
+        `scripts/change_namespace.py`, `scripts/validate_parallel.py` (`make
+        validate-parallel`),
         `scripts/ci_evidence.py` (`make run-ci`, `make validate-ci`), and
         `helm/validation-capacity.toml`.
       - `openspec/specs/change-workflow/architecture.md` — a new "A change is worked
@@ -1518,8 +1737,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         chosen to stay clear of the critical-path goal's files, D9).
       - `docs/agents/change-workflow.md` — already written in sections 4, 8, 8A,
         and 8B;
-        "Skills" gains `make change-clone`, `make change-clone-remove`, and `make
-        change-history`; "The review directory" says where a cleaned-up change's
+        "Skills" gains `make change-clone`, `make change-clone-remove`, `make
+        change-history`, and `make validate-parallel` (added by section 7); "The
+        review directory" says where a cleaned-up change's
         history lives.
       - `AGENTS.md` "Change workflow" — already written in 8.5.
       - `docs/development/DEPLOYMENT_AND_CONFIG.md` "Stateful service persistence"

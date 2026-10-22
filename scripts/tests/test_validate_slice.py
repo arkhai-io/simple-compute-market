@@ -868,7 +868,11 @@ def test_a_release_that_would_not_fit_fails_as_environmental_before_building(
     capacity = _step(summary, "capacity")
     assert capacity.detail.startswith("environmental: deploying would not fit: 3 release(s)")
     assert "validate-other, validate-third" in capacity.detail
-    assert "Scale one of them to zero" in capacity.detail
+    # The remedy scales the validation release alone, StatefulSets included, so an
+    # owner's other releases in a namespace stay up.
+    assert ("Scale one of them to zero (`kubectl scale --namespace <namespace> "
+            "--replicas=0 deployments,statefulsets --selector "
+            f"app.kubernetes.io/instance={RELEASE}`)") in capacity.detail
     assert fake.commands == []
 
 

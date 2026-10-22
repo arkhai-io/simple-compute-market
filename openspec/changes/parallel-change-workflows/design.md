@@ -529,7 +529,10 @@ The evidence is unit tests under `scripts/tests/` with injected runners; a scrip
 check that validates two clones at the same moment on the development cluster and
 shows separate namespaces, tags, and scenario pods with neither disturbing the
 other; and one real change worked in a clone alongside this one, through archive
-cleanup.
+cleanup. The check deploys, so it is `scripts/validate_parallel.py` behind `make
+validate-parallel`, a validation by name: a `check_*` script or `check-*` target
+would fall under the `make check-*` rule six steps hold and closeout's
+`python3 scripts/check_*`, and let them deploy two releases.
 
 The pilot is `seed-default-pool-at-runtime`: small, real, and independent; its
 chart change makes the Helm part real evidence; and it stays clear of Goal 7's
