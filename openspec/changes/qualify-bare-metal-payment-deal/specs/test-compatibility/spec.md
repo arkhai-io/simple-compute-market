@@ -2,7 +2,7 @@
 
 ### Requirement: A configured bare-metal payment purchase is qualified end to end
 
-With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, seller refund, and physical teardown, with the refund and the teardown as separate operations. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction. Without a configured, ready target it MUST report a named blocked prerequisite, never fall back to Alkahest or count as qualification.
+With a ready payments target configured, the bare-metal lane MUST qualify one fixed-term whole-host purchase settled through `arkhai.payments.v1`: discovery, negotiation, payment approval, receipt-gated mock delivery, re-drive of the original run's settlement, seller refund, and physical teardown, with the refund and the teardown as separate operations. Mock access is evidence of composition, never of real SSH access or revocation. The scenario MUST leave no payment hold, allocated host, mock rule, or held loop behind, whether it passes or fails, except a payment it cannot refund, which it MUST report by its negotiation and transaction together with any host its seller may still deliver for it, and a host whose fulfillment it cannot read or tear down, which it MUST report as a failed cleanup step. Without a configured, ready target it MUST report a named blocked prerequisite, never fall back to Alkahest or count as qualification.
 
 #### Scenario: Bare-metal payment purchase is qualified
 
@@ -19,9 +19,11 @@ With a ready payments target configured, the bare-metal lane MUST qualify one fi
 #### Scenario: A stage fails after the payment is approved
 
 - **WHEN** a stage of the bare-metal payment scenario fails after the buyer approved the payment
-- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded
-  and tears down its fulfillment if one exists and is not already torn down, reading the
-  deal's identifiers from the original run when the purchase command failed
+- **THEN** the scenario's cleanup refunds the deal's payment if it is not already refunded,
+  then reads the deal's fulfillment and tears down a host it finds not yet torn down,
+  reading the deal's identifiers from the original run when the purchase command failed
+- **AND** a host delivered while the refund was being requested is found and torn down,
+  and one whose fulfillment cannot be read or torn down is reported as a failed step
 - **AND** a refund the seller refuses because the payment is not yet verified, or the
   payments service or storefront is unavailable, is retried for a bounded time, and a
   refund that still fails fails the scenario naming the negotiation and transaction

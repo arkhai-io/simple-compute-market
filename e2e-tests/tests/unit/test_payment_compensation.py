@@ -32,8 +32,10 @@ class Seller:
 
     def __init__(self, *, delivered: dict[str, Any] | None = None,
                  refusals: list[int] | None = None,
-                 status_failures: int = 0) -> None:
+                 status_failures: int = 0,
+                 delivers_during_refund: dict[str, Any] | None = None) -> None:
         self.delivered = delivered
+        self.delivers_during_refund = delivers_during_refund
         self.refusals = list(refusals or [])
         self.status_failures = status_failures
         self.calls: list[tuple[str, str]] = []
@@ -48,6 +50,9 @@ class Seller:
 
     def refund(self, negotiation_id: str) -> None:
         self.calls.append(("refund", negotiation_id))
+        if self.delivers_during_refund is not None:
+            # Delivery commits first; the refund then succeeds after it.
+            self.delivered = self.delivers_during_refund
         if self.refusals:
             raise Refused(self.refusals.pop(0))
 
@@ -109,7 +114,7 @@ def test_an_undelivered_purchase_is_refunded_and_nothing_is_released(tmp_path: P
 
     _run(seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED)).steps(settled=False))
 
-    assert seller.calls == [("status", "negotiation-1"), ("refund", "negotiation-1")]
+    assert seller.calls == [("refund", "negotiation-1"), ("status", "negotiation-1")]
 
 
 def test_a_delivered_purchase_is_refunded_then_its_host_released(tmp_path: Path):
@@ -118,25 +123,59 @@ def test_a_delivered_purchase_is_refunded_then_its_host_released(tmp_path: Path)
     _run(seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED)).steps(settled=False))
 
     assert seller.calls == [
-        ("status", "negotiation-1"), ("refund", "negotiation-1"), ("release", "f-1"),
+        ("refund", "negotiation-1"), ("status", "negotiation-1"), ("release", "f-1"),
     ]
 
 
-def test_a_fulfillment_unread_before_the_refund_is_read_again_to_release(tmp_path: Path):
+def test_a_host_delivered_while_the_refund_was_requested_is_released(tmp_path: Path):
+    seller = Seller(
+        delivered=None, delivers_during_refund={"fulfillment_id": "f-2", "state": "active"},
+    )
+
+    _run(seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED)).steps(settled=False))
+
+    assert seller.calls == [
+        ("refund", "negotiation-1"), ("status", "negotiation-1"), ("release", "f-2"),
+    ]
+
+
+def test_a_host_delivered_while_a_refused_refund_was_retried_is_released(tmp_path: Path):
+    seller = Seller(
+        delivered=None, refusals=[409],
+        delivers_during_refund={"fulfillment_id": "f-3", "state": "active"},
+    )
+
+    _run(seller.compensation(_run_log(tmp_path, _ACCEPTED, _APPROVED)).steps(settled=False))
+
+    assert seller.calls[-1] == ("release", "f-3")
+
+
+def test_a_host_is_still_released_after_its_refund_failed(tmp_path: Path):
+    seller = Seller(delivered={"fulfillment_id": "f-1", "state": "active"}, refusals=[403])
+    find, refund, release = seller.compensation(
+        _run_log(tmp_path, _ACCEPTED, _APPROVED)
+    ).steps(settled=False)
+    find[1]()
+    with pytest.raises(UnresolvedPayment):
+        refund[1]()
+
+    release[1]()
+
+    assert seller.calls[-1] == ("release", "f-1")
+
+
+def test_a_fulfillment_read_that_fails_is_reported_not_taken_for_no_host(tmp_path: Path):
     seller = Seller(delivered={"fulfillment_id": "f-1", "state": "active"}, status_failures=1)
     find, refund, release = seller.compensation(
         _run_log(tmp_path, _ACCEPTED, _APPROVED)
     ).steps(settled=False)
+    find[1]()
+    refund[1]()
 
     with pytest.raises(ConnectionError):
-        find[1]()
-    refund[1]()
-    release[1]()
+        release[1]()
 
-    assert seller.calls == [
-        ("status", "negotiation-1"), ("refund", "negotiation-1"),
-        ("status", "negotiation-1"), ("release", "f-1"),
-    ]
+    assert ("release", "f-1") not in seller.calls
 
 
 def test_an_already_released_host_is_not_released_again(tmp_path: Path):
@@ -174,6 +213,7 @@ def test_a_refund_still_refused_after_its_window_names_the_unresolved_payment(tm
 
     assert "transaction-1" in str(unresolved.value)
     assert "negotiation-1" in str(unresolved.value)
+    assert "any host" in str(unresolved.value)
     # Attempts at 0, 2, ... 10 seconds; no sleep follows the last one.
     assert seller.calls.count(("refund", "negotiation-1")) == 6
     assert seller.now == 10.0

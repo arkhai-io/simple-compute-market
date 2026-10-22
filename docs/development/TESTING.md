@@ -320,8 +320,9 @@ project of its own:
   refund stage completed the deal's teardown, the module's cleanup finds the
   purchase in the buyer's run log, refunds it if the log records the payment
   approved — retrying for a bounded time while the seller has not yet verified
-  it or a service is unavailable — and releases its host if one was delivered;
-  a refund that still fails fails the run with the negotiation and
+  it or a service is unavailable — then releases a host it finds after the
+  refund, reporting one it cannot read or tear down; a refund that still fails
+  fails the run with the negotiation and
   transaction for an operator. Each cleanup step is
   attempted even after an earlier one fails, and the loops the module paused
   resume last.

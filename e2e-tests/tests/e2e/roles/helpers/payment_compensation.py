@@ -4,8 +4,9 @@ A payment scenario that fails part-way can leave an approved payment held at
 the payments service and a host delivered at the site. Its cleanup finds the
 purchase in the buyer's run log — which records each step as it happens, so a
 purchase is found even when the buy command failed or timed out — refunds an
-approved payment, and releases a delivered host. Refund and release are
-idempotent, so they need not know how far the scenario's stages got.
+approved payment, then releases a host it finds; a host it cannot read or tear
+down is reported, not released. Refund and release are idempotent, so they need
+not know how far the scenario's stages got.
 
 The buyer records a payment approved before the seller has verified its
 receipt, and the seller refuses to refund a payment it has not verified. A
@@ -63,6 +64,11 @@ def purchase_from_run_logs(run_dir: Path) -> Purchase:
 # The bare-metal status route's answer for a purchase with no fulfillment record
 # whose payment it has not verified: a pending receipt, or a refund of a deal never
 # delivered. Its other 409s describe a reserved or delivered host it cannot read.
+# The route gives no structured reason, so this detail stands in for one; it is
+# reliable while settlement records are intact, since a started delivery admits
+# every status such a record can hold, but it is not a proof of absence. The
+# storefront's own tests pin the fulfillment service's refusal, which the route
+# forwards as its detail verbatim.
 _UNVERIFIED_WITHOUT_FULFILLMENT = "bare-metal settlement is not authoritatively verified"
 
 
@@ -111,7 +117,8 @@ class UnresolvedPayment(AssertionError):
         super().__init__(
             f"payment {purchase.transaction_id} for negotiation "
             f"{purchase.negotiation_id} could not be refunded ({cause!r}); "
-            "an operator reverses any hold that remains"
+            "an operator reverses any hold that remains, and releases any host "
+            "the seller delivers for it once its receipt verifies"
         )
 
 
@@ -143,11 +150,7 @@ class PurchaseCompensation:
         found: dict[str, Any] = {"purchase": Purchase()}
 
         def find() -> None:
-            purchase = purchase_from_run_logs(self.run_dir)
-            found["purchase"] = purchase
-            if not purchase.transaction_id:
-                return  # without an approved payment no host can have been delivered
-            found["fulfillment"] = self.status(purchase.negotiation_id)
+            found["purchase"] = purchase_from_run_logs(self.run_dir)
 
         def refund() -> None:
             purchase = found["purchase"]
@@ -168,13 +171,12 @@ class PurchaseCompensation:
         def release() -> None:
             purchase = found["purchase"]
             if not purchase.transaction_id:
-                return
-            # What was found before the refund decides; only when that read
-            # failed is the fulfillment read again.
-            status = (
-                found["fulfillment"] if "fulfillment" in found
-                else self.status(purchase.negotiation_id)
-            )
+                return  # without an approved payment no host can have been delivered
+            # Read after the refund: delivery and a refund are serialised, and a
+            # recorded refund stops any later delivery start, so after a refund
+            # this read is final, whichever of the two the seller recorded first.
+            # After a failed refund it reads only what has happened so far.
+            status = self.status(purchase.negotiation_id)
             if status is not None and status.get("state") != "released":
                 self.release(purchase.negotiation_id, status)
 
