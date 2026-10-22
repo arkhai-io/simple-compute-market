@@ -119,7 +119,9 @@ allow = [
   "Bash(make -C * dist*)", "Bash(make init*)", "Bash(make -C * init*)", "Bash(make validate-*)",
   "Bash(helm version*)",
 ]
-deny = ["Bash(make run-e2e*)"]
+# Triage fixes and re-checks one change; running two changes' validations
+# side by side deploys into another change's namespace.
+deny = ["Bash(make run-e2e*)", "Bash(make validate-parallel*)"]
 
 [steps.implement]
 skill = "change-implement"
