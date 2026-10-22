@@ -7,6 +7,7 @@ release are separate operations; mock access is never evidence of real SSH.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import time
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 import pytest
 from arkhai_bare_metal import NODE_GRANT_ACCESS_ACTION, NODE_RECLAIM_ACCESS_ACTION
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
+from core_buyer.negotiation_client import AuthenticatedHTTPError
 from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run, read_run_identity
 from market_arkhai_payments import (
@@ -36,6 +38,7 @@ from registry_client import SyncRegistryClient
 from storefront_client import SyncStorefrontClient
 
 from tests.e2e.roles.buyer_cli import BuyerCli, _toml_quote, create_profiled_buyer_cli
+from tests.e2e.roles.helpers.cleanup import run_cleanup
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
     advance_storefront,
@@ -56,9 +59,9 @@ from tests.e2e.roles.helpers.payments import (
     payment_setting,
 )
 from tests.e2e.roles.scenarios.bare_metal.compute_deal_driver import (
-    BareMetalComputeDealDriver,
     MACHINE_ADDRESS,
     WHOLE_HOST_CAPACITY,
+    BareMetalComputeDealDriver,
 )
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
@@ -163,9 +166,43 @@ def _release(transport, negotiation_id, fulfillment_id, provisioning_client, adm
     return released
 
 
+def _seller_refund(negotiation_id: str):
+    """Refund the purchase as the lane's pinned seller; a repeat returns the same result."""
+    seller = create_signer(
+        lane_setting("storefront_scheme"), str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL")),
+    )
+    assert seller.identity in _pins("storefront").identities
+    with SyncStorefrontClient(
+        lane_setting("storefront_url"), signer=seller, caller_role="seller",
+        expected_publishers=_pins("storefront"),
+    ) as storefront:
+        return storefront.refund_settlement(negotiation_id)
+
+
+def _purchase_from_run_log(cli: BuyerCli) -> tuple[str | None, str | None]:
+    """The purchase's negotiation and payment transaction, as its run log recorded them.
+
+    Read from the buyer's run directory rather than from a stage's state, so cleanup
+    finds a deal the buy command approved even when the command failed or timed out,
+    or a later assertion did, before any stage recorded it.
+    """
+    negotiation_id = transaction_id = None
+    for path in sorted(cli.run_dir.glob("*.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("event") == "agreement_accepted":
+                negotiation_id = event.get("negotiation_id")
+            elif event.get("event") == "payment_approved":
+                transaction_id = event.get("transaction_id")
+    return negotiation_id, transaction_id
+
+
 @pytest.fixture(scope="module")
 def payment_supply(
-    payments_config, payment_fulfillment, payment_deal_state, payment_run,
+    payments_config, payment_buyer_cli, payment_fulfillment, payment_deal_state, payment_run,
     bare_metal_site_operator, bare_metal_site_capacity, provisioning_client,
     provisioning_test_client, storefront_admin_client, site_capacity,
 ):
@@ -231,20 +268,64 @@ def payment_supply(
         payment_run["ssh_public_key"] = ssh_key
         yield driver
     finally:
-        try:
-            if payment_deal_state.fulfillment_ref:
+        # A deal the refund stage did not finish is still outstanding at the
+        # payments service and the site: refund it, then release its host.
+        # Whether a host was delivered is read before the refund, while an
+        # undelivered deal still answers "no fulfillment" rather than "not
+        # verified"; refund and release are idempotent, so neither needs to
+        # know how far the stages got.
+        outstanding: dict[str, Any] = {}
+
+        def find_outstanding() -> None:
+            if payment_deal_state.teardown is not None:
+                return
+            negotiation_id, transaction_id = _purchase_from_run_log(payment_buyer_cli)
+            outstanding.update(negotiation_id=negotiation_id, transaction_id=transaction_id)
+            if not transaction_id:
+                return  # without an approved payment no host can have been delivered
+            try:
+                payment_fulfillment.status(negotiation_id)
+            except AuthenticatedHTTPError as error:
+                if error.status_code != 404:
+                    raise
+                outstanding["delivered"] = False  # settlement started no fulfillment
+
+        def refund_outstanding() -> None:
+            if outstanding.get("transaction_id"):
+                _seller_refund(outstanding["negotiation_id"])
+
+        def release_outstanding() -> None:
+            negotiation_id = outstanding.get("negotiation_id")
+            if not outstanding.get("transaction_id") or outstanding.get("delivered") is False:
+                return
+            status = payment_fulfillment.status(negotiation_id)
+            if status["state"] != "released":
                 _release(
-                    payment_fulfillment, payment_deal_state.negotiation_id,
-                    payment_deal_state.fulfillment_ref, provisioning_client,
-                    storefront_admin_client,
+                    payment_fulfillment, negotiation_id, str(status["fulfillment_id"]),
+                    provisioning_client, storefront_admin_client,
                 )
-        finally:
-            driver.disarm_gates()
-            provisioning_test_client.drain(timeout=30)
-            overrides.delete_pool_override(driver.site_id, driver.pool_id, "bare_metal")
-            provisioning_client.resume_lease_watchdog()
-            provisioning_client.resume_fulfillment_convergence()
-            storefront_admin_client.admin_resume_lifecycle_loops()
+
+        # Resuming held loops runs last and always, so a failing step above it
+        # cannot leave them stopped for the lane's next module.
+        run_cleanup(
+            [
+                ("find the outstanding purchase", find_outstanding),
+                ("refund the outstanding purchase", refund_outstanding),
+                ("release the outstanding purchase's host", release_outstanding),
+                ("remove the mock rules", driver.disarm_gates),
+                ("drain provisioning", lambda: provisioning_test_client.drain(timeout=30)),
+                ("remove the pool override", lambda: overrides.delete_pool_override(
+                    driver.site_id, driver.pool_id, "bare_metal",
+                )),
+            ],
+            always=[
+                ("resume the lease watchdog", provisioning_client.resume_lease_watchdog),
+                ("resume fulfillment convergence",
+                 provisioning_client.resume_fulfillment_convergence),
+                ("resume the storefront's loops",
+                 storefront_admin_client.admin_resume_lifecycle_loops),
+            ],
+        )
 
 
 def test_payment_deal_delivers_after_a_verified_receipt(
@@ -354,15 +435,7 @@ def test_the_seller_refund_reverses_the_held_payment(
     payment_supply, payment_fulfillment, provisioning_client, storefront_admin_client, site_capacity,
 ) -> None:
     require_state(payment_deal_state, "negotiation_id", "settlement_id", "fulfillment_ref")
-    seller = create_signer(
-        lane_setting("storefront_scheme"), str(payment_setting("SELLER_MARKETPLACE_CREDENTIAL")),
-    )
-    assert seller.identity in _pins("storefront").identities
-    with SyncStorefrontClient(
-        lane_setting("storefront_url"), signer=seller, caller_role="seller",
-        expected_publishers=_pins("storefront"),
-    ) as storefront:
-        refunded = storefront.refund_settlement(payment_deal_state.negotiation_id)
+    refunded = _seller_refund(payment_deal_state.negotiation_id)
     assert refunded.status == "refunded"
     assert refunded.settlement_ref == payment_deal_state.settlement_id
     with payments_client_for_owner(payments_config, str(payment_setting("BUYER_ACCOUNT"))) as client:
