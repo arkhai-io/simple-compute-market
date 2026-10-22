@@ -1744,7 +1744,7 @@ Delivers the stored-provider startup refusal and signed 500s after authenticatio
 provider"; `physical-provisioning` "A failure after authentication is answered signed").
 Touches `kit/resource-pools`, the provisioning service, and `kit/site`.
 
-- [ ] 10.1 `kit/resource-pools/src/market_resource_pools/service.py`: a stored-provider
+- [x] 10.1 `kit/resource-pools/src/market_resource_pools/service.py`: a stored-provider
       check beside `stored_declaration_problems` naming each pool and the provider no
       registered handler serves; the provisioning service's `verify_pool_declarations`
       startup step (`src/app_runtime.py`) refuses on it, beside the invalid-declaration
@@ -1753,7 +1753,22 @@ Touches `kit/resource-pools`, the provisioning service, and `kit/site`.
       `provisioning/compute/service/tests/integration/test_pool_declaration_startup.py`
       (application integration): a stored pool naming an unregistered provider refuses
       startup naming it (D23).
-- [ ] 10.2 `src/middleware/auth.py` `ProvisioningAuthMiddleware.dispatch`: a route failure
+      Done. `stored_provider_problems(db)` lists `(pool, provider)` for every stored pool,
+      enabled or not, whose provider no handler serves; `require_served_stored_providers()`
+      raises `PoolValidationError` naming each and the registered providers. The startup
+      step runs it after the declaration check, so a pool with both problems reports its
+      declarations first. Library integration: `TestStoredDeclarations` (served providers
+      pass; an enabled and a disabled pool naming an unserved provider are named with the
+      registered providers, and a served pool is not). **Differed:** the startup test is
+      not application integration as the task labels it: it drives
+      `app_runtime.verify_pool_declarations` over migrated file-backed SQLite with the
+      container's pool service replaced by one over the two real handlers the test lists,
+      not the running application or the composition's own handler map. It shows the
+      same case, enabled and disabled, refused naming the pool and those providers.
+      The API-credits service, which also stores its pool, gets no provider check: it
+      composes no pool service or handlers and reads a pool's provider only as metadata,
+      so no handler can be missing.
+- [x] 10.2 `src/middleware/auth.py` `ProvisioningAuthMiddleware.dispatch`: a route failure
       after authentication is logged and answered as a signed 500 with a fixed,
       non-revealing detail, following VM's `admin_identity.py`, and recorded as the
       request's outcome so an exact retry replays the same signed answer. Tests:
@@ -1761,18 +1776,83 @@ Touches `kit/resource-pools`, the provisioning service, and `kit/site`.
       through `ProvisioningClients`: the typed client receives a signed 500, not a
       response-authentication error, and an exact retry gets the same answer rather than
       "in progress" (D23).
-- [ ] 10.3 `kit/site/src/market_site/auth.py` `SiteAuthMiddleware.dispatch`: the same signed
+      Done: the route call and its body read are one `try`; a failure logs with its
+      traceback and becomes `{"detail": "Provisioning request failed"}`
+      (`ROUTE_FAILURE_DETAIL`), recorded and signed as any outcome is. `test_auth.py`
+      (filed as unit, though like the rest of that file it runs a FastAPI app over a real
+      SQLite replay store): under both response-signing schemes, the 500 verifies, its
+      exact retry verifies with the same body, the route runs once, and the error is
+      logged and absent from the body. The route is administrator-only, so its requests
+      are always Ed25519-signed. Application integration `test_pools_api.py` `TestRouteFailureAfterAuthentication`:
+      a stored pool naming an unserved provider (service-internal setup) makes the pool
+      list raise; the typed client raises `ComputeProvisioningError` 500, not the
+      authentication error, and an exact retry under the same request ID replays the 500
+      after the row is gone, though the route would now succeed.
+      **Also changed:** `test_host_capacity_derivation_api.py` asserted the in-process
+      transport re-raised the route's exception; it now asserts the signed 500.
+- [x] 10.3 `kit/site/src/market_site/auth.py` `SiteAuthMiddleware.dispatch`: the same signed
       500, recording nothing; an exact retry of a retry-safe route runs again, and of an
       unsafe one is refused as today. Tests:
       `kit/site/tests/integration/test_site_auth_middleware.py` (library integration);
       `domains/apicredits/service/tests/integration/test_credits_signed_roundtrip.py`
       (application integration through the typed client) (D23).
-- [ ] 10.4 Versions: `arkhai-kit-resource-pools`, `arkhai-kit-site`, the provisioning
+      Done, with `ROUTE_FAILURE_DETAIL` `"Site-authority request failed"`. Library
+      integration: a failing reserve answers a signed 500 with the fixed detail and logs
+      the error; its exact retry runs again (two calls, two signed 500s) when the route is
+      retry-safe, and is refused with the 409 when it is not (one call). The envelope is
+      checked by this file's own signed-header assertion, as its other cases are, not
+      verified by a client. **Differed:** the application-integration case is in
+      `test_signed_authority.py`, which runs the service's real `main.app`, rather than in
+      `test_credits_signed_roundtrip.py`, whose gate fronts stub handlers: the storefront
+      client's issuance read of a committed grant whose key row is gone (removed directly,
+      as no route can produce it) gets `CreditsServiceError` 500 after verifying the
+      response, not `CreditsServiceAuthenticationError`, and the service logs the error.
+- [x] 10.4 Versions: `arkhai-kit-resource-pools`, `arkhai-kit-site`, the provisioning
       service, the API-credits service; `make lock`.
-- [ ] 10.5 **Verify.** `make -C kit test-resource-pools test-site`; `make
+      `arkhai-kit-resource-pools` 0.8.0 (new public API), `arkhai-kit-site` 0.10.2,
+      `arkhai-apicredits-service` 0.6.1 with its `arkhai-kit-site` floor 0.10.2; the
+      provisioning service, already bumped and unreleased here, is not bumped again and
+      raises its `arkhai-kit-resource-pools` floor to 0.8.0. `make lock`.
+- [x] 10.5 **Verify.** `make -C kit test-resource-pools test-site`; `make
       test-provisioning`; `make test-apicredits`; `make test`; `make check-packaging`.
       End-to-end: none exercises an unserved provider or a route failure, and none is owed;
       every lane's provisioning traffic passes through the changed middleware.
+      Results (`make dist` and `make lock` first; the first three rerun after the
+      fresh-context fixes): `make -C kit test-resource-pools test-site` 127 and 282
+      passed; `make test-provisioning` unit 664, integration 488; `make test-apicredits`
+      passed (service 73). Before those fixes, which touch no other project: `make -C kit
+      test-fulfillment` 171; `make test-compute-provisioning` 231, `-ansible` 92,
+      `-client` 50; `make test-provisioning-adapter` 29; `make test-compute` 5; `make
+      test-bare-metal` passed (storefront 446); `make test-storefront` unit 1119 (1
+      skipped), integration 450 with the two environmental `test_alkahest.py` failures;
+      `make test-e2e-unit` 38; `make test-core`, `test-registry`, `test-vms-buyer`, and
+      `-C kit test-alkahest` passed. `make test`: not run whole. `make check-packaging`
+      and `make check-comment-hygiene` passed; `make check-change` fails only on the two
+      citations Sections 13 and 22 create. End-to-end: the pipeline was not run in this
+      section, and no scenario exercises either refusal.
+
+Section 10 notes (handoff):
+
+- **The body read is inside the `try`.** A streaming route that fails mid-body is a
+  failure after authentication too, so both middlewares catch it there; the status line
+  was not yet sent, since the middleware buffers the body before answering. No test uses
+  a streaming route.
+- **Fresh-context check.** Fixed: the startup and site-kit test labels and claims above,
+  the API-credits case moved onto the real application with its log asserted, the
+  provider check's docstring and startup log line, and `ResourcePool` imported from its
+  owner. Not rechecked after those fixes. Recorded rather than changed: `test_auth.py`
+  runs an application over a real store although filed under `unit/`, as the whole file
+  does; and `marketplace-identity` already holds the rule that a response is signed
+  whether a refusal comes during authentication or after, which the `physical-provisioning`
+  delta's site-kit half restates; closeout may prefer to promote that half there.
+- **A pool with both an invalid declaration and an unserved provider** reports only the
+  declarations at its first refused start; the provider refusal follows once those are
+  repaired. Reporting both at once would need one combined check; neither refusal
+  changes state.
+- **Signed 500s replace a behaviour other tests may have leaned on**: an in-process
+  transport re-raising a route's exception. Only the one provisioning test did, among the
+  suites run; a suite outside them that drives the provisioning service or a `kit/site`
+  gate and expects the exception would now see a 500.
 
 ## 11. Storefronts start degraded rather than waiting on their dependencies
 

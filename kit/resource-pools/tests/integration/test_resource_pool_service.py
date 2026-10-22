@@ -1573,6 +1573,32 @@ class TestStoredDeclarations:
         with pytest.raises(PoolValidationError, match="pool 'drifted' deliverable_modes"):
             svc.require_valid_stored_declarations()
 
+    def test_served_providers_pass(self, svc):
+        _create_backed_vm(svc)
+
+        svc.require_served_stored_providers()
+
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_a_pool_naming_an_unserved_provider_is_named(
+        self, svc, session_factory, enabled
+    ):
+        # A disabled pool's records are still read, so it is refused as well.
+        _create_backed_vm(svc, "served")
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="orphaned", label="Orphaned", provider="retired.provider",
+                enabled=enabled, policy_tags=dict(_BACKED_VM),
+            ))
+
+        with session_factory() as db:
+            assert svc.stored_provider_problems(db) == [("orphaned", "retired.provider")]
+        with pytest.raises(PoolValidationError) as refused:
+            svc.require_served_stored_providers()
+        message = str(refused.value)
+        assert "pool 'orphaned' provider 'retired.provider'" in message
+        assert "registered providers: 'ansible'" in message
+        assert "pool 'served'" not in message
+
     def test_a_pool_without_backing_may_be_given_one(self, svc, session_factory):
         # The repair path for a row an older version rewrote: supplying the
         # value is not a change to it.

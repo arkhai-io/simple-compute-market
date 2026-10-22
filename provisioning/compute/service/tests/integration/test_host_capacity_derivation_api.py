@@ -11,6 +11,7 @@ from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
 
 import pytest
+from compute_provisioning_client import ComputeProvisioningError
 from compute_provisioning_contracts import HostCreate
 
 from compute_provisioning_service import container as _container_module
@@ -84,10 +85,11 @@ async def test_a_failure_before_the_derivation_commits_leaves_neither(
 
     monkeypatch.setattr(derivation, "derive_in_session", derive_then_fail)
 
-    # The in-process transport re-raises the server's exception rather than
-    # answering 500; what matters is the state it leaves.
-    with pytest.raises(RuntimeError, match="injected"):
+    # The service answers the failure with a signed 500; what matters here is
+    # the state it leaves.
+    with pytest.raises(ComputeProvisioningError) as failed:
         await client.host_import.import_hosts_from_text(_INI, ssh_key_type="path")
+    assert failed.value.status_code == 500
 
     assert (await client.family.list_hosts(include_disabled=True)).hosts == []
     assert await _resources(capacity) == {}

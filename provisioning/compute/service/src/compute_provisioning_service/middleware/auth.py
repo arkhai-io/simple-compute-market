@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 EXCLUDED_PATHS = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
 
+#: The detail of the signed 500 answering a route that raised after
+#: authentication; it reveals nothing of the error.
+ROUTE_FAILURE_DETAIL = "Provisioning request failed"
+
 
 class SqlAlchemyProvisioningReplayStore:
     """Atomic durable replay reservations, dispatch leases, and outcomes."""
@@ -371,10 +375,26 @@ class ProvisioningAuthMiddleware(BaseHTTPMiddleware):
             f"{authenticated.principal.scheme.value}:"
             f"{authenticated.principal.identifier}"
         )
-        response = await call_next(request)
-        response_body_bytes = b"".join(
-            [chunk async for chunk in response.body_iterator]
-        )
+        try:
+            response = await call_next(request)
+            response_body_bytes = b"".join(
+                [chunk async for chunk in response.body_iterator]
+            )
+        except Exception:
+            # The caller is authenticated, so it gets a signed answer it can
+            # verify, recorded below like any outcome so an exact retry replays
+            # it rather than waiting out the dispatch lease. The detail is
+            # fixed: the error belongs in this service's log, not the response.
+            logger.exception(
+                "Provisioning route failed after authentication: %s %s",
+                request.method,
+                request.url.path,
+            )
+            response = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": ROUTE_FAILURE_DETAIL},
+            )
+            response_body_bytes = bytes(response.body)
         response_body = _response_body(response, response_body_bytes)
         replay_store.record_outcome(
             verification.reservation,

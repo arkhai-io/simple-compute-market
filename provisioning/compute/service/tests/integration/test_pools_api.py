@@ -24,12 +24,15 @@ from __future__ import annotations
 from compute_provisioning_ansible import ssh_connection
 
 from .conftest import ProvisioningClients
-from compute_provisioning_client import ComputeProvisioningError
+from compute_provisioning_client import (
+    ComputeProvisioningAuthenticationError,
+    ComputeProvisioningError,
+)
 import pytest
 import yaml
 
 from compute_provisioning_service import container as _container_module
-from market_resource_pools import ResourcePoolService
+from market_resource_pools import ResourcePool, ResourcePoolService
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import BareMetalPoolConfigHandler
 from vm_provisioning_adapter.services.ansible_pool_config_handler import AnsiblePoolConfigHandler
 
@@ -919,3 +922,39 @@ class TestProviderFixedAtCreationThroughAdminApi:
         assert await client.pools.list_pools() == before
         assert await client.pools.get_pool(omitted.id) == omitted
         assert await client.pools.export_pools_yaml() == exported
+
+
+class TestRouteFailureAfterAuthentication:
+    """A route that raises answers a signed 500 its typed client verifies.
+
+    A stored pool naming a provider no handler serves, written directly as
+    service-internal state since no write path admits one, makes the pool
+    list raise. Startup refuses such a pool; this exercises the answer a
+    running service gives when a route fails anyway.
+    """
+
+    async def test_the_failure_is_signed_and_an_exact_retry_replays_it(
+        self, client_and_queue, session_factory
+    ):
+        client, _ = client_and_queue
+        with session_factory() as db, db.begin():
+            db.add(ResourcePool(
+                id="orphaned", label="Orphaned", provider="retired.provider",
+                policy_tags={"advertisable_modes": [], "capacity_backing": "backed"},
+            ))
+
+        with pytest.raises(ComputeProvisioningError) as failed:
+            await client.pools.list_pools(request_id="pool-list-failure")
+        # The response verified: an unsigned one raises the authentication error.
+        assert not isinstance(failed.value, ComputeProvisioningAuthenticationError)
+        assert failed.value.status_code == 500
+        assert "retired.provider" not in str(failed.value)
+
+        with session_factory() as db, db.begin():
+            db.delete(db.get(ResourcePool, "orphaned"))
+        with pytest.raises(ComputeProvisioningError) as replayed:
+            await client.pools.list_pools(request_id="pool-list-failure")
+        # The recorded answer, though the route would now succeed.
+        assert replayed.value.status_code == 500
+        assert str(replayed.value) == str(failed.value)
+        assert any(pool.id == "default" for pool in (await client.pools.list_pools()).pools)
