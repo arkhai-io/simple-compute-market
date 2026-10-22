@@ -1,25 +1,26 @@
-# Design
+## Context
+
+The work landed as PR #275, stacked on PR #272, before the change was taken through the current workflow; the change records it, its design review, and the rounds after it. The scenario was run against a configured payments target and passed its three calls; that run is what found the provision-terms serialization defect in the bare-metal buyer.
+
+## Goals / Non-Goals
+
+**Goals:** one connected-system scenario proving a fixed-term bare-metal deal settled through Arkhai payments, from discovery to refund and physical release; a scenario that leaves nothing behind on failure; bare-metal buyer commands that complete an agreed negotiation.
+
+**Non-Goals:** real SSH access and revocation; live payment qualification; any change to settlement design or a new buyer command.
 
 ## Decisions
 
-Reuse the bare-metal driver for backed whole-machine seeding and mock access semantics. A pool override supplies one hourly USD/6 option without changing other pools. Keep control-flow tests distinct from the canonical Alkahest stages.
+- **D1 — Supply and access reuse the bare-metal deal driver.** `BareMetalComputeDealDriver` seeds backed whole-machine supply and supplies the mock access semantics. A pool override supplies one hourly USD/6 payment option without changing other pools. The scenario's stages stay distinct from the canonical Alkahest compute stages, which bind escrow semantics and cannot represent a payment purchase.
+- **D2 — The buyer is configured through the shared payments helper.** It uses the shared serializer under `bare_metal.arkhai_payments`, pins false receipt mode, and generates only a public SSH key for configuration. Registry and seller responses verify against lane-owned pins.
+- **D3 — Re-drive recovers the original purchase.** Replay reads the original run's validated references and resolves the run-recorded profile and principal through `BuyerProfileService`, then calls `SyncStorefrontClient.settle_agreement`: it neither buys again nor invents a settle command. Every fulfillment read and the teardown sign as that purchase's buyer; the lane's ordinary buyer fixtures use another signer and cannot read this purchase.
+- **D4 — Financial reversal and physical release are separate.** The seller refund calls the pinned seller and checks the payer's transaction snapshot; physical teardown separately follows mock reclaim, the lease release, and whole-host capacity return. Real SSH belongs to the protected lane.
+- **D5 — Completion serializes accepted terms through the outcome.** `market bare-metal buy` and `market bare-metal request-introduction` write the accepted provision terms into `run_ended` through the negotiation outcome's serializer, which copies a dictionary and dumps a model. The bare-metal buyer passes the negotiation client no provision-terms decoder, so the terms always arrive as a dictionary, and calling `.model_dump()` on them failed every agreed negotiation. Both commands get unit-level regression tests, since no pipeline scenario drives either to an agreement (01 F5).
+- **D6 — A failed run compensates what it started.** The scenario records the deal's negotiation, transaction, and fulfillment as soon as each exists — reading them from the original run when the purchase command fails after approval — and its module cleanup refunds any transaction not yet refunded, then tears down any fulfillment not yet torn down, best effort. Both operations are idempotent (a repeated refund returns the same result; a repeated teardown returns one operation), so cleanup attempts them without knowing whether the refund stage ran. The scenario drives a real payments target, so a failed run would otherwise leave a hold there until its dispute window ends, and a host allocated in the lane (01 F2).
+- **D7 — Every cleanup step runs, and the held loops resume last.** Each owned cleanup step — compensation, disarming gates, draining, removing the pool override and mock rules — is attempted on its own, its failure recorded and reported at the end; resuming the storefront's lifecycle loops, fulfillment convergence, and the lease watchdog sits in an outer `finally`. That is `docs/development/TESTING.md`'s rule that a module resumes the loops it paused in a finaliser, so a failing stage does not leave them stopped for the next module in the lane (01 F3).
+- **D8 — The scenario's contract is its own requirement, delivered by this change's delta.** It was first written as a scenario under `test-compatibility`'s "A deployable domain's deal runs on every end-to-end run", which this scenario does not do: it skips in the pipeline. It is an ADDED requirement beside "External payment qualification names its target", so it does not restate the every-run requirement, and the archive merges it once reviewed (01 F4).
 
-Use the shared payment serializer under `bare_metal.arkhai_payments`, pin false receipt mode, and generate only a public SSH key for configuration. Registry and seller responses verify against lane-owned pins.
+## Risks / Trade-offs
 
-Replay reads validated original-run references and resolves the run-recorded profile/principal through `BuyerProfileService`. It calls `SyncStorefrontClient.settle_agreement`; it neither buys again nor invents a settle CLI. All fulfillment reads and teardown sign as that purchase buyer.
-
-Financial refund calls the actual pinned seller and checks the payer snapshot. Physical teardown separately follows mock reclaim, lease release callback and whole-host capacity return. Finalizers resume held loops and remove owned rules.
-
-## Alternatives
-
-The ordinary lane buyer fixtures use a different signer and cannot read this purchase. Shared Alkahest stages bind escrow semantics and cannot represent a payment purchase. Real SSH belongs to the protected lane.
-
-## Design promotion record
-
-| Accepted decision | Permanent location |
-|---|---|
-| Three-call payment and physical release contract | `openspec/specs/test-compatibility/spec.md#scenario-bare-metal-payment-purchase-is-qualified` |
-| Bare-metal lane payment scenario map | `docs/development/TESTING.md#4-system-integration-tests-end-to-end` |
-| Configuration and first-use entry point | `e2e-tests/README.md#bare-metal-payment-deal` |
-
-No repository-wide architectural change or roadmap-goal state change: this qualifies existing fixed-term behavior, not the spot roadmap. The focused campaign index records this scenario separately and now marks configured qualification complete, with review pending.
+- **[Direct loop pauses]** → the supply fixture pauses the storefront, fulfillment convergence, and the lease watchdog itself. `unbacked-bare-metal-listings` replaces direct pauses with shared module holds and a source check that refuses them, and converts this module with the other bare-metal ones; its index row records that.
+- **[Pipeline evidence]** → the pipeline configures no payments target, so the scenario skips there; the configured run is evidence recorded with the change, not a pipeline result.
+- **[A cleanup killed by a timeout]** → a finaliser that does not run cannot compensate; a hold then expires with its window, and the lane's stack is recreated by the next run.
