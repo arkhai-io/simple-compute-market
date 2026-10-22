@@ -5,9 +5,10 @@ available of the models the step's row names, in order: a model whose harness is
 missing, not signed in, or at its usage limit is passed over, and the line names
 each one passed over and the model that ran; a network error is retried on the
 same model, never passed over. `Wrapper.resume` continues the session of a waiting
-run, named by its line in the log, with the owner's answer, optionally granting a
-rule for that one run; with steps run side by side the last run is not necessarily
-the one that asked, so the run is never inferred.
+run, named by its line in the log, with the owner's answer; with steps run side by
+side the last run is not necessarily the one that asked, so the run is never
+inferred. Either may be granted rules for that one run, passed on its command line
+and recorded as `granted` on its line, never added to the step table.
 
 Either way the run's event stream is kept as its transcript, and its outcome is
 appended to the workflow log. A run that crashes, ends without an outcome, or ends
@@ -102,9 +103,13 @@ class Wrapper:
     runs: Callable[[Path], Path | None] = runs_directory
 
     def run(self, step: str, change: str, *, arguments: str = "",
-            sections: Sequence[int | str] | None = None, fresh: bool = False) -> Entry:
+            sections: Sequence[int | str] | None = None, fresh: bool = False,
+            granted: Sequence[str] = ()) -> Entry:
         """Run `step`: a fresh session, or, for a step that resumes another's, the
-        latest session of either, unless `fresh`."""
+        latest session of either, unless `fresh`.
+
+        A granted rule applies to this run alone, as it does to a resumed run.
+        """
         steps = load_steps(self.steps_path)
         if step not in steps or step == "review":
             raise StepError(f"{step!r} has no unattended Claude Code run; a review runs "
@@ -125,9 +130,11 @@ class Wrapper:
             if previous is not None:
                 session = previous["session"]
                 models = _session_models(previous, rules)
-        extra = {"sections": list(sections)} if sections else {}
+        extra: Entry = {"sections": list(sections)} if sections else {}
+        if granted:
+            extra["granted"] = list(granted)
         return self._turn(step, rules, change, log, step_prompt(rules, change, arguments),
-                          models, session=session, extra=extra)
+                          models, session=session, granted=granted, extra=extra)
 
     def resume(self, change: str, seq: int, answer: str, granted: Sequence[str] = ()) -> Entry:
         """Resume the step session of the run at `seq` with the owner's answer.

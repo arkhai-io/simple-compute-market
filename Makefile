@@ -929,11 +929,19 @@ review: round-view-closed ## Review an OpenSpec change read-only, in Codex or, w
 # .claude/change-steps.toml, ending with an outcome logged to the change's
 # reviews/workflow.jsonl. Without it, each target opens an interactive session as
 # the owner's own permission settings allow.
+#
+# ALLOW holds rules the owner grants for that one run, several separated by `;`;
+# each reaches the script as its own `--allow`, single-quoted so the shell passes
+# a rule's spaces, `*`, and quotes as they are (a `$` is make's own, written `$$`),
+# and the run's log line records them as `granted`. An interactive session ignores
+# it: no table restricts that one.
+ALLOW ?=
 STEP_RUN = python3 scripts/run_change_step.py run
+STEP_GRANTS = $(if $(strip $(ALLOW)), --allow '$(subst ;,' --allow ',$(subst ','\'',$(ALLOW)))')
 
-design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1])
+design: ## Open a Claude Code design session for an OpenSpec change (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)",claude "/change-design $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) design "$(CHANGE)"$(STEP_GRANTS),claude "/change-design $(CHANGE)")
 
 # The orchestrating session relays and routes rather than judging, so it needs a
 # large context for a change's relayed turns, not a high effort.
@@ -941,21 +949,21 @@ orchestrate: ## Open the orchestrating Claude Code session for one OpenSpec chan
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@claude --model claude-opus-5-5 --effort medium "/change-orchestrate $(CHANGE)"
 
-plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1] [FRESH=1])
+plan: ## Open a Claude Code planning session for an OpenSpec change; unattended, it resumes the design session (CHANGE=<change> [UNATTENDED=1 [FRESH=1] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh),claude "/change-plan $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) plan "$(CHANGE)"$(if $(filter 1,$(FRESH)), --fresh)$(STEP_GRANTS),claude "/change-plan $(CHANGE)")
 
-implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1])
+implement: round-view-closed ## Open a fresh Claude Code session implementing an OpenSpec change; unattended, ARGUMENTS follows the change in the skill's invocation, as a merge's conflicts to resolve (CHANGE=<change> [SECTION=<n>] [SECTIONS=<n-m>] [UNATTENDED=1 [ARGUMENTS=<text>] [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --active "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))"),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) implement "$(CHANGE)"$(if $(strip $(SECTIONS)$(SECTION)), --sections "$(or $(strip $(SECTIONS)),$(strip $(SECTION)))")$(if $(strip $(ARGUMENTS)), --arguments '$(subst ','\'',$(ARGUMENTS))')$(STEP_GRANTS),claude "/change-implement $(CHANGE)$(if $(strip $(SECTIONS)), sections $(SECTIONS),$(if $(strip $(SECTION)), section $(SECTION)))")
 
-triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1])
+triage: round-view-closed ## Open a fresh Claude Code session triaging an OpenSpec change's untriaged reviews, validation, and the owner's notes (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)",claude "/change-triage $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) triage "$(CHANGE)"$(STEP_GRANTS),claude "/change-triage $(CHANGE)")
 
-closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1])
+closeout: round-view-closed ## Open a fresh Claude Code session closing out an OpenSpec change, archiving it last; resumes one archived but not committed (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)",claude "/change-closeout $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) closeout "$(CHANGE)"$(STEP_GRANTS),claude "/change-closeout $(CHANGE)")
 
 check-change-index: ## Fail if the change index has a malformed row, an unresolved change link, an unknown status, a dependency it does not list or that is archived, or an active change directory without exactly one row
 	@python3 scripts/check_change_index.py
@@ -990,9 +998,9 @@ change-cost: ## Report what an OpenSpec change's unattended runs cost, by step a
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_cost.py "$(CHANGE)"
 
-archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived, the capacity figure recorded, its validation namespace torn down, and its history copied into the owner's workspace (CHANGE=<change> [UNATTENDED=1])
+archive-cleanup: round-view-closed ## Open a fresh Claude Code session cleaning up an archived OpenSpec change once its closeout review's triage has advanced it: dependents released, row set to archived, the capacity figure recorded, its validation namespace torn down, and its history copied into the owner's workspace (CHANGE=<change> [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py --archived "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)",claude "/change-archive-cleanup $(CHANGE)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) archive-cleanup "$(CHANGE)"$(STEP_GRANTS),claude "/change-archive-cleanup $(CHANGE)")
 
 round-view-closed: ## Fail while a round view is open: the branch then points at the round's base, not its commit
 	@python3 scripts/round_view.py check
@@ -1031,9 +1039,9 @@ check-push-ready: round-view-closed ## Fail unless HEAD is a clean, attached cha
 push-branch: round-view-closed ## Push exactly HEAD, unforced, to the current branch's own name once check-push-ready passes
 	@python3 scripts/check_push_ready.py push
 
-validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1])
+validate: round-view-closed ## Open a Claude Code session validating the commit at HEAD for an OpenSpec change (CHANGE=<change> [HELM_ALL_SCENARIOS=1] [UNATTENDED=1 [ALLOW='<rule>;<rule>']])
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
-	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1"),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
+	@$(if $(filter 1,$(UNATTENDED)),$(STEP_RUN) validate "$(CHANGE)"$(if $(filter 1,$(HELM_ALL_SCENARIOS)), --arguments "with HELM_ALL_SCENARIOS=1")$(STEP_GRANTS),claude "/change-validate $(CHANGE)$(if $(filter 1,$(HELM_ALL_SCENARIOS)), with HELM_ALL_SCENARIOS=1)")
 
 run-e2e: round-view-closed ## Run the E2E GitHub Actions workflow on the current branch.
 	@branch="$$(git branch --show-current)"; \

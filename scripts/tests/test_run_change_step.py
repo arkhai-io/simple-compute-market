@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from change_workflow.cli import expand_sections, main, parse_sections
+from change_workflow.cli import expand_sections, main, parse_sections, split_rules
 from change_workflow.log import log_path, read_log, record_outcome
 from change_workflow_fixtures import (CHANGE, COMMIT, DENIALS, VALID, FakeClaude, event_lines,
-                                      log_file, make_wrapper, option, repository)
+                                      log_file, make_wrapper, option, option_rules, repository)
 
 
 def test_the_command_line_records_a_branch_decision(
@@ -123,6 +123,41 @@ def test_the_command_resumes_by_seq(tmp_path: Path) -> None:
     assert claude.commands[1][2] == "The owner's answer: Yes."
 
 
+def test_a_fresh_run_is_granted_each_rule_its_allow_values_hold(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["finished"]), 0))
+
+    assert main(["run", "validate", CHANGE, "--allow", "Bash(gh run download *);Bash(make lock)",
+                 "--allow", "Bash(helm version)"], root=tmp_path,
+                wrapper=make_wrapper(tmp_path, claude)) == 0
+
+    rules = ["Bash(gh run download *)", "Bash(make lock)", "Bash(helm version)"]
+    assert option_rules(claude.commands[0], "--allowedTools")[-3:] == rules
+    assert read_log(log_path(tmp_path, CHANGE))[0]["granted"] == rules
+
+
+def test_a_resumed_run_splits_its_allow_values_too(tmp_path: Path) -> None:
+    claude = FakeClaude((event_lines(VALID["question"], session="d-1"), 0),
+                        (event_lines(VALID["finished"], session="d-1"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+    wrapper.run("design", CHANGE)
+
+    assert main(["resume", CHANGE, "--seq", "1", "--answer", "Yes.",
+                 "--allow", "Bash(helm version);; Bash(make lock) ;"], root=tmp_path,
+                wrapper=wrapper) == 0
+
+    rules = ["Bash(helm version)", "Bash(make lock)"]
+    assert option_rules(claude.commands[1], "--allowedTools")[-2:] == rules
+    assert read_log(log_path(tmp_path, CHANGE))[-1]["granted"] == rules
+
+
+@pytest.mark.parametrize("values,rules", [
+    ([], []), (["a"], ["a"]), (["a;b"], ["a", "b"]), ([";a;;b;"], ["a", "b"]),
+    (["a; b", "c"], ["a", "b", "c"]), ([" ; "], []),
+])
+def test_allow_values_split_on_semicolons(values: list[str], rules: list[str]) -> None:
+    assert split_rules(values) == rules
+
+
 def test_a_stopped_run_exits_non_zero(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(result=False), 2))
 
@@ -164,6 +199,7 @@ def _make_n(*arguments: str, keep_checks: bool = False) -> list[str]:
     """
     env = {key: value for key, value in os.environ.items()
            if key not in ("UNATTENDED", "SECTION", "SECTIONS", "FRESH", "HELM_ALL_SCENARIOS",
+                          "ALLOW", "ARGUMENTS",
                           "REVIEW_BASE", "REVIEW_MODEL", "REVIEW_EFFORT", "UNVALIDATED",
                           "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
     output = subprocess.run(["make", "-n", "--no-print-directory", *arguments],
@@ -220,6 +256,44 @@ def test_implementation_targets_pass_their_sections(
         f'claude "/change-implement X {interactive}"']
     assert _make_n("implement", "CHANGE=X", variable, "UNATTENDED=1") == [
         f'python3 scripts/run_change_step.py run implement "X" {unattended}']
+
+
+@pytest.mark.parametrize("target", ["design", "plan", "implement", "triage", "validate",
+                                    "closeout", "archive-cleanup"])
+def test_an_unattended_step_target_passes_each_granted_rule_as_its_own_allow(
+        target: str) -> None:
+    assert _make_n(target, "CHANGE=X", "UNATTENDED=1",
+                   "ALLOW=Bash(gh run download *);Bash(make check-packaging)") == [
+        f'python3 scripts/run_change_step.py run {target} "X" '
+        "--allow 'Bash(gh run download *)' --allow 'Bash(make check-packaging)'"]
+    # Interactive sessions are not held to the table, so a grant means nothing there.
+    assert "--allow" not in _make_n(target, "CHANGE=X", "ALLOW=Bash(make lock)")[0]
+
+
+def test_implementation_is_given_its_arguments_beside_its_grants() -> None:
+    assert _make_n("implement", "CHANGE=X", "UNATTENDED=1",
+                   "ARGUMENTS=resolve the merge conflicts in scripts/a.py",
+                   "ALLOW=Bash(make lock)") == [
+        'python3 scripts/run_change_step.py run implement "X" '
+        "--arguments 'resolve the merge conflicts in scripts/a.py' --allow 'Bash(make lock)'"]
+
+
+def test_a_granted_rule_and_arguments_reach_the_script_as_written(tmp_path: Path) -> None:
+    """The shell quoting `make` writes, run by a real shell: quotes, `*`, and
+    backticks arrive untouched, and an empty part of `ALLOW` is dropped by the
+    script."""
+    rule, other = "Bash(git commit -m 'wip' *)", 'Bash(echo "`id`" *)'
+    command = _make_n("implement", "CHANGE=X", "UNATTENDED=1",
+                      "ARGUMENTS=resolve `scripts/a.py`'s conflicts",
+                      f"ALLOW={rule};;{other}")[0]
+    printed = subprocess.run(
+        ["sh", "-c", command.replace("python3 scripts/run_change_step.py run",
+                                     "printf '%s\\n'")],
+        cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
+
+    assert printed == ["implement", "X", "--arguments", "resolve `scripts/a.py`'s conflicts",
+                       "--allow", rule, "--allow", "", "--allow", other]
+    assert split_rules([rule, "", other]) == [rule, other]
 
 
 def test_unattended_planning_may_start_fresh_and_validation_take_every_scenario() -> None:

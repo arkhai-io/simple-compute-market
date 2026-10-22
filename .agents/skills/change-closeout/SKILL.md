@@ -60,8 +60,14 @@ the session, and every turn ends with an outcome matching
 - **The end is an outcome.** Each point this skill puts to the owner is a
   `question`. A part that would need a code edit ends with `returned`,
   `return_to` `implementation`, and `evidence` naming the closeout task's notes,
-  where you recorded what needs the edit; closeout never edits code. The owner
-  confirms the return, and implementation then sets the status. When the archive
+  where you recorded what needs the edit; closeout never edits code. Before ending,
+  commit what closeout has written — the status, the notes, any part done — as one
+  work-in-progress commit naming the change and why it returns, and push it with
+  `make push-branch`: no session is left to commit it, and a dirty checkout blocks
+  every later step's guarded push. The owner confirms the return, and
+  implementation then sets the status. A stop commits nothing: its work waits
+  uncommitted for the resumed session, and one stopped because a repository guard
+  refused or `HEAD` moved leaves the checkout as it was. When the archive
   is committed and pushed, end with `finished`, `next` naming the closeout review.
 
 ## 1. Check that closeout may start

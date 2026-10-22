@@ -195,6 +195,23 @@ def test_a_question_is_answered_by_resuming_its_session_with_a_granted_rule(
     assert "granted" not in rerun
 
 
+def test_a_fresh_run_granted_rules_holds_them_for_that_run_alone(tmp_path: Path) -> None:
+    # The owner grants two rules before the step's next run has started.
+    granted = ["Bash(gh run download *)", "Bash(make check-packaging)"]
+    claude = FakeClaude((event_lines(VALID["finished"], session="v-1"), 0),
+                        (event_lines(VALID["finished"], session="v-2"), 0))
+    wrapper = make_wrapper(tmp_path, claude)
+
+    line = wrapper.run("validate", CHANGE, granted=granted)
+    rerun = wrapper.run("validate", CHANGE)
+
+    table = list(load_steps()["validate"].allow)
+    assert option_rules(claude.commands[0], "--allowedTools") == [*table, *granted]
+    assert line["granted"] == granted
+    assert option_rules(claude.commands[1], "--allowedTools") == table
+    assert "granted" not in rerun
+
+
 def test_a_resumed_implementation_keeps_its_sections(tmp_path: Path) -> None:
     claude = FakeClaude((event_lines(VALID["question"]), 0), (event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)

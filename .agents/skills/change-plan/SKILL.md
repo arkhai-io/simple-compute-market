@@ -65,7 +65,14 @@ the session, and every turn ends with an outcome matching
   question (section 3), or finds no cadence it can cut its sections to (section 4),
   end with `returned`, `return_to` `design`, and `evidence`
   naming where you recorded what planning found; leave the status as it is. The
-  owner confirms the return, and the design step then sets the status.
+  owner confirms the return, and the design step then sets the status. Before
+  ending, commit what planning has written — what `design.md` gained, the plan so
+  far — as one work-in-progress commit naming the change and why it returns, and
+  push it with `make push-branch`: no session is left to commit it, and a dirty
+  checkout blocks every later step's guarded push. A stop, by contrast, commits
+  nothing: its work waits uncommitted for the resumed session, and one stopped
+  because a repository guard refused or `HEAD` moved leaves the checkout as it
+  was.
 
 ## 1. Check that planning may start
 

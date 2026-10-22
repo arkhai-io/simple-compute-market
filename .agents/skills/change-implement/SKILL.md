@@ -1,6 +1,6 @@
 ---
 name: change-implement
-description: Implement the sections of an OpenSpec change's tasks.md a session is given, in a fresh session — load the guidance, the change, and each section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit each section on its own for review. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
+description: Implement the sections of an OpenSpec change's tasks.md a session is given, in a fresh session — load the guidance, the change, and each section; implement and verify it; check its diff for compliance in a fresh context; record a handoff; and commit each section on its own for review; or, given a merge's conflicted files and no sections, resolve them and conclude the merge. Use when a change is `ready for implementation` or `in implementation`, when the owner says "implement <change>" or "implement section N of <change>", or to continue a change's next section.
 ---
 
 # Implementing the sections of an OpenSpec change
@@ -50,13 +50,49 @@ the session, and every turn ends with an outcome matching
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
   a wildcard after `-C` would also span a push.
 - **The end is an outcome.** When the sections you were given are committed and
-  pushed, end with `finished`, `next` naming what the round needs next. When the
-  plan is wrong (step 4), commit nothing from the section and end with `returned`,
+  pushed, end with `finished`, `next` naming what the round needs next; a merge's
+  conflicts resolved, committed, and pushed end `finished` too ("Resolving a
+  merge's conflicts"). When the plan is wrong (step 4), commit and push the
+  section's work in progress, no task checked, and end with `returned`,
   `return_to` `design` or `planning`, and `evidence` naming the section's notes,
   leaving the status as it is: the owner confirms the return, and the step started
   then sets it. An external input the change cannot supply, and a section far
   larger than its plan once its handoff is recorded (step 4), are each a
-  `question`.
+  `question`. A `stopped` run commits nothing: its work waits uncommitted for the
+  resumed session.
+
+## Resolving a merge's conflicts
+
+Invoked with no sections and an argument naming a merge's conflicted files —
+`resolve the merge conflicts in <files>` — you conclude a merge of `dev` that the
+orchestrating session started on the owner's word and that stopped at conflicts in
+code the owner did not rule on. Steps 1 to 9 do not apply; this is the whole run,
+and it checks no task.
+
+1. **Check.** The branch is the change's, as step 1 checks it. A merge is in
+   progress: `git rev-parse --quiet --verify MERGE_HEAD` prints a commit; if it
+   prints nothing, stop and say so. The unmerged files, `git diff --name-only
+   --diff-filter=U`, are the files you were named; any other difference is the
+   owner's to settle, as a question.
+2. **Load the context.** Step 2's guidance documents, the change's `proposal.md`,
+   `design.md`, and `tasks.md`, and, for each conflicted file, the sections whose
+   tasks touch it and their notes, and what each side did to it: `git log --merge
+   -p -- <file>`.
+3. **Resolve.** Edit each file so both sides hold: the change's behaviour as its
+   sections built it, and `dev`'s as its commits made it, with comments describing
+   the system that results. Where the two cannot both hold, the resolution is a
+   decision: ask the owner, with the options and your recommendation. Then `git
+   add` each resolved file.
+4. **Test.** Run the suites the verification tasks of the sections owning the
+   conflicted files name, and `make test`; `make lock` and `make check-packaging`
+   when a lock or a `pyproject.toml` conflicted. Fix what the merge broke, adding
+   each fix to the merge.
+5. **Conclude.** `git commit -m "<Git's merge subject>" -m "<resolutions>"`
+   concludes the merge without opening an editor: the subject is the one Git
+   wrote for it (`Merge branch 'dev' into <branch>`), and the paragraph names each
+   conflicted file and how it was resolved. Push it with `make push-branch`; if it refuses, stop and report its
+   reasons. Report each file's resolution, and end — unattended, `finished`, the
+   orchestrating session recomputing what comes next.
 
 ## 1. Check that this section may start
 
@@ -159,12 +195,25 @@ something it established changes.
 If the code shows the section's premise is wrong, or a task needs a design decision
 the design does not make, do not guess and do not work around it:
 
-1. Commit nothing from the section.
-2. Record in the section's notes what you found, with the evidence, and what you
+1. Record in the section's notes what you found, with the evidence, and what you
    had and had not done.
+2. For a return to design or planning, commit what the section has — its code,
+   tests, and notes — as one work-in-progress commit, checking no task for it: the
+   message names the change and the section, says the work is in progress, and why
+   the change returns. No check need pass first: only `dev` is protected, and a
+   commit known not to work harms nothing on the change's branch, while no session
+   is left to commit the work, and a dirty checkout blocks every later step's
+   guarded push. Push it with `make push-branch`; if it refuses, stop and report
+   its reasons, leaving the commit as it is.
 3. Tell the owner, and recommend the way back: a design question returns the change
    to design (`change-design`); a plan defect goes to planning (`change-plan`); an
-   external input the change cannot supply makes it `blocked in implementation`.
+   external input the change cannot supply makes it `blocked in implementation`,
+   and that commits nothing, since this session resumes once it is supplied.
+
+Only a return commits partial work. A stop — the session's limit, a denied call it
+cannot go on without — leaves the work uncommitted for the resumed session to
+finish and commit, and a stop because a repository guard refused or `HEAD` moved
+commits nothing further.
 
 If the section turns out far larger than its plan — many more files or layers than
 it names — stop at a coherent, verified point instead, record the handoff, and tell

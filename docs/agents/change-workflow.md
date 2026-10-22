@@ -91,12 +91,12 @@ Ask the owner questions in prose, never through a multiple-choice selector
 change through its steps: it runs the step `scripts/change_next_step.py` computes,
 each unattended through its `make` target, shows each step's message as written,
 and sends your reply back as written. It forms no view of a finding or a design
-question. It commits nothing while a step runs; when a step closes leaving work its
-own skill does not commit, the session commits that work as its own commit and
-pushes it. It also creates the change's clone and branch (below), and on your word
-commits changes to the workflow itself — skills, the step table, anything else you
-name — in the change's clone, on its branch, so they take effect for its next step
-and land with it. It stops for you at the design discussion's questions, your
+question. It commits nothing while a step runs. It also creates the change's clone
+and branch (below), and on your word commits changes to the workflow itself —
+skills, the step table — anything else you instruct, and merges of `dev`, in the
+change's clone, on its branch, so they take effect for its next step and land with
+it; it never writes the change's feature work of its own accord. It stops for you
+at the design discussion's questions, your
 reading of each implementation round, the triage discussion, and anything no rule
 settles — an environmental remedy, a denial that needs a rule, a proposed return, a
 stopped step; every other step follows without asking.
@@ -135,9 +135,53 @@ commit, or which the orchestrating session commits on your word in the change's
 clone.
 The orchestrating session reads each run's denials from its log line
 (`python3 scripts/run_change_step.py denials <change> <seq>`) and proposes the
-narrowest rule for a gap, either granted for one resumed run or as a table edit. A
+narrowest rule for a gap, either granted for one run or as a table edit. A
 row never names a Fable or Astra model, nor two models of one vendor. `REVIEW_MODEL`
 and `REVIEW_EFFORT` (below) are yours for a review run by hand, not the table's.
+
+**Granting a rule for one run.** A rule you grant reaches one run, fresh or
+resumed, and is never added to the table: the run's log line records it as
+`granted`, and the step's next run is held to its table again. A fresh run takes
+it through its step's target, several rules separated by `;`, each passed to the
+script as its own `--allow`:
+
+```text
+make validate CHANGE=<change> UNATTENDED=1 ALLOW='Bash(gh run download *);Bash(make check-packaging)'
+```
+
+A resumed run takes it as `--allow` on `python3 scripts/run_change_step.py resume`.
+Since a grant commits nothing, it recovers a stop met between a round's sections
+being committed and its triage, when no table edit may be committed. A deny rule is
+never granted.
+
+**Commits.** Each step that writes tracked work — design, planning,
+implementation, triage, closeout, archive cleanup — commits it and pushes it with
+`make push-branch`; validation and review commit nothing. A step commits partial
+work only when it returns the change to an earlier phase: it records why, commits
+what it has as work in progress with no task checked, and pushes it. A stopped run
+leaves its work uncommitted for its resume, or, on your word, for the orchestrating
+session to commit to a separate work-in-progress branch; one stopped by a refusing
+guard or a moved `HEAD` commits nothing. Work left uncommitted after a step finished is that
+step's defect: the orchestrating session brings it to you and commits it only on
+your word. The branch is the guard against unfinished work: only `dev` is
+protected.
+
+**Merging `dev`.** On your word, the orchestrating session merges `dev` into the
+change's branch between steps — never while a round view is open, nor between a
+round's sections being committed and that round's triage, so a merge never moves
+the commit a round's validation and review describe. It resolves conflicts in the
+change index, change documents, the step table, and skills itself, and brings a
+conflict in code to you as it stands. One you leave to implementation goes, once
+your decision is recorded, to an implementation run with no sections:
+
+```text
+make implement CHANGE=<change> UNATTENDED=1 ARGUMENTS='resolve the merge conflicts in <files>'
+```
+
+It resolves them, runs the suites of the sections owning them, concludes the
+merge, and pushes. While the merge is in progress, `make change-next`, run in the
+checkout holding the merge — the change's clone, for a change worked there — names
+you, "a merge is in progress", whatever else the change's state says.
 
 **Reading the cost.** `make change-cost CHANGE=<change>` totals the change's
 unattended runs by step, by round, and by whether a run opened its session, missed

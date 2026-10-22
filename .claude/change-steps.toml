@@ -12,8 +12,8 @@
 # Interactive runs of a step do not read this file: the owner's own permission
 # settings apply to them, with prompts. A step's permissions change here, by the
 # owner, as a tracked change, and no step may edit this file or the project's
-# Claude Code settings; a rule the owner grants for one resumed run is passed on
-# that run's command line and noted on its log line, never added here.
+# Claude Code settings; a rule the owner grants for one run, fresh or resumed, is
+# passed on that run's command line and noted on its log line, never added here.
 #
 # Rules use Claude Code's permission rule syntax. Each step's rules are its own
 # plus `common`'s. Contract: openspec/specs/change-workflow/spec.md, "Unattended

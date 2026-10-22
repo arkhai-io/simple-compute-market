@@ -93,6 +93,18 @@ the session, and every turn ends with an outcome matching
   finding whose fix needs code is a `question` naming the correction it needs
   (step 5): the change is archived, so no step takes it back to implementation,
   and the owner directs the correction.
+- **A return commits its partial work; a stop does not.** When an accepted fix
+  shows the plan or the design wrong, as `change-implement`'s step 4 finds it,
+  record why in the notes of the section it concerns, commit what the triage has —
+  the fixes so far and the tracked edits its dispositions made, the ledger
+  included — as one work-in-progress commit
+  naming the change and why it returns, checking no task for it, push it with
+  `make push-branch`, and end with `returned`, `return_to` `design` or
+  `planning`, and `evidence` naming those notes; the owner confirms the return. No
+  session is left to commit the work, and a dirty checkout blocks every later
+  step's guarded push. A stop commits nothing: its work waits uncommitted for the
+  resumed session, and one stopped because a repository guard refused or `HEAD`
+  moved leaves the checkout as it was.
 
 ## 1. Find the review and load the context
 

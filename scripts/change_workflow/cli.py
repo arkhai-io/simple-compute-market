@@ -1,11 +1,11 @@
 """The command line of `scripts/run_change_step.py`, each command dispatched to the
 module that does its work.
 
-`run` and `resume` run a step through the wrapper, `review` a review, `log` and
-`note` read and write the workflow log, `watch` follows the steps as they run, and
-`denials` reports a run's denials. A command that runs a step prints the line it
-logged on stdout, its progress going to stderr, and exits non-zero when that line
-is `stopped`.
+`run` and `resume` run a step through the wrapper, either granting rules for that
+one run with `--allow`; `review` runs a review, `log` and `note` read and write the
+workflow log, `watch` follows the steps as they run, and `denials` reports a run's
+denials. A command that runs a step prints the line it logged on stdout, its
+progress going to stderr, and exits non-zero when that line is `stopped`.
 """
 
 from __future__ import annotations
@@ -49,6 +49,14 @@ def parse_sections(text: str) -> list[list[int | str]]:
             for session in text.split(";") if session.strip()]
 
 
+def split_rules(values: Sequence[str]) -> list[str]:
+    """Each `--allow` value split on `;`, each part trimmed and empty ones dropped:
+    `make`'s `ALLOW` holds several rules so separated. No rule loses by it, since
+    the harness matches each command of a chain on its own, so a rule holding `;`
+    could never match."""
+    return [rule.strip() for value in values for rule in value.split(";") if rule.strip()]
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -61,13 +69,17 @@ def _parser() -> argparse.ArgumentParser:
                      help="text added to the skill's invocation after the change")
     run.add_argument("--fresh", action="store_true",
                      help="start a fresh session for a step that resumes another's")
+    run.add_argument("--allow", action="append", default=[],
+                     help="permission rules granted for this run alone, several separated "
+                          "by ';'")
     resume = commands.add_parser("resume", help="resume a waiting run with the owner's answer")
     resume.add_argument("change")
     resume.add_argument("--seq", type=int, required=True,
                         help="the waiting run's line in the workflow log")
     resume.add_argument("--answer", required=True)
     resume.add_argument("--allow", action="append", default=[],
-                        help="a permission rule granted for this run alone")
+                        help="permission rules granted for this run alone, several separated "
+                             "by ';'")
     review = commands.add_parser(
         "review", help="review a change, read-only, on the first available of the review's "
                        "models")
@@ -141,7 +153,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
                      else f"sections {args.sections}" if sections else "")
             arguments = " ".join(part for part in (words, args.arguments) if part)
             line = wrapper.run(args.step, args.change, arguments=arguments,
-                               sections=sections, fresh=args.fresh)
+                               sections=sections, fresh=args.fresh,
+                               granted=split_rules(args.allow))
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "review":
@@ -155,7 +168,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "resume":
-            line = wrapper.resume(args.change, args.seq, args.answer, args.allow)
+            line = wrapper.resume(args.change, args.seq, args.answer, split_rules(args.allow))
             print(json.dumps(line, ensure_ascii=False))
             return 1 if line["outcome"] == "stopped" else 0
         if args.command == "log":

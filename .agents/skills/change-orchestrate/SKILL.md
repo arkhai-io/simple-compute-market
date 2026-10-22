@@ -9,14 +9,18 @@ Carry only the change you were given between its steps. The leaf skills do the
 work in their own sessions; the owner decides every finding and design question,
 and the change advances without the owner wherever the next-step computation names
 a step. Never open this change's pull request or start another change, and never
-commit while a step is running. Each leaf step commits and pushes what its own
-skill authorizes; when a step closes and still leaves work uncommitted that its
-own skill does not commit, commit it as its own commit on the change's branch and
-push, so a closed step's work never sits uncommitted in the checkout. You also
-maintain the workflow the change runs on: you create the change's clone and
-branch, and commit the workflow changes the owner asks for ("Maintain the
-workflow", below). This session uses the owner's interactive
-permissions; the step table limits unattended runs only.
+commit while a step is running. Each leaf step that writes tracked work commits and
+pushes it itself, and one that returns the change commits its partial work first;
+a stopped run's work waits uncommitted for its resume, unless the owner has you
+commit it to a separate work-in-progress branch — needed before a fresh rerun,
+whose entry check wants a clean worktree. Tracked work a finished step
+leaves uncommitted is a defect of that step: bring it to the owner as one, and
+commit it only on their word. You also maintain the workflow the change runs on:
+you create the change's clone and branch, and commit workflow maintenance, what the
+owner instructs, and merges of `dev` on their word ("Maintain the workflow",
+below); never write the change's feature work of your own accord. This session
+uses the owner's interactive permissions; the step table limits unattended runs
+only.
 
 You relay and route; you do not judge. Read only what routing and recovery need:
 the computation and the inputs it names — the index row, the triage files'
@@ -116,6 +120,12 @@ For `design`, `plan`, `implement`, `triage`, `validate`, `closeout`, or
 `make <step> CHANGE=<change> UNATTENDED=1` for a change worked in the workspace.
 Pass computed implementation `sections` as `SECTIONS=<comma-separated-ids>`; each
 session implements its sections in order, committing and pushing each separately.
+Rules the owner grants for a fresh run go on its target as
+`ALLOW='<rule>;<rule>'`, each rule as the owner granted it; the run's log line
+records them as `granted`, and the step's next run is held to its table again.
+Always start a fresh run through its target, never the script directly: the target
+checks the change, refuses while a round view is open, and passes `SECTIONS`,
+`FRESH`, and `HELM_ALL_SCENARIOS` on.
 For `review`, run `make review CHANGE=<change> KIND=<computed-kind>`, in the clone
 likewise: the review runs on its row's models, Codex first and Claude when Codex is
 unavailable. Never set `REVIEW_MODEL` or `REVIEW_EFFORT`: they are the owner's
@@ -178,7 +188,9 @@ another review round runs, and the computation routes on that; there is no gate
 to bring to the owner, and a triage with nothing to dispose of advances without
 them.
 
-For `owner`, inspect the reason and any named `seq`. Read that run's outcome,
+An `owner` result carrying `merging` is a merge in progress in the checkout; it
+concludes as "Maintain the workflow" says, and nothing else runs until it has.
+For any other `owner`, inspect the reason and any named `seq`. Read that run's outcome,
 including `message` and `awaiting`; read its denials first, as below. Put a
 `question` to the owner and wait. Resume the same session with the reply:
 
@@ -270,10 +282,12 @@ denial with no `reason` met a deny rule and is forbidden, since the harness
 reports a reason only for a decision of the permission mode. Take any other
 value to the owner. Never grant a deny-rule
 denial: an allow cannot override it. For a gap propose the narrowest matching
-rule, distinguishing a one-run `--allow` on a stopped run's resume from a tracked
-edit of the step table, which you make and commit on the owner's word ("Maintain
-the workflow"). Never widen permissions silently. An unnecessary call may need no
-rule; explain why.
+rule, distinguishing a grant for one run — `--allow <rule>` on a stopped run's
+resume, or `ALLOW='<rule>;<rule>'` on a fresh run's target — from a tracked edit
+of the step table, which you make and commit on the owner's word ("Maintain the
+workflow"). Either way a stop met inside a round's window is recovered, since a
+grant commits nothing. Never widen permissions silently. An unnecessary call may
+need no rule; explain why.
 
 Record the reading through `note orchestrator --by orchestrator --reads <seq>`:
 the decision begins `gap:`, `forbidden:`, or `workaround:` and names the call,
@@ -284,9 +298,10 @@ A reading resolves nothing. A question is still answered; a return is still
 decided. The owner chooses recovery of a stop: resume its waiting `seq` with the
 answer and any narrowly granted `--allow <rule>`, only after the owner grants it.
 Do not resolve it first: the wrapper refuses a resolved run. The resumed run
-supersedes the stop. If the stop is not recovered (rerun fresh, fix first, or
-abandon), record a separate decision with `--resolves <stopped-seq>` and its
-reason. Leave other waiting runs untouched and recompute.
+supersedes the stop. If the stop is not recovered by its resume (rerun fresh, with
+any grant in `ALLOW`, fix first, or abandon), record a separate decision with
+`--resolves <stopped-seq>` and its reason. Leave other waiting runs untouched and
+recompute.
 
 ## Carry an implementation round
 
@@ -365,30 +380,59 @@ or another review round as the triage recorded.
 
 Besides advancing the change, you maintain the workflow it runs on. On the owner's
 explicit word, edit and commit changes to the workflow itself — skills, the step
-table, and anything else the owner names — in the change's clone, on its branch,
-so its next step runs on them and they land with the change: `git -C <clone> add`
-and `git -C <clone> commit`, then `make -C <clone> push-branch`, the guarded push.
-For a change worked in the workspace, make the edit the owner asks for and leave
-committing it to them. Commit only between steps, never while a step runs in the
-clone: validation fails when `HEAD` moves under it, and a review describes the
-commit it started on. Between a round's sections being committed and that round's
-triage, a commit also moves the `HEAD` the round's validation and review describe,
-so a permission a stopped run needs then is granted for its resumed run, and the
-table edit committed once the round is triaged, unless the owner says otherwise.
-Commit on a clean worktree only, since the guarded push refuses any other: while
-the waiver's ledger line waits for planning, the commit waits too. Never commit
-the change's own feature work; never read a finding's code to decide what to
-change.
+table — and anything else the owner instructs, in the change's clone, on its
+branch, so its next step runs on them and they land with the change: `git -C
+<clone> add` and `git -C <clone> commit`, then `make -C <clone> push-branch`, the
+guarded push. For a change worked in the workspace, make the edit the owner asks
+for and leave committing it to them. Commit only between steps, never while a step
+runs in the clone: validation fails when `HEAD` moves under it, and a review
+describes the commit it started on. Between a round's sections being committed and
+that round's triage, a commit also moves the `HEAD` the round's validation and
+review describe, so a permission a run needs then is granted for that one run,
+fresh or resumed, and the table edit committed once the round is triaged, unless
+the owner says otherwise. Commit on a clean worktree only, since the guarded push
+refuses any other: while the waiver's ledger line waits for planning, the commit
+waits too. Never write the change's feature work of your own accord; never read a
+finding's code to decide what to change.
 
-Merging another branch into the change's — one whose workflow tooling the
-change's later rounds need — is workflow maintenance too, done only on the owner's
-word: `git -C <clone> pull --no-rebase workspace <branch>`, a merge commit, then
-`make -C <clone> push-branch`. Make it only between the change's steps, never while
-its round view is open, and never between a round's sections being committed and
-that round's triage, so the merge never falls inside a round's diff. Conflicts in
-the rows of `openspec/changes/README.md` are expected and resolved in the merge
-commit, each change's row as its own branch has it; any other conflict stops the
-merge (`git -C <clone> merge --abort`) and goes to the owner.
+Merging `dev`, or another branch whose workflow tooling the change's later rounds
+need, into the change's branch is workflow maintenance too, done only on the
+owner's word: `git -C <clone> pull --no-rebase origin dev`, or `workspace
+<branch>` for another branch, then `make -C <clone> push-branch`. Make it only
+between the change's steps, never while its round view is open, and never between
+a round's sections being committed and that round's triage, so the merge never
+moves the commit a round's validation and review describe or falls inside a
+round's diff: asked for inside that window, it waits until the round is triaged,
+and you say so.
+
+A merge that stops at conflicts stays in progress — never abort it — and while it
+does, the computation names the owner, `merging`, before anything else. Resolve
+the conflicts in the workflow's own files yourself: the rows of
+`openspec/changes/README.md`, each change's row as its own branch has it; change
+documents under `openspec/changes/`, this change's or another's; the step table;
+and skills. Any other conflict — code above all: a script, a package, a test, a
+Makefile — goes to the owner as it stands: the files, and what each side did to
+them (`git -C <clone> log --merge --oneline -- <file>`), with no resolution of your
+own. When every conflict is resolved — yours, and the owner's rulings carried out
+as they gave them — conclude the merge with `git -C <clone> commit --no-edit`,
+which keeps Git's merge message and opens no editor, and push it. When the owner leaves a code conflict to implementation,
+resolve the workflow's files first, `git -C <clone> add` them, and record the
+owner's decision naming the code files left,
+
+```text
+python3 <clone>/scripts/run_change_step.py note <change> orchestrator --by owner --decision "an implementation run resolves the merge conflicts in <files>" --reason <the owner's words>
+```
+
+then run `make -C <clone> implement CHANGE=<change> UNATTENDED=1 ARGUMENTS='resolve
+the merge conflicts in <files>'`, with no sections. It resolves them, runs the
+suites of the sections owning them, concludes the merge, and pushes. While the
+merge is in progress the computation names no waiting run, so a question or stop
+from that run is resumed by the `seq` on the line its target printed when it
+ended — the one run you started — after `python3 <clone>/scripts/run_change_step.py
+log <change> --last 3` confirms it is still the latest. Recompute once the merge is
+concluded and pushed. Its `implement` line makes the computation report a
+`disagreement` while the change is in design or planning: the files decide, as
+always, and you record that the run was the merge's.
 
 ## Record decisions through the wrapper
 

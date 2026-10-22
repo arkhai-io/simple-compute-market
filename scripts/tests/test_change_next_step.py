@@ -115,7 +115,7 @@ RECORDS_ONLY = [f"openspec/changes/{CHANGE}/interventions.jsonl"]
 # The change is worked in the checkout the computation runs in, with no clone,
 # unless a test says otherwise.
 HERE = {"branch": lambda _: f"feat/{CHANGE}", "workspace": lambda _: None,
-        "clone": lambda *_: None}
+        "clone": lambda *_: None, "merging": lambda _: False}
 
 
 def _next(root: Path, *, uncommitted: bool = False, changed: list[str] | None = FIX) -> dict:
@@ -975,6 +975,78 @@ def test_a_round_view_opened_and_closed_in_git_is_seen_and_then_not(tmp_path: Pa
 
     assert (during["step"], during["round_view"]) == ("owner", CHANGE)
     assert after["step"] == "round-view"
+
+
+# A merge in progress names the owner before anything else is read.
+
+def _states(root: Path, state: str) -> None:
+    """The change in `state`: each a different routing the merge must come before."""
+    if state == "question":
+        _log(root, "design", QUESTION)
+    elif state == "implemented":
+        _implemented_round(root)
+    elif state == "untriaged":
+        _record(root, f"01-{KIND}.md")
+
+
+@pytest.mark.parametrize("status,state", [
+    ("ready for design", None), ("in design", "question"), ("in design", "untriaged"),
+    ("in implementation", "implemented"), ("in closeout", None),
+])
+def test_a_merge_in_progress_names_the_owner_whatever_the_changes_state(
+        tmp_path: Path, status: str, state: str | None) -> None:
+    root = _repository(tmp_path, status)
+    _states(root, state)
+
+    result = nxt.compute(root, CHANGE, head=lambda _: HEAD, view=lambda _: None,
+                         **{**HERE, "merging": lambda _: True})
+
+    assert (result["step"], result["merging"]) == ("owner", True)
+    assert result["reason"].startswith("a merge is in progress")
+
+
+def test_a_merge_in_progress_comes_before_an_open_view_and_the_clone(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+
+    result = nxt.compute(root, CHANGE, head=lambda _: HEAD, merging=lambda _: True,
+                         view=lambda _: pytest.fail("the view was read"),
+                         workspace=lambda _: pytest.fail("the workspace was read"),
+                         clone=lambda *_: pytest.fail("the clone was read"))
+
+    assert result["step"] == "owner" and result["merging"]
+
+
+def test_a_conflicted_merge_is_seen_in_git_until_it_is_concluded(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for role in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{role}_NAME", "test")
+        monkeypatch.setenv(f"GIT_{role}_EMAIL", "test@example.invalid")
+    root = _repository(tmp_path, "ready for design")
+    script = root / "script.py"
+    script.write_text("base\n", "utf-8")
+    _git(root, "init", "-q", "-b", "dev")
+    _commit_all(root, "base")
+    _git(root, "checkout", "-q", "-b", f"feat/{CHANGE}")
+    script.write_text("the change's\n", "utf-8")
+    _commit_all(root, "the change's")
+    _git(root, "checkout", "-q", "dev")
+    script.write_text("dev's\n", "utf-8")
+    _commit_all(root, "dev's")
+    _git(root, "checkout", "-q", f"feat/{CHANGE}")
+    before = nxt.compute(root, CHANGE)
+
+    conflicted = subprocess.run(["git", "merge", "-q", "dev"], cwd=root, capture_output=True)
+    during = nxt.compute(root, CHANGE)
+    script.write_text("both\n", "utf-8")
+    _git(root, "add", "script.py")
+    _git(root, "commit", "-q", "--no-edit")
+    after = nxt.compute(root, CHANGE)
+
+    assert conflicted.returncode != 0
+    assert before["step"] == after["step"] == "design"
+    assert (during["step"], during["merging"]) == ("owner", True)
 
 
 # A step whose latest run waits on the owner is never run afresh.

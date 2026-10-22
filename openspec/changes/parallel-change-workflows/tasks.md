@@ -2083,30 +2083,58 @@ owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
 `change-implement`, `change-triage`, `change-plan`, `change-closeout`),
 `docs/agents/change-workflow.md`, and `scripts/tests/`.
 
-- [ ] 8B.1 `run_change_step.py run` takes `--allow`, repeatable; for `run` and
+- [x] 8B.1 `run_change_step.py run` takes `--allow`, repeatable; for `run` and
       `resume`, each value is split on `;` and empty parts dropped; `Wrapper.run`
       takes `granted`, passes it on the command line, and records it as `granted`
       on the run's line, as `resume` does (D19).
-- [ ] 8B.2 The root `Makefile`: every unattended step target — `design`, `plan`,
+      Note: `split_rules` in `change_workflow/cli.py` also trims each part, so
+      `a; b` grants `b`, not ` b`.
+- [x] 8B.2 The root `Makefile`: every unattended step target — `design`, `plan`,
       `implement`, `triage`, `validate`, `closeout`, `archive-cleanup` — passes
       `ALLOW` to `run` as `--allow`; `implement` passes `ARGUMENTS` as `--arguments`
       (D19, D20.3).
-- [ ] 8B.3 The next-step computation: while the checkout's Git directory holds
+      Note: `STEP_GRANTS` makes each `;`-separated rule its own `--allow`, each
+      single-quoted with `'` escaped, so spaces, `*`, quotes, and backticks reach
+      the script as written; `ARGUMENTS` is quoted the same way. A `$` in either is
+      make's own and is written `$$`, as the comment beside `ALLOW` says. Both are
+      unattended only: an interactive session is not held to the table, and
+      `ARGUMENTS` was planned for the unattended merge hand-off alone. The help
+      lines name both.
+- [x] 8B.3 The next-step computation: while the checkout's Git directory holds
       `MERGE_HEAD`, it names `owner`, "a merge is in progress", before any other
       routing (D20.3).
-- [ ] 8B.4 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
+      Note: `_merging` (`git rev-parse --quiet --verify MERGE_HEAD`) is an injected
+      seam, `merging`, checked first in `Computation.run`, before the view, the
+      clone lookup, or the change's files are read; the result carries
+      `merging: true`.
+- [x] 8B.4 `.claude/change-steps.toml` (the orchestrator's, as the preamble says):
       the preamble's "a rule the owner grants for one resumed run" becomes "for one
       run, fresh or resumed" (D19).
-- [ ] 8B.5 Partial work on a return (D20 rule 2): `change-implement` §4 commits
+      Note: the orchestrator's edit was in the worktree as the session started and
+      is committed with this section.
+- [x] 8B.5 Partial work on a return (D20 rule 2): `change-implement` §4 commits
       what the section has as work in progress, checks no task for it, records the
       handoff, pushes, and returns; a stop leaves its work uncommitted, and a guard's
       refusal or a moved `HEAD` commits nothing. `change-triage`, `change-plan`,
       and `change-closeout` say the same of their returns.
-- [ ] 8B.6 The merge mode of `change-implement` (D20.3): invoked with no sections
+      Note: `change-implement`'s step 4 and its unattended "The end is an outcome";
+      a block for an external input commits nothing, since its session resumes; a
+      work-in-progress commit whose push the guard refuses is left as it is.
+      `change-plan` and `change-closeout` in their unattended return bullets;
+      `change-triage`, which had no return, gains "A return commits its partial
+      work; a stop does not", for a fix that shows the plan or design wrong.
+- [x] 8B.6 The merge mode of `change-implement` (D20.3): invoked with no sections
       and an argument naming a merge's conflicted files, it resolves them, runs the
       suites of the sections owning those files, concludes the merge with `git
       commit`, pushes, and finishes, checking no task.
-- [ ] 8B.7 `change-orchestrate` (D19, D20): a grant is passed to a fresh run as
+      Note: a section of its own, "Resolving a merge's conflicts", before step 1:
+      it checks `MERGE_HEAD` and that the unmerged files are those named, reads
+      each side with `git log --merge -p`, asks the owner where both sides cannot
+      hold, runs the owning sections' suites and `make test` (and `make lock`/`make
+      check-packaging` when a lock or `pyproject.toml` conflicted), and concludes
+      with `git commit -m <Git's merge subject> -m <resolutions>`, which opens no
+      editor. The skill's description names the mode.
+- [x] 8B.7 `change-orchestrate` (D19, D20): a grant is passed to a fresh run as
       `ALLOW='<rule>;<rule>'` on its step's target and to a resumed run as
       `--allow`, so a stop met inside a round's window is recovered either way;
       the closed-step leftover commit is replaced by bringing leftover work to the
@@ -2120,11 +2148,26 @@ owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
       <files>'` after recording the owner's decision; "Never commit the change's own
       feature work" becomes "never write the change's feature work of your own
       accord".
-- [ ] 8B.8 `docs/agents/change-workflow.md`: in "Orchestrating a change", grants
+      Note: the opening paragraph, "Run the computed step", "Read every denial",
+      the `owner` relay paragraph (a `merging` result), and "Maintain the
+      workflow". `dev` is merged from the clone's `origin` (another branch still
+      from `workspace`); a merge stopped at conflicts is never aborted; the session
+      resolves the index rows, change documents under `openspec/changes/` (any
+      change's), the step table, and skills, and brings any other conflict — code
+      above all — to the owner, concluding with `git commit --no-edit`. A stopped
+      run's work may, on the owner's word, be committed to a separate
+      work-in-progress branch (D20 rule 2), as a fresh rerun of implementation,
+      which wants a clean worktree, needs. A merge run's question or stop is
+      resumed by the `seq` its target printed, since the computation names no
+      waiting run while `MERGE_HEAD` exists.
+- [x] 8B.8 `docs/agents/change-workflow.md`: in "Orchestrating a change", grants
       for a fresh or resumed run with `ALLOW`, the commit rules (each step commits
       and pushes its own work; partial work only on a return), and merges of `dev`
       with the conflict hand-off (D19, D20).
-- [ ] 8B.9 Verification. Unit, in `scripts/tests/test_run_change_step.py` and
+      Note: "Granting a rule for one run", "Commits", and "Merging `dev`", after
+      "Maintaining the step table", whose "granted for one resumed run" became "for
+      one run"; the opening paragraph loses the leftover commit.
+- [x] 8B.9 Verification. Unit, in `scripts/tests/test_run_change_step.py` and
       `scripts/tests/test_change_workflow_wrapper.py`: `run --allow` passes the
       rules and records `granted`; `ALLOW`-style `a;b` splits into two rules for
       `run` and `resume`; the step's next run has no grant — the delta's scenario
@@ -2140,6 +2183,65 @@ owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
       closed step leaves tracked work uncommitted", "A step stops at its session's
       limit", and "The plan's premise fails mid-section"; `make test`. No
       end-to-end scenario covers it.
+      Evidence. Unit, the CLI and wrapper with a fake Claude: in
+      `test_run_change_step.py`, `run --allow 'a;b' --allow c` passes three rules
+      after the table's and records them `granted`; `resume --allow 'a;; b ;'`
+      passes two; `split_rules` over empty, single, `;`-separated, padded, and
+      blank values. In `test_change_workflow_wrapper.py`, a fresh run granted two
+      rules passes them after the table's and records both, and the step's next
+      run is held to its table, `granted` absent — the delta's "The owner grants
+      rules before a fresh run", covered in pieces with the Makefile tests below,
+      since no test runs make, the script, and the wrapper end to end. In
+      `test_change_next_step.py`, through the `merging` seam: a merge in progress
+      names the owner, `merging`, in five states (ready for design, a design
+      question, an untriaged review, a committed round, in closeout), and before
+      the view, the workspace, and the clone are read (each fails the test if
+      read). Through `make -n` over the real `Makefile` (unit, as earlier
+      sections named it): `ALLOW` on all seven targets becomes one `--allow` per
+      rule, and interactively none; `ARGUMENTS` on `implement` beside a grant.
+      Integration, as `TESTING.md` defines it for a real process boundary: the
+      `make -n` command run by `sh`, a quoted rule, a backticked rule and
+      argument, and an empty part arriving as written, the empty part then dropped
+      by `split_rules`; and, in a real Git repository, a conflicted merge seen by
+      `_merging` until `git commit` concludes it, the computation naming design
+      before and after. `uv run --no-project --with pytest pytest -q
+      scripts/tests`: 1537 passed. `make check-agent-skills`, `make
+      check-packaging`, and `make check-change CHANGE=parallel-change-workflows`:
+      passed. `make test`: passed,
+      every suite, `make -C helm test-render` included. The skill fixes after the
+      fresh-context check changed no code or test. End to end: none of
+      `e2e-tests/`, and no `Owed by validation:` line: nothing here needs a push
+      to show.
+      The fresh-context read of the diff and of the changed skills against D19,
+      D20, and the delta found no breach of layering, comments, documentation
+      placement, or packaging, and found, all fixed: the real-Git and real-shell
+      tests called unit here (now integration, above); an unwrapped line in the
+      guide; a merge run's question or stop with no route back while the
+      computation names only `merging` (now resumed by the `seq` its target
+      printed); the `disagreement` an `implement` line reports for a change in
+      design or planning (now named in the skill as expected); "the change's
+      documents" narrowing D20.2's "change documents", and permanent documents in
+      neither tier (now any change's documents, and any other conflict the
+      owner's); D20 rule 2's work-in-progress branch for a stopped run missing
+      from the skill and the guide; `change-implement` saying a refused guard
+      commits nothing after its work-in-progress commit (now "nothing further",
+      the commit left); two `git commit`s that would open an editor (now `-m … -m
+      …` and `--no-edit`); and the guide's `make change-next` not saying it runs in
+      the clone. Declined, for review: see the handoff. Not run again after these
+      fixes, which were wording in the skills and the guide.
+      Handoff, for the implementation review and triage:
+      - A triage that returns the change writes no `## Next`, so its file reads as
+        a triage in progress, and the computation may name triage again once the
+        change is back in design or planning. The skill does not say what `## Next`
+        records on a return, since neither token fits and D20 does not decide it;
+        a design question, not settled here.
+      - The merge check runs in whatever checkout computes, before the clone
+        lookup, as 8B.3 says ("before any other routing"): an unrelated merge in
+        progress in the owner's workspace makes the workspace's computation name
+        the owner rather than `in-clone`. D20.3 means the change's own merge, so
+        whether the check should follow the clone lookup is for review.
+      - No test runs a merge-mode `implement` run's prompt or the routing after
+        it; 8B.9 asks for neither.
 
 ## 9. The pilot's evidence and the containerization decision
 

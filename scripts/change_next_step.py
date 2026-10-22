@@ -20,7 +20,8 @@ log, and whether a round view is open, and prints one JSON object:
   this computation and every step are run; `{"step": "wait", …}` while the
   clone's bootstrap runs and the step named would need it;
 - `{"step": "owner", "reason": …}` when only the owner can move the change on: a
-  question to answer, a returned step to decide, a round the plan does not map, a
+  merge in progress in the checkout (`merging`), named before anything else is
+  read, a question to answer, a returned step to decide, a round the plan does not map, a
   validation that did not pass, a prerequisite to land, a failed bootstrap, a
   change whose records are in the workspace but whose branch is not; for a waiting
   run, its `seq` — a question or a stop is resumed by it;
@@ -284,6 +285,14 @@ def _git_head(root: Path) -> str | None:
     return head.stdout.strip() if head.returncode == 0 else None
 
 
+def _merging(root: Path) -> bool:
+    """Whether a merge is in progress in the checkout: its Git directory holds
+    `MERGE_HEAD`, from a merge stopped at its conflicts until it is concluded."""
+    merge = subprocess.run(["git", "rev-parse", "--quiet", "--verify", "MERGE_HEAD"],
+                           cwd=root, capture_output=True, text=True)
+    return merge.returncode == 0
+
+
 def _uncommitted(root: Path, path: Path) -> bool:
     """Whether `path` has changes Git has not committed, or Git cannot say."""
     status = subprocess.run(["git", "status", "--porcelain", "--", str(path)], cwd=root,
@@ -389,9 +398,11 @@ class Computation:
                  branch: Callable[[Path], str | None] = _current_branch,
                  workspace: Callable[[Path], Path | None] = workspace_of,
                  clone: Callable[[Path, str], Path | None] = clone_of,
-                 bootstrap: Callable[[Path], Bootstrap] = bootstrap_state) -> None:
+                 bootstrap: Callable[[Path], Bootstrap] = bootstrap_state,
+                 merging: Callable[[Path], bool] = _merging) -> None:
         self.root = root
         self.state = State(change)
+        self._merging = merging
         self._head = head
         self._view = view
         self._uncommitted = uncommitted or _uncommitted
@@ -403,6 +414,14 @@ class Computation:
 
     def run(self) -> Result:
         state = self.state
+        if self._merging(self.root):
+            # The change's state is half merged until the merge concludes, so
+            # nothing read from it can route; a restarted orchestrating session
+            # would otherwise run a step over the conflicts.
+            return _owner("a merge is in progress in this checkout: its conflicts are "
+                          "resolved — the workflow's files by the orchestrating session, "
+                          "code by the owner or an implementation run — and the merge "
+                          "concluded before the change is routed", merging=True)
         state.view = self._view(self.root)
         try:
             state.directory = change_directory(self.root, state.change)
