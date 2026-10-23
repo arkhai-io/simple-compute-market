@@ -1,8 +1,7 @@
-"""Storefront startup hooks: preflight + background tasks."""
+"""Storefront startup hooks: the thread store, the escrow backfill, and the loops."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -10,7 +9,6 @@ from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from market_core import MarketDomainContract
 
 from apicredits_storefront.lifecycle_steps import register_api_credit_loops
-from apicredits_storefront.utils import config
 from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
 
 logging.basicConfig(
@@ -18,49 +16,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-
-async def _preflight_credits_service() -> None:
-    """Block startup until the credits service responds, or give up."""
-    import httpx
-
-    url = config.credits_service_url()
-    if not url:
-        raise RuntimeError(
-            "[STARTUP] [credits].service_url is not configured — the "
-            "storefront has nothing to sell for."
-        )
-    health = url + "/health"
-    timeout_s = max(int(settings.get("credits.preflight_timeout", 30)), 1)
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    last_error: str | None = None
-
-    while True:
-        try:
-            async with httpx.AsyncClient(timeout=5) as http:
-                resp = await http.get(health)
-            if resp.status_code == 200:
-                logger.info("[STARTUP] Credits service reachable at %s", url)
-                return
-            last_error = f"HTTP {resp.status_code}"
-        except Exception as exc:
-            last_error = f"{type(exc).__name__}: {exc}"
-
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            break
-        await asyncio.sleep(min(2.0, remaining))
-
-    msg = (
-        f"[STARTUP] Credits service at {url} unreachable after {timeout_s}s "
-        f"({last_error})."
-    )
-    if settings.get("credits.fail_on_unreachable", True):
-        raise RuntimeError(
-            msg + " Set [credits].fail_on_unreachable = false to start the "
-            "storefront anyway (issuance will fail until it is reachable)."
-        )
-    logger.error(msg + " Continuing because fail_on_unreachable=false.")
 
 
 async def _startup_tasks(
@@ -113,16 +68,12 @@ async def _startup_tasks(
     if _container.resolved_settlement_worker is None:
         raise RuntimeError("settlement servicing worker is not initialized")
 
-    await _preflight_credits_service()
-
     # Every loop starts here, after the escrow backfill the servicing sweep
-    # depends on and the credits-service preflight: each sweep's timer, the
-    # chain probe and the listing seed while composed, and the capacity-event
-    # pollers' fan-out, which `start_loops` starts together. The configured
-    # seed listing is created by its loop's step, never here, since a
-    # mechanism it uses may not have been reached yet.
-    # With `[credits].fail_on_unreachable = false` the preflight may have given
-    # up on an unreachable credits service, and the loops start all the same.
+    # depends on: each sweep's timer, the chain probe and the listing seed while
+    # composed, and the capacity-event pollers' fan-out, which `start_loops`
+    # starts together. Nothing waits for the credits service to answer: the
+    # configured seed listing is created by its loop's step, never here, and
+    # waits while the service or a mechanism it uses cannot be reached.
     intervals = register_api_credit_loops(loops, capacity_runtime=capacity_runtime)
     loops.start_loops(task_logger=logger)
     for name, interval in intervals.items():

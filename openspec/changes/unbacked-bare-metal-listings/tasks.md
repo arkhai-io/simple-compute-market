@@ -2128,35 +2128,74 @@ dependencies"). Touches `helm/charts/storefront`, `helm/charts/bare-metal-storef
 render test, `helm/scripts/test-render.sh`, the VM and API-credit storefronts' startup and
 settings, a cookbook, and the `deployment-state` delta.
 
-- [ ] 11.1 `helm/charts/storefront/templates/deployment.yaml`: delete the `initContainers`
+- [x] 11.1 `helm/charts/storefront/templates/deployment.yaml`: delete the `initContainers`
       block (`wait-for-rpc`, `wait-for-registry`); add a `startupProbe` mirroring
       `helm/charts/bare-metal-storefront/templates/deployment.yaml`'s (`/health`, port
       `http`); drop the liveness and readiness `initialDelaySeconds` the startup probe
       replaces, as bare metal has none; the comment beside them states the current rule.
       `templates/_helpers.tpl`: delete `storefront.usesInternalRegistry` and the unused
       `rpc.url` and `rpc.wsUrl` helpers (D20).
-- [ ] 11.2 Render tests (`docs/development/TESTING.md` "Chart Render Tests"):
+      Done. The liveness and readiness probes now name the container port `http`, as bare
+      metal's do, rather than repeating the agent's port number; the port they reach is
+      unchanged. The comment in place of the init containers states why none waits; it
+      cites no spec heading, since "A deployment does not wait on a service's
+      dependencies" exists only in the delta until the archive.
+- [x] 11.2 Render tests (`docs/development/TESTING.md` "Chart Render Tests"):
       `helm/charts/storefront/tests/test_render.py` replaces every `wait-for-*` assertion
       with one test, over every fixture, that no container named `wait-for-` renders and
       that `startupProbe` does; the tests that a chain's RPC is or is not waited for go.
       `helm/charts/bare-metal-storefront/tests/test_render.py` asserts its `startupProbe`.
       `helm/scripts/test-render.sh`: the EVM fixture's chain-readiness assertion goes and
       its `CHAIN_ID|RPC_URL` check stays (D20).
-- [ ] 11.3 VM `src/startup.py`: delete `_preflight_provisioning` and its step, and correct
+      Done (chart render). The VM test renders the chart defaults, the local release, every
+      committed fixture that renders (the `invalid-*` ones exist to be refused), and a
+      two-agent release, and asserts of every agent's Deployment: no `initContainers`, no
+      `wait-for-` container, a `startupProbe` on `/health` at port `http`, and no
+      `initialDelaySeconds`. Bare metal's asserts the same over its example, its defaults,
+      and an umbrella release. Removed: the two "a chain's RPC is or is not waited for"
+      tests; the differently-spelled-section test now proves the spelling is read by the
+      service-peer check, which refuses the same peer without the release's principal.
+      `test-render.sh`: the EVM `wait-for-rpc` assertion goes, and the wallet-free
+      assertion keeps only `CHAIN_ID|RPC_URL` (the task's "its" read as the remaining
+      chain check, which is the wallet-free deployment's).
+- [x] 11.3 VM `src/startup.py`: delete `_preflight_provisioning` and its step, and correct
       the step list's docstring; `settings.toml` and `groups/config.py`'s template lose
       `[seller.provisioning].fail_on_unreachable` and `preflight_timeout`; both join
       `retired_settings.py`'s removed settings, so a configuration stating either is
       refused by key as every retired setting is; regenerate the values schema with `make
       helm-values-schema` and update `tests/unit/test_values_schema.py` and
       `tests/integration/test_publishable_startup.py` (D20).
-- [ ] 11.4 API credits `src/startup.py`: delete `_preflight_credits_service` and its call;
+      Done. The settings live at `[provisioning]`, not `[seller.provisioning]` (the old
+      error text's name), so the retired keys are `provisioning.fail_on_unreachable` and
+      `provisioning.preflight_timeout`. **Differed:** `make helm-values-schema` was denied
+      in this unattended session, so the two generated schema files
+      (`helm/values.schema.json`, `helm/charts/storefront/values.schema.json`) were edited
+      by hand with the two refused patterns `config_definition` adds for a nested retired
+      key; the drift test (`test_committed_values_schemas_carry_the_generated_definition`,
+      which compares the parsed definition with the generator's) passes, so the files equal
+      the generator's output up to key order; byte equality with a regeneration is unshown,
+      so `make helm-values-schema` is owed when it can run. Tests: unit
+      `test_startup_refusal.py` (each key refused naming why, in two spellings),
+      `cli/test_config.py` (`config set` refuses both, each in two spellings),
+      `test_values_schema.py` (the definition refuses both, each in two spellings and as
+      `null`, and accepts the section's other keys); application integration
+      `test_publishable_startup.py` (the real lifespan refuses both under the retired
+      heading before opening the database).
+- [x] 11.4 API credits `src/startup.py`: delete `_preflight_credits_service` and its call;
       the refusal of an unset `[credits].service_url` stays, run with the storefront's other
       configuration refusals. `settings.toml`, `storefront.credits.toml`, and
       `docs/cookbooks/vllm-apicredits-seller.md` lose `[credits].fail_on_unreachable` and
       `preflight_timeout`; the storefront refuses both by key, as it refuses
       `claims_sweep_interval`. `tests/unit/test_server_composition.py` stops patching the
       preflight (D20).
-- [ ] 11.5 Degraded start (application integration through the typed clients): VM
+      Done. `startup_refusal.py` gains `credits_configuration_problems` under its own
+      heading, "the storefront has no credits service to sell for", so an unset
+      `service_url` is now refused before the signer or database, with the capacity
+      refusals, where it had been refused at the end of startup. `retired_settings.py`
+      gains `REMOVED_SETTINGS`, and `retired_setting_problems` names removed keys after
+      renamed ones. Unit `test_server_composition.py`: both keys, each in two spellings, and
+      an unset `service_url` refuse startup before anything is composed.
+- [x] 11.5 Degraded start (application integration through the typed clients): VM
       `tests/integration/test_degraded_startup.py` (new), modelled on bare metal's
       refused-registry case in `tests/test_http_system.py` — a storefront whose registry,
       provisioning site, and chain RPC all refuse connections starts, `/health` answers, and
@@ -2171,16 +2210,63 @@ settings, a cookbook, and the `deployment-state` delta.
       (122 F4, the residue of 85 F3), which stays as the composition's unit test. API credits
       `tests/integration/test_lifecycle_status.py`: it starts with its credits service
       unreachable and `listing-seed` waits (D20, D19).
-- [ ] 11.6 The `deployment-state` delta: the permanent requirement "A storefront chart
+      Done. VM `test_degraded_startup.py` (application integration: the real app, its full
+      lifespan and every startup step, read through `StorefrontClient`): the registry, the
+      site, and the provisioning service point at a port nothing listens on; the chain is
+      reached only through the two Alkahest seams, a stub refusing until switched (the
+      configured chain is set through the configuration module's own `CHAINS` mapping, as
+      the unit composition test does; its URL is never dialled). It starts and answers
+      `/health`; the pause holds every loop; status reports the registry check
+      `unreachable` and the status `degraded`, both site projection families
+      `unavailable`, and Alkahest unready with exactly `alkahest.chain_unreachable`
+      (reachability); once the stub answers, a stepped probe constructs the client the
+      start could not and Alkahest is ready, with no restart. The registry and the site are
+      never brought back, so their recovery without a restart is not shown here.
+      **Differed from the task's wording:** the stepped publication cycle does not fail.
+      With the site unloaded it holds the site (`site_projection_unknown`), closes nothing,
+      and catches the unreachable availability read; with nothing to publish it never calls
+      the registry, so its outcome is completed. The test asserts that. The registry's
+      unreachability reaches status through the registry check alone, so the delta
+      scenario's "a failed publication cycle" holds only for a storefront with something to
+      publish; triage should decide whether the scenario's wording changes. The storefront
+      DB starts empty, so "no listing closed" is shown as a cycle that holds the site and
+      records no close, not over an existing listing. Reverting the preflight would fail
+      this test (the old step raised after its timeout with the provisioning service
+      refused); that was reasoned from the deleted code, not run.
+      API credits `test_lifecycle_status.py`
+      `test_startup_does_not_wait_for_an_unreachable_credits_service` (application
+      integration over the app's routes; the lifespan is not run, as the rest of that file,
+      and the storefront's own `_startup_tasks` runs instead): with `[credits].service_url`
+      and the configured quota site — the credits service hosts the ledger — refused, the
+      seed `configured_listing_seed` builds from a configured `[seed]` table registers
+      through the real capacity-administration client at that site; startup reaches its
+      loops, `/health` answers, and two stepped `listing-seed` cycles each report `waiting`
+      / `credits_service_unanswered` (the second with two attempts); status records the step
+      completed and names no URL. A call succeeding once the service answers is not shown.
+- [x] 11.6 The `deployment-state` delta: the permanent requirement "A storefront chart
       passes service configuration through" still permits a chart to wait for a configured
       chain's RPC or the internal registry before the storefront starts, which D20 and the
       delta's added requirement forbid. Add to `specs/deployment-state/spec.md` a MODIFIED
       block for that requirement, copied whole with that example removed, so the archive
       leaves no contradiction; `openspec validate unbacked-bare-metal-listings --strict`
       passes (D20; a correction of the delta to the reviewed decision).
-- [ ] 11.7 Versions: `arkhai-vms-storefront`, `arkhai-apicredits-storefront`; the chart
+      Done: the block is the permanent requirement and all its scenarios, word for word,
+      without the sentence "The chart MAY read the passed-through configuration to make a
+      Kubernetes decision, such as waiting …". The whole sentence goes rather than its
+      example alone: waiting was its only instance, and the chart makes no other
+      Kubernetes decision from the configuration. Strict validation passes (inside
+      `make check-change`).
+- [x] 11.7 Versions: `arkhai-vms-storefront`, `arkhai-apicredits-storefront`; the chart
       versions per the charts' own convention; `make lock`.
-- [ ] 11.9 One derivation of release conditions for published escrows (122 F2). The rule
+      Neither package is bumped: both already carry this change's minor bump over
+      `origin/dev` (`arkhai-vms-storefront` 0.17.0 → 0.22.0, `arkhai-apicredits-storefront`
+      0.10.0 → 0.16.0), and `docs/development/RELEASING.md` bumps a package at most once per
+      change. The storefront chart, unbumped on this branch, goes 0.3.0 → 0.4.0 (its
+      Deployment changed shape), with the umbrella's dependency pin on it and the umbrella
+      itself 0.3.0 → 0.4.0, as the last chart change did; the bare-metal chart changed only
+      its tests and is not bumped. No dependency changed, so no lock is owed (see the
+      section's handoff note on the locks a local environment refresh rewrote).
+- [x] 11.9 One derivation of release conditions for published escrows (122 F2). The rule
       "derive a condition for every published Alkahest escrow's chain, only while the
       readiness it was published under reports Alkahest ready" is written three times:
       VM's `publication_terms.demands_for_published_escrows`, API credits'
@@ -2201,13 +2287,106 @@ settings, a cookbook, and the `deployment-state` delta.
       shared rule. `design.md` decision 19's sentence naming the three callers of
       `publication_release_conditions` is corrected to the new function. No version bump:
       each package already carries this change's (`docs/development/RELEASING.md`).
-- [ ] 11.8 **Verify.** `make -C helm test-render` (chart render); `make test-storefront`,
+      Done. Bare metal passes the escrows its ready clauses built, so its conditions name
+      the chains of what it publishes rather than of every Alkahest clause, which is the
+      same set while Alkahest is ready. VM keeps reading the section from configuration,
+      now through `publication_terms.configured_alkahest_section()`, since the derivation
+      runs on paths whose composition is a test double without a settlement config.
+      `alkahest_ready` stays: API credits' listing service still reads it to drop request-
+      supplied escrows. API credits' refusal of an unconfigured chain now carries the kit's
+      message ("settlement clause references unknown chain …"); no test named the old one.
+      The VM chart render test's storefront probe derives through the kit function too.
+      Tests: kit unit `test_release_conditions.py` — conditions per named chain, none for
+      no escrow, an unconfigured chain refused, and nothing while Alkahest is unready or
+      absent from readiness even with an unusable section and an unconfigured chain; each
+      domain's existing unready case is unchanged.
+- [x] 11.8 **Verify.** `make -C helm test-render` (chart render); `make test-storefront`,
       `make test-apicredits`; for 11.9, `make -C kit test-alkahest` and
       `make test-bare-metal`; `make test`; `make check-packaging`. End-to-end: every VM-lane
       and API-credit-lane scenario starts on the changed startup. The local Helm topology
       run of D14 — `make helm-topology-up` and `make helm-topology-check` on this round's
       commit, no init containers on the VM storefront — is the maintainer's at this round's
       validation, recorded unrun if not done.
+      Results (`make dist` after the kit change, so every storefront ran on the rebuilt
+      `kit/alkahest` wheel): `make -C helm test-render` passed on Helm v3.21.0 (not CI's
+      pinned v4.3.0), with both storefront environments present, so the loader, startup
+      refusal, and release-condition probes ran rather than skipped. `make test-storefront`
+      unit 1108 (1 skipped), integration 457; `make test-apicredits` passed (storefront
+      235, the others 41, 73, 30, 1, 8, and the Rust middleware port) — one earlier run
+      failed `test_payment_settlement.py::test_a_refund_recorded_before_issuance_start_stops_issuance`,
+      which races an `asyncio.sleep(0.05)`, while the VM suite loaded the machine, and passed
+      in four other runs; `make -C kit test-alkahest` 416; `make test-bare-metal` passed
+      (storefront 449; 134, 11, 40). `make test` stopped at `test-provisioning`'s unit
+      suite on one environment-dependent failure (handoff note) and `make -k` was denied, so
+      the targets after it were run singly: provisioning service integration 488,
+      `test-provisioning-iac` 65, `test-registry` 128 and 125, `test-registry-client` 25,
+      `test-provisioning-adapter` 29, `test-compute` 5, `test-vms-domain` 53,
+      `test-vms-buyer` 207, `test-e2e-unit` 38, the targets above, and
+      `test-deployment-packaging`, whose release tooling failed four tests — three
+      `test_the_current_tree_passes` reading a gitignored local directory, and
+      `test_change_next_step.py::test_an_earlier_rounds_token_does_not_decide_a_triage_in_progress`,
+      which builds its own repository and exercises `scripts/`, which this section does not
+      touch — and whose Helm render then passed when run alone. `make check-packaging`
+      fails, but every finding of its five checks (`check-uv-setup` 51, `check-locks` 37,
+      `check-python-version` 25, `check-project-layout` 28, `check-architecture` 22) is a
+      project under that local directory; no repository project is named, and the architecture
+      check reports the scope rules holding. `make check-change` fails only on
+      comment hygiene (all 485 findings under that local directory) and the two citations Sections
+      13 and 22 create; its strict OpenSpec validation passes. End-to-end: the pipeline was
+      not run in this section; the VM and API-credit lanes start every storefront on the
+      changed startup and so exercise it, and no scenario starts one with a dependency down.
+      The local Helm topology run is the maintainer's, unrun here.
+
+Section 11 notes (handoff):
+
+- **The unattended session's limits.** `make helm-values-schema`, a single test file run
+  (`pytest`, `uv run`, or `PYTEST_ADDOPTS` through make), `make -k`, `make reinit` (but
+  not `make init`), and chained shell commands were denied; each suite was run whole
+  through its make target. The VM integration suite takes about 14–23 minutes, so a
+  failing new test costs a whole run to read its traceback.
+- **Locks the environment refresh rewrote.** Every `make init`/`reinit` here (and so
+  `make test`) rewrote the touched projects' `uv.lock` files: per-dependency platform
+  markers and extra greenlet wheels (s390x, riscv64), with no version change. The locked
+  uv on this machine evidently differs from the one that wrote the committed locks.
+  Restoring them (`git checkout --`, `git restore`) was denied, so the section's commit
+  names its files and leaves the nineteen rewritten locks uncommitted in the worktree;
+  nothing in this section changes a dependency, and `check-locks` reports no repository
+  lock either way. The owner restores or keeps them; a later session should not commit
+  this churn with a section.
+- **A local directory trips comment hygiene.** A gitignored directory of third-party
+  package sources sits in the working tree, and
+  `scripts/check_comment_hygiene.py`, which walks the tree with a fixed exclusion list,
+  reports its RFC "Section" references (485 lines). No finding is in repository code.
+  Moving the directory out of the tree, or excluding it in the script, is the owner's
+  call; this section did neither.
+- **A provisioning-service test fails here at `HEAD` too.** `make test` stopped at
+  `provisioning/compute/service` `tests/unit/test_config.py::
+  test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_local` (the
+  test's `.env` value is not read: `'settings' == 'dotenv'`). This section changes nothing
+  in that project but its lock's wheel list, which was restored, so the failure is this
+  environment's; it passed in Section 10's runs. The targets after it were run one by one.
+- **Dotted `settings_overrides` keys leak in the API-credit storefront.** Overriding
+  `capacity.sites` through `settings_overrides` in an integration test left the site in
+  the configuration for a later unit test (`capacity.seed_site is required with multiple
+  sites`). Replacing `[capacity]` whole and restoring it, as
+  `test_server_composition.py`'s `_capacity_sites` does, does not leak; the integration
+  test now has its own copy of that helper.
+- **The degraded-start scenario's publication wording.** See 11.5: a VM storefront with
+  nothing to publish completes its publication cycle while the registry is unreachable.
+  Triage decides whether the delta scenario says "the registry check failing" instead.
+- **Fresh-context check** of the diff against `1df44f4c0`: no layering, import-placement,
+  test-level, documentation-placement, versioning, or public-repository finding. Fixed:
+  evidence claims that overstated their tests (registry and site recovery, which neither
+  degraded-start test shows; the API-credit seed now built by `configured_listing_seed`
+  from configuration rather than injected; "nothing patched in a module"; "in any
+  spelling", now tested in two spellings per key), the lock note this handoff now makes,
+  the refusal messages and test docstrings phrased as history ("no longer waits"), and the
+  unchecked 11.5 and 11.9 boxes. Declined: import-order nits in files that are not sorted
+  today; regenerating the schemas, which the session cannot run (owed, below).
+- **Owed beyond this section:** `make helm-values-schema` once it can run (byte equality
+  of the hand-edited schemas); the local Helm topology run (11.8); `TESTING.md`'s loop
+  tables still list neither `alkahest-chain-probe` nor `listing-seed`, which closeout's
+  promotion (decision 22's and 19's `TESTING.md` items) adds.
 
 ## 12. Helm test pods carry no workload selector label
 

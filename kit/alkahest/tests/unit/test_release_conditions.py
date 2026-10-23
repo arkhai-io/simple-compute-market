@@ -18,14 +18,10 @@ from market_alkahest import (
     AlkahestSettlementConfig,
     ReleaseModelError,
     configured_release_model,
-    publication_release_conditions,
+    escrow_release_conditions,
     release_conditions,
 )
-from market_settlement_runtime import (
-    MechanismReadiness,
-    ReadinessBlocker,
-    SettlementPublicationClause,
-)
+from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
 
 WALLET = "0x" + "AB" * 20
 ORACLE = "0x" + "CD" * 20
@@ -171,40 +167,44 @@ def test_each_section_selects_one_model(policy, model):
     assert configured_release_model(_config(**policy)) == model
 
 
-def _clause(mechanism: str, **mechanism_input) -> SettlementPublicationClause:
-    return SettlementPublicationClause(
-        mechanism=mechanism,
-        asset="0x" + "11" * 20,
-        rate="1",
-        per="hour",
-        mechanism_input=mechanism_input,
-    )
+def _escrow(chain_name: str) -> dict:
+    """An Alkahest escrow in the publication form, on ``chain_name``."""
+    return {
+        "chain_name": chain_name,
+        "escrow_address": "0x" + "22" * 20,
+        "literal_fields": {"token": "0x" + "11" * 20},
+    }
 
 
-def test_publication_derives_a_condition_for_each_alkahest_clause_chain(chains):
-    clauses = [
-        _clause("alkahest.v1", chain="base_sepolia", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default"),
-        _clause("arkhai.payments.v1", payee_account="seller"),
-    ]
+def test_published_escrows_derive_a_condition_for_each_chain_they_name(chains):
+    escrows = [_escrow("base_sepolia"), _escrow("anvil"), _escrow("anvil")]
 
-    conditions = publication_release_conditions(
-        None, clauses, readiness=_ready(), chains=chains, wallet_address=WALLET
+    conditions = escrow_release_conditions(
+        None, escrows, readiness=_ready(), chains=chains, wallet_address=WALLET
     )
 
     assert conditions == _conditions(None, chains)
 
 
-def test_publication_without_an_alkahest_clause_advertises_no_condition():
-    clauses = [_clause("arkhai.payments.v1", payee_account="seller")]
-
+def test_a_listing_publishing_no_escrow_advertises_no_condition():
     assert (
-        publication_release_conditions(
-            None, clauses, readiness=_ready(), chains={}, wallet_address=WALLET
+        escrow_release_conditions(
+            None, [], readiness=_ready(), chains={}, wallet_address=WALLET
         )
         == []
     )
+
+
+def test_a_published_escrow_on_an_unconfigured_chain_is_refused(chains):
+    """Nothing could settle it, so no condition is derived for it."""
+    with pytest.raises(ValueError, match="unknown chain 'ethereum_sepolia'"):
+        escrow_release_conditions(
+            None,
+            [_escrow("anvil"), _escrow("ethereum_sepolia")],
+            readiness=_ready(),
+            chains=chains,
+            wallet_address=WALLET,
+        )
 
 
 @pytest.mark.parametrize(
@@ -229,22 +229,18 @@ def test_publication_without_an_alkahest_clause_advertises_no_condition():
     ],
     ids=["no-alkahest-readiness", "alkahest-unready"],
 )
-def test_publication_advertises_no_condition_while_alkahest_is_unready(
-    chains, readiness
-):
-    """An unready mechanism publishes no option, so its clauses advertise nothing.
+def test_no_condition_is_advertised_while_alkahest_is_unready(chains, readiness):
+    """An unready mechanism publishes no escrow, so nothing is advertised.
 
-    The section here would refuse derivation outright; readiness keeps the
-    refusal from being reached.
+    The section here would refuse derivation outright, and the second escrow's
+    chain is not configured; readiness keeps either refusal from being reached.
     """
-    clauses = [
-        _clause("alkahest.v1", chain="anvil", escrow_kind="erc20_escrow_obligation_default")
-    ]
+    escrows = [_escrow("anvil"), _escrow("ethereum_sepolia")]
 
     assert (
-        publication_release_conditions(
+        escrow_release_conditions(
             _config(oracle_gated=True),
-            clauses,
+            escrows,
             readiness=readiness,
             chains=chains,
             wallet_address=WALLET,

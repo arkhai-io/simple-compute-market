@@ -1722,7 +1722,9 @@
             "null"
           ],
           "patternProperties": {
-            "^[iI][dD][eE][nN][tT][iI][tT][yY]$": false
+            "^[iI][dD][eE][nN][tT][iI][tT][yY]$": false,
+            "^[fF][aA][iI][lL]_[oO][nN]_[uU][nN][rR][eE][aA][cC][hH][aA][bB][lL][eE]$": false,
+            "^[pP][rR][eE][fF][lL][iI][gG][hH][tT]_[tT][iI][mM][eE][oO][uU][tT]$": false
           }
         }
       }

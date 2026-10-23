@@ -176,9 +176,33 @@ def test_default_release_renders_mounts_and_derives_together() -> None:
     }
     assert config["Settlement"] == {"priority": []}
     assert "provisioning" not in config or "identity" not in config["provisioning"]
-    assert "wait-for-registry" in deployment
-    assert "wait-for-rpc" not in deployment
     assert "alkahest-address-book" not in deployment
+
+
+# The release renders with each committed fixture that renders at all; the
+# invalid-* fixtures exist to be refused, which test-render.sh asserts.
+RENDERING_FIXTURES = tuple(
+    sorted(path.name for path in (UMBRELLA / "fixtures").glob("*.yaml") if not path.name.startswith("invalid-"))
+)
+
+
+def test_no_release_waits_on_a_dependency_and_every_agent_has_a_startup_probe() -> None:
+    """The storefront starts while its registry, chain, or site is unreachable
+    and reports them degraded, so no init container waits on one; the startup
+    probe holds the liveness and readiness probes off a slow start instead."""
+    manifests = {"defaults": _ok(_render()), "local release": _ok(_render_local())}
+    for fixture in RENDERING_FIXTURES:
+        manifests[fixture] = _ok(_render(files=(fixture,), release=LOCAL_RELEASE))
+    manifests["a second agent"] = _ok(_render(agents={"carol": CAROL}))
+    for label, manifest in manifests.items():
+        deployments = _documents(manifest, "deployment.yaml")
+        assert deployments, label
+        for deployment in deployments:
+            assert "initContainers" not in deployment, label
+            assert "wait-for-" not in deployment, label
+            probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+            assert probe, f"{label}: no startupProbe on /health"
+            assert "initialDelaySeconds" not in deployment, label
 
 
 def test_the_pod_environment_carries_no_service_links() -> None:
@@ -241,7 +265,6 @@ def test_stated_values_are_rendered_as_stated() -> None:
         "source_confirmation_seconds": 3600,
         "sites": {"west": "http://provisioning.example:8081"},
     }
-    assert "wait-for-registry" not in _source(manifest, "deployment.yaml")
 
 
 def test_a_stated_port_equal_to_the_agents_is_accepted() -> None:
@@ -261,27 +284,14 @@ def test_a_differently_spelled_section_is_read_for_release_checks() -> None:
                 }
             },
         },
-        Settlement=None,
-        settlement={"alkahest": {"enabled": True}},
-        chains={"anvil": {"chain_id": 31337, "rpc_url": "http://anvil:8545"}},
     )
     manifest = _ok(_render(agent=agent))
 
-    assert "wait-for-rpc" in _source(manifest, "deployment.yaml")
     assert _config(manifest)["identity"]["service_peers"]
-
-
-def test_a_chain_whose_rpc_url_is_in_the_overlay_is_not_probed() -> None:
-    """An RPC URL carrying a credential lives in the Secret overlay; the pod
-    spec must not name it, so no readiness probe is rendered for it."""
-    agent = _with_config(
-        Settlement={"priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
-        Chains={"anvil": {"chain_id": 31337}},
-    )
-    manifest = _ok(_render(agent=agent))
-
-    assert "wait-for-rpc" not in _source(manifest, "deployment.yaml")
-    assert "rpc_url" not in _config(manifest)["Chains"]["anvil"]
+    # The same peer without the release's provisioning principal is refused,
+    # so the differently spelled section is the one the check read.
+    agent["config"]["identity"]["service_peers"]["provisioning_default"]["principals"] = [ACTIVE_REGISTRY]
+    _refused(_render(agent=agent), "Identity.service_peers")
 
 
 # --- release checks --------------------------------------------------------
@@ -357,13 +367,6 @@ def test_release_owned_keys_are_matched_in_any_spelling() -> None:
     manifest = _ok(_render(agent=agent))
     assert _config(manifest)["Registry"]["URLS"] == [external]
     assert "urls" not in _config(manifest)["Registry"]
-    assert "wait-for-registry" not in _source(manifest, "deployment.yaml")
-
-    agent = _with_config(
-        Settlement={"priority": ["alkahest.v1"], "alkahest": {"enabled": True}},
-        CHAINS={"anvil": {"chain_id": 31337, "RPC_URL": "http://anvil:8545"}},
-    )
-    assert "wait-for-rpc" in _source(_ok(_render(agent=agent)), "deployment.yaml")
 
 
 def test_typed_fields_are_accepted_in_any_spelling() -> None:
@@ -540,13 +543,12 @@ def test_generated_schema_refuses_secret_delivery_settings() -> None:
     _ok(_render(agent=delivery(mail=smtp)))
 
 
-def test_evm_fixture_waits_for_its_chain() -> None:
+def test_evm_fixture_passes_its_chain_through_and_mounts_its_address_book() -> None:
     # The fixture names the dev-env chart's Services and ConfigMap by the
     # release name the Makefile installs.
     manifest = _ok(_render(files=("eip191-evm-values.yaml",), release=LOCAL_RELEASE))
 
     assert _config(manifest)["Chains"]["anvil"]["chain_id"] == 31337
-    assert "wait-for-rpc" in _source(manifest, "deployment.yaml")
     _mounted_address_book(manifest)
 
 
@@ -946,9 +948,10 @@ try:
 except StorefrontStartupError as exc:
     print(json.dumps({"refusal": str(exc)}))
     raise SystemExit(0)
+from market_alkahest import escrow_release_conditions
 from market_settlement_runtime import MechanismReadiness
-from market_storefront.services.publication_terms import demands_for_published_escrows
-from market_storefront.utils.config import get_evm_wallet_address, settlement_publication_defaults
+from market_storefront.services.publication_terms import configured_alkahest_section
+from market_storefront.utils.config import CHAINS, get_evm_wallet_address, settlement_publication_defaults
 # Readiness turns on what the render does not carry -- a reachable chain and the
 # Secret overlay's wallet key -- so the probe derives as a ready Alkahest would.
 ready = MechanismReadiness(mechanism="alkahest.v1", configured=True, enabled=True, ready=True)
@@ -958,9 +961,11 @@ escrows = [
     for clause in settlement_publication_defaults()
     if clause.mechanism == "alkahest.v1"
 ]
-demands = demands_for_published_escrows(
+demands = escrow_release_conditions(
+    configured_alkahest_section(),
     escrows,
     readiness=(ready,),
+    chains=CHAINS,
     wallet_address=get_evm_wallet_address(),
 )
 print(json.dumps({"refusal": None, "demands": demands}))

@@ -8,12 +8,16 @@ storefront from configuration needs the credits service and a quota authority;
 the test wires the container the lifespan would and starts the loops through
 the storefront's own registrations, as startup does, over a settlement
 servicing worker whose repository the test controls and a capacity runtime
-standing in for the quota authority's feeds.
+standing in for the quota authority's feeds. The startup case runs the
+storefront's own startup tasks instead, with its credits service refusing
+connections.
 """
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 
 import httpx
@@ -27,7 +31,14 @@ from storefront_client.client import StorefrontClientError
 
 import apicredits_storefront.container as container
 import apicredits_storefront.server as server
+from apicredits_storefront import startup
 from apicredits_storefront.domain_runtime import get_market_domain_contract
+from apicredits_storefront.listing_seed import (
+    CREDITS_SERVICE_UNANSWERED,
+    LISTING_SEED,
+    WAITING,
+    configured_listing_seed,
+)
 from apicredits_storefront.lifecycle_steps import (
     CAPACITY_EVENTS_POLLER,
     NEGOTIATION_WATCHDOG,
@@ -42,6 +53,7 @@ from apicredits_storefront.services.system_service import SystemService
 from apicredits_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -311,6 +323,82 @@ async def test_the_chain_probe_loop_steps_alkahest_from_unreachable_to_ready(
     )
     assert ready["ready"] is True
     assert ready["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"
+
+
+#: Nothing listens on the discard port, so every connection to it is refused.
+_REFUSED = "http://127.0.0.1:9"
+
+@contextmanager
+def _capacity_sites(sites):
+    """Replace `[capacity.sites]` whole, restoring `[capacity]` afterwards: a
+    dotted override would merge into the configuration's own table, and its
+    restore would leave the sites behind for later tests."""
+    settings = storefront_config.settings
+    saved = deepcopy(settings.get("capacity"))
+    try:
+        settings.unset("capacity", force=True)
+        settings.set("capacity", {**(saved or {}), "sites": sites})
+        yield
+    finally:
+        settings.unset("capacity", force=True)
+        if saved is not None:
+            settings.set("capacity", saved)
+
+
+#: The quota site, at the refused credits service: a deterministic development
+#: principal, never used on any network.
+_REFUSED_QUOTA_SITE = {
+    _SITE: {
+        "url": _REFUSED,
+        "expected_authorities": {
+            "identities": [
+                Ed25519Signer(bytes.fromhex("88" * 32)).identity.model_dump(mode="json")
+            ]
+        },
+    }
+}
+
+
+async def test_startup_does_not_wait_for_an_unreachable_credits_service(
+    storefront, db, monkeypatch
+):
+    """The start of spec scenario "A storefront starts before its site or
+    service": startup runs to its loops while the credits service, which hosts
+    the quota ledger at the configured capacity site, refuses connections; the
+    storefront answers its health check, and the ``listing-seed`` step waits for
+    the service rather than giving up. The seed is the one the configuration
+    states, built as the composition builds it, registering its quota through
+    the real capacity-administration client at the configured site. That a call
+    succeeds once the service answers is not shown here."""
+    app, loops, _obligations, _start = storefront
+    domain = get_market_domain_contract()
+    monkeypatch.setattr(container, "resolved_market_domain", domain)
+    monkeypatch.setattr(container, "resolved_settlement_runtime", None)
+    register_api_credit_lifecycle_steps(loops)
+    # Held from the start, so the seed's cycles are the steps this test runs.
+    loops.request_pause(True)
+    with _capacity_sites(_REFUSED_QUOTA_SITE), settings_overrides(
+        **{"credits.service_url": _REFUSED, "seed": {"resource_id": "demo-quota"}}
+    ):
+        seed = configured_listing_seed(listing_service=None, signer=STOREFRONT_SIGNER, db=db)
+        monkeypatch.setattr(container, "resolved_listing_seed", seed)
+        await startup._startup_tasks(domain=domain, capacity_runtime=_QuotaSite())
+        await asyncio.wait_for(loops.await_quiescence(), timeout=1.0)
+
+        async with _admin(app) as admin:
+            health = await admin.get_health()
+            first = await admin.admin_run_lifecycle_cycle("listing-seed")
+            second = await admin.admin_run_lifecycle_cycle("listing-seed")
+            status = await admin.get_system_status()
+
+    assert health.checks["database"] == "ok"
+    assert first["state"] == WAITING
+    assert first["reason"] == CREDITS_SERVICE_UNANSWERED
+    # Still waiting, and still trying: waiting does not give the seed up.
+    assert (second["state"], second["attempts"]) == (WAITING, 2)
+    outcome = status.lifecycle[LISTING_SEED]["last_outcome"]
+    assert (outcome["trigger"], outcome["completed"]) == ("step", True)
+    assert _REFUSED not in str(status)
 
 
 async def test_an_unsigned_status_read_is_refused(storefront):

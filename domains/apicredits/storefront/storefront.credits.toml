@@ -92,8 +92,6 @@ identities = [
 # selected explicitly below and the separate issuance/keys mechanism API.
 service_url         = "http://credits-service:8082"
 admin_key_file      = "/run/secrets/arkhai/api-credits-admin-key"
-preflight_timeout   = 60
-fail_on_unreachable = true
 
 [capacity]
 # Poll fast — the suite waits on delta-driven listing reconciliation.

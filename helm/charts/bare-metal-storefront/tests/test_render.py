@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -210,6 +211,23 @@ def test_production_values_render_mount_and_derive_together() -> None:
     assert "kind: Secret" not in manifest
     assert "path: /health" in manifest
     assert "wait-for-" not in manifest
+
+
+def test_no_release_waits_on_a_dependency_and_the_pod_has_a_startup_probe() -> None:
+    """The storefront starts while its registry, chain, or sites are unreachable
+    and reports them degraded, so no init container waits on one; the startup
+    probe holds the liveness and readiness probes off a slow start instead."""
+    for label, rendered in (
+        ("example", _render()),
+        ("defaults", _render(values=None)),
+        ("umbrella release", _render_umbrella()),
+    ):
+        deployment = _source(_ok(rendered), "deployment.yaml")
+        assert "initContainers" not in deployment, label
+        assert "wait-for-" not in deployment, label
+        probe = re.search(r"\n( +)startupProbe:\n\1  httpGet:\n\1    path: /health\n\1    port: http\n", deployment)
+        assert probe, f"{label}: no startupProbe on /health"
+        assert "initialDelaySeconds" not in deployment, label
 
 
 def test_a_release_naming_no_overlay_mounts_none() -> None:

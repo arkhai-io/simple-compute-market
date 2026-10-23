@@ -692,8 +692,9 @@ the contract every mechanism shares, so each case is an Alkahest readiness block
   chains, or its wallet key, each named by its blocker.
 
 Release conditions are derived only for ready Alkahest clauses: `kit/alkahest`'s
-`publication_release_conditions` takes the clauses' readiness and returns nothing for an
-unready mechanism, and VM, bare metal, and API credits call it after readiness. VM had
+`escrow_release_conditions` takes the published escrows and the readiness they were
+published under and returns nothing for an unready mechanism, and VM, bare metal, and API
+credits call it after readiness. VM had
 derived conditions before readiness and refused every candidate per cycle. In API credits
 this covers the escrows a listing request supplies as well as those its clauses compile,
 so an unready Alkahest yields no API-credit escrow option on either path.

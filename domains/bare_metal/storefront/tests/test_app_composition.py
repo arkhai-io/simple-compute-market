@@ -1005,7 +1005,7 @@ async def test_a_storefront_configured_for_an_undeliverable_model_starts_and_rep
     client, reports Alkahest unready naming the model while contact exchange
     stays ready. The loops start held, so this shows the start and the blocker
     only; that an unready Alkahest derives no release condition is
-    `kit/alkahest`'s unit test of `publication_release_conditions`."""
+    `kit/alkahest`'s unit test of `escrow_release_conditions`."""
     document = _alkahest(publishable_configuration(tmp_path / "storefront.db"))
     document["Settlement"]["alkahest"].update(
         interruptible=True,

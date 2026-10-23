@@ -172,8 +172,6 @@ service_url            = "http://localhost:8085"
 mode                   = ""        # "mock" | "" — selects mock vs real ansible/kvm path
 timeout                = 3600
 poll_interval          = 15
-preflight_timeout      = 30
-fail_on_unreachable    = true
 
 [fulfillment.failure_policy]
 # Actions applied when provisioning/fulfillment fails. `release_capacity`

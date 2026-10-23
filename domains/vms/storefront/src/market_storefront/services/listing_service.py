@@ -38,6 +38,7 @@ from market_capacity_publication import (
     PublicationBinding,
     SiteProjectionState,
 )
+from market_alkahest import escrow_release_conditions
 from market_core import MarketDomainContract
 from market_identity import Identity, Signer
 from market_settlement_runtime import (
@@ -49,7 +50,7 @@ from market_settlement_runtime import (
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
 from market_storefront.services.publication_terms import (
-    demands_for_published_escrows,
+    configured_alkahest_section,
 )
 from market_storefront.utils.config import (
     CHAINS,
@@ -576,10 +577,14 @@ class ListingService:
         # Derived after readiness, under the readiness the options were built
         # with, for every escrow published whether a clause compiled it or the
         # request supplied it, so an unready Alkahest advertises no condition
-        # and refuses no candidate.
-        demands = demands_for_published_escrows(
+        # and refuses no candidate. A create request never supplies the
+        # conditions, so a listing advertises only what the storefront's own
+        # configuration can settle.
+        demands = escrow_release_conditions(
+            configured_alkahest_section(),
             accepted_escrows,
             readiness=readiness,
+            chains=CHAINS,
             wallet_address=get_evm_wallet_address() or "",
         )
 

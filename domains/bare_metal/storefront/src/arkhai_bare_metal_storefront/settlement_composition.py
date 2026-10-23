@@ -32,7 +32,7 @@ from market_alkahest import (
     RECIPIENT_RELEASE,
     configured_release_model,
     create_alkahest_registration,
-    publication_release_conditions,
+    escrow_release_conditions,
 )
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
@@ -215,10 +215,10 @@ class BareMetalStorefrontSettlementComposition:
         """Build ready settlement publication alternatives.
 
         A listing publishing an Alkahest escrow advertises, per chain its
-        clauses publish on, the release condition the Alkahest mechanism
-        derives from the configured section, the seller wallet, and that
-        chain's address book, and only while Alkahest is ready: an unready
-        mechanism's clauses publish no option to release.
+        escrows name, the release condition the Alkahest mechanism derives from
+        the configured section, the seller wallet, and that chain's address
+        book, and only while Alkahest is ready: an unready mechanism's clauses
+        publish no escrow to release.
         """
 
         readiness = await self.readiness(clauses=clauses)
@@ -272,19 +272,19 @@ class BareMetalStorefrontSettlementComposition:
             publication_clauses=tuple(
                 item.model_dump(mode="json", exclude_none=True) for item in clauses
             ),
-            demands=tuple(self._release_conditions(clauses, readiness)),
+            demands=tuple(self._release_conditions(accepted_escrows, readiness)),
             max_duration_seconds=max_duration_seconds,
         )
 
     def _release_conditions(
         self,
-        clauses: Sequence[SettlementPublicationClause],
+        accepted_escrows: Sequence[Mapping[str, Any]],
         readiness: Sequence[MechanismReadiness],
     ) -> list[dict[str, Any]]:
         chains = self.resources.get("chains")
-        return publication_release_conditions(
+        return escrow_release_conditions(
             self.config.mechanisms.get(ALKAHEST_CONFIG_KEY),
-            clauses,
+            accepted_escrows,
             readiness=readiness,
             chains=chains if isinstance(chains, Mapping) else {},
             wallet_address=_wallet_address(self.resources.get("wallet")),

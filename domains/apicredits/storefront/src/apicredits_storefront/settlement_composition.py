@@ -14,7 +14,7 @@ from market_alkahest import (
     RECIPIENT_RELEASE,
     AlkahestChainProbe,
     configured_release_model,
-    release_conditions,
+    escrow_release_conditions,
 )
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
@@ -170,28 +170,17 @@ class ApiCreditsSettlementComposition:
     ) -> list[dict[str, Any]]:
         """The release conditions a listing publishing ``accepted_escrows`` advertises.
 
-        Accepted escrows are the Alkahest publication form, so each one's chain
-        gets the condition the Alkahest mechanism derives from the configured
-        section, the seller wallet, and that chain's address book, and only
-        while ``readiness`` reports Alkahest ready: an unready Alkahest
-        publishes no escrow, so it advertises no condition. An escrow on a chain
-        this storefront does not configure is refused, since nothing could
-        settle it.
+        The Alkahest mechanism's own derivation, over the configured section,
+        the seller wallet, and the configured chains: nothing while
+        ``readiness`` reports Alkahest unready, and otherwise one condition per
+        chain the escrows name, refusing a chain this storefront does not
+        configure.
         """
-        chain_names = {str(escrow["chain_name"]) for escrow in accepted_escrows}
-        if not chain_names or not alkahest_ready(readiness):
-            return []
-        chains = self.mechanism_resources["chains"]
-        unconfigured = sorted(name for name in chain_names if name not in chains)
-        if unconfigured:
-            raise ValueError(
-                f"accepted escrow names chain {unconfigured[0]!r}, which this "
-                "storefront does not configure under [chains]"
-            )
-        return release_conditions(
+        return escrow_release_conditions(
             self.settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY),
-            chain_names=chain_names,
-            chains=chains,
+            accepted_escrows,
+            readiness=readiness,
+            chains=self.mechanism_resources["chains"],
             wallet_address=self.seller_wallet_address,
         )
 

@@ -27,7 +27,7 @@ from .release_conditions import (
     RELEASE_MODELS,
     ReleaseModelError,
     configured_release_model,
-    publication_release_conditions,
+    escrow_release_conditions,
     release_conditions,
 )
 from .settlement_config import (
@@ -58,8 +58,8 @@ __all__ = [
     "ReleaseModelError",
     "configured_release_model",
     "create_alkahest_registration",
+    "escrow_release_conditions",
     "json_rpc_call",
-    "publication_release_conditions",
     "release_conditions",
     "verify_escrow_against_plan",
 ]

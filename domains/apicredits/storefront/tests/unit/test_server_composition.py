@@ -153,9 +153,6 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     loops = api_credit_loop_controller()
     register_api_credit_lifecycle_steps(loops)
 
-    async def _noop():
-        return None
-
     class _HeldFeeds:
         """The quota authority's feeds: one site, held from the start, so its
         poller's one gate read acknowledges the pause."""
@@ -171,7 +168,6 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(container, "resolved_settlement_worker", object())
     monkeypatch.setattr(container, "resolved_loop_controller", loops)
     monkeypatch.setattr(negotiation_thread, "get_thread_store", lambda **_kwargs: None)
-    monkeypatch.setattr(startup, "_preflight_credits_service", _noop)
 
     timed = {
         "negotiation_watchdog",
@@ -288,6 +284,44 @@ def test_the_renamed_servicing_interval_refuses_startup_naming_its_replacement(
         "the storefront states retired settings: claims_sweep_interval was renamed "
         "settlement_servicing_interval_seconds; state "
         "settlement_servicing_interval_seconds instead"
+    )
+    assert not created
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "credits.fail_on_unreachable",
+        "CREDITS.Fail_On_Unreachable",
+        "credits.preflight_timeout",
+        "Credits.Preflight_Timeout",
+    ],
+)
+def test_the_removed_credits_preflight_settings_refuse_startup_by_key(
+    monkeypatch, tmp_path, key
+):
+    """The storefront starts without waiting for its credits service, so a stated
+    wait setting is refused by its key, in any spelling, before anything is
+    composed."""
+    refusal, created = _refused(monkeypatch, tmp_path, **{key: 30})
+
+    named = key.lower()
+    assert str(refusal) == (
+        f"the storefront states retired settings: {named} was removed: the "
+        "storefront starts without waiting for its credits service; its listing "
+        "seed waits for the service, and each call to it is retried"
+    )
+    assert not created
+
+
+def test_an_unset_credits_service_refuses_startup_before_anything_is_composed(
+    monkeypatch, tmp_path
+):
+    refusal, created = _refused(monkeypatch, tmp_path, **{"credits.service_url": ""})
+
+    assert str(refusal) == (
+        "the storefront has no credits service to sell for: "
+        "[credits].service_url is not configured"
     )
     assert not created
 

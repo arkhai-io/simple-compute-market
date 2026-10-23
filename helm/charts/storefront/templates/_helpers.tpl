@@ -54,24 +54,6 @@ Supports an optional global.imageRepository passed down from the parent.
 {{- end }}
 
 {{/*
-Compose the HTTP RPC URL from global.rpc.host and global.rpc.port.
-Mirrors the definition in the root chart's _helpers.tpl.
-*/}}
-{{- define "rpc.url" -}}
-{{- $scheme := .Values.global.rpc.scheme | default "http" -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
-{{- end }}
-
-{{/*
-Compose the WebSocket RPC URL from global.rpc.host and global.rpc.port.
-Agents connect to Anvil over WebSocket for event subscriptions.
-*/}}
-{{- define "rpc.wsUrl" -}}
-{{- $scheme := ternary "wss" "ws" (eq (.Values.global.rpc.scheme | default "http") "https") -}}
-{{- printf "%s://%s:%d" $scheme .Values.global.rpc.host (int .Values.global.rpc.port) -}}
-{{- end }}
-
-{{/*
 Compose the registry URL from global.registry.host and global.registry.port.
 */}}
 {{- define "storefront.registryUrl" -}}
@@ -265,15 +247,6 @@ Argument: dict with `agent` (name), `path` (dotted, for the message), `value`.
     {{- include "storefront.refuseFoldedDuplicates" (dict "agent" $agent "path" (printf "%s[%d]" $path $index) "value" $item) -}}
   {{- end -}}
 {{- end -}}
-{{- end }}
-
-{{/*
-Whether the agent uses the release's internal registry: its configuration
-names no registry URLs. Returns "true" or "".
-*/}}
-{{- define "storefront.usesInternalRegistry" -}}
-{{- $registry := include "storefront.foldedMap" (dict "doc" (.agent.config | default dict) "name" "registry") | fromJson -}}
-{{- if not (include "storefront.foldedKey" (dict "doc" $registry "name" "urls")) -}}true{{- end -}}
 {{- end }}
 
 {{/*
