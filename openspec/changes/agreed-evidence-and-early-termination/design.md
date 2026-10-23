@@ -23,7 +23,7 @@ A step is protocol when refusing it leaves a party unable to continue:
 
 1. **Discovery:** without the registry's schema a buyer finds no listings.
 2. **Negotiation:** without the negotiation schema the parties reach no agreement.
-3. **Commitment:** the single act, defined by the mechanism, that makes the agreement binding (D2). Hosted: the payer's mandate approval. When the deal has a seller-funded bond part (a stake beyond the payment, D5), the seller pre-approves the mandate before returning its signed acceptance, so the payer's approval stays the single committing act (D5). Alkahest: the escrow obligation on chain. Asynchronous peer-to-peer: the countersignature.
+3. **Commitment:** the single act, defined by the mechanism, that makes the agreement binding (D2). Hosted: the payer's mandate approval. When the deal has a seller-funded bond part (a stake beyond the payment, D5), both parties must approve, and the order minimizes network hops: the seller pre-approves while building its signed acceptance, which it sends anyway, so the payer's approval is the last act and commits the deal with no extra message (D5). Alkahest: the escrow obligation on chain. Asynchronous peer-to-peer: the countersignature.
 
 After commitment, refusing to continue is a broken obligation, no different from breaking a later clause, and it is visible only through the evidence it leaves. Everything after commitment, including the buyer's settle handoff, is post-commitment lifecycle (D6). Core keeps the registry, negotiation, and the schema-opaque agreement and commitment carriers.
 
@@ -389,7 +389,7 @@ Arkhai mediation (the `optimistic.arkhai` regime's intake), operated beside the 
 - **Bond forfeited whole.** Rejected (D5): a ruling may be a discount while the deal continues, so awards are partial and repeatable.
 - **A bond on every penalized hosted deal.** Rejected (D5): the ledger already reverses held payment partially; a bond is only the stake beyond it.
 - **Partial reverse on Alkahest.** Rejected (D5): escrow obligations collect or reclaim whole, so a finer consequence there is a separate part.
-- **Bond approved after the payer's approval.** Rejected (D1): the seller would hold a free option on the buyer's locked funds. Pre-approval before acceptance bounds the converse risk by approval expiry and the seller's acceptance policy.
+- **Bond approved after the payer's approval.** Rejected (D1): the seller would need an extra message telling it to approve, where pre-approval rides on the acceptance it sends anyway.
 - **A listing-level evidence window.** Rejected (D9): a seller could change it after acceptance, and it could disagree with how long funds are held.
 - **Terms in `provision_terms` or a new top-level Agreement field.** Rejected (D5): per listing rather than per option, or a protocol version bump for every party.
 - **A listing-level registry field derived from options.** Rejected (D5): it says some option can end early while the buyer selects one.
