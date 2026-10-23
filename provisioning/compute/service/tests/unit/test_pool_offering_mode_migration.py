@@ -30,11 +30,24 @@ def _engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path="/playbooks/vm-operations.yaml",
-        default_inventory_group="kvm_hosts",
-    )
+    run_migrations(engine)
+    # Migration creates no pool: store the VM `default` a database from before
+    # declared offering modes held, with no mode declared and its playbook
+    # configured, which these migrations read.
+    with Session(engine) as db, db.begin():
+        db.add(ResourcePool(
+            id=DEFAULT_POOL_ID,
+            label="Default Pool",
+            provider="ansible",
+            enabled=True,
+            policy_tags={},
+        ))
+        db.flush()
+        db.add(AnsiblePoolConfig(
+            pool_id=DEFAULT_POOL_ID,
+            playbook_path="/playbooks/vm-operations.yaml",
+            extra_vars={},
+        ))
     return engine
 
 

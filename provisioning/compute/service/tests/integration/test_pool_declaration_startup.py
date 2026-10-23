@@ -68,17 +68,29 @@ pools:
 
 
 class _Deployment:
-    def __init__(self, tmp_path, monkeypatch, *, pool_document=None):
+    def __init__(self, tmp_path, monkeypatch, *, pool_document=None, existing_default=False):
         self.engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
         self.document = tmp_path / "pools.yaml"
         if pool_document is not None:
             self.document.write_text(pool_document, encoding="utf-8")
-        run_migrations(
-            self.engine,
-            default_playbook_path="/configured/playbook.yaml",
-            default_inventory_group="kvm_hosts",
-            pool_definitions_path=self.document if pool_document is not None else None,
-        )
+        run_migrations(self.engine)
+        if existing_default:
+            # Migration creates no pool: a site already serving holds its VM
+            # `default`, with both declarations and its playbook.
+            with Session(self.engine) as db, db.begin():
+                db.add(ResourcePool(
+                    id=DEFAULT_POOL_ID, label="Default Pool", provider="vm.ansible",
+                    enabled=True, policy_tags={
+                        "deliverable_modes": ["vm"],
+                        "advertisable_modes": ["vm"],
+                        "capacity_backing": "backed",
+                    },
+                ))
+                db.flush()
+                db.add(AnsiblePoolConfig(
+                    pool_id=DEFAULT_POOL_ID, playbook_path="/configured/playbook.yaml",
+                    extra_vars={},
+                ))
         self.session_factory = sessionmaker(bind=self.engine)
         self.pool_service = ResourcePoolService(
             session_factory=self.session_factory,
@@ -113,7 +125,7 @@ class _Deployment:
 
 @pytest.fixture
 def deployment(tmp_path, monkeypatch):
-    return _Deployment(tmp_path, monkeypatch)
+    return _Deployment(tmp_path, monkeypatch, existing_default=True)
 
 
 def test_migrated_state_passes_the_startup_check(deployment):
@@ -184,7 +196,7 @@ def test_a_fresh_database_creates_default_from_its_mounted_document(
     assert deployment.pool_service.get_pool("default") is None
     # A repeated migration before the first application start must not claim
     # the provider that the mounted document is going to declare.
-    run_migrations(deployment.engine, pool_definitions_path=deployment.document)
+    run_migrations(deployment.engine)
     assert deployment.pool_service.get_pool("default") is None
 
     assert deployment.importer().import_pool_definitions().reconciled is True
@@ -211,31 +223,27 @@ def test_a_fresh_database_creates_default_from_its_mounted_document(
     assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
 
 
-@pytest.mark.parametrize("interruption", ["before-versioned-migrations", "before-pool-bootstrap"])
+@pytest.mark.parametrize("interruption", ["before-versioned-migrations", "before-pool-migration"])
 @pytest.mark.parametrize("pool_document_configured", [False, True])
-def test_an_interrupted_first_migration_resumes_the_intended_default_bootstrap(
+def test_an_interrupted_first_migration_leaves_pools_to_startup(
     tmp_path, monkeypatch, interruption, pool_document_configured,
 ):
     document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
-    document_path = tmp_path / "pools.yaml"
-    document_path.write_text(document)
     engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
 
     def interrupt_at_database_boundary(connection, cursor, statement, parameters, context, executemany):
         before_versions = "CREATE TABLE IF NOT EXISTS schema_migrations" in statement
-        before_pool = statement.lstrip().startswith("SELECT resource_pools.")
+        # The resource-pool migration's first statement counts the hosts.
+        before_pool = statement.strip() == "SELECT COUNT(*) FROM hosts"
         if (interruption == "before-versioned-migrations" and before_versions) or (
-            interruption == "before-pool-bootstrap" and before_pool
+            interruption == "before-pool-migration" and before_pool
         ):
             raise RuntimeError("interrupted schema initialization")
 
     event.listen(engine, "before_cursor_execute", interrupt_at_database_boundary)
     try:
         with pytest.raises(RuntimeError, match="interrupted schema initialization"):
-            run_migrations(
-                engine,
-                pool_definitions_path=document_path if pool_document_configured else None,
-            )
+            run_migrations(engine)
     finally:
         event.remove(engine, "before_cursor_execute", interrupt_at_database_boundary)
 
@@ -243,7 +251,7 @@ def test_an_interrupted_first_migration_resumes_the_intended_default_bootstrap(
         assert {"resource_pools", "hosts"} <= set(inspect(connection).get_table_names())
         assert connection.execute(text("SELECT count(*) FROM resource_pools")).scalar_one() == 0
         assert connection.execute(text("SELECT count(*) FROM hosts")).scalar_one() == 0
-        if interruption == "before-pool-bootstrap":
+        if interruption == "before-pool-migration":
             applied = set(connection.execute(text("SELECT id FROM schema_migrations")).scalars())
             assert "20260603_001_ansible_jobs_escrow_uid" in applied
             assert "20260713_002_resource_pools_and_hosts_pool_id" not in applied
@@ -258,9 +266,7 @@ def test_an_interrupted_first_migration_resumes_the_intended_default_bootstrap(
         assert deployment.pool_service.get_pool("default").provider == "bare_metal.ansible"
         assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
     else:
-        default = deployment.pool_service.get_pool("default")
-        assert default.provider == "vm.ansible"
-        assert default.provider_config["playbook_path"] == "/configured/playbook.yaml"
+        assert deployment.pool_service.list_pools() == []
         assert deployment.recorded_digest() is None
     app_runtime.verify_pool_declarations()
 
@@ -268,7 +274,7 @@ def test_an_interrupted_first_migration_resumes_the_intended_default_bootstrap(
 def test_a_mounted_document_does_not_replace_an_existing_default_provider(deployment):
     document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
     deployment.document.write_text(document, encoding="utf-8")
-    run_migrations(deployment.engine, pool_definitions_path=deployment.document)
+    run_migrations(deployment.engine)
 
     with pytest.raises(PoolValidationError, match="fixed at creation"):
         deployment.importer().import_pool_definitions()

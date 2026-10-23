@@ -87,6 +87,13 @@ quickstarts' mentions of the setting are promotion work (10.9).
   lifespan, so this test runs the lifespan itself; a refused start has no
   typed-client surface. A subprocess run of `compute-provisioning-api` would
   avoid the swap but starts a server on a port; the lifespan runs the same steps.
+  Correction (section 7): `compute-provisioning-migrate` no longer calls the
+  refusal. Its reason, that the migration read the VM playbook to seed
+  `default`, ended when migration stopped reading operational configuration
+  (D6), so the command now reads only the database URL and log level; the
+  service's own startup step still refuses the key. Its `migrate.main()` test
+  was removed, and `test_migration_reads_no_configuration.py` runs the command
+  under two configurations instead.
 - [x] 1.3 Rename the chart's `config.playbook_path` value to `vm_playbook_path`
   in `helm/charts/provisioning/values.yaml` and make `values.schema.json` refuse
   `config.playbook_path`, as it refuses `pool_definitions_path` (D5). Extend
@@ -773,12 +780,29 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
 `test_job_envelope_migration.py`, and every test calling `run_migrations` or
 `apply_schema_migrations` with keyword inputs.
 
-- [ ] 7.1 `run_migrations(engine)` and `apply_schema_migrations(engine)` take only
+- [x] 7.1 `run_migrations(engine)` and `apply_schema_migrations(engine)` take only
   the engine; remove their configuration parameters, `seed_default_pool`,
   `_has_existing_pool_or_host_state`, and the special dispatch for
   `20260713_002` and `20261002_002`; `migrate.py` passes only the engine (D6).
   Update every test calling them with keyword inputs.
-- [ ] 7.2 `20260713_002` creates its tables and its column only: it writes no
+  Done. Every migration is now dispatched as `migration.apply(engine)`; the
+  two entrypoints' docstrings say the result depends on code and stored data
+  alone, citing the deployment-state spec, in place of the stale
+  "ARCHITECTURE.md § Schema Migration Execution" citation (also replaced in
+  `SchemaDriftError`'s docstring, `migrate.py`'s module docstring, and, beyond
+  the plan, the provisioning chart's init-container comment in
+  `templates/deployment.yaml`). `migrate.main()` reads only `database_url`
+  and `log_level` and no longer calls the retired-settings refusal (see 1.2's
+  correction). Every caller dropped its keyword inputs (unit:
+  `test_pool_offering_mode_migration.py`, `test_vm_host_executor_ref_migration.py`,
+  `test_host_connection_migration.py`, `test_legacy_vm_lease_migration.py`,
+  `services/test_definition_document_restart_safety.py`,
+  `services/test_capacity_definitions_startup.py`; integration: those named
+  under 7.2 and 7.3, `test_relay_administration.py`, `test_relay_port_allocator.py`,
+  `test_relay_port_leases.py`, `test_reservation_release_mirror_migration.py`,
+  `test_pool_advertisement_backing_migration.py`, `test_vm_provider_identity_migration.py`,
+  `test_legacy_backfill_teardown.py`, `test_fulfillment_convergence_after_legacy_backfill.py`).
+- [x] 7.2 `20260713_002` creates its tables and its column only: it writes no
   pool row and no configuration row, and raises an actionable `SchemaDriftError`
   when hosts exist and no `default` pool does (D6). Rewrite its docstring and
   the comments describing the seed. Persistence integration (`test_database.py`):
@@ -788,7 +812,43 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   fixture holds hosts from before resource pools inserts the `default` pool and
   configuration rows the retired seed wrote, so it still exercises the later
   migrations it was written for.
-- [ ] 7.3 `_migrate_job_envelopes` takes `host_id` from the row's `host_id`, then
+  Done. The refusal (`_refuse_hosts_without_default_pool`) runs before any
+  table or column is touched, counts the hosts, names the migration, and says
+  what to create (`default` with provider `ansible` and its
+  `ansible_pool_configs` row naming the VM playbook) or that the database can
+  first be migrated by a release whose migration still creates the pool. The
+  column is still added `NOT NULL DEFAULT 'default'`, as it was, so existing
+  hosts land in `default`; `20261023_002` relaxes it. Persistence
+  integration (`test_database.py`, in-memory SQLite through `run_migrations`):
+  a fresh database holds no pool and no configuration row and passes the
+  schema check; a database predating resource pools with an empty host table
+  migrates to a nullable, undefaulted `hosts.pool_id` with no pool; one with
+  two hosts and no `default` is refused naming the count, the migration, and
+  `ansible_pool_configs`, leaving no pool, no `pool_id` column, both hosts,
+  and `20260713_002` unrecorded while `20260713_001` is recorded. "With or
+  without a pool document configured" no longer has a test of its own, since
+  `run_migrations` takes no document; 7.5 shows the migration command's
+  result is the same under either. The legacy chain's fixture already held
+  `default` and its configuration (section 2); its comment now says why, the
+  `pool_document_configured` parametrization is gone, and it asserts the
+  fixture's pool is the only one. Tests that relied on the seed now store
+  the pool they need: a shared helper `tests/integration/legacy_default_pool.py`
+  (`test_legacy_backfill_teardown.py`,
+  `test_fulfillment_convergence_after_legacy_backfill.py`,
+  `test_vm_provider_identity_migration.py`), inline inserts in
+  `test_legacy_vm_lease_migration.py`, `test_pool_offering_mode_migration.py`
+  (as the pre-offering-mode `ansible` pool with no tags, so its derivation
+  still covers `default`), `test_pool_advertisement_backing_migration.py`
+  (its fresh-bootstrap test, which asserted the seeded pool's declarations,
+  is removed), `test_lease_target_reconciliation.py`, and a `vm-pool` in
+  `test_capacity_definitions_startup.py`. `test_pool_declaration_startup.py`,
+  which section 8 rewrites, now stores a serving site's `default` in its
+  fixture (`existing_default=True`); its interrupted-migration test interrupts
+  at the host count instead of the seed's pool query, and with no document
+  configured it now ends with no pool. The integration harness keeps its own
+  `default` (it builds tables from the models); its comment no longer says
+  migration seeds one, nor does `test_pools_api.py`'s.
+- [x] 7.3 `_migrate_job_envelopes` takes `host_id` from the row's `host_id`, then
   `params.host_id`, then `params.executor_target` only for a bare-metal job; it
   never reads a VM job's `vm_target` or `executor_target`, and logs each job left
   with no host, by ID, at WARNING (D6, design-review 24 F2). Persistence integration
@@ -796,15 +856,45 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   becomes its host; a VM job with only a guest target, and one whose guest name
   matches a registered host, both keep `host_id` NULL with a WARNING; `bm-1`
   still takes its machine from `executor_target`.
-- [ ] 7.4 Retire `default_pool_inventory_group` and `default_host_id` from
+  Done. "Bare-metal job" is the job's resolved offering mode (`bare_metal`),
+  the same value the migration records. Persistence integration
+  (`test_job_envelope_migration.py`, in-memory SQLite, the migration called
+  directly): `old-1` (only `vm_target`), `bare-1` (no evidence), and a new
+  `guest-1` whose `vm_target` and `executor_target` both name `kvm2`, a
+  host in the fixture's `hosts` table, all keep `host_id` NULL, and exactly
+  those three WARNINGs are logged, each naming its job; `vm-1` keeps its
+  `host_id` parameter and `bm-1` takes `bm-node-1`. The legacy chain in
+  `test_database.py` (job `job-1`, only `vm_target`) passes with its host
+  left NULL.
+- [x] 7.4 Retire `default_pool_inventory_group` and `default_host_id` from
   `settings.toml`, `helm/values.yaml:384`, `helm/charts/provisioning/values.yaml:161`,
   and the test fixtures (D6), and rewrite `settings.toml`'s comments on pool
   definitions and the retired group, which cite sections `ARCHITECTURE.md` lacks.
   Chart render: `make -C helm test-render`.
-- [ ] 7.5 Persistence integration (deployment-state delta): migrating copies of one
+  Done, and from `config/config.yml`'s key list. Fixtures: both integration
+  harnesses' `MagicMock` settings and the unit `mock_settings`. Neither key is
+  refused, unlike `playbook_path`: ignoring them changes nothing the service
+  does. The pool-definitions comment now cites `DEPLOYMENT_AND_CONFIG.md`,
+  "Definition documents", and says migration creates no pool; section 8 adds
+  the seed. A repository search finds neither key outside the change's
+  documents and 7.5's test. Chart render: `make -C helm test-render` passed.
+- [x] 7.5 Persistence integration (deployment-state delta): migrating copies of one
   database under two configurations that differ in the VM playbook, a host
   default, and the pool and seed documents produces the same schema and rows.
-- [ ] 7.6 **Verification checkpoint.** Persistence integration 7.2, 7.3, 7.5;
+  Done as `test_migration_reads_no_configuration.py` (file SQLite, the real
+  `compute-provisioning-migrate` entry point, `migrate.main()`, each
+  configuration set through the `PROVISIONING_` environment layer and loaded
+  by the service's own loader, as 1.2's test does). The source database
+  predates resource pools and job envelopes: a host, `default` (`ansible`)
+  with its configuration, a VM job naming only its guest, and a bare-metal
+  job. The configurations differ in `vm_playbook_path`, `default_host_id`,
+  `default_pool_inventory_group`, `pool_definitions_path` (a valid document
+  naming another pool, against a missing file), and `pool_seed_path`. Both
+  copies end with equal DDL for every schema object and equal rows in every
+  table, `schema_migrations` compared by ID (its `applied_at` is when each
+  copy ran). The stored pool keeps its own playbook, no document's pool
+  appears, and the VM job's host stays NULL.
+- [x] 7.6 **Verification checkpoint.** Persistence integration 7.2, 7.3, 7.5;
   `make -C helm test-render`. Run `make test` in `provisioning/compute/service`,
   `make check-packaging`, and `make check-comment-hygiene`.
   End-to-end: every lane migrates a fresh provisioning database through
@@ -813,6 +903,63 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   owns it.
   Owed by validation: `tests.yml`, job `release · deployment contracts` — `make
   -C helm test-render` passes with `default_host_id` gone from both values files.
+  Evidence: `make -C provisioning/compute/service test` — unit 653 passed,
+  integration 516 passed (re-run after the last edit, a docstring in
+  `app_runtime.py`); `make -C helm test-render` passed; repository `make test`
+  exited 0; `make check-packaging` and `make check-change` (comment hygiene
+  included) passed. End-to-end scenarios confirmed as planned, with one
+  consequence: from this commit until sections 8 and 9 land, a fresh e2e
+  stack has no pool, and `register_e2e_pool` still reads the system
+  `default`'s playbook, so the VM lanes cannot pass on this commit alone;
+  sections 7–9 are one round. The owed CI job is confirmed as planned
+  (`release-deployment` in `.github/workflows/tests.yml`).
+  Handoff: `run_migrations` creates every model table before the chain, so
+  `hosts` exists on every database 20260713_002 sees; its refusal counts rows,
+  not tables. A test needing a pool after migration stores it itself; the
+  integration directory's `legacy_default_pool.py` holds the VM `default` in
+  its post-chain shape. `test_pool_declaration_startup.py`'s
+  `existing_default` fixture flag is a stand-in until section 8 rewrites that
+  module.
+  Fresh-context review. The owner deferred every finding below to the
+  round's implementation review and triage, and section 7 was committed
+  with them open:
+  - 7.5's test does not discriminate. Its source database already holds hosts
+    and `default`, its VM job has a `vm_target`, and both
+    `pool_definitions_path` values are non-empty, so the pre-section code would
+    pass its equality check too. Rework it: migrate a host-less database under
+    an empty `pool_definitions_path` against a document; include a VM job with
+    no target against a set `default_host_id`; drop `pool_seed_path`, which
+    does not exist until section 8; vary `bare_metal_playbook_path` as well.
+    Also add a case running `migrate.main()` with `PROVISIONING_PLAYBOOK_PATH`
+    set, so the 1.2 correction's claim is tested. Then correct the 7.2, 7.5
+    and 1.2 notes and `test_retired_settings_startup.py`'s docstring.
+  - Fix two comments in that test: the module docstring's "every operational
+    setting migration once read" narrates history, and the comment at the
+    final job assertion credits a guard the test does not show.
+  - 7.3: the fixture's legacy `ansible_jobs` has no `host_id` column, so the
+    row's own `host_id` precedence is untested, as is a bare-metal job whose
+    `params.host_id` outranks its `executor_target`. Add both, or narrow the
+    note.
+  - 7.2's note says the refusal runs "before any table or column is touched".
+    That is true only within the migration; earlier migrations and
+    `run_migrations`' table creation precede it. Reword the note.
+  - Wording: `settings.toml`'s pool-definitions comment reads as if migration
+    creates no pool only when the path is empty; the chart's init-container
+    comment ("which refuses") reads as if the container refuses, and its line
+    is overlong.
+  - Use `legacy_default_pool.py` instead of the private
+    `test_database._create_pre_pool_hosts` import where it fits (low).
+  - Declined or deferred: six touched tests in `tests/unit` run real SQLite.
+    The misplacement predates this section, and TESTING.md's move-when-touched
+    rule is written for library packages, so moving them is not this
+    section's. Citations to deployment-state "Service-owned migration history"
+    and to `DEPLOYMENT_AND_CONFIG.md` resolve; their text is promoted at
+    closeout (10.9, 10.11).
+  - Observations, not defects: the job engine's failure message for a NULL
+    host says "host None is not registered" (`compute_provisioning/jobs/engine.py`).
+    A pre-pools database with capacity rows but no hosts migrates into
+    declarations naming a nonexistent `default` (20260921_002), which is
+    consistent with D6's wording.
 
 ## 8. A fresh site is seeded from its seed document
 

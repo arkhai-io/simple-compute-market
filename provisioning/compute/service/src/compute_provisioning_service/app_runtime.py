@@ -28,8 +28,9 @@ def refuse_retired_settings() -> None:
     """Refuse a configuration stating a setting the service no longer reads.
 
     Runs before any other step, so a stale profile stops the service before it
-    composes anything that would ignore the key; the migration command, which
-    runs first in a deployment, refuses it before opening the database.
+    composes anything that would ignore the key. The migration command does not
+    refuse it: migration reads no operational configuration, so a retired key
+    cannot change what it does.
     """
     settings.refuse_retired_settings()
 

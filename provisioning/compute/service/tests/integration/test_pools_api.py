@@ -391,10 +391,10 @@ class TestDeletePool:
         is never hard-deleted."""
         client, _ = client_and_queue
 
-        # The test fixture seeds "default" as a bare ResourcePool row with
-        # no matching Ansible side-table config (unlike the real migration
-        # seed). Give it one first — otherwise any update, not just
-        # disable, would 400 on missing provider_config.
+        # The test fixture stores "default" as a bare ResourcePool row with
+        # no matching Ansible side-table config. Give it one first —
+        # otherwise any update, not just disable, would 400 on missing
+        # provider_config.
         await client.pools.replace_pool(
             "default",
             PoolReplace(

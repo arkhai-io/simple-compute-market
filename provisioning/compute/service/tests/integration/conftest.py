@@ -475,10 +475,9 @@ def _initialize_test_database(engine):
     # scheduling_cursors) ride market_fulfillment's own metadata.
     from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
-    # The host authority requires pool_id to reference an existing pool. The real
-    # migration always seeds "default" before hosts.pool_id can be NOT
-    # NULL (see db/migrations.py); mirror that guarantee here since this
-    # fixture builds schema directly rather than through the migration.
+    # Migration creates no pool. The suite's tests place hosts and declare
+    # capacity in a pool named "default", so the harness stores one, serving
+    # both compute modes.
     from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
     with Session(engine) as session:
         session.add(ResourcePool(
@@ -617,7 +616,6 @@ async def client_and_queue(
 
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,

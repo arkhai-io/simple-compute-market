@@ -31,7 +31,6 @@ from vm_provisioning_adapter.db import AnsiblePoolConfig, Relay, RelayPortLease
 
 
 _PLAYBOOK_PATH = "/configured/playbook.yaml"
-_INVENTORY_GROUP = "kvm_hosts"
 
 
 def _engine():
@@ -40,11 +39,7 @@ def _engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path=_PLAYBOOK_PATH,
-        default_inventory_group=_INVENTORY_GROUP,
-    )
+    run_migrations(engine)
     return engine
 
 
@@ -256,11 +251,7 @@ class TestMigrations:
 
     def test_running_migrations_twice_is_idempotent(self):
         engine = _engine()
-        run_migrations(
-            engine,
-            default_playbook_path=_PLAYBOOK_PATH,
-            default_inventory_group=_INVENTORY_GROUP,
-        )
+        run_migrations(engine)
         with Session(engine) as session:
             session.add(_lease("10.0.0.9:7000", 6100))
             session.commit()

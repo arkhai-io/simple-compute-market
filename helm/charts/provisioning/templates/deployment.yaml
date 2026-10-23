@@ -27,9 +27,10 @@ spec:
       securityContext:
         fsGroup: 1000
       initContainers:
-        # Applies DB migrations before the main container starts — see
-        # ARCHITECTURE.md § Schema Migration Execution. Same image, only the
-        # command differs. `Init:Error` in pod status is an unambiguous
+        # Applies DB migrations before the main container starts, which
+        # refuses a database behind its last migration — see
+        # openspec/specs/deployment-state/spec.md, "Service-owned migration
+        # history". Same image, only the command differs. `Init:Error` in pod status is an unambiguous
         # migration-failure signal, distinct from an application crash.
         # Idempotent: safe to re-run on every rollout/restart.
         - name: provisioning-migrate

@@ -111,7 +111,6 @@ async def client_and_queue(
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,

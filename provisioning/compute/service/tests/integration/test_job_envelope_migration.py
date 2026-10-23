@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
@@ -40,7 +41,13 @@ def _legacy(engine) -> None:
             ("bare-1", {"offering_mode": "vm"}, None, None, "vm", "destroy"),
             ("down-1", {"offering_mode": "vm", "vm_action": "destroy", "host_id": "kvm1"},
              {"vm_name": "t1"}, None, "vm", "teardown"),
+            # A VM job's guest targets name its guest, even where the guest's
+            # name is also a registered host's.
+            ("guest-1", {"offering_mode": "vm", "vm_target": "kvm2",
+                         "executor_target": "kvm2"}, None, None, "vm", "create"),
         ]
+        connection.execute(text("CREATE TABLE hosts (host_id VARCHAR PRIMARY KEY)"))
+        connection.execute(text("INSERT INTO hosts VALUES ('kvm1'), ('kvm2')"))
         for job_id, params, result, pid, mode, action in jobs:
             connection.execute(
                 text(
@@ -87,11 +94,12 @@ def _credentials(engine) -> dict[str, dict]:
     return {row[0]: json.loads(row[1]) for row in rows}
 
 
-def test_results_and_handles_convert_and_hosts_are_recorded() -> None:
+def test_results_and_handles_convert_and_hosts_are_recorded(caplog) -> None:
     engine = _engine()
     _legacy(engine)
 
-    _migrate_job_envelopes(engine, default_host_id="kvm-default")
+    with caplog.at_level(logging.WARNING, logger=_migrate_job_envelopes.__module__):
+        _migrate_job_envelopes(engine)
 
     jobs = _jobs(engine)
     assert jobs["vm-1"] == {
@@ -103,17 +111,28 @@ def test_results_and_handles_convert_and_hosts_are_recorded() -> None:
             "value": {"host_ip": "203.0.113.9"},
         },
     }
+    # A bare-metal job's executor target is the machine the plan wrote.
     assert jobs["bm-1"]["host_id"] == "bm-node-1"
     assert jobs["bm-1"]["handle"] == {"pid": 7}
     assert jobs["bm-1"]["result"]["result_kind"] == "bare_metal_access"
-    assert jobs["old-1"] == {"host_id": "t1", "handle": None, "result": None}
+    # A VM job's guest target is never read as its host, nor is any default.
+    assert jobs["old-1"] == {"host_id": None, "handle": None, "result": None}
     with engine.connect() as connection:
         route = connection.execute(text(
             "SELECT offering_mode, action_kind, executor_action FROM ansible_jobs "
             "WHERE id = 'old-1'"
         )).one()
     assert tuple(route) == ("vm", "create", "create")
-    assert jobs["bare-1"]["host_id"] == "kvm-default"
+    assert jobs["bare-1"]["host_id"] is None
+    assert jobs["guest-1"]["host_id"] is None
+    unhosted = sorted(
+        record.getMessage() for record in caplog.records
+        if record.levelno == logging.WARNING
+    )
+    assert unhosted == [
+        f"Job {job} names no physical host; its host_id stays NULL"
+        for job in ("bare-1", "guest-1", "old-1")
+    ]
     # A contract action keeps its identity; the job is routed, and its result
     # labelled, by the action its executor ran.
     assert jobs["down-1"]["result"]["result_kind"] == "vm_destroy"
@@ -157,9 +176,9 @@ def test_credentials_become_the_envelopes_the_contract_route_served() -> None:
 def test_running_it_again_changes_nothing() -> None:
     engine = _engine()
     _legacy(engine)
-    _migrate_job_envelopes(engine, default_host_id="kvm-default")
+    _migrate_job_envelopes(engine)
     before = (_jobs(engine), _credentials(engine))
 
-    _migrate_job_envelopes(engine, default_host_id="kvm-default")
+    _migrate_job_envelopes(engine)
 
     assert (_jobs(engine), _credentials(engine)) == before

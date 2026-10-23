@@ -28,6 +28,38 @@ def _sqlite_memory_engine():
     )
 
 
+def _create_pre_pool_hosts(connection, names):
+    """The host table as a database from before resource pools held it."""
+    connection.execute(text(
+        """
+        CREATE TABLE hosts (
+            name VARCHAR NOT NULL,
+            kvm_host VARCHAR NOT NULL,
+            ssh_user VARCHAR NOT NULL,
+            ssh_key_type VARCHAR NOT NULL,
+            ssh_key_value VARCHAR NOT NULL,
+            gpu_count INTEGER NOT NULL,
+            enabled BOOLEAN NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY (name)
+        )
+        """
+    ))
+    for name in names:
+        connection.execute(text(
+            """
+            INSERT INTO hosts (
+                name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
+                gpu_count, enabled
+            ) VALUES (
+                :name, '10.0.0.1', 'root', 'path', '/keys/id_ed25519',
+                0, 1
+            )
+            """
+        ), {"name": name})
+
+
 def _create_pre_migration_tables(engine):
     with engine.begin() as connection:
         connection.execute(text(
@@ -59,33 +91,7 @@ def _create_pre_migration_tables(engine):
             )
             """
         ))
-        connection.execute(text(
-            """
-            CREATE TABLE hosts (
-                name VARCHAR NOT NULL,
-                kvm_host VARCHAR NOT NULL,
-                ssh_user VARCHAR NOT NULL,
-                ssh_key_type VARCHAR NOT NULL,
-                ssh_key_value VARCHAR NOT NULL,
-                gpu_count INTEGER NOT NULL,
-                enabled BOOLEAN NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                PRIMARY KEY (name)
-            )
-            """
-        ))
-        connection.execute(text(
-            """
-            INSERT INTO hosts (
-                name, kvm_host, ssh_user, ssh_key_type, ssh_key_value,
-                gpu_count, enabled
-            ) VALUES (
-                'kvm1', '10.0.0.1', 'root', 'path', '/keys/id_ed25519',
-                0, 1
-            )
-            """
-        ))
+        _create_pre_pool_hosts(connection, ("kvm1",))
         # Legacy shape of the site-authority ledger tables: no
         # capacity/dimensions/dimensions columns yet. A populated row
         # here exercises the actual additive-column migration path,
@@ -185,8 +191,9 @@ def _create_pre_migration_tables(engine):
             )
             """
         ))
-    # A database holding hosts and VM leases also holds the default pool and
-    # its configuration, whose inventory group the lease conversion reads; the
+    # Migration places existing hosts in `default` and refuses a database
+    # holding hosts without that pool, so this one holds it, with the VM
+    # configuration whose inventory group the lease conversion reads; the
     # current model's table has no such column, so it is added here.
     ResourcePool.__table__.create(bind=engine)
     AnsiblePoolConfig.__table__.create(bind=engine)
@@ -221,22 +228,14 @@ def _create_pre_migration_tables(engine):
         ))
 
 
-@pytest.mark.parametrize("pool_document_configured", [False, True])
-def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
-    tmp_path, pool_document_configured,
-):
+def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema():
     engine = _sqlite_memory_engine()
     _create_pre_migration_tables(engine)
     assert "vm_remove_job_id" not in {
         column["name"] for column in inspect(engine).get_columns("vm_leases")
     }
 
-    run_migrations(
-        engine,
-        default_playbook_path="/configured/playbook.yaml",
-        default_inventory_group="legacy_hosts",
-        pool_definitions_path=tmp_path / "pools.yaml" if pool_document_configured else None,
-    )
+    run_migrations(engine)
 
     inspector = inspect(engine)
     ansible_columns = {
@@ -349,11 +348,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
 
     # New fulfillment tables are mounted by current metadata and initialization
     # remains safe to run repeatedly.
-    run_migrations(
-        engine,
-        default_playbook_path="/configured/playbook.yaml",
-        default_inventory_group="legacy_hosts",
-    )
+    run_migrations(engine)
     check_schema_version(engine)
 
     assert "resource_pools" in inspector.get_table_names()
@@ -366,12 +361,12 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
         assert host.connection().public["public_host"] is None
         assert job.capacity_reservation_id is None
         # The pre-existing host (inserted before the migration ran) is
-        # backfilled to the default pool by the column's DB-level DEFAULT.
+        # placed in the default pool by the column's DB-level DEFAULT.
         assert host.pool_id == DEFAULT_POOL_ID
 
-        default_pool = session.query(ResourcePool).filter(
-            ResourcePool.id == DEFAULT_POOL_ID
-        ).one()
+        # The fixture's pool is the only one; migration wrote none.
+        default_pool = session.query(ResourcePool).one()
+        assert default_pool.id == DEFAULT_POOL_ID
         assert default_pool.label == "Default Pool"
         assert default_pool.provider == "vm.ansible"
         assert default_pool.enabled is True
@@ -565,6 +560,64 @@ def test_run_migrations_is_idempotent():
         ).scalar_one()
     # Each migration recorded exactly once; the pinned-ID test names them.
     assert migration_count == len(MIGRATIONS)
+
+
+def _migration_ids(engine) -> set[str]:
+    with engine.connect() as connection:
+        return {row[0] for row in connection.execute(text("SELECT id FROM schema_migrations"))}
+
+
+def _pool_rows(engine) -> tuple[int, int]:
+    with engine.connect() as connection:
+        return tuple(
+            connection.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
+            for table in ("resource_pools", "ansible_pool_configs")
+        )
+
+
+def test_a_fresh_database_holds_no_pool_after_migration():
+    engine = _sqlite_memory_engine()
+
+    run_migrations(engine)
+
+    assert _pool_rows(engine) == (0, 0)
+    check_schema_version(engine)
+
+
+def test_a_database_predating_resource_pools_with_no_hosts_migrates():
+    engine = _sqlite_memory_engine()
+    with engine.begin() as connection:
+        _create_pre_pool_hosts(connection, ())
+
+    run_migrations(engine)
+
+    assert _pool_rows(engine) == (0, 0)
+    pool = {c["name"]: c for c in inspect(engine).get_columns("hosts")}["pool_id"]
+    assert pool["nullable"] and pool["default"] is None
+    check_schema_version(engine)
+
+
+def test_a_database_with_hosts_and_no_default_pool_is_refused():
+    """Its hosts predate resource pools; placing them needs a pool and a
+    provider the migration does not know, so it creates none and places none."""
+    engine = _sqlite_memory_engine()
+    with engine.begin() as connection:
+        _create_pre_pool_hosts(connection, ("kvm1", "kvm2"))
+
+    with pytest.raises(SchemaDriftError) as refusal:
+        run_migrations(engine)
+
+    message = str(refusal.value)
+    assert "2 host(s) but no resource pool 'default'" in message
+    assert "20260713_002_resource_pools_and_hosts_pool_id" in message
+    assert "ansible_pool_configs" in message
+    assert _pool_rows(engine) == (0, 0)
+    assert "pool_id" not in {c["name"] for c in inspect(engine).get_columns("hosts")}
+    applied = _migration_ids(engine)
+    assert "20260713_001_ansible_jobs_contract_fields" in applied
+    assert "20260713_002_resource_pools_and_hosts_pool_id" not in applied
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM hosts")).scalar_one() == 2
 
 
 # ---------------------------------------------------------------------------
