@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from market_core import DomainIdentity, MarketDomainContract, MARKET_DOMAIN_CONTRACT_VERSION, ImmutableCodecCapability
 from market_resource_pools import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
 
@@ -21,25 +20,9 @@ from arkhai_api_selling.quota_listing import (
     reopenable_listing_ids,
     stale_open_listing_ids,
 )
-from tests.bundles import EXAMPLE
+from tests.bundles import DOMAIN, EXAMPLE
 
 
-def _identity(value):
-    return value
-
-
-DOMAIN = MarketDomainContract(
-    identity=DomainIdentity(EXAMPLE.kind),
-    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
-    codecs=ImmutableCodecCapability(
-        normalize_listing=_identity,
-        normalize_message=_identity,
-        normalize_terms=_identity,
-        normalize_materialization=_identity,
-        normalize_receipt=_identity,
-        normalize_result=_identity,
-    ),
-)
 POOL = QuotaPool("default", ResolvedPool(BACKED, frozenset({"example"}), True))
 
 

@@ -135,9 +135,11 @@ The selling bundle's issuance projection MUST map the listing as accepted and
 pinned to the negotiation thread to the authority's issuance command's named
 service identity and quota resource, and the selling library MUST combine them
 with the accepted terms' quantity and key target into that command; neither
-MUST read a listing republished since acceptance. A storefront composing the
-selling library MUST write a listing's resource only when it creates the
-listing, so that republishing creates another listing. For a quota-backed
+MUST read a listing changed since acceptance. The selling library MUST record
+the listing as accepted with the negotiation, immutably, before the
+negotiation's success is recorded, and MUST issue from that record; only a
+negotiation accepted before recording existed, whose thread is unbound, MAY
+issue from the stored listing. For a quota-backed
 domain the selling library MUST refuse, before publication and again before
 acceptance, a listing that names no quota resource, and before acceptance a
 listing whose quota resource differs from the one its durable binding records.
@@ -149,6 +151,20 @@ The selling library MUST read no domain field name of its own.
   buyer's acceptance against the old one
 - **THEN** the issuance command for that acceptance carries the identity the
   buyer accepted
+
+#### Scenario: A listing's service changes in place after acceptance
+
+- **WHEN** a listing's service identity or endpoint changes after a buyer's
+  acceptance while its quota resource stays the same
+- **THEN** the issuance command and the delivered connection payload carry
+  the service and endpoint recorded at acceptance
+
+#### Scenario: An issuance result answers another request
+
+- **WHEN** the authority's signed issuance result differs from the submitted
+  request in its fulfillment identity, request digest, negotiation, owner,
+  service, quota resource, quantity, or key target
+- **THEN** no credential is stored and no fulfilled progress is recorded
 
 #### Scenario: A quota-backed listing names no resource
 
@@ -163,6 +179,30 @@ The selling library MUST read no domain field name of its own.
   one its durable binding recorded at creation
 - **THEN** the source check before every seller decision and acceptance
   refuses the listing as a declared mismatch
+
+### Requirement: A delivery's public record is safe and final
+
+The selling library MUST refuse an issuance result that does not answer the
+submitted request, recording no credential and no fulfilled progress. A
+public-result extension MUST receive the issuance result without its bearer
+secret, and the selling library MUST refuse, before any continuation attests or
+records the delivery, an extension that is not plain data, that names a field
+the delivery already publishes or keeps private, or that carries the bearer
+secret anywhere. Issuance progress that reaches `ready` or `failed` MUST NOT
+change afterwards.
+
+#### Scenario: An extension carries the secret
+
+- **WHEN** a domain's public-result extension returns the bearer secret nested
+  inside another value
+- **THEN** the delivery is refused before attestation and no public or private
+  result is recorded
+
+#### Scenario: A stale write reaches finished progress
+
+- **WHEN** a delivery whose progress is `ready` receives a `provisioning` or
+  `failed` write
+- **THEN** the write is refused and the recorded progress is unchanged
 
 ### Requirement: Each domain composes the authority kit in its own service root
 

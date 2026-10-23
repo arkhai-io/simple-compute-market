@@ -22,6 +22,9 @@ from arkhai_api_selling.issuance import delivery
 
 #: Statuses whose verified facts are fixed; only the refund transitions move between them.
 _SETTLED = frozenset({"verified", "refunding", "refunded"})
+#: Progress a delivery reaches once. A terminal row never changes: another
+#: status is refused, and the same status returns the row as recorded.
+_TERMINAL_PROGRESS = frozenset({"ready", "failed"})
 
 
 class SettlementRepository:
@@ -107,21 +110,28 @@ class SettlementRepository:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
-                f"SELECT public_ref, fulfillment_uid FROM {self._progress} WHERE negotiation_id = ?",
+                f"SELECT public_ref, fulfillment_uid, status FROM {self._progress} WHERE negotiation_id = ?",
                 (negotiation_id,),
             ).fetchone()
             if old and (old[0] != public_ref or (old[1] and fulfillment_uid and old[1] != fulfillment_uid)):
                 raise ValueError("issuance progress changed established identity")
-            conn.execute(
-                f"INSERT INTO {self._progress} "
-                "(negotiation_id, public_ref, status, fulfillment_uid, public_result, credentials_ref, reason, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(negotiation_id) DO UPDATE SET "
-                "status=excluded.status, fulfillment_uid=COALESCE(excluded.fulfillment_uid, fulfillment_uid), "
-                "public_result=excluded.public_result, credentials_ref=COALESCE(excluded.credentials_ref, credentials_ref), "
-                "reason=excluded.reason, updated_at=excluded.updated_at",
-                (negotiation_id, public_ref, status, fulfillment_uid,
-                 json.dumps(public, sort_keys=True), credentials_ref, reason, now, now),
-            )
+            if old and old[2] in _TERMINAL_PROGRESS:
+                if status != old[2]:
+                    raise ValueError(f"issuance progress is already {old[2]}")
+                terminal = True
+            else:
+                terminal = False
+            if not terminal:
+                conn.execute(
+                    f"INSERT INTO {self._progress} "
+                    "(negotiation_id, public_ref, status, fulfillment_uid, public_result, credentials_ref, reason, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(negotiation_id) DO UPDATE SET "
+                    "status=excluded.status, fulfillment_uid=COALESCE(excluded.fulfillment_uid, fulfillment_uid), "
+                    "public_result=excluded.public_result, credentials_ref=COALESCE(excluded.credentials_ref, credentials_ref), "
+                    "reason=excluded.reason, updated_at=excluded.updated_at",
+                    (negotiation_id, public_ref, status, fulfillment_uid,
+                     json.dumps(public, sort_keys=True), credentials_ref, reason, now, now),
+                )
         return self.progress(negotiation_id)
 
     def record_refund_intent(self, negotiation_id: str) -> dict[str, Any]:

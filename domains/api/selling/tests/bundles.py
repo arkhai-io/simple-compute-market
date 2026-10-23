@@ -16,6 +16,18 @@ from datetime import datetime, timezone
 
 from arkhai_api.labels import IssuanceLabel
 from arkhai_api.purchase import provision_terms_model
+from market_core import (
+    MARKET_DOMAIN_CONTRACT_VERSION,
+    DomainCapability,
+    DomainIdentity,
+    ImmutableCodecCapability,
+    ImmutableFulfillmentCapability,
+    ImmutablePublicationCapability,
+    ImmutableSettlementCapability,
+    ImmutableStorefrontCapability,
+    MarketDomainContract,
+    SettlementStageTable,
+)
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer
 from pydantic import BaseModel, ConfigDict
@@ -40,6 +52,7 @@ class ExampleResource(BaseModel):
     product: str
     quota: str | None = None
     url: str | None = None
+    offering_mode: str | None = None
 
 
 class ExampleListing(BaseModel):
@@ -71,6 +84,39 @@ EXAMPLE = SellingContributions(
     issuance_projection=_subject,
     consumption_rule=ConsumptionRule.FIXED_PER_REQUEST,
 )
+
+
+def _unused(value: Any) -> Any:
+    return value
+
+
+DOMAIN = MarketDomainContract(
+    identity=DomainIdentity(EXAMPLE.kind),
+    contract_version=MARKET_DOMAIN_CONTRACT_VERSION,
+    codecs=ImmutableCodecCapability(
+        normalize_listing=ExampleListing.model_validate,
+        normalize_message=_unused,
+        normalize_terms=_unused,
+        normalize_materialization=_unused,
+        normalize_receipt=_unused,
+        normalize_result=_unused,
+    ),
+    declared_capabilities=frozenset(
+        {
+            DomainCapability.STOREFRONT,
+            DomainCapability.PUBLICATION,
+            DomainCapability.SETTLEMENT,
+            DomainCapability.FULFILLMENT,
+        }
+    ),
+    storefront=ImmutableStorefrontCapability(run_negotiation_policy=_unused),
+    publication=ImmutablePublicationCapability(source_factory=_unused),
+    settlement=ImmutableSettlementCapability(
+        seller_stages=SettlementStageTable({"opaque.future.v1": object()})
+    ),
+    fulfillment=ImmutableFulfillmentCapability(fulfill=_unused),
+)
+"""The neutral domain's contract, whose listing codec is the bundle's listing schema."""
 
 
 def with_extension(extension) -> SellingContributions:

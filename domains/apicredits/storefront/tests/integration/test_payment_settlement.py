@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
+from arkhai_api_selling.quota_listing import record_accepted_listing
 from fastapi import FastAPI
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
@@ -25,12 +27,14 @@ from market_arkhai_payments import (
     servicing_stage,
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
+from market_core import ImmutableFulfillmentCapability
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient, StorefrontClientError
 
 import apicredits_storefront.container as _container
 from apicredits_storefront.controllers.settle_controller import router, settlements_router
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.services.fulfillment_service import build_api_credit_failure_policy
 from apicredits_storefront.services.payment_settlement_service import (
@@ -235,6 +239,35 @@ async def test_a_verified_receipt_issues_credits_once(harness):
     evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
     assert evidence.status == "verified" and evidence.settlement_ref == h.data.transaction_id
     assert await h.db.load_escrow(escrow_uid=NEGOTIATION) is None
+
+
+async def test_a_listing_changed_after_acceptance_settles_what_was_accepted(harness):
+    """The payment service issues from the listing recorded at acceptance, not
+    from a listing whose service changed in place under the same quota resource."""
+    h = await harness()
+    composition = _container.resolved_settlement_composition
+    composition.domain = replace(
+        get_market_domain_contract(),
+        fulfillment=ImmutableFulfillmentCapability(fulfill=h.issuer.fulfill),
+    )
+    listing = await h.db.load_listing(listing_id=LISTING)
+    await record_accepted_listing(
+        _container.SELLING_CONTRIBUTIONS, h.db, domain=composition.domain,
+        negotiation_id=NEGOTIATION, listing_id=LISTING, listing_record=listing,
+    )
+    stored = listing["listing_resource"]
+    resource = json.loads(stored) if isinstance(stored, str) else dict(stored)
+    await h.db.update_listing(
+        listing_id=LISTING, listing_resource={**resource, "service_name": "another", "base_url": "http://other.local"},
+    )
+
+    h.serve()
+    ready = await h.buyer.settle_agreement(NEGOTIATION)
+
+    assert ready.status == "ready"
+    evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
+    accepted = evidence.evidence["delivery"]["listing_resource"]
+    assert (accepted["service_name"], accepted["base_url"]) == ("sample", "http://sample.local")
 
 
 async def test_an_impostor_receipt_is_refused_without_a_grant(harness):

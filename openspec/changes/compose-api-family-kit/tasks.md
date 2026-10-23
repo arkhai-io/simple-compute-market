@@ -1291,6 +1291,104 @@ selling library's core-storefront edge, `ARCHITECTURE.toml`.
       do, because the fulfillment hook's signature is fixed by core; the
       failure actions' order is the selling library's dispatch and is tested
       there.
+      **Review round (2026-10-23).** An external implementation review of
+      this section's commit (`b8d3a0730`) was triaged with the owner, who
+      accepted these fixes, made in one commit; a fresh-context check of the
+      fixes then found gaps, fixed in the same commit:
+      - *Issuance result answers its request.* `fulfill` refuses a signed
+        result whose fulfillment identity, grant, request digest,
+        negotiation, owner, service, resource, quantity, key mode, or named
+        key differs from the request (`result_mismatch`): nothing is
+        delivered, no credential is stored, no failure policy runs, and the
+        local hold row is kept, since the grant's state is unknown. The
+        reservation is not compared: the authority may replace an expired
+        hold under the same grant. Unit: each of the nine fields and a named
+        existing key refused, a replaced hold accepted, the hold row kept.
+      - *The secret stays private.* An extension is handed the result without
+        its secret, and `fulfill` refuses an extension that is not plain JSON,
+        names a field the delivery publishes or keeps private, or carries the
+        secret under any key or nesting, before it reports the delivery
+        fulfilled, so no stage attests or records it; `persist_delivery`
+        checks the same again before it writes. Unit: the secret-free result,
+        each refusal at `fulfill`, nested secrets refused at persistence;
+        library integration: a delivery's secret stored privately beside an
+        extension and returned only to its owner.
+      - *Terminal progress stays terminal.* `checkpoint` refuses to move
+        `ready` or `failed` to another status, and a write repeating the
+        status returns the row as recorded. No path re-drives a terminal
+        delivery: the payment service returns early on terminal progress,
+        the Alkahest re-drive runs only on open progress, and the coordinator
+        writes `provisioning` only when none exists. Library integration:
+        both terminal states, content unchanged by a repeat.
+      - *The accepted listing is recorded* (supersedes the write-once reading
+        in 5.3's and 5.5's notes and in the 5.6 handoff; D7 is rewritten). At
+        acceptance, before the negotiation's success is recorded,
+        `record_accepted_listing` binds the thread from its listing
+        (`copy_listing_binding_to_thread`, once per thread; API-credit threads
+        are opened unbound, which task 6.5 corrects) and writes the listing's
+        resource to core's per-negotiation artifact table under a new
+        `listing` slot. The Alkahest stage and the payment service read it
+        through `accepted_listing_resource`: an unbound thread, accepted
+        before recording existed, reads the stored listing; a bound thread
+        without its record is refused, and the payment service refuses a
+        record that disagrees with its thread as a 409. No table or column
+        changes, so the schema baseline is unchanged. Library integration
+        (`test_accepted_listing.py`, core's real persistence): a service and
+        endpoint changed in place under the same quota resource still read as
+        accepted; an unbound thread reads the stored listing; a bound thread
+        without a record is refused; the record is written once. Through the
+        storefront: the real negotiation flow and settlement coordinator
+        (`test_settlement_fulfillment.py`, in `tests/unit/` beside the file's
+        other coordinator tests) and the payment service over HTTP
+        (`test_payment_settlement.py`, application integration) each issue
+        the accepted service after an in-place change, and each fails when the
+        record is bypassed. Core: `test_domain_binding_migrations.py` records
+        a listing artifact once under its thread.
+      - *Versioning fallout of the slot*, not new behaviour: the `listing`
+        slot is new core API, so `arkhai-core-storefront` is 0.16.0; the
+        capacity-publication kit pins it exactly, so it is 0.10.2; the four
+        exact pins on it (API-credits, VM, and bare-metal storefronts, the
+        compute provisioning service) move to 0.10.2, the VM storefront's
+        exact pin on the bare-metal storefront moves to 0.17.1, and the
+        changed distributions take patch bumps (VM and bare-metal
+        storefronts 0.17.1, provisioning service 0.17.3; the API-credits
+        storefront is already 0.12.0 in this section). `selling` requires
+        core 0.16.0 and capacity publication 0.10.2. Eleven locks relocked
+        under uv 0.11.17. The exception row's reason now says `selling`
+        imports only the registry types and writes through the repository
+        it is given.
+      - *Spec and CI.* The `api-family` delta gains "A delivery's public record
+        is safe and final" and the in-place-change and answered-another-request
+        scenarios, and states the unbound-thread exception; `tests.yml` gains
+        an `apicredits-domain` row; trailing blank lines are gone.
+      - *Pre-existing defects*, moved unchanged by this section, become tasks
+        in the sections that own their code: 6.4 (reconciliation paging), 6.5
+        (binding a thread at opening), 8.4 (uncertain Alkahest issuance), 8.5
+        (chain-acknowledgement loss), 8.6 (disabled mechanism's servicing
+        clients).
+      Declined, with the owner: 5.6 stays checked, as 1.7 to 4.5 are, since
+      the plan's header gives the end-to-end lanes to validation; and the
+      owning change `kit-owned-storefront-auth-and-persistence` is not edited,
+      since `make check-architecture-change` already holds it to the row it
+      owns. Declined from the fresh-context check: moving the coordinator
+      test out of `tests/unit/`, where the file's other coordinator tests sit,
+      is section 7's restructuring; and the Alkahest stage still needs the
+      stored listing to verify the escrow against the listing's release
+      condition, which is the stage's escrow verification and moves with it in
+      section 8, while what it issues comes from the record. Evidence:
+      `selling` 78 (62 unit, 16 library integration); core storefront 218
+      passed, 2 skipped; capacity publication 97; storefront kit 123;
+      API-credits storefront 189 (unit and application integration,
+      baselines and pins unchanged); VM storefront 1103 unit and 446
+      integration, bare-metal storefront 444, provisioning service 661 unit
+      and 485 integration, each with only the inherited failures 1.7 records
+      (the VM Alkahest toolchain pair, the dotenv-layering case); domain
+      library 19, contracts 37, vocabulary 61, client 25, authority 70,
+      service 42, buyer 27, e2e unit 80. `make test` fails only as 4.5
+      recorded. `make check-packaging` and comment hygiene pass on a copy
+      without the stale checkout; `make check-change` reports only the two
+      `api-family` citations closeout creates and, on the copy, the
+      agent-skills case.
 
 ## 6. Selling, part two: negotiation, publication, and lifecycle
 
@@ -1323,7 +1421,20 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       modules; its `startup.py` keeps only the preflight that is wiring. The
       three omitted guard tests and the negotiation integration tests pass
       against the kit. (D13.)
-- [ ] 6.4 Verification: `make test-api-selling` (unit, library integration),
+- [ ] 6.4 Reconciliation reads every listing, not the first 200: the close,
+      source-mismatch, and reopen passes in `publication_service.py` call
+      `list_listings(..., limit=200)` once and never page, so older listings
+      can stay open or closed wrongly for good. Page through every listing
+      with a stable cursor as they move into `selling`, and prove it with more
+      than 200 listings at library integration. (Found by the external
+      implementation review of section 5; the behaviour predates this change.)
+- [ ] 6.5 API-credit threads take their listing's binding at opening, as
+      the negotiation protocol's opening requirement has them do and the VM and
+      bare-metal runtimes already do (`copy_listing_binding_to_thread` in the
+      opening hook); today they are bound only when an acceptance is recorded.
+      (Found by the fresh-context check of section 5's review round; the
+      unbound opening predates this change.)
+- [ ] 6.6 Verification: `make test-api-selling` (unit, library integration),
       `make -C domains/apicredits/storefront test` (application integration,
       baselines zero), `make test`, `make check-packaging`. End-to-end:
       `e2e_credits_deal`.
@@ -1395,7 +1506,26 @@ distributions own them.
       removed and `make check-architecture` reports nothing for it. A packaging
       test that a storefront environment composing only `alkahest.v1` installs
       no payments distribution. (D2, D12, D13.)
-- [ ] 8.4 Verification: `make test-api-selling-alkahest` and
+- [ ] 8.4 Uncertain issuance stays retryable under Alkahest: the stage's
+      `retry_uncertain = False` turns a timeout, a retryable 5xx, or a lost
+      acknowledgement into a terminal failure whose failure policy can release
+      quota the authority already committed. Keep an uncertain outcome
+      pending and re-drive it under the same fulfillment identity, compensate
+      only after a definite refusal, and prove a commit-then-timeout case.
+- [ ] 8.5 Chain-acknowledgement loss does not revoke a fulfilled grant: an
+      exception from `do_obligation` rolls the issuance back at once, though
+      the transaction may have been mined. Record a submission identity before
+      submitting, reconcile chain state after an uncertain outcome, and roll
+      back only once non-submission is proven.
+- [ ] 8.6 Accepted obligations are serviced after their mechanism is
+      disabled: `enabled_mechanism_clients` builds a client only for an
+      enabled section, so obligations accepted under Alkahest strand when it is
+      disabled and the storefront restarts. Build servicing clients for every
+      configured mechanism with recoverable accepted work, whatever its
+      publication setting, and prove accept, disable, restart, recover.
+      (8.4 to 8.6 were found by the external implementation review of section
+      5; each behaviour predates this change and moved unchanged.)
+- [ ] 8.7 Verification: `make test-api-selling-alkahest` and
       `make test-api-selling-arkhai-payments` (unit, library integration),
       `make -C domains/apicredits/storefront test` (application integration,
       baselines zero), `make test`, `make check-packaging`. End-to-end:
@@ -1543,7 +1673,9 @@ change to implementation.
 | D4 — plain-data route declarations adapted by the authority | `openspec/specs/api-family/spec.md` |
 | D3 — the negotiation and delivery carriers live in `contracts`, so a buyer installs no selling machinery | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
-| D7 — the projection's split, the pin as the Agreement's listing ID with write-once listing resources, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — core's per-negotiation artifacts gain a `listing` slot (`arkhai-core-storefront` 0.16.0) | `openspec/specs/market-composition/architecture.md` (domain artifacts) |
+| A delivery's public record is safe and final: the result checked against its request, the secret-free extension, terminal progress | `openspec/specs/api-family/spec.md` |
 | D5 — side-split mechanism distributions | `openspec/specs/api-family/spec.md`; `docs/development/ARCHITECTURE.md#family-kits` |
 | D6 — per-domain service roots, the capacity profile | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `docs/development/ARCHITECTURE.md#runtime-service-map` and `#authority-boundaries` |
 | D6 — the authority's startup: the migration chain, then the profile's pool seeded in initialization and every stored pool's declarations checked; the API-credits service's in-process migrations are the library's | `openspec/specs/api-credits/architecture.md#implementation-composition`; `docs/development/DEPLOYMENT_AND_CONFIG.md` (migrations at startup) |

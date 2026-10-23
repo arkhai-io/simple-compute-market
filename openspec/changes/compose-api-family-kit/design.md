@@ -331,17 +331,29 @@ only through the projection. The public connection payload a delivery returns
 delivery shape, filled from the projected subject, and keeps those keys because
 the recorded API-credits results carry them.
 
-"Pinned to the thread" is the Agreement's listing ID. No storefront table
-records a copy of the accepted listing; the Agreement's `listing_hash` covers
-the whole listing row, status and timestamps included, which change after
-acceptance, so it cannot verify the row a settlement later loads; and recording
-a copy would change the schema baseline (D9). Instead every settlement path
-loads the listing by the Agreement's ID, a composing storefront writes a
-listing's resource once, when it creates the listing, and republishing creates
-another listing. The source check before every acceptance also refuses a
-listing whose projected quota resource differs from the one its immutable
-binding records. A service identity rewritten in place would not be caught, so
-the write-once rule is normative for every composing storefront.
+"Pinned to the thread" is a record of the listing as accepted. Before the
+runtime records the negotiation's success, `selling` binds the thread to its
+listing's durable binding, which core does once per thread, and writes the listing's
+resource, as the domain's listing schema reads it, to core's immutable
+per-negotiation artifact table under a `listing` slot. Settlement issues from
+that record, never from the stored listing, so a listing whose service or
+endpoint changes in place after acceptance, under the same quota resource,
+still issues what the buyer accepted. Recording binds the thread, so an
+unbound thread was accepted before acceptances were recorded, and reads the
+stored listing as before; a bound thread without a record is refused. API-credit
+threads are opened unbound today, though the negotiation protocol has a thread
+copy its listing's binding at opening; binding them at opening is section 6's
+(task 6.5), and recording at acceptance does not depend on it. The record lives in the existing artifact table
+because a new table or column would change the schema baseline (D9), and the
+Agreement's `listing_hash` cannot stand in for it: it covers the whole stored
+row, status and timestamps included, which change after acceptance. The `listing`
+slot is new core API, so `arkhai-core-storefront` becomes 0.16.0; the
+capacity-publication kit pins the core storefront exactly, so the bump carries
+through it (0.10.2) to the four packages that pin it exactly and to the VM
+storefront's exact pin on the bare-metal storefront. That cascade is versioning
+fallout of the slot, not new behaviour in those packages. The source check
+before every acceptance also refuses a listing whose projected quota resource
+differs from the one its immutable binding records.
 
 The consumption rule is the rule's kind, a fixed amount per request: the amount
 is the gate's setting, which the storefront does not read, and adding a

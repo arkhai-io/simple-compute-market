@@ -18,7 +18,7 @@ from arkhai_api_selling.issuance import (
     progress_result,
     settlement_evidence,
 )
-from arkhai_api_selling.quota_listing import listing_binding
+from arkhai_api_selling.quota_listing import accepted_listing_resource, listing_binding
 
 from market_alkahest import AlkahestConditionalEscrowClient, create_alkahest_registration
 from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
@@ -461,25 +461,30 @@ class AlkahestSellerStage:
         pass
 
     async def prepare(self, **context: Any) -> Any:
-        composition = context.pop("composition", None)
+        composition = context.pop("composition", None) or container.resolved_settlement_composition
+        if composition is None:
+            raise ValueError("settlement composition is unavailable")
         prepared = await _prepare_alkahest_settlement(**context)
         db = context["sqlite_client"]
         thread = await db.load_negotiation_thread_row(negotiation_id=context["negotiation_id"])
         agreement, raw = accepted_agreement(thread)
+        accepted = await accepted_listing_resource(
+            composition.contributions, db, domain=composition.domain,
+            negotiation_id=agreement.negotiation_id, listing_id=agreement.listing_id,
+        )
         evidence = settlement_evidence(
-            container.SELLING_CONTRIBUTIONS,
+            composition.contributions,
             agreement, raw, reference=prepared.mechanism_ref, status="verified",
             source={"chain_name": context["chain_name"], "escrow_uid": prepared.mechanism_ref,
                     "obligation_index": prepared.selected_obligation_index,
                     "obligation_ref": derive_obligation_ref(prepared.agreement_ref, prepared.selected_obligation_index,
                                                            prepared.obligations[prepared.selected_obligation_index]),
                     "funding_expiration_unix": prepared.obligations[prepared.selected_obligation_index]["expiration_unix"]},
-            order=prepared.fulfillment_input.order,
+            order={"listing_resource": accepted},
         )
         await db.save_settlement_evidence(evidence)
         return replace(prepared, fulfillment_input=replace(
-            prepared.fulfillment_input, sqlite_client=db,
-            composition=composition or container.resolved_settlement_composition,
+            prepared.fulfillment_input, sqlite_client=db, composition=composition,
         ))
 
     async def _start(self, *, db: Any, composition: Any, coordinator: Any, reference: str, body: Any) -> dict[str, Any] | None:

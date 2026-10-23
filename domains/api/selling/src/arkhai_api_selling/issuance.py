@@ -15,11 +15,11 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from arkhai_api.issuance import IssuanceRequest, KeyDisposition, issuance_request
+from arkhai_api.issuance import IssuanceRequest, IssuanceResult, KeyDisposition, issuance_request
 from arkhai_api.purchase import provision_terms_model
 from arkhai_api_client import AuthorityClient, AuthorityError
 from market_core import SettlementEvidence
@@ -224,6 +224,31 @@ def connection_payload(
     )
 
 
+def result_mismatch(request: IssuanceRequest, result: IssuanceResult) -> str | None:
+    """The first field in which ``result`` does not answer ``request``, or ``None``.
+
+    The capacity reservation is not compared: the authority may replace an
+    expired hold with a fresh reservation under the same grant.
+    """
+    expected = {
+        "fulfillment_id": request.fulfillment_id,
+        "grant_id": request.fulfillment_id,
+        "request_digest": request.request_digest,
+        "negotiation_id": request.negotiation_id,
+        "owner": request.owner,
+        "service": request.service,
+        "resource_id": request.resource_id,
+        "quantity": request.quantity,
+        "key_mode": request.key.mode,
+    }
+    if request.key.key_id is not None:
+        expected["key_id"] = request.key.key_id
+    for field_name, value in expected.items():
+        if getattr(result, field_name) != value:
+            return field_name
+    return None
+
+
 async def fulfill(
     contributions: SellingContributions,
     *,
@@ -327,6 +352,27 @@ async def fulfill(
             }
         return await _fail("issuance_unreachable", f"Issuance failed: {error}")
 
+    mismatch = result_mismatch(request, issuance)
+    if mismatch is not None:
+        # A signed answer to another request says nothing about this one: the
+        # grant this request asked for may or may not exist. Nothing is
+        # delivered, and no compensation runs on a grant whose state is unknown.
+        message = f"Issuance answered another request: its {mismatch} differs"
+        stage_event(
+            "provision",
+            "failed",
+            settlement_ref=settlement_ref,
+            listing_id=listing_id,
+            resource_id=resource_id,
+            error=message,
+        )
+        return {
+            "status": "error",
+            "message": message,
+            "settlement_ref": settlement_ref,
+            "grant_unknown": True,
+        }
+
     issued_key_id = issuance.key_id
     stage_event(
         "provision",
@@ -342,6 +388,35 @@ async def fulfill(
         ),
         already_issued=issuance.already_issued,
     )
+
+    extension: dict[str, Any] | None = None
+    if contributions.public_result_extension is not None:
+        try:
+            extension = public_extension(
+                contributions.public_result_extension(
+                    listing_resource, issuance.model_copy(update={"secret": None})
+                ),
+                public={"key_id", "base_url", "balance", "connection_details"},
+                secret=issuance.secret,
+            )
+        except ValueError as error:
+            # Checked before the delivery is reported fulfilled, so no stage
+            # attests or records a delivery whose public result is unsafe.
+            message = f"Public result extension refused: {error}"
+            stage_event(
+                "provision",
+                "failed",
+                settlement_ref=settlement_ref,
+                listing_id=listing_id,
+                resource_id=resource_id,
+                error=message,
+            )
+            return {
+                "status": "error",
+                "message": message,
+                "settlement_ref": settlement_ref,
+                "grant_unknown": True,
+            }
 
     payload = connection_payload(
         contributions, subject=subject, key_id=issued_key_id, quantity=quantity
@@ -373,10 +448,8 @@ async def fulfill(
         "tenant_credentials": credentials,
         "issuance": issuance,
     }
-    if contributions.public_result_extension is not None:
-        result["public_extension"] = dict(
-            contributions.public_result_extension(listing_resource, issuance)
-        )
+    if extension is not None:
+        result["public_extension"] = extension
     return result
 
 
@@ -393,7 +466,8 @@ async def fulfill_from_hold(
     """Issue under the quota hold placed at acceptance, if one stands, then release the hold row.
 
     The hold row stays while issuance is pending, so a retry issues under the
-    same reservation.
+    same reservation, and when the grant's state is unknown, so an operator
+    resolving it still sees the hold.
     """
     delivery(contributions, evidence)
     hold = await db.load_capacity_hold(negotiation_id=evidence.negotiation_id)
@@ -410,12 +484,48 @@ async def fulfill_from_hold(
         apply_failure_policy=apply_failure_policy,
         held_reservation=held_reservation,
     )
-    if held_reservation is not None and result.get("status") != "pending":
+    if (
+        held_reservation is not None
+        and result.get("status") != "pending"
+        and not result.get("grant_unknown")
+    ):
         await db.delete_capacity_hold(negotiation_id=evidence.negotiation_id)
     return result
 
 
 _PRIVATE_KEYS = frozenset({"secret", "tenant_credentials"})
+
+
+def public_extension(
+    extension: Mapping[str, Any], *, public: Iterable[str], secret: str | None
+) -> dict[str, Any]:
+    """A domain's public-result extension, refused unless it is safe to publish.
+
+    It must be plain JSON, name no field the delivery already publishes or
+    keeps private, and carry the bearer secret nowhere, under any key or
+    nesting.
+    """
+    try:
+        encoded = json.dumps(dict(extension), sort_keys=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("public result extension must be plain JSON") from exc
+    plain = json.loads(encoded)
+    clashing = sorted(set(plain) & (set(public) | _PRIVATE_KEYS))
+    if clashing:
+        raise ValueError(f"public result extension may not carry {', '.join(clashing)}")
+    if secret and _carries(plain, secret):
+        raise ValueError("public result extension may not carry the bearer secret")
+    return plain
+
+
+def _carries(value: Any, secret: str) -> bool:
+    if isinstance(value, str):
+        return secret in value
+    if isinstance(value, Mapping):
+        return any(_carries(key, secret) or _carries(item, secret) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_carries(item, secret) for item in value)
+    return False
 
 
 async def persist_delivery(
@@ -426,28 +536,35 @@ async def persist_delivery(
     *,
     public_ref: str,
 ) -> dict[str, Any]:
-    """Record a delivery's progress: the secret privately, everything else publicly."""
-    private = PrivateResultRepository(db.db_path, contributions)
+    """Record a delivery's progress: the secret privately, everything else publicly.
+
+    The public result is checked before anything is written, so a refused
+    extension leaves no private credential behind.
+    """
     credentials = result.get("tenant_credentials") or {}
-    credentials_ref = None
-    issuance = result.get("issuance")
-    if credentials.get("secret"):
-        if issuance is None:
-            raise ValueError("private delivery requires canonical issuance identity")
-        stored = await asyncio.to_thread(
-            private.store, fulfillment_id=issuance.fulfillment_id,
-            owner=delivery(contributions, evidence).owner,
-            key_id=credentials["key_id"], secret=credentials["secret"],
-        )
-        credentials_ref = stored.credentials_ref
+    secret = credentials.get("secret")
     public = {key: value for key, value in credentials.items() if key != "secret"}
     if result.get("connection_details"):
         public["connection_details"] = result["connection_details"]
-    extension = result.get("public_extension") or {}
-    clashing = sorted(set(extension) & (set(public) | _PRIVATE_KEYS))
-    if clashing:
-        raise ValueError(f"public result extension may not carry {', '.join(clashing)}")
-    public.update(extension)
+    public.update(
+        public_extension(
+            result.get("public_extension") or {},
+            public=public,
+            secret=str(secret) if secret else None,
+        )
+    )
+    credentials_ref = None
+    issuance = result.get("issuance")
+    if secret:
+        if issuance is None:
+            raise ValueError("private delivery requires canonical issuance identity")
+        stored = await asyncio.to_thread(
+            PrivateResultRepository(db.db_path, contributions).store,
+            fulfillment_id=issuance.fulfillment_id,
+            owner=delivery(contributions, evidence).owner,
+            key_id=credentials["key_id"], secret=secret,
+        )
+        credentials_ref = stored.credentials_ref
     return await db.save_issuance_progress(
         negotiation_id=evidence.negotiation_id, public_ref=public_ref,
         status="ready" if result.get("status") == "fulfilled" else ("provisioning" if result.get("status") == "pending" else "failed"),

@@ -2024,6 +2024,7 @@ class SQLiteClient:
             raise ValueError("artifact_slot must be a non-empty string")
         codec_name = artifact_slot.partition(":")[0]
         if codec_name not in {
+            "listing",
             "message",
             "terms",
             "materialization",

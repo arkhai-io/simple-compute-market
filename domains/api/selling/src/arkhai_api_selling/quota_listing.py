@@ -15,7 +15,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 from core_storefront.domain_registry import (
+    StorefrontDomainBindingError,
     StorefrontDomainRegistration,
+    StorefrontDomainRegistry,
     StorefrontListingBinding,
     build_storefront_derivation_key,
 )
@@ -32,6 +34,7 @@ from arkhai_api_selling.issuance import (
 )
 
 LISTING_SOURCE_SCHEMA_VERSION = 1
+ACCEPTED_LISTING_SLOT = "listing"
 
 
 class QuotaPoolUnavailable(ValueError):
@@ -107,6 +110,76 @@ def registration(
         contract=domain,
         contribution_id=contributions.contribution_id,
     )
+
+
+def domain_registry(
+    contributions: SellingContributions, domain: MarketDomainContract
+) -> StorefrontDomainRegistry:
+    """The registry a storefront's per-negotiation artifacts are read and written under."""
+    return StorefrontDomainRegistry((registration(contributions, domain),))
+
+
+async def record_accepted_listing(
+    contributions: SellingContributions,
+    repository: Any,
+    *,
+    domain: MarketDomainContract,
+    negotiation_id: str,
+    listing_id: str,
+    listing_record: Mapping[str, Any],
+) -> None:
+    """Pin the listing a buyer accepts to the negotiation, before its success is recorded.
+
+    Settlement issues from this record, never from the stored listing, so a
+    listing changed after acceptance cannot change what the purchase issues.
+    The record is immutable: recording a different listing for the same
+    negotiation is refused. A negotiation's artifacts are keyed by its domain
+    binding, so the thread first takes its listing's binding, which binds a
+    thread at most once and leaves a bound one as it is.
+    """
+    await repository.copy_listing_binding_to_thread(
+        negotiation_id=negotiation_id, listing_id=listing_id
+    )
+    await repository.save_domain_artifact(
+        negotiation_id=negotiation_id,
+        artifact_slot=ACCEPTED_LISTING_SLOT,
+        value={"listing_resource": _listing_resource(contributions, listing_record)},
+        registry=domain_registry(contributions, domain),
+    )
+
+
+async def accepted_listing_resource(
+    contributions: SellingContributions,
+    repository: Any,
+    *,
+    domain: MarketDomainContract,
+    negotiation_id: str,
+    listing_id: str,
+) -> Mapping[str, Any]:
+    """The ``listing_resource`` the buyer accepted.
+
+    Recording binds the thread, so a thread with no domain binding was accepted
+    before acceptances were recorded, and reads the stored listing as it
+    stands. A bound thread must carry its record, read under its binding: a
+    missing record, or one that disagrees with the thread, is refused rather
+    than replaced by the stored listing.
+    """
+    try:
+        await repository.load_thread_binding(negotiation_id=negotiation_id)
+    except StorefrontDomainBindingError:
+        return _listing_resource(contributions, await repository.load_listing(listing_id=listing_id))
+    recorded = await repository.load_domain_artifact(
+        negotiation_id=negotiation_id,
+        artifact_slot=ACCEPTED_LISTING_SLOT,
+        registry=domain_registry(contributions, domain),
+    )
+    if recorded is None:
+        raise ValueError(f"negotiation {negotiation_id!r} has no record of its accepted listing")
+    return _listing_resource(contributions, _as_mapping(recorded))
+
+
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value.model_dump(mode="json") if hasattr(value, "model_dump") else value
 
 
 def prepare_listing_binding(

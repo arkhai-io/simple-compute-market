@@ -220,6 +220,58 @@ async def test_opening_copies_binding_message_and_artifact_in_one_transaction(tm
 
 
 @pytest.mark.asyncio
+async def test_an_accepted_listing_is_recorded_once_under_its_thread(tmp_path):
+    client = SQLiteClient(str(tmp_path / "storefront.db"))
+    listing_binding = _listing_binding()
+    await _persist_listing(client, listing_binding)
+    thread_binding = StorefrontThreadBinding(
+        negotiation_id="negotiation-a",
+        listing_id=listing_binding.listing_id,
+        site_id=listing_binding.site_id,
+        binding=listing_binding.binding,
+    )
+    await client.create_negotiation_thread(
+        negotiation_id=thread_binding.negotiation_id,
+        our_listing_id=thread_binding.listing_id,
+        their_listing_id="buyer-listing",
+        our_agent_id="https://seller.example",
+        their_agent_id="https://buyer.example",
+        buyer_principal=_principal(0x33),
+        seller_principal=_principal(0x11),
+        owner_id="seller",
+        binding=thread_binding,
+    )
+    registry = StorefrontDomainRegistry((_registration("vm", "compute.v1", "vms"),))
+    accepted = {"listing_resource": {"resource_type": "compute.gpu", "offering_mode": "vm"}}
+
+    await client.save_domain_artifact(
+        negotiation_id=thread_binding.negotiation_id,
+        artifact_slot="listing",
+        value=accepted,
+        registry=registry,
+    )
+    await client.save_domain_artifact(
+        negotiation_id=thread_binding.negotiation_id,
+        artifact_slot="listing",
+        value=accepted,
+        registry=registry,
+    )
+
+    assert await client.load_domain_artifact(
+        negotiation_id=thread_binding.negotiation_id,
+        artifact_slot="listing",
+        registry=registry,
+    ) == accepted
+    with pytest.raises(StorefrontDomainBindingError, match="conflicts with durable state"):
+        await client.save_domain_artifact(
+            negotiation_id=thread_binding.negotiation_id,
+            artifact_slot="listing",
+            value={"listing_resource": {"resource_type": "compute.cpu", "offering_mode": "vm"}},
+            registry=registry,
+        )
+
+
+@pytest.mark.asyncio
 async def test_thread_and_artifact_cross_swaps_fail_before_mutation(tmp_path):
     client = SQLiteClient(str(tmp_path / "storefront.db"))
     binding = _listing_binding()

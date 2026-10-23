@@ -105,9 +105,9 @@ def test_private_result_is_owner_exact_secret_safe_and_rotatable(db_path):
         repository.get(credentials_ref=first.credentials_ref, owner=STRANGER)
 
 
-def _evidence(status: str = "verified") -> SettlementEvidence:
+def _evidence(status: str = "verified", negotiation_id: str = "neg-1") -> SettlementEvidence:
     return SettlementEvidence(
-        "neg-1", "opaque.future.v1", "ref-1", status,
+        negotiation_id, "opaque.future.v1", f"ref-{negotiation_id}", status,
         {"kind": EXAMPLE.settlement_evidence_kind, "schema_version": 1,
          "agreement_digest": "a" * 64, "source": {"verified_source": "fixture"},
          "delivery": {"owner": BUYER.model_dump(mode="json"),
@@ -170,15 +170,31 @@ def test_unsettled_negotiations_are_the_open_deals_of_one_mechanism_oldest_first
     _accept(db_path, "neg-1", "opaque.future.v1", "2026-01-01T00:00:01Z")
     _accept(db_path, "neg-2", "opaque.future.v1", "2026-01-01T00:00:00Z")
     _accept(db_path, "neg-3", "other.v1", "2026-01-01T00:00:02Z")
+    _accept(db_path, "neg-4", "opaque.future.v1", "2026-01-01T00:00:03Z")
     repository.store(_evidence())
     repository.checkpoint("neg-1", public_ref="neg-1", status="ready")
+    repository.store(_evidence(negotiation_id="neg-4"))
+    repository.checkpoint("neg-4", public_ref="neg-4", status="provisioning")
 
-    # neg-1 is delivered; neg-2 has no evidence; neg-3 is another mechanism's.
-    assert repository.unsettled_negotiations(mechanism="opaque.future.v1", limit=10) == ["neg-2"]
-
-    repository.checkpoint("neg-1", public_ref="neg-1", status="provisioning")
-    assert repository.unsettled_negotiations(mechanism="opaque.future.v1", limit=10) == ["neg-2", "neg-1"]
+    # neg-1 is delivered; neg-2 has no evidence; neg-3 is another mechanism's;
+    # neg-4 is verified and still delivering.
+    assert repository.unsettled_negotiations(mechanism="opaque.future.v1", limit=10) == ["neg-2", "neg-4"]
     assert repository.unsettled_negotiations(mechanism="opaque.future.v1", limit=1) == ["neg-2"]
+
+
+@pytest.mark.parametrize("terminal", ["ready", "failed"])
+def test_terminal_progress_is_never_written_back(db_path, terminal):
+    repository = SettlementRepository(str(db_path), EXAMPLE)
+    repository.checkpoint("neg-1", public_ref="neg-1", status="provisioning")
+    repository.checkpoint("neg-1", public_ref="neg-1", status=terminal, reason="first")
+
+    for other in {"provisioning", "ready", "failed"} - {terminal}:
+        with pytest.raises(ValueError, match=f"already {terminal}"):
+            repository.checkpoint("neg-1", public_ref="neg-1", status=other)
+    replayed = repository.checkpoint(
+        "neg-1", public_ref="neg-1", status=terminal, reason="again", public_result={"key_id": "ak_x"}
+    )
+    assert (replayed["status"], replayed["reason"], replayed["public_result"]) == (terminal, "first", {})
 
 
 def test_a_refund_completes_only_from_refunding(db_path):

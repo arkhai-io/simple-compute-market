@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-compute-provisioning-service"
-version = "0.17.2"
+version = "0.17.3"
 license = "MIT"
 description = "Deployable cross-domain compute provisioning service"
 requires-python = ">=3.12"
@@ -73,7 +73,7 @@ dev = [
     # The storefront-side projection state and the aggregate it reads sites
     # through, which one integration test composes over the real site client
     # against this service.
-    "arkhai-kit-capacity-publication==0.10.1",
+    "arkhai-kit-capacity-publication==0.10.2",
     "arkhai-core-storefront>=0.14.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",

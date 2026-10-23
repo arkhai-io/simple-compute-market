@@ -62,4 +62,3 @@ async def test_an_accepted_mechanism_no_stage_serves_is_refused():
     stages = SettlementStageTable({"other.v1": _Stage("other")})
     with pytest.raises(ValueError, match="unsupported accepted settlement mechanism"):
         await prepare_settlement(stages, sqlite_client=_Threads(_thread()), negotiation_id="neg-accepted")
-

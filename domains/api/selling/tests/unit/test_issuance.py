@@ -20,7 +20,7 @@ from arkhai_api_selling.issuance import (
     prepare_issuance_request,
     settlement_evidence,
 )
-from tests.bundles import BUYER, EXAMPLE, accepted_agreement, with_extension
+from tests.bundles import BUYER, CLAIMANT, EXAMPLE, accepted_agreement, with_extension
 
 IssuanceResult = issuance_result_model(EXAMPLE.label)
 LISTING = {"product": "alpha", "quota": "quota-a", "url": "https://alpha.example"}
@@ -129,7 +129,7 @@ def test_evidence_records_the_listing_the_agreement_names():
 
     recorded = delivery(EXAMPLE, accepted)
     assert recorded.listing_id == "L-accepted"
-    assert recorded.listing_resource == LISTING
+    assert recorded.listing_resource == {**LISTING, "offering_mode": None}
     assert accepted.evidence["kind"] == "example.settlement-evidence.v1"
 
 
@@ -320,9 +320,140 @@ async def test_a_public_result_extension_rides_beside_the_connection_payload_and
 @pytest.mark.parametrize("key", ["secret", "tenant_credentials", "key_id"])
 async def test_an_extension_naming_a_private_or_existing_field_is_refused(key):
     bundle = with_extension(lambda _listing, _result: {key: "x"})
-    result = await fulfill(bundle, evidence=_evidence(), credits_client=_Authority(_no_secret), stage_event=_events()[1])
 
-    with pytest.raises(ValueError, match="may not carry"):
-        await persist_delivery(bundle, _ProgressStore(), _evidence(), result, public_ref="neg-1")
+    result = await fulfill(bundle, evidence=_evidence(), credits_client=_Authority(), stage_event=_events()[1])
+
+    assert result["status"] == "error" and "may not carry" in result["message"]
 
 
+# The result answers the request
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("fulfillment_id", "example-fulfillment.v1:" + "f" * 64),
+        ("negotiation_id", "neg-other"),
+        ("owner", CLAIMANT),
+        ("service", "beta"),
+        ("resource_id", "quota-b"),
+        ("quantity", 4),
+        ("key_mode", "existing"),
+        ("request_digest", "sha256:" + "e" * 64),
+        ("grant_id", "example-fulfillment.v1:" + "f" * 64),
+    ],
+)
+async def test_a_result_answering_another_request_delivers_nothing(field_name, value):
+    async def other_answer(request):
+        changed = {field_name: value}
+        if field_name == "fulfillment_id":
+            changed["grant_id"] = value
+        return _result(request).model_copy(update=changed)
+
+    events, stage_event = _events()
+    policy_calls = []
+
+    async def policy(**kwargs):
+        policy_calls.append(kwargs)
+
+    result = await fulfill(
+        EXAMPLE,
+        evidence=_evidence(),
+        credits_client=_Authority(other_answer),
+        stage_event=stage_event,
+        apply_failure_policy=policy,
+    )
+
+    assert result["status"] == "error"
+    assert field_name in result["message"]
+    assert "tenant_credentials" not in result and "issuance" not in result
+    assert not policy_calls
+    assert [event for _, event, _ in events] == ["failed"]
+
+
+async def test_a_replaced_hold_still_answers_the_request():
+    async def fresh_reservation(request):
+        return _result(request).model_copy(update={"capacity_reservation_id": "alloc-fresh"})
+
+    result = await fulfill(
+        EXAMPLE,
+        evidence=_evidence(),
+        credits_client=_Authority(fresh_reservation),
+        stage_event=_events()[1],
+        held_reservation={"capacity_reservation_id": "alloc-expired"},
+    )
+
+    assert result["status"] == "fulfilled"
+
+
+async def test_an_extension_is_handed_the_result_without_its_secret():
+    seen = []
+    bundle = with_extension(lambda _listing, issued: seen.append(issued) or {})
+
+    result = await fulfill(bundle, evidence=_evidence(), credits_client=_Authority(), stage_event=_events()[1])
+
+    assert result["tenant_credentials"]["secret"] == "ak_new.s3cret"
+    assert seen[0].secret is None
+
+
+@pytest.mark.parametrize(
+    "extension",
+    [
+        {"materialization": {"token": "ak_new.s3cret"}},
+        {"notes": ["see", {"k": "prefix ak_new.s3cret suffix"}]},
+        {"materialization": {"ak_new.s3cret": True}},
+    ],
+)
+async def test_an_extension_carrying_the_secret_anywhere_is_refused(extension):
+    result = await fulfill(EXAMPLE, evidence=_evidence(), credits_client=_Authority(), stage_event=_events()[1])
+    result["public_extension"] = extension
+
+    with pytest.raises(ValueError, match="bearer secret"):
+        await persist_delivery(EXAMPLE, _ProgressStore(), _evidence(), result, public_ref="neg-1")
+
+
+async def test_a_result_naming_another_existing_key_delivers_nothing():
+    evidence = _evidence()
+    evidence.evidence["delivery"].update(key_mode="existing", key_id="ak_mine")
+
+    async def other_key(request):
+        return _result(request, secret=None).model_copy(update={"key_id": "ak_other"})
+
+    result = await fulfill(EXAMPLE, evidence=evidence, credits_client=_Authority(other_key), stage_event=_events()[1])
+
+    assert result["status"] == "error" and "key_id" in result["message"]
+
+
+async def test_the_hold_row_stays_when_the_grants_state_is_unknown():
+    store = _HoldStore()
+
+    async def other_answer(request):
+        return _result(request).model_copy(update={"negotiation_id": "neg-other"})
+
+    result = await fulfill_from_hold(
+        EXAMPLE, evidence=_evidence(), db=store, credits_client=_Authority(other_answer),
+        stage_event=_events()[1],
+    )
+
+    assert result["status"] == "error"
+    assert store.deleted == []
+
+
+@pytest.mark.parametrize(
+    ("extension", "message"),
+    [
+        ({"materialization": {"token": "ak_new.s3cret"}}, "bearer secret"),
+        ({"blob": b"bytes"}, "plain JSON"),
+        ({"key_id": "ak_other"}, "may not carry key_id"),
+    ],
+)
+async def test_an_unsafe_extension_is_refused_before_the_delivery_reaches_its_stage(extension, message):
+    events, stage_event = _events()
+    bundle = with_extension(lambda _listing, _result: extension)
+
+    result = await fulfill(bundle, evidence=_evidence(), credits_client=_Authority(), stage_event=stage_event)
+
+    assert result["status"] == "error" and message in result["message"]
+    assert result["grant_unknown"] is True
+    assert "tenant_credentials" not in result and "public_extension" not in result
+    assert [event for _, event, _ in events] == ["credits_issued", "failed"]

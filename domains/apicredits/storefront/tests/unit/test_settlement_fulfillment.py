@@ -569,6 +569,50 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     assert len(issued) == 1
 
 
+async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted(settled_db, monkeypatch):
+    """The service changes in place under the same quota resource, which the
+    source check cannot see; issuance carries the service the buyer accepted."""
+    db, neg_id = settled_db
+    from apicredits_storefront import settlement_stages
+
+    async def verify(**_kwargs):
+        return 0
+
+    issued = []
+
+    async def issue(request):
+        issued.append(request)
+        return _issuance_result(request)
+
+    async def attest(_payload, _escrow_uid):
+        return "0xfulfill"
+
+    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    listing = await db.load_listing(listing_id=thread["our_listing_id"])
+    stored = listing["listing_resource"]
+    resource = json.loads(stored) if isinstance(stored, str) else dict(stored)
+    await db.update_listing(
+        listing_id=thread["our_listing_id"],
+        listing_resource={**resource, "service_name": "Another Service", "base_url": "https://other.example"},
+    )
+    completed = asyncio.Event()
+    _runtime, _worker, coordinator = _build_settlement_composition(
+        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+    )
+
+    await coordinator.start(
+        escrow_uid="0xdeal", negotiation_id=neg_id,
+        mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),
+        chain_name="anvil", request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(completed.wait(), timeout=5)
+
+    assert (issued[0].service, issued[0].resource_id) == (resource["service_name"], resource["resource_id"])
+    progress = await db.load_issuance_progress(reference="0xdeal")
+    assert json.loads(progress["public_result"]["connection_details"])["service_name"] == resource["service_name"]
+
+
 async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailable(
     settled_db, monkeypatch,
 ):
