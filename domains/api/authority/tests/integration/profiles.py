@@ -17,6 +17,7 @@ PROFILE = CapacityProfile(
 )
 CONFIG = AuthorityConfig(
     label=LABEL, profile=PROFILE, database_url="sqlite:///:memory:", distribution="example-service",
+    key_prefix="ak",
 )
 
 
@@ -33,5 +34,5 @@ def config_for(offering_mode: str) -> AuthorityConfig:
     )
     return AuthorityConfig(
         label=IssuanceLabel(offering_mode.replace("_", "-")), profile=profile,
-        database_url="sqlite:///:memory:", distribution="example-service",
+        database_url="sqlite:///:memory:", distribution="example-service", key_prefix="ex",
     )

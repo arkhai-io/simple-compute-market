@@ -778,8 +778,8 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       delivers — with `pool_policy_tags()` spelling the seeded pool's
       declarations as the resolver reads them. `AuthorityConfig` carries
       the label, the profile, the database URL, the key namespace as
-      `key_prefix` (the `ak` of every key id, so two domains' deployments
-      never share one), and `distribution`, the name the version route
+      `key_prefix` (the `ak` of every key id; required, so two roots never
+      share one by omission), and `distribution`, the name the version route
       reports, which D14 keeps unchanged for API credits. Both are plain
       dataclasses, so the library imports no pydantic of its own.
 
@@ -814,21 +814,24 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       the profile's offering mode where `api_credits` was literal; the
       profile's `resource_type` is carried for the root and read by nothing
       in the kit today, since the ledger's reservations do not filter by
-      type. Tests: `tests/unit/test_profile.py` (unit, 13: every
+      type. Tests: `tests/unit/test_profile.py` (unit, 12: every
       validation rule, immutability, the declarations' spelling, the
       configuration's own rules). The literal replacements are proven in
       `tests/integration/test_keys_service.py` against in-memory SQLite,
       library integration rather than the unit tests this task names,
       because the offering-mode check lives inside the ledger's admission:
       under an `inference` profile the ledger admits an `inference` hold
-      and the service commits it, refuses an `api_credits` claim at
-      admission as undeclared, conflicts a purchase with a hold under
-      another mode, claims the profile's mode on a fresh reservation, and
-      returns the configured label's schema and key prefix; the moved key
-      service, migration, and pool-declaration suites run under a neutral
-      `example` profile and label from `tests/integration/profiles.py`, with
-      the seed, the kept stored pool, and the declaration refusal exercised
-      through `initialize`.
+      and the key service commits it; an `api_credits` claim is refused at
+      the site ledger's admission as undeclared by the pool the profile
+      seeded, which is the only path a foreign mode has, since the key
+      service claims the profile's mode itself; a purchase conflicts with a
+      hold under another mode; a fresh reservation carries the profile's
+      mode; the result carries the configured label's schema and key
+      prefix. The moved key-service and pool-declaration suites run under a
+      neutral `example` profile and label from
+      `tests/integration/profiles.py`, with the seed, the kept stored pool,
+      and the declaration refusal exercised through `initialize`; the
+      migration suite needs no profile and moved with its imports alone.
 
 - [x] 4.3 `route_services.py`: a framework-free route service per authority
       route — issuance, issuance lookup, consume, consume batch, verify, key
@@ -848,15 +851,17 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       one class rather than one per route, since every route shares the
       one collaborator. `declarations.py`: `site_route_contracts()` adapts
       the contracts' declarations to `SiteRouteContract` objects in
-      declaration order. Unit tests: `test_route_services.py` (14) replays
-      every refusal the 1.3 fixture records for these routes — the four
-      issuance refusals, the three consumption refusals, the three
-      not-found cases, the adjustment below zero — over a scripted key
-      service and asserts status and body equal to the record, plus the
-      422 detail, the pass-throughs, the list totals, and the version
-      route; `test_declarations.py` (2) holds the adapted contracts equal
-      to the declarations field for field, admitting `admin`, and equal to
-      the service's recorded `route_contracts.json` table, which is the
+      declaration order. Unit tests: `test_route_services.py` (13) replays
+      every refusal the 1.3 fixture records for the route services — the
+      four issuance refusals, the three consumption refusals, the three
+      not-found cases, the adjustment below zero; the recorded
+      `issuance_invalid` 422 is the bound request model's, raised before
+      any route service — over a scripted key service and asserts status
+      and body equal to the record, plus the 422 detail, the
+      pass-throughs, the list totals, and the version route;
+      `test_declarations.py` (2) holds the adapted contracts equal to the
+      declarations field for field, admitting `admin`, and equal to the
+      service's recorded `route_contracts.json` table, which is the
       service's former table as 1.3 recorded it.
 
 - [x] 4.4 `domains/apicredits/service` becomes the root: `config.py` builds
@@ -889,16 +894,16 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       `issuance_response_model` under the configured label.
       `middleware/route_contracts.py`, `models/`, `services/`, and `db/`
       are deleted; `middleware/auth.py`, `identity.py`, and `settings.toml`
-      stay. The service declares `arkhai-api-authority`, requires
-      `arkhai-api-contracts>=0.2.0`, states the runtime reason its
-      identity-kit pin now needs (nothing in the root imports it), and
-      bumps to 0.8.0. Its suite keeps 41 tests (unit and application
-      integration): the three library suites moved to the authority with
-      their 38; `test_schema_baseline` bootstraps through the root's
-      `container.bootstrap`, `test_route_contract_coverage` and the
-      baseline read the adapted table from `main`, the signed round-trip
-      and parity tests take it from the adapter, and the label from
-      `config`. 41 passed with every 1.3 and 1.4 record diffing to zero.
+      stay. The service declares `arkhai-api-authority`, states the
+      runtime reason its identity-kit pin now needs (nothing in the root
+      imports it), and bumps to 0.8.0. Its suite keeps 41 tests (unit and
+      application integration): the three library suites moved to the
+      authority with their 41; `test_schema_baseline` bootstraps through
+      the root's `container.bootstrap`, `test_route_contract_coverage`,
+      the baseline, and the parity test read the adapted table from
+      `main`, the signed round-trip takes it from the adapter, and each
+      takes the label from `config`. 41 passed with every 1.3 and 1.4
+      record diffing to zero.
 
 - [x] 4.5 Verification: `make test-api-authority` (unit, library integration
       against SQLite), `make -C domains/apicredits/service test` (application
@@ -909,19 +914,50 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       `e2e_credits_service_rollback` once validation builds the image at this
       commit.
       *Done 2026-10-23.* `make test-api-authority` 68 passed (`tests/unit/`
-      unit, `tests/integration/` library integration against in-memory
-      SQLite). `make -C domains/apicredits/service test` 41 passed
+      27, unit; `tests/integration/` 41, library integration against
+      in-memory SQLite). `make -C domains/apicredits/service test` 41 passed
       (application integration through the real app over `ASGITransport`;
       the baselines of 1.3 and 1.4 and the pins unchanged). The storefront,
       domain library, buyer, client, and contracts suites are untouched by
-      this section and pass under `make test`. `make test` and `make
-      check-packaging`: see the handoff below for the run at this commit.
+      this section's code and pass under `make test`. `make test` at this
+      commit: every suite passed except, all inherited and recorded by
+      1.7, 2.9, and 3.4, the provisioning dotenv-layering unit test, the
+      VM storefront's two Alkahest toolchain tests, the three provisioning
+      IaC relay-teardown shell tests, the release-tooling whole-tree
+      checks and `test_publish_matrix` rows that read the stale
+      `.claude/worktrees/` checkout, and the `--eval` case; and one
+      failure this section caused, the domain library's install test of
+      the service wheel, which imported the service's former `db.models`
+      and built no authority wheel to resolve the service against — it
+      now builds the authority wheel and imports the root's `container`
+      and the authority's `models` from site-packages (10 passed). Helm is
+      not installed, so the render checks are unrun; the three middleware
+      toolchains passed. `make check-packaging` passes on the copy: uv
+      setup, locks (the authority's new lock and the service's relocked),
+      Python version, layout, all four architecture parts; hygiene too.
       `make check-architecture` in place reports only the stale
       `.claude/worktrees/` checkout; each api wheel, the authority's
       included, builds once per aggregate target. End-to-end: owed to
       validation; the three scenarios are the first to run the service as
       a composition root, and `e2e_credits_service_rollback` compares a
-      pre-kit image with one whose service is the authority library.
+      pre-kit image with one whose service is the authority library. The
+      fresh-context check found no layering, scope, packaging, or wiring
+      breach; accepted from it: the root's configuration imports moved to
+      module level and the key namespace passed explicitly (and made
+      required), the migration docstrings describing a deployment with a
+      separate migration step rather than a plan, the declarations test
+      comparing every field to the declarations, the version test over an
+      installed distribution that is not the authority, and the counts
+      and wordings corrected above. Declined: the family tests' path
+      coupling to the service's recorded fixtures, which 4.3 prescribes as
+      2.5's contracts tests did; and the service pyproject's
+      runtime-reason comment, which every project with such a table
+      carries. Noted for later sections: the profile's `resource_type`
+      (`api.credits`) is read by nothing in the kit, and the storefront
+      registers quota as `api_credits` while the service's tests and the
+      lane register `api.credits`, a spelling the storefront sections
+      should settle; `SchemaDriftError`'s messages no longer name API
+      credits, operator-facing text outside every baseline.
       **Handoff.** The service root spells its label and profile in
       `config.py`; a sibling domain's root passes its own. The route
       services are one class over the key service; a domain contributing a

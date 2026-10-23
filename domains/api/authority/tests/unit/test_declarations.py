@@ -29,12 +29,17 @@ def _as_recorded(contract: SiteRouteContract) -> dict:
     }
 
 
-def test_the_adapted_contracts_follow_the_declarations_in_order():
+def test_the_adapted_contracts_are_the_declarations_field_for_field_in_order():
     adapted = site_route_contracts()
     assert [c.operation for c in adapted] == [d["operation"] for d in AUTHORITY_ROUTES]
     for contract, declaration in zip(adapted, AUTHORITY_ROUTES):
+        assert contract.method == declaration["method"]
         assert contract.pattern == re.compile(declaration["path"])
         assert contract.allowed_roles == frozenset(declaration["roles"])
+        assert contract.path_resource == declaration.get("path_resource")
+        assert contract.body_resource == declaration.get("body_resource")
+        assert contract.optional_body_resource == declaration.get("optional_body_resource", False)
+        assert contract.exact_retry_safe == declaration.get("exact_retry_safe", True)
         assert contract.permits("admin")
 
 

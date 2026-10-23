@@ -244,10 +244,8 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
 
 
 class TestCheckSchemaVersion:
-    """Not called by a service root's startup today (see migrations.py's
-    module docstring -- there's no separate deployment step to check
-    against yet), but this proves the fail-fast primitive itself is
-    correct and ready for when one exists.
+    """The fail-fast check a deployment with a separate migration step runs
+    before its service starts (see migrations.py's module docstring).
     """
 
     def test_passes_after_baseline_is_applied(self):

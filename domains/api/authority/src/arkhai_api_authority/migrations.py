@@ -7,8 +7,8 @@ once, in order, idempotently, across restarts.
 
 Migrations run in-process at startup, before the composing service is ready
 to serve, through ``run_migrations``. ``check_schema_version`` raises if the
-database is behind the migrations this module defines; no service root calls
-it at startup today.
+database is behind the migrations this module defines, for a deployment that
+applies them in a separate step before the service starts.
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ def check_schema_version(engine: Engine) -> None:
     """Raise :class:`SchemaDriftError` if the DB schema is behind the
     last known migration -- meaning migrations were never run, or the
     code shipped in this image is ahead of what's been applied to this
-    database. A service root's startup applies migrations in-process
-    through ``run_migrations`` instead of calling this function.
+    database. A service root that applies migrations in-process calls
+    ``run_migrations`` instead.
     """
     _validate_grant_schema(engine)
     expected = _MIGRATIONS[-1].id if _MIGRATIONS else None

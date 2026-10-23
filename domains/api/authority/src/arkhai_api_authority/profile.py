@@ -69,7 +69,7 @@ class AuthorityConfig:
     profile: CapacityProfile
     database_url: str
     distribution: str
-    key_prefix: str = "ak"
+    key_prefix: str
 
     def __post_init__(self) -> None:
         if not self.database_url.strip():

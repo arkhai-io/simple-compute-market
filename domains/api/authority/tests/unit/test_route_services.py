@@ -121,9 +121,9 @@ def test_lists_carry_their_totals():
     assert service.list_usage("k", after_id=0, limit=10)["total"] == 2
 
 
-def test_the_version_route_reports_the_composing_distribution():
-    assert SystemRouteService("arkhai-api-authority").version() == {
-        "service": "arkhai-api-authority",
-        "version": installed_version("arkhai-api-authority"),
+def test_the_version_route_reports_the_configured_distribution_and_its_installed_version():
+    assert SystemRouteService("pytest").version() == {
+        "service": "pytest",
+        "version": installed_version("pytest"),
     }
     assert SystemRouteService("no-such-distribution").version()["version"] == "dev"

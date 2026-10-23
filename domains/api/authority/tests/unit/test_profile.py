@@ -61,9 +61,8 @@ def test_the_profile_is_immutable():
 def test_the_configuration_validates_its_database_distribution_and_key_namespace():
     config = AuthorityConfig(
         label=IssuanceLabel("example"), profile=_profile(),
-        database_url="sqlite:///:memory:", distribution="example-service",
+        database_url="sqlite:///:memory:", distribution="example-service", key_prefix="ak",
     )
-    assert config.key_prefix == "ak"
     for field, value in (("database_url", " "), ("distribution", ""), ("key_prefix", "Ak-1")):
         with pytest.raises(ValueError):
             dataclasses.replace(config, **{field: value})
