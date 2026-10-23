@@ -30,7 +30,7 @@ A ruling or concession's outcome MUST be a list of consequences, each a payment 
 #### Scenario: Two outcomes reverse the same part
 
 - **WHEN** two outcomes on one hosted deal each reverse part of its `once` payment
-- **THEN** both reverses are applied, the second bounded by what is still held, and an outcome beyond that draws on a bond if the deal has one
+- **THEN** both reverses are applied, the second bounded by what is still held
 
 ### Requirement: Peer messages are hints until the authority confirms them
 
@@ -52,8 +52,8 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 #### Scenario: A reverse names a part
 
-- **WHEN** a seller submits `reverse` of an amount on a hosted deal with a `once` part and a `bond` part
-- **THEN** the adapter sends one `reverse` event with that amount on the `once` part and none on the bond
+- **WHEN** a seller submits `reverse` of an amount on a hosted deal
+- **THEN** the adapter sends one `reverse` event naming the `once` part and that amount
 
 ### Requirement: Lifecycle terms are part of the selected option
 
@@ -101,18 +101,18 @@ An unknown `version`, `regime`, initiator key, or `settles_through` value MUST m
 - **WHEN** an accepted Agreement's `duration_seconds` differs from its option's `max_term_seconds`
 - **THEN** the buyer refuses to commit
 
-### Requirement: Entitlements are the stop authorities of stoppable parts
+### Requirement: Entitlements are the stop authorities
 
-An adapter MUST make each initiator with an entitlement a `stop` authority of the option's stoppable parts, and nobody else. A part without a stop event MUST have no stop authorities.
+An adapter MUST make each initiator with an entitlement a `stop` authority, and nobody else. An option without `early_termination` MUST have no stop authorities. A builder MUST refuse a term its mechanism cannot realize, such as `bond` on a mechanism that cannot hold a seller-funded stake.
 
 #### Scenario: An on-demand option is derived
 
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
-- **THEN** the payer is the only stop authority of its stoppable parts
+- **THEN** the payer is the only stop authority
 
 ### Requirement: A concession is a case the seller resolves against itself
 
-A `concede` MUST be recorded at the regime's intake, and its payment effects MUST be ones the seller is authorized to apply itself. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award the bond in full.
+A `concede` MUST be recorded at the regime's intake, and its payment effects MUST be ones the seller is authorized to apply itself. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full.
 
 #### Scenario: A concession names a future end
 
@@ -121,8 +121,8 @@ A `concede` MUST be recorded at the regime's intake, and its payment effects MUS
 
 #### Scenario: A seller concedes after hardware failure
 
-- **WHEN** a seller makes the default concession on a hosted `once` deal with a bond
-- **THEN** the intake records the concession, the authority records a partial `reverse` and a full bond award with its case reference, and end service ends delivery now
+- **WHEN** a seller makes the default concession on a hosted `once` deal halfway through its term
+- **THEN** the intake records the concession, the authority records a `reverse` of half the payment with the case reference in its payload, and end service ends delivery now
 
 ### Requirement: One dispute window drives holds and retention
 
@@ -131,7 +131,7 @@ A `concede` MUST be recorded at the regime's intake, and its payment effects MUS
 #### Scenario: A once deal's hold is derived
 
 - **WHEN** a hosted mandate is derived for a deal whose lease ends at 13:00 with a one-day window
-- **THEN** its `once` hold and its bond are held until 13:00 the next day
+- **THEN** its `once` hold ends at 13:00 the next day
 
 ### Requirement: Lifecycle commands have defined outcomes
 

@@ -37,7 +37,7 @@ The payments service's `rate-parts` contract settles the seller-side needs below
 - **A stop event with an authoritative effective time, a cause and the settled amount,** in the signed snapshot. Causes: payer, payee, exhaustion, dispute authority. A stop is idempotent and final.
 - **Payee stop at or before now.** Backdating only reduces the payee's own revenue, so it can be allowed.
 - **A `notice` event as a scheduled stop.** The notice carries an effective time no earlier than now plus the entitlement's notice period, and the service applies the stop at that time.
-- **Rate-part money held through the dispute window.** Today a `until: stop` hold becomes collectable at stop; for outcomes to reverse it partially, collected periods stay held until the window after delivery ends, or the option carries a bond for what is no longer held.
+- **Rate-part money held through the dispute window.** An `until: stop` hold becomes collectable at stop. Rate parts use per-period `{for: duration}` holds instead, each held from its earned boundary for the dispute window, so a stop does not release them and outcomes can still reverse them.
 - **A maximum-term stop.** The service stops the rate part at the mandate's absolute maximum end with cause terms.
 - **Payee-only `start`.** Periods count from the seller's `start`; an unstarted mandate's hold is released when its window expires.
 - **A payer stop that settles through the declared exposure.**
