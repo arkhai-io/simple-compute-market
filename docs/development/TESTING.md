@@ -292,6 +292,19 @@ When an earlier stage or external authority is unavailable, the dependent
 stage names that prerequisite and remains blocked; it is never counted as a
 successful live deal.
 
+Every complete-deal scenario is built on the discipline the diagram below
+draws. Once, at the start, it holds every loop it depends on and initializes
+what the deal needs. Then, for each transition, it previews the move through
+the route's evaluate twin or the loop's dry run, advances exactly one side
+effect, and measures that effect against expectations through typed clients,
+recording what it produced in the shared deal state for the stages that
+depend on it. Whatever happened, the fixture's finaliser resumes the loops.
+The diagram's source is
+[`diagrams/e2e-stage-discipline.drawio`](diagrams/e2e-stage-discipline.drawio);
+the SVG beside it is the export and also opens in draw.io.
+
+![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
+
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
