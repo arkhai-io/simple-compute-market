@@ -1,7 +1,7 @@
 """The host registry's persistence: one row per registered host.
 
 The table keeps its name, ``hosts``. A row holds the host's identity, pool,
-enabled state, legacy capacity hint, and its connection as an envelope: the kind,
+enabled state, descriptive GPU fields, and its connection as an envelope: the kind,
 its version, the public fields, and the protected values exactly as the kind's
 codec produced them. No column holds secret material in any other form.
 """

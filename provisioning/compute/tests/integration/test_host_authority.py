@@ -7,8 +7,6 @@ and never letting a protected value reach a response.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-
 import pytest
 from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools.db import ResourcePool
@@ -51,19 +49,6 @@ class _Codec:
         return envelope
 
 
-class _Derivation:
-    def __init__(self) -> None:
-        self.derived: list[list[str]] = []
-
-    @contextmanager
-    def serialized(self):
-        yield
-
-    def derive_in_session(self, db, host_ids=None):
-        self.derived.append(list(host_ids or []))
-        return []
-
-
 def _connection(address: str = "192.0.2.10", **secrets: str) -> ConnectionSubmission:
     return ConnectionSubmission(kind="fake", public={"address": address}, secrets=secrets)
 
@@ -84,17 +69,12 @@ def session_factory():
 
 
 @pytest.fixture
-def derivation():
-    return _Derivation()
-
-
-@pytest.fixture
 def moves():
     return []
 
 
 @pytest.fixture
-def authority(session_factory, derivation, moves):
+def authority(session_factory, moves):
     def record_move(db, host_id, current, new):
         if new == "refused":
             raise PoolChangeRefusedError("move refused")
@@ -103,7 +83,6 @@ def authority(session_factory, derivation, moves):
     return HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([_Codec()]),
-        capacity_derivation=derivation,
         pool_change_hooks=(record_move,),
     )
 
@@ -260,7 +239,6 @@ def test_a_hook_refusing_an_unplacing_leaves_the_host_and_the_import(
     guarded = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([_Codec()]),
-        capacity_derivation=_Derivation(),
         pool_change_hooks=(refuse_unplacing,),
     )
 
@@ -313,7 +291,7 @@ def test_listing_filters_disabled_hosts_and_searches_by_id(authority) -> None:
         authority.disable_host("missing")
 
 
-def test_an_inventory_upserts_its_hosts_and_derives_their_capacity(authority, derivation) -> None:
+def test_an_inventory_upserts_its_hosts_and_records_their_gpus(authority) -> None:
     authority.register_host(HostCreate(host_id="untouched", connection=_connection()))
     entries = [
         InventoryHost(host_id="kvm1", connection=_connection(), gpu_count=2, pool_id="gpu"),
@@ -329,7 +307,6 @@ def test_an_inventory_upserts_its_hosts_and_derives_their_capacity(authority, de
     assert again[0].connection.public["address"] == "192.0.2.99"
     assert (again[0].gpu_count, again[0].pool_id) == (4, "gpu")
     assert authority.get_host("untouched") is not None
-    assert derivation.derived == [["kvm1", "kvm2"], ["kvm1"]]
 
 
 def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves) -> None:
@@ -349,7 +326,7 @@ def test_an_inventory_moving_a_host_runs_the_pool_change_hooks(authority, moves)
 
 
 def test_a_hook_refusing_an_inventory_move_applies_nothing(
-    authority, session_factory, derivation
+    authority, session_factory
 ) -> None:
     """The import is one transaction: one refused move leaves every host it
     names as it was, including hosts it would have created or reconnected."""
@@ -375,7 +352,6 @@ def test_a_hook_refusing_an_inventory_move_applies_nothing(
     assert (kvm1.pool_id, kvm1.gpu_count) == (None, 1)
     assert kvm1.connection.public["address"] == "192.0.2.10"
     assert authority.get_host("kvm2") is None
-    assert derivation.derived == [["kvm1"]]
 
 
 def test_an_inventory_naming_an_unknown_pool_applies_nothing(authority, session_factory) -> None:

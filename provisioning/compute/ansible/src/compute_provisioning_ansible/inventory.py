@@ -123,11 +123,11 @@ def _parse_entries(ini_text: str) -> list[dict]:
             )
             continue
 
-        # A malformed gpus= degrades to 0: a wrong capacity hint produces a
-        # wrong listing, which is visible. A malformed ansible_port= instead
-        # skips the entry, because substituting 22 would turn an operator's
-        # typo into a host that cannot be reached at all — a failure that
-        # looks like a network problem rather than a bad inventory line.
+        # A malformed gpus= degrades to 0: it describes the host and sells
+        # nothing, so a wrong value only misreports. A malformed ansible_port=
+        # instead skips the entry, because substituting 22 would turn an
+        # operator's typo into a host that cannot be reached at all — a failure
+        # that looks like a network problem rather than a bad inventory line.
         try:
             gpu_count = int(host_vars.get("gpus", 0))
         except ValueError:

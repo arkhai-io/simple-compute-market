@@ -30,6 +30,7 @@ from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
+    Host,
     ResourcePool,
 )
 # VM's tables are VM's metadata, held in this database; this history creates and
@@ -2455,8 +2456,9 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
     as its resource id is skipped and logged rather than overwritten. Host
     rows are not changed.
 
-    Written in SQL rather than through the service's derivation so that what
-    this migration does stays what it did when it shipped.
+    Written in SQL so that what this migration does stays what it did when it
+    shipped. It is the only derivation of capacity from hosts: no host write
+    declares capacity.
 
     Every row is planned before the first write.
     """
@@ -3368,6 +3370,50 @@ def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
             index.create(connection, checkfirst=True)
 
 
+def _migrate_hosts_pool_optional(engine: Engine) -> None:
+    """Let a host be unplaced: ``hosts.pool_id`` loses its ``NOT NULL`` and default.
+
+    A host written without a pool belongs to none, and nothing supplies one: a
+    default would place the host in a pool nobody named. Existing hosts keep
+    their pools and every other value.
+
+    SQLite cannot relax a column in place, so the table is rebuilt from the
+    model's current definition by the procedure
+    ``_migrate_capacity_declaration_contract`` follows. A table already in that
+    shape, as a fresh database creates it, is left alone.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    columns = {c["name"]: c for c in inspect(engine).get_columns("hosts")}
+    pool = columns.get("pool_id")
+    if pool is None or (pool["nullable"] and pool["default"] is None):
+        return
+
+    model = Host.__table__
+    rebuild_name = "hosts__rebuild"
+    # The table its foreign key names rides along, so its DDL can render it;
+    # only the rebuild itself is created.
+    metadata = MetaData()
+    ResourcePool.__table__.to_metadata(metadata)
+    rebuild = model.to_metadata(metadata, name=rebuild_name)
+    for index in list(rebuild.indexes):
+        rebuild.indexes.discard(index)
+    shared = [c.name for c in model.columns if c.name in columns]
+    column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
+
+    with _schema_transaction(engine, foreign_keys_off=True) as connection:
+        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_name}"))
+        connection.execute(CreateTable(rebuild))
+        connection.execute(text(
+            f"INSERT INTO {rebuild_name} ({column_list}) "
+            f"SELECT {column_list} FROM hosts"
+        ))
+        connection.execute(text("DROP TABLE hosts"))
+        connection.execute(text(f"ALTER TABLE {rebuild_name} RENAME TO hosts"))
+        for index in model.indexes:
+            index.create(connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3490,4 +3536,5 @@ MIGRATIONS: tuple[Migration, ...] = (
         "20261023_001_vm_pool_playbook_optional",
         _migrate_vm_pool_playbook_optional,
     ),
+    Migration("20261023_002_hosts_pool_optional", _migrate_hosts_pool_optional),
 )

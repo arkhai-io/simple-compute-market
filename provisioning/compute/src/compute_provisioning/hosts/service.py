@@ -5,6 +5,10 @@ lookup made immediately before execution, and applying an imported inventory. It
 knows no connection kind: a submitted connection is validated, and its secrets
 protected, by the kind's codec, and what it stores is the resulting envelope.
 
+A host is connection identity and placement, never capacity: no host write
+declares anything a site sells, whatever GPU count or model the host describes.
+Capacity is declared through the site's own administration.
+
 Every ordinary read returns a ``HostResponse``, which names each protected value
 and its scheme but never carries its ciphertext; the persistence row never leaves
 this module. Only ``lookup``, the read made immediately before execution, returns
@@ -15,10 +19,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal, Optional, Protocol
+from typing import Literal, Optional
 
 from market_resource_pools import ResourcePool
 from sqlalchemy.orm import Session, sessionmaker
@@ -42,26 +45,6 @@ class PoolChangeRefusedError(ValueError):
     protects is gone, so it is a conflict with current state rather than a bad
     request.
     """
-
-
-class HostCapacityDerivation(Protocol):
-    """Derives capacity declarations from hosts' legacy capacity.
-
-    Supplied by the composition root. Host inventory is connection identity;
-    what a site sells is declared elsewhere, so the authority applies imported
-    hosts and leaves deciding their declarations to the port.
-    """
-
-    def serialized(self) -> AbstractContextManager[None]:
-        """The capacity authority's serialization lock, held around the whole
-        transaction a derivation writes into, through its commit."""
-        ...
-
-    def derive_in_session(
-        self, db: Session, host_ids: Sequence[str] | None = None
-    ) -> Sequence[str]:
-        """Derive declarations for ``host_ids`` inside ``db``'s transaction."""
-        ...
 
 
 #: Called inside the transaction moving a host between pools, before it
@@ -131,12 +114,10 @@ class HostAuthority:
         session_factory: sessionmaker[Session],
         *,
         codecs: ConnectionCodecs,
-        capacity_derivation: HostCapacityDerivation,
         pool_change_hooks: Sequence[PoolChangeHook] = (),
     ) -> None:
         self._session_factory = session_factory
         self._codecs = codecs
-        self._capacity_derivation = capacity_derivation
         self._pool_change_hooks = tuple(pool_change_hooks)
 
     # ------------------------------------------------------------------
@@ -233,20 +214,18 @@ class HostAuthority:
     def apply_inventory(self, entries: Sequence[InventoryHost]) -> list[HostResponse]:
         """Upsert the hosts an imported inventory declares; leave the rest alone.
 
-        Idempotent for the same input. Capacity is derived for the upserted
-        hosts in the same transaction, so a host applied from an inventory and
-        the declaration derived from its legacy capacity land together. A
-        declaration already naming a host keeps it. An entry stating a pool
-        places or moves its host and one stating ``None`` unplaces it, through
-        the pool-change hooks, as an update does; an entry stating none leaves
-        an existing host's pool alone and creates a new host unplaced. A hook's
-        refusal rolls back the whole inventory.
+        Idempotent for the same input, and one transaction. An entry stating a
+        pool places or moves its host and one stating ``None`` unplaces it,
+        through the pool-change hooks, as an update does; an entry stating none
+        leaves an existing host's pool alone and creates a new host unplaced. A
+        hook's refusal rolls back the whole inventory. An entry's GPU count and
+        model are recorded on the host as description and declare no capacity.
         """
         if not entries:
             logger.warning("apply_inventory: no host entries to apply")
             return []
         applied: list[str] = []
-        with self._capacity_derivation.serialized(), self._session_factory() as db:
+        with self._session_factory() as db:
             for entry in entries:
                 stated = entry.pool_id is not POOL_UNSTATED
                 if stated and entry.pool_id is not None:
@@ -270,7 +249,6 @@ class HostAuthority:
                 host.gpu_count = entry.gpu_count
                 host.gpu_model = entry.gpu_model
                 applied.append(entry.host_id)
-            self._capacity_derivation.derive_in_session(db, applied)
             db.commit()
 
         hosts: list[HostResponse] = []
@@ -337,7 +315,6 @@ class HostAuthority:
 
 __all__ = [
     "HostAuthority",
-    "HostCapacityDerivation",
     "HostNotFoundError",
     "InventoryHost",
     "POOL_UNSTATED",

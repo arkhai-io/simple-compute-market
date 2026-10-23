@@ -12,13 +12,11 @@ in three different stores:
   against. `register_resource` is the only thing that creates one, and nothing
   derives one from a host.
 
-That last point has cost two debugging loops. The host-derived fallback in the
-provisioner's inventory provider populates the *resource-pool projection*, which is
-what listing derivation reads — so a scenario registering only a host can publish
-listings it cannot sell against. Every claim path (`has_matching_inventory_guard`'s
-snapshot, `probe`, `reserve`) reads capacity buckets, and with no declaration they
-see an empty list. The refusal then surfaces as `no_matching_inventory`, several
-stages downstream of the missing setup.
+The resource-pool projection listing derivation reads is built from declarations
+alone, and every claim path (`has_matching_inventory_guard`'s snapshot, `probe`,
+`reserve`) reads capacity buckets, so a scenario registering only a host publishes
+and claims nothing. A missing declaration surfaces as `no_matching_inventory`,
+several stages downstream of the missing setup.
 
 One declaration per executor, and one executor per scenario. A second declaration on
 one machine sells the same hardware twice, which the provisioner's inventory loader

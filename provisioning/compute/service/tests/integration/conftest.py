@@ -402,9 +402,6 @@ from compute_provisioning.jobs.queue import AsyncJobQueue
 from compute_provisioning.hosts import ConnectionCodecs
 from compute_provisioning.hosts.service import HostAuthority
 from compute_provisioning_ansible import AnsibleJobExecutor, SshConnectionCodec
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 from vm_provisioning_adapter.codec import VmAnsibleCodec
 from compute_provisioning.jobs.engine import JobEngine
 from compute_provisioning_ansible import probe_connectivity
@@ -680,7 +677,6 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec(TEST_CONNECTION_KEY)]),
-        capacity_derivation=LegacyHostCapacityDerivation(capacity_ledger_service),
         # The pool-change hooks exactly as the production container merges them,
         # so a move refused there is refused here, by every host route.
         pool_change_hooks=_container_module.Container.host_pool_change_hooks(),

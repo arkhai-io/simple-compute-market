@@ -26,6 +26,6 @@
 # Optional per-host args:
 #   ansible_port=<port>     — if SSH isn't on 22
 #   public_host=<IP/DNS>    — address buyers should use if different from ansible_host
-#   gpus=<count>            — used by the provisioning service's capacity checks
-#   gpu_model=<model>       — reported with the host's capacity
+#   gpus=<count>            — the host's GPU count, as description; it declares no capacity
+#   gpu_model=<model>       — the host's GPU model, as description
 #   pool_id=<pool>          — the Resource Pool to place the host in; empty unplaces it

@@ -899,10 +899,9 @@ async def test_a_registration_without_a_pool_is_rejected(capacity: CapacityApi):
 async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     capacity: CapacityApi, client_and_queue,
 ):
-    """An INI host gains a derived declaration and is projected from it, with
-    live availability; a host registered with no declaration is not projected
-    at all. Written through the canonical clients, read through
-    SiteCapacityClient.resource_pool_projection."""
+    """A declaration is projected, with live availability; a host is not,
+    whatever GPUs it describes or however it was written. Written through the
+    canonical clients, read through SiteCapacityClient.resource_pool_projection."""
     provisioning_client, _ = client_and_queue
     await provisioning_client.host_import.import_hosts_from_text(
         "[kvm_hosts]\n"
@@ -913,6 +912,11 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     await provisioning_client.family.register_host(HostCreate(
         host_id="kvm2", connection=ssh_connection(ssh_host="10.0.0.2", ssh_user="ubuntu", key_path="/keys/id"), gpu_count=8,
     ))
+    assert await capacity.admin.list_resources() == []
+    await capacity.register(
+        "kvm1", pool_id="default", total_units=4, host_id="kvm1",
+        attributes={"gpu_model": "H200"},
+    )
     reserved = await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1, "resource_id": "kvm1"}, {}
     )

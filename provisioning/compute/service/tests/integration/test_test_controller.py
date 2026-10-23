@@ -23,11 +23,6 @@ import pytest
 from compute_provisioning_ansible.runner import MaterializedInventory
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from market_site import CapacityLedgerService
-
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 
 from .conftest import (
     ProvisioningClients,
@@ -149,13 +144,6 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec()]),
-        capacity_derivation=LegacyHostCapacityDerivation(
-            CapacityLedgerService(
-                session_factory,
-                unit_claim_keys=("units", "gpu_count"),
-                mirror_dimension="gpu_count",
-            )
-        ),
     )
     host_authority.register_host(HostCreate(
         host_id=HOST,

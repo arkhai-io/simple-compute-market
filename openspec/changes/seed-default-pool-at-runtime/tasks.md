@@ -653,7 +653,7 @@ port); tests `provisioning/compute/service/tests/integration/{test_host_capacity
 test_capacity_api.py}`, `tests/unit/services/test_capacity_derivation.py`
 (removed), and a new hosts migration test.
 
-- [ ] 6.1 Remove the `HostCapacityDerivation` port from the host authority and
+- [x] 6.1 Remove the `HostCapacityDerivation` port from the host authority and
   `apply_inventory`'s derivation call and serialization, `services/capacity_derivation.py`,
   its container wiring, and `test_capacity_derivation.py` (D2). The upgrade
   migration `20260921_004` keeps its own SQL and is not touched. Application
@@ -661,19 +661,101 @@ test_capacity_api.py}`, `tests/unit/services/test_capacity_derivation.py`
   INI import and a startup seed carrying `gpus=` create no capacity declaration,
   so the capacity projection holds no entry for those hosts; the derivation
   cases in `test_capacity_api.py` assert the same.
-- [ ] 6.2 Append a migration after section 2's that rebuilds `hosts` from the
+  Done. `services/capacity_derivation.py` and `test_capacity_derivation.py`
+  are deleted (staged by the owner after the implementing step's `rm` and
+  `git rm` were refused), and nothing imports them. `HostCapacityDerivation` and the
+  authority's `capacity_derivation` parameter are gone, `apply_inventory`
+  neither derives nor takes the ledger's serialization lock (it held it only
+  for the derived declarations), and the host authority's docstring states
+  that no host write declares capacity; the container's
+  `capacity_derivation` provider and import are gone, as are the harnesses'
+  (`tests/integration/conftest.py`, `test_test_controller.py`) and the
+  library suite's fake; `test_legacy_host_capacity_migration.py` drops its
+  parity test against the runtime derivation (the migration's SQL is now the
+  only derivation) and its now-unused helper. Comments that described
+  derivation are rewritten: `app_runtime.py`'s seeding comment,
+  `inventory.py`'s `gpus=` comment, `hosts/db.py`'s module docstring,
+  `20260921_004`'s docstring sentence naming the service's derivation (its
+  SQL untouched), `kit/site`'s `declarations.py` module docstring (outside
+  the plan: it listed the derivation as a user of the model), and the
+  operator example `provisioning-hosts.example`'s `gpus=` and `gpu_model=`
+  lines, and, beyond the plan, two e2e comments describing a host-derived
+  projection (`test_compute_dynamic_listings.py`, and `host_registry.py`'s
+  module docstring, which also told the history of a debugging loop).
+  Application integration (`test_host_capacity_derivation_api.py`, renamed
+  `test_host_writes_declare_no_capacity_api.py` for what it proves): an INI
+  import with `gpus=`, placed and unplaced, records both hosts' GPU fields
+  and declares nothing, and the resource-pool projection is empty; the
+  startup seed step (`app_runtime.seed_inventory_if_empty`, over the
+  harness's host authority, its module settings replaced by one stating
+  `inventory_ini`) registers both hosts with their GPU counts and declares
+  nothing; a host created in a pool through the API, then updated with new
+  GPU fields, declares nothing; an operator's declaration naming a host
+  survives a re-import changing its GPUs.
+  `test_capacity_api.py::test_the_resource_pool_projection_publishes_declarations_not_hosts`
+  asserts nothing is declared after the INI import and the host
+  registration, then declares `kvm1` and shows only that declaration
+  projected, with live availability.
+- [x] 6.2 Append a migration after section 2's that rebuilds `hosts` from the
   model with `pool_id` nullable and no default, following
   `_migrate_capacity_declaration_contract`, and is a no-op on a table already in
   that shape (D1, design "Migration Plan"). Persistence integration: a new
   `test_host_pool_optional_migration.py` covers existing hosts keeping their
   pools and every other column, a fresh database, a repeated run, and
   `foreign_key_check` passing.
-- [ ] 6.3 **Verification checkpoint.** Application integration 6.1; service
+  Done as `20261023_002_hosts_pool_optional` (`_migrate_hosts_pool_optional`),
+  rebuilding from `Host.__table__` with `resource_pools` copied into the
+  rebuild's metadata, as section 2's rebuild does. It is a no-op when
+  `pool_id` is already nullable with no default. Persistence integration
+  (`test_host_pool_optional_migration.py`, file SQLite): a database at the
+  committed `schema_through_20260911_001.sql` shape with two hosts in two
+  pools, one with a path key and one with an embedded (stand-in) ciphertext,
+  migrated through `apply_schema_migrations`, ends with `pool_id` nullable
+  and undefaulted, its foreign key to `resource_pools`, both hosts' pools,
+  GPU fields, and addresses, the embedded key's ciphertext as protected, and
+  accepts an unplaced host; a table restored to the required, defaulted
+  shape is rebuilt (its `sqlite_master` page changes) with every column of
+  every row equal (`SELECT *`) and `foreign_key_check` empty; the rebuilt table still refuses an unknown pool; a fresh database
+  through `run_migrations` is in shape and the migration leaves it untouched
+  (same page and DDL); a repeated run leaves page and rows as they were.
+  `test_database.py`'s pinned migration set gains the ID; its legacy chain's
+  host keeps `default`.
+- [x] 6.3 **Verification checkpoint.** Application integration 6.1; service
   integration 6.2. Run `make test` in `provisioning/compute` and
   `provisioning/compute/service`, `make check-packaging`, and `make
   check-comment-hygiene`.
   End-to-end: every VM and bare-metal scenario declares capacity explicitly, so
   the lanes prove nothing depended on derivation. No scenario is owed.
+  Evidence, with the deletions in place: `make -C provisioning/compute test`
+  — 235 passed; `make -C provisioning/compute/service test` — unit 653,
+  integration 515; repository `make test` passed (every suite, chart render
+  and release tooling included); `make check-packaging` and `make
+  check-change` passed. End-to-end scenarios confirmed as planned; no
+  `Owed by validation:` line, since the section changes no chart.
+  Fresh-context review: no correctness, layering, or
+  packaging finding (the rebuild and dropping the ledger lock from
+  `apply_inventory` were judged sound: the only pool-change hook reads relay
+  leases, not the ledger). Fixed: a comment naming "this change" in the new
+  migration test and another in `test_legacy_host_capacity_migration.py`;
+  the rebuild test compared 7 of 11 columns and no protected value (it now
+  compares every column, with an embedded key in the fixture); unchecked
+  GPU fields and addresses; the unexercised host-update path (now tested);
+  `test_capacity_api.py` asserting nothing before its declaration; the
+  file's name; the two e2e comments; and these notes. Re-run after the
+  fixes: the service suite as above, and `make test-e2e-unit` — 38 passed.
+  Not fixed, stated instead: the rebuild copies the current `Host` model, as
+  section 2's and `_migrate_capacity_declaration_contract` do, so a later
+  model change that adds a `NOT NULL` column without a server default, or
+  drops a column, changes what this migration does on an older database.
+  Handoff: two permanent documents still describe derivation, now named in
+  the promotion record for closeout (10.9): `docs/development/ARCHITECTURE.md`'s
+  authority-table row "Sellable capacity" ("or derivation from legacy host
+  inventory") and `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Capacity
+  definitions" and "What a document does to entries it stops naming".
+  Sections 7–9 start in a fresh session; section 7 also owns the stale
+  "ARCHITECTURE.md § Schema Migration Execution" citations in `migrate.py`,
+  `database.py`, and `migrations.py` (`SchemaDriftError`), and section 8 the
+  one in `app_runtime.py`.
 
 ## 7. Migration reads no operational configuration
 
@@ -908,7 +990,7 @@ resolvable citations, and a current index.
 | D1 optional placement and its null and INI semantics | `openspec/specs/resource-pool-management/spec.md` — "Explicit valid host membership", via archive |
 | D1 a host belongs to at most one pool | `docs/development/ARCHITECTURE.md` — "One name per concept", the paragraph beginning "The host is named `host_id`" |
 | D1, D2 no host write places a host or declares capacity; a host sells only through an explicit declaration | `docs/development/ARCHITECTURE.md` — "Resource pools", a paragraph after the one on a pool's provider being fixed at creation |
-| D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` — "Host writes declare no capacity" (renamed from "Legacy host capacity is derived into declarations"), via archive; `openspec/specs/site-capacity/architecture.md` — the paragraph beginning "The alternatives each left capacity"; `docs/seller-quickstart.md` §6 and `docs/bare-metal-seller-quickstart.md` |
+| D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` — "Host writes declare no capacity" (renamed from "Legacy host capacity is derived into declarations"), via archive; `openspec/specs/site-capacity/architecture.md` — the paragraph beginning "The alternatives each left capacity"; `docs/seller-quickstart.md` §6 and `docs/bare-metal-seller-quickstart.md`; `docs/development/ARCHITECTURE.md` — "Authority boundaries", the "Sellable capacity" row; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Capacity definitions" and "What a document does to entries it stops naming", where they speak of declarations derived from host inventory |
 | D3 `default` ordinary | `openspec/specs/resource-pool-management/spec.md` — "Non-destructive pool lifecycle", "Strict lossless YAML validation"; `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations"; both via archive |
 | D4 seed document and its trigger | `openspec/specs/resource-pool-management/spec.md` — "A fresh site is seeded from its seed document", via archive; `openspec/specs/resource-pool-management/architecture.md` — "Administrative reconciliation", replacing the paragraph beginning "On a fresh database with a mounted pool document"; `docs/development/ARCHITECTURE.md` — "Resource pools", replacing the sentence beginning "A fresh site with a mounted pool document"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents", replacing the paragraph beginning "On a first boot with a pool document configured" |
 | D5 optional VM playbook, playbooks frozen at preparation | `openspec/specs/physical-provisioning/spec.md` — "Ansible fulfillment adapter", "Bare-metal inventory binds an existing provider pool", via archive; `openspec/specs/resource-pool-management/architecture.md` — "Provider configuration" |
