@@ -158,7 +158,10 @@ class FulfillmentConvergenceWatchdog:
         logger.info("[FULFILLMENT_CONVERGENCE] Started (interval=%ss)", interval)
         while True:
             try:
-                if not self._resume_event.is_set():
+                # Read again after each wake: a resume and a pause in quick
+                # succession wake the waiter with the watchdog paused again,
+                # and a pause that answered "at the gate" must hold this cycle.
+                while not self._resume_event.is_set():
                     logger.debug(
                         "[FULFILLMENT_CONVERGENCE] Cycle blocked — watchdog is paused"
                     )

@@ -84,7 +84,7 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     # Listed first, so the holds are taken before, and released after, every
-    # fixture of the module but the lane's autouse ones.
+    # other fixture of the module.
     # The module advances the storefront's loops, fulfillment convergence, and
     # lease expiry itself.
     pytest.mark.usefixtures(

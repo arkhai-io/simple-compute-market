@@ -73,24 +73,20 @@ async def test_api_credit_lifespan_carries_exact_domain_container(monkeypatch):
 
 
 def test_api_credit_chain_values_are_contributed_to_shared_factory(monkeypatch):
-    captured = []
     chain = SimpleNamespace(
         rpc_url="http://rpc",
         alkahest_address_config_path="addresses.json",
     )
     monkeypatch.setattr(server, "CHAINS", {"anvil": chain})
-    monkeypatch.setattr(
-        server,
-        "build_alkahest_clients",
-        lambda policy, **_kwargs: captured.append(policy) or {"anvil": object()},
-    )
 
     with settings_overrides(**{"wallet.private_key": "secret"}):
-        clients = server._build_alkahest_clients(lambda _policy: None)
+        policy = server._alkahest_client_policy()
 
-    assert tuple(clients) == ("anvil",)
-    assert captured[0].chains[0].name == "anvil"
-    assert captured[0].chains[0].rpc_url == "http://rpc"
+    assert policy.private_key == "secret"
+    assert policy.missing_requirements == ()
+    assert [(c.name, c.rpc_url, c.address_config_path) for c in policy.chains] == [
+        ("anvil", "http://rpc", "addresses.json")
+    ]
 
 
 def test_api_credit_watchdog_preserves_configured_schedule():

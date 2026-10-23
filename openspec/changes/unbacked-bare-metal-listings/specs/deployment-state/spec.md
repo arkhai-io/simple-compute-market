@@ -51,7 +51,7 @@ carry `app.kubernetes.io/name`.
 
 - **WHEN** both local topology releases are rendered
 - **THEN** no Pod annotated `helm.sh/hook: test` carries all of any rendered Deployment's
-  `matchLabels`
+  `matchLabels` or any rendered Service's selector
 
 ## MODIFIED Requirements
 

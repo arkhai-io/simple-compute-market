@@ -47,7 +47,6 @@ from market_storefront_kit import (
     StorefrontRouteHooks,
     StorefrontServiceHooks,
     alkahest_client_constructor,
-    build_alkahest_clients,
     build_composed_storefront_app,
 )
 
@@ -151,13 +150,6 @@ AlkahestClientConstructor = Callable[
 ]
 
 
-def _build_alkahest_clients(constructor: AlkahestClientConstructor) -> dict[str, Any]:
-    policy = _alkahest_client_policy()
-    if policy is None:
-        return {}
-    return build_alkahest_clients(policy, logger=logger, constructor=constructor)
-
-
 def _build_alkahest_chain_probe(
     alkahest_clients: dict[str, Any],
     *,
@@ -168,8 +160,11 @@ def _build_alkahest_chain_probe(
 
     Composed whenever ``[Settlement.alkahest]`` is configured, enabled or not:
     a disabled section still services the obligations accepted under it, which
-    need their chains' clients. ``constructor`` and ``json_rpc`` are its two
-    boundaries, the SDK and the chain's JSON-RPC endpoint.
+    need their chains' clients. The map starts empty and the probe's first
+    step constructs each client, bounded, since a websocket client connects
+    while it is built and startup must not wait on a chain. ``constructor`` and
+    ``json_rpc`` are its two boundaries, the SDK and the chain's JSON-RPC
+    endpoint.
     """
     section = (
         build_storefront_settlement_registry()
@@ -349,9 +344,10 @@ def _build_vm_services(
     sqlite_client = get_sqlite_client(registry=registry)
     marketplace_signer = resolve_marketplace_signer()
     set_stage_event_db_path(sqlite_client.db_path)
-    alkahest_clients = _build_alkahest_clients(seams.alkahest_client_constructor)
-    # The probe owns the client map from here: every consumer below is handed
-    # this one dict, which the probe updates in place as it rebuilds clients.
+    # The probe owns the client map, empty until its first step: every
+    # consumer below is handed this one dict, which the probe updates in place
+    # as it builds clients.
+    alkahest_clients: dict[str, Any] = {}
     alkahest_chain_probe = _build_alkahest_chain_probe(
         alkahest_clients,
         constructor=seams.alkahest_client_constructor,

@@ -19,10 +19,11 @@ A chain's result is one of:
 - ``alkahest.chain_id_mismatch``, ``alkahest.contract_missing``, or
   ``alkahest.address_config_invalid``, which the configuration causes.
 
-The probe also holds the storefront's live map of chain clients. A chain whose
-client could not be constructed has its client constructed again at each probe
-until that succeeds, and the map is updated in place, so every consumer handed
-the map reaches the rebuilt client without a restart. A probe waits for a
+The probe also holds the storefront's live map of chain clients, which starts
+empty: the storefront's startup constructs no client, since a websocket client
+connects while it is built. A chain with no client has one constructed at each
+probe until that succeeds, and the map is updated in place, so every consumer
+handed the map reaches the client without a restart. A probe waits for a
 construction no longer than the RPC timeout, and at most one construction per
 chain runs at a time: one still running when the wait ends is left to finish on
 its own thread, and a later probe adopts its client. Until the map holds one
@@ -193,8 +194,8 @@ class AlkahestChainProbe:
     """Each configured chain's last probe result and the live chain-client map.
 
     ``build_client`` constructs one chain's client by name and raises when it
-    cannot; ``clients`` is the map construction at startup already filled, which
-    the probe then owns and updates in place. ``json_rpc`` and ``clock`` are the
+    cannot; ``clients`` is the map every consumer is handed, which the probe
+    owns and fills in place. ``json_rpc`` and ``clock`` are the
     boundaries a test replaces.
     """
 
@@ -254,7 +255,7 @@ class AlkahestChainProbe:
         }
 
     async def step(self) -> dict[str, Any]:
-        """Probe every chain, and rebuild any client still missing."""
+        """Probe every chain, and build any client still missing."""
         now = self._clock()
         names = list(self._chains)
         outcomes = await asyncio.gather(*(self._probe(name) for name in names))

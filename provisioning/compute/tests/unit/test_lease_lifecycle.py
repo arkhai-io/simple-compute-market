@@ -540,3 +540,31 @@ async def test_a_timer_cycle_in_flight_keeps_a_paused_watchdog_off_its_gate():
     assert lifecycle.is_at_gate is True
     executor.release.set()
     await asyncio.wait_for(explicit, timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_a_pause_straight_after_a_resume_holds_the_cycle_the_resume_woke():
+    """A resume wakes the timer cycle waiting at the gate; a pause before that
+    cycle runs answers "at the gate", so the woken cycle must wait again rather
+    than run inside the hold."""
+    site = FakeSiteAuthority()
+    site.due = [site.reservations["alloc-1"]]
+    executor = _GatedExecutor(_decision(ReleaseAction.FREE))
+    lifecycle = _lifecycle(site, executor)
+    lifecycle.pause()
+    cycle = asyncio.create_task(lifecycle.check_leases())
+    await asyncio.sleep(0)
+
+    lifecycle.resume()
+    lifecycle.pause()
+    assert lifecycle.is_at_gate is True
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+    assert not executor.waiting.is_set()
+    assert not cycle.done()
+    assert lifecycle.is_at_gate is True
+    lifecycle.resume()
+    await asyncio.wait_for(executor.waiting.wait(), timeout=1)
+    executor.release.set()
+    await asyncio.wait_for(cycle, timeout=1)

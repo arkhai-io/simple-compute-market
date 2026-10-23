@@ -1,0 +1,1 @@
+One thing we need to change is a flag for make validate-local to optionally skip those two tests. We should detect if the prerequisite tool isn't installed in the environment and warn they are being skipped but we shouldn't keep failing on that error.

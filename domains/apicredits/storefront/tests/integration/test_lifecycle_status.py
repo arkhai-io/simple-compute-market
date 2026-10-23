@@ -405,6 +405,9 @@ async def test_startup_does_not_wait_for_an_unreachable_credits_service(
     assert (second["state"], second["attempts"]) == (WAITING, 2)
     outcome = status.lifecycle[LISTING_SEED]["last_outcome"]
     assert (outcome["trigger"], outcome["completed"]) == ("step", True)
+    # Status reports the credits service degraded, and never its URL.
+    assert status.checks["credits_service"] == "unreachable"
+    assert status.status == "degraded"
     assert _REFUSED not in str(status)
 
 

@@ -18,7 +18,9 @@ never used on a public network.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import threading
 from contextlib import ExitStack
 from unittest.mock import patch
 
@@ -199,9 +201,81 @@ async def test_the_storefront_starts_degraded_and_recovers_its_chain_without_a_r
     ), publication
     assert "close" not in publication["counts"], publication
 
-    # Once the chain answers, a stepped probe rebuilds the client it could not
-    # construct at start, and Alkahest is ready with no restart.
+    # Once the chain answers, a stepped probe builds the client it could not
+    # construct before, and Alkahest is ready with no restart.
     assert probed["probed"] == ["anvil"]
     assert chain.constructed == ["anvil"]
     assert _alkahest(recovered)["ready"] is True
     assert _alkahest(recovered)["public_details"]["chain_probe"]["anvil"]["result"] == "reachable"
+
+
+async def test_the_storefront_starts_while_a_chain_client_never_finishes_building(
+    tmp_path, monkeypatch, lifecycle_registry
+):
+    """A websocket chain that accepts the connection and never upgrades it holds
+    its client's construction for good. Startup constructs no client, so the
+    storefront still starts and answers its health check; the probe constructs
+    on a thread of its own, and, waiting on it no longer than the RPC timeout,
+    reports the chain unreachable while its JSON-RPC answers."""
+    monkeypatch.setenv(
+        "ARKHAI_IDENTITY_CREDENTIAL", base64.urlsafe_b64encode(_SEED).rstrip(b"=").decode()
+    )
+    monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
+    never_upgraded = threading.Event()
+    constructed_on: list[str] = []
+
+    def constructor(_policy):
+        def construct(chain_name: str) -> object:
+            constructed_on.append(threading.current_thread().name)
+            # Only the probe's own construction thread is held: one anywhere
+            # else, as startup's would be, fails at once, so the assertion below
+            # names it rather than the test hanging.
+            if threading.current_thread().name.startswith("alkahest-client-"):
+                never_upgraded.wait()
+            raise ConnectionError("websocket closed")
+
+        return construct
+
+    def answering(rpc_url, method, params, timeout):
+        # The chain's JSON-RPC answers, so only the missing client reads unreachable.
+        return hex(31337) if method == "eth_chainId" else "0x6080"
+
+    app = server.build_vm_storefront_app(
+        registry=build_vm_storefront_registry(build_vm_storefront_domain()),
+        seams=server.VmCompositionSeams(
+            alkahest_client_constructor=constructor, alkahest_json_rpc=answering
+        ),
+    )
+    configuration = {
+        **_CONFIGURATION,
+        "settlement": {
+            **_CONFIGURATION["settlement"],
+            "alkahest": {"enabled": True, "rpc_timeout_seconds": 0.2},
+        },
+        "db_path": str(tmp_path / "storefront.db"),
+    }
+    try:
+        with ExitStack() as stack:
+            for key, value in configuration.items():
+                stack.enter_context(replaced_setting(key, value))
+            stack.enter_context(patch.dict(storefront_config.CHAINS, _CHAINS, clear=True))
+            async with app.router.lifespan_context(app):
+                async with _admin(app) as admin:
+                    health = await admin.get_health()
+                    await admin.admin_pause_lifecycle_loops()
+                    await asyncio.wait_for(
+                        admin.admin_run_lifecycle_cycle("alkahest-chain-probe"), timeout=5
+                    )
+                    status = await admin.get_system_status()
+    finally:
+        never_upgraded.set()
+
+    assert health.checks["database"] == "ok"
+    assert constructed_on and all(
+        name.startswith("alkahest-client-") for name in constructed_on
+    ), constructed_on
+    alkahest = _alkahest(status)
+    assert alkahest["ready"] is False
+    assert [(b["code"], b["kind"]) for b in alkahest["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]

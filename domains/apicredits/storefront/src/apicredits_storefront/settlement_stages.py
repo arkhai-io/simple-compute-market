@@ -585,6 +585,12 @@ class AlkahestSellerStage:
             raise ValueError("chain_name is required for Alkahest")
         client = composition.mechanism_resources["get_client"](body.chain_name)
         if client is None:
+            # A configured chain whose client the chain probe has not built yet,
+            # at start or while its endpoint is down, is retryable.
+            if body.chain_name in CHAINS:
+                raise SettlementRefusal(
+                    503, f"Alkahest chain {body.chain_name!r} is unavailable; retry"
+                )
             raise ValueError("Alkahest chain client is unavailable")
         await coordinator.start(
             escrow_uid=reference, negotiation_id=body.negotiation_id,

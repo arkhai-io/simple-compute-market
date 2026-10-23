@@ -24,7 +24,7 @@ dependencies:
     repository: "file://charts/storefront"
     condition: storefront.enabled
   - name: bare-metal-storefront
-    version: "0.3.0"
+    version: "0.4.0"
     repository: "file://charts/bare-metal-storefront"
     condition: bare-metal-storefront.enabled
   - name: provisioning

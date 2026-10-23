@@ -53,7 +53,6 @@ from market_storefront_kit import (
     StorefrontLoopController,
     TradingPause,
     alkahest_client_constructor,
-    build_alkahest_clients,
 )
 
 from .config import (
@@ -793,21 +792,6 @@ def _alkahest_release_models(domain: MarketDomainContract) -> frozenset[str]:
     return frozenset(getattr(stage, "release_models", ()) or ())
 
 
-def _build_chain_clients(
-    chains: Mapping[str, ChainSettings],
-    *,
-    private_key: str,
-    build_clients: Callable[..., Mapping[str, Any]],
-) -> tuple[dict[str, Any], dict[str, str | None]]:
-    """The Alkahest chain clients for ``[Chains]``, signing with the wallet's key."""
-    policy = _alkahest_client_policy(chains, private_key=private_key)
-    alkahest_chains = policy.chains
-    clients = build_clients(policy, logger=logger)
-    return dict(clients), {
-        chain.name: chain.address_config_path for chain in alkahest_chains
-    }
-
-
 def seed_service_peer_trust(runtime: BareMetalStorefrontRuntime) -> None:
     """Seed each configured site's service peer, then load the trust from it.
 
@@ -836,7 +820,6 @@ def build_runtime_from_configuration(
     *,
     credential: str | None = None,
     domain: MarketDomainContract | None = None,
-    build_chain_clients: Callable[..., Mapping[str, Any]] = build_alkahest_clients,
     build_chain_client: Callable[
         [AlkahestClientPolicy], Callable[[str], Any] | None
     ] = alkahest_client_constructor,
@@ -849,10 +832,9 @@ def build_runtime_from_configuration(
     ``credential`` to ``ARKHAI_IDENTITY_CREDENTIAL``. Nothing durable is built
     until the configuration is known to publish: the startup refusal runs
     before the signer, the settlement composition, or the database.
-    ``build_chain_clients`` builds the Alkahest chain clients, the boundary to
-    the chains the storefront settles on, ``build_chain_client`` the
-    constructor the chain probe rebuilds a missing client with,
-    ``chain_json_rpc`` the probe's JSON-RPC transport to each chain, and
+    ``build_chain_client`` gives the constructor the chain probe builds each
+    Alkahest chain client with, the boundary to the chains the storefront
+    settles on, ``chain_json_rpc`` the probe's JSON-RPC transport to each chain, and
     ``site_clients`` each site's clients, the boundary to the site authorities.
 
     The service-peer trust is built here and holds nothing until the server
@@ -901,22 +883,17 @@ def build_runtime_from_configuration(
         "[Wallet].private_key": bool(private_key),
     }
     if alkahest_configured:
-        chain_clients, chain_config_paths = (
-            _build_chain_clients(
-                active.chains, private_key=private_key, build_clients=build_chain_clients
-            )
-            if private_key and active.chains
-            else (
-                {},
-                {
-                    name: chain.alkahest_address_config_path or None
-                    for name, chain in active.chains.items()
-                },
-            )
-        )
+        chain_config_paths = {
+            name: chain.alkahest_address_config_path or None
+            for name, chain in active.chains.items()
+        }
         alkahest_section = section_check.config.mechanism_config(ALKAHEST_CONFIG_KEY)
-        # The probe owns the client map from here: the composition and the
-        # runtime below are both handed this one dict, which it updates in place.
+        # The map starts empty and the probe owns it: its first step constructs
+        # each chain's client, bounded, since a websocket client connects while
+        # it is built and composition must not wait on a chain. The composition
+        # and the runtime below are both handed this one dict, which the probe
+        # updates in place.
+        chain_clients: dict[str, Any] = {}
         chain_probe: AlkahestChainProbe | None = AlkahestChainProbe(
             [
                 ProbedChain.from_config(name, chain)

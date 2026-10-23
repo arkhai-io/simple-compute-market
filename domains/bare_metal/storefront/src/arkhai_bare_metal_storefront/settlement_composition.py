@@ -157,7 +157,7 @@ class BareMetalStorefrontSettlementComposition:
     def chain_clients(self) -> Mapping[str, Any]:
         """The Alkahest chain clients, as the live map the chain probe updates.
 
-        The map itself, even while empty, so a client the probe rebuilds after
+        The map itself, even while empty, so a client the probe builds after
         startup reaches every holder.
         """
         clients = self.resources.get("clients")
