@@ -40,6 +40,8 @@ allow = [
   # nothing to the commands after it.
   "Bash(sed -n *)", "Bash(awk *)", "Bash(cut *)", "Bash(sort *)", "Bash(uniq *)",
   "Bash(tr *)", "Bash(cd *)",
+  # Lists a built wheel's or archive's contents; with -l unzip extracts nothing.
+  "Bash(unzip -l *)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
