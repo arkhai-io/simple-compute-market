@@ -2387,6 +2387,53 @@ Section 11 notes (handoff):
   of the hand-edited schemas); the local Helm topology run (11.8); `TESTING.md`'s loop
   tables still list neither `alkahest-chain-probe` nor `listing-seed`, which closeout's
   promotion (decision 22's and 19's `TESTING.md` items) adds.
+- **Corrections after Section 13** (a repair pass on uv 0.11.17 and Helm v4.3.0, the
+  versions `.github/workflows/tests.yml` pins, and Node 22):
+  - `make helm-values-schema` has run. It rewrote `helm/values.schema.json`,
+    `helm/charts/storefront/values.schema.json`, and
+    `helm/charts/bare-metal-storefront/values.schema.json`, each byte-identical to the
+    committed file, so 11.3's hand edit equals the generator's output.
+  - `make -C helm test-render` (inside `make test-deployment-packaging`) passed on Helm
+    v4.3.0 with both storefront environments present, so the loader and startup-refusal
+    probes ran.
+  - The provisioning failure in "A provisioning-service test fails here at `HEAD` too" was
+    the test's, not only the environment's. Dynaconf's `.env` discovery returns the first
+    `.env` it finds walking up from the invoked script, before it tries the working
+    directory, so a `.env` in any ancestor directory of the test runner shadowed the test's
+    own. The test now roots discovery at its own directory (`ROOT_PATH_FOR_DYNACONF`); its
+    assertions are unchanged, and the service's discovery is as `DEPLOYMENT_AND_CONFIG.md`
+    describes. The service's unit suite then passed (666) within `make test`.
+  - `test_change_next_step.py::test_an_earlier_rounds_token_does_not_decide_a_triage_in_progress`
+    depended on the clock: two files written back to back usually share a modification
+    time, which `change_next_step.governing` reads as triaged together. The test now sets the
+    earlier triage's time before the later review's; `scripts/change_next_step.py` is
+    unchanged.
+  - The locks the environment refresh rewrote (the note above) are a uv version's: with the
+    pinned uv, every committed lock passes `make check-locks`, while each project's `reinit`
+    still rewrites some of them (wheels for platforms outside a project's declared
+    `environments`, or dependency markers). They were left as committed; whether to relock
+    with the pinned uv is the owner's.
+  - The degraded-start scenario now states what the start shows: the registry check
+    unreachable and the storefront degraded, Alkahest unready for reachability, the unloaded
+    site's listings held with none closed, and Alkahest ready and publication reaching the
+    registry once each answers, without a restart. Recovery evidence added, each at
+    application integration through the typed clients, and passing on first run:
+    - VM `test_publication_loop.py::test_a_listing_every_registry_refused_is_published_once_they_answer`.
+      With a candidate and every registry refusing, the listing is recorded and stays open,
+      each registry's record is read back unpublished and diverged, and the next cycle after
+      they answer publishes it to both, with no divergence left.
+    - VM `test_negotiate_controller.py::TestSourceConfirmationWindow::test_a_round_refused_while_the_site_fails_succeeds_once_it_answers`.
+      A round refused retryably while the site fails is countered once it answers.
+    - API credits
+      `test_lifecycle_status.py::test_the_seed_completes_once_the_credits_service_answers`.
+      `listing-seed` waits while the credits ledger refuses connections, then registers and
+      creates the listing once it answers.
+    - Site recovery after a restart while unreachable was already shown by
+      `test_pool_overrides_api.py::test_a_site_with_no_projection_holds_its_listings_and_its_override_is_unknown`.
+  - **Open for triage:** with a candidate to publish and every registry refusing, the
+    publication cycle completes, reporting `registry_not_converged` per listing, so loop
+    status shows no failed cycle. Decision 20's "a failed publication or convergence cycle in
+    loop status" therefore still disagrees with the code. Neither side is changed here.
 
 ## 12. Helm test pods carry no workload selector label
 
@@ -2678,6 +2725,35 @@ Section 13 notes (handoff):
 - **Seams:** a hold's gate state is the pause answer itself — the storefront's loop
   states, provisioning's new `at_gate` — so a hold needs no second read; the read-backs
   stages use are system status, which is what a module that forgot its hold would show.
+- **Corrections after this section** (the repair pass of Section 11's corrections):
+  - `make test` passed every suite through the API-credit Python suites, including the
+    provisioning service's unit suite (666, with the dotenv test corrected) and integration
+    suite (488), then stopped at `domains/apicredits`' middleware toolchain check, which needs
+    Node 22.6 or later and that run's path lacked. On Node 22.23.1 the targets after it then
+    passed one by one: `make test-apicredits` (its Python suites, and the TypeScript and Rust middleware
+    ports), `make test-e2e-unit` (82), and `make test-deployment-packaging` (release tooling
+    1092, with the timing-dependent test corrected; the Helm render on v4.3.0). A single
+    uninterrupted `make test` on this commit has not been run.
+  - `make check-packaging` and `make check-comment-hygiene` pass.
+  - `make check-change` fails only on the citation of
+    `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, which Section 22 creates; its
+    strict OpenSpec validation passes. A citation preceding its target is a plan issue for
+    triage, not a reason to implement Section 22 early.
+  - Of the items "For triage" above, two are now resolved and two stay open:
+    - **Release order (resolved).** The VM lane's `ensure_storefront_resumed`,
+      `reap_buyer_settle_subprocess`, and `release_reserved_resources` are no longer autouse;
+      every VM scenario module, `test_pool_declared_offering_modes.py` included, lists them
+      after its holds, so they finalise while the holds stand and the holds are released
+      last. `e2e-tests/tests/unit/test_scenario_cleanup_order.py` (unit) reads the order pytest
+      resolves (`pytest --setup-plan` over the real conftests and modules) and fails any module
+      whose holds are released before a fixture that cleans up. Only a `close()` of the very
+      object a fixture yielded is exempt from counting as cleanup. Over the unchanged modules
+      it failed all eight held VM modules, naming the three fixtures; after the change, the
+      e2e-tests unit suite passed (107). No deployed lane has run on the new order.
+    - **Live read-back (resolved).** Design decision 22 now says stages assert a hold
+      through live system status, which is stronger than the fixture's state at setup.
+    - **The degraded start (partly open).** See Section 11's corrections.
+    - **The double `arkhai-e2e-tests` bump (open).**
 
 ## 14. The delegate decides delivery terms
 

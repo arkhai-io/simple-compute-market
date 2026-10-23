@@ -630,10 +630,18 @@ def deal_driver(
 
 
 # ---------------------------------------------------------------------------
-# Teardown — ensure global pause is cleared after each test module run
+# Module cleanup — `ensure_storefront_resumed`, `reap_buyer_settle_subprocess`,
+# and `release_reserved_resources`
 # ---------------------------------------------------------------------------
+#
+# Every module takes all three with `pytest.mark.usefixtures`, after its holds.
+# pytest finalises module fixtures in the reverse of their setup, so the cleanup
+# runs while the holds still stand and the holds are released last; an autouse
+# fixture would be set up first and finalised after the holds, with the
+# storefront's timers running again. `tests/unit/test_scenario_cleanup_order.py`
+# checks the order pytest actually resolves.
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def ensure_storefront_resumed(storefront_admin_client):
     """Yield to let the module run; then unconditionally clear global pause if set.
 
@@ -739,7 +747,7 @@ def lease_watchdog_held(provisioning_client):
         yield held
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def reap_buyer_settle_subprocess(deal_state: DealState):
     """Stop the buyer-CLI ``market settle`` subprocess if it outlived the test.
 
@@ -758,7 +766,7 @@ def reap_buyer_settle_subprocess(deal_state: DealState):
         log.warning("[teardown] could not terminate settle subprocess: %s", exc)
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(scope="module")
 def release_reserved_resources(storefront_admin_client):
     """Release every hold the module leaves behind once it has run.
 

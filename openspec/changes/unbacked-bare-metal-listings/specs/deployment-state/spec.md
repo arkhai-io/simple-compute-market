@@ -12,10 +12,14 @@ so that a slow start is not judged by its liveness probe.
 
 #### Scenario: The VM storefront starts before its registry and chain
 
-- **WHEN** the VM storefront starts while its registry and its chain are unreachable
-- **THEN** it starts and answers its health check, its status reports Alkahest unready
-  with a reachability blocker and a failed publication cycle, and both recover once the
-  dependencies answer
+- **WHEN** the VM storefront starts while its registry, its site, and its chain are
+  unreachable
+- **THEN** it starts and answers its health check; its status reports the registry check
+  unreachable, the storefront degraded, and Alkahest unready with a reachability blocker;
+  its publication cycle holds the listings of the site whose projection it has not loaded
+  and closes none of them
+- **AND** Alkahest becomes ready once the chain answers, and publication reaches the
+  registry once it answers, both without a restart
 
 #### Scenario: A storefront starts before its site or service
 

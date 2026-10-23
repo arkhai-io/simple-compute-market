@@ -852,6 +852,59 @@ async def test_a_registry_that_missed_a_close_is_repaired_by_the_next_cycle(
     assert (await _cycle(world))["counts"] == {}
 
 
+async def test_a_listing_every_registry_refused_is_published_once_they_answer(registry_world):
+    """A storefront with a candidate to publish while every registry refuses
+    records the listing, reports it unconverged at each registry, and closes
+    nothing; once the registries answer, the next cycle publishes it to each, in
+    the same process."""
+    world = registry_world
+    world.pools.append(pool("broker-a", backing="unbacked"))
+    world.registries.failing = {("publish", url) for url in world.registries.urls}
+
+    refused = await _cycle(world)
+    degraded = await world.client.get_system_status()
+    (listing_id,) = await _listings(world)
+    unpublished = await world.db.load_publications(listing_id=listing_id)
+    diverged = await world.db.list_publication_divergence(registry_urls=world.registries.urls)
+    world.registries.failing.clear()
+    world.registries.sent.clear()
+    answered = await _cycle(world)
+    published = await world.db.load_publications(listing_id=listing_id)
+    converged = await world.db.list_publication_divergence(registry_urls=world.registries.urls)
+
+    assert refused["counts"] == {"publish": 1, "converge": 1, "fail": 1}
+    assert [
+        (a["action"], a.get("registries"), a.get("reason"))
+        for a in refused["actions"]
+        if a.get("listing_id") == listing_id
+    ] == [
+        ("converge", list(world.registries.urls), None),
+        ("fail", None, "registry_not_converged"),
+    ]
+    assert degraded.checks["registry"] == "unreachable"
+    assert degraded.status == "degraded"
+    assert (await _listing(world, listing_id))["status"] == "open"
+    # The storefront records each registry's refusal, and reads both back as
+    # not converged.
+    assert sorted(row["registry_url"] for row in unpublished) == sorted(world.registries.urls)
+    assert all(row["status"] != "published" and row["last_error"] for row in unpublished)
+    assert sorted((row["listing_id"], row["registry_url"]) for row in diverged) == sorted(
+        (listing_id, url) for url in world.registries.urls
+    )
+
+    # Recovered: each registry's record reads published, and nothing diverges.
+    assert {row["registry_url"]: row["status"] for row in published} == {
+        url: "published" for url in world.registries.urls
+    }
+    assert converged == []
+    assert (await _listing(world, listing_id))["status"] == "open"
+    assert answered["counts"] == {"converge": 1}
+    assert sorted(url for url, _ in world.registries.to("publish", listing_id)) == sorted(
+        world.registries.urls
+    )
+    assert (await _cycle(world))["counts"] == {}
+
+
 async def test_a_registry_left_closed_by_a_failed_reopen_is_repaired_by_the_next_cycle(
     registry_world,
 ):

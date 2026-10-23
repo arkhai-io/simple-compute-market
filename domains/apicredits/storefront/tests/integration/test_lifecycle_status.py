@@ -16,14 +16,19 @@ connections.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+from functools import partial
+from unittest.mock import patch
 
 import httpx
 import pytest
+from core_storefront.auth import signed_response_headers
 from market_alkahest import ALKAHEST_CHAIN_PROBE_LOOP, AlkahestChainProbe, ProbedChain
 from market_capacity_publication import SiteEventCycle
+from market_config.config_loader import ChainConfig
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_settlement_runtime import SettlementServicingWorker
 from storefront_client import StorefrontClient
@@ -31,10 +36,11 @@ from storefront_client.client import StorefrontClientError
 
 import apicredits_storefront.container as container
 import apicredits_storefront.server as server
-from apicredits_storefront import startup
+from apicredits_storefront import listing_seed, startup
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.listing_seed import (
     CREDITS_SERVICE_UNANSWERED,
+    DONE,
     LISTING_SEED,
     WAITING,
     configured_listing_seed,
@@ -55,6 +61,7 @@ from apicredits_storefront.settlement_composition import (
 )
 from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
+from tests.integration.test_publish_reconcile import _QuotaRuntime, _quota_service
 
 # Deterministic development keys for this test only; never used on any network.
 ADMIN_SIGNER = Ed25519Signer(bytes.fromhex("44" * 32))
@@ -399,6 +406,109 @@ async def test_startup_does_not_wait_for_an_unreachable_credits_service(
     outcome = status.lifecycle[LISTING_SEED]["last_outcome"]
     assert (outcome["trigger"], outcome["completed"]) == ("step", True)
     assert _REFUSED not in str(status)
+
+
+#: The credits service's ledger signer: a deterministic development key, never
+#: used on any network.
+_LEDGER_SIGNER = Ed25519Signer(bytes.fromhex("33" * 32))
+#: The quota site the seed registers at and publishes from.
+_TOKENS_SITE = {
+    "tokens": {
+        "url": "http://tokens:8082",
+        "expected_authorities": {
+            "identities": [_LEDGER_SIGNER.identity.model_dump(mode="json")]
+        },
+    }
+}
+
+
+class _CreditsLedger:
+    """The credits service's capacity-administration endpoint, at the HTTP
+    boundary the storefront's typed client sends through: it refuses the
+    connection until ``answering`` is set, then accepts the registration with a
+    response its ledger signer signs."""
+
+    def __init__(self) -> None:
+        self.answering = False
+        self.registrations = 0
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        if not self.answering:
+            raise httpx.ConnectError("connection refused", request=request)
+        self.registrations += 1
+        resource_id = request.url.path.rsplit("/", 1)[-1]
+        body = {"resource_id": resource_id}
+        headers = signed_response_headers(
+            signer=_LEDGER_SIGNER,
+            role="service",
+            method=request.method,
+            operation="capacity_resource_put",
+            resource=resource_id,
+            request_id=request.headers["X-Market-Request-ID"],
+            status=200,
+            body=body,
+        )
+        return httpx.Response(200, json=body, headers=headers)
+
+
+async def test_the_seed_completes_once_the_credits_service_answers(
+    storefront, db, monkeypatch
+):
+    """The rest of spec scenario "A storefront starts before its site or
+    service": a storefront started while its credits service refuses
+    connections waits in ``listing-seed``, and once the service answers the next
+    stepped cycle registers the quota and creates the seeded listing, in the
+    same process. The seed is the configuration's, composed as the storefront
+    composes it; only its registration's transport is the test's."""
+    app, loops, _obligations, _start = storefront
+    domain = get_market_domain_contract()
+    monkeypatch.setattr(container, "resolved_market_domain", domain)
+    monkeypatch.setattr(container, "resolved_settlement_runtime", None)
+    register_api_credit_lifecycle_steps(loops)
+    loops.request_pause(True)
+    ledger = _CreditsLedger()
+    # A resource no listing in the module's database derives from yet.
+    seed_table = {
+        "resource_id": "demo-quota",
+        "service_name": "Acme",
+        "chain": "anvil",
+        "token": "0x" + "01" * 20,
+        "escrow_address": "0x" + "11" * 20,
+        "total_units": 100,
+    }
+    chains = {"anvil": ChainConfig(name="anvil", rpc_url="http://anvil.test", chain_id=31337)}
+    with _capacity_sites(_TOKENS_SITE), settings_overrides(seed=seed_table), patch.dict(
+        storefront_config.CHAINS, chains, clear=True
+    ):
+        listings = _quota_service(db, monkeypatch, _QuotaRuntime({"demo-quota": 42}))
+        seed = dataclasses.replace(
+            configured_listing_seed(listing_service=listings, signer=STOREFRONT_SIGNER, db=db),
+            register_quota=partial(
+                listing_seed.register_seed_quota,
+                site=listing_seed.capacity_authority_site(),
+                signer=STOREFRONT_SIGNER,
+                transport=httpx.MockTransport(ledger.handle),
+            ),
+        )
+        monkeypatch.setattr(container, "resolved_listing_seed", seed)
+        await startup._startup_tasks(domain=domain, capacity_runtime=_QuotaSite())
+        await asyncio.wait_for(loops.await_quiescence(), timeout=1.0)
+
+        async with _admin(app) as admin:
+            waiting = await admin.admin_run_lifecycle_cycle("listing-seed")
+            ledger.answering = True
+            done = await admin.admin_run_lifecycle_cycle("listing-seed")
+            status = await admin.get_system_status()
+
+    assert (waiting["state"], waiting["reason"]) == (WAITING, CREDITS_SERVICE_UNANSWERED)
+    assert (done["state"], done["attempts"]) == (DONE, 2)
+    assert ledger.registrations == 1
+    listing = await db.load_listing(listing_id=done["listing_id"])
+    assert listing["status"] == "open"
+    binding = await db.load_listing_binding(listing_id=done["listing_id"])
+    assert (binding.site_id, binding.physical_resource_id) == ("tokens", "demo-quota")
+    outcome = status.lifecycle[LISTING_SEED]["last_outcome"]
+    assert (outcome["trigger"], outcome["completed"]) == ("step", True)
 
 
 async def test_an_unsigned_status_read_is_refused(storefront):

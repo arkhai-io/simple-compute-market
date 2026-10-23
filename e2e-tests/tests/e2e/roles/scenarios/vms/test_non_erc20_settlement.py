@@ -46,11 +46,15 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     # Listed first, so the holds are taken before, and released after, every
-    # fixture of the module but the lane's autouse ones.
+    # other fixture of the module; the lane's cleanup follows them, so it runs
+    # while the holds stand.
     # The module steps the storefront's loops and fulfillment convergence (a
     # timer cycle could claim a row mid-provider-call, and the module's own
     # explicit cycle would then reach nothing) itself.
-    pytest.mark.usefixtures("storefront_loops_held", "fulfillment_convergence_held"),
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
     pytest.mark.e2e_non_erc20_settlement,
 ]
 

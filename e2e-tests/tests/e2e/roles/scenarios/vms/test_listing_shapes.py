@@ -70,8 +70,12 @@ log = logging.getLogger(__name__)
 
 pytestmark = [
     # Listed first, so the hold is taken before, and released after, every
-    # fixture of the module but the lane's autouse ones.
-    pytest.mark.usefixtures("storefront_loops_held"),
+    # other fixture of the module; the lane's cleanup follows it, so it runs
+    # while the hold stands.
+    pytest.mark.usefixtures(
+        "storefront_loops_held",
+        "ensure_storefront_resumed", "reap_buyer_settle_subprocess", "release_reserved_resources",
+    ),
     pytest.mark.e2e_listing_shapes,
 ]
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -656,6 +657,12 @@ def test_an_earlier_rounds_token_does_not_decide_a_triage_in_progress(
     _triaged(root, "02-implementation.md", "Another round", reviewed=HEAD)
     _record(root, "03-implementation.md", reviewed=HEAD)
     (_reviews(root) / "03-implementation.triage.md").write_text("# Triage\n", "utf-8")
+    # The earlier round was triaged before the latest review was published. Two
+    # files written back to back often share a modification time, which reads as
+    # triaged together, so the order is stated rather than left to the clock.
+    published = (_reviews(root) / "03-implementation.md").stat().st_mtime_ns
+    earlier = published - 1_000_000_000
+    os.utime(_reviews(root) / "02-implementation.triage.md", ns=(earlier, earlier))
 
     result = _next(root)
 

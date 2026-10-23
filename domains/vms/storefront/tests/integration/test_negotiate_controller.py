@@ -1059,6 +1059,37 @@ class TestSourceConfirmationWindow:
         assert "listing_source_unverifiable" in str(refused.value)
         assert site_requests == []
 
+    async def test_a_round_refused_while_the_site_fails_succeeds_once_it_answers(
+        self, client, db
+    ):
+        """Spec scenario "A storefront starts before its site or service", for
+        the VM storefront's provisioning site: a round refused retryably while the
+        site cannot be reached succeeds, in the same process, once the site
+        answers and the projection is polled again."""
+        c, db = client
+        await _upsert_bound_listing(db, "neg-site-returns", capacity_backing="unbacked")
+        (site,) = _PROJECTION_SITES
+        state = _container.site_projections()
+        site.failing = True
+        await state.poll_once()
+        opening = dict(
+            listing_id="neg-site-returns",
+            settlement_selection=await _selection(db, "neg-site-returns"),
+            initial_amount=4000,
+            provision_terms=_vm_provision(),
+            **_PINNED,
+        )
+
+        with pytest.raises(StorefrontClientError) as refused:
+            await c.negotiate_new(**opening)
+        site.failing = False
+        await state.poll_once()
+        opened = await c.negotiate_new(**opening)
+
+        assert refused.value.status_code == 503
+        assert "listing_source_unverifiable" in str(refused.value)
+        assert opened["action"] == "counter", opened
+
 
 class TestAcceptanceRechecksTheSource:
     """A buyer's accept rechecks the listing against its source, as a round does.

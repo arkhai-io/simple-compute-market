@@ -872,7 +872,10 @@ The VM storefront starts with its registry and chain unreachable. An unreachable
 makes Alkahest unready with a reachability blocker from its probe (decision 19); an
 unreachable registry shows as a failed publication or convergence cycle in loop status,
 retried each cycle. `/health` stays a process check and the degraded state is reported
-through system status, as bare metal reports it.
+through system status, as bare metal reports it. A storefront that starts with its site
+unreachable has no projection of it, so its publication cycle holds that site's listings
+and closes none, while the registry check reports the registry unreachable and the
+storefront degraded.
 
 A wait inside the process holds the service back as an init container does, so the same
 rule reaches the storefronts' own startup:
@@ -934,10 +937,15 @@ convergence:
   storefront, the provisioning service) built on those helpers; bare metal's and VM
   introduction's own copies are replaced;
 - a module takes the holds it needs with `usefixtures`, listed first so they are released
-  last, after the module's other cleanup; stages assert a hold, through system status for
-  loops and the fixture's own state for the lease watchdog, and never pause or resume a
-  service;
-- a unit check over the scenario source refuses any direct call of a pause route.
+  last, after the module's other cleanup; the lane's cleanup fixtures are not autouse, since
+  pytest sets an autouse fixture up first and so finalises it after the holds, and each
+  module lists them after its holds; stages assert a hold through live system status, for
+  loops and the lease watchdog alike, which a module that lost its hold would fail, where
+  the state the fixture saw when it took the hold could not; and they never pause or resume
+  a service;
+- a unit check over the scenario source refuses any direct call of a pause route, and
+  another reads the fixture order pytest resolves for every scenario module and refuses a
+  hold released before the module's other cleanup.
 
 A module killed by `helm test`'s timeout runs no finaliser, and only a restart clears its
 pause; modules in a lane run serially.
