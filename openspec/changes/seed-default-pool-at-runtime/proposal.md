@@ -29,7 +29,8 @@ e2e scenarios copy it from the seeded `default`.
 - Migration reads no operational configuration and seeds no pool:
   `run_migrations` takes only the engine, `20260713_002` refuses a database with
   hosts but no `default` pool instead of seeding, and the job-envelope migration
-  takes a job's host only from the job's own evidence. The settings
+  takes a job's host only from fields that name its physical host, never from a
+  VM job's guest target. The settings
   `default_pool_inventory_group` and `default_host_id` are retired.
 - A host's pool is optional. A host written without one is unplaced; an explicit
   `null` on update, or an empty `pool_id=` in INI inventory, unplaces a host
@@ -119,8 +120,8 @@ None.
 - Optional host placement, explicit-`null` and empty-INI unplacing →
   `openspec/specs/resource-pool-management/spec.md` (Explicit valid host
   membership); `docs/development/ARCHITECTURE.md` (One name per concept).
-- No host write places a host or declares capacity; a host sells only once placed
-  and declared → `docs/development/ARCHITECTURE.md` (Storefront capacity boundary
+- No host write places a host or declares capacity; a host sells only through an
+  explicit capacity declaration → `docs/development/ARCHITECTURE.md` (Storefront capacity boundary
   or Resource pools); `openspec/specs/physical-provisioning/spec.md`.
 - `default` as an ordinary pool → `openspec/specs/resource-pool-management/spec.md`;
   `openspec/specs/site-capacity/spec.md`.

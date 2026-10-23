@@ -55,8 +55,9 @@ Every provisioning database has applied every migration through
 **Goals:**
 
 - Migration reads no operational configuration and seeds no pool.
-- No host is sold unless an operator has placed it in a pool and declared its
-  capacity; no host write does either implicitly, whatever its entry point.
+- No host write places a host in a pool or declares its capacity, whatever its
+  entry point; a host sells only through capacity an operator has explicitly
+  declared.
 - A fresh site starts with usable pools for each compute domain, from a packaged
   seed document an operator can override or disable.
 - A job's playbook is resolved and frozen when the job is prepared, for every
@@ -250,10 +251,16 @@ refuses, with an actionable `SchemaDriftError`, a database that holds hosts but 
 has passed. The settings `default_pool_inventory_group` and `default_host_id` are
 retired from `settings.toml`, both Helm values files, and the test fixtures.
 
-`_migrate_job_envelopes` takes a job's `host_id` only from the job's own evidence,
-its parameters and then its target. A job with neither keeps `host_id` NULL, and
-the migration logs each such job at WARNING; if one is queued, the job engine fails
-it at execution as naming no registered host.
+`_migrate_job_envelopes` takes a job's `host_id` only from evidence that names its
+physical host: the row's `host_id`, then `params.host_id` (which the host-identity
+migration `20260921` renamed from `vm_host`), then `params.executor_target` for a
+bare-metal job alone, where the bare-metal plan writes the machine. A VM job's
+`vm_target`, and its `executor_target`, which defaults to `vm_target`, name its
+guest and are never read as its host. A job with none of these keeps `host_id`
+NULL, and the migration logs each such job, by ID, at WARNING; if one is queued,
+the job engine fails it at execution as naming no registered host. The migration's
+tests cover a VM job with only a guest target, and one whose guest name matches a
+registered host: both keep `host_id` NULL.
 
 `ansible_pool_configs.inventory_group`, which nothing reads, is dropped in the same
 table rebuild that makes `playbook_path` nullable.
