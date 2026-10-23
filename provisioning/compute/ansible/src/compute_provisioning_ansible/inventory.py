@@ -7,10 +7,11 @@ is the one its entry states, never its section. Parsing turns
 each entry into an ``InventoryHost`` with an ``ssh`` connection the host
 authority applies; the authority, not this module, decides what applying means.
 
-The file given to the service lists only hosts to sell. Infrastructure an
-operator manages with Ansible (relay proxies, the provisioning servers
-themselves) belongs in a separate file of the same inventory directory, which
-the service is not given.
+The file given to the service lists only the execution hosts to register;
+registering a host declares none of its capacity. Infrastructure an operator
+manages with Ansible (relay proxies, the provisioning servers themselves)
+belongs in a separate file of the same inventory directory, which the service
+is not given.
 """
 
 from __future__ import annotations

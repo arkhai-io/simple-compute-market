@@ -2,10 +2,9 @@
 
 The harness here stores no pool, as migration leaves a fresh database, and the
 service's own seed step runs over the harness's pool service with the packaged
-`pool_seed_path`. The seeded pools are ordinary and usable at once, and they
-sell only what an operator declares into them: a host placed in one sells
-nothing until capacity naming it is declared, and an unplaced host sells
-nothing at all.
+`pool_seed_path`. The seeded pools are ordinary and usable at once. Registering
+a host, placed in one or unplaced, declares none of its capacity: only capacity
+an operator declares is admitted.
 """
 
 from __future__ import annotations
@@ -94,7 +93,7 @@ async def test_a_host_and_capacity_declared_into_the_vm_pool_are_admitted(
     assert (await _projected(capacity))["vm-default"] == ["kvm1-gpus"]
 
 
-async def test_a_host_registered_without_a_pool_sells_nothing(
+async def test_a_host_registered_without_a_pool_declares_no_capacity(
     seeded, capacity: CapacityApi,
 ):
     host = await seeded.family.register_host(_host("kvm2", None))

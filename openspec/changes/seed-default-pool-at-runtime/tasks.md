@@ -1294,6 +1294,27 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   (now the outcome alone); 7.5's note overstated what the old code passed;
   D6 still described the engine's old message. The engine's distinct message
   is a diagnostic and needs no promotion row of its own.
+  Round fix (implementation review 60's triage, `reviews/60-implementation.triage.md`):
+  - 60 F1: no deployed check of `configFiles` is added. The chart render tests
+    prove the file renders and mounts at its path and the profile names it;
+    `test_an_operator_seed_document_replaces_the_packaged_one` proves startup
+    seeds from the path it is given. The step between them is a ConfigMap key
+    delivered by a `subPath` mount of the `config` volume into `/app/config`,
+    which is how `config-production.yml` reaches the container on every
+    deployed run, and the schema admits only names Kubernetes accepts as a
+    ConfigMap key.
+  - 60 F2: the INI parser's module docstring says its file lists the execution
+    hosts to register and that registering one declares no capacity;
+    `test_pool_seed_api.py`'s docstring says registering a host, placed or
+    not, declares none of its capacity, and its unplaced-host case is
+    `test_a_host_registered_without_a_pool_declares_no_capacity`.
+  Evidence for the round fix: `make check-packaging` passed; `make -C
+  provisioning/compute/ansible test` — library unit, 93 passed; `make -C
+  provisioning/compute/service test` — unit 658 passed, persistence and
+  application integration 527 passed, the renamed case among them; repository
+  `make test` exited 0; `make check-change` passed. Fresh-context compliance
+  check of the diff: no comment-hygiene, accuracy, citation, or
+  public-repository finding, and the old test name is cited nowhere else.
 
 ## 10. Closeout
 
