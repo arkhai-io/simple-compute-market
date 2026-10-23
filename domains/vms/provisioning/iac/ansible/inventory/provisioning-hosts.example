@@ -12,8 +12,11 @@
 # target when run against this directory (`-i inventory/`).
 #
 # Each line's first token is the host's `host_id`, which a capacity
-# declaration names to say which host it is delivered through. What a host is
-# sold as follows from its Resource Pool (`pool_id=`, default "default").
+# declaration names to say which host it is delivered through. What sells is
+# the capacity declared for a host, never the host entry itself. A host's
+# Resource Pool is optional: `pool_id=<pool>` places it, an empty `pool_id=`
+# unplaces it, and a line with no `pool_id` leaves an existing host's pool as it
+# is and registers a new host in no pool.
 # The real file is gitignored.
 # =============================================================================
 
@@ -25,4 +28,4 @@
 #   public_host=<IP/DNS>    — address buyers should use if different from ansible_host
 #   gpus=<count>            — used by the provisioning service's capacity checks
 #   gpu_model=<model>       — reported with the host's capacity
-#   pool_id=<pool>          — the Resource Pool the host belongs to
+#   pool_id=<pool>          — the Resource Pool to place the host in; empty unplaces it

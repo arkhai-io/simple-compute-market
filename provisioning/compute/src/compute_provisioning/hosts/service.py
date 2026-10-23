@@ -17,9 +17,10 @@ import logging
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from enum import Enum
+from typing import Literal, Optional, Protocol
 
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools import ResourcePool
 from sqlalchemy.orm import Session, sessionmaker
 
 from .connection import ConnectionCodecs, ConnectionEnvelope
@@ -35,7 +36,7 @@ class HostNotFoundError(Exception):
 
 
 class PoolChangeRefusedError(ValueError):
-    """A pool-change hook refused moving a host to another pool.
+    """A pool-change hook refused moving a host to another pool, or to none.
 
     The request is well formed and may succeed once whatever the subscriber
     protects is gone, so it is a conflict with current state rather than a bad
@@ -64,23 +65,42 @@ class HostCapacityDerivation(Protocol):
 
 
 #: Called inside the transaction moving a host between pools, before it
-#: commits, with ``(db, host_id, current_pool_id, new_pool_id)``. A hook refuses
-#: the move by raising ``PoolChangeRefusedError``, which rolls back the whole
-#: transaction. Every pool assignment of an existing host goes through the hooks,
-#: whether it comes from an update or an imported inventory, so no path moves a
-#: host around a subscriber.
-PoolChangeHook = Callable[[Session, str, str, str], None]
+#: commits, with ``(db, host_id, current_pool_id, new_pool_id)``; either pool is
+#: ``None`` for an unplaced host, so unplacing a host is a move like any other.
+#: A hook refuses the move by raising ``PoolChangeRefusedError``, which rolls
+#: back the whole transaction. Every pool assignment of an existing host goes
+#: through the hooks, whether it comes from an update or an imported inventory,
+#: so no path moves a host around a subscriber.
+PoolChangeHook = Callable[[Session, str, Optional[str], Optional[str]], None]
+
+
+class PoolUnstated(Enum):
+    """The type of :data:`POOL_UNSTATED`."""
+
+    POOL_UNSTATED = "pool-unstated"
+
+
+#: An inventory entry that says nothing about its host's pool. It differs from
+#: ``None``, which unplaces the host: an entry that does not mention a pool
+#: leaves an existing host where it is, so re-importing an older inventory
+#: never unplaces hosts placed since through the API.
+POOL_UNSTATED = PoolUnstated.POOL_UNSTATED
 
 
 @dataclass(frozen=True)
 class InventoryHost:
-    """One host an imported inventory declares."""
+    """One host an imported inventory declares.
+
+    ``pool_id`` names the pool to place or move the host in, is ``None`` to
+    unplace it, or is :data:`POOL_UNSTATED` to leave an existing host's pool
+    as it is; a new host with no pool stated is created unplaced.
+    """
 
     host_id: str
     connection: ConnectionSubmission
     gpu_count: int = 0
     gpu_model: Optional[str] = None
-    pool_id: str = DEFAULT_POOL_ID
+    pool_id: Optional[str] | Literal[PoolUnstated.POOL_UNSTATED] = POOL_UNSTATED
 
 
 def _view(host: Host) -> HostResponse:
@@ -160,24 +180,30 @@ class HostAuthority:
     # ------------------------------------------------------------------
 
     def register_host(self, data: HostCreate) -> HostResponse:
+        """Register a host in the pool it names, or unplaced when it names none."""
         connection = self._build(data.connection, previous=None)
-        pool_id = data.pool_id or DEFAULT_POOL_ID
         host = Host(
             host_id=data.host_id,
             gpu_count=data.gpu_count,
             gpu_model=data.gpu_model,
             enabled=data.enabled,
-            pool_id=pool_id,
+            pool_id=data.pool_id,
         )
         host.set_connection(connection)
         with self._session_factory() as db:
-            self._require_pool_exists(db, pool_id)
+            if data.pool_id is not None:
+                self._require_pool_exists(db, data.pool_id)
             db.add(host)
             db.commit()
             db.refresh(host)
             return _view(host)
 
     def update_host(self, host_id: str, data: HostUpdate) -> HostResponse:
+        """Apply the fields ``data`` sets; an omitted field is left as it is.
+
+        ``pool_id`` is the one field whose ``None`` means something: set
+        explicitly, it unplaces the host, through the pool-change hooks.
+        """
         with self._session_factory() as db:
             host = self._require_host(db, host_id)
             if data.connection is not None:
@@ -190,7 +216,7 @@ class HostAuthority:
                 host.gpu_model = data.gpu_model
             if data.enabled is not None:
                 host.enabled = data.enabled
-            if data.pool_id is not None:
+            if "pool_id" in data.model_fields_set:
                 self._move_to_pool(db, host, data.pool_id)
             db.commit()
             db.refresh(host)
@@ -210,8 +236,10 @@ class HostAuthority:
         Idempotent for the same input. Capacity is derived for the upserted
         hosts in the same transaction, so a host applied from an inventory and
         the declaration derived from its legacy capacity land together. A
-        declaration already naming a host keeps it. An existing host's pool
-        changes through the pool-change hooks, as an update's does; a hook's
+        declaration already naming a host keeps it. An entry stating a pool
+        places or moves its host and one stating ``None`` unplaces it, through
+        the pool-change hooks, as an update does; an entry stating none leaves
+        an existing host's pool alone and creates a new host unplaced. A hook's
         refusal rolls back the whole inventory.
         """
         if not entries:
@@ -220,10 +248,16 @@ class HostAuthority:
         applied: list[str] = []
         with self._capacity_derivation.serialized(), self._session_factory() as db:
             for entry in entries:
-                self._require_pool_exists(db, entry.pool_id)
+                stated = entry.pool_id is not POOL_UNSTATED
+                if stated and entry.pool_id is not None:
+                    self._require_pool_exists(db, entry.pool_id)
                 existing = db.query(Host).filter(Host.host_id == entry.host_id).one_or_none()
                 if existing is None:
-                    host = Host(host_id=entry.host_id, enabled=True, pool_id=entry.pool_id)
+                    host = Host(
+                        host_id=entry.host_id,
+                        enabled=True,
+                        pool_id=entry.pool_id if stated else None,
+                    )
                     host.set_connection(self._build(entry.connection, previous=None))
                     db.add(host)
                 else:
@@ -231,7 +265,8 @@ class HostAuthority:
                     host.set_connection(
                         self._build(entry.connection, previous=existing.connection())
                     )
-                    self._move_to_pool(db, host, entry.pool_id)
+                    if stated:
+                        self._move_to_pool(db, host, entry.pool_id)
                 host.gpu_count = entry.gpu_count
                 host.gpu_model = entry.gpu_model
                 applied.append(entry.host_id)
@@ -268,9 +303,11 @@ class HostAuthority:
             previous=previous,
         )
 
-    def _move_to_pool(self, db: Session, host: Host, pool_id: str) -> None:
-        """Assign ``pool_id`` to an existing host; a real move runs the hooks."""
-        self._require_pool_exists(db, pool_id)
+    def _move_to_pool(self, db: Session, host: Host, pool_id: Optional[str]) -> None:
+        """Assign ``pool_id`` to an existing host, or unplace it for ``None``;
+        a real move runs the hooks."""
+        if pool_id is not None:
+            self._require_pool_exists(db, pool_id)
         if host.pool_id == pool_id:
             return
         for hook in self._pool_change_hooks:
@@ -303,5 +340,7 @@ __all__ = [
     "HostCapacityDerivation",
     "HostNotFoundError",
     "InventoryHost",
+    "POOL_UNSTATED",
     "PoolChangeHook",
+    "PoolUnstated",
 ]

@@ -46,7 +46,7 @@ class LegacyHostCapacity:
     """The host facts a derivation reads."""
 
     host_id: str
-    pool_id: str
+    pool_id: str | None
     gpu_count: int
     gpu_model: str | None
     enabled: bool
@@ -70,15 +70,20 @@ def plan_derived_declarations(
 
     A host with no GPUs is not derived: it has no legacy capacity to
     preserve, and a zero declaration would publish a resource with nothing
-    to sell. A host some declaration already names is not derived, whatever
-    that declaration says. A host whose id another declaration already uses
-    as its resource id is skipped and reported, because registering it would
-    replace that declaration.
+    to sell. An unplaced host is not derived: a declaration names its pool,
+    and an unplaced host has none to name. A host some declaration already
+    names is not derived, whatever that declaration says. A host whose id
+    another declaration already uses as its resource id is skipped and
+    reported, because registering it would replace that declaration.
     """
     declarations: list[CapacityDeclaration] = []
     skipped: list[tuple[str, str]] = []
     for host in hosts:
-        if host.gpu_count <= 0 or host.host_id in declared_host_ids:
+        if (
+            host.gpu_count <= 0
+            or host.pool_id is None
+            or host.host_id in declared_host_ids
+        ):
             continue
         if host.host_id in existing_resource_ids:
             skipped.append(

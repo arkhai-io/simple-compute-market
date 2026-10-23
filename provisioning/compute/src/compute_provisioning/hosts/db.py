@@ -12,7 +12,7 @@ from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, Str
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.sql import func
 
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
+from market_resource_pools import ResourcePool
 
 from .connection import ConnectionEnvelope, ProtectedValue
 
@@ -27,8 +27,9 @@ class Host(Base):
     hard-deleted, so job history naming a ``host_id`` stays resolvable; a
     disabled host is excluded from listings and lookups for new work.
 
-    Every host has a pool; new rows default to the system-created ``default``
-    pool at both the ORM and database layers.
+    A host belongs to at most one pool. ``pool_id`` is null for an unplaced
+    host, and nothing supplies a pool a write did not name: placing a host is
+    its operator's statement, as declaring its capacity is.
     """
 
     __tablename__ = "hosts"
@@ -43,13 +44,7 @@ class Host(Base):
     # Nullable: a host with no GPU has none to report.
     gpu_model = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
-    pool_id = Column(
-        String,
-        ForeignKey(ResourcePool.__table__.c.id),
-        nullable=False,
-        default=DEFAULT_POOL_ID,
-        server_default=DEFAULT_POOL_ID,
-    )
+    pool_id = Column(String, ForeignKey(ResourcePool.__table__.c.id), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

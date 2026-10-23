@@ -140,7 +140,9 @@ class VmProvisioningRuntime:
         )
 
 
-def _relay_pool_change(db, host_id: str, current_pool_id: str, new_pool_id: str) -> None:
+def _relay_pool_change(
+    db, host_id: str, current_pool_id: str | None, new_pool_id: str | None
+) -> None:
     # A host moving to a pool on a different relay while it holds leases would
     # strand its VMs' buyers on the old address; the move is refused, in the
     # host authority's own refusal so every host route answers it alike.

@@ -20,7 +20,7 @@ from .test_capacity_api import CapacityApi, capacity  # noqa: F401
 _INI = (
     "[kvm_hosts]\n"
     "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
-    "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n"
+    "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200  pool_id=default\n"
     "kvm2  ansible_host=10.0.0.2  ansible_user=ubuntu  "
     "ansible_ssh_private_key_file=/keys/id\n"
 )
@@ -42,6 +42,21 @@ async def test_an_ini_import_declares_capacity_for_hosts_with_gpus(
     assert resources["kvm1"]["host_id"] == "kvm1"
     assert resources["kvm1"]["capacity"] == {"gpu_count": 4}
     assert resources["kvm1"]["attributes"] == {"gpu_model": "H200"}
+
+
+async def test_an_unplaced_host_with_gpus_derives_nothing(
+    client_and_queue, capacity: CapacityApi
+):
+    """A declaration names its pool, and an imported host stating none is in
+    no pool, so its GPUs declare nothing."""
+    client, _ = client_and_queue
+
+    await client.host_import.import_hosts_from_text(
+        _INI.replace("  pool_id=default", ""), ssh_key_type="path"
+    )
+
+    assert (await client.family.get_host("kvm1")).pool_id is None
+    assert await _resources(capacity) == {}
 
 
 async def test_a_reimport_with_changed_gpus_leaves_the_declaration(

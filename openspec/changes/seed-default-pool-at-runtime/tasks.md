@@ -502,7 +502,7 @@ Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/hosts.
 `provisioning/compute/ansible/tests/unit/test_inventory.py`, and the service's
 `test_hosts_api.py` and `test_host_pool_moves_api.py`.
 
-- [ ] 5.1 Contracts and client (D1): `HostResponse.pool_id` becomes `str | None`;
+- [x] 5.1 Contracts and client (D1): `HostResponse.pool_id` becomes `str | None`;
   `HostCreate`'s description says an omitted pool leaves the host unplaced;
   `HostUpdate` keeps `pool_id: Optional[str]`, and the route service tells an
   explicit `null` from an omitted field by the fields the request set. The typed
@@ -510,25 +510,83 @@ Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/hosts.
   included (`exclude_unset` for `HostUpdate`), while every other body keeps the
   shared `exclude_none` serialization. Unit (`provisioning/compute/tests/unit`):
   the serialized update body carries `"pool_id": null` only when set.
-- [ ] 5.2 Host authority (D1): `Host.pool_id` becomes nullable with no default or
+  Done. `HostResponse.pool_id` is `Optional[str]` and required, so a response
+  always states it; `HostCreate` and `HostUpdate` describe an omitted pool and
+  an explicit `null`. The authority, not the route service, tells the two
+  apart (`"pool_id" in data.model_fields_set` in `update_host`): the route
+  service passes the model through, and its fields-set travels with it. The
+  client's `_update_host` dumps `exclude_unset` itself, so the shared
+  `payload()` is unchanged. Unit (`provisioning/compute/client/tests/unit/test_client.py`,
+  where the client's tests live rather than `provisioning/compute`'s): through both client
+  variants over a mock transport, an update sends `{"pool_id": null}` for an
+  explicit `None`, the pool for a named one, `{"enabled": false}` alone, and
+  `{}` for an empty update.
+- [x] 5.2 Host authority (D1): `Host.pool_id` becomes nullable with no default or
   server default; `register_host` stores the named pool or none;
   `_move_to_pool` accepts `None`, runs the pool-change hooks for unplacing as for
   any move, and checks existence only for a named pool; `InventoryHost.pool_id`
   carries three states (a pool, unplace, unstated), and `apply_inventory` moves
   an existing host only when its entry states a pool or unplaces it, creating a
   new host unplaced when its entry is unstated.
-- [ ] 5.3 INI parser (D1): `parse_inventory_ini` maps a non-empty `pool_id=` to a
+  Done. Unstated is the sentinel `POOL_UNSTATED` (an enum member, exported
+  with its type `PoolUnstated`), and `InventoryHost.pool_id` defaults to it;
+  `PoolChangeHook` takes optional pools, and VM's relay hook, which already
+  compared `None` pools, is annotated so. Library integration
+  (`provisioning/compute/tests/integration/test_host_authority.py`, the real
+  authority over in-memory SQLite with a recording hook): a created host and
+  a new inventory entry naming no pool are each stored, read, and looked up
+  with no pool, and no hook runs; an update omitting the pool keeps it, an
+  explicit `None` unplaces it through the hooks, unplacing an unplaced host
+  is no move, and placing it again is one; an inventory entry stating a pool
+  places it, stating none keeps it while reconnecting it, and `None`
+  unplaces it; a hook refusing an unplacing leaves the update, and the whole
+  import with a new host in it, unapplied. Existing cases that relied on the
+  default now state `default`. Beyond the plan, the service's derivation
+  (`services/capacity_derivation.py`, `plan_derived_declarations`) skips an
+  unplaced host, since a declaration must name a pool; section 6 removes
+  derivation. Application integration
+  (`test_host_capacity_derivation_api.py::test_an_unplaced_host_with_gpus_derives_nothing`):
+  an imported GPU host stating no pool is unplaced and no declaration is
+  created.
+- [x] 5.3 INI parser (D1): `parse_inventory_ini` maps a non-empty `pool_id=` to a
   pool, an empty `pool_id=` to unplace, and an absent key to unstated, and its
   docstring no longer names a default pool. Unit (`test_inventory.py`): all three
   forms.
-- [ ] 5.4 Application integration through the typed client (`test_hosts_api.py`,
+  Done. Unit (`provisioning/compute/ansible/tests/unit/test_inventory.py`):
+  `pool_id=gpu`, `pool_id=`, and no key parse to `"gpu"`, `None`, and
+  `POOL_UNSTATED`. The package no longer imports `market_resource_pools`, so
+  `arkhai-kit-resource-pools` leaves its dependencies (`make lock` dropped it
+  from four locks) and `docs/development/RELEASING.md`'s row for it, which
+  `scripts/tests/test_publish_matrix.py` holds equal to the declaration.
+- [x] 5.4 Application integration through the typed client (`test_hosts_api.py`,
   `test_host_pool_moves_api.py`): a host created without a pool reads back
   `pool_id: null`; an update omitting the pool keeps it; an explicit `null`
   unplaces it; an import with an empty `pool_id=` unplaces an existing host; an
   import with no `pool_id` keeps an existing host's pool and leaves a new host
   unplaced; a VM relay hook refusing an unplacing rolls back the whole import;
   an unknown pool is still refused.
-- [ ] 5.5 **Verification checkpoint.** Unit: contracts/client serialization and
+  Done. Application integration (the in-process app through the typed family,
+  host-import, and pool clients): `test_hosts_api.py::TestHostPlacement` — a
+  host created with no pool reads back `null` from create, get, and list; an
+  update stating only `gpu_model` keeps `default`; an explicit `null`
+  unplaces; an import with `pool_id=` unplaces an imported host; an import
+  with no `pool_id` keeps an existing host's pool while changing its address
+  and creates a new host unplaced; an unknown pool is a 400 on create,
+  update, and import, leaving the host unchanged and creating none.
+  `test_host_pool_moves_api.py`: with a VM tunnel bound through a host in a
+  relay pool, an import that first names a new host and then unplaces the
+  tunnelled one is a 409 naming the held lease; the tunnelled host keeps its
+  pool and address and the new host, applied before the refusal, is rolled
+  back with it; an update unplacing the host is a 409 too. `test_pools_api.py`: a
+  host registered with no pool is in none while `default` is stored and
+  enabled (replacing `test_register_host_defaults_to_default_pool`), and the
+  delete-`default` test no longer asserts the host fallback; its module
+  docstring no longer calls `default` undisableable. Two derivation tests
+  (`test_host_capacity_derivation_api.py`, and
+  `test_capacity_api.py::test_the_resource_pool_projection_publishes_declarations_not_hosts`)
+  import a GPU host expecting a derived declaration, so their INI now states
+  `pool_id=default`; section 6 rewrites them.
+- [x] 5.5 **Verification checkpoint.** Unit: contracts/client serialization and
   `test_inventory.py`. Application integration: 5.4. Run `make test` in
   `provisioning/compute/contracts`, `provisioning/compute/client`,
   `provisioning/compute`, `provisioning/compute/ansible`, and
@@ -538,6 +596,49 @@ Files: `provisioning/compute/contracts/src/compute_provisioning_contracts/hosts.
   (`e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`), so they prove the
   named path still places; none registers an unplaced host. No scenario is owed:
   placement is one authority's transaction, which application integration owns.
+  Evidence: `make -C provisioning/compute/contracts test` — 59 passed;
+  `provisioning/compute/client` — 58; `provisioning/compute` — 235 (unit and
+  library integration); `provisioning/compute/ansible` — 93;
+  `provisioning/compute/service` — unit 667, integration 510, then 511
+  after the review fixes (which touched tests, comments, and docstrings, and
+  were re-run in `provisioning/compute`, its `ansible`, and the service);
+  repository
+  `make test` passed before the review fixes (every suite, chart render and
+  release tooling included); `make lock`, `make check-packaging`, `make check-comment-hygiene`,
+  and `make check-change` passed. End-to-end scenarios: corrected — two
+  e2e paths register an unplaced host. The provisioning smoke test's
+  `test_host_crud_round_trip` registers `smoke-test-host` with no pool,
+  which section 9 deletes; and the VM scenarios' module fixture
+  `_ensure_provisioning_host_registered` (`e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`)
+  registers `kvm1` with no pool, which is now an unplaced host where it was
+  placed in `default`; its readers (the mock job dry run's host lookup)
+  read the host record, not its pool, so a scenario reaching it exercises
+  an unplaced host's lookup. No `Owed by validation:`
+  line: the section changes no chart. Fresh-context review: fixed the import
+  rollback test (its new host came after the refused one, so its absence
+  proved nothing; it now comes first), an untested derivation branch, the
+  unchecked refusal message, the inventory host's lookup, the stale seeding
+  comment in `app_runtime.py`, `PoolChangeRefusedError`'s docstring, a
+  rationale in `hosts/db.py` tying placement to selling, the operator example
+  `domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.example`
+  (outside the plan: it said `pool_id` defaulted to `default` and that a host
+  is sold as its pool), the module docstring of `inventory.py`, and these
+  notes. Declined: bumping package versions and raising floors for the
+  incompatible changes (`HostResponse.pool_id` nullable, `InventoryHost`'s
+  default, the hook signature, and `compute_provisioning_ansible` now
+  importing `POOL_UNSTATED`, which no released `arkhai-compute-provisioning`
+  has). `docs/development/RELEASING.md` bumps a version when a release is
+  cut, and no section of this change has bumped one (sections 2 and 3 made
+  incompatible changes too); the release that ships the change owes every
+  bump and floor together. Recorded for closeout's packaging part.
+  Handoff: until section 6's `hosts` rebuild, a database migrated before
+  this change keeps `hosts.pool_id` `NOT NULL DEFAULT 'default'`, so on it
+  an unplaced write fails at the constraint; the harnesses build `hosts`
+  from the model and cannot see it. Sections 5 and 6 ship in one round.
+  `.dist` is rebuilt from the working tree by `make check-packaging` and
+  `make dist`, so a section's wheel-consuming suites see whatever else is
+  uncommitted; and `make push-branch` refuses a dirty tree, so section 4's
+  commit is pushed with this section's.
 
 ## 6. Host writes declare no capacity, and the hosts rebuild
 

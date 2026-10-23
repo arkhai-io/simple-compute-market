@@ -119,8 +119,9 @@ def seed_inventory_if_empty() -> None:
     # are not overwritten on pod restart.  To force a re-seed, use
     # POST /api/v1/hosts/import which always upserts regardless of table state.
     #
-    # Seeding also declares capacity for each seeded host with GPUs that no
-    # capacity declaration names, in the same transaction as the hosts.
+    # Seeding also declares capacity for each seeded host placed in a pool,
+    # with GPUs, that no capacity declaration names, in the same transaction
+    # as the hosts. An entry stating no pool registers its host unplaced.
     # ------------------------------------------------------------------
     host_service = _container_module.resolved_host_authority
     existing_hosts = host_service.list_hosts(enabled_only=False)

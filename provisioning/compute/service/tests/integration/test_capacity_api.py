@@ -907,7 +907,7 @@ async def test_the_resource_pool_projection_publishes_declarations_not_hosts(
     await provisioning_client.host_import.import_hosts_from_text(
         "[kvm_hosts]\n"
         "kvm1  ansible_host=10.0.0.1  ansible_user=ubuntu  "
-        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200\n",
+        "ansible_ssh_private_key_file=/keys/id  gpus=4  gpu_model=H200  pool_id=default\n",
         ssh_key_type="path",
     )
     await provisioning_client.family.register_host(HostCreate(

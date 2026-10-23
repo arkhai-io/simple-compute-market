@@ -5,11 +5,10 @@ All calls go through ProvisioningClients methods — no route strings in test
 code. ComputeProvisioningError is raised by the client on non-2xx responses.
 
 Coverage:
-  - The "default" pool always exists (seeded by db_engine, mirroring the
-    real migration's guarantee).
+  - The harness stores a pool named "default" (db_engine), an ordinary pool.
   - CRUD endpoints round-trip correctly through the client.
   - PUT replaces complete mutable state; PATCH updates only supplied fields.
-  - DELETE disables non-default pools; the default pool remains enabled.
+  - DELETE disables any pool, "default" included, and never deletes it.
   - Import/validate round-trip through the client and produce the expected
     created/updated/disabled/unchanged diff.
   - Hosts can be created against a pool created through this API, and
@@ -414,15 +413,6 @@ class TestDeletePool:
         pool = await client.pools.get_pool("default")
         assert pool.enabled is False
 
-        # Still the fallback for hosts that omit pool_id.
-        host = await client.family.register_host(
-            HostCreate(
-                host_id="kvm1",
-                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
-            )
-        )
-        assert host.pool_id == "default"
-
 
 class TestImportAndValidatePools:
     _YAML = """
@@ -534,15 +524,19 @@ class TestHostPoolIntegration:
         )
         assert host.pool_id == "hetzner-eu"
 
-    async def test_register_host_defaults_to_default_pool(self, client_and_queue):
+    async def test_a_host_registered_without_a_pool_is_in_none(self, client_and_queue):
+        """Not in `default`, though one is stored: no write places a host in a
+        pool it did not name."""
         client, _ = client_and_queue
+        assert (await client.pools.get_pool("default")).enabled is True
         host = await client.family.register_host(
             HostCreate(
                 host_id="kvm1",
                 connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
             )
         )
-        assert host.pool_id == "default"
+        assert host.pool_id is None
+        assert (await client.family.get_host("kvm1")).pool_id is None
 
     async def test_register_host_with_nonexistent_pool_returns_400(
         self, client_and_queue
