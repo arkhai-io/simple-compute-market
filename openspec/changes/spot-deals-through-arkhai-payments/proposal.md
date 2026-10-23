@@ -4,17 +4,18 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 
 ## What Changes
 
-- VM interruptible listings (the existing `interruptible` offering mode) gain an `arkhai.payments.v1` option priced as a rate per period. The option carries the early-termination clause of `agreed-evidence-and-early-termination` in its `params`, including a maximum term. Its derived mandate is one `rate` part with `until: stop`; `stop` authorities are derived from the clause's entitlements, and `start` is the payee's alone.
-- The hosted adapter of that change gains the rate-part early ends: payer stop settled through the exposure tail, scheduled notice, exhaustion, and the maximum-term stop. End service already tears down by the funded-through time and on stop events, and restart replays from the snapshot.
+- VM interruptible listings (the existing `interruptible` offering mode) gain an `arkhai.payments.v1` option priced as a rate per period. The option carries the `adjudication` and `early_termination` terms of `agreed-evidence-and-early-termination` in its `params`, including a maximum term. Its derived mandate is one `rate` part with `until: stop`, plus a seller-funded `bond` part when the option has one; the rate part's `stop` authorities are derived from the entitlements, and `start` is the payee's alone.
+- The hosted adapter of that change gains the rate part's per-part events, translating deal-level commands into them: payer stop settled through the exposure tail, scheduled notice, exhaustion, and the maximum-term stop. End service already keeps funded-through as a renewable timer and tears down on stop events or an expired timer, and restart replays from the snapshot.
 - Seller preemption posts one `notice` with an effective time at least the notice period ahead; the payments service applies the stop at that time. Buyer cancellation is the buyer's own `stop` at the payments service.
-- The service stops the transaction at `start + max_term_seconds` with cause terms, so billing never outlives the maximum-term lease, including on on-demand deals where the seller has no stop authority.
-- Spot and on-demand differ only in entitlements. An on-demand option gives the payee no stop entitlement, so the seller is not a `stop` authority; an exceptional end such as failed hardware is a dispute the seller concedes on the buyer's behalf, at no less than the clause's concession floor. Reserved deals add a `once` part for the committed term.
+- The service stops the rate part at the absolute instant `start_utc + max_term_seconds` from the Agreement, carried in the mandate, with cause terms, so billing ends when the lease does, including on on-demand deals where the seller has no stop authority.
+- Spot and on-demand differ only in entitlements. An on-demand option gives the payee no stop entitlement, so the seller is not a `stop` authority; an exceptional end such as failed hardware is a dispute the seller concedes on the buyer's behalf, stopping the rate part now and forfeiting any bond. Reserved deals add a `once` part for the committed term. Presets are combinations of parts and terms; none is special-cased.
+- This change's deltas own the rate-part requirements that `agreed-evidence-and-early-termination` names but does not implement: payer stop through the exposure tail, the scheduled notice stop, the exhaustion stop, the maximum-term stop, and `reserve_ahead_seconds ≥ exposure_seconds` in force. Notice withdrawal is decided here.
 - This change owns the four-path scenario: buyer stop, seller reclaim with notice, funding exhaustion, and a conceded dispute. It runs as an e2e against the payments service's public test deployment, readiness-gated, with client-side integration tests against the test double at the `kit/arkhai-payments` boundary (`docs/development/TESTING.md`, "Private Service Dependencies").
 - Bare metal and API credits keep `once` parts. Reserved and fixed-interval deals stay on `once` until prepaid credits suit them.
 
 ## Dependencies
 
-- `agreed-evidence-and-early-termination` (design): the clause, the lifecycle kit and its hosted adapter, end service, and the evidence store this change implements against.
+- `agreed-evidence-and-early-termination` (design): the lifecycle terms, the lifecycle kits and their hosted adapter, end service, and the evidence store this change implements against.
 - Payments service `rate-parts`: rate parts with per-part periods and reservation ahead, a stop lifecycle, and the snapshot fields below.
 - `route-settlement-by-mechanism` (archived 2026-10-09): the continuation lives in the VM payment seller stage.
 - Snapshot verification. SCM verifies only the receipt embedded in a transaction snapshot, not the snapshot's own proof (`settle-through-arkhai-payments` design, R9). Funded-through times and stop events are snapshot state, so this change must first verify snapshot proofs and add a snapshot vector and receipt-kit fixture.
@@ -36,10 +37,10 @@ The payments service's `rate-parts` contract settles the seller-side needs below
 - **A stop event with an authoritative effective time, a cause and the settled amount,** in the signed snapshot. Causes: payer, payee, exhaustion, dispute authority. A stop is idempotent and final.
 - **Payee stop at or before now.** Backdating only reduces the payee's own revenue, so it can be allowed.
 - **A `notice` event as a scheduled stop.** The notice carries an effective time no earlier than now plus the entitlement's notice period, and the service applies the stop at that time.
-- **A maximum-term stop.** The service stops the transaction at `start + max_term` with cause terms.
+- **A maximum-term stop.** The service stops the rate part at the mandate's absolute maximum end with cause terms.
 - **Payee-only `start`.** Periods count from the seller's `start`; an unstarted mandate's hold is released when its window expires.
 - **A payer stop that settles through the declared exposure.**
-- **Dispute file and concede.** A conceded dispute is applied mechanically, as a stop with cause authority and an optional `reverse`, and only when it meets the mandate's concession floor.
+- **Dispute file and concede.** A conceded dispute is applied mechanically, through each affected part's events: the rate part stops with cause authority, a `once` part is reversed as the case requests, and a bond is forfeited.
 - **Causal event order in snapshots.** The open ordering issue (events with identical `receivedAt` seconds) matters once stop and reservation events interleave.
 - **A stop on any part stops the whole transaction,** and the snapshot says so. The seller must not reason per part.
 

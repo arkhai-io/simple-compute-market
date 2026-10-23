@@ -25,3 +25,14 @@ The VM storefront MUST own capacity reservation, physical fulfillment, credentia
 
 - **WHEN** a VM deal's settlement reaches a terminal state before its lease end
 - **THEN** the storefront requests end service, which truncates or terminates the lease
+
+## ADDED Requirements
+
+### Requirement: VM lease ends keep the requested instant
+
+The VM storefront MUST send and record lease ends to at least one-second precision, and MUST still read lease ends already recorded to the minute.
+
+#### Scenario: A lease is truncated mid-minute
+
+- **WHEN** end service truncates a VM lease to 12:00:30
+- **THEN** the site receives 12:00:30, not 12:00 or 12:01

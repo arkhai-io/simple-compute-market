@@ -6,12 +6,12 @@ Negotiation MUST pass its exact accepted Agreement to the domain's selected sett
 
 #### Scenario: Arkhai payment gates domain provisioning
 
-- **WHEN** the seller receives `commit` for an Agreement settled through `arkhai.payments.v1`
-- **THEN** VM, bare-metal or API-credit delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
+- **WHEN** a VM seller receives `commit` for an Agreement settled through `arkhai.payments.v1`
+- **THEN** delivery remains blocked until its stage verifies a signed receipt matching the transaction ID and Agreement deal hash and produces verified evidence
 
 ### Requirement: Marketplace roles hold no payment ledger
 
-Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. Mechanism kits MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit. A storefront MAY keep lifecycle observation state (watch cursors, the end-service journal, and evidence records), which records what an authority reported and never a balance.
+Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe top-ups, payouts, or provider recovery. Mechanism kits MUST keep no settlement servicing state or daemon; headless callers supply owner-scoped credentials per request and verify service-signed receipts through the identity kit. A storefront MAY keep lifecycle observation state (watch cursors, funding timers, the end-service journal, and evidence records), which records what an authority reported and never a balance.
 
 #### Scenario: A headless caller checks a payment
 
