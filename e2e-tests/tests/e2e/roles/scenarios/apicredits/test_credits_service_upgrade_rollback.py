@@ -180,9 +180,10 @@ class Service:
         )
 
     def client(self):
-        from arkhai_apicredits.settlement import CreditsServiceClient
+        from arkhai_api_client import AuthorityClient
+        from arkhai_apicredits.label import API_CREDITS_LABEL
 
-        return CreditsServiceClient(self.url, self._admin_key)
+        return AuthorityClient(self.url, self._admin_key, label=API_CREDITS_LABEL)
 
     def route_surface(self) -> dict[str, list[str]]:
         document = httpx.get(f"{self.url}/openapi.json", timeout=10.0)
@@ -212,7 +213,7 @@ class Service:
             for grant in grants:
                 fulfillment_id = grant.get("fulfillment_id")
                 if fulfillment_id:
-                    issuance = await client.get_credit_issuance(fulfillment_id)
+                    issuance = await client.get_issuance(fulfillment_id)
                     assert issuance is not None, fulfillment_id
                     issuances[fulfillment_id] = issuance.model_dump(mode="json")
             recorded[key["key_id"]] = {"key": key, "grants": grants, "issuances": issuances}
@@ -229,21 +230,20 @@ def probes(engine, images, lane) -> Iterator[Probes]:
 
 
 def _issuance(negotiation_id: str, quantity: int, *, existing_key: str | None = None):
-    from arkhai_apicredits.settlement.credits_client import (
-        CreditIssuanceRequest,
-        CreditKeyTarget,
-    )
+    from arkhai_api.issuance import KeyDisposition, issuance_request
+    from arkhai_apicredits.label import API_CREDITS_LABEL
 
-    return CreditIssuanceRequest.create(
+    return issuance_request(
+        API_CREDITS_LABEL,
         negotiation_id=negotiation_id,
         owner=BUYER,
         service="weather-api",
         resource_id="rollback-quota",
         quantity=quantity,
         key=(
-            CreditKeyTarget(mode="existing", key_id=existing_key)
+            KeyDisposition(mode="existing", key_id=existing_key)
             if existing_key
-            else CreditKeyTarget(mode="new")
+            else KeyDisposition(mode="new")
         ),
     )
 
@@ -285,8 +285,8 @@ async def test_upgrade_the_current_image_reads_what_the_prekit_image_wrote(
     prekit = probes.start("prekit", volume)
     prekit.register_quota("rollback-quota", units=100)
     first = _issuance("neg-rollback-1", 5)
-    issued = await prekit.client().submit_credit_issuance(first)
-    topped = await prekit.client().submit_credit_issuance(
+    issued = await prekit.client().submit_issuance(first)
+    topped = await prekit.client().submit_issuance(
         _issuance("neg-rollback-2", 3, existing_key=issued.key_id)
     )
     assert (issued.balance, topped.balance) == (5, 8)
@@ -298,7 +298,7 @@ async def test_upgrade_the_current_image_reads_what_the_prekit_image_wrote(
     assert current.route_surface() == live_route_surface
     assert await current.grants() == written
 
-    retried = await current.client().submit_credit_issuance(first)
+    retried = await current.client().submit_issuance(first)
     assert retried.already_issued is True
     assert retried.key_id == issued.key_id
     assert retried.fulfillment_id == issued.fulfillment_id

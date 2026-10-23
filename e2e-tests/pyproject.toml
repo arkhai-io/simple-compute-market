@@ -52,7 +52,11 @@ dependencies = [
     # binary (one binary, many registry schemas); its verbs are
     # namespaced under `market credits …`.
     "arkhai-apicredits-buyer>=0.5.0",
-    "arkhai-apicredits-domain>=0.6.0",
+    "arkhai-apicredits-domain>=0.8.0",
+    # The API-credit lane's upgrade/rollback scenario drives the probe services
+    # through the family's typed client and builds issuances from the vocabulary.
+    "arkhai-api>=0.1.0",
+    "arkhai-api-client>=0.1.0",
     "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-policy>=0.4.0",
     # The API-credit lane's upgrade/rollback scenario starts service images.

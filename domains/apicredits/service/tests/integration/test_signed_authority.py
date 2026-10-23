@@ -400,7 +400,7 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 # construct. It is also why a client/authority disagreement is invisible to
 # them: both sides of the assertion are this suite's view of the envelope.
 #
-# These drive the real `CreditsServiceClient` (seller) and real `TokensClient`
+# These drive the real family `AuthorityClient` (seller) and real `TokensClient`
 # (service role) over `ASGITransport` against `signed_app` -- the real
 # composition, the real route tables, a real database. Nothing about the
 # envelope, the canonical body, or the response verification is reconstructed
@@ -410,10 +410,12 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 
 
 def _seller_client(signed_app):
-    from arkhai_apicredits.settlement import CreditsServiceClient
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api_client import AuthorityClient
 
-    return CreditsServiceClient(
+    return AuthorityClient(
         "http://credits-service",
+        label=ISSUANCE_LABEL,
         transport=httpx.ASGITransport(app=signed_app),
         signer=STOREFRONT_SIGNER,
         expected_authorities=TrustedIdentitySet(
@@ -490,21 +492,20 @@ def _issuance_request(negotiation_id: str, quantity: int = 5):
     `fulfillment_id` is a digest of the accepted negotiation ID, and the
     contract refuses a pair that does not agree -- which is what makes an
     issuance idempotent per accepted negotiation rather than per caller-chosen
-    string. `create` computes the digest over every bound field, so a literal
-    never becomes a second source of truth for what the request says.
+    string. The vocabulary computes the digest over every bound field, so a
+    literal never becomes a second source of truth for what the request says.
     """
-    from arkhai_apicredits.settlement.credits_client import (
-        CreditIssuanceRequest,
-        CreditKeyTarget,
-    )
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api.issuance import KeyDisposition, issuance_request
 
-    return CreditIssuanceRequest.create(
+    return issuance_request(
+        ISSUANCE_LABEL,
         negotiation_id=negotiation_id,
         owner=STOREFRONT_SIGNER.identity,
         service="weather-api",
         resource_id="weather-quota",
         quantity=quantity,
-        key=CreditKeyTarget(mode="new"),
+        key=KeyDisposition(mode="new"),
     )
 
 
@@ -521,12 +522,12 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
     """
     await _seed_quota(signed_app)
     seller = _seller_client(signed_app)
-    issued = await seller.submit_credit_issuance(_issuance_request("neg-1"))
+    issued = await seller.submit_issuance(_issuance_request("neg-1"))
 
     assert issued.quantity == 5
     assert issued.balance == 5
 
-    # Spend, not verify: `CreditIssuanceResult` deliberately excludes the
+    # Spend, not verify: the issuance result deliberately excludes the
     # bearer secret from serialization, and `verify` needs it. `consume` is
     # keyed by the grant alone, so it exercises the gated app's signed
     # envelope against this authority without the test holding material the
@@ -578,21 +579,18 @@ async def test_the_storefront_reads_its_quota_pools_declarations(signed_app):
 
 @pytest.mark.asyncio
 async def test_the_seller_client_reads_back_what_it_issued(signed_app):
-    """`get_key` and `get_credit_issuance` over the same signed boundary."""
+    """`get_key` and `get_issuance` over the same signed boundary."""
     await _seed_quota(signed_app)
     seller = _seller_client(signed_app)
-    issued = await seller.submit_credit_issuance(_issuance_request("neg-2", 7))
+    issued = await seller.submit_issuance(_issuance_request("neg-2", 7))
 
     key = await seller.get_key(issued.key_id)
     assert key["balance"] == 7
 
-    from arkhai_apicredits.settlement.credits_client import (
-        derive_credit_fulfillment_id,
-    )
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api.issuance import fulfillment_id
 
-    grant = await seller.get_credit_issuance(
-        derive_credit_fulfillment_id("neg-2")
-    )
+    grant = await seller.get_issuance(fulfillment_id(ISSUANCE_LABEL, "neg-2"))
     assert grant is not None
 
 
@@ -611,17 +609,16 @@ def _credit_request(
     """An issuance for an eip191 buyer, new key or a top-up of an existing one."""
     from market_identity import Identity
 
-    from arkhai_apicredits.settlement.credits_client import (
-        CreditIssuanceRequest,
-        CreditKeyTarget,
-    )
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (
-        CreditKeyTarget(mode="existing", key_id=existing_key)
+        KeyDisposition(mode="existing", key_id=existing_key)
         if existing_key
-        else CreditKeyTarget(mode="new")
+        else KeyDisposition(mode="new")
     )
-    return CreditIssuanceRequest.create(
+    return issuance_request(
+        ISSUANCE_LABEL,
         negotiation_id=negotiation_id,
         owner=Identity(scheme="eip191", identifier=owner),
         service="weather-api",
@@ -639,22 +636,22 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
     to exhaustion, a second deal tops the same key up, a stranger cannot top
     it up, and the key's detail carries its ownership claim but no secret.
     """
-    from arkhai_apicredits.settlement.credits_client import CreditsServiceError
+    from arkhai_api_client import AuthorityError
 
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller, gated = _seller_client(signed_app), _gated_client(signed_app)
 
     request = _credit_request("neg-deal1", 3)
-    issued = await seller.submit_credit_issuance(request)
+    issued = await seller.submit_issuance(request)
     assert issued.secret and issued.balance == 3
     assert "secret" not in issued.model_dump(mode="json")
 
     # An exact retry converges on the committed grant; an unused key's secret
     # is rotated so the retry can deliver it, and a read never returns one.
-    replay = await seller.submit_credit_issuance(request)
+    replay = await seller.submit_issuance(request)
     assert replay.key_id == issued.key_id and replay.already_issued
     assert replay.balance == 3 and replay.secret and replay.secret != issued.secret
-    found = await seller.get_credit_issuance(request.fulfillment_id)
+    found = await seller.get_issuance(request.fulfillment_id)
     assert found is not None and found.key_id == issued.key_id and found.secret is None
 
     snapshot = await _capacity_client(signed_app, admin=False).snapshot()
@@ -671,10 +668,10 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
     assert (refused.ok, refused.balance, refused.reason) == (False, 0, "insufficient_credits")
 
     # A consumed key's secret is never rotated by a retry.
-    used_replay = await seller.submit_credit_issuance(request)
+    used_replay = await seller.submit_issuance(request)
     assert used_replay.secret is None and used_replay.balance == 3
 
-    topped = await seller.submit_credit_issuance(
+    topped = await seller.submit_issuance(
         _credit_request("neg-deal2", 2, existing_key=issued.key_id)
     )
     assert topped.balance == 2 and topped.secret is None
@@ -683,20 +680,20 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
 
     # Every accepted purchase uses the same authorization; nothing in it names
     # the settlement mechanism that paid for it.
-    another = await seller.submit_credit_issuance(
+    another = await seller.submit_issuance(
         _credit_request("neg-deal-payment", 2, existing_key=issued.key_id)
     )
     assert another.balance == 3 and another.secret is None
 
-    with pytest.raises(CreditsServiceError) as refusal:
-        await seller.submit_credit_issuance(
+    with pytest.raises(AuthorityError) as refusal:
+        await seller.submit_issuance(
             _credit_request("neg-deal3", 1, owner=STRANGER, existing_key=issued.key_id)
         )
     assert refusal.value.reason == "key_not_owned"
 
     # Changed reuse of an accepted negotiation conflicts and mutates nothing.
-    with pytest.raises(CreditsServiceError) as conflict:
-        await seller.submit_credit_issuance(
+    with pytest.raises(AuthorityError) as conflict:
+        await seller.submit_issuance(
             _credit_request(request.negotiation_id, 4)
         )
     assert conflict.value.reason == "fulfillment_conflict"
@@ -716,7 +713,7 @@ async def test_batch_consumption_and_the_key_administration_surface(signed_app):
     """Batch spending, then every key-administration read and write the seller holds."""
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller, gated = _seller_client(signed_app), _gated_client(signed_app)
-    issued = await seller.submit_credit_issuance(_credit_request("neg-deal4", 5))
+    issued = await seller.submit_issuance(_credit_request("neg-deal4", 5))
 
     results = await gated.consume_batch(
         [

@@ -11,8 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from arkhai_api.issuance import (
     RESULT_SCHEMA_PATTERN,
     IssuanceRequest,
+    IssuanceResult,
     KeyDisposition,
     issuance_request_model,
+    issuance_result_model,
 )
 from arkhai_api.labels import IssuanceLabel
 
@@ -23,14 +25,17 @@ __all__ = [
     "ConsumeBatchResponse",
     "ConsumeRequest",
     "GrantListResponse",
+    "IssuanceLabel",
     "IssuanceRequest",
     "IssuanceResponse",
+    "IssuanceResult",
     "KeyDisposition",
     "KeyListResponse",
     "UsageListResponse",
     "VerifyRequest",
     "issuance_request_model",
     "issuance_response_model",
+    "issuance_result_model",
 ]
 
 

@@ -1,13 +1,14 @@
-"""Storefront-owned API-credit service client composition."""
+"""Storefront-owned composition of the family authority client."""
 
 from __future__ import annotations
 
-from arkhai_apicredits.settlement import CreditsServiceClient
+from arkhai_api_client import AuthorityClient
+from arkhai_apicredits.label import API_CREDITS_LABEL
 
-_client: CreditsServiceClient | None = None
+_client: AuthorityClient | None = None
 
 
-def get_credits_service_client() -> CreditsServiceClient:
+def get_credits_service_client() -> AuthorityClient:
     """Return the process-wide client for the configured credits service.
 
     Signed authentication is selected by the presence of a configured
@@ -25,9 +26,10 @@ def get_credits_service_client() -> CreditsServiceClient:
         from apicredits_storefront.utils import config
 
         authorities = config.credits_expected_authorities()
-        _client = CreditsServiceClient(
+        _client = AuthorityClient(
             config.credits_service_url(),
             config.credits_admin_key(),
+            label=API_CREDITS_LABEL,
             signer=config.resolve_identity_signer() if authorities else None,
             expected_authorities=authorities,
         )

@@ -9,13 +9,14 @@ every call to that route. Three tables therefore have to stay identical:
 
 - `CREDITS_ROUTE_CONTRACTS` (the service, authoritative),
 - `apicredits_middleware.client` (the gated app, `service` role),
-- `arkhai_apicredits.settlement.credits_client` (the storefront, `seller`).
+- `arkhai_api_contracts.routes` (the declarations the storefront's family
+  client binds every `seller` request from).
 
 Lives in the service's own suite because the service owns the authoritative
-table, and because the two clients it compares against need `fastapi` and
-`market_site` -- which the service has and the domain package deliberately
-does not. `middleware.route_contracts` imports directly here; there is no
-name collision with the published `apicredits_middleware`.
+table, and because the comparison needs `fastapi` and `market_site` -- which
+the service has and the family packages deliberately do not.
+`middleware.route_contracts` imports directly here; there is no name
+collision with the published `apicredits_middleware`.
 """
 
 from __future__ import annotations
@@ -99,41 +100,21 @@ def test_batch_route_signs_the_empty_resource(contracts, middleware_client):
     assert middleware_client.BATCH_RESOURCE == ""
 
 
-def test_storefront_operations_exist_and_admit_the_seller_role(contracts):
-    """The storefront's operations, signed as `seller`."""
-    from arkhai_apicredits.settlement import credits_client as sf
+def test_the_family_declarations_are_this_services_table_field_for_field():
+    """The seller's client binds each request from these declarations, so they must be this table."""
+    from arkhai_api_contracts.routes import AUTHORITY_ROUTES
 
-    keyed = {
-        sf.ISSUANCE_GET_OPERATION: "fulfillment_id",
-        sf.KEY_GET_OPERATION: "key_id",
-        sf.KEY_REVOKE_OPERATION: "key_id",
-        sf.KEY_ADJUST_OPERATION: "key_id",
-        sf.KEY_GRANTS_LIST_OPERATION: "key_id",
-        sf.KEY_USAGE_LIST_OPERATION: "key_id",
-        sf.KEYS_LIST_OPERATION: None,
-    }
-    for operation, path_resource in keyed.items():
-        assert operation in contracts, sorted(contracts)
-        contract = contracts[operation]
-        assert sf.STOREFRONT_ROLE in contract.allowed_roles, operation
-        assert contract.path_resource == path_resource, operation
-
-
-def test_issuance_signs_the_optional_body_resource(contracts):
-    """`credits_issue` takes its resource from the body, optionally.
-
-    The client mirrors that by signing the body's `fulfillment_id` or the
-    empty string. Pinned because it is the one operation whose resource is
-    not a path segment, so it is the one most likely to be "fixed" into
-    signing something else.
-    """
-    from arkhai_apicredits.settlement import credits_client as sf
-
-    contract = contracts[sf.ISSUE_OPERATION]
-    assert sf.STOREFRONT_ROLE in contract.allowed_roles
-    assert contract.body_resource == "fulfillment_id"
-    assert contract.optional_body_resource is True
-    assert getattr(contract, "path_resource", None) is None
+    assert len(AUTHORITY_ROUTES) == len(CREDITS_ROUTE_CONTRACTS)
+    for declaration, contract in zip(AUTHORITY_ROUTES, CREDITS_ROUTE_CONTRACTS):
+        operation = declaration["operation"]
+        assert operation == contract.operation
+        assert declaration["method"] == contract.method, operation
+        assert declaration["path"] == contract.pattern.pattern, operation
+        assert set(declaration["roles"]) == set(contract.allowed_roles), operation
+        assert declaration.get("path_resource") == contract.path_resource, operation
+        assert declaration.get("body_resource") == contract.body_resource, operation
+        assert declaration.get("optional_body_resource", False) == contract.optional_body_resource
+        assert declaration.get("exact_retry_safe", True) == getattr(contract, "exact_retry_safe", True)
 
 
 def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):
@@ -143,6 +124,6 @@ def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):
     keys. That is expressed by the roles the two clients sign as, so the
     two constants must stay different.
     """
-    from arkhai_apicredits.settlement import credits_client as sf
+    from arkhai_api_contracts.routes import SELLER_ROLE
 
-    assert middleware_client.GATED_APP_ROLE != sf.STOREFRONT_ROLE
+    assert middleware_client.GATED_APP_ROLE != SELLER_ROLE

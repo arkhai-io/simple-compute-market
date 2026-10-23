@@ -58,6 +58,7 @@ jobs:
           - { name: compute-provisioning,   dir: provisioning/compute, predist: true }
           - { name: api,                    dir: domains/api, predist: true }
           - { name: api-contracts,          dir: domains/api/contracts, predist: true }
+          - { name: api-client,             dir: domains/api/client, predist: true }
           - { name: vms-domain,             dir: domains/vms/domain, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
           - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true }

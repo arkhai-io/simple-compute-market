@@ -221,7 +221,8 @@ async def test_an_untrusted_gated_app_is_refused(signers):
 
 @pytest.fixture
 def storefront_client(signers):
-    from arkhai_apicredits.settlement import CreditsServiceClient
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api_client import AuthorityClient
 
     authority = signers["authority"]
     seller = create_signer("ed25519", _seed("api-credits-registry"))
@@ -245,9 +246,8 @@ def storefront_client(signers):
     async def get_issuance(fulfillment_id: str):
         # 404 rather than a synthesized grant: this case exists to show the
         # signed GET is accepted and its *refusal* verifies, and fabricating
-        # a full `CreditIssuanceResult` here would test the model, not the
-        # envelope. Under the old shared-secret gate an unsigned 404 was
-        # exactly what the kit's client could not read.
+        # a full issuance result here would test the model, not the
+        # envelope.
         return JSONResponse({"error": "not_found"}, status_code=404)
 
     app.add_middleware(
@@ -259,8 +259,9 @@ def storefront_client(signers):
         excluded_paths=frozenset({"/health"}),
     )
 
-    return CreditsServiceClient(
+    return AuthorityClient(
         "http://credits-service",
+        label=ISSUANCE_LABEL,
         transport=httpx.ASGITransport(app=app),
         signer=seller,
         expected_authorities=TrustedIdentitySet(
@@ -291,7 +292,7 @@ async def test_storefront_issuance_get_refusal_is_signed_and_readable(
     storefront_client,
 ):
     """A signed 404 reads as "no such grant", not as an auth failure."""
-    assert await storefront_client.get_credit_issuance("fulfil-1") is None
+    assert await storefront_client.get_issuance("fulfil-1") is None
 
 
 async def test_storefront_signing_requires_both_halves():
@@ -301,14 +302,16 @@ async def test_storefront_signing_requires_both_halves():
     an unauthenticated answer, which is the weaker of the two properties
     silently replacing the stronger.
     """
-    from arkhai_apicredits.settlement import CreditsServiceClient
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api_client import AuthorityClient
 
     signer = create_signer("ed25519", _seed("api-credits-registry"))
     with pytest.raises(ValueError, match="together"):
-        CreditsServiceClient("http://credits-service", signer=signer)
+        AuthorityClient("http://credits-service", label=ISSUANCE_LABEL, signer=signer)
     with pytest.raises(ValueError, match="together"):
-        CreditsServiceClient(
+        AuthorityClient(
             "http://credits-service",
+            label=ISSUANCE_LABEL,
             expected_authorities=TrustedIdentitySet(
                 identities=(signer.identity,),
             ),

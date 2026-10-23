@@ -11,11 +11,9 @@ from typing import Any
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer, Identity
 
-from arkhai_apicredits.settlement.credits_client import (
-    CreditIssuanceRequest,
-    CreditKeyTarget,
-    derive_credit_fulfillment_id,
-)
+from arkhai_api.issuance import IssuanceRequest, KeyDisposition, fulfillment_id, issuance_request
+
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.settlement.fulfillment import prepare_credit_issuance_request
 from arkhai_apicredits.settlement.issuance_evidence import (
     ApiCreditsIssuanceEvidenceBodyV1,
@@ -115,14 +113,15 @@ CASES: tuple[dict[str, Any], ...] = (
 RESOLVER_ID = "api-credit-resolver.v1"
 
 
-def _issuance_request(case: dict[str, Any]) -> CreditIssuanceRequest:
-    return CreditIssuanceRequest.create(
+def _issuance_request(case: dict[str, Any]) -> IssuanceRequest:
+    return issuance_request(
+        API_CREDITS_LABEL,
         negotiation_id=case["negotiation_id"],
         owner=case["owner"],
         service=case["service"],
         resource_id=case["resource_id"],
         quantity=case["quantity"],
-        key=CreditKeyTarget.model_validate(case["key"]),
+        key=KeyDisposition.model_validate(case["key"]),
     )
 
 
@@ -152,7 +151,7 @@ def _settlement_evidence(case: dict[str, Any]) -> SettlementEvidence:
     )
 
 
-def _signed_evidence(case: dict[str, Any], request: CreditIssuanceRequest):
+def _signed_evidence(case: dict[str, Any], request: IssuanceRequest):
     body = ApiCreditsIssuanceEvidenceBodyV1(
         condition_anchor=case["condition_anchor"],
         obligation_ref=case["obligation_ref"],
@@ -240,7 +239,7 @@ def test_every_pin_matches_byte_for_byte() -> None:
 def test_the_fulfillment_identity_is_derived_from_the_negotiation_alone() -> None:
     for case in CASES:
         pins = compute_pins(case)
-        assert pins["fulfillment_id"] == derive_credit_fulfillment_id(case["negotiation_id"])
+        assert pins["fulfillment_id"] == fulfillment_id(API_CREDITS_LABEL, case["negotiation_id"])
 
 
 def test_the_storefronts_evidence_path_authorizes_the_pinned_request() -> None:

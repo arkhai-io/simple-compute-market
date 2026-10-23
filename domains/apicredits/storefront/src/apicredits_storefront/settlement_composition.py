@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from arkhai_apicredits.settlement import CreditsServiceClient
+from arkhai_api_client import AuthorityClient
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
@@ -83,7 +83,7 @@ class ApiCreditsSettlementComposition:
     settlement_config: Any
     configuration_registry: SettlementConfigurationRegistry
     mechanism_resources: Mapping[str, Any]
-    credits_client: CreditsServiceClient
+    credits_client: AuthorityClient
     evidence_service: ApiCreditsIssuanceEvidenceService
     private_results: ApiCreditPrivateResultRepository
     failure_policy: Any

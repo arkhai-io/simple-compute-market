@@ -500,7 +500,7 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
 `apicredits_storefront/services/credits_service_client.py` and `keys_lookup.py`,
 `apicredits_service/models/keys_model.py` and `services/keys_service.py`.
 
-- [ ] 3.1 `domains/api/client/` (`arkhai-api-client` 0.1.0; dependencies
+- [x] 3.1 `domains/api/client/` (`arkhai-api-client` 0.1.0; dependencies
       `arkhai-api-contracts`, `arkhai-core`, `arkhai-kit-identity`, `httpx`):
       `src/arkhai_api_client/client.py`, the sync and async typed client moved
       from `CreditsServiceClient`, each method looking its route up by operation
@@ -508,13 +508,121 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
       constants come from `contracts`. Unit tests on the client's request
       shaping; the `test_credits_client_http.py` cases move here as library
       integration against a scripted authority. (D4.)
-- [ ] 3.2 The storefront composes the family client: `credits_service_client.py`
+      *Done 2026-10-23.* `arkhai-api-client` 0.1.0: `client.py` holds
+      `AuthorityClient` (async) and `SyncAuthorityClient` (sync) with the same
+      nine methods — `submit_issuance`, `get_issuance`, `get_key`, `list_keys`,
+      `list_key_grants`, `list_key_usage`, `revoke_key`, `adjust_key_balance`,
+      `rollback_issuance` — each built as one call bound from
+      `arkhai_api_contracts.routes.route(operation)`: the method, the path
+      with the declaration's named groups substituted and required to match
+      it again, and the signed resource from `path_resource` or the optional
+      body `fulfillment_id`. The envelope, header, response verification,
+      shared-secret fallback, and rollback logic are the storefront client's,
+      moved; the result is validated under `issuance_result_model(label)`, so
+      the client takes the label. The two issuance methods drop the `credit_`
+      spelling since the class serves any label; the verify route admits the
+      seller but spending and checking a key is the gate's, so it has no
+      method, as before. `contracts` gains `headers.py` (the seven signed
+      header names) and re-exports `IssuanceLabel`, `IssuanceResult`, and
+      `issuance_result_model`: the result is the wire shape the authority
+      answers with, and contracts already publishes the vocabulary's request
+      model and key disposition the same way, so the client, whose kind
+      allowlist admits contracts and the identity kit, reads every wire
+      model from one package. Declared and
+      allowlisted: `arkhai-api-contracts`, `arkhai-kit-identity`, `httpx`;
+      `arkhai-core`, which this task lists, is neither imported nor needed and
+      is not declared, as 2.5 did for contracts. Tests:
+      `tests/unit/test_request_binding.py` (unit, 10) — every seller route has
+      a call bound from its declaration with the resource it names, a path
+      parameter that does not bind is refused, the signed envelope is rebuilt
+      from the headers and verified by the identity kit over the bound
+      operation and resource and the canonical bytes sent, the bodyless hash,
+      the shared-secret header, refusal mapping, both classes' "together"
+      refusal, and the rollback that makes no call;
+      `tests/integration/test_scripted_authority.py` (12; integration
+      against a well-defined mock of the HTTP boundary, where `TESTING.md`
+      places a client's final call — not library integration in its
+      database sense, which this task's "library integration" wording
+      overstates) — the `test_credits_client_http.py` and
+      `test_credits_client.py` cases, for both clients, against a scripted
+      authority: an httpx transport that matches each request to the
+      contracts' declaration,
+      verifies the seller's envelope over the resource that declaration
+      binds, answers a script, and signs its answer; issuance under the shared
+      secret, a result under another label refused, the refusal reason,
+      unknown key and issuance as None, administration paths, queries, and
+      bodies, rollback order and the spared existing key, a refused adjustment
+      reported, signed calls verified on both sides, a signed 404 read as
+      None, an untrusted seller refused by the authority, an unsigned or
+      impostor answer refused by the client. 22 passed. The sync/async parity
+      contract is the service's test (3.3), where `TESTING.md` places it.
+      Wiring: `dist-api-client` and `test-api-client` in both Makefiles,
+      `test-api` running the client too, the `tests.yml` row, the
+      `publish-pypi.yml` filter and `PACKAGES` entry, the manifest entry after
+      contracts, the `RELEASING.md` row; locked with `uv lock --find-links`,
+      then `scripts/uv_project.py lock` and `reinit`, under uv 0.11.17;
+      `arkhai-api` is in its dev group, since only the tests build requests
+      from the vocabulary. D4 describes the client as "over any transport
+      exposing `authenticated_request`", the resource-pools client's shape;
+      this task's text fixed the shape built — the storefront client moved,
+      owning its httpx transport, envelope, and response verification — so
+      the design sentence is stale against the plan, for triage to settle.
+
+- [x] 3.2 The storefront composes the family client: `credits_service_client.py`
       constructs `arkhai_api_client`'s client once at the composition boundary;
       `keys_lookup.py` and every settlement caller use it;
       `arkhai_apicredits/settlement/credits_client.py` is deleted and the
       domain library's `settlement/__init__.py` re-exports nothing of it.
       (D4, D13.)
-- [ ] 3.3 The service composes the vocabulary's digest: `keys_model.py` keeps
+      *Done.* `credits_service_client.py` constructs `AuthorityClient` once,
+      under `API_CREDITS_LABEL`, which `arkhai_apicredits/label.py` now
+      defines as `IssuanceLabel("api-credits", "api-credit-fulfillment.v1")`
+      — the one place the domain library spells its label (the service,
+      which may not import the domain, spells its own in 3.3; this section's
+      touch list names `keys_lookup.py`, which needed no edit). `keys_lookup.py` and
+      `fulfillment_service.py` already read the composed client; the payment
+      service and the Alkahest stage reach it through the composition, which
+      types it `AuthorityClient`. `credits_client.py` is deleted with its two
+      test modules, and `settlement/__init__.py` exports nothing of it.
+      `fulfillment.py` builds the command through
+      `issuance_request(API_CREDITS_LABEL, ...)` and catches `AuthorityError`;
+      its `service_url`/`admin_key` fallback, which built a client outside the
+      composition, is gone: `credits_client` is required, and every production
+      caller already passed it. The domain library declares
+      `arkhai-api-client` and bumps to 0.8.0 (the client and its models leave
+      its import surface, D14); the storefront declares `arkhai-api-client`,
+      raises the domain bound, and bumps to 0.11.0; `e2e-tests` declares
+      `arkhai-api` and `arkhai-api-client`, since the rollback scenario now
+      drives its probes through `AuthorityClient` and builds its issuances
+      from the vocabulary under the domain's label. The domain library's
+      new edge to `arkhai-api-client` is interim: the `api-family` delta has
+      only `selling` and `buying` depend on the client, and `fulfillment.py`
+      holds the issuance call until section 5 moves it into `selling`.
+      Tests: the domain's
+      `test_issuance_pins.py` builds every pin through the vocabulary under
+      the label and matches byte for byte; `test_distribution.py` expects the
+      client dependency and no `credits_client.py` in the wheel;
+      `conftest_wheels.py` builds the contracts and client wheels so the
+      install tests resolve them. Storefront: `test_keys_lookup.py`
+      overwrites the composition module's client cache with a client over a
+      mock transport instead of patching the class's constructor, and adds a
+      test that the composition builds one client from patched
+      configuration readers; `test_settlement_fulfillment.py` injects a
+      scripted fake client where it patched the class;
+      `test_payment_recovery.py` returns the label-bound result; the
+      storefront's dev group declares `arkhai-api`, which only these tests
+      import. Domain 32
+      passed (45 before: the 13 client tests moved to the client project;
+      unit, the install tests library integration); storefront 197 passed (196
+      before; unit and application integration, 1.5's baselines and the pins
+      unchanged); buyer 27 passed (unchanged). Two documentation
+      attachments import the deleted client module: `api_credit_smoke.py`,
+      which also calls `fulfill_api_credits_obligation` with a signature it
+      lost before this change, and `first_use.py`, which imports it from a
+      path that predates the package rename; both are documents, left for
+      closeout.
+
+- [x] 3.3 The service composes the vocabulary's digest: `keys_model.py` keeps
       only what `contracts` does not define and imports the wire models from
       `arkhai_api_contracts`; `derive_credit_fulfillment_id` and
       `issuance_request_digest` are deleted and `keys_service.py` calls
@@ -522,11 +630,101 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
       (`api-credits` here; the capacity profile of section 4 carries it
       later). The service declares `arkhai-api` and `arkhai-api-contracts` and
       never `arkhai-api-client`. (D4, D8.)
-- [ ] 3.4 Verification: `make test-api-client` (unit, library integration),
+      *Done.* `keys_model.py` is the binding: `ISSUANCE_LABEL =
+      IssuanceLabel("api-credits", "api-credit-fulfillment.v1")`,
+      `IssuanceRequest = issuance_request_model(ISSUANCE_LABEL)`,
+      `IssuanceResponse = issuance_response_model(ISSUANCE_LABEL)`, the other
+      wire models re-exported from `arkhai_api_contracts.models`.
+      `derive_credit_fulfillment_id` and `issuance_request_digest` are
+      deleted; `keys_service.py` validates each command through the bound
+      model, which recomputes identity and digest under the label, and spells
+      the result schema from the label. The service may not import the
+      domain, so it spells the label itself until section 4's capacity
+      profile carries it. The service declares `arkhai-api` and
+      `arkhai-api-contracts` and bumps to 0.7.0; `arkhai-api-client` enters
+      its dev group only, in place of the domain library, because its
+      integration tests drive the real family client as they drove the
+      domain's, and the architecture check reads no dev group. Tests:
+      `test_keys_service.py` builds its commands through the vocabulary;
+      `test_signed_authority.py`, `test_compat_baseline.py`, and
+      `test_credits_signed_roundtrip.py` drive `AuthorityClient` under the
+      service's label; `test_credits_route_parity.py` compares the contracts'
+      declarations field for field with the service's `CREDITS_ROUTE_CONTRACTS`
+      table as imported (a table comparison, in the `integration/` module
+      that holds the middleware's table cases too), replacing the three cases
+      that read the storefront client's constants;
+      `tests/unit/test_client_parity.py` holds the two clients' public
+      methods identical. 79 passed (79 before; unit, library integration,
+      application integration): 1.3's and 1.4's baselines unchanged — the
+      recorded OpenAPI document, which carries `const` and `default` on
+      `schema`, and the recorded refusal bodies diff to zero against the
+      service composed over the bound models; no new assertion is made.
+
+- [x] 3.4 Verification: `make test-api-client` (unit, library integration),
       `make -C domains/apicredits/service test` and `make -C
       domains/apicredits/storefront test` (application integration; the pins
       of 1.2 and the baselines of 1.3–1.5 unchanged), `make test`, `make
       check-packaging`. End-to-end: `e2e_credits_deal`.
+      *Done 2026-10-23.* `make test-api-client` 22 passed (`tests/unit/`
+      unit, `tests/integration/` library integration against the scripted
+      authority). `make -C domains/apicredits/service test` 79 passed and
+      `make -C domains/apicredits/storefront test` 197 passed (unit,
+      library integration, and application integration through the real
+      apps over `ASGITransport`; 1.2's pins and 1.3–1.5's baselines
+      unchanged, the schema and refusal records included); the domain
+      library 32 and the buyer 27 besides. `make test`: every suite passed
+      except, all outside this section's files and recorded by 1.7 and 2.9,
+      the provisioning service's dotenv-layering unit test, the VM
+      storefront's two Alkahest toolchain tests (no `node`), the
+      release-tooling whole-tree checks and `test_publish_matrix` release-
+      table cases that read the other session's stale `.claude/worktrees/`
+      checkout (its pyprojects declare the old dependency sets; the three
+      API-credits rows are among them, and all pass on a copy without it),
+      the `--eval` case the macOS make 3.81 lacks, and one docker-image
+      contract case; three provisioning IaC relay-teardown shell tests fail
+      on this macOS shell and touch nothing this section changed. Helm is
+      not installed, so the render checks are unrun; the three middleware
+      toolchains passed. `make check-packaging` passes on the copy: uv setup,
+      locks (the client's new lock and the domain, service, storefront,
+      buyer, and `e2e-tests` locks relocked under uv 0.11.17; the service's
+      lock shrinks by the domain library's dependency closure, which left
+      its dev group), Python version, layout, and all four architecture
+      parts, which also pass in place for layers, scope, and kinds; each api
+      wheel builds once per aggregate target. `make check-change` reports
+      only the two `api-family` citations closeout creates; its comment
+      hygiene passes on the copy and fails in place only on the stale
+      worktree. End-to-end: owed to validation; `e2e_credits_deal` issues
+      through the family client, and `e2e_credits_service_rollback` first
+      compares images that differ in the service's code (the bound wire
+      models and the vocabulary's digest) at this commit.
+      **Handoff.** The API-credits label is spelled twice by design:
+      `arkhai_apicredits/label.py` for the storefront, buyer, and
+      `e2e-tests`, and `apicredits_service/models/keys_model.py` for the
+      service, which may not import the domain; section 4's capacity profile
+      carries the service's, and section 5 reads the domain's when it moves
+      `issuance_evidence.py`. The storefront's client is `AuthorityClient`
+      from `arkhai_api_client`, keyed to the label; a later section composing
+      `selling` passes the same object. `KeysService.get_credit_issuance`
+      keeps its name until section 4 moves the service. The two documentation
+      attachments under `docs/attachments/` naming the deleted client call
+      `fulfill_api_credits_obligation` with a signature it lost before this
+      change and are left for closeout, as is the client's path named in
+      `openspec/specs/api-credits/architecture.md#implementation-composition`
+      (promotion row added). The fresh-context check found no wiring,
+      packaging, or documentation-placement breach; accepted from it: the
+      `dev` declarations of `arkhai-api` in the client and storefront
+      projects, the two label comments rephrased as the current invariant,
+      a divider comment and a history sentence removed, and the note
+      wordings corrected above (the scripted-authority level, the client
+      cache, the attachments, the parity table, the baseline evidence).
+      Declined: widening the client kind's allowlist to the vocabulary or
+      moving the result model into contracts, since contracts already
+      publishes the vocabulary's wire models and the re-export keeps the
+      client on one package; moving `test_credits_route_parity.py` to
+      `unit/`, since the module's middleware cases are untouched and the
+      service's suite does not split that file. Section 3 is committed
+      on `feat/compose-api-family-kit-s3-client`, stacked on section 2's
+      branch.
 
 ## 4. The authority kit and the API-credits service root
 
@@ -902,6 +1100,7 @@ change to implementation.
 | D9 — the baselines' refusal records diff bodies, the one exception to the rejection-path status-only rule; the API-credit lane mounts the engine socket and runs the upgrade/rollback scenario | `docs/development/TESTING.md` (rejection paths; the API-credit lane) |
 | D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
+| D4 — the storefront composes the family client once at its composition boundary; the authority binds the contracts' wire models to its label and keeps no digest of its own | `openspec/specs/api-credits/architecture.md#implementation-composition` |
 | D11 — route services in the kit, bindings in the compositions | `openspec/specs/api-family/spec.md`; `openspec/specs/api-credits/architecture.md#implementation-composition` |
 | Open: the ledger-free split and inference's projection values | `openspec/specs/api-family/architecture.md` (current limits) |
 | New capability | `openspec/specs/README.md` |

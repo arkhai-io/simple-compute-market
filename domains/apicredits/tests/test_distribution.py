@@ -53,8 +53,10 @@ def test_domain_wheel_owns_shared_concepts(wheels: dict[str, Path]) -> None:
         "arkhai_apicredits/schema.py",
         "arkhai_apicredits/listings/models.py",
         "arkhai_apicredits/negotiation/terms.py",
+        "arkhai_apicredits/label.py",
         "arkhai_apicredits/settlement/fulfillment.py",
     } <= members
+    assert "arkhai_apicredits/settlement/credits_client.py" not in members
 
 
 def test_role_wheels_do_not_duplicate_shared_concepts(
@@ -87,7 +89,7 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     correctly moved.
     """
     expected = {
-        "domain": {"arkhai-api", "arkhai-core", "arkhai-kit-arkhai-payments"},
+        "domain": {"arkhai-api", "arkhai-api-client", "arkhai-core", "arkhai-kit-arkhai-payments"},
         "buyer": {
             "arkhai-apicredits-domain",
             "arkhai-core",

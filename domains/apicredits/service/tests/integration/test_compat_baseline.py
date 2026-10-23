@@ -117,10 +117,12 @@ def _recorded(response: httpx.Response) -> dict[str, Any]:
 
 
 def _seller_client(app):
-    from arkhai_apicredits.settlement import CreditsServiceClient
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api_client import AuthorityClient
 
-    return CreditsServiceClient(
+    return AuthorityClient(
         "http://credits-service",
+        label=ISSUANCE_LABEL,
         transport=httpx.ASGITransport(app=app),
         signer=STOREFRONT_SIGNER,
         expected_authorities=TrustedIdentitySet(identities=(AUTHORITY.identity,)),
@@ -157,17 +159,16 @@ def _capacity_admin(app):
 
 
 def _issuance(negotiation_id: str, quantity: int, *, owner=BUYER, existing_key=None):
-    from arkhai_apicredits.settlement.credits_client import (
-        CreditIssuanceRequest,
-        CreditKeyTarget,
-    )
+    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (
-        CreditKeyTarget(mode="existing", key_id=existing_key)
+        KeyDisposition(mode="existing", key_id=existing_key)
         if existing_key
-        else CreditKeyTarget(mode="new")
+        else KeyDisposition(mode="new")
     )
-    return CreditIssuanceRequest.create(
+    return issuance_request(
+        ISSUANCE_LABEL,
         negotiation_id=negotiation_id,
         owner=owner,
         service="weather-api",
@@ -238,7 +239,7 @@ async def capture_refusals(app, client: httpx.AsyncClient) -> dict[str, Any]:
         attributes={"service": "weather-api"},
         pool_id="default",
     )
-    issued = await _seller_client(app).submit_credit_issuance(_issuance("neg-baseline-1", 3))
+    issued = await _seller_client(app).submit_issuance(_issuance("neg-baseline-1", 3))
     tampered = {**_issuance("neg-baseline-2", 1).model_dump(mode="json"), "quantity": 2}
     refusals["issuance_invalid"] = _recorded(
         await client.post(

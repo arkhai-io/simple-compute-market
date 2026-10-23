@@ -17,6 +17,11 @@
       "dist": "arkhai-api-contracts"
     },
     {
+      "key": "api-client",
+      "path": "domains/api/client",
+      "dist": "arkhai-api-client"
+    },
+    {
       "key": "core",
       "path": "core",
       "dist": "arkhai-core"

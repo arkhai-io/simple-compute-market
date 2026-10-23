@@ -15,11 +15,8 @@ from market_resource_pools.db import Base as PoolsBase
 from market_site.db import Base as SiteBase
 from market_site.ledger import CapacityLedgerService
 from apicredits_service.db.models import Base
-from apicredits_service.models.keys_model import (
-    KeyDisposition,
-    derive_credit_fulfillment_id,
-    issuance_request_digest,
-)
+from arkhai_api.issuance import KeyDisposition, fulfillment_id, issuance_request
+from apicredits_service.models.keys_model import ISSUANCE_LABEL
 from apicredits_service.services.keys_service import IssuanceError, KeysService, derive_key_id
 
 BUYER = {
@@ -52,19 +49,17 @@ def _issue(
     if buyer_scheme is None or buyer_id is None:
         raise ValueError("canonical owner is required")
     owner = Identity(scheme=IdentityScheme(buyer_scheme), identifier=buyer_id)
-    fulfillment_id = derive_credit_fulfillment_id(negotiation_id)
-    key = KeyDisposition(mode=key_mode, key_id=key_id)
-    digest = issuance_request_digest(
-        fulfillment_id=fulfillment_id,
+    request = issuance_request(
+        ISSUANCE_LABEL,
         negotiation_id=negotiation_id,
         owner=owner,
         service=issuance_service,
         resource_id=resource_id,
         quantity=quantity,
-        key=key,
+        key=KeyDisposition(mode=key_mode, key_id=key_id),
     )
     return service.issue(
-        fulfillment_id=fulfillment_id,
+        fulfillment_id=request.fulfillment_id,
         negotiation_id=negotiation_id,
         owner_scheme=owner.scheme.value,
         owner_id=owner.identifier,
@@ -73,7 +68,7 @@ def _issue(
         quantity=quantity,
         key_mode=key_mode,
         key_id=key_id,
-        request_digest=digest,
+        request_digest=request.request_digest,
         capacity_reservation_id=capacity_reservation_id,
     )
 
@@ -135,7 +130,7 @@ def test_issue_new_key_grants_and_commits_quota(service, ledger):
     assert result["balance"] == 100
     # Self-describing secret: middlewares derive the key id from it.
     assert result["secret"].startswith(result["key_id"] + ".")
-    assert result["key_id"] == derive_key_id(derive_credit_fulfillment_id("0xe1"))
+    assert result["key_id"] == derive_key_id(fulfillment_id(ISSUANCE_LABEL, "0xe1"))
 
     # New keys auto-bind to the purchasing marketplace principal.
     key = service.get_key(result["key_id"])
@@ -324,7 +319,7 @@ def test_quota_hold_is_bound_to_purchase(service, ledger):
         )
     assert caught.value.reason == "fulfillment_conflict"
     assert service.get_key(
-        derive_key_id(derive_credit_fulfillment_id("neg-purchase"))
+        derive_key_id(fulfillment_id(ISSUANCE_LABEL, "neg-purchase"))
     ) is None
     assert ledger.snapshot()[0]["available_units"] == 999
 
@@ -362,7 +357,7 @@ def test_issue_quota_exhausted_persists_nothing(service, ledger):
     with pytest.raises(IssuanceError) as exc:
         _issue(service, negotiation_id="0xbig", quantity=2000, key_mode="new", **BUYER)
     assert exc.value.reason == "quota_exhausted"
-    missing_key_id = derive_key_id(derive_credit_fulfillment_id("0xbig"))
+    missing_key_id = derive_key_id(fulfillment_id(ISSUANCE_LABEL, "0xbig"))
     assert service.get_key(missing_key_id) is None
     assert service.list_grants(missing_key_id) == []
     assert ledger.snapshot()[0]["available_units"] == 1000

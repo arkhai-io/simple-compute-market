@@ -26,7 +26,8 @@ from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.settlement_stages import SettlementRefusal
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
-from arkhai_apicredits.settlement.credits_client import CreditIssuanceResult
+from arkhai_api.issuance import issuance_result_model
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from tests.listing_bindings import upsert_bound_listing
 
 BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
@@ -35,6 +36,7 @@ SERVICE = Ed25519Signer(bytes.fromhex("55" * 32))
 PAYER = "11111111-1111-4111-8111-111111111111"
 PAYEE = "22222222-2222-4222-8222-222222222222"
 DISPUTE = "33333333-3333-4333-8333-333333333333"
+IssuanceResult = issuance_result_model(API_CREDITS_LABEL)
 
 
 class IssuanceBoundary:
@@ -42,13 +44,13 @@ class IssuanceBoundary:
         self.grants = {}
         self.lose_ack = True
 
-    async def submit_credit_issuance(self, request):
+    async def submit_issuance(self, request):
         already_issued = request.fulfillment_id in self.grants
         self.grants.setdefault(request.fulfillment_id, request)
         if self.lose_ack:
             self.lose_ack = False
             raise TimeoutError("lost acknowledgement after grant commit")
-        return CreditIssuanceResult(
+        return IssuanceResult(
             fulfillment_id=request.fulfillment_id, grant_id=request.fulfillment_id,
             negotiation_id=request.negotiation_id, owner=request.owner,
             service=request.service, resource_id=request.resource_id, quantity=request.quantity,

@@ -149,6 +149,32 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-api-client"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-api-contracts" },
+    { name = "arkhai-kit-identity" },
+    { name = "httpx" },
+]
+wheels = [
+    { path = "arkhai_api_client-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
+name = "arkhai-api-contracts"
+version = "0.1.0"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "arkhai-api" },
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_api_contracts-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-apicredits-buyer"
 version = "0.5.0"
 source = { editable = "." }
@@ -202,10 +228,11 @@ dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
+    { name = "arkhai-api-client" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -216,7 +243,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]

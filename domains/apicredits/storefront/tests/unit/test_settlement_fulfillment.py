@@ -17,17 +17,15 @@ from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from market_core import SettlementEvidence
 from market_identity import Ed25519Signer
 
+from arkhai_api.issuance import IssuanceRequest, issuance_result_model
+from arkhai_api_client import AuthorityError
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.settlement import fulfillment as fulfillment_module
-from arkhai_apicredits.settlement.credits_client import (
-    CreditIssuanceRequest,
-    CreditIssuanceResult,
-    CreditsServiceClient,
-    CreditsServiceError,
-)
 from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from tests.integration.credit_negotiation import FakeCapacity
 from tests.listing_bindings import upsert_bound_listing
 
+IssuanceResult = issuance_result_model(API_CREDITS_LABEL)
 _BUYER_PRINCIPAL = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER_PRINCIPAL = Ed25519Signer(bytes.fromhex("22" * 32)).identity
 _OFFER = {
@@ -51,13 +49,27 @@ def _evidence(reference="neg-purchase", *, quantity=3, mechanism="opaque.future.
     )
 
 
+class _FakeAuthority:
+    """The family client as a stage sees it, scripted per test."""
+
+    def __init__(self, issue, rollback=None):
+        self._issue = issue
+        self._rollback = rollback
+
+    async def submit_issuance(self, request):
+        return await self._issue(request)
+
+    async def rollback_issuance(self, **kwargs):
+        return await self._rollback(**kwargs)
+
+
 def _issuance_result(
-    request: CreditIssuanceRequest,
+    request: IssuanceRequest,
     *,
     secret: str | None = "ak_new.s3cret",
     already_issued: bool = False,
-) -> CreditIssuanceResult:
-    return CreditIssuanceResult(
+) -> IssuanceResult:
+    return IssuanceResult(
         fulfillment_id=request.fulfillment_id,
         grant_id=request.fulfillment_id,
         negotiation_id=request.negotiation_id,
@@ -114,17 +126,15 @@ def _private_results(tmp_path):
 async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
     issued = {}
 
-    async def fake_issue(self, request):
+    async def fake_issue(request):
         issued["request"] = request
         return _issuance_result(request)
 
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
 
     result = await fulfill_api_credits_obligation(
         evidence=_evidence("neg-first"),
-        service_url="http://tokens:8082",
-        admin_key="k",
+        credits_client=_FakeAuthority(fake_issue),
         stage_event=stage_event,
         held_reservation={
             "capacity_reservation_id": "alloc-7",
@@ -150,16 +160,14 @@ async def test_fulfillment_issues_and_returns_credentials_once(monkeypatch):
 async def test_payment_receipt_gate_issues_without_chain_fulfillment(monkeypatch):
     issued = {}
 
-    async def fake_issue(self, request):
+    async def fake_issue(request):
         issued["request"] = request
         return _issuance_result(request)
 
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
     result = await fulfill_api_credits_obligation(
         evidence=_evidence("neg-payment", quantity=2),
-        service_url="http://tokens:8082",
-        admin_key="k",
+        credits_client=_FakeAuthority(fake_issue),
         stage_event=stage_event,
     )
 
@@ -170,10 +178,9 @@ async def test_payment_receipt_gate_issues_without_chain_fulfillment(monkeypatch
 
 
 async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
-    async def fake_issue(self, request):
-        raise CreditsServiceError("quota_exhausted", "no units", status_code=409)
+    async def fake_issue(request):
+        raise AuthorityError("quota_exhausted", "no units", status_code=409)
 
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
     events, stage_event = _events()
     policy_calls = []
 
@@ -182,8 +189,7 @@ async def test_fulfillment_refusal_applies_failure_policy(monkeypatch):
 
     result = await fulfill_api_credits_obligation(
         evidence=_evidence("neg-refused"),
-        service_url="http://tokens:8082",
-        admin_key="k",
+        credits_client=_FakeAuthority(fake_issue),
         stage_event=stage_event,
         apply_failure_policy=fake_policy,
         held_reservation={"capacity_reservation_id": "alloc-8"},
@@ -203,17 +209,16 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
     from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
     from market_identity import TrustedIdentitySet
 
-    async def fake_issue(self, request):
+    async def fake_issue(request):
         return _issuance_result(request, secret="ak_new.secret")
 
     rollbacks = []
-    async def fake_rollback(self, **kwargs):
+    async def fake_rollback(**kwargs):
         rollbacks.append(kwargs)
         return {"rolled_back": True}
     async def fake_submit(*args):
         raise RuntimeError("rpc down")
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", fake_issue)
-    monkeypatch.setattr(CreditsServiceClient, "rollback_issuance", fake_rollback)
+    authority = _FakeAuthority(fake_issue, fake_rollback)
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     path = tmp_path / "evidence.db"
     with sqlite3.connect(path) as connection:
@@ -226,11 +231,10 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
     events, stage_event = _events()
     evidence = _evidence("neg-chain", mechanism="alkahest.v1")
     result = await fulfill_api_credits_obligation(
-        evidence=evidence, service_url="http://tokens:8082", admin_key="k", stage_event=stage_event,
+        evidence=evidence, credits_client=authority, stage_event=stage_event,
     )
     composition = SimpleNamespace(
-        local_principal=signer.identity, evidence_service=evidence_service,
-        credits_client=CreditsServiceClient("http://tokens:8082", "k"),
+        local_principal=signer.identity, evidence_service=evidence_service, credits_client=authority,
     )
     result = await settlement_stages.AlkahestSellerStage(
         fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
@@ -290,14 +294,9 @@ async def test_fulfillment_service_keeps_capacity_hold_until_retry_completes(
 
 
 async def test_payment_issuance_unavailable_stays_retryable(monkeypatch):
-    async def unavailable(self, _request):
+    async def unavailable(_request):
         raise RuntimeError("credits service timed out")
 
-    monkeypatch.setattr(
-        fulfillment_module.CreditsServiceClient,
-        "submit_credit_issuance",
-        unavailable,
-    )
     events, stage_event = _events()
     policy_calls = []
 
@@ -306,8 +305,7 @@ async def test_payment_issuance_unavailable_stays_retryable(monkeypatch):
 
     result = await fulfillment_module.fulfill_api_credits_obligation(
         evidence=_evidence("neg-payment"), retry_uncertain=True,
-        service_url="http://tokens:8082",
-        admin_key="k",
+        credits_client=_FakeAuthority(unavailable),
         stage_event=stage_event,
         apply_failure_policy=fail_policy,
     )
@@ -466,8 +464,8 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     monkeypatch.setattr(fulfillment_service, "stage_event", stage_event)
     monkeypatch.setattr(fulfillment_service, "_configured_failure_actions", lambda: ("release_capacity", "emit_event"))
     monkeypatch.setattr(container, "resolved_failure_policy", fulfillment_service.build_api_credit_failure_policy())
-    credits = SimpleNamespace(submit_credit_issuance=AsyncMock(
-        side_effect=CreditsServiceError("quota_exhausted", "no units", status_code=409),
+    credits = SimpleNamespace(submit_issuance=AsyncMock(
+        side_effect=AuthorityError("quota_exhausted", "no units", status_code=409),
     ))
 
     result = await fulfillment_service.fulfill_credit_obligation(
@@ -609,7 +607,7 @@ async def settled_db(tmp_path, monkeypatch):
     return client, response["negotiation_id"]
 
 
-def _build_settlement_composition(db, *, on_outcome=None):
+def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
     from apicredits_storefront.domain_runtime import (
         fulfill_api_credit_settlement,
         persist_api_credit_settlement_outcome,
@@ -656,7 +654,7 @@ def _build_settlement_composition(db, *, on_outcome=None):
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     composition = SimpleNamespace(
         domain=get_market_domain_contract(), local_principal=signer.identity,
-        credits_client=CreditsServiceClient("http://tokens:8082", "k"),
+        credits_client=credits_client,
         evidence_service=ApiCreditsIssuanceEvidenceService(
             IssuanceEvidenceRepository(db.db_path), signer=signer,
             trusted_issuers=TrustedIdentitySet(identities=(signer.identity,)),
@@ -698,7 +696,7 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
         verified.append(kwargs)
         return 0
 
-    async def issue(self, request):
+    async def issue(request):
         issued.append(request)
         return _issuance_result(request)
 
@@ -707,10 +705,11 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
         attested.append((json.loads(payload), escrow_uid))
         return "0xfulfill"
     monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
     client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
     completed = asyncio.Event()
-    runtime, worker, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    runtime, worker, coordinator = _build_settlement_composition(
+        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+    )
     result = await coordinator.start(
         escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
         request=_settlement_request(neg_id),
@@ -763,7 +762,7 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
             raise ConnectionError("chain transport unavailable after verification")
         return 0
 
-    async def issue(self, request):
+    async def issue(request):
         issued.append(request)
         return _issuance_result(request)
 
@@ -771,9 +770,10 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
         return "0xfulfill"
 
     monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
-    monkeypatch.setattr(CreditsServiceClient, "submit_credit_issuance", issue)
     completed = asyncio.Event()
-    _, _, coordinator = _build_settlement_composition(db, on_outcome=completed.set)
+    _, _, coordinator = _build_settlement_composition(
+        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+    )
     await coordinator.start(
         escrow_uid="0xverified", negotiation_id=neg_id,
         mechanism_client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest)),

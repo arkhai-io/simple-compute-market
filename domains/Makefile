@@ -1,17 +1,17 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: dist dist-compute dist-api dist-api-contracts dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: dist dist-compute dist-api dist-api-contracts dist-api-client dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-api test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-api test-api-client test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-api dist-api-contracts dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+dist: dist-compute dist-api dist-api-contracts dist-api-client dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
@@ -47,6 +47,12 @@ dist-api-contracts: dist-api ## Build arkhai-api-contracts wheel into .dist/
 	cd api/contracts && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_api_contracts-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-api-contracts produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-client: dist-api-contracts ## Build arkhai-api-client wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/client && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_client-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-client produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -108,13 +114,13 @@ dist-provisioning-adapters: dist-bare-metal dist-provisioning-operator-client ##
 	cd vms/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 	cd bare_metal/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 
-dist-apicredits-domain: dist-api ## Build arkhai-apicredits-domain wheel into .dist/
+dist-apicredits-domain: dist-api-client ## Build arkhai-apicredits-domain wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd apicredits && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_domain-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-domain produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-apicredits-service: ## Build arkhai-apicredits-service wheel into .dist/
+dist-apicredits-service: dist-api-contracts ## Build arkhai-apicredits-service wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd apicredits/service && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
@@ -174,9 +180,13 @@ test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapt
 test-compute: ## Compute-family vocabulary package tests
 	cd compute && $(MAKE) test
 
-test-api: ## api-family vocabulary and contracts tests
+test-api: ## api-family vocabulary, contracts, and client tests
 	cd api && $(MAKE) test
 	cd api/contracts && $(MAKE) test
+	cd api/client && $(MAKE) test
+
+test-api-client: ## api-family client tests
+	cd api/client && $(MAKE) test
 
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test

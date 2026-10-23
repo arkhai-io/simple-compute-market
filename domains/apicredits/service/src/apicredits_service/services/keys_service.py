@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
 from apicredits_service.db.models import ApiKey, ConsumptionEvent, CreditGrant
 from apicredits_service.models.keys_model import (
+    ISSUANCE_LABEL,
     IssuanceRequest,
     KeyDisposition,
 )
@@ -341,7 +342,7 @@ class KeysService:
         if committed_at.tzinfo is None:
             committed_at = committed_at.replace(tzinfo=timezone.utc)
         return {
-            "schema": "arkhai.api-credits.issuance-result.v1",
+            "schema": ISSUANCE_LABEL.issuance_result_schema,
             "fulfillment_id": grant.fulfillment_id,
             "grant_id": grant.fulfillment_id,
             "negotiation_id": grant.negotiation_id,

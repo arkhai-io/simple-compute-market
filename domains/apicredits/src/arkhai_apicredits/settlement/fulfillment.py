@@ -5,19 +5,15 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping
-
-from market_core import SettlementEvidence
-from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Awaitable, Callable
 
+from arkhai_api.issuance import IssuanceRequest, KeyDisposition, issuance_request
+from arkhai_api_client import AuthorityClient, AuthorityError
+from market_core import SettlementEvidence
 from market_identity import Identity
+from pydantic import BaseModel, ConfigDict, Field
 
-from arkhai_apicredits.settlement.credits_client import (
-    CreditIssuanceRequest,
-    CreditKeyTarget,
-    CreditsServiceClient,
-    CreditsServiceError,
-)
+from arkhai_apicredits.label import API_CREDITS_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +45,7 @@ def credit_delivery(evidence: SettlementEvidence, *, require_verified: bool = Tr
     if not isinstance(payload.get("source"), Mapping):
         raise ValueError("credit settlement evidence requires authoritative source state")
     delivery = CreditDelivery.model_validate(payload.get("delivery"))
-    CreditKeyTarget.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id})
+    KeyDisposition.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id})
     if not str(delivery.listing_resource.get("service_name") or "").strip() or not str(delivery.listing_resource.get("resource_id") or "").strip():
         raise ValueError("credit settlement evidence requires service_name and quota resource")
     return delivery
@@ -59,16 +55,17 @@ def prepare_credit_issuance_request(
     *,
     evidence: SettlementEvidence,
     capacity_reservation_id: str | None = None,
-) -> CreditIssuanceRequest:
+) -> IssuanceRequest:
     """Authorize the exact validated purchase over the operator-authenticated channel."""
     delivery = credit_delivery(evidence)
-    return CreditIssuanceRequest.create(
+    return issuance_request(
+        API_CREDITS_LABEL,
         negotiation_id=evidence.negotiation_id,
         owner=delivery.owner,
         service=str(delivery.listing_resource["service_name"]),
         resource_id=str(delivery.listing_resource["resource_id"]),
         quantity=delivery.quantity,
-        key=CreditKeyTarget.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id}),
+        key=KeyDisposition.model_validate({"mode": delivery.key_mode, "key_id": delivery.key_id}),
         capacity_reservation_id=capacity_reservation_id,
     )
 
@@ -95,9 +92,7 @@ async def fulfill_api_credits_obligation(
     *,
     evidence: SettlementEvidence,
     retry_uncertain: bool = False,
-    credits_client: CreditsServiceClient | None = None,
-    service_url: str | None = None,
-    admin_key: str | None = None,
+    credits_client: AuthorityClient,
     stage_event: StageEventFn,
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     held_reservation: dict[str, Any] | None = None,
@@ -114,10 +109,6 @@ async def fulfill_api_credits_obligation(
         else None
     )
     resource_id = listing_resource.get("resource_id")
-    if credits_client is None:
-        if service_url is None or admin_key is None:
-            raise ValueError("credits_client or service_url/admin_key is required")
-        credits_client = CreditsServiceClient(service_url, admin_key)
 
     async def _fail(reason: str, message: str) -> dict[str, Any]:
         if apply_failure_policy is not None:
@@ -164,8 +155,8 @@ async def fulfill_api_credits_obligation(
         capacity_reservation_id=capacity_reservation_id,
     )
     try:
-        issuance = await credits_client.submit_credit_issuance(request)
-    except CreditsServiceError as error:
+        issuance = await credits_client.submit_issuance(request)
+    except AuthorityError as error:
         retryable = (
             error.status_code == 0
             or error.status_code in {408, 425, 429}

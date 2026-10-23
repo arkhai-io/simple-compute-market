@@ -18,6 +18,8 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     output = tmp_path_factory.mktemp("apicredits-wheels")
     projects = {
         "api": (REPO / "domains" / "api", "arkhai_api-*.whl"),
+        "api_contracts": (REPO / "domains" / "api" / "contracts", "arkhai_api_contracts-*.whl"),
+        "api_client": (REPO / "domains" / "api" / "client", "arkhai_api_client-*.whl"),
         "domain": (
             APICREDITS,
             "arkhai_apicredits_domain-*.whl",
