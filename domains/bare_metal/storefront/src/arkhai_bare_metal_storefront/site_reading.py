@@ -117,7 +117,13 @@ def read_site_pools(
     cannot read hold the pool rather than falling through to a lower tier.
     ``override_problems`` names each pool whose stored override cannot be read;
     it holds an admitted pool for the same reason.
+
+    A row that is not a mapping raises ``ValueError``: the generation is
+    malformed, and a reader refuses it as it refuses any malformed generation.
     """
+    for pool in pools:
+        if not isinstance(pool, Mapping):
+            raise ValueError("resource-pool entry must be a mapping")
     declarations = read_site_declarations(pools)
     admission: dict[str, str] = {}
     unbacked: list[str] = []

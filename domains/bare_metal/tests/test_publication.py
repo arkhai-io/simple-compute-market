@@ -7,7 +7,7 @@ validates what it serves against.
 
 from __future__ import annotations
 
-from market_resource_pools_contracts.backing import BACKED
+from market_resource_pools_contracts.backing import BACKED, UNBACKED
 
 import pytest
 from pydantic import ValidationError
@@ -52,8 +52,17 @@ def _pool(pool_id="pool-1", *resources):
     return {"pool_id": pool_id, "resources": list(resources or [_resource()])}
 
 
-def _parse(projection):
-    return trusted_bare_metal_projection(site_id="site-a", projection=projection)
+def _parse(projection, backings=None):
+    """Parse ``projection``, every named pool backed unless ``backings`` says otherwise."""
+    if backings is None:
+        backings = {
+            pool["pool_id"]: BACKED
+            for pool in projection.get("resource_pools") or ()
+            if pool.get("pool_id")
+        }
+    return trusted_bare_metal_projection(
+        site_id="site-a", projection=projection, backings=backings
+    )
 
 
 def test_interpreter_preserves_distinct_identities_and_listing_semantics():
@@ -193,6 +202,79 @@ def test_interpreter_requires_explicit_machine_identity():
 
     with pytest.raises(ValidationError):
         _parse(_projection(_pool("pool-1", _resource(view))))
+
+
+def test_a_backed_view_without_availability_refuses_the_generation():
+    view = build_bare_metal_publication_view()
+    view.pop("available")
+
+    with pytest.raises(ValueError, match="available"):
+        _parse(_projection(_pool("pool-1", _resource(view))))
+
+
+def test_one_view_contradicting_its_pools_backing_refuses_the_generation():
+    """A host-bearing view in an unbacked pool is as malformed as a view naming
+    another pool: the whole generation is refused, its consistent pool too."""
+    unbacked = _pool(
+        "pool-unbacked",
+        _resource(
+            build_bare_metal_publication_view("resource-2", pool_id="pool-unbacked"),
+            physical_resource_id="resource-2",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="host_id"):
+        _parse(
+            _projection(_pool("pool-1"), unbacked),
+            backings={"pool-1": BACKED, "pool-unbacked": UNBACKED},
+        )
+
+
+def test_an_unbacked_view_yields_a_listing_with_no_delivery_terms():
+    view = build_bare_metal_publication_view(backing=UNBACKED)
+    generation = _parse(
+        _projection(_pool("pool-1", _resource(view))), backings={"pool-1": UNBACKED}
+    )
+
+    (listing,) = available_bare_metal_listings(
+        generation.resources, backing=UNBACKED, region="us-west"
+    )
+
+    assert listing.capacity_backing == "unbacked"
+    assert (listing.host_id, listing.physical_host_id, listing.access_methods) == (
+        None,
+        None,
+        None,
+    )
+    assert (listing.gpu_count, listing.gpu_model) == (8, "H200")
+
+
+def test_an_unbacked_view_stating_an_empty_term_yields_a_listing_without_it():
+    """Empty is absent to the delegate, so the carrier accepts it; the listing
+    carries none of an unbacked view's terms all the same."""
+    view = build_bare_metal_publication_view(backing=UNBACKED)
+    view["access_methods"] = []
+    generation = _parse(
+        _projection(_pool("pool-1", _resource(view))), backings={"pool-1": UNBACKED}
+    )
+
+    (listing,) = available_bare_metal_listings(
+        generation.resources, backing=UNBACKED, region="us-west"
+    )
+
+    assert "access_methods" not in listing.model_dump(exclude_none=True)
+
+
+def test_a_pool_absent_from_its_backings_is_carried_unchecked():
+    """A pool whose declarations do not resolve has no backing to hold its
+    views to; it is carried for its reader to hold."""
+    view = build_bare_metal_publication_view(backing=UNBACKED)
+
+    generation = _parse(_projection(_pool("pool-1", _resource(view))), backings={})
+
+    (resource,) = generation.resources
+    assert resource.capacity_backing is None
+    assert resource.view.host_id is None
 
 
 def test_a_projection_without_a_generation_identity_is_refused():

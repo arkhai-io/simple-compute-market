@@ -724,6 +724,7 @@ async def test_a_bare_metal_view_reaches_the_canonical_client_as_storefronts_rea
     for resource_id in ("bm-1", "bm-2"):
         validate_bare_metal_publication_view(
             members[resource_id]["publication_views"]["bare_metal.v2"],
+            backing=BACKED,
             physical_resource_id=resource_id,
             pool_id="whole-host",
         )

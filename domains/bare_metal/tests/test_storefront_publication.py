@@ -53,6 +53,7 @@ def _resource(
     capacity=None,
     attributes=None,
     capabilities=None,
+    backing=BACKED,
 ):
     return TrustedBareMetalResource(
         pool_id=pool_id,
@@ -60,6 +61,7 @@ def _resource(
         view=BareMetalResourceProjection.model_validate(
             build_bare_metal_publication_view(
                 resource_id,
+                backing=backing,
                 pool_id=pool_id,
                 host_id=f"machine-{resource_id}",
                 physical_host_id=f"physical-{resource_id}",
@@ -129,14 +131,16 @@ def test_each_resource_falls_into_exactly_one_class():
 
 
 def test_availability_bounds_only_backed_supply():
+    """An unbacked view states no availability, and its resource is a candidate
+    without one."""
     classification = classify_bare_metal_resources(
-        _generation(_resource("leased", available=False)),
+        _generation(_resource("unbacked", backing=UNBACKED)),
         pool_backings={"pool-1": UNBACKED},
         pool_admission={"pool-1": POOL_ADMITTED},
         pool_regions=_regions("pool-1"),
     )
 
-    assert _classes(classification) == {"leased": CANDIDATE}
+    assert _classes(classification) == {"unbacked": CANDIDATE}
     (candidate,) = classification.candidates
     assert candidate["listing_resource"]["capacity_backing"] == "unbacked"
 

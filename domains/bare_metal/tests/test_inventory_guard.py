@@ -28,7 +28,10 @@ from arkhai_bare_metal.fixtures.publication_view import (
 PUBLISHED = shape_digest({"gpu": {"count": 8, "model": "H200"}, "memory": {"gib": 2048}})
 
 
-def _generation(*, capacity=None, attributes=None, enabled=True, available=True, pool_id="pool-1"):
+def _generation(
+    *, capacity=None, attributes=None, enabled=True, available=True, pool_id="pool-1",
+    backing=BACKED,
+):
     return TrustedBareMetalProjection(
         site_id="site-a",
         revision=1,
@@ -39,9 +42,13 @@ def _generation(*, capacity=None, attributes=None, enabled=True, available=True,
                 enabled=enabled,
                 view=BareMetalResourceProjection.model_validate(
                     build_bare_metal_publication_view(
-                        "r1", pool_id=pool_id, available=enabled and available
+                        "r1",
+                        backing=backing,
+                        pool_id=pool_id,
+                        available=enabled and available,
                     )
                 ),
+                capacity_backing=backing.label,
                 declared_capacity=dict(DEFAULT_CAPACITY if capacity is None else capacity),
                 declared_attributes={"gpu_model": "H200"} if attributes is None else attributes,
             )
@@ -111,5 +118,9 @@ def test_a_source_that_no_longer_offers_the_resource_is_absent(generation, kwarg
     assert _check(generation, **kwargs).outcome == SOURCE_ABSENT
 
 
-def test_supply_availability_does_not_bound_matches_while_its_machine_is_leased():
-    assert _check(_generation(available=False), backing=UNBACKED).outcome == SOURCE_MATCHES
+def test_unbacked_supply_matches_on_its_declaration_with_no_availability_read():
+    """An unbacked view states no availability, and none is asked of it."""
+    generation = _generation(backing=UNBACKED)
+
+    assert generation.resources[0].view.available is None
+    assert _check(generation, backing=UNBACKED).outcome == SOURCE_MATCHES

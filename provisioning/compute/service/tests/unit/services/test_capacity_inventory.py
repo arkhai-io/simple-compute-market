@@ -24,6 +24,7 @@ from arkhai_bare_metal.fixtures.publication_view import (
     validate_bare_metal_publication_view,
 )
 from market_resource_pools import ResourcePool
+from market_resource_pools_contracts.backing import BACKED
 from market_site.projections import resource_pool_projection
 from vm_provisioning_adapter.inventory_views import AnsiblePoolDefaultsViews
 
@@ -275,6 +276,7 @@ def test_every_bare_metal_view_meets_its_consumers_contract():
                 continue
             validate_bare_metal_publication_view(
                 view,
+                backing=BACKED,
                 physical_resource_id=resource["physical_resource_id"],
                 pool_id=pool["pool_id"],
             )

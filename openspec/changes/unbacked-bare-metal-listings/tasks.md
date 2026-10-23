@@ -2932,27 +2932,49 @@ carries delivery terms only when backed", "A bare-metal listing sells one whole 
 declaration"). Touches `domains/bare_metal/src/arkhai_bare_metal/` and the two bare-metal
 storefront call sites of the reader.
 
-- [ ] 15.1 `schema.py` `BareMetalListing`: `host_id` and `physical_host_id` optional;
+- [x] 15.1 `schema.py` `BareMetalListing`: `host_id` and `physical_host_id` optional;
       `access_methods` optional with its `["ssh"]` default removed; the validator checks
       structure and applies its backing's `delivery_term_constraints` to `host_id`,
       `physical_host_id`, and `access_methods` (D5).
-- [ ] 15.2 `projections.py`: `BareMetalResourceProjection`'s `host_id`, `physical_host_id`,
+      Done. The terms are named once, `BARE_METAL_LISTING_DELIVERY_TERMS` and
+      `BARE_METAL_VIEW_DELIVERY_TERMS` (the listing's plus `available`), exported, and
+      the validator passes every named term to the delegate, so a dropped key cannot
+      escape the check (Section 14's note). Structure: a stated host field is
+      non-blank and no access method is blank; whether an empty list is allowed is the
+      delegate's (absent when unbacked, refused when backed).
+- [x] 15.2 `projections.py`: `BareMetalResourceProjection`'s `host_id`, `physical_host_id`,
       `available`, and `access_methods` optional, no default, structure checks only.
       `TrustedBareMetalResource` gains `capacity_backing`; given a label, its validator
       applies that delegate's `delivery_term_constraints` to the four terms beside the
       `pool_id` containment check; with none, no term check runs (D6).
-- [ ] 15.3 `publication.py` `trusted_bare_metal_projection(*, site_id, projection,
+      Done; `capacity_backing` defaults to none.
+- [x] 15.3 `publication.py` `trusted_bare_metal_projection(*, site_id, projection,
       backings)`: each resource is validated with its pool's resolved label, or none where
       the pool is absent from `backings`; a violation refuses the generation as every
       malformed view does. `available_bare_metal_listings` passes on only the terms a view
       carries, and availability is read only for a backed pool (D6, D3).
-- [ ] 15.4 `fixtures/publication_view.py`: `build_bare_metal_publication_view` builds an
+      Done; `backings` is required. Availability was already read only through the
+      delegate's `judge`, which never calls it for unbacked supply.
+- [x] 15.4 `fixtures/publication_view.py`: `build_bare_metal_publication_view` builds an
       unbacked view; `validate_bare_metal_publication_view` takes the backing and validates
       through the carrier, so both sides of the boundary test against one rule (D6).
-- [ ] 15.5 The storefront's two readers, `src/publication.py` `_classify_site` and
+      Done: the builder (and `build_bare_metal_projected_resource`) takes a `backing`,
+      default backed, and passes its delivery terms through that delegate's
+      `carry_delivery_terms`, as the site's builder will (16.4); the validator's
+      `backing` is required and it builds a `TrustedBareMetalResource`. The listing
+      fixture `build_bare_metal_listing_resource` now states `access_methods`, which the
+      model no longer defaults. **Differed:** the provisioning service's two producer
+      tests that call the validator (`tests/unit/services/test_capacity_inventory.py`,
+      `tests/integration/test_capacity_api.py`) pass `backing=BACKED`, and its dev floor
+      on `arkhai-bare-metal` rises to 0.13.0; Section 16 gives them pool context.
+- [x] 15.5 The storefront's two readers, `src/publication.py` `_classify_site` and
       `src/listing_source_check.py` `build_listing_source_check`, call `read_site_pools`
       before `trusted_bare_metal_projection` and pass `backings=reading.backings` (D6).
-- [ ] 15.6 Tests: unit `domains/bare_metal/tests/test_schema.py`, `test_projections.py`, and
+      Done. The pool reading sits inside the same refusal as the generation's views, and
+      `read_site_pools` raises `ValueError` for a row that is not a mapping, so a
+      malformed generation still holds its site rather than raising out of the cycle or
+      the recheck (fresh-context check).
+- [x] 15.6 Tests: unit `domains/bare_metal/tests/test_schema.py`, `test_projections.py`, and
       `test_publication.py` — an unbacked listing or view with no terms valid and with any
       term refused, a backed one missing a term refused, `available=False` valid when
       backed, an unchecked pool absent from `backings`, no `access_methods` default, one
@@ -2961,10 +2983,69 @@ storefront call sites of the reader.
       `StorefrontClient`) in the storefront: a generation whose backed view lacks
       `available` is held as `site_projection_refused` with the validation error, in a
       cycle and at an opening (D6).
-- [ ] 15.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
-- [ ] 15.8 **Verify.** `make test-bare-metal`; `make test`; `make check-packaging`.
+      Done. Unit (`domains/bare_metal/tests`, 164 passed): every case the task lists, each
+      term parametrized, plus a stated term's structure (a blank host, a blank access
+      method), an unbacked view stating an empty `access_methods` publishing none, and
+      the view model alone accepting a term-less view. `test_inventory_guard.py` and
+      `test_storefront_publication.py` built unbacked resources from backed-shaped views,
+      which the carrier now refuses; they build them as a site builds an unbacked view.
+      Library (`test_publication_cycle.py`): a backed view missing `available`, an
+      unbacked pool's view naming a host, and a pool row that is not a mapping each hold
+      the site as `site_projection_refused` with the error text, the listing left open
+      and the cycle completing; the pre-Section-19 unbacked-pool test serves an unbacked
+      view. Application integration (`test_http_negotiation.py`, through
+      `StorefrontClient`): an opening on a generation whose backed view lacks `available`
+      is refused 503 `listing_source_unverifiable` with no site call. **The opening shows
+      the refusal, not the validation error**, which the verdict carries to the seller's
+      log only; the error text is the cycle test's evidence. Two storefront tests built
+      backed listings without `access_methods` and now state it.
+- [x] 15.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
+      `arkhai-bare-metal` 0.12.0 → 0.13.0, its first bump against `origin/dev`, with its
+      floor on the contracts raised to 0.3.0. The storefront is already 0.22.0 against
+      `origin/dev`'s 0.17.0, a minor bump, so it is not bumped again
+      (`docs/development/RELEASING.md`); its floor on `arkhai-bare-metal` rises to
+      0.13.0, as does the provisioning service's dev floor. `make lock` changed seven
+      locks, each the one version line.
+- [x] 15.8 **Verify.** `make test-bare-metal`; `make test`; `make check-packaging`.
       End-to-end: `e2e_bare_metal_publication` and `e2e_bare_metal_mock_deal` show backed
       views and listings unchanged.
+      Results, on the final tree: `make test-bare-metal` — domain 164 (unit), storefront
+      454 (library and application integration), buyer 11, adapter 40, all passed. `make
+      test`, before the fresh-context fixes: every suite through the VM storefront
+      passed (provisioning service unit 667 and integration 488 with the validator's new
+      `backing`), then the VM adapter target failed on a service test file already
+      edited for Section 16 (an in-progress edit, not this section's); with that file
+      restored, `make test-provisioning-adapter test-compute test-vms-domain
+      test-vms-buyer test-apicredits test-e2e-unit` passed (29, 5, 53, 207, the API-credit
+      suites, 107). `test-deployment-packaging` was not rerun: its Helm render cannot
+      start in this session (Section 14) and nothing it renders changed. `make
+      check-packaging`: lock, uv-setup, Python-version, and layout checks pass; the
+      architecture check reports only Section 16's uncommitted `compute_provisioning`
+      import, which is not in this commit. `make check-change` fails only on the
+      citation of `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py` (Section
+      22). End-to-end: `e2e_bare_metal_publication` and `e2e_bare_metal_mock_deal`
+      exercise backed views and listings, which keep their bytes.
+
+Section 15 notes (handoff):
+
+- **Interim behaviour until Section 16 lands.** The site's view builder has no pool
+  context yet, so it still puts host terms on an unbacked pool's opted-in view, and
+  builds a backed view with `access_methods: []` where the declaration names none.
+  Against this section's storefront either refuses the site's whole generation
+  (`site_projection_refused`), where before the unbacked pool was reported
+  `pool_unbacked` and the empty list made the site's projection fail. Section 16 makes
+  the builder carry terms through the delegate and report problems; the two land in
+  one round.
+- **Fresh-context check:** no layering, comment, test-level, or versioning breach.
+  Fixed from it: the pool reading outside the generation's refusal (above); an unbacked
+  listing taking an empty `access_methods` from its view (the listing now takes terms
+  through the delegate's `carry_delivery_terms`); the missing storefront-level case of
+  an unbacked view naming a host; the opening's evidence claim (above). Recorded rather
+  than fixed: the interim behaviour above.
+- **Plan gap for a later section:** the delta's `publication_view_unbuildable` report
+  (a site resource carrying `publication_view_problems` for the bare-metal view) is
+  owned by no task; Section 16 delivers the field and Section 19, where bare metal's
+  publication reads unbacked views, reports it.
 
 ## 16. Resource views receive their pool's context and never fail the projection
 

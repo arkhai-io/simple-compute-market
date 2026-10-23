@@ -72,6 +72,7 @@ async def _seed_listing(client: SQLiteClient) -> BareMetalListing:
         **LISTING_HARDWARE,
         host_id="machine-1",
         physical_host_id="host-1",
+        access_methods=["ssh"],
         min_duration_seconds=900,
         max_duration_seconds=7200,
     )

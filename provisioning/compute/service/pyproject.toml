@@ -65,7 +65,7 @@ dev = [
     "arkhai-bare-metal-provisioning-adapter>=0.9.1",
     # The bare-metal view's contract fixture, which the producer test validates
     # its projected views against.
-    "arkhai-bare-metal>=0.10.0",
+    "arkhai-bare-metal>=0.13.0",
     # The canonical typed clients the integration suite drives every route with.
     "arkhai-compute-provisioning-client>=0.8.0",
     "arkhai-kit-resource-pools-client>=0.1.0",

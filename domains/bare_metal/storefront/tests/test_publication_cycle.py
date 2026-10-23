@@ -45,7 +45,7 @@ from market_capacity_publication import (
     SiteProjectionState,
 )
 from market_identity import TrustedIdentitySet, create_signer
-from market_resource_pools_contracts.backing import BACKED
+from market_resource_pools_contracts.backing import BACKED, UNBACKED, CapacityBacking
 from market_pool_overrides import PoolOverrideRecord, SQLitePoolOverrideStore
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
@@ -86,13 +86,14 @@ def member(
     capacity: dict[str, Any] | None = None,
     attributes: dict[str, Any] | None = None,
     capabilities: dict[str, Any] | None = None,
+    backing: CapacityBacking = BACKED,
 ) -> dict[str, Any]:
     """A projected pool member carrying its declaration and its bare-metal view.
 
     The declaration is a whole machine: one unit holding the default hardware,
     with the GPU model as a declared attribute. The site's view repeats the
     capacity and folds enablement into ``available``, as the provisioning
-    service builds it.
+    service builds it for a pool of ``backing``.
     """
     declared = dict(DEFAULT_CAPACITY if capacity is None else capacity)
     return build_projected_resource(
@@ -103,6 +104,7 @@ def member(
         publication_views={
             "bare_metal.v2": build_bare_metal_publication_view(
                 resource_id,
+                backing=backing,
                 pool_id=pool_id if view_pool_id == "" else view_pool_id,
                 host_id=host_id or f"machine-{resource_id}",
                 physical_host_id=f"physical-{resource_id}",
@@ -410,7 +412,11 @@ async def test_an_unbacked_pool_yields_no_listing_and_is_reported(db):
         db,
         {
             "site-a": Site(
-                pool("pool-u", member("r1", "pool-u"), capacity_backing="unbacked")
+                pool(
+                    "pool-u",
+                    member("r1", "pool-u", backing=UNBACKED),
+                    capacity_backing="unbacked",
+                )
             )
         },
     )
@@ -584,6 +590,58 @@ async def test_an_unknown_site_keeps_its_listings_while_another_reconciles(db, u
     assert {"action": "hold", "site_id": "site-a", "reason": reason}.items() <= next(
         item for item in actions(report, "hold") if item["site_id"] == "site-a"
     ).items()
+
+
+async def test_a_backed_view_without_its_availability_holds_the_site(db):
+    """A backed pool's view owes every delivery term; one missing ``available``
+    is malformed, so the site's whole generation is refused and its listings
+    held, the hold carrying the validation error."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    malformed = member("r1", "pool-1")
+    del malformed["publication_views"]["bare_metal.v2"]["available"]
+    site.serve(pool("pool-1", malformed))
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert closes(report) == {}
+    (hold,) = [item for item in actions(report, "hold") if item["site_id"] == "site-a"]
+    assert hold["reason"] == "site_projection_refused"
+    assert "available" in hold["error"]
+
+
+@pytest.mark.parametrize("malformation", ["unbacked-view-names-a-host", "row-not-a-mapping"])
+async def test_a_malformed_generation_holds_its_site(db, malformation):
+    """A view whose delivery terms its pool's backing forbids, or a pool row
+    that is no mapping at all, refuses the site's generation: the site's
+    listings are held and the cycle goes on. Spec scenario "An unbacked view
+    carries a delivery term"."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    if malformation == "unbacked-view-names-a-host":
+        # The view a site builds for a backed pool, in an unbacked one.
+        site.serve(
+            pool("pool-1", member("r1", "pool-1")),
+            pool("pool-u", member("u1", "pool-u"), capacity_backing="unbacked"),
+        )
+        expected = "host_id"
+    else:
+        site.serve(pool("pool-1", member("r1", "pool-1")))
+        site.response["resource_pools"].append("not a pool")
+        expected = "mapping"
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
+    assert closes(report) == {}
+    (hold,) = [item for item in actions(report, "hold") if item["site_id"] == "site-a"]
+    assert hold["reason"] == "site_projection_refused"
+    assert expected in hold["error"]
 
 
 async def test_a_site_whose_poll_fails_keeps_deriving_from_its_last_generation(db):

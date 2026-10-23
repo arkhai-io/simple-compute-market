@@ -14,7 +14,7 @@ from .projections import (
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
 )
-from .schema import BareMetalListing
+from .schema import BARE_METAL_LISTING_DELIVERY_TERMS, BareMetalListing
 from .shapes import derive_bare_metal_shape
 
 BARE_METAL_PUBLICATION_VIEW = "bare_metal.v2"
@@ -24,6 +24,7 @@ def trusted_bare_metal_projection(
     *,
     site_id: str,
     projection: Mapping[str, Any],
+    backings: Mapping[str, CapacityBacking],
 ) -> TrustedBareMetalProjection:
     """Interpret one trusted site's resource-pool projection generation.
 
@@ -42,6 +43,12 @@ def trusted_bare_metal_projection(
     pool, or naming a different Physical Resource than its container, refuses
     the whole generation, as does any malformed view: a consumer then holds
     what it derived from the site rather than guessing which copy is right.
+
+    ``backings`` maps each pool whose declarations the caller resolved, reading
+    the whole generation, to its backing delegate. Each view's delivery terms
+    are held to its pool's backing (see ``TrustedBareMetalResource``), so a
+    view contradicting its pool's backing refuses the generation too; a pool
+    absent from ``backings`` has no backing to hold its views to.
     """
     raw_pools = projection.get("resource_pools")
     if not isinstance(raw_pools, list):
@@ -87,11 +94,13 @@ def trusted_bare_metal_projection(
                 raise ValueError(
                     "a projected resource's capacity and attributes must be mappings"
                 )
+            backing = backings.get(pool_id)
             resources.append(
                 TrustedBareMetalResource(
                     pool_id=pool_id,
                     enabled=enabled,
                     view=view,
+                    capacity_backing=backing.label if backing is not None else None,
                     declared_capacity=dict(declared_capacity),
                     declared_attributes=dict(declared_attributes),
                 )
@@ -123,11 +132,13 @@ def available_bare_metal_listings(
     """Derive listings from trusted resources of one pool that ``backing`` admits.
 
     Where the pool's backing says availability bounds its resources, only a
-    resource whose whole machine is available yields a listing. Each listing
-    publishes its pool's backing label and its resource's declared shape under
-    the compute family's flat names. A resource whose declaration does not read as a shape
-    raises ``BareMetalShapeError``; callers that must hold rather than fail
-    classify resources first (see ``storefront_publication``).
+    resource whose whole machine is available yields a listing; availability
+    is never read otherwise. Each listing publishes its pool's backing label,
+    the listing delivery terms its view carries and no others, and its
+    resource's declared shape under the compute family's flat names. A
+    resource whose declaration does not read as a shape raises
+    ``BareMetalShapeError``; callers that must hold rather than fail classify
+    resources first (see ``storefront_publication``).
     """
     listings: list[BareMetalListing] = []
     for resource in resources:
@@ -137,12 +148,16 @@ def available_bare_metal_listings(
             resource.declared_capacity, resource.declared_attributes
         )
         flat = flatten_shape(shape, COMPUTE_CAPABILITY_SCHEMA)
+        # Through the delegate, so an unbacked listing carries none of them
+        # even where its view states one as empty.
+        carried = backing.carry_delivery_terms(
+            {name: getattr(resource.view, name) for name in BARE_METAL_LISTING_DELIVERY_TERMS}
+        )
+        terms = {name: value for name, value in carried.items() if value is not None}
         listings.append(
             BareMetalListing(
                 capacity_backing=backing.label,
-                host_id=resource.view.host_id,
-                physical_host_id=resource.view.physical_host_id,
-                access_methods=list(resource.view.access_methods),
+                **terms,
                 min_duration_seconds=min_duration_seconds,
                 max_duration_seconds=max_duration_seconds,
                 region=region,

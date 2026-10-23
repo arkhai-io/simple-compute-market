@@ -505,10 +505,28 @@ def _refused_generation() -> dict:
     return projection
 
 
-async def test_an_opening_on_a_refused_generation_is_refused_as_retryable(tmp_path) -> None:
+def _view_without_availability() -> dict:
+    """The seeded listing's projection with its backed view missing ``available``,
+    a delivery term its pool's backing requires, so bare metal refuses it whole."""
+    projection = copy.deepcopy(listing_source_projection())
+    resource = projection["resource_pools"][0]["resources"][0]
+    del resource["publication_views"]["bare_metal.v2"]["available"]
+    return projection
+
+
+@pytest.mark.parametrize(
+    "projection",
+    [
+        pytest.param(_refused_generation(), id="view names another pool"),
+        pytest.param(_view_without_availability(), id="backed view lacks a delivery term"),
+    ],
+)
+async def test_an_opening_on_a_refused_generation_is_refused_as_retryable(
+    tmp_path, projection
+) -> None:
     """Spec scenario "The held generation is refused"."""
     refused, threads, opening_calls = await _open_against(
-        tmp_path, SourceSite(_refused_generation())
+        tmp_path, SourceSite(projection)
     )
 
     assert refused.status_code == 503

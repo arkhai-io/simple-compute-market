@@ -367,9 +367,30 @@ class BareMetalPublicationCycle:
             "digest": view.identity.digest,
             "resource_pools": list(view.value),
         }
+        pools = response["resource_pools"]
+        site_overrides = {
+            pool_id: override
+            for (override_site, pool_id), override in self._overrides.items()
+            if override_site == site_id
+        }
         try:
+            # The pools are read first: which backing each view's delivery
+            # terms answer to depends on the whole generation's declarations.
+            reading = read_site_pools(
+                pools,
+                override_asking_rates={
+                    pool_id: override.asking_rates
+                    for pool_id, override in site_overrides.items()
+                    if not override.problems and override.asking_rates is not None
+                },
+                override_problems={
+                    pool_id: override.problems or override.term_conflicts
+                    for pool_id, override in site_overrides.items()
+                    if override.problems or override.term_conflicts
+                },
+            )
             generation = trusted_bare_metal_projection(
-                site_id=site_id, projection=response
+                site_id=site_id, projection=response, backings=reading.backings
             )
         except ValueError as exc:
             logger.warning(
@@ -379,25 +400,6 @@ class BareMetalPublicationCycle:
                 "hold", site_id=site_id, reason="site_projection_refused", error=str(exc)
             )
             return
-        pools = response["resource_pools"]
-        site_overrides = {
-            pool_id: override
-            for (override_site, pool_id), override in self._overrides.items()
-            if override_site == site_id
-        }
-        reading = read_site_pools(
-            pools,
-            override_asking_rates={
-                pool_id: override.asking_rates
-                for pool_id, override in site_overrides.items()
-                if not override.problems and override.asking_rates is not None
-            },
-            override_problems={
-                pool_id: override.problems or override.term_conflicts
-                for pool_id, override in site_overrides.items()
-                if override.problems or override.term_conflicts
-            },
-        )
         self._report_pools(site_id, reading)
         classification = classify_bare_metal_resources(
             generation,
