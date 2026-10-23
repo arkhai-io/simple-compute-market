@@ -53,10 +53,10 @@ def initialise_container_resources() -> None:
     Migrations are not applied in-process here (see
     openspec/specs/deployment-state/spec.md, "Service-owned migration history")
     — they must be applied ahead of time via the Helm init container,
-    ``compute-provisioning-migrate``, or ``make migrate``. This step only checks the schema version and fails fast with an
-    actionable message if it's behind, so a missed migration surfaces as an
-    obvious startup error rather than a query hitting a missing column
-    later.
+    ``compute-provisioning-migrate``, or ``make migrate``. This step only
+    checks the schema version and fails fast with an actionable message if
+    it's behind, so a missed migration surfaces as an obvious startup error
+    rather than a query hitting a missing column later.
     """
     container.identity_context()
     container.init_resources()

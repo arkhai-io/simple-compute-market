@@ -101,7 +101,6 @@ async def test_a_host_registered_without_a_pool_sells_nothing(
 
     assert host.pool_id is None
     assert await capacity.admin.list_resources() == []
-    assert all(resources == [] for resources in (await _projected(capacity)).values())
     assert await capacity.reserve(
         {"offering_mode": "vm", "gpu_count": 1}, {"escrow_uid": "escrow-unplaced-1"},
     ) is None

@@ -76,12 +76,8 @@ E2E_LISTING_SHAPES_HOST = "kvm-shapes"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
-#: `fungible` above one member. Sharing the system `default` pool would let adding a
-#: scenario silently change how another scenario's listings are published.
-#: The pool the provisioning service seeds from its own active configuration. Read
-#: for its provider configuration, never used to hold a scenario's capacity.
-SYSTEM_DEFAULT_POOL_ID = "default"
-
+#: `fungible` above one member. Sharing one pool would let adding a scenario
+#: silently change how another scenario's listings are published.
 E2E_BUY_POOL_ID = "compute-e2e-buy-pool"
 E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
@@ -122,12 +118,12 @@ def register_e2e_pool(
     `specific_resource` at exactly one member — is only accidentally right for a
     pool about to gain a second member.
 
-    The provider configuration is inherited from the system `default` pool rather
-    than written here. An Ansible pool must carry a `playbook_path`, and its correct
-    value is deployment-specific — `/dev/null` under the mock profile, a container
-    path under docker, another under Helm. Copying the default pool's configuration
-    keeps a scenario's pools provisioning exactly the way that deployment already
-    provisions, and means a scenario never encodes a path belonging to one profile.
+    The pool states no provider configuration. Its playbook is the provisioning
+    service's configured `vm_playbook_path`, frozen into each job when the job is
+    prepared, and its correct value is deployment-specific — `/dev/null` under the
+    mock profile, a container path under docker, another under Helm — so a
+    scenario never encodes a path belonging to one profile, and reads no other
+    pool to learn one.
     """
     # Narrow on purpose: a 404 means "not created yet", which is the point of the
     # lookup. A transport or auth failure means the service is unreachable, and
@@ -173,7 +169,7 @@ def register_e2e_pool(
             **({"pricing": pricing} if pricing is not None else {}),
             **({"region": region} if region is not None else {}),
         },
-        provider_config=_default_pool_provider_config(provisioning_client),
+        provider_config={},
     ))
     return _pools(provisioning_client).get_pool(pool_id)
 
@@ -188,23 +184,6 @@ def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
         ADVERTISABLE_MODES_POLICY_TAG: list(deliverable_modes),
         CAPACITY_BACKING_POLICY_TAG: BACKED.label,
     }
-
-
-def _default_pool_provider_config(provisioning_client: Any) -> dict[str, Any]:
-    """The system default pool's provider configuration.
-
-    The default pool is seeded from the provisioning service's own active
-    configuration, so it is the one place a scenario can read a valid
-    `playbook_path` for whatever profile the stack is running under.
-    """
-    default_pool = _pools(provisioning_client).get_pool(SYSTEM_DEFAULT_POOL_ID)
-    config = dict(getattr(default_pool, "provider_config", None) or {})
-    assert config.get("playbook_path"), (
-        f"the {SYSTEM_DEFAULT_POOL_ID!r} pool reports no playbook_path "
-        f"({config!r}); an Ansible pool cannot be created without one, and this "
-        "scenario has no profile-independent value to substitute"
-    )
-    return config
 
 
 def register_e2e_host(

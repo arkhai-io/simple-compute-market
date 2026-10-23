@@ -19,6 +19,10 @@ reconciles only when the mounted document differs from it. The digest is written
 in the same transaction as the apply, because a digest committed after an
 already-committed apply is indistinguishable at the next startup from one
 recorded before a crash.
+
+The fresh-site pool seed is the one import here that is not gated by a digest:
+it applies only to a site with no pool document and no stored pool, so once it
+has created pools it never applies again.
 """
 
 from __future__ import annotations
@@ -79,7 +83,8 @@ class ImportOutcome:
 
 
 class DefinitionDocumentImporter:
-    """Owns reading, gating, applying, and recording — in that order, once."""
+    """Owns reading, gating, applying, and recording — in that order, once —
+    and the fresh-site pool seed, which records nothing."""
 
     def __init__(
         self,

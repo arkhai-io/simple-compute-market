@@ -251,9 +251,10 @@ def _layered_settings(
 ) -> Settings:
     """The service's own settings file under one profile, loaded as the service
     loads it, with no dotenv file in reach and no playbook setting in the
-    process environment beyond ``environment``."""
+    process environment beyond ``environment``, and no pool seed path there."""
     monkeypatch.delenv("PROVISIONING_VM_PLAYBOOK_PATH", raising=False)
     monkeypatch.delenv("PROVISIONING_PLAYBOOK_PATH", raising=False)
+    monkeypatch.delenv("PROVISIONING_POOL_SEED_PATH", raising=False)
     for name, value in (environment or {}).items():
         monkeypatch.setenv(name, value)
     (tmp_path / "config-first.yml").write_text(profile)

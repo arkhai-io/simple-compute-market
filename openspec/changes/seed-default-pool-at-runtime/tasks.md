@@ -1027,7 +1027,8 @@ integration `conftest.py`.
   - fresh with a document (`_DECLARED_DOCUMENT` and the bare-metal lane's
     `dev-env/bare-metal/resource-pools.yaml`): only its pool, and its digest
     recorded;
-  - stored pools, and a stored pool that is disabled: no seed, no change;
+  - stored pools: no seed, and the export unchanged; a stored pool that is
+    disabled: no seed (only the pool IDs are checked);
   - empty `pool_seed_path`: no pools, and startup passes;
   - a missing seed document, and an invalid one whose two valid entries come
     before the bad one: startup fails and no pool is created;
@@ -1054,8 +1055,10 @@ integration `conftest.py`.
   placed and declares nothing until capacity naming it is registered, after
   which a VM claim is reserved and the projection shows the declaration under
   `vm-default`; a host registered with no pool reads back `null`, no
-  declaration exists, every projected pool is empty, and a VM claim is not
-  reserved. The step runs directly rather than through the app's lifespan,
+  declaration exists, and a VM claim is not reserved. Correction (section 9's
+  check): that case also asserted every projected pool empty, which could not
+  fail, since the projection lists only pools with resources; the assertion
+  is removed. Its case does not depend on the seed. The step runs directly rather than through the app's lifespan,
   which the harness never runs (1.2's handoff).
 - [x] 8.5 **Verification checkpoint.** Unit 8.1; service integration 8.3;
   application integration 8.4. Run `make test` in `provisioning/compute/service`,
@@ -1097,20 +1100,46 @@ Files: `e2e-tests/tests/e2e/roles/scenarios/vms/host_registry.py`;
 `helm/charts/provisioning/templates/tests/provisioning-smoke-test.yaml` and its
 render test; `dev-env/bare-metal/resource-pools.yaml`.
 
-- [ ] 9.1 `register_e2e_pool` creates `vm.ansible` pools with `provider_config:
+- [x] 9.1 `register_e2e_pool` creates `vm.ansible` pools with `provider_config:
   {}`; remove `_default_pool_provider_config` and `SYSTEM_DEFAULT_POOL_ID` (D4,
   D5). Evidence: the e2e unit suite passes and no e2e source names a system pool.
-- [ ] 9.2 Delete `test_host_crud_round_trip`. `test_auth_enforcement_when_enabled`
+  Done. The helper's docstring now says the pool leaves its playbook to the
+  service's `vm_playbook_path`, frozen at preparation, and the constants'
+  comment no longer names a system pool. A pool surviving an earlier run is
+  reconciled by its tags as before; its stored configuration is left as it
+  is. E2e unit (`make -C e2e-tests test-unit`): 38 passed. A search of
+  `e2e-tests` for `SYSTEM_DEFAULT_POOL_ID`, `_default_pool_provider_config`,
+  `get_pool("default")`, and a `default` pool ID finds nothing. That a VM
+  scenario's pool provisions through the service's playbook is shown only
+  once the VM lane runs (validation).
+- [x] 9.2 Delete `test_host_crud_round_trip`. `test_auth_enforcement_when_enabled`
   sends an unsigned `GET` to a protected read route (`/api/v1/hosts/`) and asserts
   401 or 403, under a new marker `provisioning_security`; remove the
   `provisioning_write` marker from `e2e-tests/pyproject.toml` and add
   `provisioning_security` (D7). The Helm smoke hook selects
   `provisioning_readonly or provisioning_security`; extend the chart's render test
   to assert the expression. Run `make -C helm test-render`.
-- [ ] 9.3 Rewrite `dev-env/bare-metal/resource-pools.yaml`'s comment: imports no
+  Done. The authentication check no longer takes `seller_settings` and needs
+  no administrator credential, so it runs wherever the hook runs; `httpx` is
+  imported at module level. The module docstring states that every check is
+  stateless. The unused contract imports went with the deleted test. Chart
+  render (`make -C helm test-render`, Helm v4.3.0): passed, including
+  `test_the_smoke_hook_selects_the_read_only_and_security_checks`, which
+  finds the hook's rendered document and its `-m` argument. Under
+  `--strict-markers`, `pytest --collect-only -m "provisioning_readonly or
+  provisioning_security" tests/smoke/test_provisioning_smoke.py` selects the
+  module's five checks, the authentication check among them. Against no
+  stack the five fail with connection refused, which proves the selection
+  and nothing about a deployed service; the Helm validation's hook run is
+  that evidence.
+- [x] 9.3 Rewrite `dev-env/bare-metal/resource-pools.yaml`'s comment: imports no
   longer require a `default` pool, and the document keeps its inert pool so the
   bare-metal lane boots without seed pools (D3, D4).
-- [ ] 9.4 **Verification checkpoint.** Run `make test` in `e2e-tests` (its unit
+  Done, with a correction to the premise: what keeps the lane unseeded is
+  that a pool document is configured, whatever it names (an empty `pools`
+  list would too), not that it holds a pool. The comment says so, and that a
+  document need not name `default` or any pool.
+- [x] 9.4 **Verification checkpoint.** Run `make test` in `e2e-tests` (its unit
   suite, including `test_domain_stack_configuration.py`) and `make -C helm
   test-render`; `make check-comment-hygiene`.
   End-to-end: the VM scenarios listed in section 8 create their pools through
@@ -1119,6 +1148,58 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   evidence for this section.
   Owed by validation: `tests.yml`, job `release · deployment contracts` — `make
   -C helm test-render` passes with the smoke hook's marker expression.
+  Evidence: `make -C e2e-tests test-unit` — 38 passed (the unit suite, with
+  `test_domain_stack_configuration.py`). Correction to the plan: `make -C
+  e2e-tests test` runs the smoke and e2e tiers too, which need a deployed
+  stack; run here, with none, it ends 23 failed and 189 errors, all in the
+  live smoke and e2e modules (the provisioning smoke module's five fail with
+  a refused connection; the others were not inspected one by one), so
+  `test-unit` is the suite this checkpoint means. `make -C helm test-render` passed; `make
+  check-packaging` and `make check-change` (comment hygiene included)
+  passed; repository `make test` exited 0. End-to-end scenarios and the owed CI job confirmed as planned (the
+  job is `release-deployment` in `.github/workflows/tests.yml`).
+  Fresh-context check over sections 8 and 9: no layering, packaging, or
+  documentation-placement breach. Fixed: the bare-metal document's comment
+  (see 9.3), the vacuous 8.4 assertion, the importer's module and class
+  docstrings (which said every import is digest-gated), an overlong rewrapped
+  line in `initialise_container_resources`, and the config unit helper not
+  clearing `PROVISIONING_POOL_SEED_PATH`; the 8.3 and 8.4 notes are
+  corrected. Re-run after the fixes: the service suite (unit 658,
+  integration 520) and `make check-change`. Left for the round's review and
+  triage, as the owner directed:
+  - The seed step reads the seed document only where it applies, so a
+    missing or invalid seed fails startup only on a fresh site with no pool
+    document. The delta requirement "A fresh site is seeded from its seed
+    document" says a missing or invalid seed "MUST fail startup" without that
+    condition. Either the delta says "when it applies", or the step checks
+    the seed on every start. The narrower reading is also untested: no case
+    pairs a missing or invalid seed with stored pools or a configured
+    document.
+  - The packaged-seed check is one manual `unzip -l`; the unit test's
+    `is_file()` reads the source tree, so nothing catches a regression.
+  - `test_auth_enforcement_when_enabled` names a toggle that does not exist
+    (D7 kept the name); the seed tests replace `app_runtime.settings` and
+    container attributes, as earlier sections' tests do, though the importer
+    takes settings directly; `test_pool_seed_api.py` imports the private
+    `_initialize_test_database`; `test_migrated_state_passes_the_startup_check`
+    now runs over a fixture's pool, not migration's.
+  - `host_registry.py`'s module docstring and the GPU-count comment still
+    narrate history ("previously let…", "stayed invisible until…"), outside
+    this section's lines.
+  - Section 8's file list named `tests/unit/services/test_definition_document_restart_safety.py`;
+    it needed no change, since it covers contributed documents only.
+  - Observation: an API and a worker starting together on one fresh
+    database could both find no pool, and one would fail startup; the pool
+    document import shares the race, and no deployment runs both against
+    one database at first start.
+  Closeout (10.9) also replaces the `resource-pool-management` Evidence
+  bullet naming the tests section 8 replaced.
+  Handoff: sections 7–9 are one round's evidence. A fresh VM e2e stack now
+  holds only the seed pools, and its scenarios create their own pools with
+  no provider configuration, so the VM lane is the first evidence that a
+  pool stating no playbook dispatches. A Helm release with no
+  `definitions.pools`, the bare-metal release 2 included, holds the seed
+  pools as well; the bare-metal compose lane holds only its document's.
 
 ## 10. Closeout
 

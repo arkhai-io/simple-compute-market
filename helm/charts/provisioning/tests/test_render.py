@@ -6,7 +6,8 @@ The chart derives each definition document's path from the document's
 presence. A document that renders and mounts while its path is unset is a
 silent no-op, and a path set without the document points the service at
 nothing, so each document's three parts are asserted together. The schema
-also refuses the retired VM playbook setting the service refuses at startup.
+also refuses the retired VM playbook setting the service refuses at startup,
+and the smoke hook selects the smoke checks that write nothing.
 Standard library only: values are written as JSON, which is YAML.
 """
 
@@ -113,6 +114,20 @@ def test_the_profile_carries_the_vm_playbook_under_its_domain_name() -> None:
     assert '"playbook_path"' not in rendered.stdout
 
 
+def test_the_smoke_hook_selects_the_read_only_and_security_checks() -> None:
+    """The hook runs every smoke check that writes nothing: the read-only ones
+    and the unauthenticated-request refusal."""
+    rendered = _render({})
+    assert rendered.returncode == 0, rendered.stderr
+    hook = rendered.stdout.split("# Source: provisioning/templates/tests/provisioning-smoke-test.yaml", 1)
+    assert len(hook) == 2, "the smoke-test hook did not render"
+    assert '"helm.sh/hook": test' in hook[1].split("\n---", 1)[0]
+    assert (
+        "- -m\n        - provisioning_readonly or provisioning_security\n"
+        in hook[1].split("\n---", 1)[0]
+    )
+
+
 def test_the_retired_playbook_setting_is_refused() -> None:
     """The service refuses ``playbook_path`` at startup; the schema refuses it
     before anything renders, so a stale values file never reaches a pod."""
@@ -128,5 +143,6 @@ if __name__ == "__main__":
     test_both_definitions_render_together()
     test_a_configured_definitions_path_is_refused()
     test_the_profile_carries_the_vm_playbook_under_its_domain_name()
+    test_the_smoke_hook_selects_the_read_only_and_security_checks()
     test_the_retired_playbook_setting_is_refused()
     print("provisioning chart render checks passed")
