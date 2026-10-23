@@ -305,6 +305,17 @@ the SVG beside it is the export and also opens in draw.io.
 
 ![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
 
+The canonical compute deal runs that discipline through the parts the next
+diagram draws in order, from holding the loops to resuming them. Each box is
+one part of the deal, its preview, advance, and measurement folded into a
+sentence or two; the tag at its right is the deal stage the shared state
+records for it. The bare-metal lane runs a second deal on the freed host
+before its loops resume. The diagram's source
+is [`diagrams/e2e-compute-deal.drawio`](diagrams/e2e-compute-deal.drawio); the
+SVG beside it is the export and also opens in draw.io.
+
+![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
+
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
 same "no raw calls" discipline integration tests follow. Design new
