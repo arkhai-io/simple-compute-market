@@ -307,7 +307,7 @@ async def test_a_pool_stating_no_region_publishes_nothing_and_is_reported(world)
         if action["action"] == "hold"
     ] == [("broker-a", "pool_region_missing")]
     report = (await world.client.get_system_status()).publication_derivation[SITE]
-    assert report["regionless_pools"] == ["broker-a"]
+    assert report["holds"] == [{"pool_id": "broker-a", "reason": "pool_region_missing"}]
 
 
 async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_it(world):
@@ -324,8 +324,33 @@ async def test_a_preview_leaves_the_reported_derivation_as_the_last_cycle_left_i
     ran = (await world.client.get_system_status()).publication_derivation[SITE]
 
     assert [action for action in preview["actions"] if action["action"] == "hold"] == []
-    assert previewed["regionless_pools"] == ["broker-a"]
-    assert ran["regionless_pools"] == []
+    assert previewed["holds"] == [{"pool_id": "broker-a", "reason": "pool_region_missing"}]
+    assert ran["holds"] == []
+
+
+async def test_only_a_publication_cycle_records_a_sites_derivation(world):
+    """A site is absent from status until a publication cycle derives it:
+    capacity-event reconciliation and a preview derive the same projection and
+    record nothing."""
+    world.pools.append(_without_region(pool("broker-a", backing="unbacked", gpu_count=2)))
+
+    before = (await world.client.get_system_status()).publication_derivation
+    world.site.emit("reserved")
+    await world.client.admin_run_lifecycle_cycle("capacity-events")
+    reconciled = (await world.client.get_system_status()).publication_derivation
+    await _cycle(world, dry_run=True)
+    previewed = (await world.client.get_system_status()).publication_derivation
+    await _cycle(world)
+    ran = (await world.client.get_system_status()).publication_derivation
+
+    assert before == reconciled == previewed == {}
+    assert ran == {
+        SITE: {
+            "holds": [{"pool_id": "broker-a", "reason": "pool_region_missing"}],
+            "refusals": [],
+            "reports": [],
+        }
+    }
 
 
 async def test_a_regionless_pool_with_no_available_slice_is_still_reported(world):
@@ -434,14 +459,11 @@ async def test_an_older_producer_is_read_as_backed_and_delivery_authorizes(world
 
     result = await _cycle(world)
 
-    assert result["counts"] == {"publish": 1}
+    assert result["counts"] == {"report": 1, "publish": 1}
     (listing_id,) = await _listings(world)
     assert await _backing(world, listing_id) == "backed"
-    status = await world.client.get_system_status()
-    derivation = status["publication_derivation"] if isinstance(status, dict) else (
-        status.publication_derivation
-    )
-    assert derivation[SITE]["compatibility_rule"] is True
+    derivation = (await world.client.get_system_status()).publication_derivation
+    assert derivation[SITE]["reports"] == [{"reason": "legacy_producer_backing"}]
 
 
 async def test_an_unrecognized_backing_value_holds_its_pool(world):
@@ -949,6 +971,17 @@ async def _report(world) -> dict:
     return status.publication_derivation[SITE]
 
 
+def _entry(report: dict, kind: str, reason: str, pool_id: str) -> dict | None:
+    """The one ``kind`` entry a site's derivation gives ``pool_id`` for ``reason``."""
+    (entry, *more) = [
+        item
+        for item in report[kind]
+        if item["reason"] == reason and item.get("pool_id") == pool_id
+    ] or [None]
+    assert more == []
+    return entry
+
+
 async def test_a_pool_hint_publishes_its_shapes_and_no_default_shapes(world):
     world.pools.append(_shaped())
 
@@ -998,9 +1031,11 @@ async def test_a_declaration_shrinking_beneath_a_shape_closes_and_reports_it(wor
     await _cycle(world)
 
     world.pools[0] = _shaped(capacity={**_BIG, "ram_gb": 16})
-    assert (await _cycle(world))["counts"] == {"close": 1}
+    assert (await _cycle(world))["counts"] == {"close": 1, "report": 1}
 
-    (finding,) = (await _report(world))["infeasible_shapes"]["broker-a"]
+    (finding,) = _entry(
+        await _report(world), "reports", "listing_shape_infeasible", "broker-a"
+    )["shapes"]
     assert finding["not_feasible_against"] == "declared"
 
 
@@ -1009,7 +1044,7 @@ async def test_backed_memory_being_taken_makes_a_stated_shape_unpublishable(capa
     assert (await _cycle(capacity_world))["counts"] == {"publish": 1}
 
     capacity_world.pools[0] = _shaped(backing="backed", available={**_BIG, "ram_gb": 8})
-    assert (await _cycle(capacity_world))["counts"] == {"close": 1}
+    assert (await _cycle(capacity_world))["counts"] == {"close": 1, "report": 1}
     assert await _listings(capacity_world) == {}
 
 
@@ -1116,7 +1151,8 @@ async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
             )
         )
 
-        assert (await _cycle(world))["counts"] == {"publish": 2}
+        # Each stated finding is also a report of the cycle's.
+        assert (await _cycle(world))["counts"] == {"publish": 2, "report": 2}
 
         published = {
             (row["listing_resource"]["pool_id"], row["listing_resource"]["gpu_count"])
@@ -1124,14 +1160,18 @@ async def test_the_configured_default_reaches_every_tier_of_a_cycle(tmp_path):
         }
         assert published == {("generated", 1), ("stated", 1)}
         report = await _report(world)
-        (excluded,) = report["inadmissible_listing_shapes"]["stated"]
+        (excluded,) = _entry(
+            report, "reports", "listing_shape_inadmissible", "stated"
+        )["findings"]
         assert excluded["tier"] == "pool_hint"
         assert [problem["tier"] for problem in excluded["problems"]] == ["configured_default"]
-        (unusable,) = report["unusable_shape_constraints"]["stated"]
+        (unusable,) = _entry(
+            report, "reports", "shape_constraints_unusable", "stated"
+        )["findings"]
         assert {bound["tier"] for bound in unusable["bounds"]} == {
             "pool_hint", "configured_default",
         }
-        assert "generated" not in report["inadmissible_listing_shapes"]
+        assert _entry(report, "reports", "listing_shape_inadmissible", "generated") is None
 
 
 async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_path):
@@ -1161,7 +1201,7 @@ async def test_a_hint_constraint_tightened_past_a_published_offer_closes_it(tmp_
         world.pools[0] = _shaped(
             shapes=(_SHAPE, {**widened, "gpu": {"count": {"offer": 2}, "model": "H100"}})
         )
-        assert (await _cycle(world))["counts"] == {"close": 1}
+        assert (await _cycle(world))["counts"] == {"close": 1, "report": 1}
 
         closed = await _listing(world, two_gpu)
         assert (closed["status"], closed["closed_by"]) == ("closed", "reconciliation")
@@ -1360,5 +1400,6 @@ async def test_a_shape_priced_listing_that_would_be_free_is_refused_and_never_po
 
     result = await _cycle(world)
 
-    assert result["counts"] == {"refuse": 1}
+    # The family the pool's rates leave uncharged is reported beside the refusal.
+    assert result["counts"] == {"refuse": 1, "report": 1}
     assert await _listings(world) == {}

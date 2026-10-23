@@ -73,7 +73,7 @@ dev = [
     # The storefront-side projection state and the aggregate it reads sites
     # through, which one integration test composes over the real site client
     # against this service.
-    "arkhai-kit-capacity-publication==0.10.2",
+    "arkhai-kit-capacity-publication==0.11.0",
     "arkhai-core-storefront>=0.14.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.23",

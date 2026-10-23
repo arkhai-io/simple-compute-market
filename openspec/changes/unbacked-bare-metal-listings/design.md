@@ -405,7 +405,16 @@ made, each a reason code with its pool or Physical Resource and detail — is ke
   start is absent, so a site present with empty lists always means a clean cycle.
 - **Logged on change.** Each entry is logged as a warning when it first appears in a
   site's summary and at info when it clears; a standing condition is logged once, not
-  every cycle, and previews never log.
+  every cycle, and previews never log. An entry's error text is not part of what makes
+  it the same entry, so a standing site hold whose source answers differently each
+  cycle is not logged again.
+- **A site held whole keeps its last entries.** When a cycle cannot read a site at all —
+  its projection is not held, or this domain refuses the generation — the site's hold
+  names no pool, and the entries of the last derivation that did read the site stand
+  beside it, since they still describe the pools whose listings the hold keeps. They
+  clear, and are logged as clearing, only once a cycle reads the site again. Settled in
+  implementation (Section 17): letting them clear made every outage log each pool's
+  entries as cleared and raise them again on recovery.
 
 Bare metal had logged every pool condition every cycle, previews included; VM logged its
 whole report again whenever any part changed, from a module-level dictionary that also

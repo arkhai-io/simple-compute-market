@@ -692,7 +692,10 @@ async def test_status_reports_a_running_loop_whose_timer_cycles_fail(
         "compose",
     )
     assert outcome["error"] == {"type": "OperationalError", "message": None}
-    assert status.publication_derivation == {}
+    # The failed cycles derived nothing, so the first cycle's clean derivation stands.
+    assert status.publication_derivation == {
+        "site-a": {"holds": [], "refusals": [], "reports": []}
+    }
 
 
 def _derivation_runtime(tmp_path, monkeypatch, sites: dict, **changes):
@@ -801,12 +804,11 @@ async def test_status_reports_a_pool_resolving_no_settlement_clause_held(
     assert report["counts"].get("refuse") is None
 
 
-async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status(
+async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(
     tmp_path, monkeypatch
 ) -> None:
-    """The derivation status reports is the last cycle's: a cycle that fails
-    before it has read every site clears the one before it, so status never
-    pairs a failed outcome with an earlier cycle's holds."""
+    """A cycle that fails before deriving a site leaves that site's last
+    derivation, which status keeps reporting beside the failed outcome."""
     sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
     composed = iter((True, False))
 
@@ -833,9 +835,52 @@ async def test_a_cycle_failing_in_compose_leaves_no_earlier_derivation_in_status
             status = await admin.get_system_status()
 
     assert derived["site-a"]["holds"] != []
-    assert status.publication_derivation == {}
+    assert status.publication_derivation == derived
     outcome = status.lifecycle[PUBLICATION]["last_outcome"]
     assert (outcome["completed"], outcome["stage"]) == (False, "compose")
+
+
+async def test_a_regionless_pool_is_logged_once_and_reported_until_it_clears(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """A pool stating no region is held and reported under its site's holds as
+    ``pool_region_missing`` in every cycle, as VM reports it; its hold is
+    logged as a warning when it appears and at info when it clears, and not on
+    the cycles between. Spec scenarios "A pool states no region for many
+    cycles" and "A held pool recovers"."""
+    regionless = Site(pool("pool-1", member("r1", "pool-1"), policy_tags={"region": None}))
+    runtime = _derivation_runtime(tmp_path, monkeypatch, {"site-a": regionless})
+    app = _app(runtime)
+    caplog.set_level(logging.INFO, logger="market_capacity_publication.cycle")
+
+    def logged() -> list[tuple[str, str]]:
+        return [
+            (record.levelname, record.getMessage())
+            for record in caplog.records
+            if record.name == "market_capacity_publication.cycle"
+        ]
+
+    async with app.router.lifespan_context(app):
+        async with _admin_client(app) as admin:
+            held = []
+            for _ in range(3):
+                await admin.admin_run_lifecycle_cycle("publication")
+                held.append((await admin.get_system_status()).publication_derivation)
+            appeared = logged()
+            caplog.clear()
+            regionless.serve(pool("pool-1", member("r1", "pool-1")))
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            await admin.admin_run_lifecycle_cycle("publication")
+            cleared = (await admin.get_system_status()).publication_derivation
+            cleared_log = logged()
+
+    hold = {"pool_id": "pool-1", "reason": "pool_region_missing"}
+    assert all(derivation["site-a"]["holds"] == [hold] for derivation in held)
+    ((level, message),) = appeared
+    assert level == "WARNING" and "pool_region_missing" in message
+    assert cleared["site-a"]["holds"] == []
+    ((level, message),) = cleared_log
+    assert level == "INFO" and "cleared" in message and "pool_region_missing" in message
 
 
 class _NothingDue:

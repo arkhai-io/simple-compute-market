@@ -552,22 +552,16 @@ class TestUnbackedDerivation:
 
 class TestEnumerationQuantity:
     def test_absent_count_yields_nothing_and_is_reported(self, db_path):
-        from arkhai_vms_listings.reconciler import derivation_reports
-
         pool = _declared_pool("broker-a", [("res-1", None, 0)], tags=_UNBACKED)
 
         assert _slices(db_path, [pool]) == []
-        assert derivation_reports()["site-a"]["members_without_gpu_count"] == {
-            "res-1": "broker-a"
-        }
+        assert _site_report()["members_without_gpu_count"] == {"res-1": "broker-a"}
 
     def test_declared_zero_yields_nothing_silently(self, db_path):
-        from arkhai_vms_listings.reconciler import derivation_reports
-
         pool = _declared_pool("broker-a", [("res-1", 0, 0)], tags=_UNBACKED)
 
         assert _slices(db_path, [pool]) == []
-        assert derivation_reports()["site-a"]["members_without_gpu_count"] == {}
+        assert _site_report()["members_without_gpu_count"] == {}
 
     def test_malformed_count_holds_a_whole_fungible_pool(self, db_path):
         pool = _declared_pool(

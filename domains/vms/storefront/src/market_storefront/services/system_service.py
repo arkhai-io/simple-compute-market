@@ -50,18 +50,11 @@ _PROBE_LISTING = {"accepted_escrows": [_PROBE_ESCROW], "demands": [_PROBE_CONDIT
 
 
 def _default_publication_derivation_provider() -> dict[str, dict[str, Any]]:
-    """Per-site report of what the latest derivation could not publish.
-
-    For each site: whether it was read under the compatibility rule for a
-    producer predating the pool declarations, which pools and members are
-    unresolvable and held, which members declare no GPU count or no resource
-    type, which pools state shapes the VM vocabulary cannot read, which stated
-    shapes no member is feasible for, and which pools publish nothing because
-    their listings claim an attribute no member declares.
-    """
-    from arkhai_vms_listings.reconciler import derivation_reports
-
-    return derivation_reports()
+    """Each site's holds, refusals, and reports from the latest publication
+    cycle that derived it, from the process's site-derivation log; empty
+    before any cycle has run."""
+    log = _container.resolved_site_derivation_log
+    return log.latest() if log is not None else {}
 
 
 async def _default_pool_override_status_provider() -> list[dict[str, Any]] | None:

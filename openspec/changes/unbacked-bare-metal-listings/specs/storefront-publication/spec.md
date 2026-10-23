@@ -205,7 +205,17 @@ MUST NOT. Each storefront's system status MUST report `publication_derivation` f
 per site, as `holds`, `refusals`, and `reports`: a site that derived cleanly present with
 empty lists, and a configured site no publication cycle has derived since start absent.
 The log MUST record each entry as a warning when it first appears in a site's derivation
-and at info when it clears, and MUST NOT log a standing entry again or log a preview.
+and at info when it clears, and MUST NOT log a standing entry again or log a preview. A
+cycle that cannot read a site at all holds the site, and the site's other entries from
+the last cycle that read it MUST stand beside that hold until a cycle reads the site
+again.
+
+#### Scenario: A site's projection becomes unknown
+
+- **WHEN** a site whose pool is held for a missing region becomes unreachable, and later
+  answers again with the pool unchanged
+- **THEN** status reports the site's hold beside the pool's while it is unreachable, and
+  the log records only the site's hold appearing and clearing
 
 #### Scenario: A pool states no region for many cycles
 

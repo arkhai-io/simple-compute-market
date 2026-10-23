@@ -22,6 +22,7 @@ ACTIONS = frozenset(
         "reopen",
         "hold",
         "refuse",
+        "report",
         "skip",
         "converge",
         "fail",

@@ -1110,7 +1110,10 @@ async def test_an_unreadable_rate_holds_the_pool_and_keeps_its_listing(db):
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1")[:2] == (listing_id, "open")
-    assert {item["reason"] for item in actions(report, "hold")} == {"asking_rates_unreadable"}
+    # The pool is held once, naming why, rather than once per machine.
+    (hold,) = actions(report, "hold")
+    assert (hold["pool_id"], hold["reason"]) == ("pool-1", "asking_rates_unreadable")
+    assert "physical_resource_id" not in hold and hold["problems"]
     assert storefront.registries.operations() == []
 
 

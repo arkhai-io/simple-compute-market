@@ -78,7 +78,8 @@ class BareMetalHealthResponse(BaseModel):
     # last cycle, whether its timer or an operator's step ran it; on status.
     lifecycle: dict[str, LoopStatus] | None = None
     # Each configured site's holds, refusals, and reports, each with its reason,
-    # from the latest publication cycle; on status, and empty before any cycle.
+    # from the latest publication cycle that derived it; on status, and a site
+    # no cycle has derived since start is absent.
     publication_derivation: dict[str, dict[str, list[dict[str, object]]]] | None = None
     # Each composed settlement mechanism's readiness as its registration
     # projects it, each blocker with its kind; on status.

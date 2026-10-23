@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,7 +16,9 @@ from market_capacity_publication import (
     PublicationCycleStopped,
     PublicationCycleReport,
     RegistryDivergence,
+    SiteDerivationLog,
     converge_registries,
+    site_derivations,
 )
 
 
@@ -38,6 +41,199 @@ def test_the_report_counts_each_action_in_the_order_taken():
         ],
         "counts": {"close": 1, "publish": 2},
     }
+
+
+def _cycle_report(*actions, dry_run=False):
+    report = PublicationCycleReport(dry_run=dry_run)
+    for action, details in actions:
+        report.record(action, **details)
+    return report
+
+
+REGIONLESS = ("hold", {"site_id": "site-a", "pool_id": "p1", "reason": "pool_region_missing"})
+REFUSED = ("refuse", {"site_id": "site-a", "pool_id": "p2", "reason": "no_settlement_option"})
+REPORTED = ("report", {"site_id": "site-b", "pool_id": "p3", "reason": "listing_shapes_not_applicable"})
+
+
+class TestSiteDerivations:
+    def test_each_site_lists_its_holds_refusals_and_reports_without_action_or_site(self):
+        report = _cycle_report(
+            REGIONLESS, REFUSED, REPORTED, ("publish", {"listing_id": "x"}),
+            ("hold", {"site_id": "unconfigured", "reason": "anything"}),
+        )
+
+        summary = site_derivations(report, ["site-a", "site-b", "site-c"])
+
+        assert summary == {
+            "site-a": {
+                "holds": [{"pool_id": "p1", "reason": "pool_region_missing"}],
+                "refusals": [{"pool_id": "p2", "reason": "no_settlement_option"}],
+                "reports": [],
+            },
+            "site-b": {
+                "holds": [],
+                "refusals": [],
+                "reports": [{"pool_id": "p3", "reason": "listing_shapes_not_applicable"}],
+            },
+            "site-c": {"holds": [], "refusals": [], "reports": []},
+        }
+
+
+class TestSiteDerivationLog:
+    LOGGER = "market_capacity_publication.cycle"
+
+    def _records(self, caplog):
+        return [
+            (record.levelname, record.getMessage())
+            for record in caplog.records
+            if record.name == self.LOGGER
+        ]
+
+    def test_a_site_is_absent_until_a_cycle_records_it(self):
+        log = SiteDerivationLog()
+
+        assert log.latest() == {}
+        log.record("vm", _cycle_report(), ["site-a"])
+        assert log.latest() == {"site-a": {"holds": [], "refusals": [], "reports": []}}
+
+    def test_a_preview_records_and_logs_nothing(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+        log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+        caplog.clear()
+
+        log.record("vm", _cycle_report(dry_run=True), ["site-a"])
+        log.record("vm", _cycle_report(REFUSED, dry_run=True), ["site-a", "site-b"])
+
+        assert self._records(caplog) == []
+        assert log.latest() == {
+            "site-a": {
+                "holds": [{"pool_id": "p1", "reason": "pool_region_missing"}],
+                "refusals": [],
+                "reports": [],
+            }
+        }
+
+    def test_an_entry_is_logged_once_when_it_appears_and_once_when_it_clears(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+
+        for _ in range(3):
+            log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+        appeared = self._records(caplog)
+        caplog.clear()
+        log.record("vm", _cycle_report(), ["site-a"])
+        cleared = self._records(caplog)
+
+        assert len(appeared) == 1
+        (level, message), = appeared
+        assert level == "WARNING"
+        assert "site-a" in message and "pool_region_missing" in message and "p1" in message
+        (level, message), = cleared
+        assert level == "INFO" and "cleared" in message and "pool_region_missing" in message
+        assert log.latest()["site-a"]["holds"] == []
+
+    def test_a_standing_entry_stays_reported_every_cycle(self):
+        log = SiteDerivationLog()
+
+        for _ in range(2):
+            log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+
+        assert log.latest()["site-a"]["holds"] == [
+            {"pool_id": "p1", "reason": "pool_region_missing"}
+        ]
+
+    def test_two_sources_keep_their_derivations_apart(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+        log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+        log.record("bare_metal", _cycle_report(REFUSED), ["site-a"])
+        caplog.clear()
+
+        # Each source records its own clean or standing derivation; neither
+        # clears nor raises the other's entry.
+        log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+        log.record("bare_metal", _cycle_report(REFUSED), ["site-a"])
+
+        assert self._records(caplog) == []
+        assert log.latest()["site-a"] == {
+            "holds": [{"pool_id": "p1", "reason": "pool_region_missing"}],
+            "refusals": [{"pool_id": "p2", "reason": "no_settlement_option"}],
+            "reports": [],
+        }
+
+    def test_a_site_held_whole_keeps_its_pool_entries_and_logs_no_clearing(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+        legacy = ("report", {"site_id": "site-a", "reason": "legacy_producer_backing"})
+        log.record("vm", _cycle_report(REGIONLESS, legacy), ["site-a"])
+        caplog.clear()
+        unknown = ("hold", {"site_id": "site-a", "reason": "site_projection_unknown",
+                            "error": "connection refused"})
+
+        log.record("vm", _cycle_report(unknown), ["site-a"])
+        log.record("vm", _cycle_report(unknown), ["site-a"])
+        while_held = log.latest()["site-a"]
+        held = self._records(caplog)
+        caplog.clear()
+        log.record("vm", _cycle_report(REGIONLESS, legacy), ["site-a"])
+        read_again = self._records(caplog)
+
+        assert while_held == {
+            "holds": [
+                {"reason": "site_projection_unknown", "error": "connection refused"},
+                {"pool_id": "p1", "reason": "pool_region_missing"},
+            ],
+            "refusals": [],
+            "reports": [{"reason": "legacy_producer_backing"}],
+        }
+        ((level, message),) = held
+        assert level == "WARNING" and "site_projection_unknown" in message
+        ((level, message),) = read_again
+        assert level == "INFO" and "cleared" in message and "site_projection_unknown" in message
+        assert log.latest()["site-a"] == {
+            "holds": [{"pool_id": "p1", "reason": "pool_region_missing"}],
+            "refusals": [],
+            "reports": [{"reason": "legacy_producer_backing"}],
+        }
+
+    def test_a_standing_entry_whose_error_text_changes_is_not_logged_again(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+
+        for error in ("connection refused", "timed out", "connection reset"):
+            log.record(
+                "vm",
+                _cycle_report(("hold", {"site_id": "site-a", "reason": "site_projection_unknown",
+                                        "error": error})),
+                ["site-a"],
+            )
+
+        assert len(self._records(caplog)) == 1
+        (hold,) = log.latest()["site-a"]["holds"]
+        assert hold["error"] == "connection reset"
+
+    def test_a_logged_entry_summarizes_structured_detail(self, caplog):
+        caplog.set_level(logging.INFO, logger=self.LOGGER)
+        log = SiteDerivationLog()
+        findings = [{"tier": "pool_hint", "problems": [{"message": "x"}]}] * 2
+        reported = ("report", {"site_id": "site-a", "pool_id": "p1",
+                               "reason": "listing_shape_inadmissible", "findings": findings,
+                               "keys": ["min_price", "token"]})
+
+        log.record("vm", _cycle_report(reported), ["site-a"])
+
+        ((_, message),) = self._records(caplog)
+        assert "findings=2 item(s)" in message and "keys=min_price; token" in message
+        assert "pool_hint" not in message
+
+    def test_what_latest_returns_cannot_change_what_was_recorded(self):
+        log = SiteDerivationLog()
+        log.record("vm", _cycle_report(REGIONLESS), ["site-a"])
+
+        log.latest()["site-a"]["holds"].clear()
+
+        assert log.latest()["site-a"]["holds"]
 
 
 def test_a_callback_cannot_call_back_before_a_cycle_runs():

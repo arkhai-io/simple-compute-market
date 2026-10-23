@@ -195,10 +195,9 @@ def _loops(runtime: BareMetalStorefrontRuntime) -> tuple[_Loop, ...]:
     async def publication_step() -> Mapping[str, Any]:
         # Composing the cycle is its compose stage, so a storefront that
         # cannot compose one fails there; the cycle names the stages after it.
-        # The previous cycle's derivation goes as this one starts, so status
-        # never pairs this cycle's outcome with another cycle's derivation.
+        # A cycle that fails before deriving a site leaves that site's last
+        # derivation, which status keeps reporting beside the failed outcome.
         loops.enter_stage("compose")
-        runtime.publication_derivation.clear()
         cycle = compose_publication()
         return to_jsonable_python(await cycle.run())
 

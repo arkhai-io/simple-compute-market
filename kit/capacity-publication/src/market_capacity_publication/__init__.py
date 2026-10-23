@@ -27,7 +27,10 @@ from .cycle import (
     PublicationCycleDriver,
     PublicationCycleStopped,
     PublicationCycleReport,
+    SiteDerivation,
+    SiteDerivationLog,
     converge_registries,
+    site_derivations,
 )
 from .publication import (
     BoundListing,
@@ -77,7 +80,10 @@ __all__ = [
     "ReconciliationPlan",
     "CAPACITY_BUCKET",
     "RESOURCE_POOL",
+    "SiteDerivation",
+    "SiteDerivationLog",
     "SiteEventCycle",
     "SiteProjectionState",
     "freshly_confirmed",
+    "site_derivations",
 ]

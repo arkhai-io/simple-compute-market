@@ -28,7 +28,11 @@ from core_storefront.domain_registry import (
 from core_storefront.service_peers import ServicePeerConfigs, ServicePeerTrust
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_capacity_publication import CapacityRuntime, SiteProjectionState
+from market_capacity_publication import (
+    CapacityRuntime,
+    SiteDerivationLog,
+    SiteProjectionState,
+)
 from market_core import MarketDomainContract
 from market_capability_admissibility import Declaration
 from market_negotiation_runtime import NegotiationRuntime
@@ -288,6 +292,7 @@ class VmStorefrontServices:
     alkahest_chain_probe: AlkahestChainProbe | None
     capacity_runtime: CapacityRuntime
     site_projections: SiteProjectionState
+    site_derivation_log: SiteDerivationLog
     service_peer_trust: ServicePeerTrust
     listing_service: Any
     negotiation_runtime: NegotiationRuntime
@@ -440,6 +445,7 @@ def _build_vm_services(
         alkahest_chain_probe=alkahest_chain_probe,
         capacity_runtime=capacity_runtime,
         site_projections=site_projections,
+        site_derivation_log=SiteDerivationLog(),
         service_peer_trust=service_peer_trust,
         listing_service=listing_service,
         negotiation_runtime=negotiation_runtime,
@@ -472,6 +478,7 @@ async def _start_vm_services(services: VmStorefrontServices) -> None:
         _container.resolved_alkahest_chain_probe = services.alkahest_chain_probe
         _container.resolved_capacity_runtime = services.capacity_runtime
         _container.resolved_site_projections = services.site_projections
+        _container.resolved_site_derivation_log = services.site_derivation_log
         _container.resolved_listing_service = services.listing_service
         _container.resolved_negotiation_runtime = services.negotiation_runtime
         _container.resolved_negotiation_service = services.negotiation_service

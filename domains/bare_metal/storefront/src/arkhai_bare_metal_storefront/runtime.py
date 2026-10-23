@@ -23,7 +23,11 @@ from market_alkahest import (
     json_rpc_call,
 )
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
-from market_capacity_publication import RESOURCE_POOL, SiteProjectionState
+from market_capacity_publication import (
+    RESOURCE_POOL,
+    SiteDerivationLog,
+    SiteProjectionState,
+)
 from market_contact_exchange import (
     MECHANISM as CONTACT_MECHANISM,
 )
@@ -80,7 +84,6 @@ from .pool_overrides import (
     compile_publication_clauses,
     positive_lease_bound,
 )
-from .publication import PublicationDerivation
 from .publication_service import BareMetalRegistryConfiguration
 from .settlement import build_bare_metal_settlement_plan
 from .settlement_composition import (
@@ -239,9 +242,9 @@ class BareMetalStorefrontRuntime:
         default_factory=PublicationWake, repr=False, compare=False
     )
     #: Each configured site's holds, refusals, and reports from the latest
-    #: publication cycle, which system status reports.
-    publication_derivation: PublicationDerivation = field(
-        default_factory=PublicationDerivation, repr=False, compare=False
+    #: publication cycle that derived it, which system status reports.
+    publication_derivation: SiteDerivationLog = field(
+        default_factory=SiteDerivationLog, repr=False, compare=False
     )
     #: Seconds between the site-projection poller's cycles.
     site_projection_poll_interval_seconds: float = field(

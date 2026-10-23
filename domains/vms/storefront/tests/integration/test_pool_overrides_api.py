@@ -269,7 +269,10 @@ async def test_an_infeasible_shape_is_accepted_and_publishes_nothing(world):
     written = await _overrides(world).put_pool_override(_record(listing_shapes=[too_big]))
 
     assert [entry.feasible for entry in written.feasibility] == [False]
-    assert (await _cycle(world))["counts"] == {"close": 1}
+    result = await _cycle(world)
+    assert result["counts"] == {"report": 1, "close": 1}
+    (reported,) = [action for action in result["actions"] if action["action"] == "report"]
+    assert (reported["pool_id"], reported["reason"]) == ("gpu", "listing_shape_infeasible")
     assert await _open_listings(world) == {}
 
 
@@ -412,7 +415,9 @@ async def test_a_rate_the_market_cannot_read_holds_the_published_listing(world):
     assert (await _open_listings(world)) == {listing_id: before}
     assert before["asking_rate"]["amount"] == "2.10"
     report = (await world.client.get_system_status()).publication_derivation[SITE]
-    assert "period" in report["unreadable_asking_rates"]["gpu"][0]
+    (hold,) = report["holds"]
+    assert (hold["pool_id"], hold["reason"]) == ("gpu", "asking_rates_unreadable")
+    assert "period" in hold["problems"][0]
 
 
 # -- refused writes ------------------------------------------------------------

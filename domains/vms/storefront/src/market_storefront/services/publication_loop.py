@@ -39,6 +39,7 @@ from arkhai_vms_listings.reconciler import (
     available_compute_slices,
     open_listing_resource_keys,
     ReconciliationScope,
+    site_derivation_entries,
     stale_open_listing_ids,
 )
 from market_capability_admissibility import Declaration
@@ -47,6 +48,7 @@ from market_capacity_publication import (
     PublicationCycleDriver,
     PublicationCycleReport,
     ReconciliationPlan,
+    SiteDerivationLog,
     SiteProjectionState,
     converge_registries,
 )
@@ -146,11 +148,15 @@ class VmPublicationCycle:
         admissibility_default: Declaration | None,
         shape_feasible: ShapeFeasibility | None = None,
         enter_stage: Callable[[str], None] | None = None,
+        derivation: SiteDerivationLog | None = None,
     ) -> None:
         """``enter_stage`` names each stage the cycle reaches -- ``compose``,
         ``run``, ``converge`` -- so a failure is recorded in the stage it
-        happened in; the loop controller's, when a cycle runs under it."""
+        happened in; the loop controller's, when a cycle runs under it.
+        ``derivation`` receives each configured site's holds and reports once
+        the cycle has derived them."""
         self._db = sqlite_client
+        self._derivation = derivation
         self._enter_stage = enter_stage or (lambda _stage: None)
         self._admissibility_default = admissibility_default
         self._shape_feasible = shape_feasible or vm_shape_feasibility()
@@ -216,6 +222,12 @@ class VmPublicationCycle:
             close_stale=self._availability is not None,
             skip_open=False,
         )
+        if self._derivation is not None:
+            self._derivation.record(
+                self._registry.resolve_mode("vm").contribution_id,
+                self.report,
+                self._sites,
+            )
         self._enter_stage("converge")
         await self._converge_registries()
         return self._report()
@@ -238,8 +250,6 @@ class VmPublicationCycle:
 
     def _available_candidates(self, db_path: str) -> list[dict[str, Any]]:
         holds: set[tuple[str, str, str]] = set()
-        # A preview derives exactly as the cycle would and publishes no
-        # derivation report, so status keeps describing the last cycle that ran.
         reports: dict[str, dict[str, Any]] = {}
         candidates = available_compute_slices(
             db_path,
@@ -252,27 +262,23 @@ class VmPublicationCycle:
             holds=holds,
             shape_feasible=self._shape_feasible,
             configured_sites=self._sites,
-            record_reports=not self.dry_run,
             reports=reports,
         )
-        for kind, site_id, source_id in sorted(holds):
+        for kind, site_id, _source_id in sorted(holds):
             if kind == "site":
                 # Unknown, not empty: nothing of this site's is closed or refreshed.
                 self.report.record("hold", site_id=site_id, reason="site_projection_unknown")
-            else:
-                self.report.record("hold", site_id=site_id, **{f"{kind}_id": source_id})
-        # Every VM listing publishes a region, which only its pool states. A
-        # pool stating none publishes and refreshes nothing; its candidates
-        # still count as present, so source reconciliation does not close the
-        # listings it already published. The hold is reported from the
-        # derivation's own report rather than from the candidates, because a
-        # pool with no available slice yields no candidate and is held all
-        # the same.
-        for site_id in sorted(self._projection):
-            for pool_id in reports.get(site_id, {}).get("regionless_pools", ()):
-                self.report.record(
-                    "hold", site_id=site_id, pool_id=pool_id, reason="pool_region_missing"
-                )
+        # Every pool or member hold has its reason in the site's report, which
+        # is recorded whole: what a cycle holds, and what it reports holding
+        # nothing. Every VM listing publishes a region, which only its pool
+        # states. A pool stating none publishes and refreshes nothing; its
+        # candidates still count as present, so source reconciliation does not
+        # close the listings it already published. Its hold comes from the
+        # report rather than from the candidates, because a pool with no
+        # available slice yields no candidate and is held all the same.
+        for site_id in sorted(reports):
+            for action, entry in site_derivation_entries(reports[site_id]):
+                self.report.record(action, site_id=site_id, **entry)
         return [candidate for candidate in candidates if candidate.get("region") is not None]
 
     def _close_stale(self, db_path: str, _base_url: str) -> list[str]:
@@ -285,7 +291,6 @@ class VmPublicationCycle:
             scope=ReconciliationScope.SOURCE,
             shape_feasible=self._shape_feasible,
             admissibility_default=self._admissibility_default,
-            record_reports=not self.dry_run,
         )
         for listing_id in stale:
             self.report.record("close", listing_id=listing_id, reason="source_gone")
@@ -547,6 +552,7 @@ async def run_publication_cycle_once(
         dry_run=dry_run,
         admissibility_default=container.resolved_admissibility_default,
         enter_stage=enter_stage,
+        derivation=container.resolved_site_derivation_log,
     )
     return await cycle.run()
 

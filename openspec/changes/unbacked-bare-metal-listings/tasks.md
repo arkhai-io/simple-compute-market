@@ -3202,7 +3202,7 @@ Delivers the kit-owned site-derivation log, one status shape, and logging on cha
 Touches `kit/capacity-publication`, `core/storefront`'s and `core/storefront-client`'s
 status models, `domains/vms/listings`, and the VM and bare-metal storefronts.
 
-- [ ] 17.1 `kit/capacity-publication/src/market_capacity_publication/cycle.py`: a
+- [x] 17.1 `kit/capacity-publication/src/market_capacity_publication/cycle.py`: a
       site-derivation log keyed by publication source and site, recording a site's
       summary — `holds`, `refusals`, `reports`, each entry a reason code with its pool or
       Physical Resource and detail — only from a real cycle; logging an entry as a warning
@@ -3210,23 +3210,85 @@ status models, `domains/vms/listings`, and the VM and bare-metal storefronts.
       it. Export it. Tests in `kit/capacity-publication/tests/unit/test_cycle.py` (unit,
       `caplog`): appear, stand, clear, previews unlogged and unrecorded, two sources kept
       apart (D10).
-- [ ] 17.2 VM: `domains/vms/listings/.../reconciler.py` loses the module dictionary,
+      Done: `SiteDerivationLog.record(source, report, site_ids)` takes the cycle's own
+      `PublicationCycleReport` and ignores a previewed one, so "previews record nothing"
+      is the kit's rule rather than each caller's; `site_derivations(report, site_ids)`
+      builds the summary from every `hold`, `refuse`, and `report` action naming a
+      configured site at the top level; `latest()` merges every source's entries per site
+      and returns copies. An entry's `error` text is not part of its identity, so a
+      standing site hold whose error changes is not logged again. A hold naming no pool
+      holds the whole site, and while it stands the site's other entries from its last
+      derivation (pool, member, and site-level reports alike) stand beside it, rather
+      than being logged as cleared and raised again when the site is read; design
+      decision 10 and the delta requirement record both rules, with a scenario. A logged entry summarizes structured detail
+      (a list of findings is a count) rather than dumping it. Unit (107 passed in the
+      kit): the summary; a site absent until recorded; a preview recording and logging
+      nothing; appear logged once at warning and clear at info across repeated cycles;
+      a standing entry reported every cycle; two sources kept apart; a site held whole
+      for two cycles reporting its pool hold and site-level report beside the site
+      hold, with only the site hold logged appearing and clearing; a changing error not re-logged; structured detail
+      summarized; `latest()` not aliasing the record.
+- [x] 17.2 VM: `domains/vms/listings/.../reconciler.py` loses the module dictionary,
       `_record_site_report`, and the `record_reports` flag, keeping the `reports=`
       out-parameter; `services/publication_loop.py` converts a real cycle's reports to
       entries (`regionless_pools` a `pool_region_missing` hold, `retired_pricing_keys` a
       report naming the keys, and so on) and records them in the log, which `container.py`
       holds and `services/system_service.py` serves; listing-source checks, capacity-event
       reconciliation, and failure actions record nothing (D10).
-- [ ] 17.3 Bare metal: `src/publication.py`'s `SiteDerivation` and `PublicationDerivation`
+      Done. The conversion is the domain's, `reconciler.site_derivation_entries(report)`,
+      since the categories are: holds — `pool_unresolvable` (with the resolver's
+      problems), `member_gpu_count_unreadable` and `member_resource_type_missing` (pool
+      and `physical_resource_id`, the key bare metal's entries use too),
+      `listing_shapes_unreadable`, `asking_rates_unreadable`,
+      `family_rates_unreadable` (with problems), `pool_region_missing`; reports —
+      `legacy_producer_backing` (the site, no pool), `member_gpu_count_missing`,
+      `listing_shape_inadmissible` and `shape_constraints_unusable` (findings),
+      `asking_rate_shape_unpublished`, `listing_shape_infeasible` (shapes),
+      `claimed_attribute_undeclared` (attribute and value), `retired_pricing_keys`
+      (keys), `families_without_rates` (entries). The cycle records every site's entries
+      into its own report, in place of the reasonless pool and resource holds it recorded
+      from the `holds` set (each such hold has its reason among these; the site hold
+      keeps `site_projection_unknown`), so the run-cycle report and status name the same
+      entries, and records the report into the log under the VM contribution's ID after
+      the run stage. The composition root builds one `SiteDerivationLog` beside the
+      projection state; the container holds it, the publication step passes it to the
+      cycle, and the system status's default provider reads it. **Differed:** the
+      run-cycle report now carries `report` actions, so its counts include them; the
+      VM cycle report's contract fixture admits the action. A fungible pool held for one
+      unreadable member is reported by that member's entry; its reason says the
+      member's count is unreadable, and the pool's listings are held with it. Evidence
+      is in 17.5 (VM storefront 1110 unit and 461 application integration); that a
+      listing-source check records nothing follows from the reconciler no longer
+      recording at all, and 17.5's integration case steps capacity-event reconciliation,
+      which derives through the same functions.
+- [x] 17.3 Bare metal: `src/publication.py`'s `SiteDerivation` and `PublicationDerivation`
       give way to the kit log, with its per-cycle log lines (`_classify_site`,
       `_hold_unbounded_pools`, `_hold_pools_without_clauses`, `_report_pools`) removed;
       `runtime.py`, `lifecycle_steps.py` (no clearing at cycle start: a cycle that fails
       before deriving a site leaves that site's last derivation, which status keeps
       reporting), `publication_composition.py`, and `models.py` follow (D10).
-- [ ] 17.4 `core/storefront/.../models/system_models.py` and
+      Done. **Differed:** the cycle records after its run stage rather than after
+      compose, as VM's does, so the refusals the run stage makes reach the log (Section
+      18's typed refusal is one); a cycle failing in run therefore leaves the previous
+      derivation too. `publication_composition.py` needed no change: it passes the
+      runtime's log as before. A pool held whole — unresolvable (with the resolver's
+      problems), regionless, an override it cannot apply or whose terms conflict, or
+      asking rates it cannot read (each with its problems) — is now held once per
+      reason at the pool, as VM's are, in place of one hold per machine with no
+      problems; a machine is held on its own only for its own declaration, which is
+      reported, with its problems, even in a pool held whole. So a held
+      pool with open listings and no projected members, whose listings the cycle keeps
+      open, is reported where it was only logged before, and the problems the removed
+      log lines carried are on the entry. Evidence: bare metal 455 (application
+      integration and the library-level cycle tests), among them a pool held once for
+      an unreadable rate, naming its problems.
+- [x] 17.4 `core/storefront/.../models/system_models.py` and
       `core/storefront-client/.../models.py`: `publication_derivation` is the shared shape,
       its comment describing the entries rather than VM's categories (D10).
-- [ ] 17.5 Tests: VM `tests/integration/test_publication_loop.py`,
+      Done. Neither package's own suite reads the field (core storefront 217 and
+      storefront client 65 pass); the narrowed type is exercised by the VM storefront's
+      integration tests, whose status reads go through `HealthResponse`.
+- [x] 17.5 Tests: VM `tests/integration/test_publication_loop.py`,
       `test_pool_overrides_api.py`, `test_reconciler_projection.py`,
       `test_reconciler_derivation.py`, `_reconciler_cases.py`, and unit
       `tests/unit/test_reconciler.py` follow the shape and the out-parameter; bare metal
@@ -3235,13 +3297,84 @@ status models, `domains/vms/listings`, and the VM and bare-metal storefronts.
       `holds` as `pool_region_missing` alike in VM and bare metal; a preview changes
       nothing; a site absent before its first cycle; a listing-source check records nothing
       (D10).
-- [ ] 17.6 Versions: `arkhai-kit-capacity-publication` (exact pins in both storefronts),
+      Done. VM application integration (461 passed): a regionless pool's hold in status;
+      a preview leaving the last cycle's derivation; new
+      `test_only_a_publication_cycle_records_a_sites_derivation` — the site absent before
+      any cycle, after a capacity-event reconciliation step, and after a preview, then
+      present with its `pool_region_missing` hold after a cycle; an older producer's site
+      reported as `legacy_producer_backing`; the shape findings and an unreadable rate
+      read as entries; the run-cycle counts that now include reports. The reconciler
+      cases (library level, the derivation against a real SQLite file) read their
+      reports through the `reports=` out-parameter. Bare metal application integration
+      (455 passed): new `test_a_regionless_pool_is_logged_once_and_reported_until_it_clears`
+      — the hold in status for three cycles, one warning, then one info line and empty
+      holds once the pool states a region; the compose failure now leaves the last
+      derivation, as does a timer cycle failing on a locked database. **Differed:** the
+      listing-source check is not stepped directly: it derives through the same
+      functions as capacity-event reconciliation, which no longer record anything, and
+      the integration test steps the latter; `test_publication_cli.py` and the unit
+      `test_reconciler.py` needed no change.
+- [x] 17.6 Versions: `arkhai-kit-capacity-publication` (exact pins in both storefronts),
       `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-vms-listings`, both
       storefronts; `make lock`.
-- [ ] 17.7 **Verify.** `make -C kit test-capacity-publication`; `make test-core`; `make
+      `arkhai-kit-capacity-publication` 0.10.2 → 0.11.0, since the log is new public API
+      (still one bump against `origin/dev`'s 0.10.1), with its exact pins moved in all
+      four places that pin it: the VM, bare-metal, and API-credit storefronts and the
+      provisioning service's dev group. The rest are already bumped once against
+      `origin/dev` and do not move (core storefront 0.16.0; the client 0.27.0; VM
+      listings 0.7.0, whose removed `derivation_reports` nothing else imports; both
+      storefronts 0.22.0). `make lock` refreshed those four projects' locks, the kit's,
+      and e2e-tests'.
+- [x] 17.7 **Verify.** `make -C kit test-capacity-publication`; `make test-core`; `make
       test-vms-domain`, `make test-storefront`, `make test-bare-metal`; `make test`; `make
       check-packaging`. End-to-end: `e2e_compute_dynamic_listings`, `e2e_listing_shapes`,
       and `e2e_bare_metal_publication` read status after publication.
+      Done, after both fresh-context fixes. `make test`: every Python suite passed —
+      core 120, 145, 217, 65; the capacity-publication kit 107; the other kits; the
+      provisioning family (compute_provisioning 237, service 673 unit and 489
+      integration); the registry; VM storefront 1110 unit and 461 integration; the VM
+      adapter 29; bare metal 164 domain, 455 storefront, 11 buyer, adapter 50; VM domain
+      and buyer; API credits; e2e unit 1081 — and its last step, the Helm render tests
+      (`test-deployment-packaging`), did not run: `helm` is not on this environment's
+      `PATH`. No chart changes in this section; the render tests are unrun, not passed
+      (Section 16's rerun also stopped short of that step). `make check-packaging`
+      passes, its architecture rules included. `make check-change` reports only Section
+      22's `introduction_stages.py`. End-to-end: unrun in this session; see the handoff
+      for what the named scenarios do and do not read.
+
+Section 17 notes (handoff):
+
+- **Correction to the plan's end-to-end note:** no scenario under `e2e-tests/` reads
+  `publication_derivation` (a search finds none), so the scenarios 17.7 names exercise
+  the publication cycles that now record into the log but not the status shape; the
+  application-integration cases in 17.5 are the evidence for the shape.
+- **Fresh-context check:** no layering, comment, import, or test-level breach. Fixed from
+  it: bare metal's pool-level holds, which had become invisible when their log lines
+  went (a held pool with no members, and every pool's problem detail), now recorded
+  once per pool and reason with their problems; VM's member entries named
+  `resource_id` where bare metal's name `physical_resource_id`; a site going unknown
+  logged its pool entries as cleared and raised them again on return, and a changing
+  error text re-logged a standing site hold; logged entries dumped nested findings;
+  the kit needed a minor bump for its new API, with the API-credit storefront's and the
+  provisioning service's pins too; the reconciler cases' report dictionary was never
+  cleared; evidence notes in 17.2–17.4 overstated or omitted results; closeout 23.9
+  now names the seller quickstart's region passage and the storefront-publication
+  architecture passage that describe the old shape. A second check confirmed those
+  fixes and found three smaller gaps, fixed: a site-level report (VM's
+  `legacy_producer_backing`) was not carried while its site was held whole; a
+  machine's own declaration problems went unreported inside a pool held whole; and
+  the carry-forward and error-identity rules were in no change document (now design
+  decision 10 and the delta, with a scenario). Declined: none.
+- **Left for Section 18:** a payload the cycle cannot build is recorded as a `refuse`
+  with its site inside `source`, not at the top level, so it does not reach a site's
+  `refusals` in either storefront. Section 18's typed refusal is recorded with site,
+  pool, and Physical Resource at the top level; its `_build_payload` changes should
+  move the untyped refusal's site up too, or the delta's "every refusal" stays unmet.
+  Both cycles already record after their run stage, so run-stage refusals reach the
+  log once they carry the site.
+- **Status shape for readers:** pool-level entries carry `pool_id`; member entries
+  carry `pool_id` and `physical_resource_id`; a site-level hold carries neither. The
+  kit relies on that last convention to tell a site held whole.
 
 ## 18. A candidate with no settlement option yields no listing; an open one closes or is held
 
@@ -3595,7 +3728,12 @@ change to implementation.
         listing's release conditions, so core carries it opaquely.
       - `docs/bare-metal-seller-quickstart.md` "Start and inspect": the unbacked passage
         rewritten as how to list unbacked machines, and its `publication_derivation`
-        passage; `docs/seller-quickstart.md`'s `publication_derivation` passages.
+        passage; `docs/seller-quickstart.md`'s `publication_derivation` passages and its
+        region passage naming the retired `regionless_pools` category (status now
+        reports a `pool_region_missing` hold); `openspec/specs/storefront-publication/
+        architecture.md`'s derivation passage ("each cycle replaces it": a cycle that
+        derives no site leaves its last derivation, and a site held whole keeps its
+        pools' entries).
       - The `spec.md` files of the ten capabilities the deltas cover are written by the
         archive (23.11) and named in the record. `openspec/specs/README.md` gains nothing:
         no new capability or companion.

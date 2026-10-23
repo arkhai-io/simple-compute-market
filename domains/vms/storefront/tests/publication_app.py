@@ -29,6 +29,7 @@ import httpx
 from core_storefront import multi_registry_client
 from fastapi import FastAPI
 from market_config.config_loader import ChainConfig
+from market_capacity_publication import SiteDerivationLog
 from market_capacity_publication.capacity_remote import reset_site_event_cursors
 from market_site_client.fixtures.resource_pools import (
     build_projected_resource,
@@ -662,6 +663,7 @@ async def publication_app(
                 "resolved_listing_service",
                 "resolved_capacity_runtime",
                 "resolved_site_projections",
+                "resolved_site_derivation_log",
                 "resolved_domain_registry",
                 "resolved_marketplace_signer",
                 "resolved_system_service",
@@ -675,6 +677,7 @@ async def publication_app(
         container.resolved_listing_service = listings
         container.resolved_capacity_runtime = capacity
         container.resolved_site_projections = site_projections
+        container.resolved_site_derivation_log = SiteDerivationLog()
         container.resolved_domain_registry = registry
         container.resolved_marketplace_signer = TEST_MARKETPLACE_SIGNER
         container.resolved_system_service = SystemService(
