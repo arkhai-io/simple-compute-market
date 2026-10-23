@@ -23,7 +23,7 @@ A step is protocol when refusing it leaves a party unable to continue:
 
 1. **Discovery:** without the registry's schema a buyer finds no listings.
 2. **Negotiation:** without the negotiation schema the parties reach no agreement.
-3. **Commitment:** the single act, defined by the mechanism, that makes the agreement binding (D2). Hosted: the payer's mandate approval. When the deal has a seller-funded bond, the seller pre-approves the mandate before returning its signed acceptance, so the payer's approval stays the single committing act (D5). Alkahest: the escrow obligation on chain. Asynchronous peer-to-peer: the countersignature.
+3. **Commitment:** the single act, defined by the mechanism, that makes the agreement binding (D2). Hosted: the payer's mandate approval. When the deal has a seller-funded bond part (a stake beyond the payment, D5), the seller pre-approves the mandate before returning its signed acceptance, so the payer's approval stays the single committing act (D5). Alkahest: the escrow obligation on chain. Asynchronous peer-to-peer: the countersignature.
 
 After commitment, refusing to continue is a broken obligation, no different from breaking a later clause, and it is visible only through the evidence it leaves. Everything after commitment, including the buyer's settle handoff, is post-commitment lifecycle (D6). Core keeps the registry, negotiation, and the schema-opaque agreement and commitment carriers.
 
@@ -55,15 +55,20 @@ Information exchanged after commitment is not committed or carried by the protoc
 
 ### D5. A deal is a set of parts; payment events are per part
 
-**Per-part events.** A deal's money is a set of parts, and the payment authority's events are per part: each part offers only the events it is reasonable to apply to that part alone, each with its own authorities.
+**Events follow the mechanism's joints.** A deal's money is a set of parts, and each mechanism's events are the operations its machinery can actually perform on a part on its own, each with its own authorities. Where a mechanism can apply an effect in part, the event is partial; where it can only act all at once, the event is whole, and any finer consequence needs a separate part.
+
+- **Hosted payments is a ledger.** A `once` part is debited and credited, held, inside the service's ledger at approval; the event command already carries an optional part and amount, and the snapshot tracks reversed minor units. Money leaves the ledger only at account top-ups and payouts, never per transaction. So reversal is partial and repeatable up to what a part still holds, and a penalty up to the held payment is a partial `reverse`, not a bond.
+- **Alkahest escrow is all or nothing.** An obligation is collected whole when its arbiter is satisfied or reclaimed whole on expiry; the splitter declares one split, once. It has no partial reverse, so any penalty, even one smaller than the price, must be a separate seller-funded escrow. That arrives with the specialized arbiter (D13).
+
+Hosted parts:
 
 | Part | Events |
 |---|---|
-| `once` | `start`, collect (applied by the authority when the hold ends), `reverse` of any amount up to what remains |
-| `rate` (`spot-deals-through-arkhai-payments`) | `start`, `notice`, `stop`, collect, `reverse` of any amount up to what was collected |
-| `bond` | slash of any amount up to what remains, release of the remainder (applied by the authority when the hold ends) |
+| `once` | `start`, collect (applied by the service when the hold ends), `reverse` of any amount up to what is held, repeatable |
+| `rate` (`spot-deals-through-arkhai-payments`) | `start`, `notice`, `stop`, collect, `reverse` of any amount up to what is held, repeatable |
+| `bond` | award to the payer of any amount up to what is held, repeatable; return of the remainder to the seller, applied by the service when the hold ends |
 
-A `once` part has no stop, because nothing about a fixed amount can be stopped. `reverse` and slash are partial and repeatable, so one transaction can absorb several consequences over its life. More exotic deal structures are new combinations of parts, never new deal-level events at the authority. Deal-level commands such as "end delivery at *T*" belong to the lifecycle layer (D6), whose payment adapter translates each into the events of the parts it affects. The payment core never receives a deal-level event, and it has no notion of disputes: arbitration is per agreement and sits outside it (D10).
+A `once` part has no stop, because nothing about a fixed amount can be stopped. More exotic deal structures are new combinations of parts, never new deal-level events at the authority. Deal-level commands such as "end delivery at *T*" belong to the lifecycle layer (D6), whose payment adapter translates each into the events of the parts it affects. The payment core never receives a deal-level event, and it has no notion of disputes: arbitration is per agreement and sits outside it (D10).
 
 **No structure is forced.** Option builders offer reasonable defaults as presets ("spot", "on-demand", "reserved", each with or without a bond). Every preset is only a combination of parts and terms in the generic vocabulary, and nothing special-cases one.
 
@@ -71,7 +76,7 @@ A `once` part has no stop, because nothing about a fixed amount can be stopped. 
 
 - `adjudication`, on every option whose mechanism has a lifecycle adapter: the regime that decides disputes about the agreement (D4, D10), and the dispute window.
 - `early_termination`, only when some part of the option can be stopped: who is entitled to stop it, the seller's exposure, and the maximum term.
-- `bond`, optional: the seller's bond (below).
+- `bond`, optional: the seller's stake beyond the payment (below).
 
 ```json
 {
@@ -99,8 +104,8 @@ A `once` part has no stop, because nothing about a fixed amount can be stopped. 
 
 - **Entitlements are the stop authorities of stoppable parts.** The adapter makes each initiator with an entitlement a `stop` authority of the option's stoppable parts, and nobody else. An on-demand option has no `payee` entitlement, so the seller cannot stop it. A `once` part has no stop event, so it has no stop authorities with or without a clause; its `start` authority is the payee alone (D7).
 - **Exceptional ends are disputes.** A seller whose hardware fails on a deal it may not stop concedes a case on the buyer's behalf (D10); the concession's outcome ends delivery and applies per-part consequences.
-- **A seller's promise is a bond.** A `bond` part is funded by the seller and held until the hold ends (below). A ruling or concession may slash it, wholly or in part, any number of times while it is held; the remainder is released to the seller when the hold ends. A partial slash is a discount: the deal otherwise continues. A bond is how a seller's promise acquires a concrete price. Without one, a concession costs the seller only what it reverses; that is the deal the buyer chose, and buyers can filter for a bond.
-- **One window.** `adjudication.dispute_window_seconds` bounds when a case may be filed: until that long after the deal's delivery ends. Each mechanism derives how long it holds funds and the bond from it, so a ruling can still act on them: hosted holds (the `once` hold and the bond) end at the lease end plus the dispute window. Evidence is kept for the same window (D9).
+- **A seller's promise is priced by what can be taken back.** On hosted payments, an outcome may reverse any part of the held payment, partially and more than once; a partial reverse while the term continues is a discount. That covers every penalty up to what is held. `bond.amount` is the seller's stake beyond it: a separate part funded by the seller toward the payer, held, awarded to the payer in part or whole by outcomes, and returned to the seller when its hold ends. A deal needs a bond only when its promised penalty can exceed the payment still held, such as a cheap deal with a costly failure, or a rate deal whose collected periods are no longer held. On a mechanism without partial reversal (Alkahest), the same `bond` term is realized as a separate escrow whatever its size.
+- **One window.** `adjudication.dispute_window_seconds` bounds when a case may be filed: until that long after the deal's delivery ends. Each mechanism derives how long it holds funds and the bond from it, so a ruling can still act on them: hosted holds (the payment parts and any bond) end at the lease end plus the dispute window, so the whole payment stays reversible for it. Evidence is kept for the same window (D9).
 - **Authority causes need no entitlement.** Funding exhaustion stops at the last funded boundary. The maximum term stops at an absolute instant, the Agreement's `start_utc + max_term_seconds`, carried in the mandate. That is the instant the lease ends (D8), whenever the seller sent `start`. Both stops have cause "terms".
 - **Buyer stops settle through the seller's exposure.** A payer stop at *t* settles through *t* plus `exposure_seconds`, bounding the seller's unpaid window by terms.
 - **Notice is a scheduled stop at the authority** (D7).
@@ -120,7 +125,7 @@ Term semantics:
 | `max_term_seconds` versus Agreement `duration_seconds` | Must be equal until a schema change replaces the fixed-term fields (`spot-deals-through-arkhai-payments`, "Known mismatch"). |
 | `reserve_ahead_seconds` versus `exposure_seconds` | `reserve_ahead_seconds ≥ exposure_seconds`, enforced by the builder and by the buyer's validation. |
 | `exposure_seconds` versus the seller's servicing budget | `exposure_seconds` is at least the storefront's polling interval plus its declared watchdog and teardown budget, checked at publication and at acceptance (D8). |
-| No `bond` | The deal has no bond part. |
+| No `bond` | The deal has no bond part; penalties are bounded by what the mechanism can still reverse. |
 | `dispute_window_seconds` shorter than the regime's minimum | Refused at publication and by the buyer. |
 
 **Discovery.** These terms are filtered per option, not per listing, because a buyer selects one option. They are common settlement fields owned by the lifecycle codec, not by a mechanism: `adjudication.regime`, `early_termination.payer`, `early_termination.payee.notice_seconds`, `bond.amount`. The settlement query language's namespace rules are amended to admit the codec's projections as the one shared exception. The registry schema does not change.
@@ -152,7 +157,7 @@ flowchart LR
 
 **Two kinds of record.**
 
-- **Payment events** are the payment authority's record of what happened to a part: `start`, `notice`, `stop`, collect, `reverse`, slash, release, and stops the authority applies itself (exhaustion, maximum term, a matured notice). Shape: `{negotiation_id, commitment_ref, part, kind, actor, at, amount, cause, case_ref, sequence, authority_record_ref}`; `case_ref` names the case whose outcome caused it, if any. `extend` is reserved for top-up.
+- **Payment events** are the payment authority's record of what happened to a part: `start`, `notice`, `stop`, collect, `reverse`, award, return, and stops the authority applies itself (exhaustion, maximum term, a matured notice). Shape: `{negotiation_id, commitment_ref, part, kind, actor, at, amount, cause, case_ref, sequence, authority_record_ref}`; `case_ref` names the case whose outcome caused it, if any. `extend` is reserved for top-up.
 - **Arbitration events** are the arbitration record's, per agreement: a case filed, conceded, ruled or closed. Shape: `{negotiation_id, commitment_ref, case_ref, kind, actor, at, outcome, sequence, record_ref}`. A transaction may have any number of cases.
 - **Peer messages** are buyer-to-seller and have no authority record: `commit` (the commitment reference and post-commitment information, D14) and `hint` (a courtesy notice that the buyer acted). They are kept as evidence and acted on only after a read of the authority.
 
@@ -231,20 +236,20 @@ Arbitration and payment are separate systems. Payment is per part (D5). Arbitrat
 
 - **Case.** One self-contained payload: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. It is the bundle a party exports and files, and the payload of `dispute` and `concede`.
 - **Evidence item:** an evidence-store record: kind, producer, time, content digest, and the exact original bytes or the authority's signed record. Mechanism records are referenced, not copied into a parallel format.
-- **Outcome.** A ruling or concession is a list of consequences, each either a payment effect on one part (reverse an amount of a `once` or `rate` part, slash an amount of a bond, stop a `rate` part at *T*) or a delivery end at *T*. Any subset may appear. An outcome with no delivery end leaves the term running: a partial slash is a discount. A transaction may receive several outcomes over its life, from several cases, each bounded by what its parts still hold.
+- **Outcome.** A ruling or concession is a list of consequences, each either a payment effect on one part (reverse an amount of a payment part, award an amount of a bond, stop a `rate` part at *T*) or a delivery end at *T*. Any subset may appear, and the payment adapter refuses effects its mechanism cannot perform. An outcome with no delivery end leaves the term running: a partial reverse is a discount. A transaction may receive several outcomes over its life, from several cases, each bounded by what its parts still hold.
 - **Application.** The arbitration adapter applies an outcome's payment effects through the payment adapter, each event carrying the case reference, with the authority the regime holds for that effect; a delivery end goes to end service as a final request (D8).
-- **Concession.** A concession is a case the seller resolves against itself. It is recorded at the regime's intake, and its payment effects are ones the seller is itself authorized to apply: reversing its own payments and slashing its own bond. It needs no adjudicator. The default concession for an exceptional end ends delivery now, reverses the unserved share of `once` parts by time, stops `rate` parts now, and slashes the bond in full; the seller may concede more, and the buyer may still dispute.
+- **Concession.** A concession is a case the seller resolves against itself. It is recorded at the regime's intake, and its payment effects are ones the seller is itself authorized to apply: reversing its own payments and awarding its own bond. It needs no adjudicator. The default concession for an exceptional end ends delivery now, reverses the unserved share of `once` parts by time, stops `rate` parts now, and awards the bond in full; the seller may concede more, and the buyer may still dispute.
 - **Sketch only:** fields that only automated adjudication needs, such as attestation normalization. They become normative with the change that automates adjudication.
 - **Contested cases** go to Arkhai's mediation, whose rulings are applied with the Arkhai dispute authority.
 
 ### D11. Adjudication is optimistic; automation is deferred
 
-Arkhai already resolves disputes for deals through its registry, manually. The deferred dispute authority automates certain cases of this, and is built together with a managed metering gateway that produces the delivery evidence it would decide on. Remedies differ by mechanism: on hosted payments a ruling applies through `reverse` and bond slashes while funds are held, which the shared dispute window guarantees; on the current Alkahest path a declared split cannot be undone on chain, so remedies are off-chain.
+Arkhai already resolves disputes for deals through its registry, manually. The deferred dispute authority automates certain cases of this, and is built together with a managed metering gateway that produces the delivery evidence it would decide on. Remedies differ by mechanism: on hosted payments a ruling applies through partial `reverse` and bond awards while funds are held, which the shared dispute window guarantees; on the current Alkahest path a declared split cannot be undone on chain, so remedies are off-chain.
 
 ### D12. Design for the adversarial worst case; default to cooperation
 
 - **Safety depends only on authority records** and a party's own kept records, never on a message the counterparty may withhold. The seller reads the authority for stops; the buyer reads it for notices and reclaims.
-- **Exposure is bounded by agreed terms.** Exhaustion: reserve-ahead covers the seller's exposure while funded-through stops advancing. Buyer stop: the exposure tail (D5). Seller abandonment: the maximum-term stop and the scheduled notice stop end billing without a further seller message. Exceptional seller ends and lesser failures: a bond, slashed wholly or in part, when the deal has one. Silent commitment: no charge until the seller starts (D7). Churn: each stopped deal pays at least the exposure tail; the seller may add a setup `once` part, and since a seller need not accept every negotiation, a DoS guard or blocklist belongs in its negotiation acceptance policy.
+- **Exposure is bounded by agreed terms.** Exhaustion: reserve-ahead covers the seller's exposure while funded-through stops advancing. Buyer stop: the exposure tail (D5). Seller abandonment: the maximum-term stop and the scheduled notice stop end billing without a further seller message. Exceptional seller ends and lesser failures: a partial or full reverse of the held payment, and a bond beyond it when the deal has one. Silent commitment: no charge until the seller starts (D7). Churn: each stopped deal pays at least the exposure tail; the seller may add a setup `once` part, and since a seller need not accept every negotiation, a DoS guard or blocklist belongs in its negotiation acceptance policy.
 - **Defaults cooperate.** Our implementations send hints and end service promptly. Hints are idempotent and trigger a read, so a forged one does nothing.
 - **Choose flows for the worst case:** one authority, one record, a bounded exposure window.
 
@@ -252,7 +257,7 @@ Arkhai already resolves disputes for deals through its registry, manually. The d
 
 - **Production first.** The hosted mechanism is made complete and production-quality first.
 - **Alkahest is at the user's own risk.** It is maintained so that every managed component has a feasible trustless alternative, not offered as production-ready. Before it is, optimistic mediation would be a specialized arbiter contract, more specific than `TrustedOracleArbiter`, possibly heartbeat-signature based, whose `DemandData` encodes the terms and accepts posted notices. The Alkahest lifecycle adapter is built with it.
-- **The test** for a decision is whether a neutral arbiter (another oracle, or a signature-based arbiter) could implement it. A decision fails if only a managed service can hold the evidence or act, if evaluation needs data only a managed party can produce, or if the commitment cannot be expressed on chain or as exchanged signatures. D2's mechanism-defined agreement, D5's per-part events and bond, D10's outcomes as lists of per-part effects, D7's scheduled notice, and D9's kept signed bytes all pass it: each is a rule an arbiter contract can check against posted records, and a bond is an escrow the seller funds.
+- **The test** for a decision is whether a neutral arbiter (another oracle, or a signature-based arbiter) could implement it. A decision fails if only a managed service can hold the evidence or act, if evaluation needs data only a managed party can produce, or if the commitment cannot be expressed on chain or as exchanged signatures. D2's mechanism-defined agreement, D5's per-part events following each mechanism's joints, D10's outcomes as lists of per-part effects, D7's scheduled notice, and D9's kept signed bytes all pass it: each is a rule an arbiter contract can check against posted records, and a bond is an escrow the seller funds.
 
 ### D14. Message sequence and information placement
 
@@ -286,7 +291,7 @@ sequenceDiagram
     B->>R: listing query
     R-->>B: listings: VM shape, arkhai.payments.v1 option with adjudication, early_termination, bond
     B->>S: signed proposal: VM terms incl. ssh_public_key, chosen option
-    S->>P: pre-approve mandate (funds bond part)
+    S->>P: pre-approve mandate (funds bond part, if the stake exceeds the payment)
     S-->>B: signed acceptance: negotiated Agreement bytes, plus mandate derived from them (mandate.deal = sha256(JCS(Agreement))) and the seller's pre-approval
     B->>B: verify mandate is the derivation of the Agreement, keep acceptance as evidence
     B->>P: approve mandate (+ Agreement attachment)
@@ -320,11 +325,11 @@ sequenceDiagram
         S->>P: watch: stop record
     else exceptional end
         S->>A: concede (case payload)
-        S->>P: stop rate part now, slash bond (case_ref)
-        S->>P: watch: stop and slash records
+        S->>P: stop rate part now, award bond (case_ref)
+        S->>P: watch: stop and award records
     else partial failure
         B->>A: dispute (case payload)
-        A->>P: ruling: slash part of bond (case_ref), term continues
+        A->>P: ruling: reverse part of the held payment (case_ref), term continues
         S->>A: watch: ruling
     end
     S->>X: end service at T
@@ -332,7 +337,7 @@ sequenceDiagram
 
 ### D15. Scope and related changes
 
-- **This change:** D1–D14; the five lifecycle packages; the lifecycle routes and client (seller `submit`, `read`, `list`; buyer `commit`, `hint`); the `adjudication`, `early_termination` and `bond` codec, its semantics table and its common query fields; deriving each part's authorities from the terms; Alkahest release models replacing the listing-wide flag; the hosted payment adapter for `once` and `bond` parts (`commit`, payee-only `start`, `read`, `watch`, partial `reverse`, slash); the `optimistic.arkhai` arbitration adapter (file, concede, read outcomes, apply them); end service and its final-request interface, with authority, arbitration and local sources; both evidence stores; routing bare-metal teardown and both terminal-settlement paths through end service. Verified at integration level against a payments test double at the `kit/arkhai-payments` boundary, per `TESTING.md`, "Private Service Dependencies".
+- **This change:** D1–D14; the five lifecycle packages; the lifecycle routes and client (seller `submit`, `read`, `list`; buyer `commit`, `hint`); the `adjudication`, `early_termination` and `bond` codec, its semantics table and its common query fields; deriving each part's authorities from the terms; Alkahest release models replacing the listing-wide flag; the hosted payment adapter for `once` and `bond` parts (`commit`, payee-only `start`, `read`, `watch`, partial `reverse`, bond award); the `optimistic.arkhai` arbitration adapter (file, concede, read outcomes, apply them); end service and its final-request interface, with authority, arbitration and local sources; both evidence stores; routing bare-metal teardown and both terminal-settlement paths through end service. Verified at integration level against a payments test double at the `kit/arkhai-payments` boundary, per `TESTING.md`, "Private Service Dependencies".
 - **`spot-deals-through-arkhai-payments`:** the hosted rate part and its adapter events, the funding timer, the buyer's post-stop `hint`, presets that emit `early_termination`, and the requirements for payer stop with exposure tail, scheduled notice stop, exhaustion, the stop at `start_utc + max_term_seconds`, and `reserve_ahead_seconds ≥ exposure_seconds` in force. It owns the four-path scenario (buyer stop, seller reclaim with notice, funding exhaustion, conceded dispute), as an e2e against the payments service's public test deployment, readiness-gated, with client-side integration tests against the test double. It depends on this change.
 - **`move-settle-out-of-core`:** moves the settle route table and client method out of core, retires the settle, status and refund routes in favour of the lifecycle routes, and moves API credits and the Alkahest settle path. It depends on this change and on `move-escrow-into-alkahest`.
 - **`automate-seller-spot`:** rescoped to the strategy runner as a caller of the seller half. It depends on both hosted changes.
@@ -355,8 +360,8 @@ This change:
 - Payee-only `start`. A `once` hold cannot be collected before the payee's `start`, and returns to the payer if the part is not started by the lease end the mandate carries. Collect is applied by the service when the hold ends.
 - Idempotency keys on `start`, as on `reverse`.
 - A per-transaction event sequence, and a cause and optional case reference on each stored event.
-- Partial, repeatable `reverse` up to what a part still holds.
-- A `bond` part: funded by the payee, pre-approved by the payee before the payer approves, slashable in part and repeatedly by the payee and the Arkhai dispute authority, its remainder released to the payee when the hold ends.
+- Partial, repeatable `reverse` confirmed as the contract's meaning of an event's `amount` (the snapshot already counts reversed minor units).
+- A `bond` part: funded by the payee toward the payer, which needs per-part direction or a second mandate; pre-approved by the payee before the payer approves; awarded to the payer in part and repeatedly by the payee and the Arkhai dispute authority; its remainder returned to the payee when the hold ends.
 - Holds derived from the lease end plus the agreement's dispute window.
 - Snapshot-proof verification in SCM before snapshot state is read as evidence.
 
@@ -381,7 +386,9 @@ Arkhai mediation (the `optimistic.arkhai` regime's intake), operated beside the 
 - **Deal-level lifecycle events at the payment service.** Rejected (D5): they fix one deal structure into the service. Per-part events compose into any structure, and the translation belongs to the adapter.
 - **A concession floor in the clause.** Rejected (D5): it special-cases one penalty shape and, as drafted, cost no more than an entitled stop. A bond part prices seller exits in the generic vocabulary.
 - **Disputes as part events at the payment core.** Rejected (D10): arbitration is per agreement and can yield several fine-grained consequences on different parts, or none that end the term; the payment core only needs per-part effects with authorities.
-- **Bond forfeited whole.** Rejected (D5): a ruling may be a discount while the deal continues, so slashes are partial and repeatable.
+- **Bond forfeited whole.** Rejected (D5): a ruling may be a discount while the deal continues, so awards are partial and repeatable.
+- **A bond on every penalized hosted deal.** Rejected (D5): the ledger already reverses held payment partially; a bond is only the stake beyond it.
+- **Partial reverse on Alkahest.** Rejected (D5): escrow obligations collect or reclaim whole, so a finer consequence there is a separate part.
 - **Bond approved after the payer's approval.** Rejected (D1): the seller would hold a free option on the buyer's locked funds. Pre-approval before acceptance bounds the converse risk by approval expiry and the seller's acceptance policy.
 - **A listing-level evidence window.** Rejected (D9): a seller could change it after acceptance, and it could disagree with how long funds are held.
 - **Terms in `provision_terms` or a new top-level Agreement field.** Rejected (D5): per listing rather than per option, or a protocol version bump for every party.
@@ -409,7 +416,7 @@ Arkhai mediation (the `optimistic.arkhai` regime's intake), operated beside the 
 
 Design, fifth round. Changed after the fourth review round (`reviews/08-design-external.md`) and the owner's direction:
 
-- D5, D10: arbitration is per agreement and separate from the payment core; outcomes are lists of per-part effects and optional delivery ends, possibly several per transaction; bonds slash in part and repeatedly; one dispute window in `adjudication` drives holds and retention.
+- D5, D10: arbitration is per agreement and separate from the payment core; outcomes are lists of per-part effects and optional delivery ends, possibly several per transaction; events follow each mechanism's joints: hosted reverses partially, so a bond is only stake beyond the held payment, while Alkahest needs a separate escrow; one dispute window in `adjudication` drives holds and retention.
 - D1, D14: the seller pre-approves a bonded mandate before acceptance.
 - D6: payment and arbitration adapter families; arbitration events; buyer-side kit area.
 - D8: arbitration outcomes are final-request sources; funding timer implemented in `spot-deals-through-arkhai-payments`.

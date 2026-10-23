@@ -20,17 +20,17 @@ A case MUST be filed about an agreement, not a part, at the intake of the regime
 
 ### Requirement: An outcome is a list of per-part effects
 
-A ruling or concession's outcome MUST be a list of consequences, each a payment effect on one part (reverse an amount, slash an amount of a bond, stop a `rate` part at *T*) or a delivery end at *T*. The arbitration adapter MUST apply each payment effect through the payment adapter with the case reference, and MUST send a delivery end to end service. An outcome without a delivery end MUST leave the term running.
+A ruling or concession's outcome MUST be a list of consequences, each a payment effect on one part (reverse an amount of a payment part, award an amount of a bond, stop a `rate` part at *T*) or a delivery end at *T*. The payment adapter MUST refuse an effect its mechanism cannot perform, such as a partial reverse on an all-or-nothing escrow. The arbitration adapter MUST apply each payment effect through the payment adapter with the case reference, and MUST send a delivery end to end service. An outcome without a delivery end MUST leave the term running.
 
 #### Scenario: A ruling discounts a deal
 
-- **WHEN** a ruling slashes half of a deal's bond and has no delivery end
-- **THEN** the payment authority records one partial slash with the case reference, and the lease is unchanged
+- **WHEN** a ruling reverses a quarter of a hosted deal's held `once` payment and has no delivery end
+- **THEN** the payment authority records one partial `reverse` with the case reference, and the lease is unchanged
 
-#### Scenario: A bond is slashed twice
+#### Scenario: Two outcomes reverse the same part
 
-- **WHEN** two outcomes on one deal each slash part of its bond
-- **THEN** both slashes are applied, each bounded by what remains of the bond
+- **WHEN** two outcomes on one hosted deal each reverse part of its `once` payment
+- **THEN** both reverses are applied, the second bounded by what is still held, and an outcome beyond that draws on a bond if the deal has one
 
 ### Requirement: Peer messages are hints until the authority confirms them
 
@@ -53,7 +53,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 #### Scenario: A reverse names a part
 
 - **WHEN** a seller submits `reverse` of an amount on a hosted deal with a `once` part and a `bond` part
-- **THEN** the adapter sends one `reverse` event on the `once` part and none on the bond
+- **THEN** the adapter sends one `reverse` event with that amount on the `once` part and none on the bond
 
 ### Requirement: Lifecycle terms are part of the selected option
 
@@ -112,7 +112,7 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 
 ### Requirement: A concession is a case the seller resolves against itself
 
-A `concede` MUST be recorded at the regime's intake, and its payment effects MUST be ones the seller is authorized to apply itself. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and slash the bond in full.
+A `concede` MUST be recorded at the regime's intake, and its payment effects MUST be ones the seller is authorized to apply itself. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award the bond in full.
 
 #### Scenario: A concession names a future end
 
@@ -122,11 +122,11 @@ A `concede` MUST be recorded at the regime's intake, and its payment effects MUS
 #### Scenario: A seller concedes after hardware failure
 
 - **WHEN** a seller makes the default concession on a hosted `once` deal with a bond
-- **THEN** the intake records the concession, the authority records a partial `reverse` and a full slash with its case reference, and end service ends delivery now
+- **THEN** the intake records the concession, the authority records a partial `reverse` and a full bond award with its case reference, and end service ends delivery now
 
 ### Requirement: One dispute window drives holds and retention
 
-`adjudication.dispute_window_seconds` MUST bound when a case may be filed, counted from when delivery ends. Each payment adapter MUST derive its holds from it, so that every hold on a deal's funds and bond lasts at least until the lease end plus the window. The window MUST NOT be shorter than the regime's minimum.
+`adjudication.dispute_window_seconds` MUST bound when a case may be filed, counted from when delivery ends. Each payment adapter MUST derive its holds from it, so that every hold on a deal's payment and bond lasts at least until the lease end plus the window. The window MUST NOT be shorter than the regime's minimum.
 
 #### Scenario: A once deal's hold is derived
 
