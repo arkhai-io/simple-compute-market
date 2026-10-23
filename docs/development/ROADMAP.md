@@ -215,6 +215,7 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
 | ~~VM keeps its own per-site projection cache~~ — closed: per-site projection state is kit-owned, one injected instance per storefront process holding both families for every site, and VM and bare metal both publish on a loop over it | [`share-site-projection-state`](../../openspec/changes/archive/2026-10-19-share-site-projection-state/) |
 | Every storefront carries its own authentication middleware and a persistence client whose boundary with core's is unstated | [`kit-owned-storefront-auth-and-persistence`](../../openspec/changes/kit-owned-storefront-auth-and-persistence/) |
+| API credits carries the whole API-access machinery — issuance, the key authority, the gate, the storefront's issuance composition, the buyer flows — as its own code, so a second API-selling domain can only copy it | [`compose-api-family-kit`](../../openspec/changes/compose-api-family-kit/) |
 | ~~API credits has no end-to-end lane of its own: its scenario rides the VM lane~~ — closed: each market domain runs in its own pipeline lane, building and composing only its own stack, and the API-credit lane routes its deal's discovery across a compute registry of its own | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/archive/2026-10-09-bare-metal-mock-provisioned-deal/) |
 | ~~No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host~~ — closed: the bare-metal lane runs a mock-provisioned whole-host deal on the compute deal stages VM's lane runs, from publication through settlement, on-chain evidence publication, lease expiry and release, and a second deal | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/archive/2026-10-09-bare-metal-mock-provisioned-deal/) |
 
@@ -323,6 +324,103 @@ The multi-seller shape this goal requires is in place in both domains: the selle
 Finite unbacked listings, and payment settlement over them, are anticipated and unowned. They are the reason backing is modelled as a listing property rather than as a domain: a seller's supply becomes capacity-backed later without a new domain, a new registry, or a migration unwinding a fabricated site. Backing itself is immutable per durable listing — an unbacked listing does not become backed, it closes and a backed one is published in its place — because moving from no admission guarantee to a named authority is a material provenance change a buyer holding a listing reference should not have happen underneath them.
 
 Two consequences of this posture are accepted rather than solved. Nothing keeps a listed rate current or honest, since a seller pays nothing to advertise one they will not honour; the intended control is registry curation, which sits outside the registry service boundary and is not implemented here. And an unbacked listing cannot be exhausted, which closes capacity-exhaustion abuse but not abuse of whatever the settlement mechanism reveals.
+
+---
+
+## Goal 8 — Sell metered inference as its own market domain
+
+**Value.** Model inference is the market Goal 4 named as the test of kit
+composition — "an inference-token domain … becomes codecs, a contract, and
+configuration rather than a fork of the VM storefront." It is also the market
+with the most obvious external analogue: a registry serving inference listings
+is, structurally, a model catalogue like OpenRouter's, with the catalogue
+separated from payment, routing, and the provider relationship. A seller with a
+GPU keeps the machine, serves a model, and sells API calls against it to many
+buyers at once; a buyer compares sellers per model on context length,
+quantization, and price per token, buys credits through any settlement
+mechanism the marketplace supports, and receives a bearer credential for an
+OpenAI-compatible endpoint. The domain supplies the shapes a buyer compares on
+— a model card, a rate card, a usage record — which the API-credits listing does
+not carry; what a storefront sells and charges stays the storefront's, and
+whether listings are comparable across sellers is the registry operator's to
+enforce. That vocabulary gap is why it is a domain rather than a field.
+
+**Current state.** Nothing supports it. There is no `inference` domain
+identity, registry schema identity, filter specification, or offering mode, and
+no usage vocabulary anywhere in the repository. The nearest thing is API
+credits, which sells prepaid finite units for a named service and consumes one
+configured fixed amount per admitted request; its architecture companion records
+that variable-cost metering is not established. The vLLM API-credits cookbook
+sells a model server behind that domain today, which demonstrates the gap: a
+listing naming `service_name: vllm-chat` cannot be compared with another
+seller's because nothing on it names the model, its context, its quantization,
+or its price per token.
+
+What is reusable is real and specific. The settlement runtime, the negotiation
+runtime, the storefront shell, the capacity/publication kit, and the registry
+are domain-neutral and need nothing. The credits authority's consumption route
+already accepts a variable amount with an idempotency key, though every caller
+passes one. Issuance — the immutable request with its digest, the deterministic
+fulfillment identity, the client, the rollback, the signed evidence — is generic
+to any market that delivers a bearer credential and is currently namespaced to
+API credits, with its schema strings inside the digests. What is not reusable
+is the consumption rule itself: API credits charges a fixed amount before the
+request; inference must reserve a worst-case charge, run the request, and settle
+from measured usage, because the cost is unknown until the response is complete
+and a single request can exceed a key's balance.
+
+The campaign therefore proceeds in a fixed order: define the vocabulary; take
+the `api` family vocabulary and kit that Goal 4's `compose-api-family-kit`
+builds by refactoring API credits onto it, with the API-credits digests pinned
+byte-for-byte first; compose the inference roles on
+the kit and prove one deal at a flat charge per request; replace the flat charge
+with hold-then-settle metering; package the seller path thinly; qualify the
+market. An earlier order copied the API-credits roles into inference first and
+extracted afterwards, because the shared boundary was thought unknowable from
+one consumer; the copy was carried as far as the storefront and the authority,
+measured at about 12,500 copied source lines against fewer than 300 new ones,
+and withdrawn unmerged on 2026-10-19 in favour of the family-kit shape compute
+already uses. See [`openspec/changes/README.md`](../../openspec/changes/README.md)
+for readiness.
+
+| Open gap | Owned by |
+|---|---|
+| No inference vocabulary: domain identity, model-card listing, rate card, provision intent, usage record and charge derivation, usage evidence, registry filter specification | [`add-inference-domain-contract`](../../openspec/changes/add-inference-domain-contract/) |
+| No inference roles: storefront, authority, gateway, buyer plugin, local stack, development identities, or end-to-end deal | [`compose-inference-domain-stack`](../../openspec/changes/compose-inference-domain-stack/) |
+| No admission hold, no post-response settlement from measured usage, no streaming usage capture, no cancellation or disconnect handling, no usage retention | [`meter-inference-usage`](../../openspec/changes/meter-inference-usage/) |
+| Becoming a seller requires a repository checkout, hand-written configuration, and manual identity generation, and a hand-assembled stack drifts as soon as its pinned versions move | [`package-inference-seller`](../../openspec/changes/package-inference-seller/) |
+| No multi-seller, concurrency, cancellation, lifecycle, late-usage, buyer-profile, or cross-language evidence; the per-domain deal path is not release-qualified | [`qualify-inference-market`](../../openspec/changes/qualify-inference-market/) |
+
+Three shapes are anticipated and unowned, by a scope decision of 2026-09-16
+that confined this campaign to the marketplace repository: an Arkhai-hosted
+inference registry beside the compute one (the API-credits registry's Helm
+alias is the pattern, so the change is small when opened); webapp integration
+of inference alongside API credits; and a fiat option (`arkhai.payments.v1`)
+for inference listings, which depends on the external payments service.
+External rating and billing platforms were evaluated during planning and are
+deliberately kept at the usage-record seam as optional seller-side adapters —
+the authority remains the only synchronous admission decision.
+
+Two further shapes are anticipated with recorded triggers rather than owned. An
+unbacked inference listing: backing is a declared property of every pool and
+listing since
+[`unbacked-listing-publication`](../../openspec/changes/archive/2026-09-24-unbacked-listing-publication/)
+was archived on 2026-09-24, and version-1 inference listings carry the backed
+value — quota as a sales cap, not capacity — so admitting the unbacked value is
+an inference filter-specification bump when a seller needs it, since a model
+server's supply is not finite the way a GPU is. And a monetary `asking_rate` per
+million tokens, once
+[`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/)
+— now unblocked — promotes the exact-decimal filter value type and declarative
+co-requirements. Until then inference compares on integer credit rates and the
+settlement asset.
+
+**Completion test.** Two independent sellers list the same model at different
+rate cards; a buyer discovers both on an inference registry, buys credits from
+one through the ordinary CLI, calls the OpenAI-compatible endpoint including a
+cancelled stream, is charged the derived amount and no more, exhausts the key,
+tops it up, and calls again — with the API-credits domain's behavior, digests,
+and data unchanged throughout.
 
 ---
 
