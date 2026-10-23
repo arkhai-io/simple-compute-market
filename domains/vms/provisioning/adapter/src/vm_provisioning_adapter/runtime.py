@@ -82,6 +82,7 @@ class VmProvisioningRuntime:
     def fulfillment_plan(self) -> VmFulfillmentPlan:
         return VmFulfillmentPlan(
             reserved_var_keys=self.codec.reserved_var_keys,
+            vm_playbook_path=self.config.resolved_vm_playbook_path,
             port_allocator=self.relay_port_allocator,
         )
 

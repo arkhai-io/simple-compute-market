@@ -294,6 +294,32 @@ class TestVmSizeDefaultsThroughAdminApi:
         assert exc_info.value.status_code == 400
 
 
+class TestPlaybookLeftToTheService:
+    async def test_a_vm_pool_stating_no_configuration_is_accepted_and_exported(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        created = await client.pools.create_pool(
+            PoolCreate(
+                id="vm-unstated",
+                label="VM, service playbook",
+                provider="vm.ansible",
+                policy_tags={
+                    "deliverable_modes": ["vm"],
+                    "advertisable_modes": ["vm"],
+                    "capacity_backing": "backed",
+                },
+                provider_config={},
+            )
+        )
+        assert created.provider_config["playbook_path"] is None
+
+        exported = yaml.safe_load(await client.pools.export_pools_yaml())
+        (entry,) = [pool for pool in exported["pools"] if pool["id"] == "vm-unstated"]
+        assert entry["provider_config"]["playbook_path"] is None
+        assert "inventory_group" not in entry["provider_config"]
+
+
 class TestGetAndListPools:
     async def test_get_missing_pool_returns_404(self, client_and_queue):
         client, _ = client_and_queue

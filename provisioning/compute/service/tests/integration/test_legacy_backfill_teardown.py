@@ -67,6 +67,15 @@ def _bootstrap_engine():
         default_inventory_group=_INVENTORY_GROUP,
     )
     with engine.begin() as connection:
+        # The pool configuration a lease-holding database had carried an
+        # inventory group, which the current table no longer has.
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(
+            text("UPDATE ansible_pool_configs SET inventory_group=:group"),
+            {"group": _INVENTORY_GROUP},
+        )
         connection.execute(text(
             """
             CREATE TABLE vm_leases (
@@ -149,7 +158,10 @@ def test_pre_cutover_vm_lease_backfills_and_tears_down_to_release():
             # No job authority: a backfilled teardown is dispatched as
             # persisted, and preparing nothing reads no create job.
             "vm.ansible": JobFulfillmentProvider(
-                plan=VmFulfillmentPlan(reserved_var_keys=VmAnsibleCodec().reserved_var_keys),
+                plan=VmFulfillmentPlan(
+                    reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+                    vm_playbook_path=_PLAYBOOK_PATH,
+                ),
                 submission=None,
                 jobs=None,
             ),

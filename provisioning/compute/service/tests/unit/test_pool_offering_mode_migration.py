@@ -64,7 +64,6 @@ def test_pool_mode_derivation_is_exact_includes_default_and_is_idempotent(caplog
                 pool_id="vm-pool",
                 playbook_path="/playbooks/vm-operations.yaml",
                 requirement_delegate="vm_management_v1",
-                inventory_group="kvm_hosts",
                 extra_vars={},
             )
         )

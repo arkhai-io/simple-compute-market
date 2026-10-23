@@ -143,7 +143,7 @@ tests in `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.p
 and `provisioning/compute/service/tests/integration/{test_ansible_pool_config_handler.py,
 test_pools_api.py}`, and a new migration test module beside them.
 
-- [ ] 2.1 Make `AnsiblePoolConfig.playbook_path` nullable and remove
+- [x] 2.1 Make `AnsiblePoolConfig.playbook_path` nullable and remove
   `inventory_group` from the model; the handler accepts an omitted or null
   `playbook_path`, stores NULL for it, returns it from `read_config`, and stops
   writing the `__unused__` placeholder and its comment (D5, D6). Make the VM
@@ -151,14 +151,34 @@ test_pools_api.py}`, and a new migration test module beside them.
   Library integration: `test_ansible_pool_config_handler.py` covers an omitted
   playbook stored and read as null, a stated one unchanged, and a blank string
   still refused.
-- [ ] 2.2 Freeze the service's playbook at preparation (D5). `VmFulfillmentPlan`
+  Done. A stated playbook that names nothing (blank, or not a string) is refused
+  as `invalid_type` rather than the former `required_field`. Library integration
+  (`test_ansible_pool_config_handler.py`, the real handler over in-memory SQLite,
+  in the service's `tests/integration`): `{}` and an explicit `null` stored and
+  read back as `playbook_path: None`; a stated playbook kept; `""`, blank, an
+  integer, and a list refused; `inventory_group` now an unknown field.
+- [x] 2.2 Freeze the service's playbook at preparation (D5). `VmFulfillmentPlan`
   takes the configured `vm_playbook_path` from its runtime (`runtime.py`'s
   `fulfillment_plan()`), and `prepare_create` and `prepare_teardown` write the
   pool's `playbook_path` when it states one and that configured path otherwise.
   Unit: `test_vm_fulfillment_plan.py` covers both, for create and teardown, and a
   prepared job's parameters keeping the frozen path after the plan's configured
   path changes.
-- [ ] 2.3 Append a migration after `20261019_001_vm_provider_identity` that
+  Done. `vm_playbook_path` is a required keyword, though it may be `None`, so
+  no composition can omit it; with neither the pool's nor the service's
+  playbook, preparation is refused (`ProviderConfigInvalidError` naming
+  `vm_playbook_path`). The legacy lease conversion's plan passes `None`: a
+  historical pool always states its playbook, which its compiler requires. Unit
+  (`test_vm_fulfillment_plan.py`, VM adapter): the service's path frozen for a
+  pool stating none and the pool's own winning, each for create and teardown; a
+  job prepared before reconfiguration carrying the old path and one prepared
+  after carrying the new; refusal with neither; and `VmProvisioningRuntime`'s
+  `fulfillment_plan()` passing the configured `resolved_vm_playbook_path`. That
+  the stored path is what runs is the existing codec and executor tests'
+  (`test_vm_codec.py`: a stored `playbook_path` becomes the plan's;
+  `test_executor.py`: a plan's playbook replaces the executor's). The plan's
+  former "missing playbook" case became a blank-playbook refusal.
+- [x] 2.3 Append a migration after `20261019_001_vm_provider_identity` that
   rebuilds `ansible_pool_configs` from the model with `playbook_path` nullable
   and `inventory_group` dropped, following `_migrate_capacity_declaration_contract`
   (foreign keys off, temporary table from the model, copy shared columns, drop,
@@ -174,12 +194,63 @@ test_pools_api.py}`, and a new migration test module beside them.
   model adds the column its legacy schema had, and the legacy migration suites
   (`test_legacy_vm_lease_migration.py`, `test_legacy_backfill_teardown.py`,
   `test_fulfillment_convergence_after_legacy_backfill.py`) pass.
-- [ ] 2.4 Application integration through the typed pool client
+  Done as `20261023_001_vm_pool_playbook_optional`
+  (`_migrate_vm_pool_playbook_optional`). Its rebuild copies `resource_pools`
+  and `relays` into the rebuild's metadata, since `CreateTable` must resolve the
+  foreign keys it renders; the copies are not created. Correction to the plan's
+  premise: `run_migrations` creates every model table before the chain, so on a
+  fresh database `ansible_pool_configs` has no `inventory_group` when
+  `20260724_001` runs, and `vm_leases` exists (from `20260603_003`), so the
+  conversion's `SELECT apc.inventory_group` failed every fresh migration. The
+  conversion now reads `inventory_group` only where the column exists, else
+  `NULL`. A fresh database holds no lease, so it migrates (the fresh-database
+  test below is that case's evidence); a lease met with `NULL` fails the
+  compiler's pool configuration check, so a database predating resource pools
+  that still holds VM leases is now refused at `20260724_001` with "no usable
+  Ansible pool configuration" where it used to convert. Every live database is
+  past `20260921_004` (design, Context), and 7.2 refuses such a database
+  earlier, at `20260713_002`, with an actionable message. Persistence
+  integration (`test_vm_pool_config_migration.py`, file SQLite): a database at
+  the committed `schema_through_20260911_001.sql` shape with two populated
+  configurations migrated through `apply_schema_migrations` is rebuilt (its
+  `sqlite_master` page changes), keeps every other value, relaxes
+  `playbook_path`, drops `inventory_group`, keeps the relay index and both
+  foreign keys, accepts a NULL playbook, and still refuses an unknown pool; a
+  fresh database through `run_migrations` is in shape and the migration leaves
+  its table untouched (same page and DDL); a repeated run (the migration
+  directly, then the chain) leaves the rebuilt table's page, columns, and rows
+  as they were. Legacy suites: the three named add the column after migrating,
+  as planned. Beyond the plan, `test_database.py`'s legacy chain (a pre-pools
+  database holding an active VM lease) could not add the column itself, since
+  `run_migrations` creates the table before the chain; its fixture now holds
+  the `default` pool and its configuration, with the inventory group, which is
+  what 7.2 prescribes for that test, and pins the new migration ID. That test
+  therefore no longer exercises `20260713_002` creating or seeding the pool
+  tables on a pre-pools database, and its `pool_document_configured`
+  parametrization no longer distinguishes two cases; 7.1 removes the parameter
+  and 7.2 the seed. Also updated for the dropped column:
+  `test_relay_port_leases.py`, `test_pool_declaration_startup.py` (its
+  seeded-`default` test, which section 8 replaces), and
+  `test_pool_offering_mode_migration.py`. `_migrate_resource_pools_and_hosts_pool_id`
+  keeps an unused `default_inventory_group` parameter, and `migrate.py` still
+  passes `default_pool_inventory_group`, until 7.1 and 7.4 retire them;
+  `settings.toml` says the setting has no effect.
+- [x] 2.4 Application integration through the typed pool client
   (`test_pools_api.py`): a `vm.ansible` pool created with `provider_config: {}`
   is accepted, and its export shows `playbook_path: null`; a fulfillment accepted
   for it carries the service's configured playbook in its job parameters
   (`test_fulfillment_api.py`, extended).
-- [ ] 2.5 **Verification checkpoint.** Unit `test_vm_fulfillment_plan.py`;
+  Done. `test_pools_api.py::TestPlaybookLeftToTheService`: created through the
+  typed pool client with `provider_config: {}`, read back and exported with
+  `playbook_path: null` and no `inventory_group`. `test_fulfillment_api.py`:
+  a fulfillment begun through the typed client for such a pool freezes the
+  harness's configured VM playbook (`/fake/playbook.yml`) into the prepared
+  operation and into the dispatched job's stored parameters (read from the job
+  engine the app composed). The integration harness constructs its own
+  `VmFulfillmentPlan` with that configured path rather than through
+  `VmProvisioningRuntime`, so this test does not cover the runtime's wiring;
+  2.2's unit test does.
+- [x] 2.5 **Verification checkpoint.** Unit `test_vm_fulfillment_plan.py`;
   library integration `test_ansible_pool_config_handler.py`; service integration
   `test_vm_pool_config_migration.py`; application integration 2.4. Run `make
   test` in `domains/vms/provisioning/adapter` and `provisioning/compute/service`,
@@ -189,6 +260,29 @@ test_pools_api.py}`, and a new migration test module beside them.
   the playbook path is not run, so they prove dispatch still succeeds but not
   which playbook was frozen; unit and application integration own that. No
   scenario is owed.
+  Evidence: `make -C domains/vms/provisioning/adapter test` — 37 passed; `make
+  -C provisioning/compute/service test` — unit 667 passed, integration 501
+  passed (both after the review fixes); repository `make test` exited 0 (before
+  the review fixes, which touched only these two projects' tests, a docstring,
+  a migration comment, and a `settings.toml` comment, all re-run above); `make
+  check-change` (comment hygiene included) passed. Fresh-context review: fixed
+  the fallback's comment, the legacy fixture's comments, a vacuous assertion,
+  the untested runtime wiring, the no-op proofs, and the stale
+  `default_pool_inventory_group` comment; declined moving the handler's pure
+  validation cases to a unit module (the file's existing validation tests sit
+  there too) and copying the shared schema fixture out of `tests/unit/fixtures`
+  (four unit tests read it; one copy is the point). End-to-end scenarios confirmed as planned; the VM lanes'
+  pools still come from the migration-seeded `default` until sections 8 and 9,
+  so none yet runs a pool stating no playbook. No `Owed by validation:` line:
+  the section changes no chart.
+  Handoff: a rebuild following `_migrate_capacity_declaration_contract` for a
+  table whose foreign keys name tables outside its own metadata must copy those
+  tables into the rebuild's `MetaData`, or `CreateTable` cannot render the
+  constraint; section 6's `hosts` rebuild references `resource_pools`.
+  `run_migrations` creates every model table before the versioned chain, so a
+  legacy-chain test cannot add a dropped column after a mid-chain create — it
+  pre-creates the table in the fixture. Reflected column types compare by
+  identity; compare their string forms.
 
 ## 3. Bare-metal playbook frozen at preparation
 

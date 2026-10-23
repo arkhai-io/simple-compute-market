@@ -48,6 +48,15 @@ def _bootstrap_engine():
         default_inventory_group=_INVENTORY_GROUP,
     )
     with engine.begin() as connection:
+        # The pool configuration a lease-holding database had carried an
+        # inventory group, which the current table no longer has.
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(
+            text("UPDATE ansible_pool_configs SET inventory_group=:group"),
+            {"group": _INVENTORY_GROUP},
+        )
         connection.execute(text(
             """
             CREATE TABLE vm_leases (

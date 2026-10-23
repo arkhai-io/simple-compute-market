@@ -290,7 +290,7 @@ def test_existing_pool_state_without_hosts_keeps_its_default_configuration(
         session.flush()
         session.add(AnsiblePoolConfig(
             pool_id="default", playbook_path="/configured/original.yaml",
-            inventory_group="original_hosts", extra_vars={},
+            extra_vars={},
         ))
     engine.dispose()
     document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
@@ -301,8 +301,6 @@ def test_existing_pool_state_without_hosts_keeps_its_default_configuration(
     assert default.label == "Existing default"
     assert default.provider == "vm.ansible"
     assert default.provider_config["playbook_path"] == "/configured/original.yaml"
-    with deployment.session_factory() as session:
-        assert session.get(AnsiblePoolConfig, "default").inventory_group == "original_hosts"
     with pytest.raises(PoolValidationError, match="fixed at creation"):
         deployment.importer().import_pool_definitions()
     assert deployment.recorded_digest() is None

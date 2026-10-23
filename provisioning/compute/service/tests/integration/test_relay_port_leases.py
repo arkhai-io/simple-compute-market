@@ -64,7 +64,6 @@ def _pool_config(pool_id: str, **overrides) -> AnsiblePoolConfig:
     fields = {
         "pool_id": pool_id,
         "playbook_path": _PLAYBOOK_PATH,
-        "inventory_group": _INVENTORY_GROUP,
         "extra_vars": {},
     }
     fields.update(overrides)
@@ -249,9 +248,9 @@ class TestMigrations:
         with engine.begin() as connection:
             connection.execute(text(
                 "INSERT INTO ansible_pool_configs "
-                "(pool_id, playbook_path, requirement_delegate, inventory_group, extra_vars) "
-                "VALUES ('legacy', :p, 'vm_management_v1', :g, '{}')"
-            ), {"p": _PLAYBOOK_PATH, "g": _INVENTORY_GROUP})
+                "(pool_id, playbook_path, requirement_delegate, extra_vars) "
+                "VALUES ('legacy', :p, 'vm_management_v1', '{}')"
+            ), {"p": _PLAYBOOK_PATH})
         with Session(engine) as session:
             assert session.get(AnsiblePoolConfig, "legacy").relay_id is None
 

@@ -128,8 +128,8 @@ relay_definitions_path = ""
 # is. POST /api/v1/capacity/definitions/import always reconciles.
 capacity_definitions_path = ""
 
-# Legacy/default pool migration configuration. Existing hosts are backfilled
-# into this real Ansible pool. Override the inventory group where needed.
+# Has no effect: a VM pool's configuration carries no inventory group, since
+# the VM codec names its own.
 default_pool_inventory_group = "kvm_hosts"
 
 # Storefront callback and marketplace service boundary. The service signer

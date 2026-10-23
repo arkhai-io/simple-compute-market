@@ -760,6 +760,7 @@ async def client_and_queue(
     ansible_fulfillment_provider = JobFulfillmentProvider(
         plan=VmFulfillmentPlan(
             reserved_var_keys=VmAnsibleCodec().reserved_var_keys,
+            vm_playbook_path=mock_settings.resolved_vm_playbook_path,
             # Without this a relay-backed pool cannot lease a port, so every
             # relay-backed fulfillment is rejected as invalid provider
             # configuration — which reads as a bad request rather than as a

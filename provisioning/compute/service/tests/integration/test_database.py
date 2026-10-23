@@ -185,6 +185,23 @@ def _create_pre_migration_tables(engine):
             )
             """
         ))
+    # A database holding hosts and VM leases also holds the default pool and
+    # its configuration, whose inventory group the lease conversion reads; the
+    # current model's table has no such column, so it is added here.
+    ResourcePool.__table__.create(bind=engine)
+    AnsiblePoolConfig.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
+        ))
+        connection.execute(text(
+            "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags) "
+            "VALUES ('default', 'Default Pool', 'ansible', 1, '{}')"
+        ))
+        connection.execute(text(
+            "INSERT INTO ansible_pool_configs (pool_id, playbook_path, inventory_group, "
+            "extra_vars) VALUES ('default', '/configured/playbook.yaml', 'legacy_hosts', '{}')"
+        ))
         connection.execute(text(
             """
             CREATE TABLE capacity_events (
@@ -368,12 +385,9 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
             AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID
         ).one()
         assert ansible_config.playbook_path == "/configured/playbook.yaml"
-        assert ansible_config.inventory_group == "legacy_hosts"
         assert ansible_config.extra_vars == {}
-        # VM size default columns are additive to a pre-existing row this
-        # migration chain itself created (the DEFAULT_POOL_ID backfill,
-        # above) -- confirms the migration actually adds real, queryable
-        # columns to an old-schema table, not just that the table exists.
+        # The fixture's configuration row survives the rebuild that drops its
+        # inventory group after the lease conversion read it.
         assert ansible_config.default_vm_ram is None
         assert ansible_config.default_vm_vcpus is None
         assert ansible_config.default_vm_disk_size is None
@@ -384,6 +398,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
     assert {
         "default_vm_ram", "default_vm_vcpus", "default_vm_disk_size",
     }.issubset(ansible_pool_config_columns)
+    assert "inventory_group" not in ansible_pool_config_columns
 
     host_migration_columns = {
         column["name"] for column in inspector.get_columns("hosts")
@@ -486,6 +501,7 @@ def test_run_migrations_applies_versioned_migrations_to_old_sqlite_schema(
         "20261006_003_vm_fulfillment_request_names_no_guest",
         "20261006_004_active_fulfillment_targets_on_reservations",
         "20261019_001_vm_provider_identity",
+        "20261023_001_vm_pool_playbook_optional",
     }
 
 

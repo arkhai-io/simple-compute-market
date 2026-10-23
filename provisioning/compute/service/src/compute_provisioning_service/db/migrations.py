@@ -685,13 +685,26 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
     # joins on whichever the database has.
     host_columns = {c["name"] for c in inspect(connection).get_columns("hosts")}
     host_key = "host_id" if "host_id" in host_columns else "name"
+    # Every database this conversion ran on as it was released had an inventory
+    # group on its pool configuration. A configuration table created from the
+    # current model has none, so the column reads as NULL. That keeps a fresh
+    # database, which holds no lease, migrating; a lease found here then fails
+    # the compiler's pool configuration check, so a database that predates
+    # resource pools and still holds VM leases is refused rather than converted.
+    config_columns = {
+        c["name"] for c in inspect(connection).get_columns("ansible_pool_configs")
+    }
+    inventory_group = (
+        "apc.inventory_group" if "inventory_group" in config_columns else "NULL"
+    )
     rows = connection.execute(text(
         """
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
                vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
                vl.vm_remove_job_id, cr.capacity_reservation_id,
                cr.offering_mode, cr.executor_target, h.pool_id, rp.provider,
-               apc.playbook_path, apc.inventory_group, apc.extra_vars
+               apc.playbook_path, {inventory_group} AS inventory_group,
+               apc.extra_vars
         FROM vm_leases vl
         LEFT JOIN capacity_reservations cr
           ON cr.capacity_reservation_id = vl.allocation_id
@@ -700,7 +713,9 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
         WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
         ORDER BY vl.id
-        """.replace("{host_key}", _validate_sql_identifier(host_key))
+        """
+        .replace("{host_key}", _validate_sql_identifier(host_key))
+        .replace("{inventory_group}", inventory_group)
     )).mappings().all()
 
     seen_reservations: set[str] = set()
@@ -997,7 +1012,6 @@ def _migrate_resource_pools_and_hosts_pool_id(
             session.add(AnsiblePoolConfig(
                 pool_id=DEFAULT_POOL_ID,
                 playbook_path=default_playbook_path,
-                inventory_group=default_inventory_group,
                 extra_vars={},
             ))
         session.commit()
@@ -3305,6 +3319,55 @@ def _migrate_vm_provider_identity(engine: Engine) -> None:
                 ))
 
 
+def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
+    """Let a VM pool leave its playbook to the service, and drop the inventory group.
+
+    A pool's ``playbook_path`` becomes nullable: a pool stating none runs the
+    service's configured VM playbook, frozen into each job when it is prepared.
+    ``inventory_group`` is dropped: the VM codec names its own inventory group
+    and nothing reads the column. Existing rows keep every other value.
+
+    SQLite cannot relax ``NOT NULL`` in place, so the table is rebuilt from the
+    model's current definition, which drops the column in the same step, by the
+    procedure ``_migrate_capacity_declaration_contract`` follows. A table
+    already in that shape, as a fresh database creates it, is left alone.
+    """
+    if not _table_exists(engine, "ansible_pool_configs"):
+        return
+    columns = {
+        c["name"]: c for c in inspect(engine).get_columns("ansible_pool_configs")
+    }
+    if columns["playbook_path"]["nullable"] and "inventory_group" not in columns:
+        return
+
+    model = AnsiblePoolConfig.__table__
+    rebuild_name = "ansible_pool_configs__rebuild"
+    # The tables its foreign keys name ride along, so its DDL can render them;
+    # only the rebuild itself is created.
+    metadata = MetaData()
+    ResourcePool.__table__.to_metadata(metadata)
+    VmBase.metadata.tables["relays"].to_metadata(metadata)
+    rebuild = model.to_metadata(metadata, name=rebuild_name)
+    for index in list(rebuild.indexes):
+        rebuild.indexes.discard(index)
+    shared = [c.name for c in model.columns if c.name in columns]
+    column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
+
+    with _schema_transaction(engine, foreign_keys_off=True) as connection:
+        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_name}"))
+        connection.execute(CreateTable(rebuild))
+        connection.execute(text(
+            f"INSERT INTO {rebuild_name} ({column_list}) "
+            f"SELECT {column_list} FROM ansible_pool_configs"
+        ))
+        connection.execute(text("DROP TABLE ansible_pool_configs"))
+        connection.execute(text(
+            f"ALTER TABLE {rebuild_name} RENAME TO ansible_pool_configs"
+        ))
+        for index in model.indexes:
+            index.create(connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3423,4 +3486,8 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_active_fulfillment_targets_on_reservations,
     ),
     Migration("20261019_001_vm_provider_identity", _migrate_vm_provider_identity),
+    Migration(
+        "20261023_001_vm_pool_playbook_optional",
+        _migrate_vm_pool_playbook_optional,
+    ),
 )
