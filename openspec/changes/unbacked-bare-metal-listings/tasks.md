@@ -2872,19 +2872,56 @@ Delivers the backing delegate's two delivery-term operations (D5, D1;
 `resource-pool-management` "Capacity backing is interpreted by one delegate"). Touches
 `kit/resource-pools-contracts`.
 
-- [ ] 14.1 `kit/resource-pools-contracts/src/market_resource_pools_contracts/backing.py`:
+- [x] 14.1 `kit/resource-pools-contracts/src/market_resource_pools_contracts/backing.py`:
       `CapacityBacking.carry_delivery_terms(terms)` — backed returns the terms as given,
       unbacked returns none — and `delivery_term_constraints(terms)` — backed refuses a
       term that is not present, unbacked refuses one that is — beside
       `admissible_settlement`, on the delegate's own state as its other operations are. One
       presence rule: neither absent nor `None`; a string or collection non-empty; a boolean
       present as `True` or `False`. A refusal names every offending term (D5).
-- [ ] 14.2 Tests in `kit/resource-pools-contracts/tests/unit/test_backing.py` (unit): each
+      Done. `carry_delivery_terms` returns a new dict, empty when unbacked.
+      `delivery_term_constraints` takes a mapping of every term the domain names, `None`
+      for an absent one, and raises `DeliveryTermsError` (a `ValueError`, exported, with
+      `.terms` naming the offending terms in order), so a pydantic validator applying it
+      reports a validation error. A term the caller leaves out of the mapping is not
+      checked: each domain must pass all of its named terms (Section 15's validators
+      build the full mapping from a terms constant).
+- [x] 14.2 Tests in `kit/resource-pools-contracts/tests/unit/test_backing.py` (unit): each
       delegate's operations over present, absent, `None`, empty-string, empty-list, and
       `False` terms (D5).
-- [ ] 14.3 Version: `arkhai-kit-resource-pools-contracts`; `make lock`.
-- [ ] 14.4 **Verify.** `make -C kit test-resource-pools-contracts`; `make test`; `make
+      Done (unit): carrying and constraining, each delegate, over present values (a
+      string, a list, a mapping, `True`, `False`, `0`) and absent ones (`None`, `""`,
+      `[]`, `()`, `{}`); an unavailable backed host (`False`) present; a refusal naming
+      every offending term in order. That a model reports the refusal as a validation
+      error is Section 15's evidence, where the first model applies it.
+- [x] 14.3 Version: `arkhai-kit-resource-pools-contracts`; `make lock`.
+      0.2.0 → 0.3.0 (new public operations; the first bump against `origin/dev`). No
+      dependant uses the new API in this section, so no floor moves here; Section 15
+      raises `arkhai-bare-metal`'s floor on it to 0.3.0. `make lock` ran over every project and
+      changed only the 27 locks resolving the package, each one version line.
+- [x] 14.4 **Verify.** `make -C kit test-resource-pools-contracts`; `make test`; `make
       check-packaging`. End-to-end: none alone; Sections 15–19 and 22's scenarios.
+      Results: `make -C kit test-resource-pools-contracts` (unit) 426 passed. `make test`:
+      every Python suite passed — among them core, every kit, provisioning (service unit
+      667, integration 488), the VM storefront (unit 1110, integration 460), bare metal
+      (domain 134, storefront 450, buyer 11, adapter 40), API credits, e2e-tests unit
+      107, and release tooling 1081 (11 skipped) — then `test-deployment-packaging`'s
+      Helm render could not start: this session has no `helm` binary (as in round 2's
+      triage). `make check-packaging` passes. `make check-change` fails only on the
+      citation of `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, which
+      Section 22 creates. End-to-end: no scenario exercises the operations alone; the
+      bare-metal lane's scenarios do once Sections 15–19 and 22 use them.
+
+Section 14 notes (handoff):
+
+- **Fresh-context check:** no guidance breach. Fixed from it: the carrying tests now run
+  over absent values too; the refusal text names "listing or view" and the label rather
+  than an article that only fits today's two labels; the two constraint branches are one
+  filter on presence against what the backing owes; a redundant boolean branch in the
+  presence rule went (a `bool` is not `Sized`). Noted for Section 15: a term left out of
+  the mapping is unchecked, so the bare-metal validators pass every named term.
+- **Session:** `git stash` is refused in this environment; to check and commit one section
+  while the next is in progress, the next section's edits were set aside by hand.
 
 ## 15. The bare-metal carrier validates delivery terms against its pool's backing
 
