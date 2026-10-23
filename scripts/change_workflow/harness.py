@@ -52,8 +52,8 @@ UNATTENDED = (
     "harness reports as don't ask mode, may be done instead by a tool your step's rules allow "
     "for the same work, such as the Edit tool for a shell write or Read or Grep for a shell "
     "read; name the substitute in your message. Never ask about a denial as a question. Never "
-    "end your turn or schedule a wake-up to wait for a background command; wait as your skill "
-    "says. A turn that starts after you have reported ends the run in your report's place.")
+    "end your turn, schedule a wake-up, or start a monitor to wait for a background command or "
+    "subagent: run a subagent in the foreground, and wait for a command as your skill says. A turn that starts after you have reported ends the run in your report's place.")
 
 # The retries a run is given after a network error, on the same model: a network
 # error says nothing of the model's availability, so it never falls to the next.

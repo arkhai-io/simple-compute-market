@@ -55,6 +55,13 @@ the session, and every turn ends with an outcome matching
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
   a wildcard after `-C` would also span a push. Remove a tracked file with
   `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
+- **A turn's end is its outcome.** Never end a turn with work still running: the
+  wrapper logs that turn's report as the run's end, and what the work later finds
+  reaches nobody. Run the fresh-context check's subagent in the foreground, never
+  with `run_in_background`. Wait for a background command inside one Bash call,
+  with a blocking `tail -f … | grep -m1` on its output matching the line it prints
+  when it ends, repeated when the call times out — never with Monitor, a wake-up,
+  or a shell loop.
 - **The end is an outcome.** When the sections you were given are committed and
   pushed, end with `finished`, `next` naming what the round needs next; a merge's
   conflicts resolved, committed, and pushed end `finished` too ("Resolving a
