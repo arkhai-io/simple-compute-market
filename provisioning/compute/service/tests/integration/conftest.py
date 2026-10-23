@@ -794,6 +794,7 @@ async def client_and_queue(
             build_bare_metal_adapter_bundle(
                 fulfillment_provider=JobFulfillmentProvider(
                     plan=BareMetalFulfillmentPlan(
+                        playbook_path=mock_settings.resolved_bare_metal_playbook_path,
                         reclaim_policy=mock_settings.bare_metal_reclaim_policy,
                     ),
                     submission=job_submission,

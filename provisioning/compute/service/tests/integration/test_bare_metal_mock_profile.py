@@ -223,6 +223,9 @@ async def test_a_grant_is_delivered_through_convergence_and_reclaimed_from_its_p
     assert listed.total == 2
     assert reclaim.capacity_reservation_id == capacity_reservation_id
     grant_params = (await clients.family.get_job(grant_job_id)).params
+    # Both jobs' stored parameters carry the access playbook the harness
+    # configures.
+    assert grant_params["playbook_path"] == "/fake/bare-metal-node-access.yml"
     assert reclaim.params == {
         **grant_params,
         "action": NODE_RECLAIM_ACCESS_ACTION,

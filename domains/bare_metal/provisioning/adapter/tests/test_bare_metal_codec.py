@@ -60,6 +60,28 @@ def test_a_grant_renders_the_access_playbooks_variables() -> None:
     }
 
 
+def test_the_plan_carries_the_stored_playbook_and_no_playbook_variable() -> None:
+    plan = BareMetalAnsibleCodec().prepare(
+        job_run(_grant(playbook_path="/opt/service/node-access.yaml"))
+    )
+
+    assert plan.playbook_path == Path("/opt/service/node-access.yaml")
+    assert "playbook_path" not in plan.variables
+
+
+def test_parameters_stored_without_a_playbook_name_none_in_the_plan() -> None:
+    """Stored parameters naming no playbook validate, and the plan names none,
+    leaving the executor's configured playbook to run."""
+    stored = _grant().model_dump(mode="json")
+    del stored["playbook_path"]
+
+    plan = BareMetalAnsibleCodec().prepare(
+        job_run(BareMetalJobParams.model_validate(stored))
+    )
+
+    assert plan.playbook_path is None
+
+
 def test_a_reclaim_names_its_policy_and_no_vm_variable_reaches_the_playbook() -> None:
     params = _grant(action=NODE_RECLAIM_ACCESS_ACTION, reclaim_policy="lock_user")
 

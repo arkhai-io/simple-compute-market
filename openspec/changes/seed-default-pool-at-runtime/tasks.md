@@ -295,7 +295,7 @@ runtime.py,services/bare_metal_fulfillment_plan.py}`; tests
 `domains/bare_metal/provisioning/adapter/tests/{test_bare_metal_fulfillment_plan.py,
 test_bare_metal_codec.py,test_bare_metal_mock_output.py}`.
 
-- [ ] 3.1 `BareMetalJobParams` gains `playbook_path: str | None = None`;
+- [x] 3.1 `BareMetalJobParams` gains `playbook_path: str | None = None`;
   `BareMetalFulfillmentPlan` takes `playbook_path` beside `reclaim_policy`, writes
   it into every grant in `prepare_create` and into every reclaim through
   `prepare_teardown`'s `model_copy` update; the runtime passes
@@ -306,12 +306,31 @@ test_bare_metal_codec.py,test_bare_metal_mock_output.py}`.
   stored without it gaining the current one; `test_bare_metal_codec.py` covers a
   plan carrying the stored path and parameters without one validating and
   yielding none, so the executor's configured playbook runs.
-- [ ] 3.2 Check every bare-metal mock rule and fixture that matches job
+  Done. The plan's `playbook_path` is a required keyword (never `None`), so no
+  composition can omit it; the integration harness passes its configured
+  `resolved_bare_metal_playbook_path`. Unit (bare-metal adapter): grant and
+  reclaim carrying the configured path; a reclaim prepared by a reconfigured
+  plan carrying the new path whatever its grant carries; a reclaim of a grant
+  stored without a playbook gaining the configured one;
+  `build_bare_metal_runtime` (under the mock profile) giving its plan the
+  configured path, observed through its provider's prepared operation; the
+  codec passing a stored playbook to the plan and rendering no `playbook_path`
+  variable; stored parameters without one validating and yielding none. That a
+  plan's playbook replaces the executor's is `provisioning/compute/ansible`'s
+  `test_executor.py`.
+- [x] 3.2 Check every bare-metal mock rule and fixture that matches job
   parameters (`test_bare_metal_mock_output.py`, the service's
   `test_bare_metal_mock_profile.py`, and e2e bare-metal mock rules) and update
   any that matches an exact parameter set to admit the new field (D5). Evidence:
   the suites pass unchanged in intent.
-- [ ] 3.3 **Verification checkpoint.** Unit: the two bare-metal suites above.
+  Checked: a mock rule matches when every key it names equals the job's
+  parameter (`executor_mock.py`, `MockRuleSet`), so no rule — the adapter's
+  tests, the service's mock-profile tests, or the e2e driver's
+  (`{"action", "host_id"}`) — matches an exact parameter set, and none changed.
+  The one exact comparison, `test_bare_metal_mock_profile.py`'s reclaim
+  parameters equal to the grant's plus action and policy, still holds, since
+  both carry the same configured playbook. All pass unchanged.
+- [x] 3.3 **Verification checkpoint.** Unit: the two bare-metal suites above.
   Application integration: `test_bare_metal_mock_profile.py` (service) runs a
   grant and reclaim through the composed service and its stored job parameters
   carry the configured playbook. Run `make test` in
@@ -320,6 +339,29 @@ test_bare_metal_codec.py,test_bare_metal_mock_output.py}`.
   End-to-end: `e2e_bare_metal_mock_deal` and `e2e_bare_metal_deal` run grants
   and reclaims; they prove dispatch, not which playbook was frozen. No scenario
   is owed.
+  Evidence: application integration
+  (`test_bare_metal_mock_profile.py::test_a_grant_is_delivered_through_convergence_and_reclaimed_from_its_parameters`):
+  a grant begun and a reclaim prepared through the typed clients, read back
+  through the typed client's job reads, carry the harness's configured
+  `/fake/bare-metal-node-access.yml` — through the harness's own plan
+  construction, so the runtime's wiring is 3.1's unit test's. `make -C
+  domains/bare_metal/provisioning/adapter test` — 46 passed; `make -C
+  provisioning/compute/service test` — unit 667 passed, integration 501
+  passed (both re-run after the review fixes); repository `make test` exited 0
+  (before the review fixes, which renamed tests and reworded docstrings and
+  comments only); `make check-change` passed. End-to-end scenarios confirmed as planned: the bare-metal lane runs
+  `e2e_bare_metal_mock_deal`; `e2e_bare_metal_deal` needs a real host and no
+  lane selects it. No `Owed by validation:` line: the section changes no
+  chart. Fresh-context review: no rule breaches; fixed four test names,
+  docstrings, or comments that claimed a playbook runs or stays frozen where a
+  test shows only that parameters carry it, a vacuous grant assertion, and the
+  codec docstring's claim that every stored job names a playbook. Declined:
+  replacing the runtime test's `ACTIVE_PROFILES` environment setting with an
+  injected seam — `build_bare_metal_runtime` selects its runner from that
+  variable, as the VM runtime does, so the environment is its seam.
+  Handoff: neither compute runtime's plan wiring is reached by the service's
+  integration harness, which builds its own plans; each adapter's unit suite
+  covers its runtime's `fulfillment_plan` wiring.
 
 ## 4. `default` is an ordinary pool in the kits
 
