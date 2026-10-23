@@ -257,26 +257,68 @@ The teardown observation follows the resource sold: VM capacity is released,
 an API-credit grant is consumed until the authority returns HTTP 402, and a
 bare-metal lease is released only when authenticated access is revoked and the
 selected-site authority reports teardown. A health check or static Compose
-render is not deal evidence. The canonical compute deal diagram below draws
-the compute family's scenario part by part.
+render is not deal evidence.
 
-The scenarios share `DomainDealState`, exact event ordering, profiled buyer
-configuration, and public client helpers from
-`e2e-tests/tests/e2e/roles/helpers/domain_deal.py` and
-`e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain results
-opaque: they do not assume a VM listing, provisioning job, host field, API key,
-Physical Resource, site, or teardown payload. A scenario supplies its codecs
-and domain assertions instead of copying another domain's control flow.
+Three diagrams carry the rest of this section. The first draws the discipline
+every complete-deal scenario follows, whatever its domain. The second applies
+that discipline to the compute family's canonical deal, part by part, as the
+worked example. The third zooms into one of those parts to show the discipline
+inside a single box. Each diagram's source is the `.drawio` file named under it
+in [`diagrams/`](diagrams/); the SVG beside each is its export and also opens
+in draw.io.
 
-The compute family's canonical deal (Alkahest settlement on the dev chain,
-delivery through the provisioning mock profile) takes every stage its domains
-run identically from `e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`.
-Those stages are not named `Test*`, so pytest collects them only where a
-domain's scenario module subclasses them, with an empty body, in its run order.
-A shared stage's body is therefore defined once and runs in every compute lane;
-a stage whose body would differ stays each domain's own, inserted between the
-shared ones (VM's listing creation and claim, bare metal's publication, evidence,
-and second-deal stages). What differs reaches a shared stage two ways: fixtures
+#### The discipline every scenario follows
+
+A scenario asserts only on side effects it asked for. While a service's timer
+loops run, an observation races them: a listing reconciled a second later reads
+differently from one reconciled a second earlier, and waiting for the system to
+settle cannot establish ordering even when it passes. So a scenario holds every
+loop it depends on once, at the start, through the pause and step controls
+under ["Pause the loop, then advance it explicitly"](#2-integration-tests), and
+initializes what the deal needs. Then, for each transition, it previews the
+move through the route's evaluate twin or the loop's dry run, advances exactly
+one side effect, and measures that effect against expectations through typed
+clients, with no sleeps: the only wait is on a request the stage made. What a
+stage produced goes into the shared deal state for the stages that depend on
+it, and whatever happened, the fixture's finaliser resumes the loops.
+
+![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
+
+Source: [`diagrams/e2e-stage-discipline.drawio`](diagrams/e2e-stage-discipline.drawio).
+
+The shared deal state is `DomainDealState`, from
+`e2e-tests/tests/e2e/roles/helpers/domain_deal.py`, which the scenarios share
+with exact event ordering, profiled buyer configuration, and the public client
+helpers in `e2e-tests/tests/e2e/roles/buyer_cli.py`. The helpers keep domain
+results opaque: they do not assume a VM listing, provisioning job, host field,
+API key, Physical Resource, site, or teardown payload. A scenario supplies its
+codecs and domain assertions instead of copying another domain's control flow.
+A stage names each earlier result it depends on with `require_state`, one
+exact producer/consumer field at a time. When an earlier stage or external
+authority is unavailable, the dependent stage names that prerequisite and
+remains blocked; it is never counted as a successful live deal.
+
+#### The canonical compute deal
+
+The compute family's canonical deal settles through Alkahest on the dev chain
+and delivers through the provisioning mock profile. The diagram draws it part
+by part, from holding the loops to resuming them. Each box is one part of the
+deal, its preview, advance, and measurement folded into a sentence or two, and
+the tag at its right is the deal stage the shared state records for it. The
+bare-metal lane runs a second deal on the freed host before its loops resume.
+
+![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
+
+Source: [`diagrams/e2e-compute-deal.drawio`](diagrams/e2e-compute-deal.drawio).
+
+Every stage the compute domains run identically comes from one definition, in
+`e2e-tests/tests/e2e/roles/helpers/compute_deal_stages.py`. Those stages are
+not named `Test*`, so pytest collects them only where a domain's scenario
+module subclasses them, with an empty body, in its run order. A shared stage's
+body is therefore defined once and runs in every compute lane; a stage whose
+body would differ stays each domain's own, inserted between the shared ones
+(VM's listing creation and claim, bare metal's publication, evidence, and
+second-deal stages). What differs reaches a shared stage two ways: fixtures
 every compute conftest provides under one set of names supply who is calling,
 and each domain's `ComputeDealDriver`
 (`e2e-tests/tests/e2e/roles/scenarios/vms/compute_deal_driver.py`,
@@ -290,45 +332,21 @@ checks the stage set from source: each domain subclasses every shared stage once
 in order, with an empty body, and every state field has one producer that runs
 before any stage reads it.
 
-Staged scenarios use `require_state` with one exact producer/consumer field.
-When an earlier stage or external authority is unavailable, the dependent
-stage names that prerequisite and remains blocked; it is never counted as a
-successful live deal.
+#### One part, zoomed in
 
-Every complete-deal scenario is built on the discipline the diagram below
-draws. Once, at the start, it holds every loop it depends on and initializes
-what the deal needs. Then, for each transition, it previews the move through
-the route's evaluate twin or the loop's dry run, advances exactly one side
-effect, and measures that effect against expectations through typed clients,
-recording what it produced in the shared deal state for the stages that
-depend on it. Whatever happened, the fixture's finaliser resumes the loops.
-The diagram's source is
-[`diagrams/e2e-stage-discipline.drawio`](diagrams/e2e-stage-discipline.drawio);
-the SVG beside it is the export and also opens in draw.io.
-
-![How an end-to-end scenario holds the loops once, then previews, advances, and measures each transition](diagrams/e2e-stage-discipline.svg)
-
-The canonical compute deal runs that discipline through the parts the next
-diagram draws in order, from holding the loops to resuming them. Each box is
-one part of the deal, its preview, advance, and measurement folded into a
-sentence or two; the tag at its right is the deal stage the shared state
-records for it. The bare-metal lane runs a second deal on the freed host
-before its loops resume. The diagram's source
-is [`diagrams/e2e-compute-deal.drawio`](diagrams/e2e-compute-deal.drawio); the
-SVG beside it is the export and also opens in draw.io.
-
-![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
-
-The last diagram zooms into one of those parts, settle, to show the
-discipline inside a box. The stage previews twice, through the storefront's
-evaluate-settle and the provisioning service's evaluate-job, advances with
-one settle call, and measures a fulfillment dispatched and held at the mock
-gate; what it reads from and writes to the shared deal state is what ties it
-to the parts before and after. The diagram's source is
-[`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio); the
-SVG beside it is the export and also opens in draw.io.
+Settle has the fullest shape of any part, so it is the one drawn open. The
+stage previews twice, through the storefront's evaluate-settle and the
+provisioning service's evaluate-job, advances with one settle call, and
+measures a fulfillment dispatched and held at the mock gate. What it reads
+from and writes to the shared deal state is what ties it to the parts before
+and after: `require_state` on the escrow, listing, negotiation, and armed gate
+on the way in, and the placed host and fulfillment ids on the way out, the
+latter read next by the deliver part. Every other box in the deal diagram
+opens the same way, with its own previews, advance, and measurement.
 
 ![One part of the compute deal, settle, zoomed in: its two previews, one advance, and measurement](diagrams/e2e-settle-zoom.svg)
+
+Source: [`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio).
 
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
