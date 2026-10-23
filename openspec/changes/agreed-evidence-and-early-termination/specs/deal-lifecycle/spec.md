@@ -197,9 +197,9 @@ The storefront MUST expose the seller half's `submit`, `read`, and `list` throug
 - **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
 - **THEN** the route submits the default concession through the seller half, and the lease changes only through end service
 
-### Requirement: Only the payee starts a hosted deal, after provisioning
+### Requirement: Only the payee starts a rate part, after provisioning
 
-For hosted payments `start` MUST be the payee's alone. The seller MUST read the authority, provision, read again, and then submit `start`. If the payer stopped meanwhile, `start` is rejected, or provisioning has not finished by the lease end (`start_utc + duration_seconds`), end service MUST terminate the provisioned resource. A crash between provisioning and `start` MUST resume from the journal with the same decision.
+For hosted parts that have a `start` event, `start` MUST be the payee's alone. A `once` part has none. The seller MUST read the authority, provision, read again, and then submit `start`. If the payer stopped meanwhile, `start` is rejected, or provisioning has not finished by the lease end (`start_utc + duration_seconds`), end service MUST terminate the provisioned resource. A crash between provisioning and `start` MUST resume from the journal with the same decision.
 
 #### Scenario: Start is rejected after provisioning
 

@@ -25,7 +25,7 @@ Arkhai payments' first product is spot, interruptible deals paid from prepaid cr
 The payments service's `rate-parts` contract settles the seller-side needs below:
 - `fundedThrough` per transaction in the signed snapshot: the earliest current reservation across rate parts. The VM stage's teardown deadline is `min(fundedThrough, stop effective time)`.
 - `reserveAhead` is a required per-part Duration term. The VM option params declare it as at least the clause's `exposure_seconds` (polling, watchdog and teardown); the option builder and buyer validation enforce that, and the SDK supplies a default.
-- The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated; the only future-dated stop is a matured `notice`, applied by the service. Any stop ends the whole transaction.
+- The stop carries an effective time, a cause (payer, payee, authority or terms) and settled amounts. Payee stops may be backdated; the only future-dated stop is a matured `notice`, applied by the service. A stop ends the part it names; the payments service's whole-transaction stop is a filed defect this change depends on.
 - Per-transaction event sequence numbers give causal order.
 - Billing is per started period (period = quantum), and periods count from `start`. The first batch, including any `once` parts, is reserved at approval.
 - Platform credits are `USD/6`, so payment options and derived mandates use asset `USD/6`. The examples and kit docs written for `settle-through-arkhai-payments` use `USD/2` and move to `USD/6` here; no production code hardcodes an asset.
@@ -39,7 +39,8 @@ The payments service's `rate-parts` contract settles the seller-side needs below
 - **A `notice` event as a scheduled stop.** The notice carries an effective time no earlier than now plus the entitlement's notice period, and the service applies the stop at that time.
 - **Rate-part money held through the dispute window.** An `until: stop` hold becomes collectable at stop. Rate parts use per-period `{for: duration}` holds instead, each held from its earned boundary for the dispute window, so a stop does not release them and outcomes can still reverse them.
 - **A maximum-term stop.** The service stops the rate part at the mandate's absolute maximum end with cause terms.
-- **Payee-only `start`.** Periods count from the seller's `start`; an unstarted mandate's hold is released when its window expires.
+- **Payee-only `start`, per part.** Periods count from the seller's `start` of that part; an unstarted rate part earns nothing.
+- **Per-part lifecycle and authorities.** `start`, `notice` and `stop` address a part, with per-part authorities, so several rate parts can run at different granularities.
 - **A payer stop that settles through the declared exposure.**
 - **Rate-part effects for arbitration outcomes.** A ruling or concession may stop the rate part at a time no later than now and reverse part of what it collected, each event carrying the case reference. Cases themselves are filed at the regime's intake, not at the payment core.
 - **Causal event order in snapshots.** The open ordering issue (events with identical `receivedAt` seconds) matters once stop and reservation events interleave.

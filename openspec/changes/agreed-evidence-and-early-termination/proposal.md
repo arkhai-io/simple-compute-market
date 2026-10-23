@@ -29,7 +29,7 @@ Seller-initiated interruption ships in part: an interruptible VM listing, a stor
 - `negotiation-protocol`: the protocol ends at commitment; regimes are chosen per option.
 - `buyer-orchestration`: "Payment buyers approve and settle by negotiation" generalizes to verifying the mechanism's committed form; `commit` replaces `settle_agreement` where the buyer lifecycle route exists; buyer stop, dispute, and read go through the buyer half.
 - `market-composition`: "Deals compose negotiate, settle, and provision stages" treats settle as the post-commitment handoff; "Marketplace roles hold no payment ledger" admits lifecycle observation cursors.
-- `settlement-servicing`: "The payments mandate is derived exactly from the Agreement" gains payee-only start, entitlement-derived stops, and the bond part.
+- `settlement-servicing`: "The payments mandate is derived exactly from the Agreement" holds through the dispute window, entitlement-derived stops, and no start or stop on `once` parts.
 - `settlement-configuration`: lifecycle terms are common clause fields; Alkahest release models are listed per option, and migration maps the old flag.
 - `storefront-publication`: lifecycle terms, including the dispute window, are published per option; the admin interrupt route reads the accepted option.
 - `cli-query-language`: lifecycle terms are common settlement fields.
