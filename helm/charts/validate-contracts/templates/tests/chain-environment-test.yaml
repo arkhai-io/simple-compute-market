@@ -17,7 +17,7 @@ kind: Pod
 metadata:
   name: {{ include "validate-contracts.fullname" . }}-chain-environment-test
   labels:
-    {{- include "validate-contracts.labels" . | nindent 4 }}
+    {{- include "validate-contracts.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

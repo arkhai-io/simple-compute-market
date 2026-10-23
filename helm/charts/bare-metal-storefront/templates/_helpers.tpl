@@ -22,6 +22,22 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 
+{{/*
+Labels for this chart's Helm test pod. Every workload selector in the release
+requires app.kubernetes.io/name, so a test pod carries the release's other
+labels but never that one: selecting a workload's pods by its selector, as
+`kubectl logs -l` or `kubectl logs deploy/...` does, never returns a test pod.
+*/}}
+{{- define "bare-metal-storefront.testLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end -}}
+
 {{- define "bare-metal-storefront.image" -}}
 {{- $repository := .Values.image.repository | default .Values.global.imageRepository -}}
 {{- $name := .Values.image.name -}}

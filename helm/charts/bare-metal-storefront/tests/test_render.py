@@ -230,6 +230,22 @@ def test_no_release_waits_on_a_dependency_and_the_pod_has_a_startup_probe() -> N
         assert "initialDelaySeconds" not in deployment, label
 
 
+def test_the_health_test_pod_is_replaced_on_each_run_and_selected_by_no_workload() -> None:
+    """The pod is annotated so each `helm test` deletes the last run's pod
+    before creating its own, as every chart's test pod is, and it carries no
+    `app.kubernetes.io/name`, which the Deployment's selector requires, so
+    selecting the storefront's pods never returns it."""
+    manifest = _ok(_render())
+    pod = _lines(_source(manifest, "tests/health-test.yaml"))
+    deployment = _source(manifest, "deployment.yaml")
+
+    assert {'"helm.sh/hook": test', '"helm.sh/hook-delete-policy": before-hook-creation'} <= pod
+    assert {"app.kubernetes.io/component: test", f"app.kubernetes.io/instance: {RELEASE}"} <= pod
+    assert not any(line.startswith("app.kubernetes.io/name:") for line in pod)
+    selector = deployment.split("    matchLabels:\n", 1)[1].split("  template:\n", 1)[0]
+    assert "app.kubernetes.io/name:" in selector
+
+
 def test_a_release_naming_no_overlay_mounts_none() -> None:
     _assert_configuration_files(_ok(_render({"secret": {"secretName": ""}})), overlay=None)
 

@@ -2394,11 +2394,14 @@ Delivers a test-labels helper in every chart and a topology render assertion (D2
 `deployment-state` "Helm test pods carry no workload selector labels"). Touches
 `helm/charts/*` and `helm/tests/test_release_topology.py`.
 
-- [ ] 12.1 A `<chart>.testLabels` helper in each chart's `templates/_helpers.tpl` —
+- [x] 12.1 A `<chart>.testLabels` helper in each chart's `templates/_helpers.tpl` —
       `registry`, `storefront`, `provisioning`, `e2e-tests`, `validate-contracts`,
       `bare-metal-storefront` — carrying chart, version, managed-by, instance, and
       `app.kubernetes.io/component: test`, never `app.kubernetes.io/name` (D21).
-- [ ] 12.2 Each chart's test Pod takes it, under `helm/charts/`:
+      Done; each helper's comment states why `name` is left out. The version label
+      renders where the chart states an `appVersion`, as each chart's general labels do;
+      bare metal's general labels carry none, its test labels do.
+- [x] 12.2 Each chart's test Pod takes it, under `helm/charts/`:
       `registry/templates/tests/registry-environment-test.yaml`,
       `storefront/templates/tests/storefront-environment-test.yaml`,
       `provisioning/templates/tests/provisioning-smoke-test.yaml`,
@@ -2406,15 +2409,63 @@ Delivers a test-labels helper in every chart and a topology render assertion (D2
       `validate-contracts/templates/tests/chain-environment-test.yaml`, and
       `bare-metal-storefront/templates/tests/health-test.yaml`, which also gains
       `"helm.sh/hook-delete-policy": before-hook-creation` as the others have (D21).
-- [ ] 12.3 `helm/tests/test_release_topology.py` (chart render): over both topology releases,
+      Done; bare metal's hook annotation is now quoted as the others are. These six are
+      every `helm.sh/hook` the chart templates hold (read from the templates); the
+      topology test below ties the test pods it checks to the Pods rendered from each
+      chart's `templates/tests/`.
+- [x] 12.3 `helm/tests/test_release_topology.py` (chart render): over both topology releases,
       parse each Deployment's `spec.selector.matchLabels` and each Pod annotated
       `helm.sh/hook: test` in either quoting; assert no such Pod carries all of any
       Deployment's `matchLabels`, and each carries `component: test` and no `name`.
       `helm/charts/bare-metal-storefront/tests/test_render.py` asserts the delete policy
       (D21).
-- [ ] 12.4 **Verify.** `make -C helm test-render`; `make test`; `make check-packaging` if a
+      Done (chart render). `test_no_test_pod_carries_a_workload_selector` reads both
+      releases' Deployment selectors and test Pods' labels with the standard library;
+      asserts the Pods it reads as test pods are exactly those rendered from a chart's
+      `templates/tests/`, each selector requires `name`, and each test Pod carries
+      `component: test` and its release's instance label and no `name` and no
+      Deployment's whole selector. It is a static stand-in for the scenario "A registry's
+      pods are selected", which only a cluster shows. Broken once while written: with
+      `app.kubernetes.io/name` added to the registry's test labels it fails naming that
+      Pod and its `name` label (an earlier break, the Pod back on its general labels,
+      failed first on `component`); restored, it passes. Bare metal's
+      `test_the_health_test_pod_is_replaced_on_each_run_and_selected_by_no_workload` asserts
+      the quoted hook and delete policy, `component: test` and the instance label, no
+      `name`, and that the Deployment's selector requires `name`; with the delete policy
+      removed it fails, and restored it passes.
+- [x] 12.4 **Verify.** `make -C helm test-render`; `make test`; `make check-packaging` if a
       chart version changed. End-to-end: the Helm topology check of 11.8 runs every test Pod;
       no compose scenario covers chart labels, and none is owed.
+      No chart version changed: the change edits only test-hook templates and helpers, as
+      the last chart change did to the registry's test Pod without a bump, and the
+      storefront chart and umbrella already carry Section 11's bump. The bare-metal chart
+      stays at 0.3.0 though its test template changes here (and its values schema did
+      earlier in this change); whether a chart bumps for that is the owner's call, since
+      `docs/development/RELEASING.md` does not cover charts. `make check-packaging` was run
+      all the same, as `AGENTS.md` asks before a commit, and fails only on that local directory
+      (Section 11's note). Results: `make -C helm test-render` passed on Helm v3.21.0, not
+      the v4.3.0 `.github/workflows/tests.yml` pins, with both storefront environments
+      present. **Differed:** `make test` was not rerun: Section 12 changes
+      only chart templates and the render tests, which no suite but
+      `test-deployment-packaging`'s Helm render reads, and that render is the run above;
+      the rest of `make test` ran on Section 11's tree, and stops here on the
+      environment's provisioning failure (Section 11's note). End-to-end: none; the
+      topology check of 11.8 is the maintainer's, unrun here.
+
+Section 12 notes (handoff):
+
+- **Fresh-context check** of the diff against `218835f64`: no template, selector,
+  comment-hygiene, placement, or public-repository finding; every selector the charts
+  render requires `name`, so no test pod can match one. Fixed: the topology test now
+  asserts the instance label on every test pod and ties the pods it reads to the chart
+  test templates; the break-once evidence was redone so the `name` assertion itself fails,
+  and bare metal's test was broken once too; the docstrings no longer claim runtime
+  replacement or an unresolved spec citation; a stray blank line. Taken up rather than
+  declined: `make check-packaging` run despite the plan's "if a chart version changed".
+  Left to the owner: whether the bare-metal chart bumps for its test-template change.
+- The topology test reads YAML with the standard library: `_mapping_under` takes the
+  `key: value` lines nested one indent under a header line. A template that rendered a
+  label as a flow mapping or a multi-line value would read as absent; none does today.
 
 ## 13. Scenarios hold shared services for the whole module
 

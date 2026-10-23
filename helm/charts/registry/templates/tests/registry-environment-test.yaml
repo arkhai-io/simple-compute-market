@@ -33,7 +33,7 @@ kind: Pod
 metadata:
   name: {{ include "registry.fullname" . }}-smoke-test
   labels:
-    {{- include "registry.labels" . | nindent 4 }}
+    {{- include "registry.testLabels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation

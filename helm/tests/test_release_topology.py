@@ -404,6 +404,74 @@ def test_topology_up_restarts_every_deployment_but_the_chain() -> None:
     assert components == {*order, "dev-env"}
 
 
+def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
+    """The ``key: value`` lines nested under the first line equal to ``header``,
+    at the next indentation, with any quotes around a value removed."""
+    start = lines.index(header)
+    indent = " " * (len(header) - len(header.lstrip()) + 2)
+    mapping = {}
+    for line in lines[start + 1 :]:
+        if not line.startswith(indent) or line.startswith(indent + " "):
+            break
+        key, value = line.strip().split(": ", 1)
+        mapping[key.strip('"')] = value.strip('"')
+    return mapping
+
+
+_TEST_HOOK = re.compile(r'^\s+"?helm\.sh/hook"?: "?test"?$', re.MULTILINE)
+
+
+def _selectors_and_test_pods(manifest: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Every rendered Deployment's ``spec.selector.matchLabels`` and every Pod
+    annotated ``helm.sh/hook: test``'s labels, each by its name."""
+    selectors, test_pods = {}, {}
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        deployment = "kind: Deployment" in lines
+        test_pod = "kind: Pod" in lines and _TEST_HOOK.search(document) is not None
+        if not (deployment or test_pod):
+            continue
+        name = next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: "))
+        if deployment:
+            selectors[name] = _mapping_under(lines, "    matchLabels:")
+        else:
+            test_pods[name] = _mapping_under(lines, "  labels:")
+    return selectors, test_pods
+
+
+def _test_templates(manifest: str) -> set[str]:
+    """The name of every Pod rendered from a chart's ``templates/tests/``."""
+    names = set()
+    for document in _documents(manifest):
+        lines = document.splitlines()
+        if "kind: Pod" in lines and any(
+            line.startswith("# Source: ") and "/templates/tests/" in line for line in lines
+        ):
+            names.add(next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: ")))
+    return names
+
+
+def test_no_test_pod_carries_a_workload_selector() -> None:
+    """The deployment-state scenario "Both topology releases are rendered", a
+    static stand-in for selecting a workload's pods in a cluster: no Helm test
+    pod carries all of any Deployment's selector, since every test pod lacks
+    ``app.kubernetes.io/name``, which every selector requires, and each carries
+    its release's instance label and ``component: test``."""
+    for release_name, release in ((RELEASE_ONE, _release_one()), (RELEASE_TWO, _release_two())):
+        selectors, test_pods = _selectors_and_test_pods(release)
+        # Every test template's Pod is read as a test pod, so none escapes the
+        # checks below by a hook annotation spelled some other way.
+        assert set(test_pods) == _test_templates(release), (sorted(test_pods), release_name)
+        assert selectors and test_pods, (sorted(selectors), sorted(test_pods))
+        assert all("app.kubernetes.io/name" in selector for selector in selectors.values()), selectors
+        for pod, labels in test_pods.items():
+            assert labels.get("app.kubernetes.io/component") == "test", (pod, labels)
+            assert labels.get("app.kubernetes.io/instance") == release_name, (pod, labels)
+            assert "app.kubernetes.io/name" not in labels, (pod, labels)
+            for deployment, selector in selectors.items():
+                assert not selector.items() <= labels.items(), (pod, deployment)
+
+
 def _secret_references(manifest: str) -> set[str]:
     named = re.findall(r'secretName: "?([^"\s]+)"?', manifest)
     keyed = re.findall(r'secretKeyRef:\n\s+name: "?([^"\s]+)"?', manifest)
