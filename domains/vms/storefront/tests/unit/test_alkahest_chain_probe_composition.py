@@ -107,7 +107,8 @@ async def test_the_root_hands_readiness_and_the_loop_one_probe_over_one_client_m
     """The settlement composition reads readiness from the probe the
     ``alkahest-chain-probe`` loop steps, and holds the probe's own map, so a
     stepped probe makes Alkahest ready and its rebuilt client reaches the
-    composition without a restart."""
+    composition without a restart. The map starts empty: the probe's first step
+    builds the client, never composition."""
     chain = _Chain()
     domain = build_vm_storefront_domain()
     sqlite_client = SQLiteClient(
@@ -120,7 +121,7 @@ async def test_the_root_hands_readiness_and_the_loop_one_probe_over_one_client_m
     ), replaced_setting("wallet", _WALLET), patch.dict(
         storefront_config.CHAINS, _CHAINS, clear=True
     ):
-        clients = server._build_alkahest_clients(chain.constructor)
+        clients: dict[str, object] = {}
         probe = server._build_alkahest_chain_probe(
             clients, constructor=chain.constructor, json_rpc=chain.rpc
         )

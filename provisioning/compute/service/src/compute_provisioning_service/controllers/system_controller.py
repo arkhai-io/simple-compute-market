@@ -148,6 +148,9 @@ def make_system_routers(
             )
         return await watchdog.advance_cycle()
 
+    # The pause and resume routes are async so they run on the event loop's
+    # thread: a worker's resume event is an ``asyncio.Event``, which is not
+    # thread-safe, and its gate count is read here while the loop updates it.
     def pause_state(worker: Any) -> WorkerPauseResponse:
         return WorkerPauseResponse(paused=worker.is_paused, at_gate=worker.is_at_gate)
 
@@ -156,7 +159,7 @@ def make_system_routers(
         response_model=WorkerPauseResponse,
         summary="Pause timer-driven fulfillment convergence cycles (admin)",
     )
-    def pause_fulfillment_convergence() -> WorkerPauseResponse:
+    async def pause_fulfillment_convergence() -> WorkerPauseResponse:
         """Hold the timer; explicit cycles still run. ``at_gate`` is false while
         a timer cycle begun before the pause is still running; pausing again
         reads it afresh."""
@@ -169,7 +172,7 @@ def make_system_routers(
         response_model=WorkerPauseResponse,
         summary="Resume timer-driven fulfillment convergence cycles (admin)",
     )
-    def resume_fulfillment_convergence() -> WorkerPauseResponse:
+    async def resume_fulfillment_convergence() -> WorkerPauseResponse:
         watchdog = require(convergence_watchdog, "fulfillment convergence")
         watchdog.resume()
         return pause_state(watchdog)
@@ -179,7 +182,7 @@ def make_system_routers(
         response_model=WorkerPauseResponse,
         summary="Pause timer-driven lease watchdog cycles (admin)",
     )
-    def pause_lease_watchdog() -> WorkerPauseResponse:
+    async def pause_lease_watchdog() -> WorkerPauseResponse:
         """Hold the timer at its gate; ``check-leases`` still runs a cycle.
         ``at_gate`` is false while a timer cycle begun before the pause is still
         running; pausing again reads it afresh."""
@@ -192,7 +195,7 @@ def make_system_routers(
         response_model=WorkerPauseResponse,
         summary="Resume timer-driven lease watchdog cycles (admin)",
     )
-    def resume_lease_watchdog() -> WorkerPauseResponse:
+    async def resume_lease_watchdog() -> WorkerPauseResponse:
         lifecycle = require(lease_lifecycle, "the lease lifecycle")
         lifecycle.resume()
         return pause_state(lifecycle)

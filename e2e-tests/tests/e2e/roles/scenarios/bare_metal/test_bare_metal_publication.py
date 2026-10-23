@@ -40,7 +40,7 @@ from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
     # Listed first, so the hold is taken before, and released after, every
-    # fixture of the module but the lane's autouse ones.
+    # other fixture of the module.
     pytest.mark.usefixtures("storefront_loops_held"),
     pytest.mark.e2e_bare_metal_publication,
 ]

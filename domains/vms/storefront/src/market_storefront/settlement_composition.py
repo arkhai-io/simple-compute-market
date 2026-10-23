@@ -841,7 +841,7 @@ def build_vm_settlement_composition(
 
     ``alkahest_clients`` is the live map the chain probe updates in place, so
     every consumer here holds it rather than a copy and reaches a client the
-    probe rebuilds; ``chain_probe`` is the probe whose results Alkahest
+    probe builds; ``chain_probe`` is the probe whose results Alkahest
     readiness reads.
     """
     registry_owner = getattr(sqlite_client, "domain_registry", None)

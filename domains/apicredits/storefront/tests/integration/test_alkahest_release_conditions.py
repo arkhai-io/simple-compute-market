@@ -15,7 +15,9 @@ a deterministic development value, never used on a public network.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import threading
 from contextlib import asynccontextmanager, contextmanager
 from copy import deepcopy
 from unittest.mock import patch
@@ -150,7 +152,8 @@ def storefront(tmp_path, monkeypatch):
 
 def _app(seams=None):
     # The chain probe's JSON-RPC transport is the composition's seam to the
-    # chain; the SDK builds its clients over the HTTP rpc_url without calling it.
+    # chain; the SDK, which the probe builds its clients with, builds them over
+    # the HTTP rpc_url without calling it.
     return server.build_api_credits_storefront_app(
         registry=server.build_api_credits_storefront_registry(
             domain=get_market_domain_contract()
@@ -450,6 +453,55 @@ async def test_the_composition_and_the_loop_share_one_probe_over_one_client_map(
     assert reached["ready"] is True
     assert composition.mechanism_resources["clients"] is probe.clients
     assert probe.clients == {"anvil": "client:anvil"}
+
+
+async def test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_building(
+    storefront,
+):
+    """Spec requirement "A deployment does not wait on a service's
+    dependencies": a websocket chain that accepts the connection and never
+    upgrades it holds its client's construction for good. Startup constructs no
+    client, so the storefront starts and answers its health check, and the
+    probe, whose wait on construction the RPC timeout bounds, holds Alkahest
+    unready for reachability."""
+    never_upgraded = threading.Event()
+    constructed_on: list[str] = []
+
+    def constructor(_policy):
+        def construct(chain_name: str) -> object:
+            constructed_on.append(threading.current_thread().name)
+            # Only the probe's own construction thread is held: one anywhere
+            # else, as startup's would be, fails at once, so the assertion below
+            # names it rather than the test hanging.
+            if threading.current_thread().name.startswith("alkahest-client-"):
+                never_upgraded.wait()
+            raise ConnectionError("websocket closed")
+
+        return construct
+
+    seams = server.ApiCreditCompositionSeams(
+        alkahest_client_constructor=constructor, alkahest_json_rpc=_deployed_chain
+    )
+    try:
+        async with _started(
+            _settlement(rpc_timeout_seconds=0.2), probed=False, seams=seams
+        ) as (_listings, public, admin):
+            health = await public.get_health()
+            await asyncio.wait_for(
+                admin.admin_run_lifecycle_cycle("alkahest-chain-probe"), timeout=5
+            )
+            status = _alkahest_status(await admin.get_system_status())
+    finally:
+        never_upgraded.set()
+
+    assert health.checks["database"] == "ok"
+    assert constructed_on and all(
+        name.startswith("alkahest-client-") for name in constructed_on
+    ), constructed_on
+    assert status["ready"] is False
+    assert [(b["code"], b["kind"]) for b in status["blockers"]] == [
+        ("alkahest.chain_unreachable", "reachability")
+    ]
 
 
 async def test_status_reports_a_configured_chain_no_listing_publishes_on(storefront):

@@ -421,47 +421,80 @@ def _mapping_under(lines: list[str], header: str) -> dict[str, str]:
 _TEST_HOOK = re.compile(r'^\s+"?helm\.sh/hook"?: "?test"?$', re.MULTILINE)
 
 
-def _selectors_and_test_pods(manifest: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
-    """Every rendered Deployment's ``spec.selector.matchLabels`` and every Pod
-    annotated ``helm.sh/hook: test``'s labels, each by its name."""
+def _selectors_and_test_pods(
+    manifest: str,
+) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Every rendered Deployment's ``spec.selector.matchLabels`` and Service's
+    ``spec.selector``, each by its kind and name, and every Pod annotated
+    ``helm.sh/hook: test``'s labels, by its name."""
     selectors, test_pods = {}, {}
     for document in _documents(manifest):
         lines = document.splitlines()
         deployment = "kind: Deployment" in lines
+        service = "kind: Service" in lines and "  selector:" in lines
         test_pod = "kind: Pod" in lines and _TEST_HOOK.search(document) is not None
-        if not (deployment or test_pod):
+        if not (deployment or service or test_pod):
             continue
         name = next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: "))
         if deployment:
-            selectors[name] = _mapping_under(lines, "    matchLabels:")
+            selectors[f"Deployment/{name}"] = _mapping_under(lines, "    matchLabels:")
+        elif service:
+            selectors[f"Service/{name}"] = _mapping_under(lines, "  selector:")
         else:
             test_pods[name] = _mapping_under(lines, "  labels:")
     return selectors, test_pods
 
 
-def _test_templates(manifest: str) -> set[str]:
-    """The name of every Pod rendered from a chart's ``templates/tests/``."""
-    names = set()
+def _test_templates(manifest: str) -> dict[str, str]:
+    """Every Pod rendered from a chart's ``templates/tests/``: its name, and
+    the template it was rendered from, from ``templates/tests/`` on."""
+    templates = {}
     for document in _documents(manifest):
         lines = document.splitlines()
-        if "kind: Pod" in lines and any(
-            line.startswith("# Source: ") and "/templates/tests/" in line for line in lines
-        ):
-            names.add(next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: ")))
-    return names
+        source = next(
+            (line for line in lines if line.startswith("# Source: ") and "/templates/tests/" in line),
+            None,
+        )
+        if "kind: Pod" in lines and source is not None:
+            name = next(line.split(": ", 1)[1].strip('"') for line in lines if line.startswith("  name: "))
+            templates[name] = source[source.index("templates/tests/") :]
+    return templates
+
+
+#: The test templates each topology release renders a Pod from, so a test pod
+#: that stops rendering fails here rather than leaving nothing to check.
+_EXPECTED_TEST_TEMPLATES = {
+    RELEASE_ONE: {
+        "templates/tests/registry-environment-test.yaml",
+        "templates/tests/storefront-environment-test.yaml",
+        "templates/tests/provisioning-smoke-test.yaml",
+        "templates/tests/e2e-deal-test.yaml",
+        "templates/tests/chain-environment-test.yaml",
+    },
+    RELEASE_TWO: {
+        "templates/tests/provisioning-smoke-test.yaml",
+        "templates/tests/health-test.yaml",
+    },
+}
 
 
 def test_no_test_pod_carries_a_workload_selector() -> None:
     """The deployment-state scenario "Both topology releases are rendered", a
     static stand-in for selecting a workload's pods in a cluster: no Helm test
-    pod carries all of any Deployment's selector, since every test pod lacks
-    ``app.kubernetes.io/name``, which every selector requires, and each carries
-    its release's instance label and ``component: test``."""
+    pod carries all of any Deployment's or Service's selector, since every test
+    pod lacks ``app.kubernetes.io/name``, which every selector requires, and
+    each carries its release's instance label and ``component: test``."""
     for release_name, release in ((RELEASE_ONE, _release_one()), (RELEASE_TWO, _release_two())):
         selectors, test_pods = _selectors_and_test_pods(release)
+        templates = _test_templates(release)
         # Every test template's Pod is read as a test pod, so none escapes the
         # checks below by a hook annotation spelled some other way.
-        assert set(test_pods) == _test_templates(release), (sorted(test_pods), release_name)
+        assert set(test_pods) == set(templates), (sorted(test_pods), release_name)
+        assert set(templates.values()) == _EXPECTED_TEST_TEMPLATES[release_name], (
+            sorted(templates.values()),
+            release_name,
+        )
+        assert any(key.startswith("Service/") for key in selectors), (sorted(selectors), release_name)
         assert selectors and test_pods, (sorted(selectors), sorted(test_pods))
         assert all("app.kubernetes.io/name" in selector for selector in selectors.values()), selectors
         for pod, labels in test_pods.items():

@@ -869,10 +869,14 @@ never started. Both init containers are removed, as the bare-metal chart has non
 relies on a `startupProbe`, and the storefront's own loops retry.
 
 The VM storefront starts with its registry and chain unreachable. An unreachable chain
-makes Alkahest unready with a reachability blocker from its probe (decision 19); an
-unreachable registry shows as a failed publication or convergence cycle in loop status,
-retried each cycle. `/health` stays a process check and the degraded state is reported
-through system status, as bare metal reports it. A storefront that starts with its site
+makes Alkahest unready with a reachability blocker from its probe (decision 19). An
+unreachable registry is reported by the registry check as unreachable and by the
+storefront as degraded; the publication cycle still completes, each listing it could not
+publish recording `registry_not_converged`, and the next cycle publishes once the registry
+answers. A failed cycle would repeat what the registry check and each listing already
+say, and would misreport a cycle in which one registry refused and another published.
+`/health` stays a process check and the degraded state is reported through system
+status, as bare metal reports it. A storefront that starts with its site
 unreachable has no projection of it, so its publication cycle holds that site's listings
 and closes none, while the registry check reports the registry unreachable and the
 storefront degraded.
@@ -886,10 +890,15 @@ rule reaches the storefronts' own startup:
   and settlement calls to it fail retryably, and VM's held site projection already treats
   an unreachable site as unknown, so no listing closes for it. Bare metal has no such
   preflight.
-- An Alkahest chain whose client could not be constructed at start is rebuilt at its next
-  probe (decision 19), so the storefront recovers without a restart. Planning confirms
-  whether construction touches the RPC; a construction failure the address configuration
-  causes remains the configuration blocker `alkahest.address_config_invalid`.
+- Startup constructs no Alkahest client: each storefront's client map starts empty and the
+  chain probe (decision 19) constructs every client at its first step, waiting on each no
+  longer than its RPC timeout, and again at each probe until it succeeds, so the
+  storefront recovers without a restart. A websocket client connects while it is built,
+  and an endpoint that accepts the connection and never upgrades it would otherwise hold
+  startup for good; bounding a construction at startup instead would still hold the
+  service back on its chain, which the rejected alternative below rules out. A
+  construction failure the address configuration causes remains the configuration blocker
+  `alkahest.address_config_invalid`.
 - The VM storefront chart gains a `startupProbe` mirroring the bare-metal chart's, so a
   slow start is not judged by the liveness probe alone.
 
@@ -911,7 +920,9 @@ the selector labels its Deployment selects by, so a selector-based `kubectl logs
 test-labels helper carrying chart, version, managed-by, instance, and
 `app.kubernetes.io/component: test`, but not `app.kubernetes.io/name`, which every
 Deployment selector requires. A render test over both topology releases asserts no Pod
-annotated `helm.sh/hook: test` carries all of any Deployment's `matchLabels`. The
+annotated `helm.sh/hook: test` carries all of any Deployment's `matchLabels` or any
+Service's selector, since a Service selecting a test pod would route traffic to it, and
+that each release renders its expected test pods. The
 bare-metal test pod gains the hook delete policy the others have.
 
 Rejected: adding `component: test` while keeping `name`, which leaves registry and

@@ -75,6 +75,9 @@ def _referenced_name(node: ast.AST) -> str | None:
         return node.attr
     if isinstance(node, ast.Name):
         return node.id
+    # An import names what it binds, under an alias the name check cannot follow.
+    if isinstance(node, ast.alias):
+        return node.name.rsplit(".", 1)[-1]
     return None
 
 
@@ -98,9 +101,12 @@ def forbidden_calls(
     source: str, filename: str, *, exempt: frozenset[str] = frozenset()
 ) -> list[str]:
     """``file:line name`` for each reference to a pause operation or hold
-    helper, and each string naming a pause route (in a call, a constant, or an
-    f-string; docstrings aside), outside the top-level functions named in
-    ``exempt``."""
+    helper (a name, an attribute, or an import of one), each string that is a
+    pause operation's name (as ``getattr`` takes it), and each string naming a
+    pause route (in a call, a constant, or an f-string; docstrings aside),
+    outside the top-level functions named in ``exempt``. A route assembled
+    from pieces that name no route, such as a prefix constant and ``"/pause"``,
+    is not caught."""
     tree = ast.parse(source, filename=filename)
     skipped = _docstrings(tree) | {
         id(inner)
@@ -116,6 +122,8 @@ def forbidden_calls(
         if name in PAUSE_OPERATIONS or name in HOLD_HELPER_NAMES:
             found.add((node.lineno, name))
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value in PAUSE_OPERATIONS:
+                found.add((node.lineno, node.value))
             found.update((node.lineno, route) for route in PAUSE_ROUTES if route in node.value)
     return [f"{filename}:{line} {name}" for line, name in sorted(found)]
 
@@ -131,7 +139,7 @@ def test_no_scenario_or_stage_pauses_a_shared_service(path: Path):
     )
 
 
-def test_the_check_names_a_direct_pause_a_route_and_a_hold_helper_call():
+def test_the_check_names_a_direct_pause_a_route_and_a_hold_helper_reference():
     planted = (
         "def test_stage(admin, provisioning, http):\n"
         "    admin.admin_pause_lifecycle_loops()\n"
@@ -141,6 +149,9 @@ def test_the_check_names_a_direct_pause_a_route_and_a_hold_helper_call():
         "RESUME = '/api/v1/admin/lifecycle/resume'\n"
         "def helper():\n"
         "    '''Never posts to /api/v1/admin/lifecycle/pause itself.'''\n"
+        "from helpers.compute_deal import lease_watchdog_held as hold\n"
+        "def by_name(admin):\n"
+        "    getattr(admin, 'admin_resume_lifecycle_loops')()\n"
     )
 
     assert forbidden_calls(planted, "planted.py") == [
@@ -149,6 +160,8 @@ def test_the_check_names_a_direct_pause_a_route_and_a_hold_helper_call():
         "planted.py:4 resume_lease_watchdog",
         "planted.py:5 lease-watchdog/pause",
         "planted.py:6 lifecycle/resume",
+        "planted.py:9 lease_watchdog_held",
+        "planted.py:11 admin_resume_lifecycle_loops",
     ]
 
 

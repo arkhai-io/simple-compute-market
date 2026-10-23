@@ -66,8 +66,10 @@ def alkahest_client_constructor(
     since no chain's client could then be built. The SDK builds a client over an HTTP ``rpc_url``
     without contacting the RPC, so an unreachable chain still gets one; over a
     websocket ``rpc_url`` it connects at construction, so construction fails
-    until the chain answers. A storefront hands this to the chain probe, which
-    constructs a missing client again at each probe until it succeeds.
+    until the chain answers, or never returns from an endpoint that accepts the
+    connection and never upgrades it. A storefront hands this to the chain
+    probe, which constructs each missing client at each probe until it
+    succeeds, waiting on it no longer than its RPC timeout.
     """
 
     if _missing_requirements(policy):
@@ -106,9 +108,10 @@ def build_alkahest_clients(
 ) -> dict[str, Any]:
     """Build every usable configured client and isolate per-chain failures.
 
-    ``constructor`` gives the per-chain construction, the SDK boundary; a
-    storefront hands its chain probe the same one, so the clients built at
-    start and those the probe rebuilds come from one place.
+    ``constructor`` gives the per-chain construction, the SDK boundary. Each
+    client is built on the calling thread with no bound, and a websocket client
+    connects while it is built, so a storefront's startup does not call this:
+    its chain probe constructs every client, bounded by its RPC timeout.
     """
 
     active_logger = logger or logging.getLogger(__name__)

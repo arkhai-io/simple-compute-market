@@ -1008,3 +1008,40 @@ async def test_a_stage_without_seller_refunds_refuses_the_route_and_skips_the_ac
     assert refused.value.status_code == 409
     skipped = await stage.refund_before_delivery(db=None, composition=None, negotiation_id="neg-alkahest")
     assert skipped == {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
+
+
+@pytest.mark.parametrize(
+    ("configured", "refusal"),
+    [
+        pytest.param({"anvil": object()}, 503, id="configured-chain-without-a-client-yet"),
+        pytest.param({}, None, id="unconfigured-chain"),
+    ],
+)
+async def test_a_chain_with_no_client_is_retryable_only_when_configured(
+    monkeypatch, configured, refusal
+):
+    """The chain probe builds each client after startup, so a settle for a
+    configured chain it has not built yet is refused 503 for a retry, and one
+    for a chain the storefront does not configure is refused outright (the
+    route answers that ``ValueError`` 400)."""
+    from apicredits_storefront import settlement_stages
+    from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
+
+    monkeypatch.setattr(settlement_stages, "CHAINS", configured)
+    stage = AlkahestSellerStage(
+        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
+    )
+    coordinator = SimpleNamespace(start=AsyncMock())
+    composition = SimpleNamespace(mechanism_resources={"get_client": lambda _chain: None})
+    body = SimpleNamespace(chain_name="anvil", negotiation_id="neg-alkahest")
+
+    expected = SettlementRefusal if refusal else ValueError
+    with pytest.raises(expected) as refused:
+        await stage._start(
+            db=None, composition=composition, coordinator=coordinator,
+            reference="escrow-1", body=body,
+        )
+
+    if refusal:
+        assert refused.value.status_code == refusal
+    coordinator.start.assert_not_awaited()

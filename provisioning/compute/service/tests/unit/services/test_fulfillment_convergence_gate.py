@@ -91,3 +91,32 @@ async def test_a_timer_cycle_in_flight_keeps_a_paused_watchdog_off_its_gate():
     finally:
         loop.cancel()
         await asyncio.gather(loop, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_a_pause_straight_after_a_resume_holds_the_cycle_the_resume_woke():
+    """A resume wakes the timer loop waiting at the gate; a pause before that
+    loop runs answers "at the gate", so the woken loop must wait again rather
+    than run a cycle inside the hold."""
+    cycles = _HeldCycles()
+    watchdog = _watchdog(cycles)
+    watchdog.pause()
+    loop = asyncio.create_task(watchdog.run())
+    try:
+        await asyncio.sleep(0)
+        watchdog.resume()
+        watchdog.pause()
+        assert watchdog.is_at_gate is True
+        for _ in range(5):
+            await asyncio.sleep(0)
+
+        assert cycles.runs == 0
+        assert watchdog.is_at_gate is True
+        watchdog.resume()
+        await asyncio.wait_for(cycles.started.wait(), timeout=1)
+        cycles.release.set()
+        await asyncio.wait_for(cycles.finished.wait(), timeout=1)
+        assert cycles.runs == 1
+    finally:
+        loop.cancel()
+        await asyncio.gather(loop, return_exceptions=True)

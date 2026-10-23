@@ -141,7 +141,7 @@ class ListingService:
         self._db = sqlite_client
         self._marketplace_signer = marketplace_signer
         # The live map the chain probe updates in place; read when needed, so a
-        # client the probe rebuilds is available without a restart.
+        # client the probe builds is available without a restart.
         self._alkahest_clients = alkahest_clients
         self._settlement_composition_provider = settlement_composition_provider
         # What a source's site currently declares about it, read from the held

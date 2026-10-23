@@ -35,7 +35,6 @@ from market_storefront_kit import (
     StorefrontRouteHooks,
     StorefrontServiceHooks,
     alkahest_client_constructor,
-    build_alkahest_clients,
     build_composed_storefront_app,
 )
 
@@ -152,13 +151,6 @@ def _alkahest_client_policy() -> AlkahestClientPolicy:
             for name, chain in CHAINS.items()
         ),
         missing_requirements=missing,
-        warn_if_no_chains=True,
-    )
-
-
-def _build_alkahest_clients(constructor: AlkahestClientConstructor) -> dict[str, Any]:
-    return build_alkahest_clients(
-        _alkahest_client_policy(), logger=logger, constructor=constructor
     )
 
 
@@ -188,10 +180,11 @@ def _build_api_credit_services(
     domain: MarketDomainContract,
     seams: ApiCreditCompositionSeams = ApiCreditCompositionSeams(),
 ) -> ApiCreditsStorefrontServices:
-    # Before anything is constructed: a renamed setting, a capacity
-    # configuration that cannot be read, or a contradictory Alkahest release
-    # model stops startup. A coherent model this storefront cannot deliver
-    # makes Alkahest unready instead.
+    # Before anything is constructed: a renamed or removed setting (the
+    # retired credits-service preflight settings among them), an unset
+    # `[credits].service_url`, a capacity configuration that cannot be read,
+    # or a contradictory Alkahest release model stops startup. A coherent
+    # model this storefront cannot deliver makes Alkahest unready instead.
     require_startable_storefront()
     require_coherent_release_model()
     marketplace_signer = resolve_identity_signer()
@@ -207,19 +200,19 @@ def _build_api_credit_services(
     alkahest_enabled = bool(
         alkahest_section is not None and getattr(alkahest_section, "enabled", False)
     )
+    # The probe owns the client map, empty until its first step constructs each
+    # client, bounded: a websocket client connects while it is built, and
+    # startup must not wait on a chain. Every consumer below is handed this one
+    # dict, which the probe updates in place.
+    alkahest_clients: dict[str, Any] = {}
     alkahest_chain_probe: AlkahestChainProbe | None = None
     if alkahest_enabled:
-        alkahest_clients = _build_alkahest_clients(seams.alkahest_client_constructor)
-        # The probe owns the client map from here: every consumer below is
-        # handed this one dict, which it updates in place.
         alkahest_chain_probe = _build_alkahest_chain_probe(
             alkahest_section,
             alkahest_clients,
             constructor=seams.alkahest_client_constructor,
             json_rpc=seams.alkahest_json_rpc,
         )
-    else:
-        alkahest_clients = {}
     sqlite_client = get_sqlite_client(
         local_listing_principal=marketplace_signer.identity,
         expected_legacy_sellers=(BASE_URL_OVERRIDE,),

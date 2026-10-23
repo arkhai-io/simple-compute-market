@@ -1527,7 +1527,8 @@ opened unpinned.
       required); `arkhai-vms-negotiation` 0.5.0 and `arkhai-apicredits-domain` 0.7.0, not
       in the plan but both changed, with policy floors at 0.6.0; VM storefront 0.21.0 (its
       exact pin on bare metal moved), bare-metal storefront 0.21.0, API-credit storefront
-      0.15.0, with floors on the packages above; `arkhai-e2e-tests` 0.3.1; `make lock`.
+      0.15.0, with floors on the packages above; `arkhai-e2e-tests` 0.3.1, a second bump
+      that triage 139 (13.6) reverted to Section 7's 0.3.0; `make lock`.
       **Not bumped:** `arkhai-kit-alkahest` and `arkhai-core-storefront-client`, already
       bumped and unreleased on this branch (7.8's policy); `arkhai-kit-storefront`, whose
       wheel is unchanged (only its test layout and `testpaths` moved).
@@ -2411,8 +2412,10 @@ Section 11 notes (handoff):
   - The locks the environment refresh rewrote (the note above) are a uv version's: with the
     pinned uv, every committed lock passes `make check-locks`, while each project's `reinit`
     still rewrites some of them (wheels for platforms outside a project's declared
-    `environments`, or dependency markers). They were left as committed; whether to relock
-    with the pinned uv is the owner's.
+    `environments`, or dependency markers). `aa00b15` relocked the seven that `make test`
+    rewrote with `make lock`, resolving no version differently (triage 139 F4); since
+    then the locks differ from `9aa024e`'s only by the version bumps, and
+    `140-validation` passed on that commit.
   - The degraded-start scenario now states what the start shows: the registry check
     unreachable and the storefront degraded, Alkahest unready for reachability, the unloaded
     site's listings held with none closed, and Alkahest ready and publication reaching the
@@ -2430,10 +2433,51 @@ Section 11 notes (handoff):
       creates the listing once it answers.
     - Site recovery after a restart while unreachable was already shown by
       `test_pool_overrides_api.py::test_a_site_with_no_projection_holds_its_listings_and_its_override_is_unknown`.
-  - **Open for triage:** with a candidate to publish and every registry refusing, the
-    publication cycle completes, reporting `registry_not_converged` per listing, so loop
-    status shows no failed cycle. Decision 20's "a failed publication or convergence cycle in
-    loop status" therefore still disagrees with the code. Neither side is changed here.
+  - With a candidate to publish and every registry refusing, the publication cycle
+    completes, reporting `registry_not_converged` per listing, so loop status shows no
+    failed cycle. Triage 139 F3 settled it for the code: decision 20 now says the registry
+    check reports the registry unreachable, the storefront degraded, each unpublished
+    listing `registry_not_converged`, and the next cycle publishes.
+- **Round 2 triage fixes** (`139-implementation`, against `aa00b15`):
+  - **139 F1 — no Alkahest client is built at startup.** Each storefront's composition
+    starts its client map empty and the chain probe constructs every client at its first
+    step, bounded by the RPC timeout (VM `server.py`, API credits `server.py`, bare metal
+    `runtime.py`, whose `build_chain_clients` parameter and `_build_chain_clients` are
+    gone). Before, a websocket chain that accepted the connection and never upgraded it
+    held startup on the composition thread past the `startupProbe`. Every consumer already
+    read the probe's one map with `.get`, since a chain whose construction failed at start
+    was already an empty entry, so none needed a change. The kit's `build_alkahest_clients`
+    stays, documented as unbounded and not for a storefront's startup, since other active
+    changes' designs name it. Tests (application integration): a degraded start with a
+    constructor that never returns, per storefront — VM
+    `test_degraded_startup.py::test_the_storefront_starts_while_a_chain_client_never_finishes_building`,
+    API credits
+    `test_alkahest_release_conditions.py::test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_building`,
+    bare metal
+    `test_app_composition.py::test_startup_does_not_wait_on_a_chain_whose_client_never_finishes_building`
+    — each answers its health check and a probe step bounded at 0.2 s reports
+    `alkahest.chain_unreachable`. Existing composition tests moved to the constructor seam;
+    bare metal's composition test now shows the map empty until the probe's first step.
+    Each degraded-start test answers the chain's JSON-RPC, so only the missing client
+    reads unreachable, and records the thread each construction ran on: only the probe's
+    `alkahest-client-<chain>` thread is held, so a construction on startup's path fails
+    the test at once instead of hanging it. D20's client bullet rewritten.
+  - **A settle before the probe's first step is retryable.** With no client built at
+    start, the VM settle route's "chain not configured" 400 and the API-credit stage's
+    "chain client is unavailable" (answered 400) also met a configured chain the probe
+    had not reached yet. Both now answer 503 for a chain in `[chains]` with no client, as
+    bare metal already did, and keep the refusal for an unconfigured chain. Unit:
+    `test_settlement_start_authority.py::test_a_chain_with_no_client_is_retryable_only_when_configured`
+    (VM, through the controller) and
+    `test_settlement_fulfillment.py::test_a_chain_with_no_client_is_retryable_only_when_configured`
+    (API credits, the stage). The chain probe's and its consumers' docstrings say the map
+    starts empty and the probe builds each client.
+  - **139 F5.** `test_startup_does_not_wait_for_an_unreachable_credits_service` asserts
+    `checks["credits_service"] == "unreachable"` and `status == "degraded"`.
+  - **139 F7 (comment).** The API-credit startup comment lists the retired settings and
+    the unset `[credits].service_url` among its refusals; `storefront.credits.toml`'s
+    comments name the chain probe as what builds the clients.
+  - Evidence: see Section 13's round 2 triage-fix note.
 
 ## 12. Helm test pods carry no workload selector label
 
@@ -2483,12 +2527,14 @@ Delivers a test-labels helper in every chart and a topology render assertion (D2
 - [x] 12.4 **Verify.** `make -C helm test-render`; `make test`; `make check-packaging` if a
       chart version changed. End-to-end: the Helm topology check of 11.8 runs every test Pod;
       no compose scenario covers chart labels, and none is owed.
-      No chart version changed: the change edits only test-hook templates and helpers, as
-      the last chart change did to the registry's test Pod without a bump, and the
-      storefront chart and umbrella already carry Section 11's bump. The bare-metal chart
-      stays at 0.3.0 though its test template changes here (and its values schema did
-      earlier in this change); whether a chart bumps for that is the owner's call, since
-      `docs/development/RELEASING.md` does not cover charts. `make check-packaging` was run
+      The registry, provisioning, e2e-tests, and validate-contracts charts stay as they
+      are: this section edits only their test-hook templates and helpers, as the last chart
+      change did to the registry's test Pod without a bump, and the storefront chart and
+      umbrella already carry Section 11's bump. The bare-metal chart is 0.4.0 (triage 139):
+      its values schema accepts the chain probe's `probe_interval_seconds` and
+      `rpc_timeout_seconds`, new values an operator can set, so it takes a minor bump as
+      `docs/development/RELEASING.md` gives a package's new public surface; the umbrella's
+      dependency entry moved with it. `make check-packaging` was run
       all the same, as `AGENTS.md` asks before a commit, and fails only on that local directory
       (Section 11's note). Results: `make -C helm test-render` passed on Helm v3.21.0, not
       the v4.3.0 `.github/workflows/tests.yml` pins, with both storefront environments
@@ -2509,10 +2555,22 @@ Section 12 notes (handoff):
   and bare metal's test was broken once too; the docstrings no longer claim runtime
   replacement or an unresolved spec citation; a stray blank line. Taken up rather than
   declined: `make check-packaging` run despite the plan's "if a chart version changed".
-  Left to the owner: whether the bare-metal chart bumps for its test-template change.
+  The bare-metal chart's bump, left to the owner here, was settled by triage 139 (12.4).
 - The topology test reads YAML with the standard library: `_mapping_under` takes the
   `key: value` lines nested one indent under a header line. A template that rendered a
   label as a flow mapping or a multi-line value would read as absent; none does today.
+- **Round 2 triage fixes** (`139-implementation`):
+  - **139 F6 (topology).** `test_no_test_pod_carries_a_workload_selector` (chart render)
+    reads every Service's `spec.selector` beside the Deployments' `matchLabels`, keyed by
+    kind and name, and asserts each release's test templates: release one registry,
+    storefront, provisioning, e2e-tests, and validate-contracts; the bare-metal release
+    provisioning and bare-metal-storefront. Every chart's Service selector requires
+    `name` (read from the templates, `dev-env`'s Mailpit included). The delta scenario
+    "Both topology releases are rendered" and D21 now name Service selectors too. Helm is not installed
+    in the triage session, so the render was not run there; the fix commit's validation
+    runs it.
+  - **Section 12 open item.** The bare-metal chart is 0.4.0 and the umbrella's dependency
+    entry moved with it (12.4).
 
 ## 13. Scenarios hold shared services for the whole module
 
@@ -2625,11 +2683,14 @@ on, the provisioning service's two pause routes.
       Stage00's change (D22).
       Done (unit), wider than the task: every Python file under the roles' `scenarios/`
       and `helpers/` except the lane conftests, so drivers and other helpers are checked
-      too, and `compute_deal.py` outside the three hold helpers' bodies. It flags any
-      reference to a pause operation or hold helper (a call, or one passed as a callback),
-      and any call whose arguments name a pause or resume route path
-      (`lifecycle/pause`, `lease-watchdog/resume`, and the rest), so a raw HTTP post is
-      caught as well as a typed-client call. Its own tests prove the checker names a
+      too, and `compute_deal.py` outside the three hold helpers' bodies. It flags a
+      reference to a pause operation or hold helper by name or attribute (a call, or one
+      passed as a callback) or by import, under an alias too; a string that is a pause
+      operation's name, as `getattr` takes it; and any string naming a pause or resume
+      route path (`lifecycle/pause`, `lease-watchdog/resume`, and the rest), so a raw HTTP
+      post is caught as well as a typed-client call. A route assembled from pieces that
+      name no route, such as a prefix constant and `"/pause"`, is not caught (the alias
+      and `getattr` forms added by triage 139 F6). Its own tests prove the checker names a
       planted direct pause, a hold-helper call, a resume, and a raw route post by file
       and line, that only the hold helpers' bodies are exempt, and that each lane conftest
       defines the hold fixtures over the helpers. `test_compute_deal_stages.py` needed no edit: it
@@ -2642,16 +2703,16 @@ on, the provisioning service's two pause routes.
       a model, not a dict: incompatible before 1.0); the provisioning service 0.17.3 →
       0.18.0 (its patch bump on this branch is too small for a new response field);
       `arkhai-compute-provisioning` 0.19.1 → 0.20.0, which the task omits but whose lease
-      lifecycle gains `is_at_gate`; `arkhai-e2e-tests` is not bumped again: it is at 0.3.1
-      from Sections 7 (0.2.1 → 0.3.0) and 8 (→ 0.3.1), already two bumps against
-      `origin/dev` where `docs/development/RELEASING.md` allows one; collapsing them to
-      0.3.0 is for triage. Floors raised where the new API is used: the client on contracts
+      lifecycle gains `is_at_gate`; `arkhai-e2e-tests` is not bumped again: Section 7 took
+      it 0.2.1 → 0.3.0, and triage 139 (13.6) set it back to 0.3.0 from Section 8's second
+      bump to 0.3.1, since `docs/development/RELEASING.md` allows one bump against
+      `origin/dev`. Floors raised where the new API is used: the client on contracts
       0.10.0, the service on contracts 0.10.0, `compute_provisioning` 0.20.0, and (dev) the
       client 0.8.0, and e2e-tests on contracts 0.10.0 and the client 0.8.0. `make lock`
       stops on that local directory before locking anything (Section 11's note), so it was run
       with `PROJECTS=` naming the eleven projects whose locks name a bumped package, and
-      those eleven locks are committed; they also carry the environment's marker churn
-      (Section 11's note). Twelve other locks the environment rewrote, naming no bumped
+      those eleven locks are committed; the environment's marker churn they also carried
+      was relocked away in `aa00b15` (Section 11's corrections, triage 139 F4). Twelve other locks the environment rewrote, naming no bumped
       package (`core/registry`, the API-credit service and storefront, `domains/vms/buyer`,
       and eight under `kit/`), are left uncommitted.
 - [x] 13.7 **Verify.** `make test-e2e-unit` (unit); `make test-provisioning`; `make test`;
@@ -2752,8 +2813,58 @@ Section 13 notes (handoff):
       e2e-tests unit suite passed (107). No deployed lane has run on the new order.
     - **Live read-back (resolved).** Design decision 22 now says stages assert a hold
       through live system status, which is stronger than the fixture's state at setup.
-    - **The degraded start (partly open).** See Section 11's corrections.
-    - **The double `arkhai-e2e-tests` bump (open).**
+    - **The degraded start (resolved by triage 139 F3).** See Section 11's corrections.
+    - **The double `arkhai-e2e-tests` bump (resolved by triage 139).** See 13.6.
+- **Round 2 triage fixes** (`139-implementation`, against `aa00b15`; Sections 11 and 12
+  carry their own parts):
+  - **139 F2 — a woken timer cycle cannot pass a gate a pause closed again.** Both gates
+    (`LeaseLifecycle.check_leases`, `FulfillmentConvergenceWatchdog.run`) read the resume
+    event again after each wake, with nothing awaited between the last read and the
+    in-flight count, and the four pause and resume routes are `async def`, so the
+    `asyncio.Event` and the count are touched on the loop's thread only. Unit:
+    `test_lease_lifecycle.py::test_a_pause_straight_after_a_resume_holds_the_cycle_the_resume_woke`
+    and `test_fulfillment_convergence_gate.py::` the same name — a resume, then a pause
+    before the woken cycle runs, holds that cycle and keeps `at_gate`. Broken once: with
+    the old `if`, each failed (`compute_provisioning` 1 failed, 233 passed; the service's
+    unit suite 1 failed, 666 passed); restored, both pass. No version moves: the response
+    contract is unchanged, and `compute_provisioning` and the service are already bumped
+    on this branch.
+  - **139 F6 (source check).** See 13.5.
+  - **139 F7.** The three bare-metal modules' `# Listed first` comments no longer name
+    autouse fixtures the lane does not have. `8ac5657`'s message departs from the
+    repository's conventions (a `fix(scenarios):` subject, no trailers, an outside item
+    label, workflow routing); it is not rewritten, and the merge commit's message
+    describes that commit's change.
+  - **13.6 open item.** `arkhai-e2e-tests` is 0.3.0; `make lock PROJECTS=e2e-tests`
+    changed only its own version line.
+  - **Evidence for the round's fixes** (Sections 11–13), on the final tree:
+    - `make test`, one uninterrupted run: every suite passed — among them
+      `compute_provisioning` 234 (unit and integration), the provisioning service's
+      unit 667 and integration 488 (application integration), the VM storefront's unit
+      1110 and integration 460, the bare-metal storefront 450, the API-credit storefront
+      239, e2e-tests unit 107, and release tooling 1081 (11 skipped) — and then stopped
+      at `test-deployment-packaging`'s Helm render, which could not start: the triage
+      session has no `helm` binary. The chart render tests (the topology test and
+      bare metal's chart tests) are therefore unrun here; the fix commit's validation
+      runs them.
+    - `make check-packaging` passes. `make check-change` fails only on the citation of
+      `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, which Section 22
+      creates.
+    - **Fresh-context check** of the diff against `aa00b15`: eight findings. Fixed: the
+      VM and API-credit settle refusals of a configured chain without a client (now 503,
+      Section 11's note); the chain probe's and its consumers' docstrings that assumed a
+      first build at startup; the degraded-start tests, which could hang rather than
+      fail on a regression and in two storefronts refused JSON-RPC, so "unreachable" did
+      not prove the missing client; this note, which was missing; the
+      `storefront.credits.toml` comment's claim that only the probe reads `[chains]`; the
+      delta scenario and D21, which named Deployment selectors only. Declined: removing
+      the kit's now-unused `build_alkahest_clients`, which other active changes' designs
+      name.
+    - **End-to-end:** not run here. The fix commit's validation runs every lane: the
+      degraded start and settlement paths under `e2e_deal`, `e2e_deal_buyer_cli`,
+      `e2e_buy`, `e2e_alkahest_escrow_codecs`, `e2e_non_erc20_settlement`,
+      `e2e_bare_metal_mock_deal`, and `e2e_credits_deal`; the module holds on every held
+      module.
 
 ## 14. The delegate decides delivery terms
 

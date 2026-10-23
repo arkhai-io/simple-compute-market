@@ -406,6 +406,13 @@ class VmAlkahestSellerStage:
                 detail=f"settlement mechanism {mechanism!r} is not configured",
             )
         if accepted_chain not in _container.configured_chain_names():
+            # A configured chain whose client the chain probe has not built yet,
+            # at start or while its endpoint is down, is retryable.
+            if accepted_chain in config.CHAINS:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"settlement chain {accepted_chain!r} is unavailable; retry",
+                )
             raise HTTPException(
                 status_code=400,
                 detail=(

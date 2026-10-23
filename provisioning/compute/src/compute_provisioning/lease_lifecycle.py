@@ -278,8 +278,15 @@ class LeaseLifecycleService:
         return released
 
     async def check_leases(self) -> dict:
-        """The timer's cycle: blocks at the gate while paused."""
-        if not self._resume_event.is_set():
+        """The timer's cycle: blocks at the gate while paused.
+
+        The gate is read again after each wake: a resume and a pause in quick
+        succession wake the waiter with the watchdog paused again, and a pause
+        that answered "at the gate" must hold that cycle back. Nothing awaits
+        between the last read and the count, so no pause can read the gate in
+        between.
+        """
+        while not self._resume_event.is_set():
             logger.debug("[LEASE_LIFECYCLE] Cycle blocked — watchdog is paused")
             await self._resume_event.wait()
         self._timer_cycles_in_flight += 1
