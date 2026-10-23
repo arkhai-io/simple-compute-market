@@ -50,10 +50,10 @@ def apply_ansible_config() -> None:
 def initialise_container_resources() -> None:
     """Wire the DI container and verify the DB schema is up to date.
 
-    Migrations are no longer applied in-process here (see ARCHITECTURE.md
-    § Schema Migration Execution) — they must be applied ahead of time via
-    the Helm init container, ``compute-provisioning-migrate``, or ``make migrate``.
-    This step only checks the schema version and fails fast with an
+    Migrations are not applied in-process here (see
+    openspec/specs/deployment-state/spec.md, "Service-owned migration history")
+    — they must be applied ahead of time via the Helm init container,
+    ``compute-provisioning-migrate``, or ``make migrate``. This step only checks the schema version and fails fast with an
     actionable message if it's behind, so a missed migration surfaces as an
     obvious startup error rather than a query hitting a missing column
     later.
@@ -174,6 +174,17 @@ def import_pool_definitions_if_configured() -> None:
     _definition_importer().import_pool_definitions()
 
 
+def seed_initial_pools_if_fresh() -> None:
+    """Seed a fresh site's pools from ``pool_seed_path``.
+
+    Runs after the pool document import, which a configured document owns, and
+    before the declaration check, which then reads the seeded pools too.
+    Migration creates no pool, so this is how a site with no pool document
+    starts with any.
+    """
+    _definition_importer().seed_initial_pools()
+
+
 def verify_pool_declarations() -> None:
     """Refuse to start while any stored pool lacks valid declarations.
 
@@ -237,6 +248,7 @@ def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
         ComputeProvisioningStartupStep(
             "import-pool-definitions", import_pool_definitions_if_configured
         ),
+        ComputeProvisioningStartupStep("seed-initial-pools", seed_initial_pools_if_fresh),
         ComputeProvisioningStartupStep(
             "verify-pool-declarations", verify_pool_declarations
         ),

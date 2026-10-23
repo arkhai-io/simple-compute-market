@@ -457,7 +457,7 @@ ok: [kvm1] => {
 # ---------------------------------------------------------------------------
 
 
-def _initialize_test_database(engine):
+def _initialize_test_database(engine, *, default_pool: bool = True):
     # resource_pools must exist before VM's ansible_pool_configs FK resolves.
     from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
@@ -477,7 +477,9 @@ def _initialize_test_database(engine):
     FulfillmentBase.metadata.create_all(bind=engine)
     # Migration creates no pool. The suite's tests place hosts and declare
     # capacity in a pool named "default", so the harness stores one, serving
-    # both compute modes.
+    # both compute modes, unless a module asks for a site with no pool.
+    if not default_pool:
+        return
     from compute_provisioning_service.db.models import DEFAULT_POOL_ID, ResourcePool
     with Session(engine) as session:
         session.add(ResourcePool(

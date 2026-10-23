@@ -974,20 +974,40 @@ tests `test_pool_declaration_startup.py`,
 `tests/unit/services/test_definition_document_restart_safety.py`, and the
 integration `conftest.py`.
 
-- [ ] 8.1 Add `seed/pools.yaml` with exactly the document in design D4, packaged
+- [x] 8.1 Add `seed/pools.yaml` with exactly the document in design D4, packaged
   with the service wheel; add `pool_seed_path = "seed/pools.yaml"` to
   `settings.toml` with a comment saying when it applies and that empty disables
   it; `Settings.resolved_pool_seed_path` resolves a relative path against the
   settings file's directory and returns none for an empty value (D4). Unit
   (`test_config.py`): default, absolute, relative, and empty values. Packaging:
   the built wheel contains `seed/pools.yaml`.
-- [ ] 8.2 Add the startup step `seed-initial-pools` after
+  Done. The document's pools are D4's exactly, under a header comment saying
+  when it applies. A blank value counts as empty. Unit (`test_config.py`, the
+  service's own `settings.toml` and a profile loaded by its loader): the
+  packaged default resolves to `seed/pools.yaml` beside `settings.toml` and
+  the file exists; an absolute path is kept; a relative one resolves against
+  the settings directory, not the working directory (the helper `chdir`s to
+  a temporary directory); empty and blank give `None`. Packaging: after `make
+  dist`, `unzip -l` of `arkhai_compute_provisioning_service-0.17.2-py3-none-any.whl`
+  lists `compute_provisioning_service/seed/pools.yaml` (hatchling ships every
+  file under the package, as it ships `settings.toml` and `config/`).
+- [x] 8.2 Add the startup step `seed-initial-pools` after
   `import-pool-definitions` and before `verify-pool-declarations` (D4). When no
   `pool_definitions_path` is configured, `pool_seed_path` is not empty, and no
   pool is stored, it applies the seed document through the pool service's
   `import_pools_in_session` in one transaction, recording no digest, and logs each
   created pool at INFO; a missing or invalid seed document fails startup.
-- [ ] 8.3 Persistence integration (`test_pool_declaration_startup.py`, real importer,
+  Done: `DefinitionDocumentImporter.seed_initial_pools` and the step
+  `app_runtime.seed_initial_pools_if_fresh`. A disabled pool counts as
+  stored. The seed file is read only once the other conditions hold, so a
+  missing seed document fails startup only where it would apply: a site
+  holding pools, or one with a pool document, never reads it. The emptiness
+  check and the import share one transaction. Each created pool is logged
+  ("Pool seed: created pool <id> from <path>"), and each skip is logged with
+  its reason. The other stale "ARCHITECTURE.md § Schema Migration Execution"
+  citation, in `initialise_container_resources`, now cites the
+  deployment-state spec.
+- [x] 8.3 Persistence integration (`test_pool_declaration_startup.py`, real importer,
   file-backed SQLite): a fresh database with no pool document gets `vm-default`
   and `bare-metal-default` with valid declarations and no recorded digest, and
   the declaration check passes; with a pool document, its pools and no seed; with
@@ -995,12 +1015,49 @@ integration `conftest.py`.
   or invalid seed document, a failed startup and no pool; the step order. Replace
   the tests built on the migration-seeded or document-created `default` with
   these cases.
-- [ ] 8.4 Application integration through the typed clients: on a fresh service
+  Done. Each case runs the real startup steps in the service's order
+  (`import_pool_definitions_if_configured`, `seed_initial_pools_if_fresh`,
+  `verify_pool_declarations`), with the module's settings and container
+  attributes replaced by the deployment's, over `run_migrations`' database and
+  the packaged seed resolved by the service's own settings. Cases:
+  - fresh, no document: both pools, enabled, with their provider, their mode
+    delivered and advertised, backed, and no playbook; an INFO line per
+    created pool; no import recorded of any kind; a second start changes
+    nothing;
+  - fresh with a document (`_DECLARED_DOCUMENT` and the bare-metal lane's
+    `dev-env/bare-metal/resource-pools.yaml`): only its pool, and its digest
+    recorded;
+  - stored pools, and a stored pool that is disabled: no seed, no change;
+  - empty `pool_seed_path`: no pools, and startup passes;
+  - a missing seed document, and an invalid one whose two valid entries come
+    before the bad one: startup fails and no pool is created;
+  - a bad or missing pool document on a fresh site: startup fails, and the
+    seed step does not stand in for it;
+  - the step order.
+  Replaced: the document-created `default` test (now the fresh-with-document
+  case), the interrupted first migration (migration creates no pool, which
+  7.2 shows), and the existing-`default` state test (now the stored-pools
+  case). Kept: the declaration-check tests, the refused predating document,
+  the unchanged document, the provider-immutability tests, and the stand-in
+  `existing_default` fixture, which now is that case's site.
+- [x] 8.4 Application integration through the typed clients: on a fresh service
   composed with the default seed, `vm-default` and `bare-metal-default` list
   through the pool client, a host registered with `pool_id: vm-default` and a
   capacity declared into it are admitted, and a host registered without a pool
   sells nothing.
-- [ ] 8.5 **Verification checkpoint.** Unit 8.1; service integration 8.3;
+  Done as `test_pool_seed_api.py`, over the in-process app through the
+  typed family, pool, and site clients. The module overrides `db_engine` so
+  the harness stores no pool (`_initialize_test_database(default_pool=False)`,
+  a new keyword), then runs the service's seed step with the packaged path
+  over the harness's pool service. Cases: exactly the two seeded pools list,
+  enabled, with their providers; a host registered into `vm-default` is
+  placed and declares nothing until capacity naming it is registered, after
+  which a VM claim is reserved and the projection shows the declaration under
+  `vm-default`; a host registered with no pool reads back `null`, no
+  declaration exists, every projected pool is empty, and a VM claim is not
+  reserved. The step runs directly rather than through the app's lifespan,
+  which the harness never runs (1.2's handoff).
+- [x] 8.5 **Verification checkpoint.** Unit 8.1; service integration 8.3;
   application integration 8.4. Run `make test` in `provisioning/compute/service`,
   `make check-packaging`, and `make check-comment-hygiene`.
   End-to-end: the VM and bare-metal Helm releases and VM compose configure no pool
@@ -1010,6 +1067,24 @@ integration `conftest.py`.
   its document and boots unseeded (`e2e_bare_metal_publication`,
   `e2e_bare_metal_introduction`, `e2e_bare_metal_mock_deal`). No new scenario is
   owed: seeding is one service's startup transaction.
+  Evidence: `make -C provisioning/compute/service test` — unit 658 passed,
+  integration 520 passed; `make dist` and the wheel listing of 8.1; `make
+  check-packaging` and `make check-change` (comment hygiene included)
+  passed; repository `make test` exited 0. End-to-end scenarios confirmed as
+  planned: the only stack mounting a pool document is the bare-metal compose
+  file (`domains/bare_metal/compose.yml`, `PROVISIONING_POOL_DEFINITIONS_PATH`),
+  and the provisioning chart's `definitions.pools` is empty by default, so
+  the VM Helm and compose stacks and the bare-metal Helm release boot on the
+  seed. The VM scenarios still need section 9 to create their pools without
+  reading `default`. No `Owed by validation:` line: the section changes no
+  chart. Fresh-context check: started, and ended early when the API's rate
+  limit stopped it, before it reported; one check is run over sections 8 and
+  9 together at section 9's checkpoint instead.
+  Handoff: a test that needs a fresh site through the in-process app
+  overrides `db_engine` with `_initialize_test_database(engine,
+  default_pool=False)` and runs the seed step itself, as
+  `test_pool_seed_api.py` does. A VM pool stating no playbook reads back with
+  `provider_config["playbook_path"]` as `None`, not as an empty mapping.
 
 ## 9. E2E pools and smoke tests
 

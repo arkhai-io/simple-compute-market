@@ -295,6 +295,53 @@ def test_the_packaged_defaults_state_no_retired_setting(
     settings.refuse_retired_settings()
 
 
+_SETTINGS_DIR = Path(config_module.__file__).parent
+
+
+def test_the_packaged_pool_seed_document_is_the_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch)
+
+    assert settings.resolved_pool_seed_path == (_SETTINGS_DIR / "seed/pools.yaml").resolve()
+    assert settings.resolved_pool_seed_path.is_file()
+
+
+def test_an_absolute_pool_seed_path_is_taken_as_stated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile=f'pool_seed_path: "{tmp_path / "pools.yaml"}"\n'
+    )
+
+    assert settings.resolved_pool_seed_path == (tmp_path / "pools.yaml").resolve()
+
+
+def test_a_relative_pool_seed_path_resolves_against_the_settings_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not against the working directory, which the profile loader moved to."""
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile='pool_seed_path: "seed/other.yaml"\n'
+    )
+
+    assert settings.resolved_pool_seed_path == (_SETTINGS_DIR / "seed/other.yaml").resolve()
+
+
+@pytest.mark.parametrize("value", ['""', '"  "'])
+def test_an_empty_pool_seed_path_disables_seeding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch, profile=f"pool_seed_path: {value}\n")
+
+    assert settings.resolved_pool_seed_path is None
+
+
 def test_the_retired_playbook_setting_in_a_profile_is_refused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

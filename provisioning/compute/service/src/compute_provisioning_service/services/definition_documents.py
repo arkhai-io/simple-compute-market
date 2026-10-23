@@ -40,12 +40,13 @@ from market_site import (
 
 from compute_provisioning import DefinitionDocumentContribution
 
-from compute_provisioning_service.db.models import DefinitionDocumentImport
+from compute_provisioning_service.db.models import DefinitionDocumentImport, ResourcePool
 
 logger = logging.getLogger(__name__)
 
 _CAPACITY = "capacity"
 _POOLS = "pools"
+_POOL_SEED = "pool-seed"
 
 
 class CapacityDefinitionsRejected(ValueError):
@@ -122,6 +123,39 @@ class DefinitionDocumentImporter:
             label="Pool-definitions",
             apply=self._apply_pools,
         )
+
+    def seed_initial_pools(self) -> ImportOutcome:
+        """Create a fresh site's pools from its seed document.
+
+        Applies only when no pool document is configured and no pool is
+        stored: a configured document is the site's authority over its pools,
+        and a site holding any pool is not fresh, so its pools are never
+        touched. The seed goes through the pool document's validation and
+        import in one transaction, so it lands whole or not at all; on an empty
+        pool table that import only creates. No digest is recorded: the seed is
+        not a submitted document, and a later change to it reaches no site that
+        already holds pools.
+        """
+        if getattr(self._settings, "resolved_pool_definitions_path", None) is not None:
+            logger.info("Pool seed: skipped — a pool document is configured")
+            return ImportOutcome(_POOL_SEED, False, "pool document configured")
+        path = getattr(self._settings, "resolved_pool_seed_path", None)
+        if path is None:
+            logger.info("Pool seed: disabled — pool_seed_path is empty")
+            return ImportOutcome(_POOL_SEED, False, "disabled")
+
+        with self._session_factory() as db, db.begin():
+            if db.query(ResourcePool.id).first() is not None:
+                logger.info("Pool seed: skipped — pools are already stored")
+                return ImportOutcome(_POOL_SEED, False, "pools stored")
+            if not path.exists():
+                raise FileNotFoundError(f"Configured pool seed file does not exist: {path}")
+            diff = self._pool_service.import_pools_in_session(
+                db, path.read_text(encoding="utf-8")
+            )
+        for pool_id in diff.created:
+            logger.info("Pool seed: created pool %s from %s", pool_id, path)
+        return ImportOutcome(_POOL_SEED, True, f"created={len(diff.created)}")
 
     def import_capacity_definitions(self) -> ImportOutcome:
         """Reconcile capacity declarations. They run after pools, which a

@@ -1,29 +1,34 @@
-"""Startup refuses pools without valid advertisement and backing declarations.
+"""A site's pools at startup: the pool document, the fresh-site seed, and the
+declaration check.
 
-A pool lacking either declaration must never reach the resource-pool
+A configured pool document is the site's authority over its pools. A fresh site
+with none is seeded from ``pool_seed_path``, once, and a site that holds any
+pool is never seeded. Then every stored pool must carry valid advertisement and
+backing declarations: a pool lacking either must never reach the resource-pool
 projection, where a consumer could not tell it from a site that predates the
-declarations. The service therefore refuses to start, naming the pool, rather
-than serving it.
+declarations, so the service refuses to start, naming the pool.
 
-External boundary: SQLAlchemy against file-backed SQLite and a real mounted
-pool document in a temp directory, driven through the real startup entry
-points. Both are deterministic and do no network I/O.
+External boundary: SQLAlchemy against file-backed SQLite and real pool and
+seed documents in a temp directory, driven through the real startup entry
+points and the real importer. Both are deterministic and do no network I/O.
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
 
 from bare_metal_provisioning_adapter.services.bare_metal_pool_config_handler import BareMetalPoolConfigHandler
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from compute_provisioning_service import app_runtime
 from compute_provisioning_service import container as _container_module
+from compute_provisioning_service.config import settings as service_settings
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.models import DefinitionDocumentImport
 from compute_provisioning_service.services.definition_documents import (
@@ -35,12 +40,21 @@ from market_resource_pools import (
     ResourcePool,
     ResourcePoolService,
 )
+from market_resource_pools_contracts import resolve_pool_declarations
 from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.services.ansible_pool_config_handler import (
     AnsiblePoolConfigHandler,
 )
 
 _POOL_KIND = "pools"
+
+# The seed document the service is packaged with, resolved as the service
+# resolves its default `pool_seed_path`.
+_PACKAGED_SEED = service_settings.resolved_pool_seed_path
+
+_BARE_METAL_DOCUMENT = (
+    Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml"
+).read_text(encoding="utf-8")
 
 _DECLARED_DOCUMENT = """
 pools:
@@ -68,7 +82,16 @@ pools:
 
 
 class _Deployment:
-    def __init__(self, tmp_path, monkeypatch, *, pool_document=None, existing_default=False):
+    """One database, a pool document path, and a seed document path.
+
+    ``start`` runs the startup steps that decide a site's pools, in the
+    service's order, against this deployment's configuration.
+    """
+
+    def __init__(
+        self, tmp_path, monkeypatch, *,
+        pool_document=None, seed=_PACKAGED_SEED, existing_default=False,
+    ):
         self.engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
         self.document = tmp_path / "pools.yaml"
         if pool_document is not None:
@@ -99,14 +122,25 @@ class _Deployment:
                 "bare_metal.ansible": BareMetalPoolConfigHandler(),
             },
         )
-        monkeypatch.setattr(
-            _container_module,
-            "resolved_resource_pool_service",
-            self.pool_service,
-            raising=False,
+        self.settings = SimpleNamespace(
+            resolved_pool_definitions_path=self.document if pool_document is not None else None,
+            resolved_pool_seed_path=seed,
         )
+        monkeypatch.setattr(app_runtime, "settings", self.settings)
+        for name, value in (
+            ("resolved_resource_pool_service", self.pool_service),
+            ("resolved_session_factory", self.session_factory),
+            ("resolved_capacity_ledger_service", None),
+        ):
+            monkeypatch.setattr(_container_module, name, value, raising=False)
+
+    def start(self) -> None:
+        app_runtime.import_pool_definitions_if_configured()
+        app_runtime.seed_initial_pools_if_fresh()
+        app_runtime.verify_pool_declarations()
 
     def importer(self) -> DefinitionDocumentImporter:
+        """The importer over the mounted document, whether or not configured."""
         return DefinitionDocumentImporter(
             session_factory=self.session_factory,
             settings=SimpleNamespace(resolved_pool_definitions_path=self.document),
@@ -117,6 +151,13 @@ class _Deployment:
         with self.session_factory() as db:
             row = db.get(DefinitionDocumentImport, _POOL_KIND)
             return None if row is None else row.digest
+
+    def recorded_kinds(self) -> list[str]:
+        with self.session_factory() as db:
+            return [row.document_kind for row in db.query(DefinitionDocumentImport)]
+
+    def pool_ids(self) -> list[str]:
+        return sorted(pool.id for pool in self.pool_service.list_pools())
 
     def default_tags(self) -> dict:
         with Session(self.engine) as db:
@@ -176,105 +217,114 @@ def test_an_unchanged_document_over_valid_state_still_starts(deployment):
     app_runtime.verify_pool_declarations()
 
 
-def test_the_check_runs_after_the_pool_document_import():
+def test_the_seed_runs_between_the_pool_document_and_the_declaration_check():
     names = [step.name for step in app_runtime.startup_steps()]
 
-    assert names.index("import-pool-definitions") < names.index("verify-pool-declarations")
-    assert names.index("verify-pool-declarations") < names.index("seed-inventory")
-
-
-@pytest.mark.parametrize("bare_metal", [False, True])
-def test_a_fresh_database_creates_default_from_its_mounted_document(
-    tmp_path, monkeypatch, bare_metal,
-):
-    document = (
-        (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml")
-        .read_text(encoding="utf-8")
-        if bare_metal else _DECLARED_DOCUMENT
+    assert (
+        names.index("import-pool-definitions")
+        < names.index("seed-initial-pools")
+        < names.index("verify-pool-declarations")
+        < names.index("seed-inventory")
     )
-    deployment = _Deployment(tmp_path, monkeypatch, pool_document=document)
-    assert deployment.pool_service.get_pool("default") is None
-    # A repeated migration before the first application start must not claim
-    # the provider that the mounted document is going to declare.
-    run_migrations(deployment.engine)
-    assert deployment.pool_service.get_pool("default") is None
 
-    assert deployment.importer().import_pool_definitions().reconciled is True
-    created = deployment.pool_service.get_pool("default")
-    assert created.provider == ("bare_metal.ansible" if bare_metal else "vm.ansible")
-    if bare_metal:
-        assert created.provider_config == {}
-        assert created.policy_tags["deliverable_modes"] == []
-        assert created.policy_tags["advertisable_modes"] == []
-    else:
-        assert created.provider_config["playbook_path"] == "/configured/playbook.yaml"
-    assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
-    assert deployment.importer().import_pool_definitions().reconciled is False
-    app_runtime.verify_pool_declarations()
 
+def test_a_fresh_site_with_no_pool_document_is_seeded_once(tmp_path, monkeypatch, caplog):
+    deployment = _Deployment(tmp_path, monkeypatch)
+
+    with caplog.at_level(logging.INFO):
+        deployment.start()
+
+    assert deployment.pool_ids() == ["bare-metal-default", "vm-default"]
+    for pool_id, provider, mode in (
+        ("vm-default", "vm.ansible", "vm"),
+        ("bare-metal-default", "bare_metal.ansible", "bare_metal"),
+    ):
+        pool = deployment.pool_service.get_pool(pool_id)
+        assert (pool.provider, pool.enabled) == (provider, True)
+        # Neither pool states a playbook: each job takes its domain's
+        # configured one when it is prepared.
+        assert pool.provider_config.get("playbook_path") is None
+        declarations = resolve_pool_declarations(pool.policy_tags)
+        assert declarations.advertisable_modes == frozenset({mode})
+        assert declarations.backing.label == "backed"
+        assert pool.policy_tags["deliverable_modes"] == [mode]
+        assert f"Pool seed: created pool {pool_id} from {_PACKAGED_SEED}" in caplog.text
+    # The seed is no submitted document: nothing records it.
+    assert deployment.recorded_kinds() == []
+
+    # A second start finds pools stored and changes nothing.
     before = deployment.pool_service.export_pools_yaml()
-    changed = yaml.safe_load(_DECLARED_DOCUMENT)
-    if not bare_metal:
-        changed["pools"][0].update(provider="bare_metal.ansible", provider_config={})
-    deployment.document.write_text(yaml.safe_dump(changed), encoding="utf-8")
-    with pytest.raises(PoolValidationError, match="fixed at creation"):
-        deployment.importer().import_pool_definitions()
+    deployment.start()
     assert deployment.pool_service.export_pools_yaml() == before
+    assert deployment.recorded_kinds() == []
+
+
+@pytest.mark.parametrize("document", [_DECLARED_DOCUMENT, _BARE_METAL_DOCUMENT])
+def test_a_fresh_site_with_a_pool_document_takes_its_pools_and_no_seed(
+    tmp_path, monkeypatch, document,
+):
+    deployment = _Deployment(tmp_path, monkeypatch, pool_document=document)
+
+    deployment.start()
+
+    assert deployment.pool_ids() == [DEFAULT_POOL_ID]
     assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
 
 
-@pytest.mark.parametrize("interruption", ["before-versioned-migrations", "before-pool-migration"])
-@pytest.mark.parametrize("pool_document_configured", [False, True])
-def test_an_interrupted_first_migration_leaves_pools_to_startup(
-    tmp_path, monkeypatch, interruption, pool_document_configured,
-):
-    document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
-    engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
+def test_a_site_holding_pools_is_not_seeded(deployment):
+    before = deployment.pool_service.export_pools_yaml()
 
-    def interrupt_at_database_boundary(connection, cursor, statement, parameters, context, executemany):
-        before_versions = "CREATE TABLE IF NOT EXISTS schema_migrations" in statement
-        # The resource-pool migration's first statement counts the hosts.
-        before_pool = statement.strip() == "SELECT COUNT(*) FROM hosts"
-        if (interruption == "before-versioned-migrations" and before_versions) or (
-            interruption == "before-pool-migration" and before_pool
-        ):
-            raise RuntimeError("interrupted schema initialization")
+    deployment.start()
 
-    event.listen(engine, "before_cursor_execute", interrupt_at_database_boundary)
-    try:
-        with pytest.raises(RuntimeError, match="interrupted schema initialization"):
-            run_migrations(engine)
-    finally:
-        event.remove(engine, "before_cursor_execute", interrupt_at_database_boundary)
+    assert deployment.pool_ids() == [DEFAULT_POOL_ID]
+    assert deployment.pool_service.export_pools_yaml() == before
+    assert deployment.recorded_kinds() == []
 
-    with engine.connect() as connection:
-        assert {"resource_pools", "hosts"} <= set(inspect(connection).get_table_names())
-        assert connection.execute(text("SELECT count(*) FROM resource_pools")).scalar_one() == 0
-        assert connection.execute(text("SELECT count(*) FROM hosts")).scalar_one() == 0
-        if interruption == "before-pool-migration":
-            applied = set(connection.execute(text("SELECT id FROM schema_migrations")).scalars())
-            assert "20260603_001_ansible_jobs_escrow_uid" in applied
-            assert "20260713_002_resource_pools_and_hosts_pool_id" not in applied
-    engine.dispose()
 
-    deployment = _Deployment(
-        tmp_path, monkeypatch, pool_document=document if pool_document_configured else None,
-    )
-    if pool_document_configured:
-        assert deployment.pool_service.get_pool("default") is None
-        assert deployment.importer().import_pool_definitions().reconciled is True
-        assert deployment.pool_service.get_pool("default").provider == "bare_metal.ansible"
-        assert deployment.recorded_digest() == DefinitionDocumentImporter.digest_of(document)
-    else:
-        assert deployment.pool_service.list_pools() == []
-        assert deployment.recorded_digest() is None
-    app_runtime.verify_pool_declarations()
+def test_a_site_holding_only_a_disabled_pool_is_not_seeded(tmp_path, monkeypatch):
+    deployment = _Deployment(tmp_path, monkeypatch, existing_default=True)
+    deployment.pool_service.disable_pool(DEFAULT_POOL_ID)
+
+    deployment.start()
+
+    assert deployment.pool_ids() == [DEFAULT_POOL_ID]
+
+
+def test_an_empty_seed_path_seeds_nothing_and_starts(tmp_path, monkeypatch):
+    deployment = _Deployment(tmp_path, monkeypatch, seed=None)
+
+    deployment.start()
+
+    assert deployment.pool_ids() == []
+
+
+def test_a_missing_seed_document_fails_startup_and_creates_no_pool(tmp_path, monkeypatch):
+    deployment = _Deployment(tmp_path, monkeypatch, seed=tmp_path / "absent.yaml")
+
+    with pytest.raises(FileNotFoundError, match="pool seed"):
+        deployment.start()
+
+    assert deployment.pool_ids() == []
+
+
+def test_an_invalid_seed_document_fails_startup_and_creates_no_pool(tmp_path, monkeypatch):
+    """A valid entry ahead of the invalid one is not created either: the seed
+    lands whole or not at all."""
+    seed = yaml.safe_load(_PACKAGED_SEED.read_text(encoding="utf-8"))
+    seed["pools"].append({"id": "no-provider", "label": "No provider"})
+    path = tmp_path / "seed.yaml"
+    path.write_text(yaml.safe_dump(seed), encoding="utf-8")
+    deployment = _Deployment(tmp_path, monkeypatch, seed=path)
+
+    with pytest.raises(PoolValidationError, match=r"pools\[2\]"):
+        deployment.start()
+
+    assert deployment.pool_ids() == []
+    assert deployment.recorded_kinds() == []
 
 
 def test_a_mounted_document_does_not_replace_an_existing_default_provider(deployment):
-    document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
-    deployment.document.write_text(document, encoding="utf-8")
-    run_migrations(deployment.engine)
+    deployment.document.write_text(_BARE_METAL_DOCUMENT, encoding="utf-8")
 
     with pytest.raises(PoolValidationError, match="fixed at creation"):
         deployment.importer().import_pool_definitions()
@@ -282,38 +332,8 @@ def test_a_mounted_document_does_not_replace_an_existing_default_provider(deploy
     assert deployment.recorded_digest() is None
 
 
-def test_existing_pool_state_without_hosts_keeps_its_default_configuration(
-    tmp_path, monkeypatch,
-):
-    engine = create_engine(f"sqlite:///{tmp_path / 'provisioning.db'}")
-    ResourcePool.__table__.create(engine)
-    AnsiblePoolConfig.__table__.create(engine)
-    with Session(engine) as session, session.begin():
-        session.add(ResourcePool(
-            id="default", label="Existing default", provider="ansible",
-            enabled=True, policy_tags={},
-        ))
-        session.flush()
-        session.add(AnsiblePoolConfig(
-            pool_id="default", playbook_path="/configured/original.yaml",
-            extra_vars={},
-        ))
-    engine.dispose()
-    document = (Path(__file__).resolve().parents[5] / "dev-env/bare-metal/resource-pools.yaml").read_text()
-
-    deployment = _Deployment(tmp_path, monkeypatch, pool_document=document)
-
-    default = deployment.pool_service.get_pool("default")
-    assert default.label == "Existing default"
-    assert default.provider == "vm.ansible"
-    assert default.provider_config["playbook_path"] == "/configured/original.yaml"
-    with pytest.raises(PoolValidationError, match="fixed at creation"):
-        deployment.importer().import_pool_definitions()
-    assert deployment.recorded_digest() is None
-
-
 @pytest.mark.parametrize("missing", [False, True])
-def test_a_fresh_database_does_not_substitute_a_default_for_a_bad_document(
+def test_a_bad_pool_document_on_a_fresh_site_is_not_replaced_by_the_seed(
     tmp_path, monkeypatch, missing,
 ):
     deployment = _Deployment(
@@ -321,9 +341,13 @@ def test_a_fresh_database_does_not_substitute_a_default_for_a_bad_document(
     )
     if missing:
         deployment.document.unlink()
+
     with pytest.raises(FileNotFoundError if missing else PoolValidationError):
-        deployment.importer().import_pool_definitions()
-    assert deployment.pool_service.get_pool("default") is None
+        deployment.start()
+    # The seed step itself leaves a site with a configured document alone.
+    app_runtime.seed_initial_pools_if_fresh()
+
+    assert deployment.pool_ids() == []
     assert deployment.recorded_digest() is None
 
 

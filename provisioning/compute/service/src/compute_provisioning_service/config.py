@@ -136,6 +136,20 @@ class Settings:
         return Path(raw).resolve() if raw else None
 
     @property
+    def resolved_pool_seed_path(self) -> Path | None:
+        """The fresh-site pool seed document, or ``None`` when seeding is off.
+
+        A relative path resolves against the directory of ``settings.toml``,
+        where the packaged seed document lives, so the default names it in an
+        installed wheel whatever the working directory.
+        """
+        raw = str(getattr(self._source, "pool_seed_path", "") or "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        return (path if path.is_absolute() else _SRC_DIR / path).resolve()
+
+    @property
     def resolved_capacity_definitions_path(self) -> Path | None:
         raw = str(getattr(self._source, "capacity_definitions_path", "") or "").strip()
         return Path(raw).resolve() if raw else None

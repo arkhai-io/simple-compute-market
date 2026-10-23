@@ -105,9 +105,18 @@ inventory_ini = ""
 # docs/development/DEPLOYMENT_AND_CONFIG.md, "Definition documents"). Reconciled
 # at startup only when the document differs from the one last reconciled, like
 # relay definitions; a reconciliation disables pools the document does not
-# name. Empty by default: pools are then administered through the API, and
-# migration creates none.
+# name. Empty by default: pools are then administered through the API. Migration
+# creates no pool in either case.
 pool_definitions_path = ""
+
+# Pool seed document
+# A pool document applied once at startup to a fresh site: only when no
+# pool_definitions_path is configured and no pool is stored, and never again
+# once it has created pools. No digest is recorded, so it is never reconciled.
+# A relative path resolves against this file's directory; the packaged document
+# holds `vm-default` and `bare-metal-default`. Empty disables seeding. A seed
+# document that is missing or invalid, when it applies, fails startup.
+pool_seed_path = "seed/pools.yaml"
 
 # Relay definitions
 # Path to a YAML file of relay definitions. Reconciled at startup only when the
