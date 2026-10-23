@@ -1,10 +1,7 @@
 """A quota-backed listing: its durable binding, its source recheck, and its reconciliation.
 
-A listing is bound at creation to the site and quota resource it sells, the pool
-that resource belongs to, and the backing that pool declares. Every capacity
-effect, reconciliation, and recheck builds the listing's capacity binding from
-that record, never from the published listing. The offering mode, contribution
-identifier, and source envelope kind are the domain's, read from its bundle.
+Every capacity effect, reconciliation, and recheck reads the listing's durable
+binding, never the published listing.
 """
 
 from __future__ import annotations
@@ -30,7 +27,7 @@ from arkhai_api_selling.contributions import SellingContributions
 from arkhai_api_selling.issuance import (
     MissingQuotaResource,
     issuance_subject,
-    stored_listing_resource,
+    decode_stored,
 )
 
 LISTING_SOURCE_SCHEMA_VERSION = 1
@@ -58,13 +55,8 @@ def quota_pool(
 ) -> QuotaPool:
     """The enabled pool advertising the domain's offering mode that holds ``resource_id``.
 
-    ``pool_id`` is the pool a bound listing recorded: the resource must still
-    be in that pool, because a listing represents its source as bound, and a
-    resource now in another pool is not that source whatever that pool
-    declares. Without it, as at listing creation, any projected pool holding
-    the resource is the one. Read from the site's resource-pool projection,
-    through the one reader of pool declarations, so a pool whose declarations
-    do not resolve is refused rather than read as either backing.
+    With ``pool_id`` (a bound listing's recorded pool) the resource must still be
+    in that pool. A pool whose declarations do not resolve is refused.
     """
     holding = next(
         (
@@ -128,14 +120,10 @@ async def record_accepted_listing(
     listing_id: str,
     listing_record: Mapping[str, Any],
 ) -> None:
-    """Pin the listing a buyer accepts to the negotiation, before its success is recorded.
+    """Record the listing a buyer accepts with the negotiation, before its success is recorded.
 
-    Settlement issues from this record, never from the stored listing, so a
-    listing changed after acceptance cannot change what the purchase issues.
-    The record is immutable: recording a different listing for the same
-    negotiation is refused. A negotiation's artifacts are keyed by its domain
-    binding, so the thread first takes its listing's binding, which binds a
-    thread at most once and leaves a bound one as it is.
+    Artifacts are keyed by the thread's domain binding, so the thread first takes
+    its listing's binding.
     """
     await repository.copy_listing_binding_to_thread(
         negotiation_id=negotiation_id, listing_id=listing_id
@@ -143,9 +131,41 @@ async def record_accepted_listing(
     await repository.save_domain_artifact(
         negotiation_id=negotiation_id,
         artifact_slot=ACCEPTED_LISTING_SLOT,
-        value={"listing_resource": _listing_resource(contributions, listing_record)},
+        value=domain_listing(contributions, listing_record),
         registry=domain_registry(contributions, domain),
     )
+
+
+async def accepted_listing(
+    contributions: SellingContributions,
+    repository: Any,
+    *,
+    domain: MarketDomainContract,
+    negotiation_id: str,
+    listing_id: str,
+) -> dict[str, Any]:
+    """The listing the buyer accepted, as the domain's listing schema reads it.
+
+    An unbound thread was accepted before acceptances were recorded and reads
+    the stored listing. A bound thread must name ``listing_id`` and carry its
+    record; otherwise it is refused.
+    """
+    try:
+        binding = await repository.load_thread_binding(negotiation_id=negotiation_id)
+    except StorefrontDomainBindingError:
+        return domain_listing(contributions, await repository.load_listing(listing_id=listing_id))
+    if binding.listing_id != listing_id:
+        raise ValueError(
+            f"negotiation {negotiation_id!r} accepted listing {binding.listing_id!r}, not {listing_id!r}"
+        )
+    recorded = await repository.load_domain_artifact(
+        negotiation_id=negotiation_id,
+        artifact_slot=ACCEPTED_LISTING_SLOT,
+        registry=domain_registry(contributions, domain),
+    )
+    if recorded is None:
+        raise ValueError(f"negotiation {negotiation_id!r} has no record of its accepted listing")
+    return domain_listing(contributions, _as_mapping(recorded))
 
 
 async def accepted_listing_resource(
@@ -156,26 +176,25 @@ async def accepted_listing_resource(
     negotiation_id: str,
     listing_id: str,
 ) -> Mapping[str, Any]:
-    """The ``listing_resource`` the buyer accepted.
-
-    Recording binds the thread, so a thread with no domain binding was accepted
-    before acceptances were recorded, and reads the stored listing as it
-    stands. A bound thread must carry its record, read under its binding: a
-    missing record, or one that disagrees with the thread, is refused rather
-    than replaced by the stored listing.
-    """
-    try:
-        await repository.load_thread_binding(negotiation_id=negotiation_id)
-    except StorefrontDomainBindingError:
-        return _listing_resource(contributions, await repository.load_listing(listing_id=listing_id))
-    recorded = await repository.load_domain_artifact(
-        negotiation_id=negotiation_id,
-        artifact_slot=ACCEPTED_LISTING_SLOT,
-        registry=domain_registry(contributions, domain),
+    """The ``listing_resource`` of the listing the buyer accepted."""
+    listing = await accepted_listing(
+        contributions, repository, domain=domain, negotiation_id=negotiation_id, listing_id=listing_id
     )
-    if recorded is None:
-        raise ValueError(f"negotiation {negotiation_id!r} has no record of its accepted listing")
-    return _listing_resource(contributions, _as_mapping(recorded))
+    return listing["listing_resource"]
+
+
+def domain_listing(
+    contributions: SellingContributions, record: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """A stored listing narrowed to the domain's listing schema and validated by it."""
+    if record is None:
+        raise ValueError("the listing is gone from the local store")
+    values = {
+        name: decode_stored(record[name])
+        for name in contributions.listing_schema.model_fields
+        if record.get(name) is not None
+    }
+    return contributions.listing_schema.model_validate(values).model_dump(mode="json")
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:
@@ -193,11 +212,9 @@ def prepare_listing_binding(
 ) -> StorefrontListingBinding:
     """The immutable binding recorded with a new listing.
 
-    The quota resource is the one the listing's issuance projection names, so
-    a listing whose projection names none is refused here, before anything is
-    published. An operator creates each listing, and several may sell one
-    quota resource, so the derivation identity is the listing itself: nothing
-    derives a listing from its source or looks one up by derivation.
+    A listing whose projection names no quota resource is refused here, before
+    anything is published. Several listings may sell one resource, so the
+    derivation identity is the listing itself.
     """
     resource_id = str(
         issuance_subject(contributions, listing_resource, listing_id=listing_id).resource_id
@@ -241,11 +258,7 @@ async def listing_binding(repository: Any, listing_id: str) -> PublicationBindin
 
 @dataclass(frozen=True)
 class BoundQuotaSource:
-    """A listing's capacity binding and the pool its durable record names.
-
-    The capacity binding carries what every market's effects need; the pool is
-    the domain's provenance, which its source checks enforce.
-    """
+    """A listing's capacity binding and the pool its durable record names."""
 
     binding: PublicationBinding
     pool_id: str
@@ -276,21 +289,12 @@ def build_listing_source_check(
     contributions: SellingContributions,
     capacity: Callable[[Any], Any],
 ) -> ListingSourceCheck:
-    """A check reading each listing's own site through its trusted site client.
+    """A check run before every seller decision and acceptance, against the listing's own site.
 
-    The negotiation runtime asks before every seller decision and every
-    acceptance. The listing itself must name, through the domain's issuance
-    projection, the quota resource its durable binding records, so an
-    acceptance never stands on a listing issuance could not serve. The declared
-    half confirms that the resource is still in the pool the binding records,
-    that the pool is enabled and advertises the domain's offering mode, and
-    that the pool still declares the backing the listing was bound with.
-    Provenance is the domain's to check; the binding's backing delegate decides
-    only whether availability is asked. The available half requires at least
-    one available unit, the condition listing creation requires. A source the
-    storefront cannot read is unverifiable, which the runtime refuses as
-    retryable. ``capacity`` returns the aggregate capacity client for a
-    repository; the check reads only the site the listing's binding names.
+    It is a declared mismatch when the listing's projection no longer names the
+    bound quota resource, or the resource has left the bound pool, or that pool is
+    disabled, stops advertising the offering mode, or changes its backing. An
+    unreadable source is unverifiable, which the runtime refuses as retryable.
     """
 
     async def check(repository: Any, listing_id: str) -> ListingSourceVerdict:
@@ -381,15 +385,12 @@ def _listing_resource(
     if record is None:
         raise ValueError("the listing is gone from the local store")
     listing = contributions.listing_schema.model_validate(
-        {"listing_resource": stored_listing_resource(record.get("listing_resource"))}
+        {"listing_resource": decode_stored(record.get("listing_resource"))}
     )
     return listing.listing_resource.model_dump(mode="json")
 
 
-# Reconciliation. Pure functions over each listing's status and binding and an
-# availability view, so the storefront's persistence stays out of them. Whether
-# availability bounds a listing is its backing's decision, which the caller
-# supplies as ``judge``.
+# Reconciliation: pure functions over listing bindings and an availability view.
 
 AvailabilityView = Mapping[tuple[str, str], int]
 """Available units keyed by exact trusted ``(site_id, resource_id)``."""
@@ -431,15 +432,9 @@ def stale_open_listing_ids(
     availability: AvailabilityView | None,
     judge: Judge,
 ) -> list[str]:
-    """Open listings whose quota resource is exhausted.
+    """Open listings whose quota resource is exhausted or gone.
 
-    A listing stays open while its quota resource has any sellable units and
-    closes on exhaustion; buyers pick the quantity per deal, and the quota
-    guard enforces the per-deal bound. ``availability=None`` (authority
-    unreachable) closes nothing — the next delta or reconcile converges. A
-    resource missing from the view is treated as exhausted: the ledger is the
-    source of sellable truth, and a listing whose resource is gone must not
-    stay open.
+    ``availability=None`` (authority unreachable) closes nothing.
     """
     if availability is None:
         return []
@@ -465,10 +460,8 @@ def reopenable_listing_ids(
 ) -> list[str]:
     """Closed listings whose quota resource has units again.
 
-    ``availability=None`` reopens nothing: with no consumption information
-    everything would look free, and reopening on ignorance over-sells. Only a
-    listing reconciliation closed is a candidate; one its seller closed stays
-    closed until the seller reopens it, whatever quota returns.
+    ``availability=None`` reopens nothing, and a listing its seller closed stays
+    closed.
     """
     if availability is None:
         return []

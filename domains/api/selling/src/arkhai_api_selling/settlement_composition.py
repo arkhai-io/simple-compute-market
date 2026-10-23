@@ -1,10 +1,7 @@
-"""A storefront's settlement composition over the shared settlement runtime, mechanism-neutral.
+"""A storefront's mechanism-neutral settlement composition over the shared settlement runtime.
 
-The storefront injects its seller stage table, one entry per mechanism it
-composes, and every mechanism decision is that entry's: the library builds the
-registry from the entries' registrations, the mechanism clients from the
-entries, and the coordinator's continuations from the entry the accepted
-Agreement selects, comparing no mechanism ID.
+Every mechanism decision belongs to the seller stage the accepted Agreement
+selects; the library compares no mechanism ID.
 """
 
 from __future__ import annotations
@@ -214,9 +211,7 @@ class SellingSettlementComposition:
         return accepted_escrows, settlement_options, readiness
 
 
-# The settlement job coordinator's continuations. A storefront binds each to its
-# stage table and collaborators; each resolves the stage the accepted Agreement
-# selected.
+# The settlement job coordinator's continuations, bound by the storefront to its stage table.
 
 
 async def prepare_settlement(stages: SettlementStageTable, **context: Any) -> Any:
@@ -312,12 +307,7 @@ async def persist_settlement_outcome(
         )
         return
     reason = outcome.reason or "fulfillment failed"
-    # Logged as well as persisted. The reason reaches the buyer in the
-    # settle-status body, and nowhere else: a settlement that fails before
-    # its first call to the credits service leaves no other trace in the
-    # storefront's output. `issuance_error:` prefixes carry a caught
-    # exception, which is the one case where the reason is the only record
-    # that it happened at all.
+    # Logged too: a failure before the first issuance call leaves no other trace.
     logger.warning(
         "[SETTLE] settlement failed for %s: %s",
         prepared.mechanism_ref,

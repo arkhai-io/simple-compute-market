@@ -137,9 +137,8 @@ def _kind(kind: str) -> tuple[Any, str]:
     return (Literal[kind], kind)  # type: ignore[valid-type]
 
 
-# Each factory is cached, so one kind yields one class. create_model rather than
-# a class statement, because a class defined inside the factory cannot name the
-# base it shadows.
+# Cached, so one kind yields one class. create_model, because a nested class
+# cannot name the base it shadows.
 
 
 @cache

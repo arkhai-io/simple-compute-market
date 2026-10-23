@@ -109,3 +109,16 @@ async def test_a_bound_negotiation_without_its_record_is_refused(tmp_path):
         await accepted_listing_resource(
             EXAMPLE, client, domain=DOMAIN, negotiation_id="neg-recorded", listing_id="L-1"
         )
+
+
+async def test_a_bound_negotiation_is_refused_for_another_listing(tmp_path):
+    client = await _storefront(tmp_path)
+    await record_accepted_listing(
+        EXAMPLE, client, domain=DOMAIN, negotiation_id="neg-recorded", listing_id="L-1",
+        listing_record=await client.load_listing(listing_id="L-1"),
+    )
+
+    with pytest.raises(ValueError, match="accepted listing 'L-1', not 'L-2'"):
+        await accepted_listing_resource(
+            EXAMPLE, client, domain=DOMAIN, negotiation_id="neg-recorded", listing_id="L-2"
+        )

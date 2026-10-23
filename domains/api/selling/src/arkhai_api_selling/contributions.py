@@ -1,8 +1,6 @@
 """What a storefront hands the selling library: one frozen bundle of its domain's contributions.
 
-The library reads every domain-specific name and value from the bundle and
-discovers or imports no domain. A field a domain may omit is optional, and its
-absence is valid.
+The library discovers or imports no domain.
 """
 
 from __future__ import annotations
@@ -26,9 +24,7 @@ _TABLE_PREFIX = re.compile(r"^[a-z][a-z0-9_]*$")
 class IssuanceSubject:
     """What a listing sells, as the authority's issuance command names it.
 
-    ``resource_id`` is the quota resource issuance reserves against; a listing
-    that names none can be neither published nor accepted. ``endpoint`` is
-    delivery metadata returned beside the key and never digested.
+    ``endpoint`` is delivery metadata returned beside the key and never digested.
     """
 
     service: str
@@ -71,11 +67,8 @@ class ConsumptionRule(enum.Enum):
 class SellingContributions:
     """One domain's contributions to the selling library.
 
-    ``kind`` is the domain's listing and provision kind literal, ``<schema>.v1``;
-    the settlement-evidence and listing-source envelope kinds are spelled from
-    its stem. ``table_prefix`` names the domain's storefront tables
-    (``<prefix>_settlement_evidence`` and its siblings) and, hyphenated, its
-    private credentials reference.
+    ``kind`` is ``<schema>.v1``, from whose stem the envelope kinds are spelled;
+    ``table_prefix`` names the domain's tables and its credentials reference.
     """
 
     label: IssuanceLabel

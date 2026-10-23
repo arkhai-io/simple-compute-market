@@ -137,9 +137,10 @@ service identity and quota resource, and the selling library MUST combine them
 with the accepted terms' quantity and key target into that command; neither
 MUST read a listing changed since acceptance. The selling library MUST record
 the listing as accepted with the negotiation, immutably, before the
-negotiation's success is recorded, and MUST issue from that record; only a
-negotiation accepted before recording existed, whose thread is unbound, MAY
-issue from the stored listing. For a quota-backed
+negotiation's success is recorded, and MUST settle and issue from that
+record, refusing a negotiation that has none or is asked for
+another listing; only a negotiation accepted before recording existed, whose
+thread is unbound, MAY issue from the stored listing. For a quota-backed
 domain the selling library MUST refuse, before publication and again before
 acceptance, a listing that names no quota resource, and before acceptance a
 listing whose quota resource differs from the one its durable binding records.

@@ -1389,6 +1389,37 @@ selling library's core-storefront edge, `ARCHITECTURE.toml`.
       without the stale checkout; `make check-change` reports only the two
       `api-family` citations closeout creates and, on the copy, the
       agent-skills case.
+      **Second review round (2026-10-23).** A re-review of `829cff2fc` was
+      triaged with the owner, who accepted fixes for five findings:
+      - *Attestation outcome.* The Alkahest stage submits its attestation
+        through the kit's `AlkahestFulfillmentPublisher` and rolls the
+        issuance back only on a definite non-submission or rejection; an
+        unknown outcome keeps the grant, records
+        `attestation_outcome_unknown`, and reports the error for an operator
+        without resubmitting. Unit: `execution reverted` rolls back, a lost
+        RPC acknowledgement does not.
+      - *An unknown grant is not compensated.* A result answering another
+        request is retryable on a stage that retries uncertain outcomes
+        (payments); elsewhere it is an error marked `grant_unknown`, which
+        runs no failure policy and keeps the hold row.
+      - *An invalid answer is a protocol violation.* A 200 whose body does
+        not parse is `grant_unknown`, never retried.
+      - *The recorded listing names its negotiation's listing.*
+        `accepted_listing` refuses a bound thread asked for another listing.
+        Library integration: refused for `L-2` after accepting `L-1`.
+      - *Alkahest settles from the record.* The whole listing, narrowed to
+        the domain's schema (`domain_listing`), is recorded at acceptance,
+        and the Alkahest stage verifies the escrow and builds its evidence
+        from it rather than from the stored listing; `_domain_order` is gone.
+        This supersedes the first round's declined note on escrow
+        verification. Unit: an in-place change to the service, endpoint, and
+        accepted escrows still verifies and issues what was accepted.
+      Task 8.5 narrows to the crash between submission and its record. The
+      owner also asked for verbose and redundant comments and docstrings in
+      this section's code to be trimmed; they were, to the invariants each
+      states. Evidence: `selling` 82 (unit, library integration); contracts
+      37; API-credits storefront 190 (unit and application integration,
+      baselines and pins unchanged); domain library 19.
 
 ## 6. Selling, part two: negotiation, publication, and lifecycle
 
@@ -1512,11 +1543,12 @@ distributions own them.
       quota the authority already committed. Keep an uncertain outcome
       pending and re-drive it under the same fulfillment identity, compensate
       only after a definite refusal, and prove a commit-then-timeout case.
-- [ ] 8.5 Chain-acknowledgement loss does not revoke a fulfilled grant: an
-      exception from `do_obligation` rolls the issuance back at once, though
-      the transaction may have been mined. Record a submission identity before
-      submitting, reconcile chain state after an uncertain outcome, and roll
-      back only once non-submission is proven.
+- [ ] 8.5 Chain-acknowledgement loss does not revoke a fulfilled grant: the
+      stage already keeps the grant on an unknown attestation outcome, but a
+      crash between submission and recording leaves no trace of the
+      submission. Record a submission identity before submitting, and
+      reconcile chain state after an unknown outcome or a restart rather
+      than leaving it to an operator.
 - [ ] 8.6 Accepted obligations are serviced after their mechanism is
       disabled: `enabled_mechanism_clients` builds a client only for an
       enabled section, so obligations accepted under Alkahest strand when it is

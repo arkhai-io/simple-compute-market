@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 from arkhai_api.issuance import IssuanceRequest, fulfillment_id, issuance_result_model
 from arkhai_api_client import AuthorityError
@@ -457,3 +458,46 @@ async def test_an_unsafe_extension_is_refused_before_the_delivery_reaches_its_st
     assert result["grant_unknown"] is True
     assert "tenant_credentials" not in result and "public_extension" not in result
     assert [event for _, event, _ in events] == ["credits_issued", "failed"]
+
+
+async def test_a_retrying_stage_retries_an_answer_to_another_request():
+    async def other_answer(request):
+        return _result(request).model_copy(update={"negotiation_id": "neg-other"})
+
+    result = await fulfill(
+        EXAMPLE, evidence=_evidence(), retry_uncertain=True,
+        credits_client=_Authority(other_answer), stage_event=_events()[1],
+    )
+
+    assert result["status"] == "pending" and "negotiation_id" in result["message"]
+
+
+async def test_a_malformed_answer_is_a_protocol_violation_even_when_retrying():
+    async def malformed(_request):
+        raise ValueError("1 validation error for IssuanceResult")
+
+    policy_calls = []
+
+    async def policy(**kwargs):
+        policy_calls.append(kwargs)
+
+    result = await fulfill(
+        EXAMPLE, evidence=_evidence(), retry_uncertain=True,
+        credits_client=_Authority(malformed), stage_event=_events()[1], apply_failure_policy=policy,
+    )
+
+    assert result["status"] == "error" and result["grant_unknown"] is True
+    assert "invalid result" in result["message"]
+    assert not policy_calls
+
+
+async def test_a_transport_failure_stays_retryable():
+    async def unreachable(_request):
+        raise httpx.ConnectError("connection refused")
+
+    result = await fulfill(
+        EXAMPLE, evidence=_evidence(), retry_uncertain=True,
+        credits_client=_Authority(unreachable), stage_event=_events()[1],
+    )
+
+    assert result["status"] == "pending"

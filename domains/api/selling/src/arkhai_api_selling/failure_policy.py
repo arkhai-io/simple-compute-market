@@ -1,11 +1,4 @@
-"""The ordered failure actions a storefront applies when its own issuance fails.
-
-The policy is the settlement runtime's ordered dispatch; the actions are the
-family's. Each storefront supplies the collaborators the actions act through:
-its capacity runtime, its listing reopen pass, its webhook settings, its
-settlement composition, whose seller stage decides a refund, and its stage
-event log.
-"""
+"""The ordered failure actions a storefront applies when its own issuance fails."""
 
 from __future__ import annotations
 
@@ -37,12 +30,9 @@ def build_failure_policy(
     composition: Callable[[], Any],
     stage_event: Callable[..., Any],
 ) -> FailurePolicy:
-    """Compose shared ordered dispatch with the family's failure actions.
+    """Compose the runtime's ordered dispatch with the family's failure actions.
 
-    ``actions_provider`` returns the configured action names, ``webhook_target``
-    the configured webhook URL (empty for none) and timeout,
-    ``composition`` the storefront's settlement composition once it is built,
-    and ``stage_event`` records the failure event.
+    ``composition`` returns the storefront's settlement composition once it is built.
     """
 
     async def release_capacity(db: Any, context: dict[str, Any]) -> dict[str, Any]:

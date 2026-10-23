@@ -1,12 +1,9 @@
 """Mechanism-neutral credit issuance from verified settlement evidence.
 
-The selected seller stage verifies a settlement's source and records it as
-evidence bound to the accepted Agreement; everything here reads that evidence
-and never compares mechanism IDs. What a deal issues comes from the listing the
-Agreement names, as recorded in the evidence, through the domain's issuance
-projection: the Agreement pins the listing's ID, the storefront writes a
-listing's resource once when it creates the listing, and republishing creates
-another listing, so a settled purchase issues what its buyer accepted.
+A seller stage verifies the settlement and records it as evidence bound to the
+accepted Agreement; issuance reads that evidence and never compares mechanism
+IDs. What a deal issues is the listing recorded at acceptance, projected through
+the domain's issuance projection.
 """
 
 from __future__ import annotations
@@ -63,12 +60,7 @@ def issuance_subject(
     *,
     listing_id: str | None = None,
 ) -> IssuanceSubject:
-    """The listing's issuance subject, refusing one that names no service or quota resource.
-
-    Publication and acceptance both call this before anything is recorded, and
-    issuance calls it again, so no path issues against a listing without a
-    quota resource.
-    """
+    """The listing's issuance subject, refusing one that names no service or quota resource."""
     subject = contributions.issuance_projection(listing_resource)
     named = f"listing {listing_id!r}" if listing_id else "the listing"
     if not subject.service.strip():
@@ -140,8 +132,8 @@ def accepted_agreement(thread: Mapping[str, Any]) -> tuple[Agreement, bytes]:
     return agreement, raw
 
 
-def stored_listing_resource(value: Any) -> Any:
-    """A stored listing's ``listing_resource``, decoded when the store keeps it as JSON text."""
+def decode_stored(value: Any) -> Any:
+    """A stored listing column, decoded when the store keeps it as JSON text."""
     if isinstance(value, (str, bytes)):
         try:
             return json.loads(value)
@@ -166,7 +158,7 @@ def settlement_evidence(
         {key: provision[key] for key in ("kind", "version", "payload")}
     )
     listing = contributions.listing_schema.model_validate(
-        {"listing_resource": stored_listing_resource(order.get("listing_resource"))}
+        {"listing_resource": decode_stored(order.get("listing_resource"))}
     )
     accepted = {
         "owner": agreement.buyer,
@@ -307,6 +299,30 @@ async def fulfill(
             "settlement_ref": settlement_ref,
         }
 
+    def _event(event: str, message: str) -> None:
+        stage_event(
+            "provision",
+            event,
+            settlement_ref=settlement_ref,
+            listing_id=listing_id,
+            resource_id=resource_id,
+            error=message,
+        )
+
+    def _retryable(message: str) -> dict[str, Any]:
+        _event("issuance_retryable", message)
+        return {"status": "pending", "message": message, "settlement_ref": settlement_ref}
+
+    def _grant_unknown(message: str) -> dict[str, Any]:
+        # The grant may exist, so nothing compensates it and the hold row stays.
+        _event("failed", message)
+        return {
+            "status": "error",
+            "message": message,
+            "settlement_ref": settlement_ref,
+            "grant_unknown": True,
+        }
+
     request = prepare_issuance_request(
         contributions,
         evidence=evidence,
@@ -321,57 +337,22 @@ async def fulfill(
             or error.status_code >= 500
         )
         if retry_uncertain and retryable:
-            stage_event(
-                "provision",
-                "issuance_retryable",
-                settlement_ref=settlement_ref,
-                listing_id=listing_id,
-                resource_id=resource_id,
-                error=str(error),
-            )
-            return {
-                "status": "pending",
-                "message": f"Issuance remains retryable: {error}",
-                "settlement_ref": settlement_ref,
-            }
+            return _retryable(f"Issuance remains retryable: {error}")
         return await _fail(error.reason, f"Issuance refused: {error}")
+    except ValueError as error:
+        # A protocol violation: retrying would only repeat it.
+        return _grant_unknown(f"Issuance produced an invalid result: {error}")
     except Exception as error:
         if retry_uncertain:
-            stage_event(
-                "provision",
-                "issuance_retryable",
-                settlement_ref=settlement_ref,
-                listing_id=listing_id,
-                resource_id=resource_id,
-                error=str(error),
-            )
-            return {
-                "status": "pending",
-                "message": f"Issuance remains retryable: {error}",
-                "settlement_ref": settlement_ref,
-            }
+            return _retryable(f"Issuance remains retryable: {error}")
         return await _fail("issuance_unreachable", f"Issuance failed: {error}")
 
     mismatch = result_mismatch(request, issuance)
     if mismatch is not None:
-        # A signed answer to another request says nothing about this one: the
-        # grant this request asked for may or may not exist. Nothing is
-        # delivered, and no compensation runs on a grant whose state is unknown.
         message = f"Issuance answered another request: its {mismatch} differs"
-        stage_event(
-            "provision",
-            "failed",
-            settlement_ref=settlement_ref,
-            listing_id=listing_id,
-            resource_id=resource_id,
-            error=message,
-        )
-        return {
-            "status": "error",
-            "message": message,
-            "settlement_ref": settlement_ref,
-            "grant_unknown": True,
-        }
+        if retry_uncertain:
+            return _retryable(message)
+        return _grant_unknown(message)
 
     issued_key_id = issuance.key_id
     stage_event(
@@ -400,23 +381,7 @@ async def fulfill(
                 secret=issuance.secret,
             )
         except ValueError as error:
-            # Checked before the delivery is reported fulfilled, so no stage
-            # attests or records a delivery whose public result is unsafe.
-            message = f"Public result extension refused: {error}"
-            stage_event(
-                "provision",
-                "failed",
-                settlement_ref=settlement_ref,
-                listing_id=listing_id,
-                resource_id=resource_id,
-                error=message,
-            )
-            return {
-                "status": "error",
-                "message": message,
-                "settlement_ref": settlement_ref,
-                "grant_unknown": True,
-            }
+            return _grant_unknown(f"Public result extension refused: {error}")
 
     payload = connection_payload(
         contributions, subject=subject, key_id=issued_key_id, quantity=quantity
@@ -463,11 +428,10 @@ async def fulfill_from_hold(
     apply_failure_policy: ApplyFailurePolicyFn | None = None,
     retry_uncertain: bool = False,
 ) -> dict[str, Any]:
-    """Issue under the quota hold placed at acceptance, if one stands, then release the hold row.
+    """Issue under the quota hold placed at acceptance, then release the hold row.
 
-    The hold row stays while issuance is pending, so a retry issues under the
-    same reservation, and when the grant's state is unknown, so an operator
-    resolving it still sees the hold.
+    The row stays while issuance is pending, so a retry reuses the reservation,
+    and while the grant is unknown, so an operator resolving it still sees it.
     """
     delivery(contributions, evidence)
     hold = await db.load_capacity_hold(negotiation_id=evidence.negotiation_id)
@@ -499,11 +463,8 @@ _PRIVATE_KEYS = frozenset({"secret", "tenant_credentials"})
 def public_extension(
     extension: Mapping[str, Any], *, public: Iterable[str], secret: str | None
 ) -> dict[str, Any]:
-    """A domain's public-result extension, refused unless it is safe to publish.
-
-    It must be plain JSON, name no field the delivery already publishes or
-    keeps private, and carry the bearer secret nowhere, under any key or
-    nesting.
+    """A domain's public-result extension, refused unless it is plain JSON, clashes
+    with no published or private field, and carries the secret nowhere.
     """
     try:
         encoded = json.dumps(dict(extension), sort_keys=True)

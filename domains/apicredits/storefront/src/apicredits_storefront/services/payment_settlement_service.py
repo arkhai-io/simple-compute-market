@@ -198,8 +198,7 @@ class ApiCreditPaymentSettlementService:
                 negotiation_id=agreement.negotiation_id, listing_id=agreement.listing_id,
             )
         except (LookupError, ValueError) as exc:
-            # LookupError covers an accepted-listing record that disagrees with
-            # its thread's domain binding.
+            # LookupError: the record disagrees with the thread's binding.
             raise SettlementRefusal(409, "credit provisioning terms are unavailable") from exc
         try:
             evidence = settlement_evidence(

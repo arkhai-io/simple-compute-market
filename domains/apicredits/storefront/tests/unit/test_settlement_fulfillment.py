@@ -137,7 +137,15 @@ def _private_results(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("chain_error", "rolled_back"),
+    [("execution reverted", True), ("rpc down", False)],
+)
+async def test_an_attestation_failure_rolls_back_only_when_nothing_reached_the_chain(
+    tmp_path, chain_error, rolled_back,
+):
+    """A reverted submission created no attestation; an unexplained failure may
+    have been mined, so the grant stands for an operator to reconcile."""
     from apicredits_storefront import settlement_stages
     from market_identity import TrustedIdentitySet
 
@@ -149,7 +157,7 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
         rollbacks.append(kwargs)
         return {"rolled_back": True}
     async def fake_submit(*args):
-        raise RuntimeError("rpc down")
+        raise RuntimeError(chain_error)
     authority = _FakeAuthority(fake_issue, fake_rollback)
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     path = tmp_path / "evidence.db"
@@ -177,9 +185,13 @@ async def test_chain_failure_after_issuance_rolls_back(monkeypatch, tmp_path):
         composition=composition,
     )
     assert result["status"] == "error"
-    assert rollbacks and rollbacks[0]["settlement_ref"] == "neg-chain"
-    assert rollbacks[0]["key_mode"] == "new"
     assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
+    if rolled_back:
+        assert rollbacks[0]["settlement_ref"] == "neg-chain" and rollbacks[0]["key_mode"] == "new"
+        assert "grant_unknown" not in result
+    else:
+        assert rollbacks == []
+        assert result["grant_unknown"] is True and "operator" in result["message"]
 
 
 async def test_the_fulfillment_hook_issues_under_this_storefronts_bundle(monkeypatch):
@@ -570,12 +582,16 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
 
 
 async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted(settled_db, monkeypatch):
-    """The service changes in place under the same quota resource, which the
-    source check cannot see; issuance carries the service the buyer accepted."""
+    """The service and accepted escrows change in place under the same quota
+    resource, which the source check cannot see; the escrow is verified and
+    issuance runs against the listing the buyer accepted."""
     db, neg_id = settled_db
     from apicredits_storefront import settlement_stages
 
-    async def verify(**_kwargs):
+    verified = []
+
+    async def verify(**kwargs):
+        verified.append(kwargs)
         return 0
 
     issued = []
@@ -592,9 +608,11 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
     listing = await db.load_listing(listing_id=thread["our_listing_id"])
     stored = listing["listing_resource"]
     resource = json.loads(stored) if isinstance(stored, str) else dict(stored)
+    accepted_escrows = listing["accepted_escrows"]
     await db.update_listing(
         listing_id=thread["our_listing_id"],
         listing_resource={**resource, "service_name": "Another Service", "base_url": "https://other.example"},
+        accepted_escrows=[{"chain_name": "anvil", "escrow_address": "0x" + "99" * 20}],
     )
     completed = asyncio.Event()
     _runtime, _worker, coordinator = _build_settlement_composition(
@@ -608,6 +626,9 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
     )
     await asyncio.wait_for(completed.wait(), timeout=5)
 
+    assert verified[0]["listing"]["accepted_escrows"] == (
+        json.loads(accepted_escrows) if isinstance(accepted_escrows, str) else accepted_escrows
+    )
     assert (issued[0].service, issued[0].resource_id) == (resource["service_name"], resource["resource_id"])
     progress = await db.load_issuance_progress(reference="0xdeal")
     assert json.loads(progress["public_result"]["connection_details"])["service_name"] == resource["service_name"]
@@ -732,22 +753,9 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
 
 
 def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
-    """The fulfillment input carries a domain listing, not a database row.
-
-    `prepare` reads the seller's order with `load_listing`, which returns
-    this storefront's own row: the domain payload plus its bookkeeping
-    columns. That row then reaches the domain's `normalize_listing` hook,
-    and `ApiCreditsListing` sets `extra="forbid"` -- so issuance failed
-    with eleven `extra_forbidden` errors before making a single call to the
-    credits service, and the only record was the reason persisted on the
-    escrow row.
-
-    Both halves are asserted. The raw row must still be refused: that
-    strictness is the wire contract for a listing arriving from a
-    registry, and narrowing the model instead of the caller would have
-    traded this bug for a weaker guard on untrusted input.
-    """
-    from apicredits_storefront.settlement_stages import _domain_order
+    """A stored row carries bookkeeping columns the domain listing forbids; the
+    selling library narrows it to the listing schema, and the raw row stays refused."""
+    from arkhai_api_selling.quota_listing import domain_listing
     from arkhai_apicredits.domain_runtime import _normalize_listing
     from arkhai_apicredits.schema import ApiCreditsListing
     from pydantic import ValidationError
@@ -763,13 +771,10 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
     }
     row = {
         "kind": "api_credits.v1",
-        # Stored as JSON text, which the domain model's own before-validator
-        # already handles; this test is about the surrounding columns.
         "listing_resource": json.dumps(resource),
         "accepted_escrows": [{"chain_name": "anvil", "escrow_address": "0x1111"}],
         "settlement_options": [],
         "demands": [],
-        # The bookkeeping the model forbids, named by the e2e failure.
         "listing_id": "d6f4e4dc-06de-4a2f-a4df-b2f1bf64abab",
         "agent_url": "http://credits-storefront:8000/",
         "oracle_address": None,
@@ -786,13 +791,12 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
     with pytest.raises(ValidationError):
         _normalize_listing(row)
 
-    projected = _domain_order(row)
+    projected = domain_listing(SELLING_CONTRIBUTIONS, row)
     assert set(projected) <= set(ApiCreditsListing.model_fields)
 
     listing = _normalize_listing(projected)
     assert listing.listing_resource.service_name == "weather-api"
     assert listing.listing_resource.resource_id == "weather-quota"
-    # The payload the issuance call actually needs survives the projection.
     assert listing.accepted_escrows == row["accepted_escrows"]
 
 

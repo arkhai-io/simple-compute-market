@@ -333,14 +333,15 @@ the recorded API-credits results carry them.
 
 "Pinned to the thread" is a record of the listing as accepted. Before the
 runtime records the negotiation's success, `selling` binds the thread to its
-listing's durable binding, which core does once per thread, and writes the listing's
-resource, as the domain's listing schema reads it, to core's immutable
-per-negotiation artifact table under a `listing` slot. Settlement issues from
-that record, never from the stored listing, so a listing whose service or
+listing's durable binding, which core does once per thread, and writes the
+listing, narrowed to the domain's listing schema, to core's immutable
+per-negotiation artifact table under a `listing` slot. Settlement verifies the
+payment and issues from that record, never from the stored listing, so a listing whose service or
 endpoint changes in place after acceptance, under the same quota resource,
 still issues what the buyer accepted. Recording binds the thread, so an
 unbound thread was accepted before acceptances were recorded, and reads the
-stored listing as before; a bound thread without a record is refused. API-credit
+stored listing as before; a bound thread without a record, or asked for
+another listing than the one it accepted, is refused. API-credit
 threads are opened unbound today, though the negotiation protocol has a thread
 copy its listing's binding at opening; binding them at opening is section 6's
 (task 6.5), and recording at acceptance does not depend on it. The record lives in the existing artifact table

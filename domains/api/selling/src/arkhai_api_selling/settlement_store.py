@@ -1,11 +1,8 @@
-"""Negotiation-bound source evidence and independent issuance checkpoints, in the domain's own tables.
+"""Negotiation-bound settlement evidence and issuance checkpoints, in the domain's own tables.
 
-Evidence status moves ``verified -> refunding -> refunded``; an abandoned
-refund intent restores ``verified`` from ``refunding`` only. The evidence
-payload (verified facts) never changes once verified, and delivery requires
-``verified`` status, so a refund recorded first stops delivery from starting.
-Delivery start and refund intent are each one serialized SQLite write, so
-exactly one of them decides whether delivery precedes a refund.
+Evidence moves ``verified -> refunding -> refunded``, and only ``refunding``
+returns to ``verified``. Delivery start and refund intent are each one
+serialized write, so exactly one decides whether delivery precedes a refund.
 """
 
 from __future__ import annotations
@@ -22,8 +19,7 @@ from arkhai_api_selling.issuance import delivery
 
 #: Statuses whose verified facts are fixed; only the refund transitions move between them.
 _SETTLED = frozenset({"verified", "refunding", "refunded"})
-#: Progress a delivery reaches once. A terminal row never changes: another
-#: status is refused, and the same status returns the row as recorded.
+#: Final progress: another status is refused, the same status returns the row.
 _TERMINAL_PROGRESS = frozenset({"ready", "failed"})
 
 
@@ -182,10 +178,8 @@ class SettlementRepository:
     def claim_delivery_start(self, negotiation_id: str) -> bool:
         """Claim the right to start delivery, before any external effect.
 
-        Succeeds only while the evidence is verified, so once refund intent is
-        recorded no delivery can start. Claiming again for a delivery already
-        under way succeeds while the evidence stays verified, which lets an
-        interrupted delivery resume under the same grant identity.
+        Succeeds only while the evidence is verified, including for a delivery
+        already under way, so an interrupted delivery resumes under the same grant.
         """
         now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path, timeout=30) as conn:
@@ -200,12 +194,10 @@ class SettlementRepository:
         return cursor.rowcount == 1
 
     def unsettled_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
-        """Accepted deals of one mechanism whose settlement or delivery is still open.
+        """Accepted deals of one mechanism whose settlement or delivery is still open, oldest first.
 
-        Open means no verified evidence yet, a refund left ``refunding``, or
-        verified evidence whose credit issuance has not reached an outcome. The
-        filter runs before the limit, oldest first, so completed deals never
-        crowd out an open one; a malformed Agreement is skipped, never fatal.
+        The filter runs before the limit, so completed deals never crowd out an open
+        one; a malformed Agreement is skipped.
         """
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             rows = conn.execute(
