@@ -17,6 +17,7 @@ APICREDITS = REPO / "domains" / "apicredits"
 def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     output = tmp_path_factory.mktemp("apicredits-wheels")
     projects = {
+        "api": (REPO / "domains" / "api", "arkhai_api-*.whl"),
         "domain": (
             APICREDITS,
             "arkhai_apicredits_domain-*.whl",

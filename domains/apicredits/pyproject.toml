@@ -1,10 +1,11 @@
 [project]
 name = "arkhai-apicredits-domain"
-version = "0.6.0"
+version = "0.7.0"
 license = "MIT"
 description = "Shared API-credit domain models, policies, and market-domain contract."
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "arkhai-api>=0.1.0",
     "arkhai-core>=0.4.0",
     "arkhai-kit-policy",
     "arkhai-kit-alkahest>=0.7.0",

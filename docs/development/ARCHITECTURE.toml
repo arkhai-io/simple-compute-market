@@ -27,6 +27,12 @@ directory = "domains/compute"
 vocabulary = "arkhai-compute"
 tokens = []
 
+[[families]]
+name = "api"
+directory = "domains/api"
+vocabulary = "arkhai-api"
+tokens = []
+
 [[domains]]
 name = "vms"
 directory = "domains/vms"
@@ -39,10 +45,10 @@ directory = "domains/bare_metal"
 family = "compute"
 tokens = ["bare_metal.v1"]
 
-# API credits has no shared vocabulary beneath it, so no family.
 [[domains]]
 name = "apicredits"
 directory = "domains/apicredits"
+family = "api"
 tokens = ["api_credits.v1"]
 
 [[mechanisms]]
@@ -205,7 +211,7 @@ reason = "The VM Alkahest settlement codec, whose name does not carry its mechan
 project = "arkhai-apicredits-domain"
 layer = "specialization"
 kind = "library"
-scope = ["apicredits", "alkahest", "arkhai-payments"]
+scope = ["api", "apicredits", "alkahest", "arkhai-payments"]
 owner = "align-package-paths-with-layers"
 since = 2026-10-13
 reason = "The API-credits domain holds both mechanisms' settlement codecs, and its name carries neither."

@@ -87,7 +87,7 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     correctly moved.
     """
     expected = {
-        "domain": {"arkhai-core", "arkhai-kit-arkhai-payments"},
+        "domain": {"arkhai-api", "arkhai-core", "arkhai-kit-arkhai-payments"},
         "buyer": {
             "arkhai-apicredits-domain",
             "arkhai-core",

@@ -259,16 +259,33 @@ access vocabulary and kit"). Touches the two new projects,
 the domain library's `pyproject.toml`, the Make, CI, and publish wiring named
 above.
 
-- [ ] 2.1 `domains/api/pyproject.toml` (`arkhai-api` 0.1.0, dependencies
+- [x] 2.1 `domains/api/pyproject.toml` (`arkhai-api` 0.1.0, dependencies
       `pydantic` and `arkhai-kit-identity`, `[tool.arkhai.architecture]
       allowed-dependencies` naming exactly those), `Makefile` on the kit
       template, `src/arkhai_api/`, `tests/`. (D3.)
-- [ ] 2.2 `src/arkhai_api/purchase.py`: the key disposition and purchase payload
+      *Done 2026-10-22.* As named; `requires-python` is the domain library's
+      (`>=3.12,<3.14`). `__init__.py` is a docstring: the modules are the API,
+      so binding the purchase shape does not import the issuance models.
+- [x] 2.2 `src/arkhai_api/purchase.py`: the key disposition and purchase payload
       models and a `provision_terms_model(kind)` factory returning the
       `ProvisionTerms` class bound to a kind literal, byte-identical in payload
       validation to `ApiCreditsProvisionTerms` today; `src/arkhai_api/labels.py`:
       the `IssuanceLabel` type and its validation, naming no value. (D3.)
-- [ ] 2.3 `src/arkhai_api/issuance.py`: `IssuanceRequest` and `IssuanceResult`
+      *Done.* `purchase.py`: `KeyIntent` and `PurchasePayload` (today's
+      `ApiCreditsKeyIntent` and `ApiCreditsProvisionPayload`), the
+      `ProvisionTerms` base whose `payload` validates through `PurchasePayload`
+      and dumps `exclude_none`, `ProvisionTerms.purchase(...)` (today's
+      `make_api_credits_provision_terms`), the four payload accessors, and
+      `provision_terms_model(kind)`, a cached `create_model` subclass binding
+      `kind` to the literal, so equal kinds yield one class. `labels.py`:
+      `IssuanceLabel`, a frozen dataclass of the label `name` (lowercase words
+      joined by hyphens) and a `fulfillment_id_prefix` derived as
+      `<name>-fulfillment.v1` unless given, with properties spelling the
+      request, result, evidence, capability, and portable-reference schema
+      strings. The prefix is a second field because the recorded API-credits
+      identity prefix is `api-credit-fulfillment.v1`, singular, which no rule
+      derives from `api-credits`; the API-credits binding passes both.
+- [x] 2.3 `src/arkhai_api/issuance.py`: `IssuanceRequest` and `IssuanceResult`
       models, `fulfillment_id(label, negotiation_id)`, and
       `issuance_request_digest(label, request)`, moved from
       `credits_client.py` with the schema strings and digest domain taken from
@@ -276,12 +293,54 @@ above.
       `src/arkhai_api/evidence.py`: the issuance evidence body, sign, verify,
       digest, encode, decode, and the portable fulfillment reference, moved from
       `issuance_evidence.py` the same way. (D3, D8.)
-- [ ] 2.4 Vocabulary tests, unit: the purchase shape under two kinds; every
+      *Done.* `issuance.py`: `KeyDisposition` (the wire name the service's
+      OpenAPI document records; the purchase-side intent is `KeyIntent`), the
+      label-agnostic `IssuanceRequest` and `IssuanceResult` bases with `schema`
+      a pattern-constrained string, `fulfillment_id`, `issuance_request_digest`,
+      `issuance_request(label, ...)` building a request with its identity and
+      digest, and `issuance_request_model(label)` and
+      `issuance_result_model(label)`: cached `create_model` subclasses binding
+      `schema` to the label's literal with that default and validating identity
+      and digest under the label, so a bound model refuses another label's
+      request and the service's OpenAPI keeps `const` and `default` on
+      `schema`. `create_model` rather than a class statement because a class
+      defined inside the factory cannot name the base it shadows.
+      `IssuanceRequest` keeps the service's field order (`fulfillment_id`
+      before `negotiation_id`) and docstring ("Complete immutable command for
+      one credits grant."), since both enter the served document's `required`
+      list and `description`; the storefront client's order differed only in
+      that pair, which no digest or signature reads. `evidence.py`:
+      `IssuanceEvidenceBodyV1` requires `domain` and spells `protocol` and
+      `capability` from it, refusing a body whose explicit spelling disagrees;
+      `SignedIssuanceEvidenceV1`, `ExpectedIssuanceEvidenceV1`,
+      `PortableFulfillmentRefV1`; and the sign, digest, decode, verify, and
+      portable-reference functions, each taking the label and refusing a body
+      or reference under another. Nothing is deleted from
+      `arkhai_apicredits/settlement/` here: section 3 deletes
+      `credits_client.py` and section 5 touches `issuance_evidence.py`, as the
+      plan's touch lists say, so the domain's copies stand until their callers
+      are rewired.
+- [x] 2.4 Vocabulary tests, unit: the purchase shape under two kinds; every
       pin fixture of 1.2 replayed through the vocabulary under `api-credits`
       and matching byte for byte; the same inputs under `inference` differing;
       a distribution test on the `conftest_wheels.py` pattern that the wheel
       installs and imports with no core, storefront, or runtime package present.
-- [ ] 2.5 `domains/api/contracts/` (`arkhai-api-contracts` 0.1.0; dependencies
+      *Done.* `test_purchase.py` (two kinds through one payload validation,
+      refusals, the purchase builder, the accessors), `test_labels.py`
+      (spelling, validation, one class per label, no domain name under
+      `src/`), `test_issuance_pins.py` (the five pin cases read from
+      `domains/apicredits/tests/fixtures/pins/issuance_pins.json`: every
+      recorded value byte-identical under `api-credits`, every value different
+      under `inference`, each label's bound request and result models
+      refusing the other's, a recorded evidence decoding under `api-credits`
+      only), `test_evidence.py` (round trip, label refusals, canonical and size
+      bounds, tamper, trust, expiry, skew, the portable reference).
+      `test_distribution.py` builds the vocabulary and identity wheels, asserts
+      the wheel requires `arkhai-kit-identity` and `pydantic` alone, installs
+      it into a fresh environment, and imports every module with no core,
+      storefront, settlement-runtime, negotiation-runtime, site, or API-credits
+      package findable. Unit, 53 passed.
+- [x] 2.5 `domains/api/contracts/` (`arkhai-api-contracts` 0.1.0; dependencies
       `pydantic`, `arkhai-core`, `arkhai-kit-identity`, `arkhai-api`):
       `src/arkhai_api_contracts/models.py`, the authority's wire models moved
       from `keys_model.py` without its digest helpers;
@@ -291,23 +350,116 @@ above.
       `operations.py`, the operation-name constants. Unit tests: every route
       the service mounts today appears exactly once; the declarations match
       `route_contracts.py`'s table field for field. (D4.)
-- [ ] 2.6 `docs/development/ARCHITECTURE.toml`: the `[[families]]` row for
+      *Done.* `models.py` holds the wire models as `keys_model.py` defines
+      them, re-exporting the vocabulary's `KeyDisposition`, `IssuanceRequest`,
+      and `issuance_request_model` and adding `IssuanceResponse` with
+      `issuance_response_model(label)` on the same pattern; `routes.py`
+      declares the eleven signed routes as plain data (`method`, `path`,
+      `operation`, `roles`, and `path_resource`, `body_resource`,
+      `optional_body_resource`, `exact_retry_safe` where they differ from the
+      site kit's defaults) with `route(operation)`; `operations.py` the eleven
+      names, which keep their `credits_` spelling because the signed operation
+      is wire. Dependencies are `arkhai-api`, `arkhai-kit-identity`, and
+      `pydantic`, which are also its allowlist; `arkhai-core`, which this task
+      lists, is neither imported nor needed, so it is not declared. Unit:
+      `test_routes.py` compares the declarations to the service baseline's
+      `route_contracts.json` credits table field for field, resolves every
+      mounted `/api/v1/issuance` and `/api/v1/keys` route in `routes.json` to
+      exactly one declaration and no unsigned path to any, and checks each
+      operation is declared once; `test_models.py` compares each wire model's
+      JSON schema, under the `api-credits` label and with null defaults
+      dropped as FastAPI drops them, to the baseline `openapi.json` component
+      of the same name, and checks the bound response carries the secret and
+      refuses another label. 16 passed.
+- [x] 2.6 `docs/development/ARCHITECTURE.toml`: the `[[families]]` row for
       `api` (`directory = "domains/api"`, `vocabulary = "arkhai-api"`) and
       `family = "api"` on the `apicredits` row; the comment saying API credits
       has no family is removed. `make check-architecture` classifies both new
       projects from their paths with no override row. (D1, D14.)
-- [ ] 2.7 API credits binds the purchase shape: `arkhai_apicredits/negotiation/terms.py`
+      *Done.* As named, and the domain library's override row gains `api` in
+      its scope: an override replaces the path reading entirely, so without it
+      the library's dependency on the vocabulary fails the scope rule. All
+      four architecture parts pass with both new projects classified from
+      their paths, run on a copy of the tree without the other session's stale
+      `.claude/worktrees/` checkout that fails `check-architecture` in place
+      (1.7).
+- [x] 2.7 API credits binds the purchase shape: `arkhai_apicredits/negotiation/terms.py`
       becomes a binding of `provision_terms_model` under `api_credits.v1`, the
       domain library's `pyproject.toml` declaring `arkhai-api`; its existing
       terms tests pass unchanged. A vocabulary test binds a second kind literal
       and proves the payload validation identical. (D3, `api-family` "Two kind
       literals bind the purchase shape".)
-- [ ] 2.8 Wiring: `dist-api`, `dist-api-contracts`, `test-api` in
+      *Done.* `terms.py` is the binding: `ApiCreditsProvisionTerms =
+      provision_terms_model(API_CREDITS_PROVISION_KIND)`,
+      `make_api_credits_provision_terms = ApiCreditsProvisionTerms.purchase`,
+      the accessors re-exported; `API_CREDITS_PROVISION_VERSION`,
+      `ApiCreditsKeyIntent`, and `ApiCreditsProvisionPayload` had no consumer
+      and are gone. The domain library declares `arkhai-api>=0.1.0` and bumps
+      to 0.7.0, a published wheel whose requirements changed. Domain library 45
+      passed (unit; the install tests library integration), the pins among
+      them; storefront 196, buyer 27, service 79 passed unchanged (unit and
+      application integration), 1.3–1.5's baselines among them. The two-kind
+      test is 2.4's.
+- [x] 2.8 Wiring: `dist-api`, `dist-api-contracts`, `test-api` in
       `domains/Makefile` and the root `Makefile`; rows in `tests.yml`;
       published-package rows and `publish-pypi.yml` entries; locks.
-- [ ] 2.9 Verification: `make test-api` (unit), `make -C domains/apicredits
+      *Done.* Both Makefiles gain the three targets, in `dist`, `dist-ci`, and
+      `test`, with `dist-apicredits-domain` depending on `dist-api`;
+      `tests.yml` two matrix rows; `publish-pypi.yml` the push path, two
+      filters, and two `PACKAGES` entries; `manifests/published-distributions.json`
+      both, after the identity kit; `RELEASING.md` two rows and `arkhai-api`
+      on the domain library's. Locks: the two new projects, and the domain,
+      storefront, buyer, service, and `e2e-tests` locks, which record the
+      domain wheel, relocked through `scripts/uv_project.py lock` under uv
+      0.11.17, the release `tests.yml` pins, run through `uvx`. The storefront
+      lock's diff is large because its committed lock predates uv intersecting
+      each dependency's marker with the project's `[tool.uv] environments`;
+      0.10.9 and 0.11.17 rewrite it identically, and beyond the markers its
+      hunks are the `arkhai-api` entry and the domain's version.
+      `domains/apicredits/tests/conftest_wheels.py` builds the vocabulary
+      wheel so the domain's install tests resolve it, and
+      `test_distribution.py` expects the domain wheel to require it.
+- [x] 2.9 Verification: `make test-api` (unit), `make -C domains/apicredits
       test-domain` (unit), `make test`, `make check-packaging`. End-to-end: `e2e_credits_deal` exercises the
       bound purchase shape once deployed.
+      *Done 2026-10-22.* `make test-api`: vocabulary 53, contracts 16 (unit;
+      the distribution test library integration against a fresh environment).
+      `make -C domains/apicredits test-domain` 45 (unit and library
+      integration). `make test`: every suite passed except, all inherited
+      from the `dev` base and recorded by 1.7, the provisioning service's
+      dotenv-layering unit test, the VM storefront's two Alkahest toolchain
+      tests, the release-tooling whole-tree checks and four
+      `test_publish_matrix` release-table cases that read the other session's
+      stale `.claude/worktrees/` checkout as part of the tree (the
+      `apicredits-domain` case now among them, since that checkout's domain
+      declares no `arkhai-api`; all pass on a copy without it), the
+      `--eval` case the macOS make 3.81 lacks, and one docker-credential-helper
+      timing case; Helm is not installed, so the render checks are unrun.
+      `make check-packaging` passes on the copy: uv setup, locks (the seven
+      relocked), Python version, layout, all four architecture parts.
+      `make check-change` on the copy reports only the two `api-family`
+      citations closeout creates; its agent-skills part fails there only
+      because the copy omits `.claude/`, and passes in place. End-to-end: owed
+      to validation; `e2e_credits_deal` negotiates through the bound purchase
+      shape and `e2e_credits_service_rollback` first compares images that
+      differ in code (the domain wheel) at this commit.
+      **Handoff.** The API-credits label is
+      `IssuanceLabel("api-credits", "api-credit-fulfillment.v1")`, so far
+      only in tests: section 3 binds it in the storefront client and the
+      service, and section 4's capacity profile carries it. The service's
+      wire `IssuanceRequest` and `IssuanceResponse` must be the bound classes
+      `issuance_request_model(label)` and `issuance_response_model(label)`,
+      built where the service root knows its label, for the OpenAPI
+      baseline's `const` and `default` on `schema` to hold; their docstrings
+      and field order are OpenAPI surface too. The signed-header constants
+      the client needs are left to 3.1, as planned. `credits_client.py` and
+      `issuance_evidence.py` still hold the domain's copies of the moved
+      code until sections 3 and 5 rewire their callers. Relock under uv
+      0.11.17 with `uvx uv@0.11.17` behind a `uv` shim on `PATH`, and run
+      the whole-tree checks on a copy excluding `.claude/`, until the stale
+      worktree is removed by the session that owns it. Section 2 is committed
+      on `feat/compose-api-family-kit-s2-vocabulary`, stacked on section 1's
+      branch.
 
 ## 3. The typed client and one digest implementation
 

@@ -10,6 +10,7 @@ on:
       - 'domains/apicredits/**'
       - 'domains/bare_metal/**'
       - 'domains/compute/**'
+      - 'domains/api/**'
       - 'provisioning/compute/**'
       - '.github/workflows/publish-pypi.yml'
   workflow_dispatch:
@@ -103,6 +104,8 @@ jobs:
             kit-resource-pools-client: ['kit/resource-pools-client/**', '.github/workflows/publish-pypi.yml']
             kit-storefront: ['kit/storefront/**', '.github/workflows/publish-pypi.yml']
             compute: ['domains/compute/**', '.github/workflows/publish-pypi.yml']
+            api: ['domains/api/pyproject.toml', 'domains/api/src/**', 'domains/api/tests/**', '.github/workflows/publish-pypi.yml']
+            api-contracts: ['domains/api/contracts/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-buyer: ['domains/bare_metal/buyer/**', '.github/workflows/publish-pypi.yml']
@@ -165,6 +168,8 @@ jobs:
             {"key": "kit-resource-pools-client", "path": "kit/resource-pools-client",     "dist": "arkhai-kit-resource-pools-client"},
             {"key": "kit-storefront",         "path": "kit/storefront",                   "dist": "arkhai-kit-storefront"},
             {"key": "compute",                "path": "domains/compute",                  "dist": "arkhai-compute"},
+            {"key": "api",                    "path": "domains/api",                      "dist": "arkhai-api"},
+            {"key": "api-contracts",          "path": "domains/api/contracts",            "dist": "arkhai-api-contracts"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-buyer",      "path": "domains/bare_metal/buyer",        "dist": "arkhai-bare-metal-buyer"},

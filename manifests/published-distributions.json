@@ -7,6 +7,16 @@
       "dist": "arkhai-kit-identity"
     },
     {
+      "key": "api",
+      "path": "domains/api",
+      "dist": "arkhai-api"
+    },
+    {
+      "key": "api-contracts",
+      "path": "domains/api/contracts",
+      "dist": "arkhai-api-contracts"
+    },
+    {
       "key": "core",
       "path": "core",
       "dist": "arkhai-core"

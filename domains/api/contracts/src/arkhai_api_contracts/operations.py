@@ -1,0 +1,13 @@
+"""The signed operation names of the authority's routes."""
+
+ISSUE = "credits_issue"
+ISSUANCE_GET = "credits_issuance_get"
+KEY_CONSUME_BATCH = "credits_key_consume_batch"
+KEY_CONSUME = "credits_key_consume"
+KEY_VERIFY = "credits_key_verify"
+KEY_REVOKE = "credits_key_revoke"
+KEY_ADJUST = "credits_key_adjust"
+KEY_GRANTS_LIST = "credits_key_grants_list"
+KEY_USAGE_LIST = "credits_key_usage_list"
+KEYS_LIST = "credits_keys_list"
+KEY_GET = "credits_key_get"

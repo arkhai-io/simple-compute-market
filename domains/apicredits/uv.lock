@@ -137,10 +137,23 @@ wheels = [
 ]
 
 [[package]]
+name = "arkhai-api"
+version = "0.1.0"
+source = { registry = "../../.dist" }
+dependencies = [
+    { name = "arkhai-kit-identity" },
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_api-0.1.0-py3-none-any.whl" },
+]
+
+[[package]]
 name = "arkhai-apicredits-domain"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
+    { name = "arkhai-api" },
     { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
@@ -159,6 +172,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "arkhai-api", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
