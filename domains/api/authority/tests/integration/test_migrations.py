@@ -8,13 +8,13 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
-from apicredits_service.db.database import create_db_engine, run_migrations
-from apicredits_service.db.migrations import (
+from arkhai_api_authority.database import create_db_engine, run_migrations
+from arkhai_api_authority.migrations import (
     SchemaDriftError,
     apply_schema_migrations,
     check_schema_version,
 )
-from apicredits_service.db.models import Base
+from arkhai_api_authority.models import Base
 
 
 def _sqlite_memory_engine():
@@ -111,11 +111,10 @@ class TestRunMigrationsIsIdempotent:
 
 
 class TestAdoptingAPreCreateAllOnlyDatabase:
-    """A database this service already created via the old
-    Base.metadata.create_all()-only startup (no schema_migrations table
-    at all) must be adopted cleanly -- not treated as corrupt, and not
-    silently skipped in a way that leaves it unable to receive future
-    migrations.
+    """A database created by a create_all()-only startup (no
+    schema_migrations table at all) must be adopted cleanly -- not treated
+    as corrupt, and not silently skipped in a way that leaves it unable to
+    receive future migrations.
     """
 
     def test_adopts_a_database_with_no_schema_migrations_table(self):
@@ -245,7 +244,7 @@ class TestAdoptingAPreCreateAllOnlyDatabase:
 
 
 class TestCheckSchemaVersion:
-    """Not called by this service's own startup today (see migrations.py's
+    """Not called by a service root's startup today (see migrations.py's
     module docstring -- there's no separate deployment step to check
     against yet), but this proves the fail-fast primitive itself is
     correct and ready for when one exists.
@@ -266,7 +265,7 @@ class TestCheckSchemaVersion:
         # Only meaningful once _MIGRATIONS is non-empty; document the
         # intended behavior now so it's exercised the moment a real
         # migration is added, rather than discovered broken then.
-        import apicredits_service.db.migrations as migrations_module
+        import arkhai_api_authority.migrations as migrations_module
 
         original = migrations_module._MIGRATIONS
         migrations_module._MIGRATIONS = (
@@ -290,7 +289,7 @@ class TestCreateDbEngineIsSqliteOnly:
 
 
 def test_failed_migration_is_not_recorded_and_prior_success_is_preserved(monkeypatch):
-    import apicredits_service.db.migrations as migrations_module
+    import arkhai_api_authority.migrations as migrations_module
 
     engine = _sqlite_memory_engine()
     Base.metadata.create_all(bind=engine)

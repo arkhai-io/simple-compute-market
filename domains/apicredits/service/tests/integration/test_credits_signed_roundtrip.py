@@ -7,8 +7,8 @@ Each of those fails as "signature did not verify", which a table comparison
 cannot see.
 
 So this drives the real `TokensClient` over `httpx.ASGITransport` against a
-real `SiteAuthMiddleware` composed with the real
-`CREDITS_ROUTE_CONTRACTS` and real ed25519 signers -- the same arrangement
+real `SiteAuthMiddleware` composed with the authority's adapted route
+contracts and real ed25519 signers -- the same arrangement
 the provisioning service's integration suite uses. Nothing about the
 envelope is stubbed; only the handler bodies are.
 """
@@ -23,7 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site.auth import SiteAuthMiddleware
-from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from arkhai_api_authority import site_route_contracts
 from apicredits_middleware.client import TokensClient
 from apicredits_middleware.signing import (
     AuthoritySigning,
@@ -39,7 +39,7 @@ _IDENTITIES = _REPO / "dev-env/identities"
 
 
 def _contracts():
-    return CREDITS_ROUTE_CONTRACTS
+    return site_route_contracts()
 
 
 def _only_role(role: str, identity: Identity):
@@ -221,7 +221,7 @@ async def test_an_untrusted_gated_app_is_refused(signers):
 
 @pytest.fixture
 def storefront_client(signers):
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api_client import AuthorityClient
 
     authority = signers["authority"]
@@ -302,7 +302,7 @@ async def test_storefront_signing_requires_both_halves():
     an unauthenticated answer, which is the weaker of the two properties
     silently replacing the stronger.
     """
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api_client import AuthorityClient
 
     signer = create_signer("ed25519", _seed("api-credits-registry"))

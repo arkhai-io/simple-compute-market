@@ -1,4 +1,4 @@
-"""Credits authority persistence for keys, immutable grants, and consumption.
+"""The authority's persistence for keys, immutable grants, and consumption.
 
 Bearer secrets are hashed on key rows. Issuance grants snapshot every
 mutation-relevant public input under a unique fulfillment identity and digest;

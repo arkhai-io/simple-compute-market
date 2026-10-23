@@ -112,6 +112,11 @@
       "dist": "arkhai-kit-site"
     },
     {
+      "key": "api-authority",
+      "path": "domains/api/authority",
+      "dist": "arkhai-api-authority"
+    },
+    {
       "key": "kit-site-client",
       "path": "kit/site-client",
       "dist": "arkhai-kit-site-client"

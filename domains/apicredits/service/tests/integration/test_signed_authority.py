@@ -410,7 +410,7 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 
 
 def _seller_client(signed_app):
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api_client import AuthorityClient
 
     return AuthorityClient(
@@ -495,7 +495,7 @@ def _issuance_request(negotiation_id: str, quantity: int = 5):
     string. The vocabulary computes the digest over every bound field, so a
     literal never becomes a second source of truth for what the request says.
     """
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api.issuance import KeyDisposition, issuance_request
 
     return issuance_request(
@@ -587,7 +587,7 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     key = await seller.get_key(issued.key_id)
     assert key["balance"] == 7
 
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api.issuance import fulfillment_id
 
     grant = await seller.get_issuance(fulfillment_id(ISSUANCE_LABEL, "neg-2"))
@@ -609,7 +609,7 @@ def _credit_request(
     """An issuance for an eip191 buyer, new key or a top-up of an existing one."""
     from market_identity import Identity
 
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (

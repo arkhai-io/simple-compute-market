@@ -1,14 +1,14 @@
-"""Versioned schema migrations for the API-credits service database.
+"""Versioned schema migrations for the authority's database.
 
 SQLAlchemy ``create_all`` creates missing tables but does not alter
 existing ones. This module tracks completed migrations in a
 ``schema_migrations`` table so schema evolution can be applied exactly
 once, in order, idempotently, across restarts.
 
-Migrations run in-process at startup, before the app is ready to serve,
-via ``run_migrations`` in ``db/database.py``. ``check_schema_version``
-raises if the database is behind the migrations this module defines;
-nothing in this service's own startup path calls it today.
+Migrations run in-process at startup, before the composing service is ready
+to serve, through ``run_migrations``. ``check_schema_version`` raises if the
+database is behind the migrations this module defines; no service root calls
+it at startup today.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from market_resource_pools_contracts.hints import (
     CAPACITY_BACKING_POLICY_TAG,
     declared_deliverable_modes,
 )
-from apicredits_service.db.models import CreditGrant
+from arkhai_api_authority.models import CreditGrant
 from sqlalchemy import Engine, inspect, text
 
 logger = logging.getLogger(__name__)
@@ -65,9 +65,8 @@ def check_schema_version(engine: Engine) -> None:
     """Raise :class:`SchemaDriftError` if the DB schema is behind the
     last known migration -- meaning migrations were never run, or the
     code shipped in this image is ahead of what's been applied to this
-    database. This service's own startup applies migrations in-process
-    instead of calling this function (see ``db/database.py``'s
-    ``run_migrations``).
+    database. A service root's startup applies migrations in-process
+    through ``run_migrations`` instead of calling this function.
     """
     _validate_grant_schema(engine)
     expected = _MIGRATIONS[-1].id if _MIGRATIONS else None
@@ -87,7 +86,7 @@ def check_schema_version(engine: Engine) -> None:
 
 def _drift_message(*, current: str, expected: str) -> str:
     return (
-        f"API-credits database schema is at version {current}, service "
+        f"authority database schema is at version {current}, the service "
         f"expects {expected}. Apply migrations before starting the "
         "service (run_migrations)."
     )
@@ -137,21 +136,21 @@ def _validate_grant_schema(engine: Engine) -> None:
     """Reject incompatible grant schemas, including already-versioned databases."""
 
     if not _table_exists(engine, "credit_grants"):
-        raise SchemaDriftError("API-credits grant schema is missing; run_migrations.")
+        raise SchemaDriftError("grant schema is missing; run_migrations.")
     actual = {
         column["name"] for column in inspect(engine).get_columns("credit_grants")
     }
     expected = set(CreditGrant.__table__.columns.keys())
     if actual != expected:
         raise SchemaDriftError(
-            "API-credits grant schema is incompatible. Quiesce issuance and "
+            "grant schema is incompatible. Quiesce issuance and "
             "explicitly reset the disposable database before startup; "
             "grant payloads cannot be adopted."
         )
 
 
 def _adopt_baseline_schema(engine: Engine) -> None:
-    """Adopt the existing API-credit and capacity tables into versioning."""
+    """Adopt the existing key, grant, and capacity tables into versioning."""
     required = {
         "api_keys",
         "credit_grants",
@@ -162,7 +161,7 @@ def _adopt_baseline_schema(engine: Engine) -> None:
     missing = required - set(inspect(engine).get_table_names())
     if missing:
         raise SchemaDriftError(
-            f"API-credits baseline schema is missing tables: {sorted(missing)}"
+            f"baseline schema is missing tables: {sorted(missing)}"
         )
 
 

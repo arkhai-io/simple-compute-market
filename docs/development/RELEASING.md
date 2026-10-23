@@ -59,6 +59,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-api` | `domains/api/` | `arkhai-kit-identity` |
 | `arkhai-api-contracts` | `domains/api/contracts/` | `arkhai-api`, `arkhai-kit-identity` |
 | `arkhai-api-client` | `domains/api/client/` | `arkhai-api-contracts`, `arkhai-kit-identity` |
+| `arkhai-api-authority` | `domains/api/authority/` | `arkhai-api`, `arkhai-api-contracts`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
 | `arkhai-bare-metal` | `domains/bare_metal/` | `arkhai-compute`, `arkhai-core`, `arkhai-kit-capability-shape`, `arkhai-kit-resource-pools-contracts` (`storefront` extra: `arkhai-core-storefront`) |
 | `arkhai-bare-metal-storefront` | `domains/bare_metal/storefront/` | `arkhai-bare-metal`, `arkhai-compute-provisioning-client`, `arkhai-compute-provisioning-contracts`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-contact-exchange`, `arkhai-kit-delivery`, `arkhai-kit-delivery-apprise`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-pool-overrides`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
 | `arkhai-bare-metal-buyer` | `domains/bare_metal/buyer/` | `arkhai-bare-metal`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-core-registry-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-contact-exchange`, `arkhai-kit-identity`, `arkhai-kit-settlement-runtime` |
@@ -80,7 +81,7 @@ the one its `pyproject.toml` declares.
 | `arkhai-apicredits-buyer` | `domains/apicredits/buyer/` | `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `arkhai-kit-settlement-runtime` |
 | `arkhai-apicredits-middleware` | `domains/apicredits/middleware/python/` | none (`signed` extra: `arkhai-kit-identity`) |
 | `arkhai-apicredits-storefront` | `domains/apicredits/storefront/` | `arkhai-api-client`, `arkhai-apicredits-domain`, `arkhai-core`, `arkhai-core-registry-client`, `arkhai-core-storefront`, `arkhai-core-storefront-client`, `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`, `arkhai-kit-capacity-publication`, `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`, `arkhai-kit-policy`, `arkhai-kit-resource-pools`, `arkhai-kit-settlement-runtime`, `arkhai-kit-site-client`, `arkhai-kit-storefront` |
-| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-api`, `arkhai-api-contracts`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
+| `arkhai-apicredits-service` | `domains/apicredits/service/` | `arkhai-api`, `arkhai-api-authority`, `arkhai-api-contracts`, `arkhai-kit-identity`, `arkhai-kit-resource-pools`, `arkhai-kit-resource-pools-contracts`, `arkhai-kit-site` |
 
 This set is defined once, by the `PACKAGES` table in the workflow's
 `detect-changes` job and the per-package path filters beside it. Adding a

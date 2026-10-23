@@ -72,8 +72,7 @@ async def capture_openapi(client: httpx.AsyncClient) -> dict[str, Any]:
 
 
 def capture_route_contracts() -> dict[str, Any]:
-    from apicredits_service.main import _UNSIGNED_PATHS
-    from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+    from apicredits_service.main import _UNSIGNED_PATHS, CREDITS_ROUTE_CONTRACTS
     from market_site.auth import CAPACITY_ROUTE_CONTRACTS
 
     def declare(contract) -> dict[str, Any]:
@@ -117,7 +116,7 @@ def _recorded(response: httpx.Response) -> dict[str, Any]:
 
 
 def _seller_client(app):
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api_client import AuthorityClient
 
     return AuthorityClient(
@@ -159,7 +158,7 @@ def _capacity_admin(app):
 
 
 def _issuance(negotiation_id: str, quantity: int, *, owner=BUYER, existing_key=None):
-    from apicredits_service.models.keys_model import ISSUANCE_LABEL
+    from apicredits_service.config import ISSUANCE_LABEL
     from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (

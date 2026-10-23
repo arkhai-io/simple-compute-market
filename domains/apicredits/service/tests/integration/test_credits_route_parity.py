@@ -7,23 +7,22 @@ signs a resource the service derives from somewhere else, does not produce
 a slightly wrong request -- it produces a signature that cannot verify, on
 every call to that route. Three tables therefore have to stay identical:
 
-- `CREDITS_ROUTE_CONTRACTS` (the service, authoritative),
-- `apicredits_middleware.client` (the gated app, `service` role),
-- `arkhai_api_contracts.routes` (the declarations the storefront's family
-  client binds every `seller` request from).
+- the table this service authenticates, adapted by the authority from
+  `arkhai_api_contracts.routes` (the declarations the storefront's family
+  client binds every `seller` request from; the authority's own tests hold
+  the adaptation to the declarations),
+- `apicredits_middleware.client` (the gated app, `service` role).
 
-Lives in the service's own suite because the service owns the authoritative
-table, and because the comparison needs `fastapi` and `market_site` -- which
-the service has and the family packages deliberately do not.
-`middleware.route_contracts` imports directly here; there is no name
-collision with the published `apicredits_middleware`.
+Lives in the service's own suite because the service composes the table the
+gated app signs against, and because the comparison needs `fastapi` and
+`market_site` -- which the service has and the gate deliberately does not.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from apicredits_service.main import CREDITS_ROUTE_CONTRACTS
 
 
 @pytest.fixture(scope="module")
@@ -98,23 +97,6 @@ def test_batch_route_signs_the_empty_resource(contracts, middleware_client):
     assert getattr(contract, "path_resource", None) is None
     assert getattr(contract, "body_resource", None) is None
     assert middleware_client.BATCH_RESOURCE == ""
-
-
-def test_the_family_declarations_are_this_services_table_field_for_field():
-    """The seller's client binds each request from these declarations, so they must be this table."""
-    from arkhai_api_contracts.routes import AUTHORITY_ROUTES
-
-    assert len(AUTHORITY_ROUTES) == len(CREDITS_ROUTE_CONTRACTS)
-    for declaration, contract in zip(AUTHORITY_ROUTES, CREDITS_ROUTE_CONTRACTS):
-        operation = declaration["operation"]
-        assert operation == contract.operation
-        assert declaration["method"] == contract.method, operation
-        assert declaration["path"] == contract.pattern.pattern, operation
-        assert set(declaration["roles"]) == set(contract.allowed_roles), operation
-        assert declaration.get("path_resource") == contract.path_resource, operation
-        assert declaration.get("body_resource") == contract.body_resource, operation
-        assert declaration.get("optional_body_resource", False) == contract.optional_body_resource
-        assert declaration.get("exact_retry_safe", True) == getattr(contract, "exact_retry_safe", True)
 
 
 def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):

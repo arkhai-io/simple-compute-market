@@ -1,56 +1,43 @@
-"""Keys API: issuance (market-facing), consume/verify (middleware-facing),
+"""Keys API bindings: issuance (market-facing), consume/verify (middleware-facing),
 and the admin/guard surface.
 
 Router-factory style (like ``market_site.router``): endpoints resolve the
-service per request through ``get_service`` so the composition root owns
-construction order.
+route service per request through ``get_service`` so the composition root
+owns construction order. Each binding maps its route to the authority's route
+service and a refusal to its response, and holds no decision of its own.
 """
 
 from __future__ import annotations
 
-import logging
 from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
-
-from apicredits_service.models.keys_model import (
+from arkhai_api_authority import AuthorityRouteService, RouteRefusal
+from arkhai_api_contracts.models import (
     AdjustRequest,
     ConsumeBatchRequest,
     ConsumeBatchResponse,
     ConsumeRequest,
     GrantListResponse,
-    IssuanceRequest,
-    IssuanceResponse,
     KeyListResponse,
     UsageListResponse,
     VerifyRequest,
+    issuance_request_model,
+    issuance_response_model,
 )
-from apicredits_service.services.keys_service import (
-    FULFILLMENT_CONFLICT,
-    INSUFFICIENT_CREDITS,
-    KEY_NOT_FOUND,
-    KEY_NOT_OWNED,
-    KEY_REVOKED,
-    QUOTA_EXHAUSTED,
-    IssuanceError,
-    KeysService,
-)
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 
-logger = logging.getLogger(__name__)
+from apicredits_service.config import authority_config
 
-#: HTTP status per machine-readable refusal reason. The reason rides the
-#: body either way — clients dispatch on it, not the status.
-_ISSUANCE_STATUS = {
-    KEY_NOT_FOUND: 404,
-    KEY_NOT_OWNED: 403,
-    KEY_REVOKED: 409,
-    QUOTA_EXHAUSTED: 409,
-    FULFILLMENT_CONFLICT: 409,
-}
+IssuanceRequest = issuance_request_model(authority_config.label)
+IssuanceResponse = issuance_response_model(authority_config.label)
 
 
-def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
+def _refused(refusal: RouteRefusal) -> JSONResponse:
+    return JSONResponse(status_code=refusal.status_code, content=refusal.body)
+
+
+def make_keys_router(get_service: Callable[[], AuthorityRouteService]) -> APIRouter:
     router = APIRouter(tags=["keys"])
 
     # ------------------------------------------------------------------
@@ -64,43 +51,13 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def issue(
         body: IssuanceRequest,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> IssuanceResponse:
         """Commit or replay one immutable fulfillment grant."""
         try:
-            result = service.issue(
-                fulfillment_id=body.fulfillment_id,
-                negotiation_id=body.negotiation_id,
-                owner_scheme=body.owner.scheme.value,
-                owner_id=body.owner.identifier,
-                service=body.service,
-                resource_id=body.resource_id,
-                quantity=body.quantity,
-                key_mode=body.key.mode,
-                key_id=body.key.key_id,
-                request_digest=body.request_digest,
-                capacity_reservation_id=body.capacity_reservation_id,
-            )
-        except IssuanceError as exc:
-            logger.info(
-                "[ISSUANCE] refused fulfillment=%s: %s",
-                body.fulfillment_id,
-                exc.reason,
-            )
-            return JSONResponse(
-                status_code=_ISSUANCE_STATUS.get(exc.reason, 409),
-                content={"error": exc.reason, "detail": exc.message},
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        logger.info(
-            "[ISSUANCE] fulfillment=%s key=%s quantity=%d replay=%s",
-            body.fulfillment_id,
-            result["key_id"],
-            body.quantity,
-            result["already_issued"],
-        )
-        return IssuanceResponse(**result)
+            return IssuanceResponse(**service.issue(body))
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     @router.get(
         "/issuance/{fulfillment_id}",
@@ -109,12 +66,12 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def get_issuance(
         fulfillment_id: str,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> IssuanceResponse:
-        result = service.get_credit_issuance(fulfillment_id)
-        if result is None:
-            raise HTTPException(status_code=404, detail="issuance not found")
-        return IssuanceResponse(**result)
+        try:
+            return IssuanceResponse(**service.get_issuance(fulfillment_id))
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     # ------------------------------------------------------------------
     # Middleware-facing: consume / verify
@@ -127,28 +84,12 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     def consume(
         key_id: str,
         body: ConsumeRequest,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ):
         try:
-            outcome = service.consume(
-                key_id=key_id,
-                amount=body.amount,
-                idempotency_key=body.idempotency_key,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
-        if outcome.get("ok"):
-            return outcome
-        reason = outcome.get("reason")
-        status = {
-            KEY_NOT_FOUND: 404,
-            KEY_REVOKED: 403,
-            INSUFFICIENT_CREDITS: 402,
-        }.get(reason, 402)
-        return JSONResponse(
-            status_code=status,
-            content={"error": reason, "balance": outcome.get("balance", 0)},
-        )
+            return service.consume(key_id, amount=body.amount, idempotency_key=body.idempotency_key)
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     @router.post(
         "/keys/consume-batch",
@@ -157,12 +98,13 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def consume_batch(
         body: ConsumeBatchRequest,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> ConsumeBatchResponse:
         """Items are independent; per-item outcomes return in order with
         a 200 overall (a failed item is not an HTTP failure)."""
-        results = service.consume_batch([item.model_dump() for item in body.items])
-        return ConsumeBatchResponse(results=results)
+        return ConsumeBatchResponse(
+            **service.consume_batch([item.model_dump() for item in body.items])
+        )
 
     @router.post(
         "/keys/{key_id}/verify",
@@ -171,10 +113,10 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     def verify(
         key_id: str,
         body: VerifyRequest,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> dict:
         """POST (not GET) so the secret rides the body, never a URL."""
-        return service.verify(key_id=key_id, secret=body.secret)
+        return service.verify(key_id, secret=body.secret)
 
     # ------------------------------------------------------------------
     # Admin + the seller guards' key→owner lookup
@@ -188,10 +130,9 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     def list_keys(
         status: str | None = Query(default=None),
         owner_id: str | None = Query(default=None),
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> KeyListResponse:
-        keys = service.list_keys(status=status, owner_id=owner_id)
-        return KeyListResponse(keys=keys, total=len(keys))
+        return KeyListResponse(**service.list_keys(status=status, owner_id=owner_id))
 
     @router.get(
         "/keys/{key_id}",
@@ -199,13 +140,13 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def get_key(
         key_id: str,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> dict:
         """The negotiation guards' key→owner lookup rides this endpoint."""
-        key = service.get_key(key_id)
-        if key is None:
-            raise HTTPException(status_code=404, detail=f"key {key_id!r} not found")
-        return key
+        try:
+            return service.get_key(key_id)
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     @router.post(
         "/keys/{key_id}/revoke",
@@ -213,12 +154,12 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def revoke(
         key_id: str,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> dict:
-        key = service.revoke(key_id)
-        if key is None:
-            raise HTTPException(status_code=404, detail=f"key {key_id!r} not found")
-        return key
+        try:
+            return service.revoke(key_id)
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     @router.post(
         "/keys/{key_id}/adjust",
@@ -227,19 +168,12 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     def adjust(
         key_id: str,
         body: AdjustRequest,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> dict:
         try:
-            key = service.adjust(
-                key_id=key_id,
-                delta=body.delta,
-                reason=body.reason,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc))
-        if key is None:
-            raise HTTPException(status_code=404, detail=f"key {key_id!r} not found")
-        return key
+            return service.adjust(key_id, delta=body.delta, reason=body.reason)
+        except RouteRefusal as refusal:
+            return _refused(refusal)
 
     @router.get(
         "/keys/{key_id}/grants",
@@ -248,10 +182,9 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
     )
     def list_grants(
         key_id: str,
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> GrantListResponse:
-        grants = service.list_grants(key_id)
-        return GrantListResponse(grants=grants, total=len(grants))
+        return GrantListResponse(**service.list_grants(key_id))
 
     @router.get(
         "/keys/{key_id}/usage",
@@ -262,9 +195,8 @@ def make_keys_router(get_service: Callable[[], KeysService]) -> APIRouter:
         key_id: str,
         after_id: int = Query(default=0, ge=0),
         limit: int = Query(default=500, ge=1, le=5000),
-        service: KeysService = Depends(get_service),
+        service: AuthorityRouteService = Depends(get_service),
     ) -> UsageListResponse:
-        events = service.list_usage(key_id, after_id=after_id, limit=limit)
-        return UsageListResponse(events=events, total=len(events))
+        return UsageListResponse(**service.list_usage(key_id, after_id=after_id, limit=limit))
 
     return router

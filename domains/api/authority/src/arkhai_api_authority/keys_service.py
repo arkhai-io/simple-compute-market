@@ -1,9 +1,10 @@
 """Keys, immutable credit grants, and consumption.
 
-The credits authority owns quota, key ownership, bearer hashes, balances, and
-grant idempotency. Issuance compares the complete canonical command before any
-new mutation; an exact retry converges on the committed grant while changed
-reuse conflicts.
+The authority owns quota, key ownership, bearer hashes, balances, and grant
+idempotency. Issuance compares the complete canonical command before any new
+mutation; an exact retry converges on the committed grant while changed reuse
+conflicts. Every label, offering mode, and key-namespace value comes from the
+configuration the service root passes.
 """
 
 from __future__ import annotations
@@ -18,13 +19,11 @@ from market_identity import Identity, IdentityScheme
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from arkhai_api_contracts.models import KeyDisposition, issuance_request_model
 from market_site.ledger import CapacityConflictError, CapacityLedgerService
-from apicredits_service.db.models import ApiKey, ConsumptionEvent, CreditGrant
-from apicredits_service.models.keys_model import (
-    ISSUANCE_LABEL,
-    IssuanceRequest,
-    KeyDisposition,
-)
+
+from arkhai_api_authority.models import ApiKey, ConsumptionEvent, CreditGrant
+from arkhai_api_authority.profile import AuthorityConfig
 
 KEY_NOT_FOUND = "key_not_found"
 KEY_NOT_OWNED = "key_not_owned"
@@ -55,11 +54,11 @@ def _new_secret(key_id: str) -> str:
     return f"{key_id}.{_secrets.token_urlsafe(32)}"
 
 
-def derive_key_id(fulfillment_id: str) -> str:
-    """Derive one stable new-key identifier from the immutable grant key."""
+def derive_key_id(key_prefix: str, fulfillment_id: str) -> str:
+    """Derive one stable new-key identifier, in the deployment's key namespace, from the grant key."""
 
     digest = hashlib.sha256(f"key:{fulfillment_id}".encode("utf-8")).hexdigest()
-    return f"ak_{digest[:16]}"
+    return f"{key_prefix}_{digest[:16]}"
 
 
 def _principal(
@@ -95,10 +94,16 @@ class KeysService:
         self,
         session_factory: sessionmaker[Session],
         capacity_ledger: CapacityLedgerService,
+        *,
+        config: AuthorityConfig,
     ) -> None:
         self._session_factory = session_factory
         self._ledger = capacity_ledger
         self._lock = _GLOBAL_MUTATION_LOCK
+        self._label = config.label
+        self._profile = config.profile
+        self._key_prefix = config.key_prefix
+        self._request_model = issuance_request_model(config.label)
 
     # ------------------------------------------------------------------
     # Issuance (settlement fulfillment)
@@ -125,7 +130,7 @@ class KeysService:
         if owner is None:
             raise ValueError("owner is required")
         key_target = KeyDisposition(mode=key_mode, key_id=key_id)
-        IssuanceRequest(
+        self._request_model(
             negotiation_id=negotiation_id,
             fulfillment_id=fulfillment_id,
             owner=owner,
@@ -173,7 +178,7 @@ class KeysService:
                 if not admitted:
                     raise IssuanceError(KEY_NOT_OWNED, why)
             else:
-                new_id = derive_key_id(fulfillment_id)
+                new_id = derive_key_id(self._key_prefix, fulfillment_id)
                 key = db.get(ApiKey, new_id)
                 if key is None:
                     secret = _new_secret(new_id)
@@ -329,8 +334,8 @@ class KeysService:
             already_issued=True,
         )
 
-    @staticmethod
     def _grant_result(
+        self,
         grant: CreditGrant,
         key: ApiKey,
         *,
@@ -342,7 +347,7 @@ class KeysService:
         if committed_at.tzinfo is None:
             committed_at = committed_at.replace(tzinfo=timezone.utc)
         return {
-            "schema": ISSUANCE_LABEL.issuance_result_schema,
+            "schema": self._label.issuance_result_schema,
             "fulfillment_id": grant.fulfillment_id,
             "grant_id": grant.fulfillment_id,
             "negotiation_id": grant.negotiation_id,
@@ -384,7 +389,7 @@ class KeysService:
                 reservation["capacity_reservation_id"]
             )
             if (
-                reservation["offering_mode"] != "api_credits"
+                reservation["offering_mode"] != self._profile.offering_mode
                 or int(reservation["units"]) != quantity
                 or backing_resource != resource_id
                 or reservation["deal_ref"].get("negotiation_id") != negotiation_id
@@ -402,7 +407,7 @@ class KeysService:
                 return str(committed["capacity_reservation_id"])
 
         claim: dict[str, Any] = {
-            "offering_mode": "api_credits",
+            "offering_mode": self._profile.offering_mode,
             "resource_id": resource_id,
             "units": quantity,
         }

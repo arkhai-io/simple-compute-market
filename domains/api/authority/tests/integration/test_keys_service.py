@@ -9,15 +9,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from market_identity import Identity, IdentityScheme
-from market_resource_pools import DEFAULT_POOL_ID, ResourcePool
-from market_resource_pools.db import Base as PoolsBase
-from market_site.db import Base as SiteBase
-from market_site.ledger import CapacityLedgerService
-from apicredits_service.db.models import Base
 from arkhai_api.issuance import KeyDisposition, fulfillment_id, issuance_request
-from apicredits_service.models.keys_model import ISSUANCE_LABEL
-from apicredits_service.services.keys_service import IssuanceError, KeysService, derive_key_id
+from arkhai_api_authority import IssuanceError, KeysService, derive_key_id, initialize, run_migrations
+from market_identity import Identity, IdentityScheme
+from market_site.ledger import CapacityLedgerService, UndeclaredOfferingModeError
+
+from tests.integration.profiles import CONFIG, LABEL, PROFILE, config_for
 
 BUYER = {
     "buyer_scheme": "eip191",
@@ -50,7 +47,7 @@ def _issue(
         raise ValueError("canonical owner is required")
     owner = Identity(scheme=IdentityScheme(buyer_scheme), identifier=buyer_id)
     request = issuance_request(
-        ISSUANCE_LABEL,
+        LABEL,
         negotiation_id=negotiation_id,
         owner=owner,
         service=issuance_service,
@@ -73,39 +70,32 @@ def _issue(
     )
 
 
-@pytest.fixture
-def ledger_and_service() -> tuple[CapacityLedgerService, KeysService, object]:
+def _composed(config=CONFIG) -> tuple[CapacityLedgerService, KeysService, object]:
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(bind=engine)
-    SiteBase.metadata.create_all(bind=engine)
-    PoolsBase.metadata.create_all(bind=engine)
-    with Session(engine) as db, db.begin():
-        db.add(
-            ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="api_credits",
-                enabled=True,
-                policy_tags={"deliverable_modes": ["api_credits"]},
-            )
-        )
+    run_migrations(engine)
+    initialize(engine, config.profile)
     session_factory = sessionmaker(bind=engine)
     ledger = CapacityLedgerService(session_factory)
     ledger.register_resource(
         resource_id="svc-quota",
         total_units=1000,
-        resource_type="api_credits",
-        pool_id="default",
+        resource_type=config.profile.resource_type,
+        pool_id=config.profile.pool_id,
     )
     return (
         ledger,
-        KeysService(session_factory=session_factory, capacity_ledger=ledger),
+        KeysService(session_factory=session_factory, capacity_ledger=ledger, config=config),
         engine,
     )
+
+
+@pytest.fixture
+def ledger_and_service() -> tuple[CapacityLedgerService, KeysService, object]:
+    return _composed()
 
 
 @pytest.fixture
@@ -130,7 +120,7 @@ def test_issue_new_key_grants_and_commits_quota(service, ledger):
     assert result["balance"] == 100
     # Self-describing secret: middlewares derive the key id from it.
     assert result["secret"].startswith(result["key_id"] + ".")
-    assert result["key_id"] == derive_key_id(fulfillment_id(ISSUANCE_LABEL, "0xe1"))
+    assert result["key_id"] == derive_key_id(CONFIG.key_prefix, fulfillment_id(LABEL, "0xe1"))
 
     # New keys auto-bind to the purchasing marketplace principal.
     key = service.get_key(result["key_id"])
@@ -284,7 +274,7 @@ def test_issue_requires_a_complete_canonical_owner(service):
 
 def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
     hold = ledger.reserve(
-        claim={"offering_mode": "api_credits", "units": 200},
+        claim={"offering_mode": PROFILE.offering_mode, "units": 200},
         deal_ref={"negotiation_id": "0xheld"},
         ttl_seconds=900,
     )
@@ -304,7 +294,7 @@ def test_issue_commits_negotiation_hold_instead_of_reserving(service, ledger):
 
 def test_quota_hold_is_bound_to_purchase(service, ledger):
     hold = ledger.reserve(
-        claim={"offering_mode": "api_credits", "units": 1},
+        claim={"offering_mode": PROFILE.offering_mode, "units": 1},
         deal_ref={"negotiation_id": "neg-other"},
         ttl_seconds=900,
     )
@@ -319,14 +309,14 @@ def test_quota_hold_is_bound_to_purchase(service, ledger):
         )
     assert caught.value.reason == "fulfillment_conflict"
     assert service.get_key(
-        derive_key_id(fulfillment_id(ISSUANCE_LABEL, "neg-purchase"))
+        derive_key_id(CONFIG.key_prefix, fulfillment_id(LABEL, "neg-purchase"))
     ) is None
     assert ledger.snapshot()[0]["available_units"] == 999
 
 
 def test_expired_hold_replaced_and_replay_does_not_commit_twice(service, ledger):
     hold = ledger.reserve(
-        claim={"offering_mode": "api_credits", "units": 200},
+        claim={"offering_mode": PROFILE.offering_mode, "units": 200},
         deal_ref={"negotiation_id": "neg-expired"},
         ttl_seconds=-1,
     )
@@ -357,7 +347,7 @@ def test_issue_quota_exhausted_persists_nothing(service, ledger):
     with pytest.raises(IssuanceError) as exc:
         _issue(service, negotiation_id="0xbig", quantity=2000, key_mode="new", **BUYER)
     assert exc.value.reason == "quota_exhausted"
-    missing_key_id = derive_key_id(fulfillment_id(ISSUANCE_LABEL, "0xbig"))
+    missing_key_id = derive_key_id(CONFIG.key_prefix, fulfillment_id(LABEL, "0xbig"))
     assert service.get_key(missing_key_id) is None
     assert service.list_grants(missing_key_id) == []
     assert ledger.snapshot()[0]["available_units"] == 1000
@@ -443,3 +433,67 @@ def test_usage_log_pages_by_event_id(service):
     assert len(events) == 4
     page = service.list_usage(new["key_id"], after_id=events[1]["id"], limit=2)
     assert [e["idempotency_key"] for e in page] == ["r2", "r3"]
+
+
+# ---------------------------------------------------------------------------
+# The profile replaces every offering-mode literal
+# ---------------------------------------------------------------------------
+
+
+def _issue_under(config, service, negotiation_id, *, capacity_reservation_id=None):
+    owner = Identity(scheme=IdentityScheme("eip191"), identifier=BUYER["buyer_id"])
+    request = issuance_request(
+        config.label, negotiation_id=negotiation_id, owner=owner, service="svc",
+        resource_id="svc-quota", quantity=5, key=KeyDisposition(mode="new"),
+    )
+    return service.issue(
+        fulfillment_id=request.fulfillment_id, negotiation_id=negotiation_id,
+        owner_scheme=owner.scheme.value, owner_id=owner.identifier, service="svc",
+        resource_id="svc-quota", quantity=5, key_mode="new", key_id=None,
+        request_digest=request.request_digest, capacity_reservation_id=capacity_reservation_id,
+    )
+
+
+def test_a_reservation_under_the_profiles_mode_is_committed_and_another_mode_refused():
+    config = config_for("inference")
+    ledger, service, _ = _composed(config)
+
+    hold = ledger.reserve(
+        claim={"offering_mode": "inference", "units": 5},
+        deal_ref={"negotiation_id": "neg-own-mode"},
+        ttl_seconds=900,
+    )
+    issued = _issue_under(config, service, "neg-own-mode", capacity_reservation_id=hold["capacity_reservation_id"])
+    assert issued["capacity_reservation_id"] == hold["capacity_reservation_id"]
+    assert ledger.get_reservation(hold["capacity_reservation_id"])["state"] == "leased"
+
+    # The seeded pool declares only the profile's mode, so the other mode is refused at admission.
+    with pytest.raises(UndeclaredOfferingModeError):
+        ledger.reserve(
+            claim={"offering_mode": "api_credits", "units": 5},
+            deal_ref={"negotiation_id": "neg-other-mode"},
+            ttl_seconds=900,
+        )
+
+
+def test_a_hold_under_another_mode_conflicts_with_the_purchase():
+    config = config_for("inference")
+    ledger, service, _ = _composed(config)
+    hold = ledger.reserve(
+        claim={"offering_mode": "inference", "units": 5},
+        deal_ref={"negotiation_id": "neg-other"},
+        ttl_seconds=900,
+    )
+    with pytest.raises(IssuanceError) as refused:
+        _issue_under(config, service, "neg-purchase", capacity_reservation_id=hold["capacity_reservation_id"])
+    assert refused.value.reason == "fulfillment_conflict"
+
+
+def test_a_fresh_reservation_claims_the_profiles_mode_and_the_result_carries_its_label():
+    config = config_for("inference")
+    ledger, service, _ = _composed(config)
+    issued = _issue_under(config, service, "neg-fresh")
+    reservation = ledger.get_reservation(issued["capacity_reservation_id"])
+    assert reservation["offering_mode"] == "inference"
+    assert issued["schema"] == config.label.issuance_result_schema
+    assert issued["key_id"].startswith(f"{config.key_prefix}_")

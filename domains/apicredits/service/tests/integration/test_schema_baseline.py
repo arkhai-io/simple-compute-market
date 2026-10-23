@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from apicredits_service.db.database import run_migrations
+from apicredits_service.container import bootstrap
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "baseline" / "schema.json"
 
@@ -23,7 +23,7 @@ def _fresh_database() -> sqlite3.Connection:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(engine)
+    bootstrap(engine)
     return engine.raw_connection().driver_connection
 
 

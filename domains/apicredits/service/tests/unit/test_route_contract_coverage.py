@@ -18,7 +18,7 @@ from market_site.auth import (
     EXCLUDED_PATHS,
     resolve_site_route,
 )
-from apicredits_service.middleware.route_contracts import CREDITS_ROUTE_CONTRACTS
+from apicredits_service.main import CREDITS_ROUTE_CONTRACTS
 from starlette.routing import Route
 
 ALL_CONTRACTS = CREDITS_ROUTE_CONTRACTS + CAPACITY_ROUTE_CONTRACTS
