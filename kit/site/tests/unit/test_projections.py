@@ -49,6 +49,20 @@ def test_both_projections_name_the_pool_pool_id():
     )
 
 
+def test_a_resource_recording_no_pool_is_in_neither_projection(caplog):
+    """Not in `default`, nor in a pool named for the resource: both
+    projections are exactly what they are without it, and it is reported."""
+    poolless = {**_resources()[0], "resource_id": "host-c", "pool_id": None}
+
+    with caplog.at_level("WARNING", logger="market_site.projections"):
+        pools = resource_pool_projection([*_resources(), poolless])
+        buckets = capacity_bucket_projection([*_resources(), poolless])
+
+    assert pools == resource_pool_projection(_resources())
+    assert buckets == capacity_bucket_projection(_resources())
+    assert caplog.text.count("'host-c' records no pool and is not projected") == 2
+
+
 def test_canonical_digest_ignores_mapping_order():
     assert canonical_digest([{"b": 2, "a": 1}]) == canonical_digest([{"a": 1, "b": 2}])
 

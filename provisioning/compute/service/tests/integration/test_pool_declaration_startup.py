@@ -310,7 +310,9 @@ def test_existing_pool_state_without_hosts_keeps_its_default_configuration(
 def test_a_fresh_database_does_not_substitute_a_default_for_a_bad_document(
     tmp_path, monkeypatch, missing,
 ):
-    deployment = _Deployment(tmp_path, monkeypatch, pool_document="pools: []")
+    deployment = _Deployment(
+        tmp_path, monkeypatch, pool_document="pools: [{id: default, label: Default}]",
+    )
     if missing:
         deployment.document.unlink()
     with pytest.raises(FileNotFoundError if missing else PoolValidationError):

@@ -388,10 +388,8 @@ class TestDeletePool:
     async def test_delete_default_pool_disables_but_keeps_it_resolvable(
         self, client_and_queue
     ):
-        """`default` can be disabled like any other pool it just can never
-        be hard-deleted or stop being the fallback for hosts that omit pool_id.
-        See openspec/specs/fulfillment/spec.md,
-        decision 8."""
+        """`default` is disabled like any other pool, and like any other it
+        is never hard-deleted."""
         client, _ = client_and_queue
 
         # The test fixture seeds "default" as a bare ResourcePool row with
@@ -485,10 +483,33 @@ pools:
         result = await client.pools.validate_pools(bad_yaml)
         assert result.valid is False
         assert result.diff is None
-        assert {problem.code for problem in result.problems} >= {
-            "unknown_provider",
-            "missing_default_pool",
-        }
+        assert "unknown_provider" in {problem.code for problem in result.problems}
+
+    async def test_a_document_naming_no_default_pool_imports(self, client_and_queue):
+        """No pool name is required of a document. Applied authoritatively, it
+        disables the stored `default` it does not name, as any omitted pool."""
+        client, _ = client_and_queue
+        no_default = """
+pools:
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: vm.ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+"""
+        validated = await client.pools.validate_pools(no_default)
+        assert validated.valid is True
+        assert validated.problems == []
+
+        result = await client.pools.import_pools(no_default)
+        assert result.applied is True
+        assert result.diff.created == ["hetzner-eu-central"]
+        assert result.diff.disabled == ["default"]
+        assert (await client.pools.get_pool("hetzner-eu-central")).enabled is True
+        assert (await client.pools.get_pool("default")).enabled is False
 
     async def test_export_round_trips(self, client_and_queue):
         client, _ = client_and_queue

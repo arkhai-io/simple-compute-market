@@ -374,12 +374,18 @@ Files: `kit/resource-pools/src/market_resource_pools/service.py` and its tests;
 `kit/site/src/market_site/ledger.py` and its tests;
 `provisioning/compute/service/src/compute_provisioning_service/services/capacity_inventory.py`.
 
-- [ ] 4.1 Remove the `missing_default_pool` check from document validation
+- [x] 4.1 Remove the `missing_default_pool` check from document validation
   (`service.py:616-623`) (D3). Library integration
   (`kit/resource-pools/tests/integration/test_resource_pool_service.py`):
   `test_missing_default_pool_rejected` becomes a document without `default`
   validating and importing; the disabled-`default` tests stay.
-- [ ] 4.2 Remove every `pool_id or DEFAULT_POOL_ID` read from `kit/site`'s ledger
+  Done: the check, its `declared_ids` set, and the module's `DEFAULT_POOL_ID`
+  import are gone. Library integration (`kit/resource-pools`, the real service
+  over in-memory SQLite): a document naming only `hetzner-eu-central`
+  validates with no problems and a created-only diff, writes nothing, then
+  imports it alone; the disabled-`default` test stays, its docstring no longer
+  naming the removed rule. `make -C kit/resource-pools test` — 124 passed.
+- [x] 4.2 Remove every `pool_id or DEFAULT_POOL_ID` read from `kit/site`'s ledger
   (`ledger.py:871, 933, 1002, 1222-1229, 1317, 2251, 2307`) and from
   `capacity_inventory.py:59-61`; a stored declaration with no pool is excluded
   from projection, admission, and pool moves, and is logged rather than read as
@@ -388,7 +394,56 @@ Files: `kit/resource-pools/src/market_resource_pools/service.py` and its tests;
   (`provisioning/compute/service/tests/unit/services/test_capacity_inventory.py`)
   cover a row stored with a NULL pool: absent from the projection, not admitted,
   and not reported as `default`.
-- [ ] 4.3 **Verification checkpoint.** The suites of 4.1 and 4.2. Application
+  Done. Ledger (`kit/site`): admission (`_find_candidate`) skips a pool-less
+  row first, before any claim matching, and logs it; a settlement assignment
+  to one is refused (`records no pool`); `backing_pool_id_in_session` returns
+  `None`; `_stored_declaration` keeps `None`, so re-declaring such a row in a
+  pool is "updated", never "unchanged"; and naming any pool for it is a move,
+  refused under a live obligation ("from no recorded pool"). Beyond the plan,
+  the same defect read a pool-less row as a pool named for its resource id in
+  four more `kit/site` places, and each now excludes it:
+  `iter_scheduling_candidates_in_session` (scheduling) and both
+  `projections.py` functions (`resource_pool_projection`,
+  `capacity_bucket_projection`, since the capacity-bucket projection reads the
+  ledger directly, not the provisioning inventory) log it;
+  `dict_resource_satisfies_claim`, the exact matcher the VM storefront injects
+  for ranking over snapshot rows, matches it to no claim, so ranking agrees
+  with admission. `resource_feasibility_view` keeps its `pool_id or
+  resource_id` fallback, but no caller now reaches it with a pool-less row.
+  The administrative listing and the snapshot still carry such a row, with
+  `pool_id: null` (the snapshot always did), so an operator can find and
+  re-declare it. Provisioning's `load_capacity_resource_inventory` leaves it
+  out of the resource-pool projection with a WARNING naming it. Library
+  integration (`kit/site/tests/integration/test_ledger.py`, the real ledger
+  over in-memory SQLite): a pool-less row is not probed or reserved for an
+  unpinned claim, a claim naming `default`, or one naming the resource's id,
+  each refusal logged by the missing-pool check itself, and no reservation is
+  written; it is in neither projection while a pooled row is, and the listing
+  reports it with no pool; it is not a scheduling candidate and an assignment
+  to it is refused, leaving the reservation's backing unchanged; naming
+  `default` for it is refused while a reservation holds it and accepted once
+  released; the declaration that was "unchanged" while the row was in
+  `default` is "updated" once its pool is gone, and the reservation it backs
+  resolves to no pool. Unit (`kit/site`): `test_projections.py` — both
+  projections equal their projection without the pool-less resource, each
+  logging it; `test_dict_resource_satisfies_claim.py` — a pool-less row
+  matches no claim, `default`- and id-pinned included. The VM storefront's
+  test double `domains/vms/storefront/tests/fake_site.py` served snapshot
+  rows with no `pool_id`, which no site now produces, so
+  `test_most_available_ranks_by_legacy_gpu_count_claim_through_the_real_aggregate_client`
+  ranked nothing; its rows now carry the pool-per-resource its own matcher
+  already assumed (`make -C domains/vms/storefront test` — unit 1103,
+  integration 448 passed). These replace `test_attribute_view_falls_back_to_resource_id_when_pool_id_unset`
+  and `test_a_legacy_row_with_no_stored_pool_is_in_the_default_pool`, which
+  asserted the fallbacks. `kit/fulfillment`'s
+  `test_resource_without_pool_is_not_schedulable` reserved against a pool-less
+  row, which admission now refuses; it strips the pool after admission instead,
+  and the scheduler still finds no candidate. Unit
+  (`test_capacity_inventory.py`): a pool-less declaration between two pooled
+  ones is left out and logged, and the projection equals the two pooled
+  declarations' own.
+  `DEFAULT_POOL_ID` stays exported from `market_resource_pools`.
+- [x] 4.3 **Verification checkpoint.** The suites of 4.1 and 4.2. Application
   integration: `test_pools_api.py` imports a document naming no `default`
   through the typed client and disables a pool named `default`. Run `make test`
   in `kit/resource-pools`, `kit/site`, and `provisioning/compute/service`, `make
@@ -396,6 +451,41 @@ Files: `kit/resource-pools/src/market_resource_pools/service.py` and its tests;
   End-to-end: `e2e_bare_metal_publication` and `e2e_bare_metal_introduction`
   import the bare-metal development document; none exercises a document without
   `default`. No scenario is owed.
+  Evidence: application integration (`test_pools_api.py`, through the typed
+  pool client against the in-process app): a document naming no `default`
+  validates with no problems and imports, creating its pool and disabling the
+  harness's stored `default` it omits; `test_delete_default_pool_disables_but_keeps_it_resolvable`
+  disables `default` (its docstring no longer cites a spec decision that does
+  not exist; its host-fallback assertion is section 5's). Persistence
+  integration (`test_pool_declaration_startup.py`): the "bad document" case
+  used `pools: []`, which is now valid, so it uses an entry missing its
+  provider, which no longer distinguishes "nothing substituted" from "not
+  applied"; section 8 replaces that test. Repository `make test` passed
+  before the review fixes (every suite, chart render included), and after
+  them and the test double's fix every suite passed but one:
+  `scripts/tests/test_publish_matrix.py` failed on section 5's edit to
+  `provisioning/compute/ansible/pyproject.toml`, already in the tree, which
+  section 5 owns (`kit/resource-pools` 124, `kit/site` 282 then 289,
+  `kit/fulfillment` 171, the service's unit 667 and integration 502); `make check-packaging`, `make
+  check-comment-hygiene`, and `make check-change` passed. End-to-end scenarios
+  confirmed as planned. No `Owed by validation:` line: the section changes no
+  chart. Fresh-context review: fixed the admission order (the missing-pool
+  check ran after claim matching, so a `default`-pinned claim was refused by
+  the resource-id fallback, unlogged), the injected storefront matcher
+  disagreeing with admission, a tombstone assertion on the removed problem
+  code, an equality the inventory test claimed but did not check, an
+  unreachable guard in `_pool_declares_mode`, and the untested
+  `declaration_change_in_session` and `backing_pool_id_in_session` cases, and
+  added the projection exclusion at unit level. Declined: rate-limiting the
+  WARNING emitted per pool-less row per read — no write path can produce such
+  a row (every declaration names a pool, and `20260921_002` backfilled the
+  rest), so one appearing is an operator's database edit the log should keep
+  naming; and editing the delete-`default` test's host-fallback comment, which
+  describes this commit's behaviour and section 5 rewrites.
+  Handoff: `.dist` is rebuilt by `make check-packaging` from the working
+  tree, so a later section's uncommitted edits reach every wheel-consuming
+  suite; a section's checks need the tree to hold that section alone, and
+  `git stash` and `git checkout --` are not available to this step.
 
 ## 5. A host's pool is optional
 
