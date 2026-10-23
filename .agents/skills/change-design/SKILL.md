@@ -127,7 +127,12 @@ the problem itself, lead with that — a well-designed solution to a misread
 problem is the costliest outcome.
 
 **Decisions.** List every open decision, numbered, including ones the
-documents treat as settled but the code or a correction reopens. For each:
+documents treat as settled but the code or a correction reopens, as an agenda:
+each decision's number, title, and kind (below), one line each, no positions, in
+the order to settle them. Then present the first decision in full and wait for
+the owner's answer before the next: one decision per message. Every decision
+presented at once invites answers before the owner has read the arguments, and
+an answer to one often reshapes the next. In full, a decision has:
 
 - **Context.** Recap what the design currently says or assumes on this point,
   and the code, guidance, or correction that bears on it, so the owner can
