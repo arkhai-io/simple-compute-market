@@ -53,7 +53,8 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push.
+  a wildcard after `-C` would also span a push. Remove a tracked file with
+  `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
 - **The end is an outcome.** When the sections you were given are committed and
   pushed, end with `finished`, `next` naming what the round needs next; a merge's
   conflicts resolved, committed, and pushed end `finished` too ("Resolving a
