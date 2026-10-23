@@ -1,12 +1,12 @@
 # =============================================================================
-# Ansible inventory: hosts the provisioning service sells — example template
+# Ansible inventory: hosts the provisioning service registers — example template
 # =============================================================================
 # Copy to `provisioning-hosts.ini` and fill in your real values:
 #   cp ansible/inventory/provisioning-hosts.example ansible/inventory/provisioning-hosts.ini
 #
 # The provisioning service registers every host entry in this file when it
 # starts with no hosts registered, or when it is imported again
-# (`POST /api/v1/hosts/import`). List only hosts to sell: infrastructure goes
+# (`POST /api/v1/hosts/import`). List only execution hosts: infrastructure goes
 # in `hosts` in the same directory. Section names mean nothing to the service;
 # `[kvm_hosts]` is the group the VM host-setup and VM-operations playbooks
 # target when run against this directory (`-i inventory/`).

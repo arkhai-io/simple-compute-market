@@ -425,7 +425,7 @@ consumer ignores.
 - **Same-package boundary** (producer and consumer share a package):
   `tests/fixtures/<module>.py` within that package, importable as
   `tests.fixtures.<module>` by any test in the package. Example:
-  `domains/vms/storefront/tests/fixtures/publish.py`.
+  `domains/vms/storefront/tests/fixtures/publication_cycle.py`.
 - **Cross-package boundary** (the consumer is a separate, higher-level
   package): `src/<package_name>/fixtures/<module>.py` inside the
   producer's own source package. Because the producer is already

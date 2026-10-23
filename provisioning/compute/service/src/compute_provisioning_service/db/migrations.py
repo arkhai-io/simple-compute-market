@@ -2707,7 +2707,7 @@ def _migrate_job_envelopes(engine: Engine) -> None:
     which defaults to it, name the guest, never the host, so they are not read.
     A job with no such evidence keeps ``host_id`` NULL and is logged by ID at
     WARNING; if it is still queued, the job engine fails it at execution for
-    naming no registered host, rather than running it on a guessed one.
+    naming no host, rather than running it on a guessed one.
     The row also has its ``offering_mode`` and ``action_kind``
     filled from its parameters where they were never recorded, gains
     ``executor_action`` (the action its executor runs, which routing reads and a

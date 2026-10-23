@@ -93,7 +93,9 @@ quickstarts' mentions of the setting are promotion work (10.9).
   (D6), so the command now reads only the database URL and log level; the
   service's own startup step still refuses the key. Its `migrate.main()` test
   was removed, and `test_migration_reads_no_configuration.py` runs the command
-  under two configurations instead.
+  under two configurations instead. Round fix (37 triage, 7.6a): that module
+  also runs `migrate.main()` with `PROVISIONING_PLAYBOOK_PATH` set and shows it
+  applies every migration, which is the evidence for this correction.
 - [x] 1.3 Rename the chart's `config.playbook_path` value to `vm_playbook_path`
   in `helm/charts/provisioning/values.yaml` and make `values.schema.json` refuse
   `config.playbook_path`, as it refuses `pool_definitions_path` (D5). Extend
@@ -812,8 +814,10 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   fixture holds hosts from before resource pools inserts the `default` pool and
   configuration rows the retired seed wrote, so it still exercises the later
   migrations it was written for.
-  Done. The refusal (`_refuse_hosts_without_default_pool`) runs before any
-  table or column is touched, counts the hosts, names the migration, and says
+  Done. The refusal (`_refuse_hosts_without_default_pool`) runs before this
+  migration touches any table or column; `run_migrations`' table creation and
+  the earlier migrations have already run, and stay recorded (37 triage,
+  7.6d). It counts the hosts, names the migration, and says
   what to create (`default` with provider `ansible` and its
   `ansible_pool_configs` row naming the VM playbook) or that the database can
   first be migrated by a release whose migration still creates the pool. The
@@ -865,7 +869,16 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   those three WARNINGs are logged, each naming its job; `vm-1` keeps its
   `host_id` parameter and `bm-1` takes `bm-node-1`. The legacy chain in
   `test_database.py` (job `job-1`, only `vm_target`) passes with its host
-  left NULL.
+  left NULL. Round fix (37 triage, 7.6c):
+  `test_a_stored_host_outranks_the_parameter_and_the_parameter_outranks_the_target`
+  migrates a job table that already records `host_id`: a VM job's stored host
+  outranks its `host_id` parameter, and a bare-metal job's `host_id` parameter
+  outranks its `executor_target`. The job engine now fails a queued job naming
+  no host with "job names no host, so it cannot be dispatched", rather than
+  "host None is not registered" (7.6h; `compute_provisioning/jobs/engine.py`,
+  the compute kit's library integration
+  `test_a_job_naming_no_host_fails_before_any_executor_runs`), and this
+  migration's docstring says so.
 - [x] 7.4 Retire `default_pool_inventory_group` and `default_host_id` from
   `settings.toml`, `helm/values.yaml:384`, `helm/charts/provisioning/values.yaml:161`,
   and the test fixtures (D6), and rewrite `settings.toml`'s comments on pool
@@ -884,16 +897,24 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
   Done as `test_migration_reads_no_configuration.py` (file SQLite, the real
   `compute-provisioning-migrate` entry point, `migrate.main()`, each
   configuration set through the `PROVISIONING_` environment layer and loaded
-  by the service's own loader, as 1.2's test does). The source database
-  predates resource pools and job envelopes: a host, `default` (`ansible`)
-  with its configuration, a VM job naming only its guest, and a bare-metal
-  job. The configurations differ in `vm_playbook_path`, `default_host_id`,
-  `default_pool_inventory_group`, `pool_definitions_path` (a valid document
-  naming another pool, against a missing file), and `pool_seed_path`. Both
-  copies end with equal DDL for every schema object and equal rows in every
-  table, `schema_migrations` compared by ID (its `applied_at` is when each
-  copy ran). The stored pool keeps its own playbook, no document's pool
-  appears, and the VM job's host stays NULL.
+  by the service's own loader, as 1.2's test does). Reworked in the round fix
+  (37 triage, 7.6a/7.6b/7.6f), because the first version's database reached
+  none of the configuration reads migration used to make, so its
+  two-configuration comparison held under the code before section 7 too; only
+  its NULL-host assertion, which 7.3 owns, would have failed. The source database holds no host and no pool, and
+  one VM job from before job envelopes whose parameters name no host and no
+  target: the old seed would have created `default` from the first
+  configuration's playbook, and the old job-envelope migration would have
+  given the job each configuration's `default_host_id`. The configurations
+  differ in `vm_playbook_path`, `bare_metal_playbook_path`, `default_host_id`,
+  `default_pool_inventory_group`, `pool_definitions_path` (empty, against a
+  valid document naming another pool), and `pool_seed_path` (the packaged
+  seed, against empty). Both copies end with equal DDL for every schema
+  object and equal rows in every table, `schema_migrations` compared by ID
+  (its `applied_at` is when each copy ran); no pool exists, and the job's
+  host is NULL. A second case runs the command with `PROVISIONING_PLAYBOOK_PATH`
+  set and shows every migration applied (1.2's correction). The module no
+  longer imports `test_database.py`'s private host-table helper.
 - [x] 7.6 **Verification checkpoint.** Persistence integration 7.2, 7.3, 7.5;
   `make -C helm test-render`. Run `make test` in `provisioning/compute/service`,
   `make check-packaging`, and `make check-comment-hygiene`.
@@ -960,6 +981,13 @@ migrate.py,migrations.py}`, `settings.toml`; `helm/values.yaml`,
     A pre-pools database with capacity rows but no hosts migrates into
     declarations naming a nonexistent `default` (20260921_002), which is
     consistent with D6's wording.
+  Round fix (implementation review 37's triage) for the findings above: 7.6a,
+  7.6b, and 7.6f in 7.5's note and 1.2's correction; 7.6c and 7.6h in 7.3's
+  note; 7.6d in 7.2's note; 7.6e — the chart's init-container comment says the
+  service, not the init container, refuses a database behind its last
+  migration, and is rewrapped, and `settings.toml`'s `pool_definitions_path`
+  comment says an empty value seeds a fresh site from `pool_seed_path`. 7.6g
+  and the second observation stand as recorded.
 
 ## 8. A fresh site is seeded from its seed document
 
@@ -990,7 +1018,11 @@ integration `conftest.py`.
   a temporary directory); empty and blank give `None`. Packaging: after `make
   dist`, `unzip -l` of `arkhai_compute_provisioning_service-0.17.2-py3-none-any.whl`
   lists `compute_provisioning_service/seed/pools.yaml` (hatchling ships every
-  file under the package, as it ships `settings.toml` and `config/`).
+  file under the package, as it ships `settings.toml` and `config/`). The
+  standing guard that it stays packaged (37 triage, 9.4b): the service image
+  installs only the wheel, and every stack starting without a pool document —
+  the VM compose lane and both Helm releases — reads the seed from it, so a
+  wheel without it fails each of those starts; no packaging check is added.
 - [x] 8.2 Add the startup step `seed-initial-pools` after
   `import-pool-definitions` and before `verify-pool-declarations` (D4). When no
   `pool_definitions_path` is configured, `pool_seed_path` is not empty, and no
@@ -1032,6 +1064,12 @@ integration `conftest.py`.
   - empty `pool_seed_path`: no pools, and startup passes;
   - a missing seed document, and an invalid one whose two valid entries come
     before the bad one: startup fails and no pool is created;
+  - a missing or invalid seed document on a site holding pools, or with a
+    pool document configured: startup continues, no pool changes, and the step
+    logs its skip, which it takes before opening the seed (round fix, 37
+    triage, 9.4a);
+  - an operator's own valid seed document: exactly its pools are created, with
+    no import recorded (round fix, 37 triage, 9.4b);
   - a bad or missing pool document on a fresh site: startup fails, and the
     seed step does not stand in for it;
   - the step order.
@@ -1040,7 +1078,10 @@ integration `conftest.py`.
   7.2 shows), and the existing-`default` state test (now the stored-pools
   case). Kept: the declaration-check tests, the refused predating document,
   the unchanged document, the provider-immutability tests, and the stand-in
-  `existing_default` fixture, which now is that case's site.
+  `existing_default` fixture, which now is that case's site. Its declaration
+  check over that site is `test_a_site_holding_default_passes_the_startup_check`,
+  renamed from `test_migrated_state_passes_the_startup_check`, since migration
+  no longer makes the pool it checks (37 triage, 9.4c).
 - [x] 8.4 Application integration through the typed clients: on a fresh service
   composed with the default seed, `vm-default` and `bare-metal-default` list
   through the pool client, a host registered with `pool_id: vm-default` and a
@@ -1131,7 +1172,9 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   module's five checks, the authentication check among them. Against no
   stack the five fail with connection refused, which proves the selection
   and nothing about a deployed service; the Helm validation's hook run is
-  that evidence.
+  that evidence. The check is now `test_an_unsigned_read_is_refused`: nothing
+  turns enforcement off, so its old name's "when enabled" described no
+  condition it has (37 triage, 9.4c).
 - [x] 9.3 Rewrite `dev-env/bare-metal/resource-pools.yaml`'s comment: imports no
   longer require a `default` pool, and the document keeps its inert pool so the
   bare-metal lane boots without seed pools (D3, D4).
@@ -1144,7 +1187,7 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   test-render`; `make check-comment-hygiene`.
   End-to-end: the VM scenarios listed in section 8 create their pools through
   `register_e2e_pool`; the provisioning smoke hook runs
-  `test_auth_enforcement_when_enabled` on every Helm validation. Both are the
+  `test_an_unsigned_read_is_refused` on every Helm validation. Both are the
   evidence for this section.
   Owed by validation: `tests.yml`, job `release · deployment contracts` — `make
   -C helm test-render` passes with the smoke hook's marker expression.
@@ -1200,6 +1243,57 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   pool stating no playbook dispatches. A Helm release with no
   `definitions.pools`, the bare-metal release 2 included, holds the seed
   pools as well; the bare-metal compose lane holds only its document's.
+  Round fix (implementation review 37's triage; the open items above are
+  dispositioned in `reviews/37-implementation.triage.md`):
+  - 37 F2: the provisioning chart's comment on capacity and pools says a pool a
+    declaration names must exist when capacity is imported — from `pools`, or
+    on a fresh site without one from the service's seed — instead of naming
+    `default`; `provisioning-hosts.example` calls its entries hosts the
+    service registers, and says to list only execution hosts. The seller
+    quickstarts' same wording is 10.9's.
+  - 9.4b: the provisioning chart gains `configFiles` (`values.yaml`,
+    `values.schema.json`, `templates/configmap.yaml`, `templates/deployment.yaml`):
+    each entry renders through `toYaml` into the ConfigMap and mounts
+    read-only at `/app/config/<name>`, the mount's path and name quoted. The
+    schema takes a single file name of at most 253 characters, and refuses
+    `.`, names beginning `..`, the three definition documents' names, and
+    `config.yml`, `config-*.yml`, and their `.yaml` forms. Chart render
+    (`tests/test_render.py`): an operator seed and `config.pool_seed_path`
+    render, mount, and pass through; content with an indented first line and
+    no final newline, under a name YAML reads as a boolean, survives exactly
+    (Helm parses every rendered manifest, so a broken block scalar fails the
+    render); each refused name fails naming it.
+  - 9.4c: `test_an_unsigned_read_is_refused` (see 9.2).
+  - 9.4d: `host_registry.py`'s module docstring and its GPU-count and
+    one-executor comments state the invariants, not how they were found.
+  - 39 O1: `docs/development/TESTING.md` cites
+    `domains/vms/storefront/tests/fixtures/publication_cycle.py`, which exists,
+    as its same-package fixture example.
+  Evidence for the round fix, all at the fix commit's tree: `make
+  check-packaging` passed (fresh wheelhouse, the compute kit rebuilt);
+  `make -C provisioning/compute test` — library integration and unit, 236
+  passed, the new engine case among them; `make -C provisioning/compute/service
+  test` — unit 658 passed, persistence and application integration 527 passed;
+  `make -C helm test-render` — chart render passed, 10 provisioning chart
+  checks; `make -C e2e-tests test-unit` — 38 passed; repository `make test`
+  exited 0 (run before the compliance fixes below, which changed only the
+  chart, its render tests, and two service test modules, each re-run above);
+  `make check-change` passed. Fresh-context compliance check of the round's
+  diff: no comment-hygiene, import, layering, citation, or public-repository
+  finding. Fixed: `configFiles` rendered each file under an unquoted key with
+  a literal block, which reshaped content and mis-typed some names (now
+  `toYaml`, and quoted mounts); the schema accepted `.`, `..`, and `..data`
+  (now refused, with a length limit); the documentation named only the
+  `.yml` profile names the schema refuses (now both forms); 7.5's docstring
+  claimed every setting varies (now the settings that decide pools and a
+  job's host); the not-read case proved only that startup continued (now it
+  asserts the skip, taken before the seed is opened); no case showed an
+  operator's valid seed replacing the packaged one (added, see 8.3); the
+  chart's capacity comment named only the packaged seed's pools; the
+  concurrent-start note named a unique-key failure SQLite reports as a lock
+  (now the outcome alone); 7.5's note overstated what the old code passed;
+  D6 still described the engine's old message. The engine's distinct message
+  is a diagnostic and needs no promotion row of its own.
 
 ## 10. Closeout
 
@@ -1255,6 +1349,15 @@ implementation.
   hand-editing each spec's Evidence section where its named tests moved; the
   archive in 10.11 merges the deltas. `openspec/specs/README.md` needs no change:
   no capability or companion is added. Complete the record's evidence column.
+  Added by implementation review 37's triage, each a row of the record below:
+  the seller quickstarts' "List only hosts to sell" lines
+  (`docs/seller-quickstart.md:328`, `docs/bare-metal-seller-quickstart.md:55`)
+  describe host registration, not selling (37 F2); both quickstarts document
+  overriding the seed — by path and an empty `pool_seed_path` under compose,
+  and `configFiles` with `config.pool_seed_path` under Helm — and
+  `docs/seller-quickstart.md:200`'s fresh-site `default` is rewritten (9.4b);
+  the resource-pool-management companion states that one process initializes
+  a database, and what a second process starting with it sees (37 F1 / 9.4f).
 - [ ] 10.10 **Documentation citations.** Run `make check-doc-citations
   CHANGE=seed-default-pool-at-runtime` and resolve every match; then run pinned
   `npx --yes @fission-ai/openspec@1.14.0 validate seed-default-pool-at-runtime
@@ -1296,6 +1399,10 @@ resolvable citations, and a current index.
 | D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` — "Host writes declare no capacity" (renamed from "Legacy host capacity is derived into declarations"), via archive; `openspec/specs/site-capacity/architecture.md` — the paragraph beginning "The alternatives each left capacity"; `docs/seller-quickstart.md` §6 and `docs/bare-metal-seller-quickstart.md`; `docs/development/ARCHITECTURE.md` — "Authority boundaries", the "Sellable capacity" row; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Capacity definitions" and "What a document does to entries it stops naming", where they speak of declarations derived from host inventory |
 | D3 `default` ordinary | `openspec/specs/resource-pool-management/spec.md` — "Non-destructive pool lifecycle", "Strict lossless YAML validation"; `openspec/specs/site-capacity/spec.md` — "Operator-administered capacity declarations"; both via archive |
 | D4 seed document and its trigger | `openspec/specs/resource-pool-management/spec.md` — "A fresh site is seeded from its seed document", via archive; `openspec/specs/resource-pool-management/architecture.md` — "Administrative reconciliation", replacing the paragraph beginning "On a fresh database with a mounted pool document"; `docs/development/ARCHITECTURE.md` — "Resource pools", replacing the sentence beginning "A fresh site with a mounted pool document"; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Definition documents", replacing the paragraph beginning "On a first boot with a pool document configured" |
+| D4 amendments: a seed read only where it applies (9.4a); overriding the seed by path (9.4b) | `openspec/specs/resource-pool-management/spec.md` — "A fresh site is seeded from its seed document", via archive; `docs/seller-quickstart.md` and `docs/bare-metal-seller-quickstart.md`, overriding or disabling the seed, with `docs/seller-quickstart.md`'s sentence beginning "A fresh site with a mounted pool document" replaced |
+| D4 amendment: the chart's `configFiles` (9.4b) | `openspec/specs/deployment-state/spec.md` — "The provisioning chart mounts operator files it gives no meaning", via archive; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Kubernetes: ConfigMap and Secret mounting" |
+| One process initializes a database (37 F1 / 9.4f) | `openspec/specs/resource-pool-management/architecture.md` — "Administrative reconciliation", beside the seed paragraph |
+| Inventory entries register hosts, not sales (37 F2) | `docs/seller-quickstart.md` §3, `docs/bare-metal-seller-quickstart.md` "Define the selected site" |
 | D5 optional VM playbook, playbooks frozen at preparation | `openspec/specs/physical-provisioning/spec.md` — "Ansible fulfillment adapter", "Bare-metal inventory binds an existing provider pool", via archive; `openspec/specs/resource-pool-management/architecture.md` — "Provider configuration" |
 | D5 a setting belonging to one domain is named for it; `vm_playbook_path`, the refused retired key | `openspec/specs/physical-provisioning/spec.md` — "A domain's service playbook setting is named for its domain", via archive; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Profile-based configuration" |
 | D6 migration reads no configuration; job-envelope host evidence | `openspec/specs/deployment-state/spec.md` — "Service-owned migration history", via archive; `docs/development/DEPLOYMENT_AND_CONFIG.md` — "Migrations at startup" |

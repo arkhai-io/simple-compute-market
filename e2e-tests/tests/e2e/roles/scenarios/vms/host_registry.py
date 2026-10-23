@@ -20,9 +20,9 @@ several stages downstream of the missing setup.
 
 One declaration per executor, and one executor per scenario. A second declaration on
 one machine sells the same hardware twice, which the provisioner's inventory loader
-refuses outright — and a shared executor is what previously let one scenario's GPU
-count break another's reservation. A fungible pool is therefore several executors
-with one declaration each, never several declarations on one.
+refuses outright — and on a shared executor one scenario's GPU count would change
+what another can reserve. A fungible pool is therefore several executors with one
+declaration each, never several declarations on one.
 
 A declaration's own id stays the commercial resource id the scenario's listing
 advertises, not the executor's alias: `compute_capacity_claim_from_order` pins the
@@ -59,12 +59,12 @@ from compute_provisioning_contracts import ConnectionSubmission, HostCreate, Hos
 #: what hardware exists; a declaration says how much of it is for sale, and the
 #: listing-reopen decision reads the declaration. Declaring four units for a
 #: scenario whose listing sells one leaves three available after the reserve, so
-#: the listing never closes — which is how this defaulted-to-4 and stayed
-#: invisible until a scenario asserted on listing closure.
+#: the listing never closes: a declaration states what its listing sells, never
+#: this count.
 E2E_HOST_GPU_COUNT = 4
 
-#: One executor per scenario. Sharing `kvm1` across all of them is what coupled the
-#: scenarios to each other, and is incompatible with one declaration per executor.
+#: One executor per scenario, so no scenario's declaration changes what another can
+#: reserve, as one declaration per executor requires.
 E2E_BUY_HOST = "kvm-buy"
 E2E_DEAL_HOST = "kvm-deal"
 E2E_DEAL_CLI_HOST = "kvm-deal-cli"

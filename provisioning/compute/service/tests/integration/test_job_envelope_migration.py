@@ -143,6 +143,49 @@ def test_results_and_handles_convert_and_hosts_are_recorded(caplog) -> None:
     assert tuple(route) == ("teardown", "destroy")
 
 
+def test_a_stored_host_outranks_the_parameter_and_the_parameter_outranks_the_target() -> None:
+    engine = _engine()
+    with engine.begin() as connection:
+        # A job table that already records each job's host.
+        connection.execute(text(
+            "CREATE TABLE ansible_jobs (id VARCHAR PRIMARY KEY, status VARCHAR NOT NULL, "
+            "params JSON NOT NULL, result JSON, logs TEXT, error TEXT, process_id VARCHAR, "
+            "retry_count INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL DEFAULT 3, "
+            "offering_mode VARCHAR, action_kind VARCHAR, host_id VARCHAR)"
+        ))
+        connection.execute(
+            text(
+                "INSERT INTO ansible_jobs (id, status, params, offering_mode, host_id) "
+                "VALUES (:id, 'queued', :params, :mode, :host)"
+            ),
+            [
+                {
+                    "id": "stored-1",
+                    "params": json.dumps({"offering_mode": "vm", "host_id": "kvm-param"}),
+                    "mode": "vm",
+                    "host": "kvm-stored",
+                },
+                {
+                    "id": "bm-param-1",
+                    "params": json.dumps({
+                        "offering_mode": "bare_metal",
+                        "host_id": "bm-param",
+                        "executor_target": "bm-target",
+                        "executor_action": "node_grant_access",
+                    }),
+                    "mode": "bare_metal",
+                    "host": None,
+                },
+            ],
+        )
+
+    _migrate_job_envelopes(engine)
+
+    jobs = _jobs(engine)
+    assert jobs["stored-1"]["host_id"] == "kvm-stored"
+    assert jobs["bm-param-1"]["host_id"] == "bm-param"
+
+
 def test_credentials_become_the_envelopes_the_contract_route_served() -> None:
     engine = _engine()
     _legacy(engine)

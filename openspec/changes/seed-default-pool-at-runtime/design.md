@@ -205,6 +205,43 @@ to every existing document-less site on upgrade. Each adapter contributing its o
 seed pool through its bundle adds a kit field the document makes unnecessary.
 Seeding inert pools would make the seed do nothing without an edit.
 
+*Settled in the triage of implementation review 37.*
+
+- **9.4a — a seed is read only where it applies.** A seed document that applies
+  and is missing or invalid fails startup; on a site holding pools, or with a pool
+  document configured, the seed is not read, so a dangling `pool_seed_path` never
+  fails a serving site. Rejected: validating the seed on every start, which fails
+  a serving site over a file it will never use; reading it on every start and only
+  warning, a code path for a dangling path's sake.
+- **9.4b — the seed stays packaged, and an operator overrides it by path.** The
+  seed is a service default, so it ships beside `settings.toml` and `config/`, the
+  service's other defaults; every way of running the service finds it. Every
+  stack starting without a pool document reads it from the installed wheel, which
+  is the guard that it is packaged; no packaging check is added. An operator
+  replaces it by pointing `pool_seed_path` at another document, or turns seeding
+  off with an empty value. In Kubernetes the provisioning chart gains a generic
+  `configFiles` map: each entry is rendered verbatim into the ConfigMap and
+  mounted read-only at `/app/config/<name>`, and the operator names the file in
+  `config`. The chart stays config-neutral: it gives a file no meaning and derives
+  no setting from it. Its schema refuses names that are not single file names,
+  names the chart mounts itself, and `config.yml` or `config-*.yml` (and their
+  `.yaml` forms), which the service would load as profiles around `config`. Its
+  templates render the whole map with `toYaml` and quote each mount's name, so a
+  file's content and name survive exactly. The seller quickstarts document
+  the override. Rejected: a loose seed file copied into the image and named by
+  path per deployment, which leaves a service run any other way without a seed; a
+  chart value for the seed, `definitions.poolSeed`, which makes the chart aware of
+  one setting; a `pool_seed` setting holding the document inline, a larger rework
+  depending on Dynaconf replacing rather than merging a nested mapping; and
+  documenting only `definitions.pools` and an empty `pool_seed_path`, which gives
+  no way to change a fresh site's starting pools with seed behaviour.
+- **37 F1 / 9.4f — one process initializes a database.** The seed's emptiness
+  check and import share a transaction but are not serialized across processes,
+  as the pool-document import and the inventory seed are not. Two processes
+  starting together on one fresh database can both find no pool; the second to
+  write fails its start, and, restarted, finds the pools and skips. No shipped deployment starts two processes against one database. The
+  assumption and its outcome are documented, not changed.
+
 ### D5. A job's playbook is resolved and frozen when the job is prepared
 
 A VM pool's `playbook_path` becomes optional: `ansible_pool_configs.playbook_path`
@@ -258,7 +295,8 @@ bare-metal job alone, where the bare-metal plan writes the machine. A VM job's
 `vm_target`, and its `executor_target`, which defaults to `vm_target`, name its
 guest and are never read as its host. A job with none of these keeps `host_id`
 NULL, and the migration logs each such job, by ID, at WARNING; if one is queued,
-the job engine fails it at execution as naming no registered host. The migration's
+the job engine fails it at execution as naming no host (a failure message of its
+own since implementation review 37's triage, 7.6h). The migration's
 tests cover a VM job with only a guest target, and one whose guest name matches a
 registered host: both keep `host_id` NULL.
 
@@ -279,7 +317,8 @@ were edited by hand.
 ### D7. Smoke tests
 
 `test_host_crud_round_trip` is deleted: it writes state, which `TESTING.md`'s smoke
-tier excludes, and integration tests cover it. `test_auth_enforcement_when_enabled`
+tier excludes, and integration tests cover it. The authentication check, renamed
+`test_an_unsigned_read_is_refused` in implementation review 37's triage (9.4c),
 sends an unsigned request to a protected read route instead of a VM create, takes
 a new marker, `provisioning_security`, and the provisioning Helm test hook selects
 `provisioning_readonly or provisioning_security`. The `provisioning_write` marker
@@ -356,6 +395,7 @@ configuration needs the optional playbook.
 | D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` (Host writes declare no capacity, renamed from Legacy host capacity is derived into declarations); `openspec/specs/site-capacity/architecture.md`; `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md` |
 | D3 `default` ordinary | `openspec/specs/resource-pool-management/spec.md` (Non-destructive pool lifecycle; Strict lossless YAML validation); `openspec/specs/site-capacity/spec.md` (Operator-administered capacity declarations) |
 | D4 seed document | `openspec/specs/resource-pool-management/spec.md` (A fresh site is seeded from its seed document); `openspec/specs/resource-pool-management/architecture.md` (Administrative reconciliation); `docs/development/ARCHITECTURE.md` (Resource pools); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Definition documents) |
+| D4 amendments (37 triage: 9.4a, 9.4b, 37 F1 / 9.4f) | `openspec/specs/resource-pool-management/spec.md` (A fresh site is seeded from its seed document: read only where it applies; overridden by path); `openspec/specs/deployment-state/spec.md` (The provisioning chart mounts operator files it gives no meaning); `openspec/specs/resource-pool-management/architecture.md` (Administrative reconciliation: one process initializes a database); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Kubernetes: ConfigMap and Secret mounting; Definition documents); `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md` (overriding the seed) |
 | D5 playbooks frozen at preparation, VM pool playbook optional, `vm_playbook_path` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/resource-pool-management/architecture.md` (Provider configuration); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Profile-based configuration), including the convention that a setting belonging to one domain is named for it |
 | D6 migration reads no configuration | `openspec/specs/deployment-state/spec.md` (Service-owned migration history); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Migrations at startup) |
 | D7 smoke tests | `docs/development/TESTING.md` |

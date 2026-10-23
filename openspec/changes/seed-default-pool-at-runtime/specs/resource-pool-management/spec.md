@@ -88,7 +88,7 @@ is seeded with `vm-default` and `bare-metal-default` from `pool_seed_path`.
 
 ### Requirement: A fresh site is seeded from its seed document
 
-Migration MUST create no Resource Pool. At startup, after the pool document import and before the stored-declaration check, the provisioning service MUST apply the pool document named by `pool_seed_path` when no `pool_definitions_path` is configured and no pool is stored, through the same validation and import as a pool document, in one transaction, recording no digest. It MUST NOT apply it when a pool document is configured or any pool is stored. An empty `pool_seed_path` MUST seed nothing. A seed document that is missing or fails validation MUST fail startup. The packaged default seed document declares `vm-default` (`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each delivering and advertising its own offering mode, backed, with empty provider configuration.
+Migration MUST create no Resource Pool. At startup, after the pool document import and before the stored-declaration check, the provisioning service MUST apply the pool document named by `pool_seed_path` when no `pool_definitions_path` is configured and no pool is stored, through the same validation and import as a pool document, in one transaction, recording no digest. It MUST NOT apply it when a pool document is configured or any pool is stored. An empty `pool_seed_path` MUST seed nothing. A seed document that applies and is missing or fails validation MUST fail startup; where the seed does not apply, the service MUST NOT read it. An operator replaces the seed by naming another pool document with `pool_seed_path`. The packaged default seed document declares `vm-default` (`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each delivering and advertising its own offering mode, backed, with empty provider configuration.
 
 #### Scenario: A fresh site configures no pool document
 
@@ -112,8 +112,13 @@ Migration MUST create no Resource Pool. At startup, after the pool document impo
 
 #### Scenario: The seed document is invalid
 
-- **WHEN** the seed document named by `pool_seed_path` is missing or fails pool document validation
+- **WHEN** the service starts on a database storing no pool, with no `pool_definitions_path`, and the seed document named by `pool_seed_path` is missing or fails pool document validation
 - **THEN** startup fails and no pool is created
+
+#### Scenario: A seed document that does not apply is not read
+
+- **WHEN** the seed document named by `pool_seed_path` is missing or invalid, and the database stores a pool or a `pool_definitions_path` is configured
+- **THEN** startup continues and the seed document causes no pool change
 
 #### Scenario: Migration runs on a fresh database
 

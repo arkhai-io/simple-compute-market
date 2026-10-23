@@ -108,7 +108,7 @@ class TestProvisioningSmoke:
         log.info("Connectivity for %s: reachable=%s", first, data.reachable)
 
     @pytest.mark.provisioning_security
-    def test_auth_enforcement_when_enabled(self, provisioning_settings: dict):
+    def test_an_unsigned_read_is_refused(self, provisioning_settings: dict):
         """An unsigned read of a protected route is refused.
 
         A read, so the check changes nothing even where enforcement is broken.

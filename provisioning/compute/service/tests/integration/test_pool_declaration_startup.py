@@ -169,7 +169,7 @@ def deployment(tmp_path, monkeypatch):
     return _Deployment(tmp_path, monkeypatch, existing_default=True)
 
 
-def test_migrated_state_passes_the_startup_check(deployment):
+def test_a_site_holding_default_passes_the_startup_check(deployment):
     app_runtime.verify_pool_declarations()
 
 
@@ -305,6 +305,47 @@ def test_a_missing_seed_document_fails_startup_and_creates_no_pool(tmp_path, mon
         deployment.start()
 
     assert deployment.pool_ids() == []
+
+
+@pytest.mark.parametrize("site", ["pools stored", "pool document configured"])
+@pytest.mark.parametrize("seed_problem", ["missing", "invalid"])
+def test_a_seed_document_that_does_not_apply_is_not_read(
+    tmp_path, monkeypatch, caplog, site, seed_problem,
+):
+    """Only a seed that applies fails startup: a site holding pools, or
+    governed by its pool document, never reads one."""
+    seed = tmp_path / "seed.yaml"
+    if seed_problem == "invalid":
+        seed.write_text("pools: [{id: no-provider, label: No provider}]", encoding="utf-8")
+    deployment = _Deployment(
+        tmp_path, monkeypatch, seed=seed,
+        existing_default=site == "pools stored",
+        pool_document=_DECLARED_DOCUMENT if site == "pool document configured" else None,
+    )
+    before = deployment.pool_service.export_pools_yaml()
+
+    with caplog.at_level(logging.INFO):
+        deployment.start()
+
+    # The step skips before it opens the seed document.
+    assert {
+        "pools stored": "Pool seed: skipped — pools are already stored",
+        "pool document configured": "Pool seed: skipped — a pool document is configured",
+    }[site] in caplog.text
+    assert deployment.pool_ids() == [DEFAULT_POOL_ID]
+    if site == "pools stored":
+        assert deployment.pool_service.export_pools_yaml() == before
+
+
+def test_an_operator_seed_document_replaces_the_packaged_one(tmp_path, monkeypatch):
+    seed = tmp_path / "seed.yaml"
+    seed.write_text(_DECLARED_DOCUMENT.replace("id: default", "id: gpu-h200"), encoding="utf-8")
+    deployment = _Deployment(tmp_path, monkeypatch, seed=seed)
+
+    deployment.start()
+
+    assert deployment.pool_ids() == ["gpu-h200"]
+    assert deployment.recorded_kinds() == []
 
 
 def test_an_invalid_seed_document_fails_startup_and_creates_no_pool(tmp_path, monkeypatch):

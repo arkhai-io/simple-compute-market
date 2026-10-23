@@ -1,10 +1,13 @@
 """The migration command's result depends on the database alone.
 
-Two copies of one database, from before resource pools and job envelopes, are
-migrated by the real ``compute-provisioning-migrate`` entry point under two
-configurations that differ in every operational setting migration once read:
-the VM playbook, the default host, the inventory group, and the pool and seed
-documents. Both copies end with the same schema and the same rows.
+Two copies of one database are migrated by the real
+``compute-provisioning-migrate`` entry point under two configurations that
+differ in every setting that could decide a site's pools or a job's host: the
+VM and bare-metal playbooks, a default host, an inventory group, and the pool
+and seed documents. The database holds no host and no pool, and a job naming no
+host, so a migration that created a pool from configuration or gave a job a
+configured host would leave the copies different. Both end with the same
+schema and the same rows.
 
 External boundary: file-backed SQLite in a temp directory. Each configuration
 is set through the service's environment layer and loaded by the service's own
@@ -23,10 +26,7 @@ from sqlalchemy import create_engine, text
 from compute_provisioning_service import config as config_module
 from compute_provisioning_service.config import settings
 from compute_provisioning_service.db import migrate
-from compute_provisioning_service.db.models import ResourcePool
-from vm_provisioning_adapter.db import AnsiblePoolConfig
-
-from .test_database import _create_pre_pool_hosts
+from compute_provisioning_service.db.migrations import MIGRATIONS
 
 _POOL_DOCUMENT = """
 pools:
@@ -42,11 +42,10 @@ pools:
 
 
 def _source_database(path: Path) -> None:
-    """Hosts placed in `default`, its VM configuration, and two jobs whose
-    host the job-envelope migration decides."""
+    """No host and no pool; one VM job from before job envelopes whose
+    parameters name no host and no target."""
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
-        _create_pre_pool_hosts(connection, ("kvm1",))
         connection.execute(text(
             "CREATE TABLE ansible_jobs (id VARCHAR PRIMARY KEY, status VARCHAR NOT NULL, "
             "params JSON NOT NULL, result JSON, logs TEXT, error TEXT, process_id VARCHAR, "
@@ -56,26 +55,8 @@ def _source_database(path: Path) -> None:
         ))
         connection.execute(text(
             "INSERT INTO ansible_jobs (id, status, params, created_at, updated_at) VALUES "
-            "('job-vm', 'queued', '{\"vm_action\": \"create\", \"vm_target\": \"guest-1\"}', "
-            "'2026-01-01 00:00:00', '2026-01-01 00:00:00'), "
-            "('job-bm', 'queued', '{\"offering_mode\": \"bare_metal\", "
-            "\"executor_target\": \"bm-node-1\", \"executor_action\": \"node_grant_access\"}', "
+            "('job-untargeted', 'queued', '{\"vm_action\": \"create\"}', "
             "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
-        ))
-    ResourcePool.__table__.create(bind=engine)
-    AnsiblePoolConfig.__table__.create(bind=engine)
-    with engine.begin() as connection:
-        connection.execute(text(
-            "ALTER TABLE ansible_pool_configs ADD COLUMN inventory_group VARCHAR"
-        ))
-        connection.execute(text(
-            "INSERT INTO resource_pools (id, label, provider, enabled, policy_tags, "
-            "created_at, updated_at) VALUES ('default', 'Default Pool', 'ansible', 1, '{}', "
-            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
-        ))
-        connection.execute(text(
-            "INSERT INTO ansible_pool_configs (pool_id, playbook_path, inventory_group, "
-            "extra_vars) VALUES ('default', '/opt/stored/vm.yaml', 'stored_hosts', '{}')"
         ))
     engine.dispose()
 
@@ -132,18 +113,20 @@ def test_two_configurations_migrate_one_database_to_the_same_schema_and_rows(
     _migrate_under(
         monkeypatch, first,
         vm_playbook_path="/opt/first/vm.yaml",
+        bare_metal_playbook_path="/opt/first/node-access.yaml",
         default_host_id="kvm1",
         default_pool_inventory_group="first_hosts",
-        pool_definitions_path=str(pool_document),
-        pool_seed_path="",
+        pool_definitions_path="",
+        pool_seed_path="seed/pools.yaml",
     )
     _migrate_under(
         monkeypatch, second,
         vm_playbook_path="/opt/second/vm.yaml",
+        bare_metal_playbook_path="/opt/second/node-access.yaml",
         default_host_id="kvm-elsewhere",
         default_pool_inventory_group="second_hosts",
-        pool_definitions_path=str(tmp_path / "absent.yaml"),
-        pool_seed_path="seed/pools.yaml",
+        pool_definitions_path=str(pool_document),
+        pool_seed_path="",
     )
 
     assert _contents(first) == _contents(second)
@@ -151,16 +134,31 @@ def test_two_configurations_migrate_one_database_to_the_same_schema_and_rows(
     engine = create_engine(f"sqlite:///{first}")
     try:
         with engine.connect() as connection:
-            pools = connection.execute(text(
-                "SELECT p.id, p.provider, c.playbook_path FROM resource_pools p "
-                "JOIN ansible_pool_configs c ON c.pool_id = p.id"
-            )).all()
+            pools = connection.execute(text("SELECT id FROM resource_pools")).all()
             hosts = dict(connection.execute(text(
-                "SELECT id, host_id FROM ansible_jobs ORDER BY id"
+                "SELECT id, host_id FROM ansible_jobs"
             )).all())
     finally:
         engine.dispose()
-    # The stored pool keeps its own playbook; no document's pool is created.
-    assert [tuple(row) for row in pools] == [("default", "vm.ansible", "/opt/stored/vm.yaml")]
-    # No configured default host stands in for a VM job's missing host.
-    assert hosts == {"job-bm": "bm-node-1", "job-vm": None}
+    # Neither the playbooks nor either document creates a pool.
+    assert pools == []
+    # A job naming no host gets none, whatever default host is configured.
+    assert hosts == {"job-untargeted": None}
+
+
+def test_the_migration_command_migrates_with_the_retired_playbook_setting_stated(
+    tmp_path, monkeypatch,
+):
+    database = tmp_path / "provisioning.db"
+
+    _migrate_under(monkeypatch, database, playbook_path="/opt/retired/vm.yaml")
+
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        with engine.connect() as connection:
+            applied = {row[0] for row in connection.execute(text(
+                "SELECT id FROM schema_migrations"
+            ))}
+    finally:
+        engine.dispose()
+    assert applied == {migration.id for migration in MIGRATIONS}

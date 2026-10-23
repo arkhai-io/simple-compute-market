@@ -105,8 +105,9 @@ inventory_ini = ""
 # docs/development/DEPLOYMENT_AND_CONFIG.md, "Definition documents"). Reconciled
 # at startup only when the document differs from the one last reconciled, like
 # relay definitions; a reconciliation disables pools the document does not
-# name. Empty by default: pools are then administered through the API. Migration
-# creates no pool in either case.
+# name. Empty by default: a fresh site is then seeded from pool_seed_path
+# (below), and pools are administered through the API. Migration creates no pool
+# in either case.
 pool_definitions_path = ""
 
 # Pool seed document
