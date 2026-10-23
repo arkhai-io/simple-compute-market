@@ -160,7 +160,9 @@ waiting is a defect in the mock, not something to resume around.
 applies to a service's own background lifecycle loops, where the seam is
 an HTTP control rather than a callback. Each loop should offer a pause,
 and an explicit single-step that works *while* paused, so a scenario
-drives transitions instead of waiting for a timer:
+drives transitions instead of waiting for a timer. The stage discipline
+diagram under [system integration tests](#4-system-integration-tests-end-to-end)
+draws a scenario following this:
 
 | Loop | Pause | Explicit step |
 |---|---|---|
@@ -255,7 +257,8 @@ The teardown observation follows the resource sold: VM capacity is released,
 an API-credit grant is consumed until the authority returns HTTP 402, and a
 bare-metal lease is released only when authenticated access is revoked and the
 selected-site authority reports teardown. A health check or static Compose
-render is not deal evidence.
+render is not deal evidence. The canonical compute deal diagram below draws
+the compute family's scenario part by part.
 
 The scenarios share `DomainDealState`, exact event ordering, profiled buyer
 configuration, and public client helpers from
@@ -315,6 +318,17 @@ is [`diagrams/e2e-compute-deal.drawio`](diagrams/e2e-compute-deal.drawio); the
 SVG beside it is the export and also opens in draw.io.
 
 ![The canonical compute deal, part by part, from holding the loops to resuming them](diagrams/e2e-compute-deal.svg)
+
+The last diagram zooms into one of those parts, settle, to show the
+discipline inside a box. The stage previews twice, through the storefront's
+evaluate-settle and the provisioning service's evaluate-job, advances with
+one settle call, and measures a fulfillment dispatched and held at the mock
+gate; what it reads from and writes to the shared deal state is what ties it
+to the parts before and after. The diagram's source is
+[`diagrams/e2e-settle-zoom.drawio`](diagrams/e2e-settle-zoom.drawio); the
+SVG beside it is the export and also opens in draw.io.
+
+![One part of the compute deal, settle, zoomed in: its two previews, one advance, and measurement](diagrams/e2e-settle-zoom.svg)
 
 The e2e test pod cannot import service internals — it uses typed
 clients, explicit test controllers, and stage/event APIs over HTTP, the
