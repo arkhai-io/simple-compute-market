@@ -139,7 +139,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -147,7 +147,7 @@ dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_api_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_api_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

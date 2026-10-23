@@ -55,7 +55,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-api-contracts", specifier = ">=0.1.0" },
+    { name = "arkhai-api-contracts", specifier = ">=0.2.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
 ]
@@ -69,7 +69,7 @@ dev = [
 
 [[package]]
 name = "arkhai-api-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
@@ -77,7 +77,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_api_contracts-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_api_contracts-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

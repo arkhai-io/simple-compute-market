@@ -230,6 +230,57 @@ async def test_issuance_sends_the_request_and_reads_the_result_under_the_shared_
         assert "secret" not in result.model_dump(mode="json")
 
 
+async def test_a_request_under_another_label_never_reaches_the_authority():
+    authority = ScriptedAuthority(lambda _r, _b: (200, {}))
+    async_client, sync_client = _shared_secret_clients(authority)
+    foreign = _request(label=OTHER_LABEL)
+    with pytest.raises(ValueError):
+        await async_client.submit_issuance(foreign)
+    with pytest.raises(ValueError):
+        sync_client.submit_issuance(foreign)
+    assert authority.requests == []
+
+
+class _OneShotTransport(httpx.AsyncBaseTransport, httpx.BaseTransport):
+    """A caller-owned transport that refuses to serve once closed, as a real one does."""
+
+    def __init__(self, handler):
+        self._mock = httpx.MockTransport(handler)
+        self.closed = False
+
+    def _serve(self, request):
+        if self.closed:
+            raise RuntimeError("transport already closed")
+        return self._mock.handle_request(request)
+
+    async def handle_async_request(self, request):
+        return self._serve(request)
+
+    def handle_request(self, request):
+        return self._serve(request)
+
+    async def aclose(self):
+        self.closed = True
+
+    def close(self):
+        self.closed = True
+
+
+async def test_a_callers_transport_serves_every_call_until_the_client_is_closed():
+    transport = _OneShotTransport(lambda _r: httpx.Response(200, json={"key_id": "k1"}))
+    async_client = AuthorityClient("http://authority", "secret", label=LABEL, transport=transport)
+    assert [(await async_client.get_key("k1"))["key_id"] for _ in range(2)] == ["k1", "k1"]
+    assert transport.closed is False
+    await async_client.close()
+    assert transport.closed is True
+
+    transport = _OneShotTransport(lambda _r: httpx.Response(200, json={"key_id": "k1"}))
+    sync_client = SyncAuthorityClient("http://authority", "secret", label=LABEL, transport=transport)
+    assert [sync_client.get_key("k1")["key_id"] for _ in range(2)] == ["k1", "k1"]
+    sync_client.close()
+    assert transport.closed is True
+
+
 async def test_a_result_under_another_label_is_refused():
     request = _request()
     authority = ScriptedAuthority(lambda _r, _b: (200, _result(request, label=OTHER_LABEL)))

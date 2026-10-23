@@ -51,6 +51,7 @@ from arkhai_api_contracts.models import (
     IssuanceLabel,
     IssuanceRequest,
     IssuanceResult,
+    issuance_request_model,
     issuance_result_model,
 )
 from arkhai_api_contracts.routes import SELLER_ROLE, SERVICE_ROLE, route
@@ -385,25 +386,37 @@ class AuthorityClient:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._request_model = issuance_request_model(label)
         self._result = issuance_result_model(label)
+        self._http: httpx.AsyncClient | None = None
 
     @property
     def signing_enabled(self) -> bool:
         return self._signer is not None
 
+    async def close(self) -> None:
+        """Close the HTTP client and the transport it was given."""
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
+
     async def _request(self, call: _Call) -> httpx.Response:
         prepared = _prepare(
             call, service_url=self._service_url, admin_key=self._admin_key, signer=self._signer
         )
-        async with httpx.AsyncClient(timeout=call.timeout, transport=self._transport) as http:
-            response = await http.request(
-                call.method,
-                prepared.url,
-                json=prepared.json,
-                content=prepared.content,
-                headers=prepared.headers,
-                params=call.params,
-            )
+        # One HTTP client for this client's lifetime: closing one per call would
+        # close the transport the caller supplied with it.
+        if self._http is None:
+            self._http = httpx.AsyncClient(transport=self._transport)
+        response = await self._http.request(
+            call.method,
+            prepared.url,
+            json=prepared.json,
+            content=prepared.content,
+            headers=prepared.headers,
+            params=call.params,
+            timeout=call.timeout,
+        )
         if prepared.request_id is not None:
             assert self._expected_authorities is not None
             _verify(
@@ -416,8 +429,13 @@ class AuthorityClient:
         return response
 
     async def submit_issuance(self, request: IssuanceRequest, *, timeout: float = 30.0) -> IssuanceResult:
-        """Commit, or retrieve on an exact retry, the immutable issuance request."""
-        return _issued(self._result, await self._request(_issue(request, timeout)))
+        """Commit, or retrieve on an exact retry, the immutable issuance request.
+
+        The request is bound to this client's label before anything is sent, so
+        another label's command never reaches the authority.
+        """
+        bound = self._request_model.model_validate(request.model_dump(mode="json"))
+        return _issued(self._result, await self._request(_issue(bound, timeout)))
 
     async def get_issuance(self, fulfillment_id: str, *, timeout: float = 10.0) -> IssuanceResult | None:
         """One committed grant, without its secret, or None when unknown."""
@@ -494,25 +512,35 @@ class SyncAuthorityClient:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._request_model = issuance_request_model(label)
         self._result = issuance_result_model(label)
+        self._http: httpx.Client | None = None
 
     @property
     def signing_enabled(self) -> bool:
         return self._signer is not None
 
+    def close(self) -> None:
+        """Close the HTTP client and the transport it was given."""
+        if self._http is not None:
+            self._http.close()
+            self._http = None
+
     def _request(self, call: _Call) -> httpx.Response:
         prepared = _prepare(
             call, service_url=self._service_url, admin_key=self._admin_key, signer=self._signer
         )
-        with httpx.Client(timeout=call.timeout, transport=self._transport) as http:
-            response = http.request(
-                call.method,
-                prepared.url,
-                json=prepared.json,
-                content=prepared.content,
-                headers=prepared.headers,
-                params=call.params,
-            )
+        if self._http is None:
+            self._http = httpx.Client(transport=self._transport)
+        response = self._http.request(
+            call.method,
+            prepared.url,
+            json=prepared.json,
+            content=prepared.content,
+            headers=prepared.headers,
+            params=call.params,
+            timeout=call.timeout,
+        )
         if prepared.request_id is not None:
             assert self._expected_authorities is not None
             _verify(
@@ -525,8 +553,9 @@ class SyncAuthorityClient:
         return response
 
     def submit_issuance(self, request: IssuanceRequest, *, timeout: float = 30.0) -> IssuanceResult:
-        """Commit, or retrieve on an exact retry, the immutable issuance request."""
-        return _issued(self._result, self._request(_issue(request, timeout)))
+        """Commit, or retrieve on an exact retry, the immutable issuance request; see ``AuthorityClient``."""
+        bound = self._request_model.model_validate(request.model_dump(mode="json"))
+        return _issued(self._result, self._request(_issue(bound, timeout)))
 
     def get_issuance(self, fulfillment_id: str, *, timeout: float = 10.0) -> IssuanceResult | None:
         """One committed grant, without its secret, or None when unknown."""

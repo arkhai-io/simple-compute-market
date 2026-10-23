@@ -181,6 +181,19 @@ def _no_http(request: httpx.Request) -> httpx.Response:
     raise AssertionError("no HTTP call should be made")
 
 
+async def test_another_labels_request_is_refused_before_anything_is_sent():
+    foreign = issuance_request(
+        IssuanceLabel("other"), negotiation_id="e1", owner=OWNER, service="service-main",
+        resource_id="q1", quantity=1, key=KeyDisposition(mode="new"),
+    )
+    client = AuthorityClient("http://authority", label=LABEL, transport=httpx.MockTransport(_no_http))
+    with pytest.raises(ValueError):
+        await client.submit_issuance(foreign)
+    sync = SyncAuthorityClient("http://authority", label=LABEL, transport=httpx.MockTransport(_no_http))
+    with pytest.raises(ValueError):
+        sync.submit_issuance(foreign)
+
+
 async def test_rollback_with_nothing_to_roll_back_makes_no_call():
     expected = {"key_id": "", "rolled_back": False, "reason": "nothing_to_roll_back"}
     client = AuthorityClient("http://authority", label=LABEL, transport=httpx.MockTransport(_no_http))

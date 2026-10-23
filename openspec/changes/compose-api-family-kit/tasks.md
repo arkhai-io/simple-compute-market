@@ -725,6 +725,30 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
       service's suite does not split that file. Section 3 is committed
       on `feat/compose-api-family-kit-s3-client`, stacked on section 2's
       branch.
+      **Review round (2026-10-23).** The owner's review of the section's
+      pull request found what the passing suites did not; its fixes are a
+      second commit. Accepted: contracts bumps to 0.2.0, since the headers
+      module and the result-model re-exports are new public API an index
+      could otherwise resolve away from a client requiring `>=0.1.0`, and
+      the client and service require `>=0.2.0`; the client binds an
+      outgoing issuance request through `issuance_request_model(label)`
+      before anything is sent, so another label's command never reaches
+      the authority (unit test: refused with no call; scripted authority:
+      no request recorded); each client owns one HTTP client for its
+      lifetime and offers `close()`, because closing a per-call client
+      closed the transport the caller supplied with it, which the moved
+      storefront client had done too (a caller-owned transport that refuses
+      to serve once closed now serves two calls and closes only with the
+      client); `api_credit_smoke.py` constructs the family client under the
+      domain's label, its call into fulfillment still carrying the
+      signature it lost before this change. Client 25 passed; contracts 16;
+      service 79, storefront 197, domain 32, buyer 27 unchanged; the six
+      locks recording contracts relocked; `make check-packaging` and
+      comment hygiene pass on the copy. For the owner: PR checks do not run
+      against a feature-branch base, so the lanes' evidence comes from
+      validation's pipeline run; and D4's "over any transport exposing
+      `authenticated_request`" differs from the shape 3.1's text fixed,
+      which triage settles by amending D4 or re-reviewing the shape.
 
 ## 4. The authority kit and the API-credits service root
 

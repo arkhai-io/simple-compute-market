@@ -38,7 +38,8 @@ from smoke_common import (
 )
 
 from arkhai_apicredits.listings.models import coerce_resource_dict
-from arkhai_apicredits.settlement.credits_client import CreditsServiceClient
+from arkhai_api_client import AuthorityClient
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.settlement.fulfillment import fulfill_api_credits_obligation
 from arkhai_apicredits.settlement.payments import validate_payment_publication_clause
 
@@ -94,9 +95,10 @@ async def main(directory, phase, authority):
     db = SQLiteClient(str(Path(directory) / "storefront.db"))
     identifier = "api-smoke-" + Path(directory).name
 
-    credits_client = CreditsServiceClient(
+    credits_client = AuthorityClient(
         "http://127.0.0.1:3181",
         Path(authority, "admin-key").read_text(),
+        label=API_CREDITS_LABEL,
         transport=httpx.AsyncHTTPTransport(),
     )
 
