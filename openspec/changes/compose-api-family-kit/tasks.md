@@ -399,10 +399,15 @@ above.
       *Done.* `terms.py` is the binding: `ApiCreditsProvisionTerms =
       provision_terms_model(API_CREDITS_PROVISION_KIND)`,
       `make_api_credits_provision_terms = ApiCreditsProvisionTerms.purchase`,
-      the accessors re-exported; `API_CREDITS_PROVISION_VERSION`,
-      `ApiCreditsKeyIntent`, and `ApiCreditsProvisionPayload` had no consumer
-      and are gone. The domain library declares `arkhai-api>=0.1.0` and bumps
-      to 0.7.0, a published wheel whose requirements changed. The terms
+      the accessors re-exported. Three names the module published are gone,
+      `API_CREDITS_PROVISION_VERSION`, `ApiCreditsKeyIntent`, and
+      `ApiCreditsProvisionPayload`, none with a consumer in the repository,
+      and `ApiCreditsProvisionTerms` now names a generated class called
+      `ProvisionTerms`, which changes pydantic error headers only; the
+      domain library's import surface is not a compatibility boundary (D14),
+      so no alias is kept. The domain library declares `arkhai-api>=0.1.0`
+      and bumps to 0.7.0, the minor bump the versioning policy gives a
+      pre-1.0 incompatible change. The terms
       consumers' tests are the storefront's and buyer's, which pass unchanged:
       storefront 196, buyer 27, service 79 (unit and application integration),
       1.3–1.5's baselines among them; domain library 45 (unit; the install

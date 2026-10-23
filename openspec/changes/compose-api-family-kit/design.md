@@ -421,7 +421,12 @@ version response do not change, and the baselines above hold each to a diff of
 zero. The gate publishes as `arkhai-api-gate`, and the
 `arkhai-apicredits-middleware` distribution is no longer published, which is
 the one package break and is listed as such. The API-credits distributions
-keep their names and bump versions as their contents shrink. No database reset
+keep their names and bump versions as their contents shrink. They are not
+import-compatibility boundaries before 1.0: as implementations move into the
+family packages, their Python module and symbol surfaces shrink under minor
+version bumps, as the versioning policy permits, while runtime behaviour,
+wire, digests, data, configuration, and the retained service and package
+identities stay compatible. No database reset
 is required, and the service's in-process migration chain is unchanged.
 `ARCHITECTURE.toml` gains the family row and the `family` attribute on the
 API-credits row, loses the domain library's override row, and needs no row for
