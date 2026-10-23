@@ -35,7 +35,7 @@ config-docker.yml,config-mock.yml,config-local.yml.example}`;
 tests and fixtures naming `playbook_path` or `resolved_playbook_path`. The
 quickstarts' mentions of the setting are promotion work (10.9).
 
-- [ ] 1.1 Rename the setting `playbook_path` to `vm_playbook_path` in
+- [x] 1.1 Rename the setting `playbook_path` to `vm_playbook_path` in
   `settings.toml`, every `config/*.yml` profile, and the service `Makefile`
   (`PROVISIONING_PLAYBOOK_PATH` becomes `PROVISIONING_VM_PLAYBOOK_PATH`); rename
   `Settings.resolved_playbook_path` to `resolved_vm_playbook_path` and update its
@@ -44,7 +44,19 @@ quickstarts' mentions of the setting are promotion work (10.9).
   `resolved_vm_playbook_path` resolves the configured value, and that no source,
   test, or fixture still reads `playbook_path` as a setting (a repository search
   for `resolved_playbook_path` and `settings.playbook_path` finds nothing).
-- [ ] 1.2 Refuse the retired key (D5). Add a check in `config.py` that names every
+  Done: `settings.toml`, `config-docker.yml`, `config-mock.yml`,
+  `config-local.yml.example`, `config.yml`'s key list, and the `Makefile`'s
+  `serve` target; the two integration harnesses' `MagicMock` settings
+  (`conftest.py`, `test_test_controller.py`) renamed too. `config-seller.yml`
+  states no playbook. Unit (`test_config.py`, real Dynaconf over the service's own
+  `settings.toml` and a temporary profile): a profile's relative
+  `vm_playbook_path` resolves, and the packaged default resolves to the image's
+  VM playbook. `git grep` for `resolved_playbook_path`, `settings.playbook_path`,
+  `PROVISIONING_PLAYBOOK_PATH`, and `config.playbook_path` finds only pool-level
+  `provider_config.playbook_path` reads (section 2's) and the refusal tests.
+  `migrate.py` still passes the resolved path to `run_migrations` as
+  `default_playbook_path`; section 7 removes that parameter.
+- [x] 1.2 Refuse the retired key (D5). Add a check in `config.py` that names every
   retired setting present — `playbook_path`, replaced by `vm_playbook_path` — and
   a first startup step in `app_runtime.startup_steps()` that raises with that
   message before any other step. Unit: `test_config.py` covers the key set in a
@@ -52,13 +64,41 @@ quickstarts' mentions of the setting are promotion work (10.9).
   Application integration: the service's startup sequence, run as the
   integration suite composes it, fails naming `vm_playbook_path` when the retired
   key is set.
-- [ ] 1.3 Rename the chart's `config.playbook_path` value to `vm_playbook_path`
+  Done: `config.RETIRED_SETTINGS` maps each retired key to its replacement;
+  `Settings.stated_retired_settings()` reads presence through Dynaconf's
+  `exists`, so any layer counts, and `refuse_retired_settings()` raises
+  `RetiredSettingsError` naming each key and its replacement. The startup step
+  `refuse-retired-settings` is first, and `compute-provisioning-migrate` calls
+  the same refusal before opening the database (beyond the plan: until section 7
+  the migration reads the VM playbook to seed `default`, so a stale profile
+  would otherwise seed with the key ignored before the API refused). Unit
+  (`test_config.py`): the key in a profile and through
+  `PROVISIONING_PLAYBOOK_PATH`, both refused naming `vm_playbook_path`; absent,
+  no refusal. Unit (`test_worker.py`): the refusal is the first startup step.
+  Application integration (`tests/integration/test_retired_settings_startup.py`):
+  the in-process app's own lifespan raises `RetiredSettingsError` naming
+  `vm_playbook_path`, and the next step's effect (`ANSIBLE_CONFIG` exported) is
+  absent; and `migrate.main()` raises the same without creating its SQLite file.
+  In both the key is set through the environment layer, reloaded with the
+  service's own loader (`config._load_bootstrap`), and swapped into the
+  `settings` object the modules read — the service loads it once at import, so
+  the test reloads it rather than reproducing import. The integration suite's
+  `client_and_queue` harness overrides the container and never runs the
+  lifespan, so this test runs the lifespan itself; a refused start has no
+  typed-client surface. A subprocess run of `compute-provisioning-api` would
+  avoid the swap but starts a server on a port; the lifespan runs the same steps.
+- [x] 1.3 Rename the chart's `config.playbook_path` value to `vm_playbook_path`
   in `helm/charts/provisioning/values.yaml` and make `values.schema.json` refuse
   `config.playbook_path`, as it refuses `pool_definitions_path` (D5). Extend
   `helm/charts/provisioning/tests/test_render.py`: the rendered profile carries
   `vm_playbook_path`, and a values file setting `config.playbook_path` fails
   schema validation. Run `make -C helm test-render`.
-- [ ] 1.4 **Verification checkpoint.** Unit: service `test_config.py` and the
+  Done. Chart render: `make -C helm test-render` passed (Helm v4.3.0), including
+  the two new checks — the default render's profile carries
+  `"vm_playbook_path"` and no `"playbook_path"`, and `config.playbook_path` fails
+  with an error naming it. No umbrella values file or compose file set the
+  provisioning playbook setting.
+- [x] 1.4 **Verification checkpoint.** Unit: service `test_config.py` and the
   startup-step test. Application integration: the startup refusal of 1.2. Chart
   render: `make -C helm test-render`. Run `make test` in
   `provisioning/compute/service` and `domains/vms/provisioning/adapter`, and
@@ -70,6 +110,23 @@ quickstarts' mentions of the setting are promotion work (10.9).
   No scenario is owed.
   Owed by validation: `tests.yml`, job `release · deployment contracts` — `make
   -C helm test-render` passes with the renamed value and the refused key.
+  Evidence: `make -C provisioning/compute/service test` — unit 667 passed,
+  integration 487 passed (after the review fixes); `make -C
+  domains/vms/provisioning/adapter test` — 29 passed; `make -C helm
+  test-render` passed; repository `make test` exited 0 (run before the review
+  fixes, which touched only the service's migrate entry point, docstrings, and
+  tests, all re-run above); `make check-comment-hygiene` and `make check-change`
+  passed. The end-to-end scenarios and the owed CI job are confirmed as
+  planned: the markers exist in `e2e-tests/pyproject.toml`, and the job is
+  `release-deployment` (`release · deployment contracts`) in
+  `.github/workflows/tests.yml`, which runs `make -C helm test-render`.
+  Handoff: Dynaconf's `exists()` is what makes "set in any layer" hold, and
+  `settings.toml` must not state a retired key, or the service could never
+  start. The integration suite's harness never runs the app lifespan; a test
+  of a startup step runs `app.router.lifespan_context(app)` itself, as
+  `test_retired_settings_startup.py` does. The Edit tool strips a trailing
+  space from a replacement, which broke `values.yaml` once (`key:"value"`);
+  `make -C helm test-render` caught it.
 
 ## 2. Optional VM pool playbook, frozen at preparation
 

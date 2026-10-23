@@ -31,11 +31,14 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    # Before the database is opened: a stale profile must stop the init
+    # container as it stops the service, not run with the key ignored.
+    settings.refuse_retired_settings()
     engine = create_db_engine(settings.database_url, settings.is_sqlite)
     logger.info("Applying migrations to %s ...", settings.database_url)
     run_migrations(
         engine,
-        default_playbook_path=str(settings.resolved_playbook_path),
+        default_playbook_path=str(settings.resolved_vm_playbook_path),
         default_inventory_group=str(settings.default_pool_inventory_group),
         default_host_id=getattr(settings, "default_host_id", None),
         pool_definitions_path=settings.resolved_pool_definitions_path,

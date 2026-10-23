@@ -24,6 +24,16 @@ from compute_provisioning_ansible import DEFAULT_ANSIBLE_CONFIG
 logger = logging.getLogger(__name__)
 
 
+def refuse_retired_settings() -> None:
+    """Refuse a configuration stating a setting the service no longer reads.
+
+    Runs before any other step, so a stale profile stops the service before it
+    composes anything that would ignore the key; the migration command, which
+    runs first in a deployment, refuses it before opening the database.
+    """
+    settings.refuse_retired_settings()
+
+
 def apply_ansible_config() -> None:
     """Export ``ANSIBLE_CONFIG`` for every playbook the service runs.
 
@@ -205,6 +215,7 @@ def create_job_queue() -> None:
 
 def startup_steps() -> tuple[ComputeProvisioningStartupStep, ...]:
     return (
+        ComputeProvisioningStartupStep("refuse-retired-settings", refuse_retired_settings),
         ComputeProvisioningStartupStep("apply-ansible-config", apply_ansible_config),
         ComputeProvisioningStartupStep(
             "initialise-container-resources",

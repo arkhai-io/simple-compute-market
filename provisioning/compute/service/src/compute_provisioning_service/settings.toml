@@ -33,7 +33,9 @@ default_host_id = "kvm1"
 # Ansible filesystem paths.
 # Set to absolute paths via your active profile or PROVISIONING_* env vars.
 # The Dockerfile bakes in the /opt paths; local dev overrides via config-local.yml.
-playbook_path = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+# Each domain's playbook setting is named for its domain. Startup refuses the
+# retired `playbook_path`, naming `vm_playbook_path`, rather than ignoring it.
+vm_playbook_path = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
 bare_metal_playbook_path = "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
 inventory_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 management_vars_path = "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"

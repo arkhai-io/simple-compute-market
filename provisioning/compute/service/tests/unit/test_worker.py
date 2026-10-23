@@ -44,6 +44,13 @@ async def test_worker_runs_background_tasks_and_cancels_them_cleanly(monkeypatch
     assert cancelled.is_set()
 
 
+def test_runtime_refuses_retired_settings_before_any_other_step():
+    """A stale profile stops the service before it composes anything that
+    would ignore the retired key."""
+    names = [step.name for step in worker.app_runtime.startup_steps()]
+    assert names[0] == "refuse-retired-settings"
+
+
 def test_runtime_imports_pools_before_seeding_inventory():
     names = [step.name for step in worker.app_runtime.startup_steps()]
     assert names.index("import-pool-definitions") < names.index("seed-inventory")

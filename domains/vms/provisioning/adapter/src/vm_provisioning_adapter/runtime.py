@@ -74,7 +74,7 @@ class VmProvisioningRuntime:
         return AnsibleJobExecutor(
             self.ansible_service,
             self.codec,
-            self.config.resolved_playbook_path,
+            self.config.resolved_vm_playbook_path,
             timeout_seconds=self.config.ansible_timeout_seconds,
             additional_non_retryable_errors=self.config.additional_non_retryable_errors,
         )

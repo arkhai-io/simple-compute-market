@@ -8,7 +8,7 @@
 # Override specific values at runtime via PROVISIONING_* env vars.
 # ---------------------------------------------------------------------------
 
-playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+vm_playbook_path: "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
 bare_metal_playbook_path: "/opt/domains/bare_metal/provisioning/iac/ansible/playbooks/node-access.yaml"
 inventory_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/provisioning-hosts.ini"
 management_vars_path: "/opt/domains/vms/provisioning/iac/ansible/inventory/management-vars.yaml"

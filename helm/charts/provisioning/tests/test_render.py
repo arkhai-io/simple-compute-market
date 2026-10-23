@@ -1,10 +1,13 @@
-"""Definition documents render, mount, and set their path together, or not at all.
+"""The provisioning chart's rendered configuration and the values it refuses.
+
+Definition documents render, mount, and set their path together, or not at all.
 
 The chart derives each definition document's path from the document's
 presence. A document that renders and mounts while its path is unset is a
 silent no-op, and a path set without the document points the service at
-nothing, so each document's three parts are asserted together. Standard
-library only: values are written as JSON, which is YAML.
+nothing, so each document's three parts are asserted together. The schema
+also refuses the retired VM playbook setting the service refuses at startup.
+Standard library only: values are written as JSON, which is YAML.
 """
 
 from __future__ import annotations
@@ -100,9 +103,30 @@ def test_a_configured_definitions_path_is_refused() -> None:
         assert setting in rendered.stderr
 
 
+def test_the_profile_carries_the_vm_playbook_under_its_domain_name() -> None:
+    rendered = _render({})
+    assert rendered.returncode == 0, rendered.stderr
+    assert (
+        '"vm_playbook_path": "/opt/domains/vms/provisioning/iac/ansible/playbooks/'
+        'single-tenant/vm-operations.yaml"'
+    ) in rendered.stdout
+    assert '"playbook_path"' not in rendered.stdout
+
+
+def test_the_retired_playbook_setting_is_refused() -> None:
+    """The service refuses ``playbook_path`` at startup; the schema refuses it
+    before anything renders, so a stale values file never reaches a pod."""
+    rendered = _render({"config": {"playbook_path": "/opt/vm-operations.yaml"}})
+    assert rendered.returncode != 0, "config.playbook_path was accepted"
+    assert "playbook_path" in rendered.stderr
+    assert "vm_playbook_path" not in rendered.stderr
+
+
 if __name__ == "__main__":
     test_empty_definitions_render_no_document_mount_or_path()
     test_each_definition_renders_its_document_mount_and_path_alone()
     test_both_definitions_render_together()
     test_a_configured_definitions_path_is_refused()
-    print("provisioning chart definition-document render checks passed")
+    test_the_profile_carries_the_vm_playbook_under_its_domain_name()
+    test_the_retired_playbook_setting_is_refused()
+    print("provisioning chart render checks passed")

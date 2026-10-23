@@ -22,7 +22,8 @@
         "inventory_ini": false,
         "storefront_admin_key": false,
         "pool_definitions_path": false,
-        "capacity_definitions_path": false
+        "capacity_definitions_path": false,
+        "playbook_path": false
       }
     },
     "definitions": {
