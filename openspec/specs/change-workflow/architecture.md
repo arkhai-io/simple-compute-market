@@ -157,9 +157,10 @@ validation driving Docker, the cluster, and the push.
 
 A denial is read from the run's own record, never from the step's message: the
 record names the call, while the message generalizes ("Bash is not allowed" for a
-chain missing one utility). The harness gives a reason only for a decision of the
-permission mode, so a denial reasoned `mode` is a gap in the table, and one with no
-reason met a deny rule — a forbidden action. A step that cannot go on without a
+chain missing one utility). The harness's reason classifies it: `mode` is a gap in
+the table, `rule` met a deny rule — a forbidden action — and `subcommandResults`
+refused a shell command by one of its parts without saying which way, so the
+command's parts are matched against the step's deny rules. A step that cannot go on without a
 denied call stops naming it; one that can goes on, and every denial is recorded on
 its outcome either way. After a `mode` denial, the same work done by a tool the
 step's rules allow for it — the Edit tool for a shell write — is the rules being

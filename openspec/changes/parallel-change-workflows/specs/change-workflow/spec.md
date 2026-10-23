@@ -751,16 +751,16 @@ check no task for it, and push it; a run that stops MUST leave its partial work
 uncommitted, and one stopped by a refusing repository guard or a moved `HEAD` MUST
 commit nothing. A step MUST NOT reset, check out, switch, rebase, stash, or clean. Every denial a
 run records MUST be recorded on the run's outcome, from the run's own record and
-with the harness's reason when it gives one; the harness gives none for a call a
-deny rule refused. A run that cannot go on without a denied tool MUST end
+with the harness's reason when it gives one. A run that cannot go on without a denied tool MUST end
 with a stopped outcome naming the denial, rather than asking a question or working
 around it; a run that goes on MUST do so only by calls its step's rules allow. A
 call a deny rule refused MUST NOT be done by another tool; a call denied for want
 of an allow rule MAY be done by a tool the step's rules allow for the same work,
 and the run MUST name that substitute in its message. The orchestrating session
 MUST read each recorded denial from the run's record, never from the step's
-message; classify it by the harness's reason, or its absence, as a gap in the
-table or a forbidden action; check the run's later calls, after a deny-rule
+message; classify it by the harness's reason as a gap in the table or a
+forbidden action, matching a command refused by its parts, or one with no
+reason, against the step's deny rules; check the run's later calls, after a deny-rule
 denial, for a workaround; propose, for a gap, the narrowest rule that matches the
 call and say whether it is a one-run grant or a tracked change; and record its
 reading in the workflow log as a
