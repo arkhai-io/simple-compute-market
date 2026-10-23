@@ -33,7 +33,10 @@ from market_resource_pools_contracts import PoolCreate, PoolUpdate
 
 from tests.e2e.roles.buyer_cli import _toml_quote, create_profiled_buyer_cli
 from tests.e2e.roles.helpers.domain_deal import require_state
-from tests.e2e.roles.helpers.compute_deal import advance_storefront, pause_storefront
+from tests.e2e.roles.helpers.compute_deal import (
+    advance_storefront,
+    assert_storefront_loops_held,
+)
 from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id
 from tests.e2e.roles.scenarios.vms.host_registry import (
     declare_e2e_capacity,
@@ -42,8 +45,10 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 )
 
 pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held"),
     pytest.mark.e2e_vm_introduction,
-    pytest.mark.usefixtures("held_loops"),
 ]
 
 VM = "vm"
@@ -78,14 +83,6 @@ class IntroductionState:
 @pytest.fixture(scope="module")
 def state() -> IntroductionState:
     return IntroductionState(run=uuid.uuid4().hex[:8])
-
-
-@pytest.fixture(scope="module")
-def held_loops(storefront_admin_client):
-    """Hold the storefront's timer loops for this module and resume afterwards."""
-    assert pause_storefront(storefront_admin_client)
-    yield
-    storefront_admin_client.admin_resume_lifecycle_loops()
 
 
 @pytest.fixture(scope="module")
@@ -184,7 +181,9 @@ class TestStage00_DisclosureBeforeCommitment:
     def test_00_readiness_discloses_the_retention_window(
         self, storefront_admin_client, state: IntroductionState
     ):
-        """A buyer reads the retention window before handing over a contact."""
+        """A buyer reads the retention window before handing over a contact;
+        the module's loops are held, so every publication is a stepped one."""
+        assert_storefront_loops_held(storefront_admin_client)
         health = storefront_admin_client.get_health()
         disclosure = health.disclosures.get("introduction_retention")
         assert disclosure and disclosure["scope"] == "introduction_record", health

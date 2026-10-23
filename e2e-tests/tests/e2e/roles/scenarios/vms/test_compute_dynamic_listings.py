@@ -25,12 +25,17 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.helpers.compute_deal import pause_storefront
+from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.scenarios.vms.conftest import capacity_site_id, capacity_source_for, require_state
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_compute_dynamic_listings
+pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held"),
+    pytest.mark.e2e_compute_dynamic_listings,
+]
 
 
 #: This scenario's own pool. One pool per scenario: a pool's `listing_mode`
@@ -49,6 +54,7 @@ ACCEPTED_ESCROWS = [{
 
 @dataclass
 class DynamicListingState:
+    storefront_held: bool = False
     supply_declared: bool = False
     listing_ids_by_gpu_count: dict[int, str] = field(default_factory=dict)
     capacity_reservation_id: str | None = None
@@ -134,23 +140,18 @@ def _listing_statuses(storefront_admin_client, ids_by_gpu_count: dict[int, str])
 
 
 class TestComputeDynamicListings:
-    def test_00_pauses_the_storefront(
+    def test_00_the_storefront_loops_are_held(
         self, storefront_admin_client, dynamic_state: DynamicListingState
     ):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+        """The storefront's timer loops are held for this scenario.
 
-        Named as a stage rather than hidden in a fixture because every later
-        assertion depends on it: with the loops running, a listing status read
-        after a reserve races the capacity poller's next cycle. Advances are
-        explicit from here on.
-
-        Pausing this early is safe *here* and not in general: a paused storefront
-        also refuses new negotiations, so a scenario that has to agree a deal
-        cannot hold the pause across that step. This one reserves capacity through
-        the admin API and never negotiates, so it can pause at the start; the deal
-        scenarios pause after agreement instead.
+        The module holds them through ``storefront_loops_held``; this stage
+        asserts the hold because every later assertion depends on it: with the
+        loops running, a listing status read after a reserve races the capacity
+        poller's next cycle. Advances are explicit from here on.
         """
-        dynamic_state.storefront_paused = pause_storefront(storefront_admin_client)
+        assert_storefront_loops_held(storefront_admin_client)
+        dynamic_state.storefront_held = True
 
     def test_00a_registers_executor_host_and_syncs_projection(
         self, provisioning_client, storefront_admin_client,
@@ -168,7 +169,7 @@ class TestComputeDynamicListings:
         state no scenario declares. The projection pull that follows is asserted
         rather than slept out.
         """
-        require_state(dynamic_state, "storefront_paused")
+        require_state(dynamic_state, "storefront_held")
 
         # `reserve` matches CapacityBucket rows, which only a capacity declaration
         # creates — the host-derived projection is a different store. The

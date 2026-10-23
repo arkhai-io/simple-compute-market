@@ -37,7 +37,8 @@ from typing import Any, Optional, Protocol
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_fulfillment_to,
-    pause_storefront,
+    assert_lease_watchdog_held,
+    assert_storefront_loops_held,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.domain_deal import DomainDealState, require_state
@@ -158,7 +159,7 @@ class ComputeDealState(DomainDealState):
     # Phase 0 — readiness. Each check gates the stages that depend on it.
     #: The storefront's timer loops are held, so every later effect is one a
     #: stage asked for. Required before the first write.
-    _lifecycle_paused: bool = False
+    _lifecycle_held: bool = False
     _storefront_healthy: bool = False
     _registry_reachable: bool = False
     _provisioning_healthy: bool = False
@@ -309,25 +310,26 @@ class ComputeDealDriver(Protocol):
 # Phase 0 — readiness
 # ===========================================================================
 
-class Stage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(
+class Stage00_LifecycleHeld:
+    def test_00_the_storefront_loops_are_held(
         self, storefront_admin_client, deal_state: ComputeDealState
     ):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+        """The storefront's timer loops are held for this scenario.
 
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
+        The module holds them through its lane's storefront hold fixture; this
+        stage asserts the hold, through system status, because every later
+        assertion depends on it: with the loops running, a listing status read
+        after a reserve races the capacity poller's next cycle, and a defect that
+        reorders two writes shows up as an intermittent failure instead of a
+        reproducible one.
 
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
+        Trading is unaffected — the hold stops the loops, not the storefront's
+        willingness to negotiate — so the deal stages below still work. Work a
+        loop would have done is requested explicitly, through
         `advance_storefront`.
         """
-        pause_storefront(storefront_admin_client)
-        deal_state._lifecycle_paused = True
+        assert_storefront_loops_held(storefront_admin_client)
+        deal_state._lifecycle_held = True
 
 
 class Stage00a_StorefrontHealth:
@@ -556,7 +558,7 @@ class Stage00f1_ExecutorHostRegistry:
         """
         require_state(
             deal_state,
-            "_lifecycle_paused",
+            "_lifecycle_held",
             "_storefront_healthy",
             "_provisioning_mock_mode",
             "_contract_pins_agree",
@@ -1125,7 +1127,7 @@ class Stage09a_ProvisioningCompletes:
         race -- the timer could have claimed this row while the job above
         was still gated -- the same race 11b's advances avoid.
         The advance releases the watchdog's own claims first; the timer is
-        paused for the module by ``convergence_advanced_explicitly``.
+        held for the module by ``fulfillment_convergence_held``.
         """
         require_state(deal_state, "fulfillment_id")
 
@@ -1263,8 +1265,9 @@ class Stage10a_LeaseExpirySetup:
     ):
         """Expire the deal's lease and hold provider teardown at its gate.
 
-        The watchdog is paused first so the expiry sits unobserved until 10b runs
-        one cycle: that keeps the trigger and the reaction as separate, asserted
+        The module holds the lease watchdog (``lease_watchdog_held``), which
+        this stage reads back, so the expiry sits unobserved until 10b runs one
+        cycle: that keeps the trigger and the reaction as separate, asserted
         steps rather than one race.
 
         Release reaches the storefront through the capacity-released callback,
@@ -1276,15 +1279,15 @@ class Stage10a_LeaseExpirySetup:
         require_state(deal_state, "lease_id", "real_escrow_uid",
                       "reserved_resource_id", "deal_lease",
                       "_provisioning_storefront_ok")
-        assert provisioning_client.pause_lease_watchdog().get("paused") is True
+        assert_lease_watchdog_held(provisioning_client)
         deal_driver.arm_teardown_gate()
         # Expire the lease rather than interrupting the deal. Expiry is what ends
         # a lease in production; interruption is an operator escape hatch for a
         # deal sold as interruptible, and driving the main teardown path with the
         # escape hatch would leave the ordinary path uncovered.
         #
-        # The watchdog is paused above, so nothing acts on the expiry until 10b
-        # runs one cycle deliberately.
+        # The watchdog is held for the module, so nothing acts on the expiry
+        # until 10b runs one cycle deliberately.
         lease = deal_state.deal_lease.backdate(_expired_lease_end())
         assert lease.get("id") == deal_state.lease_id, (
             f"back-dated the wrong reservation: {lease}"
@@ -1344,6 +1347,8 @@ class Stage11b_TeardownCompletion:
     ):
         require_state(deal_state, "teardown_fulfillment_id", "lease_id",
                       "reserved_resource_id")
+        # The release below is this stage's own lease cycle, not the timer's.
+        assert_lease_watchdog_held(provisioning_client)
         sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
@@ -1391,4 +1396,3 @@ class Stage11b_TeardownCompletion:
         # `admin_release_reservations` is fleet-wide and would clear other
         # scenarios' holds.
         deal_driver.release_reserved(reserved_again)
-        provisioning_client.resume_lease_watchdog()

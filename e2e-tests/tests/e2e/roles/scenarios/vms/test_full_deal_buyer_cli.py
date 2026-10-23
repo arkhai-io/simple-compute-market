@@ -106,9 +106,10 @@ from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     advance_fulfillment_to,
     advance_storefront,
+    assert_lease_watchdog_held,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    pause_storefront,
     wait_for_stage_event,
 )
 from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
@@ -125,12 +126,15 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 log = logging.getLogger(__name__)
 
 pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    # The module steps the storefront's loops, fulfillment convergence (a timer
+    # cycle could claim a row mid-provider-call, and the module's own explicit
+    # cycle would then reach nothing), and lease expiry itself.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"
+    ),
     pytest.mark.e2e_deal_buyer_cli,
-    # This module advances fulfillment convergence itself, so the
-    # 30s timer is stopped for its duration -- otherwise a timer
-    # cycle can claim a row mid-provider-call and the module's own
-    # explicit cycle reaches nothing.
-    pytest.mark.usefixtures("convergence_advanced_explicitly"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -216,22 +220,18 @@ E2E_RESOURCE_ID = "compute-e2e-deal-cli-001"
 # ===========================================================================
 
 
-class TestStage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+class TestStage00_LifecycleHeld:
+    def test_00_the_storefront_loops_are_held(self, storefront_admin_client):
+        """The storefront's timer loops are held for this scenario.
 
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
-
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
-        `advance_storefront`.
+        The module holds them through ``storefront_loops_held``; this stage
+        asserts the hold, through system status, because every later assertion
+        depends on it: with the loops running, a listing status read after a
+        reserve races the capacity poller's next cycle. Trading is unaffected, so
+        the deal stages below still work; work a loop would have done is
+        requested explicitly, through `advance_storefront`.
         """
-        pause_storefront(storefront_admin_client)
+        assert_storefront_loops_held(storefront_admin_client)
 
 
 class TestStage00a_StorefrontHealth:
@@ -1399,8 +1399,9 @@ class TestStage10a_LeaseExpirySetup:
     ):
         """Expire the deal's lease and hold provider teardown at its gate.
 
-        The watchdog is paused first so the expiry sits unobserved until 10b runs
-        one cycle: that keeps the trigger and the reaction as separate, asserted
+        The module holds the lease watchdog (``lease_watchdog_held``), which
+        this stage reads back, so the expiry sits unobserved until 10b runs one
+        cycle: that keeps the trigger and the reaction as separate, asserted
         steps rather than one race.
         """
         # `deal_lease` is now a dependency: this stage back-dates through it
@@ -1408,7 +1409,7 @@ class TestStage10a_LeaseExpirySetup:
         # rather than raise an AttributeError two lines down.
         require_state(deal_state, "lease_id", "real_escrow_uid",
                       "reserved_resource_id", "deal_lease")
-        assert provisioning_client.pause_lease_watchdog().get("paused") is True
+        assert_lease_watchdog_held(provisioning_client)
         delete_mock_rules_if_present(provisioning_test_client, REMOVE_RULE_ID)
         provisioning_test_client.add_mock_rule(
             rule_id=REMOVE_RULE_ID,
@@ -1421,8 +1422,8 @@ class TestStage10a_LeaseExpirySetup:
         # escape hatch left the ordinary path uncovered — `DealLease.backdate`
         # was written for exactly this and had never been called by anything.
         #
-        # The watchdog is paused above, so nothing acts on the expiry until 10b
-        # runs one cycle deliberately.
+        # The watchdog is held for the module, so nothing acts on the expiry
+        # until 10b runs one cycle deliberately.
         lease = deal_state.deal_lease.backdate(_expired_lease_end())
         assert lease.get("id") == deal_state.lease_id, (
             f"back-dated the wrong reservation: {lease}"
@@ -1488,6 +1489,8 @@ class TestStage11b_TeardownCompletion:
         deal_state: DealState,
     ):
         require_state(deal_state, "fulfillment_id", "lease_id", "reserved_resource_id")
+        # The release below is this stage's own lease cycle, not the timer's.
+        assert_lease_watchdog_held(provisioning_client)
         sync_stage, sync_event = deal_state.deal_lease.released_stage_event
         existing = storefront_admin_client.get_events(limit=500, stage=sync_stage)
         since_id = max((ev.id for ev in existing.events), default=0)
@@ -1542,4 +1545,3 @@ class TestStage11b_TeardownCompletion:
             site_id=capacity_site_id(),
         )
         deal_state.lease_status = "released"
-        provisioning_client.resume_lease_watchdog()

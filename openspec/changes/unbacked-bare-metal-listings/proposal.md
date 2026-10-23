@@ -179,7 +179,9 @@ None.
   last probe; an unpinned escrow proposal is refused; bare metal's fulfillment routes
   answer 404 for an introduction deal; an API-credit create refused only for reachability
   answers 503; the storefronts' lifecycle loops gain `alkahest-chain-probe`, and API
-  credits' `listing-seed`.
+  credits' `listing-seed`; the provisioning service's fulfillment-convergence and
+  lease-watchdog pause and resume routes answer `at_gate` beside `paused`, typed as
+  `WorkerPauseResponse`.
 - Configuration: the VM storefront's `[seller.provisioning]` `fail_on_unreachable` and
   `preflight_timeout`, and the API-credit storefront's `credits` counterparts, are
   removed; an Alkahest probe interval is added. A backed bare-metal listing's payload and binding are

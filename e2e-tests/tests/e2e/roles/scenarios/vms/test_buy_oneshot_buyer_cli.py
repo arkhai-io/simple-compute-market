@@ -52,9 +52,9 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 from tests.e2e.roles.helpers.compute_deal import (
     DealLease,
     advance_storefront,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
     dry_run_storefront,
-    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.conftest import (
     DealState,
@@ -65,7 +65,12 @@ from tests.e2e.roles.scenarios.vms.conftest import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_buy
+pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held"),
+    pytest.mark.e2e_buy,
+]
 
 # ---------------------------------------------------------------------------
 # Offer / demand spec — distinct from the full-deal suite so the two can
@@ -167,22 +172,18 @@ _REGISTRY_A = str(settings.REGISTRY.API_URL or "http://registry:8080")
 # ===========================================================================
 
 
-class TestStage00_LifecyclePause:
-    def test_00_pauses_the_storefront_loops(self, storefront_admin_client):
-        """Hold the storefront's timer loops idle for the rest of this scenario.
+class TestStage00_LifecycleHeld:
+    def test_00_the_storefront_loops_are_held(self, storefront_admin_client):
+        """The storefront's timer loops are held for this scenario.
 
-        A named stage rather than a fixture because every later assertion depends
-        on it: with the loops running, a listing status read after a reserve races
-        the capacity poller's next cycle, and a defect that reorders two writes
-        shows up as an intermittent failure instead of a reproducible one.
-
-        Trading is unaffected — this pauses the loops, not the storefront's
-        willingness to negotiate — so the deal stages below still work. Loops are
-        held, not stopped: nothing is torn down and no cycle is cut in half. Work
-        a loop would have done is requested explicitly from here on, through
-        `advance_storefront`.
+        The module holds them through ``storefront_loops_held``; this stage
+        asserts the hold, through system status, because every later assertion
+        depends on it: with the loops running, a listing status read after a
+        reserve races the capacity poller's next cycle. Trading is unaffected, so
+        the deal stages below still work; work a loop would have done is
+        requested explicitly, through `advance_storefront`.
         """
-        pause_storefront(storefront_admin_client)
+        assert_storefront_loops_held(storefront_admin_client)
 
 
 class TestStageB0_Readiness:

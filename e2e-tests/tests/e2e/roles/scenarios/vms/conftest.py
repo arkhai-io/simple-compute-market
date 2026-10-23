@@ -50,10 +50,12 @@ from market_identity import (
 from compute_provisioning_client import ComputeProvisioningError, SyncComputeProvisioningClient
 from compute_provisioning_contracts import ConnectionSubmission, HostCreate
 from market_resource_pools_client import SyncResourcePoolClient
+from storefront_client import SyncStorefrontClient
 from vm_provisioning_operator import SyncVmOperatorClient
 from e2e_harness.settings import settings
 from e2e_harness.provisioning_test_client import ProvisioningTestClient
-from tests.e2e.roles.helpers.compute_deal import SiteCapacity, convergence_paused
+from tests.e2e.roles.helpers import compute_deal
+from tests.e2e.roles.helpers.compute_deal import SiteCapacity
 from tests.e2e.roles.helpers.compute_deal_stages import ComputeDealState
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.vms.compute_deal_driver import VmComputeDealDriver
@@ -649,15 +651,92 @@ def ensure_storefront_resumed(storefront_admin_client):
         log.warning("[teardown] Could not verify/clear global pause: %s", exc)
 
 
-@pytest.fixture(scope="module")
-def convergence_advanced_explicitly(provisioning_client):
-    """This module drives fulfillment convergence; the timer does not.
+# ---------------------------------------------------------------------------
+# Alice's storefront
+# ---------------------------------------------------------------------------
 
-    Opt-in, via ``pytest.mark.usefixtures`` on the modules that actually drive
-    convergence; see `convergence_paused` for why it is not autouse and why the
-    timer is resumed in the finaliser.
+
+def _alice_url() -> str:
+    return _require_setting(
+        getattr(settings, "ALICE", None) and settings.ALICE.API_URL, "ALICE.API_URL"
+    )
+
+
+def _alice_publisher_trust():
+    identity = create_signer(
+        "eip191",
+        _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
+    ).identity
+    return TrustedIdentitySet(
+        identities=(
+            Identity(scheme="eip191", identifier=identity.identifier),
+        )
+    )
+
+
+@pytest.fixture(scope="module")
+def alice_admin_client():
+    """Admin-role client for Alice's storefront: system controls only.
+
+    Alice's administrator is a distinct principal from Alice's seller, exactly
+    as Bob's is, and is pinned as ``Identity.administrators.operator`` in
+    ``storefront.alice.toml``.
     """
-    yield from convergence_paused(provisioning_client)
+
+    client = SyncStorefrontClient(
+        _alice_url(),
+        create_signer(
+            str(settings.ALICE.get("admin_scheme", "eip191") or "eip191"),
+            _require_setting(
+                settings.ALICE.get("admin_credential", ""), "ALICE.ADMIN_CREDENTIAL"
+            ),
+        ),
+        caller_role="admin",
+        expected_publishers=_alice_publisher_trust(),
+    )
+    yield client
+    client.close()
+
+
+# ---------------------------------------------------------------------------
+# Module holds of the lane's shared services
+# ---------------------------------------------------------------------------
+#
+# Each is a module-scoped fixture over one of `helpers/compute_deal.py`'s hold
+# helpers, which state the module-hold rule. A module takes the holds it needs
+# with `pytest.mark.usefixtures`, listed first; none is autouse, since a
+# scenario that relies on a timer -- one reaching `active` without asking for a
+# cycle -- would be stalled rather than made deterministic by it.
+
+
+@pytest.fixture(scope="module")
+def storefront_loops_held(storefront_admin_client):
+    """Bob's lifecycle loops, held for the module."""
+    with compute_deal.storefront_loops_held(storefront_admin_client) as held:
+        yield held
+
+
+@pytest.fixture(scope="module")
+def alice_loops_held(alice_admin_client):
+    """Alice's lifecycle loops, held for the module."""
+    with compute_deal.storefront_loops_held(alice_admin_client) as held:
+        yield held
+
+
+@pytest.fixture(scope="module")
+def fulfillment_convergence_held(provisioning_client):
+    """Bob's provisioning service's fulfillment convergence, held for a module
+    that advances it itself."""
+    with compute_deal.fulfillment_convergence_held(provisioning_client) as held:
+        yield held
+
+
+@pytest.fixture(scope="module")
+def lease_watchdog_held(provisioning_client):
+    """Bob's provisioning service's lease watchdog, held for a module that steps
+    lease expiry itself; stages read the hold back through system status."""
+    with compute_deal.lease_watchdog_held(provisioning_client) as held:
+        yield held
 
 
 @pytest.fixture(scope="module", autouse=True)

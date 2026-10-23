@@ -153,6 +153,9 @@ class LeaseLifecycleService:
         self._paused = False
         self._resume_event = asyncio.Event()
         self._resume_event.set()
+        # Timer cycles past the gate and not yet finished. A pause stops new
+        # ones at the gate; one already running finishes first.
+        self._timer_cycles_in_flight = 0
 
     def pause(self) -> None:
         self._paused = True
@@ -167,6 +170,17 @@ class LeaseLifecycleService:
     @property
     def is_paused(self) -> bool:
         return not self._resume_event.is_set()
+
+    @property
+    def is_at_gate(self) -> bool:
+        """Paused with no timer cycle running, so none can run until resumed.
+
+        A timer cycle that passed the gate before the pause keeps running to
+        its end; until it does the watchdog is paused but not yet held, and a
+        caller holding it waits for this. An explicit ``force_check_leases``
+        is the caller's own and does not count.
+        """
+        return self.is_paused and self._timer_cycles_in_flight == 0
 
     def get_lease(self, lease_id: str) -> dict[str, Any]:
         reservation = self._site_authority.get_reservation(lease_id)
@@ -264,10 +278,15 @@ class LeaseLifecycleService:
         return released
 
     async def check_leases(self) -> dict:
+        """The timer's cycle: blocks at the gate while paused."""
         if not self._resume_event.is_set():
             logger.debug("[LEASE_LIFECYCLE] Cycle blocked — watchdog is paused")
             await self._resume_event.wait()
-        return await self._run_cycle()
+        self._timer_cycles_in_flight += 1
+        try:
+            return await self._run_cycle()
+        finally:
+            self._timer_cycles_in_flight -= 1
 
     async def force_check_leases(self) -> dict:
         return await self._run_cycle()

@@ -55,8 +55,8 @@ from market_resource_pools_contracts import PoolUpdate
 
 from tests.e2e.roles.helpers.compute_deal import (
     advance_storefront,
+    assert_storefront_loops_held,
     delete_mock_rules_if_present,
-    pause_storefront,
 )
 from tests.e2e.roles.scenarios.vms.conftest import require_state
 from tests.e2e.roles.scenarios.vms.host_registry import (
@@ -68,7 +68,12 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.e2e_listing_shapes
+pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held"),
+    pytest.mark.e2e_listing_shapes,
+]
 
 #: A model no other scenario declares, so discovery counts only this listing.
 GPU_MODEL = "L40S"
@@ -142,7 +147,7 @@ CREATE_RULE_ID = "e2e-listing-shapes-create"
 
 @dataclass
 class ShapeState:
-    paused: bool = False
+    held: bool = False
     declared: bool = False
     listing_id: str | None = None
     provisioning_armed: bool = False
@@ -162,16 +167,17 @@ def shape_state() -> ShapeState:
 
 
 class TestStage00_Setup:
-    def test_00a_pause_storefront_loops(self, storefront_admin_client, shape_state):
-        """Hold the timer loops so this scenario's publication cycle is explicit."""
-        shape_state.paused = pause_storefront(storefront_admin_client)
-        assert shape_state.paused
+    def test_00a_storefront_loops_are_held(self, storefront_admin_client, shape_state):
+        """The timer loops are held for the module, so this scenario's
+        publication cycle is explicit."""
+        assert_storefront_loops_held(storefront_admin_client)
+        shape_state.held = True
 
     def test_00b_pool_states_a_shape_and_its_declaration_every_dimension(
         self, provisioning_client, resource_pool_client, site_capacity_admin_client,
         storefront_admin_client, shape_state,
     ):
-        require_state(shape_state, "paused")
+        require_state(shape_state, "held")
         provision_e2e_executor(
             provisioning_client,
             site_capacity_admin_client,

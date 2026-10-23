@@ -32,12 +32,15 @@ from market_settlement_runtime import derive_obligation_ref
 from storefront_client import SyncStorefrontClient
 from market_resource_pools_contracts import PoolCreate
 
+from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.helpers.domain_deal import require_state
 from tests.e2e.roles.scenarios.bare_metal.conftest import lane_setting
 
 pytestmark = [
+    # Listed first, so the hold is taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held"),
     pytest.mark.e2e_bare_metal_introduction,
-    pytest.mark.usefixtures("bare_metal_loops_held"),
 ]
 
 BARE_METAL = "bare_metal"
@@ -145,9 +148,12 @@ def _introduction_option(listing: Any) -> dict[str, Any]:
 
 class TestStage00_DisclosureBeforeCommitment:
     def test_00_readiness_discloses_the_window_without_authentication(
-        self, bare_metal_storefront_public, state: IntroductionState
+        self, bare_metal_storefront_public, bare_metal_storefront_admin,
+        state: IntroductionState,
     ):
-        """A buyer reads the retention window before handing over a contact."""
+        """A buyer reads the retention window before handing over a contact;
+        the module's loops are held, so every publication is a stepped one."""
+        assert_storefront_loops_held(bare_metal_storefront_admin)
         health = bare_metal_storefront_public.get_health()
         disclosure = health.disclosures.get("introduction_retention")
         assert disclosure == _expected_disclosure(), health.disclosures

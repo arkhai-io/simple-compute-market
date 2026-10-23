@@ -75,8 +75,8 @@ Phase 9 — Provisioning completion
          GET provisioning /api/v1/leases/by-escrow/{uid} -> active/pending lease
 
 Phase 10 — Lease expiry and durable teardown
-  10a  Pause automatic lease servicing, arm the provider teardown gate, and
-       back-date the lease end so the watchdog reads it as expired. Expiry is
+  10a  Assert the module's lease-watchdog hold, arm the provider teardown gate,
+       and back-date the lease end so the watchdog reads it as expired. Expiry is
        what ends a lease in production; admin interruption is an escape hatch
        for a deal sold as interruptible and is covered elsewhere.
   10b  Run one lease cycle → reservation releasing, fulfillment id recorded,
@@ -105,7 +105,7 @@ from tests.e2e.roles.helpers.compute_deal_stages import (
     DEAL_TOKEN,
     DURATION_HOURS,
     LISTED_HOURLY_RATE,
-    Stage00_LifecyclePause,
+    Stage00_LifecycleHeld,
     Stage00a_StorefrontHealth,
     Stage00b_RegistryReachable,
     Stage00c_ProvisioningHealth,
@@ -139,12 +139,15 @@ from tests.e2e.roles.scenarios.vms.conftest import DealState, capacity_source_fo
 log = logging.getLogger(__name__)
 
 pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    # The module steps the storefront's loops, fulfillment convergence (a timer
+    # cycle could claim a row mid-provider-call, and the module's own explicit
+    # cycle would then reach nothing), and lease expiry itself.
+    pytest.mark.usefixtures(
+        "storefront_loops_held", "fulfillment_convergence_held", "lease_watchdog_held"
+    ),
     pytest.mark.e2e_deal,
-    # This module advances fulfillment convergence itself, so the
-    # 30s timer is stopped for its duration -- otherwise a timer
-    # cycle can claim a row mid-provider-call and the module's own
-    # explicit cycle reaches nothing.
-    pytest.mark.usefixtures("convergence_advanced_explicitly"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -187,7 +190,7 @@ ACCEPTED_ESCROWS = [{
 # Phase 0 — E2E readiness
 # ===========================================================================
 
-class TestStage00_LifecyclePause(Stage00_LifecyclePause):
+class TestStage00_LifecycleHeld(Stage00_LifecycleHeld):
     pass
 
 

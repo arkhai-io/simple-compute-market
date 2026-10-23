@@ -2473,7 +2473,7 @@ Delivers one hold mechanism for every lane (D22; `test-compatibility` "Scenarios
 services for the whole module"). Touches `e2e-tests/` and, for the gate state a hold waits
 on, the provisioning service's two pause routes.
 
-- [ ] 13.1 The provisioning service's fulfillment-convergence and lease-watchdog pause
+- [x] 13.1 The provisioning service's fulfillment-convergence and lease-watchdog pause
       routes answer whether the loop is at its gate (waiting on its resume event with no
       cycle in flight), as the storefront's lifecycle pause reports each loop's gate state:
       the delta requires a hold to wait until each held loop reports itself paused at its
@@ -2483,19 +2483,53 @@ on, the provisioning service's two pause routes.
       watchdog's gate state with a cycle in flight and idle; application integration per
       route through `ProvisioningClients`. The proposal's Impact "Wire" bullet names the
       field (D22).
-- [ ] 13.2 `e2e-tests/tests/e2e/roles/helpers/compute_deal.py`: one helper per pause kind —
+      Done. Each watchdog counts its timer cycles past the gate (`_timer_cycles_in_flight`;
+      the lease lifecycle's `check_leases`, which its `LeaseWatchdog` timer calls, and the
+      convergence loop's `_run_timer_cycle`) and reports `is_at_gate`: paused with none
+      running. An explicit cycle (`force_check_leases`, `run_cycle`, `advance_cycle`) is
+      the caller's own and does not count. A loop sleeping its interval while paused reads
+      at its gate, since it can start no cycle before the gate. **Differed:** the routes
+      file needed no change (route contracts carry no response shape); the field is the new
+      `compute_provisioning_contracts.WorkerPauseResponse(paused, at_gate)`, which the four
+      routes declare as their `response_model` and the clients return in place of a plain
+      dict, so a caller reads `.at_gate`. Tests: unit `provisioning/compute/tests/unit/
+      test_lease_lifecycle.py` and `service/tests/unit/services/
+      test_fulfillment_convergence_gate.py` (idle: at the gate once paused; a timer cycle
+      in flight keeps a paused watchdog off it until the cycle ends; an explicit cycle in
+      flight does not), each cycle held on an event, no sleeps; application integration
+      `test_system_api.py` `TestWorkerControls` through the typed client: pause, pause
+      again after explicit cycles, and resume each answer the typed state (the harness
+      starts no watchdog timer, so the in-flight case is the unit tests');
+      `test_provisioning_client_endpoint_coverage.py` reads the typed response.
+- [x] 13.2 `e2e-tests/tests/e2e/roles/helpers/compute_deal.py`: one helper per pause kind —
       storefront lifecycle loops (from `pause_storefront`), fulfillment convergence (from
       `convergence_paused`, which stops swallowing a failed pause), and the lease watchdog
       (new) — each pausing, waiting until every held loop reports itself at its gate,
       yielding, and resuming in a `finally`; their docstrings state the module-hold rule
       (D22).
-- [ ] 13.3 Module-scoped lane fixtures built only on those helpers: `scenarios/vms/conftest.py`
+      Done: `storefront_loops_held`, `fulfillment_convergence_held`, and
+      `lease_watchdog_held`, context managers over one `_until_held`, which repeats the
+      (idempotent) pause until its answer reports every held loop at its gate, bounded by
+      `HOLD_TIMEOUT_SECONDS` (60) and polling every half second; a pause that raises fails
+      the hold. The `finally` that resumes covers the wait as well as the module, so a hold
+      that times out or fails also leaves its service running. The rule is stated once, in a comment above them (including that a module
+      killed by `helm test`'s timeout runs no finaliser), and each docstring points to it. `pause_storefront` and
+      `convergence_paused` are gone; `assert_storefront_loops_held` reads the hold back
+      through system status for stages.
+- [x] 13.3 Module-scoped lane fixtures built only on those helpers: `scenarios/vms/conftest.py`
       — Bob's loops, Alice's loops (Alice's admin client moves here from
       `test_multi_registry.py`), convergence, and the lease watchdog;
       `scenarios/bare_metal/conftest.py` — the storefront's loops (replacing
       `bare_metal_loops_held`), convergence, and the lease watchdog. API-credit scenarios
       hold nothing today, so that lane gains a fixture only when a module needs one (D22).
-- [ ] 13.4 Every module that paused or resumed takes its holds with `usefixtures`, listed
+      Done, with one set of names across both lanes, so a module of either lane names
+      the same holds and the source check knows one set: `storefront_loops_held` (Bob in the VM lane, the bare-metal storefront in its
+      own), `fulfillment_convergence_held`, `lease_watchdog_held`, and in the VM lane
+      `alice_loops_held`. `convergence_advanced_explicitly` and `bare_metal_loops_held`
+      are gone. Alice's admin client and its two helpers (`_alice_url`,
+      `_alice_publisher_trust`) moved to the VM conftest; `test_multi_registry.py` imports
+      the helpers for its seller client.
+- [x] 13.4 Every module that paused or resumed takes its holds with `usefixtures`, listed
       first: `vms/test_full_deal.py`, `test_full_deal_buyer_cli.py`,
       `test_buy_oneshot_buyer_cli.py`, `test_listing_shapes.py`,
       `test_compute_dynamic_listings.py`, `test_multi_registry.py`,
@@ -2506,7 +2540,35 @@ on, the provisioning service's two pause routes.
       status; Stage 10a and 11b assert the lease-watchdog fixture's state instead of pausing
       and resuming. `ensure_storefront_resumed`, which resumes the trading pause, stays
       (D22).
-- [ ] 13.5 Source check (unit): `e2e-tests/tests/unit/test_scenario_holds.py` (new) walks
+      Done. Holds by module: the storefront's loops in all eleven; also Alice's in
+      `test_multi_registry.py`; convergence and the lease watchdog in both typed and CLI
+      VM deals and the bare-metal mock deal; convergence in `test_non_erc20_settlement.py`.
+      The usefixtures mark is each module's first `pytestmark` entry. The shared stage is
+      now `Stage00_LifecycleHeld` (its field `_lifecycle_held`), and each module's own
+      Stage 00 (or its first stage) calls `assert_storefront_loops_held`, which counts
+      only timed loops: a loop registered as a step alone reports no state, and the pause
+      answer leaves it out too. Stages 10a and 11b (shared, and the CLI deal's own) and
+      the bare-metal deal's 12d and 12e read the lease-watchdog hold back live through
+      provisioning system status (`assert_lease_watchdog_held`, `checks.lease_watchdog ==
+      "paused"`) instead of pausing or resuming it; none of them requests the hold
+      fixture, so a module reusing them without the hold fails there rather than taking
+      the hold mid-module. **Differed from D22**, which has these stages assert "the
+      fixture's own state": that state is the pause answer frozen at setup, which the
+      fixture yields only once it reads paused and at the gate, so asserting it could
+      never fail; the live read can. The design's wording is left for closeout's
+      promotion to settle. **Not exact to "listed first … released last":** pytest sets
+      up autouse fixtures before marked ones, so the VM lane's autouse
+      `ensure_storefront_resumed`, `reap_buyer_settle_subprocess`, and
+      `release_reserved_resources` tear down after the holds. The first two touch no
+      loop. The third now releases the storefront's reservations fleet-wide with its
+      loops running again, where before this section the VM modules other than
+      `test_vm_introduction.py` (whose own `held_loops` resumed them) never resumed Bob's
+      loops and it ran with them paused. An admin release is an operation a live
+      storefront takes with its loops running, and the next module's hold waits for every
+      loop to reach its gate before its first stage, so this is left as it is; making the
+      holds outlast it would mean ordering an autouse fixture after a marked one, which
+      pytest offers no direct way to do. For triage.
+- [x] 13.5 Source check (unit): `e2e-tests/tests/unit/test_scenario_holds.py` (new) walks
       every `tests/e2e/roles/scenarios/**/test_*.py` and the stage helpers with `ast` and
       fails, naming file and line, on any call of `admin_pause_lifecycle_loops`,
       `admin_resume_lifecycle_loops`, `pause_fulfillment_convergence`,
@@ -2514,13 +2576,108 @@ on, the provisioning service's two pause routes.
       a pause helper outside the hold helpers and lane conftests;
       `tests/unit/test_compute_deal_stages.py`'s shared-name and field checks follow
       Stage00's change (D22).
-- [ ] 13.6 Versions: `arkhai-compute-provisioning-contracts`,
+      Done (unit), wider than the task: every Python file under the roles' `scenarios/`
+      and `helpers/` except the lane conftests, so drivers and other helpers are checked
+      too, and `compute_deal.py` outside the three hold helpers' bodies. It flags any
+      reference to a pause operation or hold helper (a call, or one passed as a callback),
+      and any call whose arguments name a pause or resume route path
+      (`lifecycle/pause`, `lease-watchdog/resume`, and the rest), so a raw HTTP post is
+      caught as well as a typed-client call. Its own tests prove the checker names a
+      planted direct pause, a hold-helper call, a resume, and a raw route post by file
+      and line, that only the hold helpers' bodies are exempt, and that each lane conftest
+      defines the hold fixtures over the helpers. `test_compute_deal_stages.py` needed no edit: it
+      derives the shared names and fields from source, and passes over the renamed stage
+      and field.
+- [x] 13.6 Versions: `arkhai-compute-provisioning-contracts`,
       `arkhai-compute-provisioning-client`, the provisioning service, `arkhai-e2e-tests`;
       `make lock`.
-- [ ] 13.7 **Verify.** `make test-e2e-unit` (unit); `make test-provisioning`; `make test`;
+      Contracts 0.9.1 → 0.10.0 (new model); client 0.7.0 → 0.8.0 (the pause methods return
+      a model, not a dict: incompatible before 1.0); the provisioning service 0.17.3 →
+      0.18.0 (its patch bump on this branch is too small for a new response field);
+      `arkhai-compute-provisioning` 0.19.1 → 0.20.0, which the task omits but whose lease
+      lifecycle gains `is_at_gate`; `arkhai-e2e-tests` is not bumped again: it is at 0.3.1
+      from Sections 7 (0.2.1 → 0.3.0) and 8 (→ 0.3.1), already two bumps against
+      `origin/dev` where `docs/development/RELEASING.md` allows one; collapsing them to
+      0.3.0 is for triage. Floors raised where the new API is used: the client on contracts
+      0.10.0, the service on contracts 0.10.0, `compute_provisioning` 0.20.0, and (dev) the
+      client 0.8.0, and e2e-tests on contracts 0.10.0 and the client 0.8.0. `make lock`
+      stops on that local directory before locking anything (Section 11's note), so it was run
+      with `PROJECTS=` naming the eleven projects whose locks name a bumped package, and
+      those eleven locks are committed; they also carry the environment's marker churn
+      (Section 11's note). Twelve other locks the environment rewrote, naming no bumped
+      package (`core/registry`, the API-credit service and storefront, `domains/vms/buyer`,
+      and eight under `kit/`), are left uncommitted.
+- [x] 13.7 **Verify.** `make test-e2e-unit` (unit); `make test-provisioning`; `make test`;
       `make check-packaging`. End-to-end: every lane's scenarios run on the holds
       (`make -C e2e-tests test-e2e-vm`, `test-e2e-bare-metal`, `test-e2e-apicredits`), and
       after `make helm-topology-check` Bob's loops report running (the maintainer's, 11.8).
+      Results:
+      - `make test-e2e-unit` (unit): 82 passed, among them `test_scenario_holds.py` over
+        every scenario, helper, and lane conftest, and `test_hold_helpers.py` (new, added
+        after review): against fake clients, a hold repeats its pause until every loop
+        is at its gate, fails by its deadline (injected clock and sleep, no real wait),
+        resumes after a failing module, resumes when its pause fails or the storefront
+        reports its loops unpaused, and the read-backs skip step-only loops and read the
+        lease watchdog's status. The resume-on-failed-hold test is the one that would
+        fail with the wait outside the `try`, since nothing would have resumed.
+      - `make test-provisioning`: the integration half (application integration) 488
+        passed; the unit half 665 passed and 1 failed, the environment's
+        `test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_local`
+        (Section 11's note), so `make test` stops there.
+      - `make test`: every suite before `test-provisioning` passed (core, kits,
+        provisioning contracts 59, client 50, `compute_provisioning` 233, ansible 92),
+        then the stop above. Of the suites after it, those covering code or locks this
+        section moved were run one by one: `make test-provisioning-adapter` (passed),
+        `make test-bare-metal` (passed: 134, 449, 11, 40), `make test-storefront` (passed:
+        1108 and 1 skipped, 457), `make test-vms-domain` (53 passed), `make test-compute` (5 passed).
+        Not run: `test-provisioning-iac`, `test-registry`, `test-registry-client`,
+        `test-vms-buyer`, `test-apicredits`, `test-deployment-packaging`, none of which
+        reads a file or lock this section changed.
+      - `make check-packaging`: stops at `check-uv-setup` on 51 problems, all under
+        that local directory; its other stages, run one by one, report only it too
+        (locks 37, Python version 25, project layout 28, architecture 22), the same counts
+        as Section 11's note.
+      - `make check-change`: fails only on comment hygiene's findings in that local directory and
+        the one citation of a file Section 22 creates
+        (`e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`).
+      **End-to-end:** not run here. The scenarios that exercise this section once
+      deployed are the eleven held modules' markers: `e2e_deal`, `e2e_deal_buyer_cli`,
+      `e2e_buy`, `e2e_listing_shapes`, `e2e_compute_dynamic_listings`, `multi_registry`,
+      `e2e_non_erc20_settlement`, `e2e_vm_introduction`, `e2e_bare_metal_mock_deal`,
+      `e2e_bare_metal_publication`, and `e2e_bare_metal_introduction`; the API-credit lane
+      holds nothing and is unchanged. The Helm topology check (11.8) is the maintainer's.
+
+Section 13 notes (handoff):
+
+- **Fresh-context checks**, two. The first found two defects, both fixed: a hold that
+  failed to reach its gate left its service paused (the wait sat before the `try`), and
+  the storefront read-back counted step-only loops, which report no state, so Alice's
+  storefront without contact exchange would have failed it. Also fixed from it: Stage 10a's
+  assertion of the frozen fixture answer, which could not fail (now a live status read,
+  also in 11b, 12d, 12e); a test docstring naming the wrong event; the source check's
+  whole-file exemption of `compute_deal.py`, now its hold helpers' bodies only, and its
+  blindness to raw route posts; a docstring phrased as history; the 13.4 note's incomplete
+  list of autouse fixtures. The second found no layering, hygiene, version, or spec
+  defect; fixed from it: the conftests' lease-watchdog docstrings, the 13.3/13.4/13.6
+  notes (the D22 departure, `test_vm_introduction.py`'s former resume, the e2e-tests
+  double bump, the twelve uncommitted locks), the `# Listed first` comments, which now
+  name the autouse exception, the hold-section header placed above Alice's client, the
+  conftests now checked outside their hold fixtures, route strings caught outside call
+  arguments, and the hold helpers' missing unit test. Declined: `_until_held`'s half-second
+  poll, since the provisioning pause routes answer at once and offer no server-side wait;
+  replacing `run_cycle` on the convergence watchdog's instance in its gate test, since the
+  constructor offers no cycle seam and adding one for a test is outside this section; and
+  a resume failure in the `finally` masking a failed hold, since Python chains it and
+  pytest reports both.
+- **For triage:** `release_reserved_resources` now tears down with the loops running
+  (13.4); `arkhai-e2e-tests` carries two bumps (13.6); D22's "the fixture's own state"
+  against the live read (13.4); the delta scenario "failed publication cycle" against the
+  degraded start's completed step with a hold (Section 11's note).
+- **Owed to closeout:** `TESTING.md`'s module-hold guidance replaces its
+  `bare_metal_loops_held` passage (23's promotion item names it).
+- **Seams:** a hold's gate state is the pause answer itself — the storefront's loop
+  states, provisioning's new `at_gate` — so a hold needs no second read; the read-backs
+  stages use are system status, which is what a module that forgot its hold would show.
 
 ## 14. The delegate decides delivery terms
 

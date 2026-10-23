@@ -95,11 +95,7 @@ from market_site_client import SiteCapacityAdminClient
 from storefront_client import SyncStorefrontClient
 from compute_provisioning_client import SyncComputeProvisioningClient
 
-from market_identity import (
-    Identity,
-    TrustedIdentitySet,
-    create_signer,
-)
+from market_identity import create_signer
 from e2e_harness.settings import settings
 from tests.e2e.roles.scenarios.vms.host_registry import (
     E2E_HOST_GPU_COUNT,
@@ -108,13 +104,25 @@ from tests.e2e.roles.scenarios.vms.host_registry import (
     provision_e2e_executor,
     refresh_storefront_projections,
 )
-from tests.e2e.roles.helpers.compute_deal import pause_storefront
+from tests.e2e.roles.helpers.compute_deal import assert_storefront_loops_held
 from tests.e2e.roles.helpers.compute_deal_stages import alkahest_opening
-from tests.e2e.roles.scenarios.vms.conftest import _require_setting, _signer, _trust, capacity_source_for
+from tests.e2e.roles.scenarios.vms.conftest import (
+    _alice_publisher_trust,
+    _alice_url,
+    _require_setting,
+    _signer,
+    _trust,
+    capacity_source_for,
+)
 
 log = logging.getLogger(__name__)
 
-pytestmark = pytest.mark.multi_registry
+pytestmark = [
+    # Listed first, so the holds are taken before, and released after, every
+    # fixture of the module but the lane's autouse ones.
+    pytest.mark.usefixtures("storefront_loops_held", "alice_loops_held"),
+    pytest.mark.multi_registry,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -252,51 +260,9 @@ def _require(state: MRState, *fields: str) -> None:
 
 # ---------------------------------------------------------------------------
 # Bob is covered by the shared conftest fixtures (storefront_admin_client,
-# storefront_client, seller_wallet, seller_agent_id). Alice needs her own
-# parallel set.
+# storefront_client, seller_wallet, seller_agent_id), as is Alice's admin
+# client, which her loops' hold needs. Alice's other clients are here.
 # ---------------------------------------------------------------------------
-
-def _alice_url() -> str:
-    return _require_setting(
-        getattr(settings, "ALICE", None) and settings.ALICE.API_URL, "ALICE.API_URL"
-    )
-
-
-def _alice_publisher_trust():
-    identity = create_signer(
-        "eip191",
-        _require_setting(settings.ALICE.PRIVATE_KEY, "ALICE.PRIVATE_KEY"),
-    ).identity
-    return TrustedIdentitySet(
-        identities=(
-            Identity(scheme="eip191", identifier=identity.identifier),
-        )
-    )
-
-
-@pytest.fixture(scope="module")
-def alice_admin_client():
-    """Admin-role client for Alice's storefront: system controls only.
-
-    Alice's administrator is a distinct principal from Alice's seller, exactly
-    as Bob's is, and is pinned as ``Identity.administrators.operator`` in
-    ``storefront.alice.toml``.
-    """
-
-    client = SyncStorefrontClient(
-        _alice_url(),
-        create_signer(
-            str(settings.ALICE.get("admin_scheme", "eip191") or "eip191"),
-            _require_setting(
-                settings.ALICE.get("admin_credential", ""), "ALICE.ADMIN_CREDENTIAL"
-            ),
-        ),
-        caller_role="admin",
-        expected_publishers=_alice_publisher_trust(),
-    )
-    yield client
-    client.close()
-
 
 @pytest.fixture(scope="module")
 def alice_seller_client():
@@ -402,20 +368,20 @@ def _registry_pins(url: str) -> dict[str, str]:
 # Phase 0 — readiness
 # ===========================================================================
 
-class TestStage00_PausesBothStorefronts:
-    def test_00_pauses_both_storefronts_loops(
+class TestStage00_BothStorefrontsAreHeld:
+    def test_00_both_storefronts_loops_are_held(
         self, storefront_admin_client, alice_admin_client
     ):
-        """Hold both storefronts' timer loops before any listing is created.
+        """Both storefronts' timer loops are held before any listing is created.
 
         Each storefront publishes what its sites declare on its own publication
         loop. This scenario creates its listings explicitly, so a loop left
         running could bind the same slice first and the explicit create would
-        be refused. It holds the loops rather than relying on an earlier
-        scenario having done so, which a marker-selected run would not.
+        be refused. The module holds both itself rather than relying on an
+        earlier scenario having done so, which a marker-selected run would not.
         """
-        pause_storefront(storefront_admin_client)
-        pause_storefront(alice_admin_client)
+        assert_storefront_loops_held(storefront_admin_client)
+        assert_storefront_loops_held(alice_admin_client)
 
 
 class TestStage00a_BobHealth:
