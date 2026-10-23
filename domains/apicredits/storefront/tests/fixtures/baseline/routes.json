@@ -1,0 +1,152 @@
+[
+  {
+    "method": "POST",
+    "name": "pause_lifecycle_loops",
+    "path": "/api/v1/admin/lifecycle/pause"
+  },
+  {
+    "method": "POST",
+    "name": "resume_lifecycle_loops",
+    "path": "/api/v1/admin/lifecycle/resume"
+  },
+  {
+    "method": "POST",
+    "name": "dry_run_lifecycle_cycle",
+    "path": "/api/v1/admin/lifecycle/{loop}/dry-run"
+  },
+  {
+    "method": "POST",
+    "name": "run_lifecycle_cycle",
+    "path": "/api/v1/admin/lifecycle/{loop}/run-cycle"
+  },
+  {
+    "method": "POST",
+    "name": "pause",
+    "path": "/api/v1/admin/pause"
+  },
+  {
+    "method": "POST",
+    "name": "resume",
+    "path": "/api/v1/admin/resume"
+  },
+  {
+    "method": "GET",
+    "name": "AdminSettleController.wait_for_settlement",
+    "path": "/api/v1/admin/settle/{escrow_uid}/wait"
+  },
+  {
+    "method": "GET",
+    "name": "ListingsController.list_listings",
+    "path": "/api/v1/listings"
+  },
+  {
+    "method": "POST",
+    "name": "ListingsController.publish_from_quota",
+    "path": "/api/v1/listings/publish-from-quota"
+  },
+  {
+    "method": "GET",
+    "name": "ListingsController.get_listing",
+    "path": "/api/v1/listings/{listing_id}"
+  },
+  {
+    "method": "POST",
+    "name": "ListingsController.close_listing",
+    "path": "/api/v1/listings/{listing_id}/close"
+  },
+  {
+    "method": "GET",
+    "name": "NegotiationsController.list_negotiations",
+    "path": "/api/v1/listings/{listing_id}/negotiations"
+  },
+  {
+    "method": "GET",
+    "name": "NegotiationsController.get_negotiation",
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}"
+  },
+  {
+    "method": "POST",
+    "name": "NegotiationsController.advance_negotiation",
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance"
+  },
+  {
+    "method": "POST",
+    "name": "NegotiationsController.force_accept_negotiation",
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept"
+  },
+  {
+    "method": "POST",
+    "name": "ListingsController.pause_listing",
+    "path": "/api/v1/listings/{listing_id}/pause"
+  },
+  {
+    "method": "POST",
+    "name": "ListingsController.resume_listing",
+    "path": "/api/v1/listings/{listing_id}/resume"
+  },
+  {
+    "method": "POST",
+    "name": "NegotiateController.negotiate_new",
+    "path": "/api/v1/negotiate/new"
+  },
+  {
+    "method": "POST",
+    "name": "NegotiateController.negotiate_continue",
+    "path": "/api/v1/negotiate/{neg_id}"
+  },
+  {
+    "method": "POST",
+    "name": "SettleController.settle_escrow",
+    "path": "/api/v1/settle/{escrow_uid}"
+  },
+  {
+    "method": "GET",
+    "name": "SettleController.settle_status",
+    "path": "/api/v1/settle/{escrow_uid}/status"
+  },
+  {
+    "method": "POST",
+    "name": "refund_settlement",
+    "path": "/api/v1/settlements/{negotiation_id}/refund"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.stream_events",
+    "path": "/api/v1/system/events"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.health_versioned",
+    "path": "/api/v1/system/health"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.system_status",
+    "path": "/api/v1/system/status"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_html",
+    "path": "/docs"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_redirect",
+    "path": "/docs/oauth2-redirect"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.health_bare",
+    "path": "/health"
+  },
+  {
+    "method": "GET",
+    "name": "openapi",
+    "path": "/openapi.json"
+  },
+  {
+    "method": "GET",
+    "name": "redoc_html",
+    "path": "/redoc"
+  }
+]

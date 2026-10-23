@@ -3,6 +3,9 @@
 # Project-local scratch files, private notes, and generated diagnostics.
 .scm-local/
 
+# Temporary worktrees build targets check out.
+.worktrees/
+
 # Visible transfer staging for snap-confined tools such as Multipass.
 scm-clean-room-transfer/
 

@@ -1,0 +1,839 @@
+{
+  "migrations": [
+    "20260731_001_apicredits_schema_baseline",
+    "20260811_002_canonical_owner_principals",
+    "20260815_003_fulfillment_grants",
+    "20260922_004_pool_advertisement_and_backing",
+    "20261005_005_reservation_release_requested_at"
+  ],
+  "tables": {
+    "api_keys": {
+      "columns": [
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "secret_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "balance",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "sqlite_autoindex_api_keys_1",
+          "origin": "pk",
+          "unique": true
+        }
+      ]
+    },
+    "capacity_buckets": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "backing_resource_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_type",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_subtype",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "total_units",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "capacity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "attributes",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "backing_resource_id"
+          ],
+          "name": "ix_capacity_buckets_backing_resource_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "pool_id"
+          ],
+          "name": "ix_capacity_buckets_pool_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_bucket_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_1",
+          "origin": "pk",
+          "unique": true
+        },
+        {
+          "columns": [
+            "backing_resource_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_2",
+          "origin": "u",
+          "unique": true
+        },
+        {
+          "columns": [
+            "host_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_3",
+          "origin": "u",
+          "unique": true
+        }
+      ]
+    },
+    "capacity_events": {
+      "columns": [
+        {
+          "default": null,
+          "name": "version",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "kind",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "occurred_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "resource_id"
+          ],
+          "name": "ix_capacity_events_resource_id",
+          "origin": "c",
+          "unique": false
+        }
+      ]
+    },
+    "capacity_reservation_debits": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "capacity_bucket_id",
+          "table": "capacity_buckets",
+          "to": "capacity_bucket_id"
+        },
+        {
+          "from": "capacity_reservation_id",
+          "table": "capacity_reservations",
+          "to": "capacity_reservation_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "capacity_bucket_id"
+          ],
+          "name": "ix_capacity_reservation_debits_capacity_bucket_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "name": "sqlite_autoindex_capacity_reservation_debits_1",
+          "origin": "pk",
+          "unique": true
+        }
+      ]
+    },
+    "capacity_reservations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "units",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "deal_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "hold_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "executor_target",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "release_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "executor_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "lease_start_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "lease_end_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "create_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "failure_reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "failure_message",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "released_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "release_requested_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "escrow_uid"
+          ],
+          "name": "ix_capacity_reservations_escrow_uid",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "settlement_resource_id"
+          ],
+          "name": "ix_capacity_reservations_settlement_resource_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "state"
+          ],
+          "name": "ix_capacity_reservations_state",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "name": "sqlite_autoindex_capacity_reservations_1",
+          "origin": "pk",
+          "unique": true
+        }
+      ]
+    },
+    "consumption_events": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "amount",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "idempotency_key",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "occurred_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "key_id",
+          "table": "api_keys",
+          "to": "key_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "ix_consumption_events_key_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "key_id",
+            "idempotency_key"
+          ],
+          "name": "sqlite_autoindex_consumption_events_1",
+          "origin": "u",
+          "unique": true
+        }
+      ]
+    },
+    "credit_grants": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "service",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "key_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "key_target_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "request_digest",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "result_balance",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "quantity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "reason",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "granted_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "key_id",
+          "table": "api_keys",
+          "to": "key_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "ix_credit_grants_key_id",
+          "origin": "c",
+          "unique": false
+        },
+        {
+          "columns": [
+            "fulfillment_id"
+          ],
+          "name": "sqlite_autoindex_credit_grants_1",
+          "origin": "u",
+          "unique": true
+        },
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_credit_grants_2",
+          "origin": "u",
+          "unique": true
+        }
+      ]
+    },
+    "resource_pools": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "label",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "provider",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": null,
+          "name": "policy_tags",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_resource_pools_1",
+          "origin": "pk",
+          "unique": true
+        }
+      ]
+    },
+    "schema_migrations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "origin": "pk",
+          "unique": true
+        }
+      ]
+    }
+  }
+}

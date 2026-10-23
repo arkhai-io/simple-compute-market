@@ -37,14 +37,22 @@ diffed"). Tests and fixtures only; no production code changes. Touches
 `domains/apicredits/tests/`, `domains/apicredits/service/tests/`,
 `domains/apicredits/storefront/tests/`, and `e2e-tests/`.
 
-- [ ] 1.1 Confirm by inspection, before writing anything, that `design.md`'s
+- [x] 1.1 Confirm by inspection, before writing anything, that `design.md`'s
       "What exists" still holds on the base branch: the digest strings are
       literal in both `arkhai_apicredits/settlement/credits_client.py` and
       `apicredits_service/models/keys_model.py`; `db/database.py` seeds
       provider and modes `api_credits`; `keys_service.py` refuses other
       offering modes; the issuance-evidence router is unmounted. Record drift in
       `design.md` rather than working around it.
-- [ ] 1.2 `domains/apicredits/tests/test_issuance_pins.py` with fixtures under
+      *Done 2026-10-22.* All four hold on `dev` at `9720ac596`: the four
+      schema strings and the `api-credits` digest domain are literal in both
+      `credits_client.py` and `keys_model.py`; `db/database.py` seeds the
+      default pool's provider, deliverable, and advertisable modes as
+      `api_credits`; `keys_service.py`'s `_commit_quota` refuses a reservation
+      whose offering mode is not `api_credits`; `make_issuance_evidence_router`
+      is defined and referenced nowhere, and `server.py` mounts nine routers
+      without it. No drift; `design.md` unchanged.
+- [x] 1.2 `domains/apicredits/tests/test_issuance_pins.py` with fixtures under
       `domains/apicredits/tests/fixtures/pins/`: for a fixed input set of
       issuance requests (new key, existing key, several quantities and owners),
       record the request digest, the fulfillment identity, the evidence digest,
@@ -52,7 +60,14 @@ diffed"). Tests and fixtures only; no production code changes. Touches
       domain produces today, and assert them byte for byte. The fixture is
       written once by a generator flagged `--write` and never rewritten by a
       passing run. (D8.)
-- [ ] 1.3 `domains/apicredits/service/tests/integration/test_compat_baseline.py`
+      *Done.* Five cases (new and existing keys, quantities 1–250, two eip191
+      and two ed25519 owners, two services); the fixture records the inputs
+      beside the expected values so a changed input set is seen too. Written
+      by `python tests/test_issuance_pins.py --write`, which refuses to
+      overwrite. A fourth test proves the storefront's evidence path
+      (`prepare_credit_issuance_request`) yields the pinned identity and
+      digest. Unit, 4 passed.
+- [x] 1.3 `domains/apicredits/service/tests/integration/test_compat_baseline.py`
       with fixtures under `service/tests/fixtures/baseline/`: the route surface
       (every route's method and path, and the served OpenAPI document with
       volatile fields normalized); each route's admitted roles and signed
@@ -61,14 +76,67 @@ diffed"). Tests and fixtures only; no production code changes. Touches
       conflict); the `/api/v1/system/version` response; the environment
       variables and settings keys the service reads, by prefix. Application
       integration through the service's test client. (D9.)
-- [ ] 1.4 `domains/apicredits/service/tests/unit/test_schema_baseline.py`: the
+      *Done.* Six records: `routes` (method, path, name), `openapi` (served,
+      no volatile field today), `route_contracts` (both tables field for
+      field, plus the unsigned paths), `refusals` (nineteen: unauthenticated,
+      unknown route, role, trust, changed reuse, exact-retry refusal, and every
+      issuance, key, and consumption refusal the controllers map to a status,
+      with a 422's pydantic echo dropped; issuance to a revoked existing key
+      is not among them), `version` (shape and distribution name; the number is asserted
+      against the installed distribution, not recorded), and `configuration`
+      (settings.toml keys plus each `settings.get`/attribute read in the
+      source, and the environment variables that select them). The app is
+      loaded fresh by `tests/integration/signed_service.py` with seller and
+      service trust and no admin, as the deployed stack is configured; the
+      fixtures are written by `python -m tests.integration.test_compat_baseline
+      --write`. Application integration through the real app over
+      `ASGITransport`, state set up through `CreditsServiceClient`,
+      `SiteCapacityAdminClient`, and the gated `TokensClient`, refusals
+      hand-signed as rejection paths, with the first half of each reused
+      request identity also hand-signed since no client can fix one.
+      `tests/__init__.py` was added so test modules import the helper. The
+      bodies the refusal record diffs are what D9 asks for; `TESTING.md`'s
+      rejection-path rule asserts status only, and closeout records the
+      baseline as that rule's one exception (promotion record).
+- [x] 1.4 `domains/apicredits/service/tests/unit/test_schema_baseline.py`: the
       tables, columns, and indexes a freshly migrated database holds, and the
       recorded migration identifiers in order, against a fixture. (D9.)
-- [ ] 1.5 `domains/apicredits/storefront/tests/integration/test_compat_baseline.py`
+      *Done.* Nine tables (the credits tables, the site ledger's, the pool
+      table, `schema_migrations`) with columns, indexes, and foreign keys as
+      SQLite reports them, and the five migration identifiers in applied
+      order. Placed at `tests/integration/test_schema_baseline.py`, not the
+      `unit/` path this task names: it runs the migrations against a real
+      SQLite database, which `TESTING.md` places in `integration/`. Library
+      integration, 1 passed.
+- [x] 1.5 `domains/apicredits/storefront/tests/integration/test_compat_baseline.py`
       and `tests/unit/test_schema_baseline.py`: the same five baselines for the
       storefront, including its `api_credit_*` tables and migration identifiers.
       (D9.)
-- [ ] 1.6 `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_service_upgrade_rollback.py`,
+      *Done.* Six records for the storefront plus `schema`: `routes`,
+      `openapi`, `authentication` (every mounted route's caller role, bound
+      operation, and bound resource), `refusals` (unauthenticated, untrusted,
+      wrong role, invalid signature, exact retry, changed reuse, unknown
+      lifecycle loop), `health` (the storefront has no version route), and
+      `configuration` under the `APICREDITS_STOREFRONT` prefix. The bound
+      operation and resource are observed, not transcribed: every
+      authenticated route binds them before trust is decided, so an unsigned
+      probe reads them from the request state through an outermost test
+      middleware; the one route that resolves state first, the settlement
+      status read, is recorded from the canonical client's contract. The
+      caller role is stated per route in the test and held to the mounted
+      route set both ways. The app is the storefront's own factory over a
+      fresh SQLite file, with the container holding what the probed routes
+      resolve before they authenticate: the database, the signer, a
+      negotiation service, the system service, a loop controller with every
+      step registered and no loop started, and a placeholder negotiation
+      runtime no probe reaches; application integration, with the refusals
+      hand-signed as rejection paths. The schema record, at
+      `tests/integration/test_schema_baseline.py` for the reason 1.4 gives,
+      holds twenty-seven tables and nineteen migration identifiers across the
+      core, settlement-runtime, and `api_credit_*` chains. The two schema
+      modules share a forty-line SQLite introspection helper by duplication,
+      since the two packages share no test code.
+- [x] 1.6 `e2e-tests/tests/e2e/roles/scenarios/apicredits/test_credits_service_upgrade_rollback.py`,
       marker `e2e_credits_service_rollback` registered in
       `e2e-tests/pyproject.toml`: with the lane's database volume retained,
       start the current API-credits service image over a copy of a database the
@@ -88,12 +156,88 @@ diffed"). Tests and fixtures only; no production code changes. Touches
       `.github/workflows/e2e.yml` needs no change. Not run locally;
       validation's lane and the pipeline run it. (D14, `api-credits` "Upgrade
       and rollback against a retained database".)
-- [ ] 1.7 Verification: `make -C domains/apicredits test-domain` (unit),
+      *Done, not run locally.* The scenario drives the lane host's Docker
+      engine through the `docker` SDK (added to `e2e-tests`, relocked) over
+      the socket `test-e2e-apicredits` now mounts into the test container
+      (`BUYER_MACHINE_DOCKER_SOCKET`, empty for the other lanes). Rollback:
+      the lane's service volume is mounted read-only into a copying
+      container and never into a probe, and the current image then the
+      previous release's start over the copy; upgrade: the previous release
+      starts over a fresh volume, registers a quota, issues a new-key
+      grant and a top-up, then the current image starts over it, reads both
+      back, and an exact retry of the first issuance converges on the
+      recorded grant. Both directions compare each probe's `/openapi.json`
+      path and method set with the lane's live service's and read every key
+      and grant, and the issuance of every grant carrying a fulfillment
+      identity (every issued grant does), through `CreditsServiceClient`. Probe services run
+      behind the shared-secret gate (`APICREDITS_STOREFRONT_ADMIN_KEY`, the
+      committed development value), since no credential file can be mounted
+      from inside the test container; the quota is declared through the
+      capacity route with the gate's header, a raw call the scenario marks,
+      since the typed capacity client only signs. Images, volume, network,
+      and engine are each required and fail the scenario by name. At this
+      commit both images are built from trees that differ only in tests and
+      documents, so a pass proves the harness; the compatibility evidence
+      accrues from section 3 on, when the images first differ in code. The
+      lane's volume is copied while its service runs; the service is
+      quiescent after the deal scenarios and uses SQLite's default journal,
+      so the copy is consistent. Lane settings
+      (`api_credits.service_image`, `service_prekit_image`, `lane_network`,
+      `service_volume`, `admin_key`) are in `config-docker.yml`.
+      `build-apicredits-service-prekit` checks the pinned commit out under
+      `.worktrees/` (gitignored and dockerignored), fetching it at depth one
+      when absent, builds that commit's whole wheelhouse with its own `make
+      dist`, builds the service image from that worktree as
+      `arkhai:apicredits-service-prekit`, and removes the worktree whether or
+      not the build succeeded; `build-e2e-apicredits` depends on it.
+      `e2e-tests` declares `arkhai-apicredits-domain`, which the scenario
+      imports directly. Declined from the fresh-context check: a mounted
+      signing identity for the probes, which would need the development seed
+      written into a volume from inside the test container (the lane's own
+      service exercises the signed posture); and declaring `starlette`, which
+      both baselines import under `fastapi` as the service's existing
+      route-coverage test does. The
+      marker joins `E2E_APICREDITS_MODULE` last, after the deal scenarios
+      whose grants the rollback direction reads.
+- [x] 1.7 Verification: `make -C domains/apicredits test-domain` (unit),
       `make -C domains/apicredits/service test` (unit and application
       integration), `make -C domains/apicredits/storefront test` (unit and
       application integration), `make test`. End-to-end: `e2e_credits_deal` and
       `e2e_credits_payment_deal` are unaffected; `e2e_credits_service_rollback`
       is new and owed to validation. Record each suite's level and result here.
+      *Done 2026-10-22.* Domain library 45 passed (41 before; unit, the pins
+      a fourth of which is library integration through the evidence path).
+      Service 79 passed (72 before; unit, library integration, application
+      integration). Storefront 191 passed (184 before; unit, application
+      integration). `make test`: every other suite passed except, all on the
+      `dev` base and outside this section's files, one provisioning-service
+      unit test (`test_config.py`, the dotenv layering characterization,
+      untouched since #263), the VM storefront's two Alkahest toolchain tests
+      the plan already lists, three release-tooling `test_publish_matrix`
+      cases over `RELEASING.md` rows for packages this section does not
+      touch, two release-tooling whole-tree checks and
+      `make check-comment-hygiene` that trip on another session's stale
+      worktree under `.claude/worktrees/` (both pass on a copy of this tree
+      without it), and one release-tooling case needing GNU make 4's
+      `--eval`, which the macOS make 3.81 here lacks. Helm is not installed
+      here, so `test-deployment-packaging`'s render checks are unrun.
+      `make check-packaging` passes on the copy (uv setup, locks, Python
+      version, layout, all four architecture parts); `make check-change`
+      reports only the two `api-family` citations closeout creates. The e2e
+      unit suite passes (80) and the new scenario collects (2). Reinit under
+      the local uv 0.10.9 rewrites several locks' markers; those rewrites are
+      reverted, and only `e2e-tests/uv.lock` changes. End-to-end: the three
+      scenarios are owed to validation; a pass of the rollback scenario at
+      this commit proves the harness (1.6).
+      **Handoff.** The service's `tests/__init__.py` makes `tests` a package;
+      the baseline generators run as `python -m tests.<dir>.<module> --write`
+      from each project and refuse to overwrite. Later sections diff against
+      the fixtures as committed; a section that changes a recorded value has
+      changed behaviour. The stale worktree under `.claude/worktrees/` belongs
+      to another session and was left alone. Section 1 is committed on
+      `feat/compose-api-family-kit-s1-baselines`, stacked on the planning
+      branch; the owner asked for one PR per section, each stacked on the
+      last.
 
 ## 2. Vocabulary and contracts
 
@@ -564,6 +708,8 @@ change to implementation.
 | D6 — per-domain service roots, the capacity profile | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `docs/development/ARCHITECTURE.md#runtime-service-map` and `#authority-boundaries` |
 | D7 — the contribution bundles and the issuance projection | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D9, D14 — the compatibility baselines and rollback directions | `openspec/specs/api-credits/spec.md` |
+| D9 — the baselines' refusal records diff bodies, the one exception to the rejection-path status-only rule; the API-credit lane mounts the engine socket and runs the upgrade/rollback scenario | `docs/development/TESTING.md` (rejection paths; the API-credit lane) |
+| D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
 | D11 — route services in the kit, bindings in the compositions | `openspec/specs/api-family/spec.md`; `openspec/specs/api-credits/architecture.md#implementation-composition` |
 | Open: the ledger-free split and inference's projection values | `openspec/specs/api-family/architecture.md` (current limits) |

@@ -363,6 +363,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
     { name = "arkhai-apicredits-buyer" },
+    { name = "arkhai-apicredits-domain" },
     { name = "arkhai-bare-metal" },
     { name = "arkhai-bare-metal-buyer" },
     { name = "arkhai-compute-provisioning-client" },
@@ -381,6 +382,7 @@ dependencies = [
     { name = "arkhai-vms-buyer" },
     { name = "arkhai-vms-provisioning-operator-client" },
     { name = "arkhai-vms-storefront" },
+    { name = "docker" },
     { name = "dynaconf" },
     { name = "eth-account" },
     { name = "eth-typing" },
@@ -408,6 +410,7 @@ dev = [
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
+    { name = "arkhai-apicredits-domain", specifier = ">=0.6.0" },
     { name = "arkhai-bare-metal", specifier = ">=0.11.0" },
     { name = "arkhai-bare-metal-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
@@ -427,6 +430,7 @@ requires-dist = [
     { name = "arkhai-vms-provisioning-operator-client", specifier = ">=0.9.0" },
     { name = "arkhai-vms-storefront", specifier = ">=0.16.0" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
+    { name = "docker", specifier = ">=7.1.0" },
     { name = "dynaconf", specifier = ">=3.2" },
     { name = "eth-account", specifier = ">=0.12" },
     { name = "eth-typing", specifier = ">=4.0" },
@@ -1136,6 +1140,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/62/d5/bf5434fde726c4f80cb99912b2d8e0afa1587557e2a2d7e0315eb942f2de/cytoolz-1.1.0-cp313-cp313t-win32.whl", hash = "sha256:10ae4718a056948d73ca3e1bb9ab1f95f897ec1e362f829b9d37cc29ab566c60", size = 951595, upload-time = "2025-10-19T00:42:42.877Z" },
     { url = "https://files.pythonhosted.org/packages/64/29/39c161e9204a9715321ddea698cbd0abc317e78522c7c642363c20589e71/cytoolz-1.1.0-cp313-cp313t-win_amd64.whl", hash = "sha256:1bb77bc6197e5cb19784b6a42bb0f8427e81737a630d9d7dda62ed31733f9e6c", size = 1004445, upload-time = "2025-10-19T00:42:44.855Z" },
     { url = "https://files.pythonhosted.org/packages/e2/5a/7cbff5e9a689f558cb0bdf277f9562b2ac51acf7cd15e055b8c3efb0e1ef/cytoolz-1.1.0-cp313-cp313t-win_arm64.whl", hash = "sha256:563dda652c6ff52d215704fbe6b491879b78d7bbbb3a9524ec8e763483cb459f", size = 926207, upload-time = "2025-10-19T00:42:46.456Z" },
+]
+
+[[package]]
+name = "docker"
+version = "7.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/7f/731ff914b0255d3d065f45fd4e626d4b8c95dbcbaada049f337a6ac16410/docker-7.2.0.tar.gz", hash = "sha256:cebb93773d334f778e023a7ee352a8d6e13ab1bd3b863a4d4a59dec897df43ac", size = 118731, upload-time = "2026-07-09T14:53:46.39Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/23/529140fe1aab80fc6992f93a706deec709140a6397439139a054e1515c45/docker-7.2.0-py3-none-any.whl", hash = "sha256:a3f45fdeb9165e2d25d9a1d02ddf3bc70fb572cf5ebbf9b58558c22caf29b71f", size = 148775, upload-time = "2026-07-09T14:53:45.224Z" },
 ]
 
 [[package]]

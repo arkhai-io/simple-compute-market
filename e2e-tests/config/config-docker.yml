@@ -86,6 +86,14 @@ api_credits:
   compute_registry_authority_id: "compute-registry"
   compute_registry_scheme:       "eip191"
   compute_registry_identifier:   "0x90f79bf6eb2c4f870365e785982e1f101e93b906"
+  # The upgrade/rollback scenario's images, lane network and volume, and gate
+  # key: the committed development value in dev-env/identities, never to be
+  # used on a public network.
+  service_image:        "arkhai:apicredits-service"
+  service_prekit_image: "arkhai:apicredits-service-prekit"
+  lane_network:         "simple-market-apicredits_default"
+  service_volume:       "simple-market-apicredits_api-credits-service-data"
+  admin_key:            "development-api-credits-admin-key"
 
 # Second storefront (multi-registry scenario)
 alice:
