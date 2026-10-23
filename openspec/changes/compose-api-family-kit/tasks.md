@@ -416,7 +416,11 @@ above.
       *Done.* Both Makefiles gain the three targets, in `dist`, `dist-ci`, and
       `test`, with `dist-apicredits-domain` depending on `dist-api`;
       `tests.yml` two matrix rows (the root `dist` and `dist-ci` reach the two
-      wheels through `dist-domains`, as every domain wheel); `publish-pypi.yml` the push path, two
+      wheels through `dist-domains`, as every domain wheel, and the root
+      `dist-api-contracts` and `dist-apicredits-domain` declare only their
+      cross-directory prerequisites, since `domains/Makefile` already orders
+      the vocabulary before them: a dry run builds `arkhai-api` once per
+      target); `publish-pypi.yml` the push path, two
       filters, and two `PACKAGES` entries; `manifests/published-distributions.json`
       both, after the identity kit; `RELEASING.md` two rows and `arkhai-api`
       on the domain library's. Locks: the two new projects, and the domain,

@@ -47,4 +47,3 @@ class IssuanceLabel:
     @property
     def portable_fulfillment_ref_schema(self) -> str:
         return f"arkhai.{self.name}.portable-fulfillment-ref.v1"
-

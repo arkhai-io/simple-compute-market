@@ -41,7 +41,7 @@ dist-release: ## Build the wheel set for a publishing path.
 
 dist: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client
 
-dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-api dist-api-contracts dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
+dist-ci: dist-storefront-client dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-arkhai-core-registry dist-ci-kits dist-alkahest dist-config dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-ansible dist-domains dist-compute-provisioning-service dist-registry-client ## Build repository-owned Python wheels without fetching separately released artifacts.
 
 dist-domains: dist-ci-kits dist-compute-provisioning dist-compute-provisioning-ansible ## Build every domains-scoped wheel through the domain aggregate
 	cd domains && $(MAKE) dist DIST_DIR=$(DIST_DIR)
@@ -146,10 +146,10 @@ dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## B
 dist-api: dist-identity ## Build arkhai-api, the api-family vocabulary, into .dist/
 	cd domains && $(MAKE) dist-api DIST_DIR=$(DIST_DIR)
 
-dist-api-contracts: dist-api ## Build arkhai-api-contracts wheel into .dist/
+dist-api-contracts: dist-identity ## Build arkhai-api-contracts wheel into .dist/ (domains/Makefile builds arkhai-api first)
 	cd domains && $(MAKE) dist-api-contracts DIST_DIR=$(DIST_DIR)
 
-dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy dist-api ## Build arkhai-apicredits-domain wheel into .dist/
+dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-service: dist-identity dist-ci-kits dist-apicredits-domain dist-apicredits-middleware ## Build arkhai-apicredits-service wheel into .dist/
