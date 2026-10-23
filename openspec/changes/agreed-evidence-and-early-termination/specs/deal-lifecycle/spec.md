@@ -1,13 +1,36 @@
 ## ADDED Requirements
 
-### Requirement: Authority events come from the named authority
+### Requirement: Payment events are per part
 
-An authority event MUST be read from the authority the committed agreement names, and MUST record what happened to one part of the deal. It MUST carry `negotiation_id`, `commitment_ref`, `part`, `kind`, `actor`, `at`, `cause`, `sequence`, and the authority's record reference. The lifecycle layer MUST treat the commitment reference as opaque.
+A payment event MUST be read from the payment authority the committed agreement names, and MUST record what happened to one part of the deal. It MUST carry `negotiation_id`, `commitment_ref`, `part`, `kind`, `actor`, `at`, `amount` where it moves money, `cause`, the `case_ref` of the case whose outcome caused it if any, `sequence`, and the authority's record reference. The lifecycle layer MUST treat the commitment reference as opaque.
 
 #### Scenario: A start is recorded
 
 - **WHEN** the payments service records the payee's `start` of a hosted deal's `once` part
 - **THEN** the seller's `watch` yields it with the part, the payee as actor, the authority's sequence number, and its record reference
+
+### Requirement: Arbitration is per agreement and separate from payment
+
+A case MUST be filed about an agreement, not a part, at the intake of the regime its `adjudication` names. Arbitration events (filed, conceded, ruled, closed) MUST carry the case reference and be read from that regime's record. A transaction MAY have any number of cases. The payment adapter MUST NOT file, concede, or decide cases.
+
+#### Scenario: Two cases on one deal
+
+- **WHEN** a buyer files a case, it is ruled, and later files a second case on the same deal
+- **THEN** both cases are recorded against the agreement, each with its own outcome
+
+### Requirement: An outcome is a list of per-part effects
+
+A ruling or concession's outcome MUST be a list of consequences, each a payment effect on one part (reverse an amount, slash an amount of a bond, stop a `rate` part at *T*) or a delivery end at *T*. The arbitration adapter MUST apply each payment effect through the payment adapter with the case reference, and MUST send a delivery end to end service. An outcome without a delivery end MUST leave the term running.
+
+#### Scenario: A ruling discounts a deal
+
+- **WHEN** a ruling slashes half of a deal's bond and has no delivery end
+- **THEN** the payment authority records one partial slash with the case reference, and the lease is unchanged
+
+#### Scenario: A bond is slashed twice
+
+- **WHEN** two outcomes on one deal each slash part of its bond
+- **THEN** both slashes are applied, each bounded by what remains of the bond
 
 ### Requirement: Peer messages are hints until the authority confirms them
 
@@ -27,14 +50,14 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 - **WHEN** a buyer submits an early end on a hosted deal whose only part is `once`
 - **THEN** the outcome is `rejected`, naming the part shape, and no authority is contacted
 
-#### Scenario: A seller concedes on a bonded once deal
+#### Scenario: A reverse names a part
 
-- **WHEN** a seller concedes a dispute on a hosted deal with a `once` part and a `bond` part
-- **THEN** the adapter sends a `reverse` of the `once` part for the case's requested outcome and a forfeit of the `bond` part
+- **WHEN** a seller submits `reverse` of an amount on a hosted deal with a `once` part and a `bond` part
+- **THEN** the adapter sends one `reverse` event on the `once` part and none on the bond
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `regime`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+A settlement option MAY carry `adjudication` (`version`, `regime`, `dispute_window_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
 
 #### Scenario: A term changes the option ID
 
@@ -87,14 +110,28 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
 - **THEN** the payer is the only stop authority of its stoppable parts
 
-### Requirement: A concession ends now and acts through each part
+### Requirement: A concession is a case the seller resolves against itself
 
-A `concede` MUST name an end time no later than now. The adapter MUST apply it through each affected part's events, forfeiting any `bond` part. A seller-filed concession's requested outcome for a `once` part MUST default to reversing the unserved share of the term by time.
+A `concede` MUST be recorded at the regime's intake, and its payment effects MUST be ones the seller is authorized to apply itself. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and slash the bond in full.
 
 #### Scenario: A concession names a future end
 
-- **WHEN** a seller submits `concede` with an end time later than now
-- **THEN** the adapter rejects it before contacting the authority
+- **WHEN** a seller submits `concede` with a delivery end later than now
+- **THEN** the arbitration adapter rejects it before contacting any authority
+
+#### Scenario: A seller concedes after hardware failure
+
+- **WHEN** a seller makes the default concession on a hosted `once` deal with a bond
+- **THEN** the intake records the concession, the authority records a partial `reverse` and a full slash with its case reference, and end service ends delivery now
+
+### Requirement: One dispute window drives holds and retention
+
+`adjudication.dispute_window_seconds` MUST bound when a case may be filed, counted from when delivery ends. Each payment adapter MUST derive its holds from it, so that every hold on a deal's funds and bond lasts at least until the lease end plus the window. The window MUST NOT be shorter than the regime's minimum.
+
+#### Scenario: A once deal's hold is derived
+
+- **WHEN** a hosted mandate is derived for a deal whose lease ends at 13:00 with a one-day window
+- **THEN** its `once` hold and its bond are held until 13:00 the next day
 
 ### Requirement: Lifecycle commands have defined outcomes
 
@@ -157,12 +194,12 @@ The storefront MUST expose the seller half's `submit`, `read`, and `list` throug
 
 #### Scenario: The admin interrupt route ends a hosted deal
 
-- **WHEN** an administrator interrupts a hosted deal through the VM admin route
-- **THEN** the route submits through the seller half, and the lease changes only through end service
+- **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
+- **THEN** the route submits the default concession through the seller half, and the lease changes only through end service
 
 ### Requirement: Only the payee starts a hosted deal, after provisioning
 
-For hosted payments `start` MUST be the payee's alone. The seller MUST read the authority, provision, read again, and then submit `start`. If the payer stopped meanwhile, `start` is rejected, or provisioning has not finished by the Agreement's `start_utc + max_term_seconds`, end service MUST terminate the provisioned resource. A crash between provisioning and `start` MUST resume from the journal with the same decision.
+For hosted payments `start` MUST be the payee's alone. The seller MUST read the authority, provision, read again, and then submit `start`. If the payer stopped meanwhile, `start` is rejected, or provisioning has not finished by the lease end (`start_utc + duration_seconds`), end service MUST terminate the provisioned resource. A crash between provisioning and `start` MUST resume from the journal with the same decision.
 
 #### Scenario: Start is rejected after provisioning
 
@@ -171,21 +208,12 @@ For hosted payments `start` MUST be the payee's alone. The seller MUST read the 
 
 ### Requirement: End service keeps the earliest final request
 
-End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch` and from local delivery decisions: bare-metal buyer teardown, a failed start, and terminal settlement. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
+End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from arbitration outcomes with a delivery end, and from local delivery decisions: bare-metal buyer teardown, a failed start, and terminal settlement. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
 
 #### Scenario: A buyer tears down bare metal
 
 - **WHEN** a bare-metal buyer requests teardown through the storefront
 - **THEN** end service terminates the lease with the buyer as actor, the request is kept as evidence, and no payment command is sent
-
-### Requirement: Funding is a renewable timer
-
-End service MUST keep a funded-through deadline as a local timer that advances with each deadline change, and MUST issue a final request only when the timer expires without renewal.
-
-#### Scenario: Funding advances
-
-- **WHEN** a deal funded through 12:05 is funded through 12:10 before 12:05
-- **THEN** the lease is not truncated, and the timer moves to 12:10
 
 ### Requirement: End service terminates or truncates, and journals each effect
 
@@ -214,23 +242,23 @@ The buyer MUST keep the seller's signed acceptance with its proof headers and ex
 - **WHEN** a buyer verifies the seller's signed acceptance
 - **THEN** it stores the proof headers and exact body before committing
 
-### Requirement: Evidence outlives the deal and its disputes
+### Requirement: Evidence outlives the deal and its cases
 
-Records MUST be kept while the deal, its physical recovery, or any dispute on it is open, and for the dispute window after the last of these closes. An accepted negotiation never committed MUST be kept for the window after its acceptance expires. The buyer MUST apply the window the listing published.
+Records MUST be kept while the deal, its physical recovery, or any case on it is open, and for the Agreement's `dispute_window_seconds` after the last of these closes. An accepted negotiation never committed MUST be kept for the same window after its acceptance expires.
 
 #### Scenario: A long deal passes the window
 
 - **WHEN** a running deal's last authority event is older than the dispute window
 - **THEN** its evidence records are kept
 
-#### Scenario: A dispute stays open
+#### Scenario: A case stays open
 
-- **WHEN** a dispute on an ended deal remains unresolved past the window
+- **WHEN** a case on an ended deal remains unresolved past the window
 - **THEN** its evidence records are kept until the window after its resolution
 
 ### Requirement: A dispute is one case payload
 
-A `dispute` or `concede` MUST carry one case: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
+A `dispute` or `concede` MUST carry one case about the agreement: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
 
 #### Scenario: A buyer files a dispute
 

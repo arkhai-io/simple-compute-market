@@ -16,7 +16,7 @@ Mechanism-contributed clause fields MUST live under the mechanism's configuratio
 
 ### Requirement: Explicit atomic configuration migration
 
-Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`. `[Settlement.alkahest].interruptible = true` MUST be mapped to `release_models = ["interruptible"]`.
+Each affected role MUST provide dry-run and write modes that map still-supported legacy Alkahest settlement settings to the typed hierarchy, derive canonical priority, leave identity/wallet/chains in their owning namespaces, preserve unrelated configuration, redact secrets, refuse conflicting old/new values, validate the complete result, write and back up with restrictive permissions, and replace atomically. Repeating migration MUST be a no-op. Legacy `fiat.stripe.v1` or `[Settlement.stripe]` settings MUST be rejected with an actionable removal diagnostic and MUST NOT be converted to `arkhai.payments.v1`. `[Settlement.alkahest].oracle_gated = true` MUST be mapped to `release_models = ["oracle_gated"]`, `interruptible = true` to `["interruptible"]`, and neither to `["recipient"]`.
 
 #### Scenario: Migration preview is requested
 
@@ -47,7 +47,7 @@ Each affected role MUST provide dry-run and write modes that map still-supported
 
 ### Requirement: Alkahest release models are listed per option
 
-`[Settlement.alkahest].release_models` MUST list the release models a storefront offers, and the storefront MUST publish one Alkahest option per model. A listing MUST NOT carry a listing-level interruptible marker.
+`[Settlement.alkahest].release_models` MUST list the release models a storefront offers, drawn from `recipient`, `oracle_gated` and `interruptible`, and the storefront MUST publish one Alkahest option per model. Oracle-address settings MUST be validated against list membership, and a domain that cannot deliver a listed model MUST refuse to start. A listing MUST NOT carry a listing-level interruptible marker.
 
 #### Scenario: A storefront offers two Alkahest release models
 

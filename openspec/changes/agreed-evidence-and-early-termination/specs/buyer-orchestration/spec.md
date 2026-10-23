@@ -2,7 +2,7 @@
 
 ### Requirement: Payment buyers approve and settle by negotiation
 
-The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including each part's event authorities and terms, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID. On VM and bare-metal deals it MUST then send `commit` through the buyer half with the negotiation ID and transaction ID; on API-credit deals it MUST settle with `settle_agreement`. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
+The buyer MUST supply its Arkhai account as `payer_account`, verify that the mandate is the mechanism's derivation of the negotiated Agreement, including each part's event authorities, holds and terms and the seller's pre-approval of any bond, validate it against local payment policy, approve with owner-scoped WorkOS credentials, and poll the deterministic transaction ID. On VM and bare-metal deals it MUST then send `commit` through the buyer half with the negotiation ID and transaction ID; on API-credit deals it MUST settle with `settle_agreement`. Marketplace requests MUST use the recorded profile signer and storefront trust, independently of payment credentials.
 
 #### Scenario: Payment and marketplace credentials stay separate
 
@@ -32,9 +32,9 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: Buyer lifecycle actions go through the buyer half
 
-Buyer stop, dispute, and read MUST go through the buyer half of the lifecycle interface, dispatched by the domain's buyer stage table, without core buyer code binding the lifecycle kits. After an accepted stop the buyer client MUST send a `hint` to the seller.
+Buyer payment commands, dispute filing, and read MUST go through the buyer half of the lifecycle interface, dispatched by the domain's buyer stage table, without core buyer code binding the lifecycle kits. After a filed dispute the buyer client MUST send a `hint` to the seller.
 
 #### Scenario: A buyer files a dispute on a hosted deal
 
 - **WHEN** a buyer files a dispute on a hosted deal
-- **THEN** the dispute goes to the payments service with the buyer's own credential and its case payload, and a `hint` follows to the storefront
+- **THEN** the case goes to the intake of the agreement's regime with the buyer's own credential and its case payload, not to the payments service, and a `hint` follows to the storefront
