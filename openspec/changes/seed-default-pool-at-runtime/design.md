@@ -352,11 +352,11 @@ configuration needs the optional playbook.
 | Decision | Destination |
 |---|---|
 | D1 optional host placement | `openspec/specs/resource-pool-management/spec.md` (Explicit valid host membership); `docs/development/ARCHITECTURE.md` (One name per concept: a host belongs to at most one pool) |
-| D1, D2 no implicit placement or capacity (owner principle) | `docs/development/ARCHITECTURE.md` (Storefront capacity boundary or Resource pools) |
-| D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` (Legacy host capacity is derived into declarations); `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md` |
+| D1, D2 no implicit placement or capacity (owner principle) | `docs/development/ARCHITECTURE.md` (Resource pools) |
+| D2 no derivation from host writes | `openspec/specs/physical-provisioning/spec.md` (Host writes declare no capacity, renamed from Legacy host capacity is derived into declarations); `openspec/specs/site-capacity/architecture.md`; `docs/seller-quickstart.md`, `docs/bare-metal-seller-quickstart.md` |
 | D3 `default` ordinary | `openspec/specs/resource-pool-management/spec.md` (Non-destructive pool lifecycle; Strict lossless YAML validation); `openspec/specs/site-capacity/spec.md` (Operator-administered capacity declarations) |
 | D4 seed document | `openspec/specs/resource-pool-management/spec.md` (A fresh site is seeded from its seed document); `openspec/specs/resource-pool-management/architecture.md` (Administrative reconciliation); `docs/development/ARCHITECTURE.md` (Resource pools); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Definition documents) |
-| D5 playbooks frozen at preparation, VM pool playbook optional, `vm_playbook_path` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/resource-pool-management/architecture.md` (Provider configuration); `docs/development/DEPLOYMENT_AND_CONFIG.md`, including the convention that a setting belonging to one domain is named for it |
+| D5 playbooks frozen at preparation, VM pool playbook optional, `vm_playbook_path` | `openspec/specs/physical-provisioning/spec.md`; `openspec/specs/resource-pool-management/architecture.md` (Provider configuration); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Profile-based configuration), including the convention that a setting belonging to one domain is named for it |
 | D6 migration reads no configuration | `openspec/specs/deployment-state/spec.md` (Service-owned migration history); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Migrations at startup) |
 | D7 smoke tests | `docs/development/TESTING.md` |
 | Roadmap gap closed | `docs/development/ROADMAP.md` (Goal 1) |
