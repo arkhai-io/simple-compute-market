@@ -65,7 +65,7 @@ def test_a_subagent_transcript_yields_its_denials_shaped_like_the_parents(tmp_pa
         {"tool_name": "Bash", "tool_use_id": "t-1", "tool_input": {"command": "sleep 5"},
          "reason": "mode", "subagent": {"id": AGENT, "description": "Verify the claims"}},
         {"tool_name": "Bash", "tool_use_id": "t-2", "tool_input": {"command": "git push"},
-         "subagent": {"id": AGENT, "description": "Verify the claims"}},
+         "reason": "rule", "subagent": {"id": AGENT, "description": "Verify the claims"}},
     ]
 
 

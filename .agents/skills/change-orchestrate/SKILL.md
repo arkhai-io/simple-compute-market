@@ -286,10 +286,19 @@ Read or Grep for a shell read — is not a workaround; read it as the gap it is.
 denied chain retried as separate allowed commands alone does not establish a
 workaround. One denied call is not a denied tool.
 
-Classify by the harness's `reason`: `mode` means a missing allow rule, a gap; a
-denial with no `reason` met a deny rule and is forbidden, since the harness
-reports a reason only for a decision of the permission mode. Take any other
-value to the owner. Never grant a deny-rule
+Classify by the harness's `reason`:
+
+- `mode`: no allow rule matched the call, a gap.
+- `rule`: a deny rule refused it, forbidden.
+- `subcommandResults`: the harness split a shell command into its parts and
+  refused one, without saying whether a deny rule or a missing allow rule did.
+  Match each part against the step's deny rules and `common`'s in
+  `.claude/change-steps.toml`: a part one matches makes the call forbidden — name
+  the rule; otherwise it is a gap, naming the part no allow rule matches.
+- No `reason`, from a record written before reasons were carried: match the call
+  against the deny rules the same way; matched, it is forbidden.
+
+Take any other value, or a call you cannot place this way, to the owner. Never grant a deny-rule
 denial: an allow cannot override it. For a gap propose the narrowest matching
 rule, distinguishing a grant for one run — `--allow <rule>` on a stopped run's
 resume, or `ALLOW='<rule>;<rule>'` on a fresh run's target — from a tracked edit
