@@ -3056,14 +3056,19 @@ publication view is built from its capacity declaration"). Touches
 `provisioning/compute` (`compute_provisioning`), the provisioning service, the VM and
 bare-metal provisioning adapters, `kit/site`, and `kit/site-client`.
 
-- [ ] 16.1 `provisioning/compute/src/compute_provisioning/inventory_views.py`: a frozen
+- [x] 16.1 `provisioning/compute/src/compute_provisioning/inventory_views.py`: a frozen
       pool-context type (pool ID, provider, resolved `PoolDeclarations`);
       `resource_views(declaration, *, pool)` returns the views it built and the problems,
       keyed by view identifier, that kept it from building one; the composer merges both
       and applies `_check_declared` to problem keys too. Export it.
       `provisioning/compute/pyproject.toml` declares `arkhai-kit-resource-pools-contracts`.
       Tests in `provisioning/compute/tests/unit/test_composition.py` (unit) (D4).
-- [ ] 16.2 The provisioning service, `src/services/capacity_inventory.py`: one row-to-context
+      Done: `InventoryPoolContext` and `ResourceViews(views, problems)`, both exported;
+      a problem is a tuple of messages per view. The composer also refuses a projection
+      returning a view and a problem for the same view. Unit: each projection receives
+      the context, problems merge, a problem for an undeclared view is refused as an
+      undeclared view is, and a view both built and unbuildable is refused.
+- [x] 16.2 The provisioning service, `src/services/capacity_inventory.py`: one row-to-context
       function, through `resolve_pool_declarations`, serves `load_capacity_pool_metadata`
       and the resource pass; `load_capacity_resource_inventory` reads the `ResourcePool`
       rows through the session factory (`main.py`'s call site passes it), resolves each pool
@@ -3076,9 +3081,27 @@ bare-metal provisioning adapters, `kit/site`, and `kit/site-client`.
       `bare_metal.v2` view with no delivery terms, a host-bearing declaration in an unbacked
       pool projects none either, and a malformed declaration projects without its view and
       with a problem while every other pool still projects (D3, D4).
-- [ ] 16.3 VM adapter `domains/vms/provisioning/adapter/.../inventory_views.py`: the new
+      Done: `pool_context(pool)` resolves one row; `load_capacity_resource_inventory(
+      resources, views, session_factory)` reads every pool row once per projection and
+      gives each declaration its pool's context; a row whose declarations do not resolve
+      (a row no write path can produce, since startup refuses it) gets none, with a
+      warning, as a pool with no row does. **Differed:** `load_capacity_pool_metadata`
+      keeps calling each pool view with the row's ID and provider: pool views take no
+      resolved declarations, so routing them through `pool_context` would resolve
+      declarations the pool pass never reads; both passes read the provider from the one
+      column (design decision 4 records it as settled in implementation). Unit (673
+      passed): the frozen bare-metal projection now carries the backed no-host
+      declaration's problem, compared by place and by naming `host_id` rather than by the
+      domain's wording; an unbacked pool's views with and without a host;
+      a malformed declaration beside a good one; a declaration in a pool with no row or
+      an unresolvable one; each pool read once with every member given its context. The
+      application-integration case is `test_bare_metal_views_follow_each_pools_backing_
+      and_problems_stay_local`, through the canonical site client.
+- [x] 16.3 VM adapter `domains/vms/provisioning/adapter/.../inventory_views.py`: the new
       signature and return shape (D4).
-- [ ] 16.4 Bare-metal adapter `domains/bare_metal/provisioning/adapter/.../inventory_views.py`
+      Done; the view contributes nothing per resource (unit, in the service's
+      `test_vm_inventory_views.py`, which the VM adapter's target also runs).
+- [x] 16.4 Bare-metal adapter `domains/bare_metal/provisioning/adapter/.../inventory_views.py`
       `BareMetalPublicationViews.resource_views`: delivery terms through the pool's
       `carry_delivery_terms`; the view built through `TrustedBareMetalResource` with the
       pool's label; the no-host rule a problem for a backed pool only; a missing or invalid
@@ -3086,20 +3109,91 @@ bare-metal provisioning adapters, `kit/site`, and `kit/site-client`.
       private-looking key a problem rather than a raise. Its `pyproject.toml` declares
       `arkhai-kit-resource-pools-contracts`. Tests in its `tests/test_inventory_views.py`
       (unit): unbacked with and without a host; each problem; nothing raises (D3, D4, D5).
-- [ ] 16.5 `kit/site/src/market_site/projections.py` `resource_pool_projection` copies
+      Done. The builder holds no branch on backing: it passes the four terms through the
+      delegate, builds the view, and validates it through the carrier under the pool's
+      label, turning a validation error into the view's problems (each pydantic error
+      as `loc: message`). The view is serialized without absent fields, so a backed
+      view's bytes are unchanged and an unbacked one names no term. **Differed:** the
+      adapter's source imports nothing from the contracts (it reads the delegate off the
+      context), so the contracts are declared in its dev group, for the tests that build
+      contexts. Unit (50 passed): the backed view unchanged and valid through the
+      contract fixture; an unbacked view, host or no host, carrying no term and valid
+      under the unbacked backing; an unbacked view needing no physical host or access
+      methods; eight backed problems (no host, no or empty access methods, no physical
+      host, no or invalid allocation mode, a private capability, a private capacity key)
+      each named in the problem; a private capability a problem in an unbacked pool too.
+- [x] 16.5 `kit/site/src/market_site/projections.py` `resource_pool_projection` copies
       `publication_view_problems` when present, uninterpreted, as it copies
       `publication_views`; `kit/site-client/.../fixtures/resource_pools.py`
       `build_projected_resource` and `validate_resource_pool_projection` carry and check it.
       Tests in `kit/site/tests/unit/test_projections.py` and
       `kit/site-client/tests/unit/test_resource_pool_fixture.py` (unit) (D4).
-- [ ] 16.6 Versions: `arkhai-compute-provisioning`, the two adapters, the provisioning
+      Done. The fixture checks only the field's form (a non-empty mapping of view to
+      non-empty problem text); what a problem says is the view's domain's. Unit: kit/site
+      283, site-client 61 passed.
+- [x] 16.6 Versions: `arkhai-compute-provisioning`, the two adapters, the provisioning
       service, `arkhai-kit-site`, `arkhai-kit-site-client`; `make lock`.
-- [ ] 16.7 **Verify.** `make test-compute-provisioning`, `make test-provisioning` (with the
+      `arkhai-compute-provisioning` (0.20.0) and the service (0.18.0) are already minor
+      bumps against `origin/dev`, so neither moves. The VM adapter 0.13.1 → 0.14.0 and the
+      bare-metal adapter 0.9.2 → 0.10.0 (incompatible protocol); `arkhai-kit-site` 0.10.2
+      → 0.11.0 (a new field carried, larger than the branch's patch bump);
+      `arkhai-kit-site-client` 0.11.0 → 0.12.0. Floors: both adapters on
+      `compute_provisioning` 0.20.0, the bare-metal adapter on `arkhai-bare-metal` 0.13.0,
+      the service on `arkhai-kit-site` 0.11.0 and (extra and dev) on the adapters' new
+      versions, and (dev) on `arkhai-kit-site-client` 0.12.0, whose validator checks
+      the new field; `compute_provisioning` declares the contracts at 0.3.0, and
+      `docs/development/RELEASING.md`'s row for it names the new internal dependency, as
+      its release-tooling test requires. No exact pin names these packages.
+- [x] 16.7 **Verify.** `make test-compute-provisioning`, `make test-provisioning` (with the
       mock profile), `make -C domains test-provisioning-adapter`, `make -C kit test-site
       test-site-client`; `make check-architecture` (the new
       `compute_provisioning` → contracts edge is permitted); `make test`; `make
       check-packaging`. End-to-end: every bare-metal-lane scenario reads views through the
       changed resource pass.
+      Done. `compute_provisioning` 237 (unit); the service 673 unit and 489 application
+      integration; the VM adapter 29 and bare-metal adapter 50 (unit); kit/site 283 and
+      site-client 61 (unit). `make test`: its first run failed only on the VM storefront's
+      `test_introduction_origins`, a 503 `listing_source_unverifiable` after a slow
+      registry publication, which passed on the rerun; the rerun of every target from the
+      VM storefront on passed — VM storefront 1110 unit and 460 integration, bare metal
+      164 domain, 454 storefront, 11 buyer, compute 5, VM domain 53, VM buyer 207 and 41,
+      API credits 73, 239, 30, 1 and 8, e2e unit 1081 — after one more rerun: Section 17's
+      in-progress kit additions to `market_capacity_publication` (additive, unused) were in
+      the tree, but its change to the core status model had to be reverted and the wheels
+      rebuilt first (handoff below). `make check-packaging` passes, its architecture rules
+      included. `make check-change` reports only Section 22's
+      `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, a file that section
+      creates. End-to-end: unrun in this session; the bare-metal lane is the evidence once
+      the round is validated.
+
+Section 16 notes (handoff):
+
+- **Fresh-context check:** no layering, comment, or test-level breach. Fixed from it: the
+  release guide's dependency row for `arkhai-compute-provisioning`, which its release
+  tooling test compares with the manifest (a passing `check-packaging` does not catch
+  it); the frozen projection test pinning pydantic's and the contracts' wording of a
+  problem; the service's dev floor on the site client; a projection returning a view and
+  a problem for one view, now refused; the delta scenario promising a `region` the view
+  does not carry (region is a neutral attribute); a docstring's wrap. Recorded in
+  `design.md` decision 4: the pool-metadata pass does not use the context function, and
+  an unresolvable stored row gives its members no views or problems.
+- **For triage:** the resource-pool projection's new `publication_view_problems` field is
+  specified only in the `physical-provisioning` delta, while `site-capacity`'s spec owns
+  the projection and states the `publication_views` convention; closeout could promote
+  the field there too, or the change could add a `site-capacity` delta.
+- **Interim behaviour from Section 15 is closed:** the site's view builder now carries
+  delivery terms through the delegate and reports problems, so an unbacked pool's
+  opted-in declaration projects a term-less view and a backed declaration with no
+  access methods projects a problem rather than an empty list.
+- **Section 19 owes** the storefront's `publication_view_unbuildable` report of a
+  resource carrying `publication_view_problems` (Section 15's note).
+- **Session:** run each section's suite with no other section's edit in the tree.
+  Section 15's ran while this section's edits were being made, which is how a shared
+  test file broke it; this section's first rerun failed in the VM storefront's system
+  status because Section 17's change to the core status model was in the tree when
+  `make lock` built the core storefront wheel. A rebuilt wheel keeps its version, so
+  `reinit` installs whatever `.dist` holds: after reverting an edit to a wheel's
+  source, run `make lock` (or `make dist`) again before trusting a suite.
 
 ## 17. One site-derivation log for both compute storefronts
 

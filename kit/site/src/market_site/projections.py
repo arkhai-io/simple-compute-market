@@ -118,6 +118,13 @@ def resource_pool_projection(
             projected["publication_views"] = dict(
                 resource.get("publication_views") or {},
             )
+        # Why a contributed view could not be built, keyed by view identifier.
+        # Carried as the views are, uninterpreted: the domain that reads the
+        # view reads its problems.
+        if resource.get("publication_view_problems") is not None:
+            projected["publication_view_problems"] = dict(
+                resource.get("publication_view_problems") or {},
+            )
         pools.setdefault(pool_id, []).append(projected)
     result: list[dict[str, Any]] = []
     for pool_id in sorted(pools):

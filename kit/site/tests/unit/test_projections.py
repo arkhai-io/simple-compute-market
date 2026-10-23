@@ -86,6 +86,23 @@ def test_resource_pool_projection_preserves_allowlisted_publication_views():
     }
 
 
+def test_resource_pool_projection_carries_view_problems_uninterpreted():
+    """Copied as given, whatever a view's problems say, and absent when the
+    resource reports none."""
+    resources = _resources()
+    resources[0]["publication_view_problems"] = {
+        "bare_metal.v2": ["declaration names no host", "anything at all"],
+    }
+
+    rows = resource_pool_projection(resources)
+
+    first, second = rows[0]["resources"]
+    assert first["publication_view_problems"] == {
+        "bare_metal.v2": ["declaration names no host", "anything at all"],
+    }
+    assert "publication_view_problems" not in second
+
+
 def test_resource_pool_digest_changes_with_publication_availability():
     resources = _resources()
     resources[0]["publication_views"] = {

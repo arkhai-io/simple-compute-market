@@ -122,6 +122,16 @@ nothing above the compute family learns of it:
   site-client resource-pool fixture both sides of the boundary test against carries it.
   `kit/resource-pools` and core do not change.
 
+Settled in implementation (Section 16): the row-to-context function serves the resource
+pass alone. `load_capacity_pool_metadata` projects a pool's raw tags, which readers
+resolve through the same shared resolver, and calls each pool view with the row's ID and
+provider; routing it through the context would resolve declarations the pool pass never
+reads, and a pool whose declarations do not resolve would lose its metadata. Both passes
+read the provider from the one column, so they cannot drift on it. A stored row whose
+declarations do not resolve — which no write path produces, since startup refuses it —
+gives its members no context, so they project with no views and no problems, as a
+member whose pool has no row does, and the service logs a warning.
+
 `kit/site` still calls the pool directory and the resource inventory separately, and the
 two reads need not agree by construction: a pool's `capacity_backing` and provider are
 fixed at creation and a pool is never hard-deleted, so no pool can change backing between
