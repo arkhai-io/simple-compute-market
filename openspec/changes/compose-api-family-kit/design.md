@@ -188,10 +188,15 @@ cannot be the site kit's contract objects. `authority` provides the adapter from
 those declarations to `SiteRouteContract` objects, and each domain's service
 root invokes it where it installs the site kit's `SiteAuthMiddleware`, so
 resource extraction, role admission, and exact-retry semantics stay where they
-are, fed by the same declarations. `client` holds the typed sync
-and async client over any transport exposing `authenticated_request`, looking
-each route up by operation name, so request authentication and the client
-cannot disagree. The service's own duplicate models and digest helpers are
+are, fed by the same declarations. `client` holds the typed sync and async
+clients. Each derives a request's method, path, operation, and signed
+resource from the shared route declarations, so request authentication and
+the client cannot disagree; signs its requests and verifies the authority's
+signed responses itself; and owns its httpx transport's lifecycle. Neither
+depends on the site client's `authenticated_request` abstraction: the
+client stays a thin standalone package over `contracts`, the identity kit,
+and httpx, and coupling it to the site client would add a dependency with
+no architectural gain. The service's own duplicate models and digest helpers are
 deleted; it imports the vocabulary's functions, so client and server recompute
 the same bytes from one implementation.
 

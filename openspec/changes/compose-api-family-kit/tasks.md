@@ -562,11 +562,13 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
       contracts, the `RELEASING.md` row; locked with `uv lock --find-links`,
       then `scripts/uv_project.py lock` and `reinit`, under uv 0.11.17;
       `arkhai-api` is in its dev group, since only the tests build requests
-      from the vocabulary. D4 describes the client as "over any transport
-      exposing `authenticated_request`", the resource-pools client's shape;
-      this task's text fixed the shape built — the storefront client moved,
-      owning its httpx transport, envelope, and response verification — so
-      the design sentence is stale against the plan, for triage to settle.
+      from the vocabulary. D4 once described the client as "over any
+      transport exposing `authenticated_request`", the resource-pools
+      client's shape; the owner's review of this section amended D4 to the
+      shape built and this task's text fixed: sync and async clients that
+      own their httpx transport lifecycle, derive method, path, operation,
+      and signed resource from the shared declarations, sign and verify
+      themselves, and do not depend on the site client's abstraction.
 
 - [x] 3.2 The storefront composes the family client: `credits_service_client.py`
       constructs `arkhai_api_client`'s client once at the composition boundary;
@@ -744,11 +746,10 @@ the new project, `arkhai_apicredits/settlement/credits_client.py`,
       signature it lost before this change. Client 25 passed; contracts 16;
       service 79, storefront 197, domain 32, buyer 27 unchanged; the six
       locks recording contracts relocked; `make check-packaging` and
-      comment hygiene pass on the copy. For the owner: PR checks do not run
+      comment hygiene pass on the copy. The owner confirmed the D4
+      amendment recorded under 3.1. For the owner: PR checks do not run
       against a feature-branch base, so the lanes' evidence comes from
-      validation's pipeline run; and D4's "over any transport exposing
-      `authenticated_request`" differs from the shape 3.1's text fixed,
-      which triage settles by amending D4 or re-reviewing the shape.
+      validation's pipeline run.
 
 ## 4. The authority kit and the API-credits service root
 
