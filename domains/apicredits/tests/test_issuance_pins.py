@@ -8,20 +8,18 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from market_core import SettlementEvidence
 from market_identity import Ed25519Signer, Identity
 
+from arkhai_api.evidence import (
+    IssuanceEvidenceBodyV1,
+    canonical_signed_issuance_evidence,
+    encode_portable_fulfillment_ref,
+    issuance_evidence_digest,
+    sign_issuance_evidence,
+)
 from arkhai_api.issuance import IssuanceRequest, KeyDisposition, fulfillment_id, issuance_request
 
 from arkhai_apicredits.label import API_CREDITS_LABEL
-from arkhai_apicredits.settlement.fulfillment import prepare_credit_issuance_request
-from arkhai_apicredits.settlement.issuance_evidence import (
-    ApiCreditsIssuanceEvidenceBodyV1,
-    canonical_signed_issuance_evidence,
-    encode_portable_issuance_fulfillment_ref,
-    issuance_evidence_digest,
-    sign_api_credits_issuance_evidence,
-)
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "pins" / "issuance_pins.json"
 
@@ -125,34 +123,9 @@ def _issuance_request(case: dict[str, Any]) -> IssuanceRequest:
     )
 
 
-def _settlement_evidence(case: dict[str, Any]) -> SettlementEvidence:
-    key = case["key"]
-    return SettlementEvidence(
-        negotiation_id=case["negotiation_id"],
-        mechanism="alkahest.v1",
-        settlement_ref=case["obligation_ref"],
-        status="verified",
-        evidence={
-            "kind": "api_credits.settlement-evidence.v1",
-            "schema_version": 1,
-            "agreement_digest": "a" * 64,
-            "source": {"obligation_ref": case["obligation_ref"]},
-            "delivery": {
-                "owner": case["owner"].model_dump(mode="json"),
-                "listing_resource": {
-                    "service_name": case["service"],
-                    "resource_id": case["resource_id"],
-                },
-                "quantity": case["quantity"],
-                "key_mode": key["mode"],
-                "key_id": key.get("key_id"),
-            },
-        },
-    )
-
-
 def _signed_evidence(case: dict[str, Any], request: IssuanceRequest):
-    body = ApiCreditsIssuanceEvidenceBodyV1(
+    body = IssuanceEvidenceBodyV1(
+        domain=API_CREDITS_LABEL.name,
         condition_anchor=case["condition_anchor"],
         obligation_ref=case["obligation_ref"],
         fulfillment_id=request.fulfillment_id,
@@ -169,7 +142,7 @@ def _signed_evidence(case: dict[str, Any], request: IssuanceRequest):
         committed_at_unix=case["committed_at_unix"],
         request_digest=request.request_digest,
     )
-    return sign_api_credits_issuance_evidence(body, ISSUER)
+    return sign_issuance_evidence(API_CREDITS_LABEL, body, ISSUER)
 
 
 def _inputs(case: dict[str, Any]) -> dict[str, Any]:
@@ -185,13 +158,14 @@ def _inputs(case: dict[str, Any]) -> dict[str, Any]:
 def compute_pins(case: dict[str, Any]) -> dict[str, Any]:
     request = _issuance_request(case)
     evidence = _signed_evidence(case, request)
-    evidence_digest = issuance_evidence_digest(evidence)
+    evidence_digest = issuance_evidence_digest(API_CREDITS_LABEL, evidence)
     return {
         "fulfillment_id": request.fulfillment_id,
         "request_digest": request.request_digest,
         "evidence_digest": evidence_digest,
         "signed_evidence": canonical_signed_issuance_evidence(evidence),
-        "portable_fulfillment_ref": encode_portable_issuance_fulfillment_ref(
+        "portable_fulfillment_ref": encode_portable_fulfillment_ref(
+            API_CREDITS_LABEL,
             resolver_id=RESOLVER_ID,
             attestation_uid=case["attestation_uid"],
             evidence_digest=evidence_digest,
@@ -240,14 +214,6 @@ def test_the_fulfillment_identity_is_derived_from_the_negotiation_alone() -> Non
     for case in CASES:
         pins = compute_pins(case)
         assert pins["fulfillment_id"] == fulfillment_id(API_CREDITS_LABEL, case["negotiation_id"])
-
-
-def test_the_storefronts_evidence_path_authorizes_the_pinned_request() -> None:
-    recorded = {c["name"]: c["expected"] for c in load_fixture()["cases"]}
-    for case in CASES:
-        prepared = prepare_credit_issuance_request(evidence=_settlement_evidence(case))
-        assert prepared.fulfillment_id == recorded[case["name"]]["fulfillment_id"]
-        assert prepared.request_digest == recorded[case["name"]]["request_digest"]
 
 
 def main(argv: list[str]) -> int:

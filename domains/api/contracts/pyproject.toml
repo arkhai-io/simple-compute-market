@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-api-contracts"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
-description = "The api family authority's wire models and route declarations, without the authority."
+description = "The api family's wire models and negotiation carriers and its authority's route declarations, without the authority."
 requires-python = ">=3.12,<3.14"
 # Models and plain-data declarations only, so a client signs a request and a
 # service root assembles its authentication table without the authority kit.
 dependencies = [
     "arkhai-api>=0.1.0",
+    "arkhai-core>=0.4.0",
     "arkhai-kit-identity>=0.4.0",
     "pydantic>=2",
 ]
@@ -38,4 +39,4 @@ dev = [
 # beyond the standard library, because its lightness is part of its contract.
 # make check-architecture holds it; see docs/development/ARCHITECTURE.md, "Kind".
 [tool.arkhai.architecture]
-allowed-dependencies = ["arkhai-api", "arkhai-kit-identity", "pydantic"]
+allowed-dependencies = ["arkhai-api", "arkhai-core", "arkhai-kit-identity", "pydantic"]

@@ -1,15 +1,26 @@
 """Storefront dependency container.
 
-``resolved_*`` module-level variables are populated once during the
-FastAPI lifespan in ``server.py``. Controllers retrieve services via
-``Depends(lambda: _c.resolved_X)`` — the same pattern as the VM
-storefront and the services.
+``SELLING_CONTRIBUTIONS`` is the API-credits bundle the selling library
+composes, fixed for the process. ``resolved_*`` module-level variables are
+populated once during the FastAPI lifespan in ``server.py``. Controllers
+retrieve services via ``Depends(lambda: _c.resolved_X)`` — the same pattern as
+the VM storefront and the services.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from arkhai_api_selling.contributions import (
+    ConsumptionRule,
+    IssuanceSubject,
+    QuotaSource,
+    SellingContributions,
+)
+from arkhai_api_selling.evidence_store import IssuanceEvidenceService, PrivateResultRepository
+from arkhai_apicredits.label import API_CREDITS_LABEL
+from arkhai_apicredits.schema import API_CREDITS_SCHEMA_KIND, ApiCreditsListing
 from market_storefront_kit import TradingPause
 
 if TYPE_CHECKING:
@@ -23,10 +34,6 @@ if TYPE_CHECKING:
         SettlementServicingWorker,
         SettlementSQLiteRepository,
     )
-    from apicredits_storefront.services.issuance_evidence import (
-        ApiCreditPrivateResultRepository,
-        ApiCreditsIssuanceEvidenceService,
-    )
     from apicredits_storefront.settlement_composition import (
         ApiCreditsSettlementComposition,
     )
@@ -37,6 +44,42 @@ if TYPE_CHECKING:
     from apicredits_storefront.services.system_service import SystemService
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
+
+def _issuance_subject(listing_resource: Mapping[str, Any]) -> IssuanceSubject:
+    """A listing sells its named service, against the quota resource it was created over."""
+    resource_id = listing_resource.get("resource_id")
+    return IssuanceSubject(
+        service=str(listing_resource.get("service_name") or ""),
+        resource_id=str(resource_id) if resource_id else None,
+        endpoint=listing_resource.get("base_url"),
+    )
+
+
+def _listing_resource(request: Mapping[str, Any], source: QuotaSource) -> dict[str, Any]:
+    """An operator's named-service listing over its quota resource."""
+    return {
+        "service_name": request["service_name"],
+        "description": request.get("description"),
+        "openapi_url": request.get("openapi_url"),
+        "base_url": request.get("base_url"),
+        "resource_id": source.resource_id,
+        "capacity_site_id": source.site_id,
+        "offering_mode": source.offering_mode,
+    }
+
+
+SELLING_CONTRIBUTIONS = SellingContributions(
+    label=API_CREDITS_LABEL,
+    kind=API_CREDITS_SCHEMA_KIND,
+    offering_mode="api_credits",
+    contribution_id="apicredits",
+    table_prefix="api_credit",
+    listing_schema=ApiCreditsListing,
+    publication_mapping=_listing_resource,
+    issuance_projection=_issuance_subject,
+    consumption_rule=ConsumptionRule.FIXED_PER_REQUEST,
+)
+
 resolved_market_domain: "MarketDomainContract | None" = None
 resolved_sqlite_client: "SQLiteClient | None" = None
 resolved_settlement_repository: "SettlementSQLiteRepository | None" = None
@@ -45,8 +88,8 @@ resolved_settlement_worker: "SettlementServicingWorker | None" = None
 resolved_settlement_coordinator: "SettlementJobCoordinator | None" = None
 resolved_failure_policy: "FailurePolicy | None" = None
 resolved_settlement_composition: "ApiCreditsSettlementComposition | None" = None
-resolved_issuance_evidence_service: "ApiCreditsIssuanceEvidenceService | None" = None
-resolved_private_result_repository: "ApiCreditPrivateResultRepository | None" = None
+resolved_issuance_evidence_service: "IssuanceEvidenceService | None" = None
+resolved_private_result_repository: "PrivateResultRepository | None" = None
 resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None

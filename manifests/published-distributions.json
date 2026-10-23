@@ -12,6 +12,11 @@
       "dist": "arkhai-api"
     },
     {
+      "key": "core",
+      "path": "core",
+      "dist": "arkhai-core"
+    },
+    {
       "key": "api-contracts",
       "path": "domains/api/contracts",
       "dist": "arkhai-api-contracts"
@@ -20,11 +25,6 @@
       "key": "api-client",
       "path": "domains/api/client",
       "dist": "arkhai-api-client"
-    },
-    {
-      "key": "core",
-      "path": "core",
-      "dist": "arkhai-core"
     },
     {
       "key": "kit-settlement-runtime",
@@ -125,6 +125,11 @@
       "key": "kit-capacity-publication",
       "path": "kit/capacity-publication",
       "dist": "arkhai-kit-capacity-publication"
+    },
+    {
+      "key": "api-selling",
+      "path": "domains/api/selling",
+      "dist": "arkhai-api-selling"
     },
     {
       "key": "kit-contact-exchange",

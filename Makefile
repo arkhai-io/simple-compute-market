@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-api test-api-client test-api-authority test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-api dist-api-contracts dist-api-client dist-api-authority dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-api test-api-client test-api-authority test-api-selling test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
@@ -155,6 +155,9 @@ dist-api-client: dist-identity ## Build arkhai-api-client wheel into .dist/ (dom
 dist-api-authority: dist-identity dist-ci-kits ## Build arkhai-api-authority wheel into .dist/ (domains/Makefile builds the vocabulary and contracts first)
 	cd domains && $(MAKE) dist-api-authority DIST_DIR=$(DIST_DIR)
 
+dist-api-selling: dist-identity dist-core dist-arkhai-core-storefront dist-ci-kits dist-policy ## Build arkhai-api-selling wheel into .dist/ (domains/Makefile builds the vocabulary, contracts, and client first)
+	cd domains && $(MAKE) dist-api-selling DIST_DIR=$(DIST_DIR)
+
 dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/
 	cd domains && $(MAKE) dist-apicredits-domain DIST_DIR=$(DIST_DIR)
 
@@ -260,6 +263,9 @@ test-api-client:
 
 test-api-authority:
 	$(MAKE) -C domains test-api-authority
+
+test-api-selling:
+	$(MAKE) -C domains test-api-selling
 
 test-vms-domain:
 	$(MAKE) -C domains test-vms-domain

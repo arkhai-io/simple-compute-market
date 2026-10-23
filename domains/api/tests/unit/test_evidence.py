@@ -124,8 +124,16 @@ def test_a_wrong_signer_is_refused_and_a_tampered_body_fails_verification():
     ("overrides", "message"),
     [
         ({"funding_expiration_unix": 1_999_999_999}, "after funding expiry"),
-        ({"quantity": 8}, "quantity does not match"),
         ({"issuer": CLAIMANT}, "issuer is not trusted"),
+        ({"condition_anchor": "condition:other"}, "condition_anchor does not match"),
+        ({"obligation_ref": "obligation:other"}, "obligation_ref does not match"),
+        ({"service": "other-service"}, "service does not match"),
+        ({"resource_id": "other-quota"}, "resource_id does not match"),
+        ({"quantity": 8}, "quantity does not match"),
+        ({"key_id": "ak_other"}, "key_id does not match"),
+        ({"key_mode": "existing"}, "key_mode does not match"),
+        ({"claimant": Ed25519Signer(bytes(range(4, 36))).identity}, "claimant does not match"),
+        ({"request_digest": "sha256:" + "d" * 64}, "request_digest does not match"),
     ],
 )
 def test_verification_compares_every_accepted_fact(overrides, message):

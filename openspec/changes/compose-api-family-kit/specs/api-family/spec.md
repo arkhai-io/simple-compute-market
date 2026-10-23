@@ -132,12 +132,16 @@ obtain a contribution.
 ### Requirement: The issuance projection reads the accepted listing
 
 The selling bundle's issuance projection MUST map the listing as accepted and
-pinned to the negotiation thread, together with the accepted terms, to the
-authority's issuance command — one named service identity, one quota resource,
-the quantity, and the key target — and MUST NOT read a listing republished
-since acceptance. For a quota-backed domain the selling library MUST refuse,
-before publication and again before acceptance, a listing that names no quota
-resource. The selling library MUST read no domain field name of its own.
+pinned to the negotiation thread to the authority's issuance command's named
+service identity and quota resource, and the selling library MUST combine them
+with the accepted terms' quantity and key target into that command; neither
+MUST read a listing republished since acceptance. A storefront composing the
+selling library MUST write a listing's resource only when it creates the
+listing, so that republishing creates another listing. For a quota-backed
+domain the selling library MUST refuse, before publication and again before
+acceptance, a listing that names no quota resource, and before acceptance a
+listing whose quota resource differs from the one its durable binding records.
+The selling library MUST read no domain field name of its own.
 
 #### Scenario: A listing is republished after acceptance
 
@@ -152,6 +156,13 @@ resource. The selling library MUST read no domain field name of its own.
   resource under a quota-backed profile
 - **THEN** publication is refused naming the listing, and an acceptance against
   such a listing is refused before any issuance
+
+#### Scenario: A listing's quota resource no longer matches its binding
+
+- **WHEN** a listing's stored resource names a quota resource other than the
+  one its durable binding recorded at creation
+- **THEN** the source check before every seller decision and acceptance
+  refuses the listing as a declared mismatch
 
 ### Requirement: Each domain composes the authority kit in its own service root
 

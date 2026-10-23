@@ -14,15 +14,12 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding, quota_pool
 from core_storefront.stage_log import stage_event
 from market_identity import Identity
 
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.listing_binding import (
-    QuotaPool,
-    prepare_api_credit_listing_binding,
-    quota_pool,
-)
 from apicredits_storefront.services import capacity_client
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.utils.config import (
@@ -154,7 +151,9 @@ class ListingService:
                 f"(available={available})."
             )
         projection = await capacity.site_client(capacity_site_id).resource_pool_projection()
-        pool = quota_pool(projection["resource_pools"], resource_id=resource_id)
+        pool = quota_pool(
+            SELLING_CONTRIBUTIONS, projection["resource_pools"], resource_id=resource_id
+        )
         accepted_escrows, settlement_options = _admissible_settlement_terms(
             pool, accepted_escrows=accepted_escrows, settlement_options=settlement_options
         )
@@ -179,10 +178,11 @@ class ListingService:
         listing_id = str(uuid.uuid4())
         now_iso = datetime.now().isoformat()
         await self._db.upsert_listing_with_binding(
-            binding=prepare_api_credit_listing_binding(
+            binding=prepare_listing_binding(
+                SELLING_CONTRIBUTIONS,
                 listing_id=listing_id,
                 site_id=capacity_site_id,
-                resource_id=resource_id,
+                listing_resource=listing.listing_resource.model_dump(mode="json"),
                 pool=pool,
                 domain=get_market_domain_contract(),
             ),

@@ -25,10 +25,11 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-api" },
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
@@ -41,12 +42,24 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "arkhai-api", specifier = ">=0.1.0" },
+    { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
     { name = "pydantic", specifier = ">=2" },
 ]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
+
+[[package]]
+name = "arkhai-core"
+version = "0.4.1"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
+]
 
 [[package]]
 name = "arkhai-kit-identity"

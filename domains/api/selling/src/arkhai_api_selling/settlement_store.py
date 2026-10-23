@@ -1,4 +1,4 @@
-"""Negotiation-bound source evidence and independent issuance checkpoints.
+"""Negotiation-bound source evidence and independent issuance checkpoints, in the domain's own tables.
 
 Evidence status moves ``verified -> refunding -> refunded``; an abandoned
 refund intent restores ``verified`` from ``refunding`` only. The evidence
@@ -15,19 +15,24 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from arkhai_apicredits.settlement.fulfillment import credit_delivery
 from market_core import SettlementEvidence
+
+from arkhai_api_selling.contributions import SellingContributions
+from arkhai_api_selling.issuance import delivery
 
 #: Statuses whose verified facts are fixed; only the refund transitions move between them.
 _SETTLED = frozenset({"verified", "refunding", "refunded"})
 
 
 class SettlementRepository:
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, contributions: SellingContributions) -> None:
         self.db_path = db_path
+        self._contributions = contributions
+        self._evidence = contributions.table("settlement_evidence")
+        self._progress = contributions.table("issuance_progress")
 
     def store(self, evidence: SettlementEvidence) -> SettlementEvidence:
-        credit_delivery(evidence, require_verified=False)
+        delivery(self._contributions, evidence, require_verified=False)
         payload = dict(evidence.evidence)
         digest = payload["agreement_digest"]
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -35,7 +40,7 @@ class SettlementRepository:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
                 "SELECT mechanism, agreement_digest, settlement_ref, evidence, status "
-                "FROM api_credit_settlement_evidence WHERE negotiation_id = ?",
+                f"FROM {self._evidence} WHERE negotiation_id = ?",
                 (evidence.negotiation_id,),
             ).fetchone()
             if old:
@@ -52,10 +57,8 @@ class SettlementRepository:
                     raise ValueError("refund status changes only through refund transitions")
             elif evidence.status in _SETTLED - {"verified"}:
                 raise ValueError("refund status changes only through refund transitions")
-                if old_payload["delivery"] != payload["delivery"]:
-                    raise ValueError("settlement evidence changed accepted delivery inputs")
             conn.execute(
-                "INSERT INTO api_credit_settlement_evidence "
+                f"INSERT INTO {self._evidence} "
                 "(negotiation_id, mechanism, agreement_digest, settlement_ref, status, evidence) "
                 "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(negotiation_id) DO UPDATE SET "
                 "settlement_ref=excluded.settlement_ref, status=excluded.status, evidence=excluded.evidence",
@@ -68,13 +71,13 @@ class SettlementRepository:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             row = conn.execute(
                 "SELECT mechanism, settlement_ref, status, evidence, agreement_digest "
-                "FROM api_credit_settlement_evidence WHERE negotiation_id = ?",
+                f"FROM {self._evidence} WHERE negotiation_id = ?",
                 (negotiation_id,),
             ).fetchone()
         if row is None:
             return None
         evidence = SettlementEvidence(negotiation_id, row[0], row[1], row[2], json.loads(row[3]))
-        credit_delivery(evidence, require_verified=False)
+        delivery(self._contributions, evidence, require_verified=False)
         if evidence.evidence["agreement_digest"] != row[4]:
             raise ValueError("settlement evidence no longer matches its Agreement binding")
         return evidence
@@ -83,7 +86,7 @@ class SettlementRepository:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT * FROM api_credit_issuance_progress "
+                f"SELECT * FROM {self._progress} "
                 "WHERE negotiation_id = ? OR public_ref = ?", (reference, reference),
             ).fetchone()
         if row is None:
@@ -104,13 +107,13 @@ class SettlementRepository:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute("BEGIN IMMEDIATE")
             old = conn.execute(
-                "SELECT public_ref, fulfillment_uid FROM api_credit_issuance_progress WHERE negotiation_id = ?",
+                f"SELECT public_ref, fulfillment_uid FROM {self._progress} WHERE negotiation_id = ?",
                 (negotiation_id,),
             ).fetchone()
             if old and (old[0] != public_ref or (old[1] and fulfillment_uid and old[1] != fulfillment_uid)):
                 raise ValueError("issuance progress changed established identity")
             conn.execute(
-                "INSERT INTO api_credit_issuance_progress "
+                f"INSERT INTO {self._progress} "
                 "(negotiation_id, public_ref, status, fulfillment_uid, public_result, credentials_ref, reason, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(negotiation_id) DO UPDATE SET "
                 "status=excluded.status, fulfillment_uid=COALESCE(excluded.fulfillment_uid, fulfillment_uid), "
@@ -132,8 +135,8 @@ class SettlementRepository:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT ev.status, p.delivery_started_at, p.status "
-                "FROM api_credit_settlement_evidence ev "
-                "LEFT JOIN api_credit_issuance_progress p ON p.negotiation_id = ev.negotiation_id "
+                f"FROM {self._evidence} ev "
+                f"LEFT JOIN {self._progress} p ON p.negotiation_id = ev.negotiation_id "
                 "WHERE ev.negotiation_id = ?",
                 (negotiation_id,),
             ).fetchone()
@@ -141,7 +144,7 @@ class SettlementRepository:
                 raise ValueError("refund requires verified settlement evidence")
             if row[0] == "verified":
                 conn.execute(
-                    "UPDATE api_credit_settlement_evidence SET status = 'refunding' "
+                    f"UPDATE {self._evidence} SET status = 'refunding' "
                     "WHERE negotiation_id = ? AND status = 'verified'",
                     (negotiation_id,),
                 )
@@ -153,7 +156,7 @@ class SettlementRepository:
             return
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute(
-                "UPDATE api_credit_settlement_evidence SET status = 'verified' "
+                f"UPDATE {self._evidence} SET status = 'verified' "
                 "WHERE negotiation_id = ? AND status = 'refunding'",
                 (negotiation_id,),
             )
@@ -161,7 +164,7 @@ class SettlementRepository:
     def complete_refund(self, negotiation_id: str) -> None:
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.execute(
-                "UPDATE api_credit_settlement_evidence SET status = 'refunded' "
+                f"UPDATE {self._evidence} SET status = 'refunded' "
                 "WHERE negotiation_id = ? AND status = 'refunding'",
                 (negotiation_id,),
             )
@@ -177,10 +180,10 @@ class SettlementRepository:
         now = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             cursor = conn.execute(
-                "UPDATE api_credit_issuance_progress "
+                f"UPDATE {self._progress} "
                 "SET delivery_started_at = COALESCE(delivery_started_at, ?), updated_at = ? "
                 "WHERE negotiation_id = ? AND EXISTS ("
-                "SELECT 1 FROM api_credit_settlement_evidence ev "
+                f"SELECT 1 FROM {self._evidence} ev "
                 "WHERE ev.negotiation_id = ? AND ev.status = 'verified')",
                 (now, now, negotiation_id, negotiation_id),
             )
@@ -196,11 +199,11 @@ class SettlementRepository:
         """
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT t.negotiation_id
                 FROM negotiation_threads t
-                LEFT JOIN api_credit_settlement_evidence ev ON ev.negotiation_id = t.negotiation_id
-                LEFT JOIN api_credit_issuance_progress p ON p.negotiation_id = t.negotiation_id
+                LEFT JOIN {self._evidence} ev ON ev.negotiation_id = t.negotiation_id
+                LEFT JOIN {self._progress} p ON p.negotiation_id = t.negotiation_id
                 WHERE t.terminal_state = 'success'
                   AND t.agreement_bytes IS NOT NULL
                   AND CASE WHEN json_valid(CAST(t.agreement_bytes AS TEXT))

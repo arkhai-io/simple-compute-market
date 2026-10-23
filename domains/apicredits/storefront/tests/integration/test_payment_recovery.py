@@ -14,16 +14,16 @@ from market_arkhai_payments import (
 )
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+from arkhai_api_selling.issuance import SettlementRefusal, accepted_agreement, settlement_evidence
 from market_identity import Ed25519Signer
 
-from apicredits_storefront import settlement_stages
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.services.payment_settlement_service import (
     ApiCreditPaymentSettlementService,
 )
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from apicredits_storefront.settlement_stages import SettlementRefusal
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from arkhai_api.issuance import issuance_result_model
@@ -75,6 +75,7 @@ async def payment_context(tmp_path):
     issuance = IssuanceBoundary()
     composition = SimpleNamespace(
         domain=get_market_domain_contract(), credits_client=issuance, arkhai_payments_stage=kit_stage,
+        contributions=SELLING_CONTRIBUTIONS,
     )
     composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
         db=store, composition=composition, stage=kit_stage, mechanism=ARKHAI_PAYMENTS_MECHANISM,
@@ -196,11 +197,12 @@ async def test_refund_status_moves_only_through_ordered_transitions(payment_cont
 async def test_recovery_refuses_a_stored_receipt_with_invalid_signature(payment_context):
     stage, context, payments, issuance = payment_context
     db = context["db"]
-    agreement, raw = settlement_stages.accepted_agreement(context["thread"])
+    agreement, raw = accepted_agreement(context["thread"])
     receipt = payments.receipt.model_dump(mode="json", by_alias=True, exclude_none=True)
     receipt["receipt"]["ledger"] = "tampered"
     data = context["thread"]["settlement_data"]
-    evidence = settlement_stages.settlement_evidence(
+    evidence = settlement_evidence(
+        SELLING_CONTRIBUTIONS,
         agreement, raw, reference=data["transaction_id"], status="verified",
         source={**data, "receipt": receipt},
         order=await db.load_listing(listing_id=agreement.listing_id),

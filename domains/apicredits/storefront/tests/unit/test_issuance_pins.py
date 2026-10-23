@@ -1,4 +1,4 @@
-"""The storefront's evidence producer authorizes the pinned issuance requests."""
+"""The storefront's bundle, through the selling library's evidence producer, authorizes the pinned issuance requests."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from arkhai_api_selling.issuance import prepare_issuance_request, settlement_evidence
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
-from arkhai_apicredits.settlement.fulfillment import prepare_credit_issuance_request
 from market_core.schemas import Agreement
 from market_identity import Identity
 
-from apicredits_storefront.settlement_stages import settlement_evidence
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from tests.integration.credit_negotiation import SELLER_PRINCIPAL, payment_option
 
 PINS = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "pins" / "issuance_pins.json"
@@ -45,6 +45,7 @@ def test_production_evidence_yields_the_pinned_request(case):
         ).model_dump(mode="json"),
     )
     evidence = settlement_evidence(
+        SELLING_CONTRIBUTIONS,
         agreement,
         agreement.model_dump_json(exclude_none=True).encode(),
         reference=inputs["obligation_ref"],
@@ -59,7 +60,7 @@ def test_production_evidence_yields_the_pinned_request(case):
         },
     )
 
-    prepared = prepare_credit_issuance_request(evidence=evidence)
+    prepared = prepare_issuance_request(SELLING_CONTRIBUTIONS, evidence=evidence)
 
     assert prepared.fulfillment_id == expected["fulfillment_id"]
     assert prepared.request_digest == expected["request_digest"]

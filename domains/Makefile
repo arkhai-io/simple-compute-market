@@ -1,17 +1,17 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: dist dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: dist dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-api test-api-client test-api-authority test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-api test-api-client test-api-authority test-api-selling test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+dist: dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
 	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
@@ -59,6 +59,12 @@ dist-api-authority: dist-api-contracts ## Build arkhai-api-authority wheel into 
 	cd api/authority && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_api_authority-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-api-authority produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-selling: dist-api-client ## Build arkhai-api-selling wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/selling && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_selling-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-selling produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -120,7 +126,7 @@ dist-provisioning-adapters: dist-bare-metal dist-provisioning-operator-client ##
 	cd vms/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 	cd bare_metal/provisioning/adapter && uv build --wheel --out-dir $(DIST_DIR)
 
-dist-apicredits-domain: dist-api-client ## Build arkhai-apicredits-domain wheel into .dist/
+dist-apicredits-domain: dist-api-contracts ## Build arkhai-apicredits-domain wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd apicredits && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_domain-*-none-any.whl > /dev/null 2>&1 || \
@@ -132,7 +138,7 @@ dist-apicredits-service: dist-api-authority ## Build arkhai-apicredits-service w
 	@ls $(DIST_DIR)/arkhai_apicredits_service-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-service produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-apicredits-storefront: dist-apicredits-domain ## Build arkhai-apicredits-storefront wheel into .dist/
+dist-apicredits-storefront: dist-apicredits-domain dist-api-selling ## Build arkhai-apicredits-storefront wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd apicredits/storefront && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
@@ -186,17 +192,21 @@ test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapt
 test-compute: ## Compute-family vocabulary package tests
 	cd compute && $(MAKE) test
 
-test-api: ## api-family vocabulary, contracts, client, and authority tests
+test-api: ## api-family vocabulary, contracts, client, authority, and selling tests
 	cd api && $(MAKE) test
 	cd api/contracts && $(MAKE) test
 	cd api/client && $(MAKE) test
 	cd api/authority && $(MAKE) test
+	cd api/selling && $(MAKE) test
 
 test-api-client: ## api-family client tests
 	cd api/client && $(MAKE) test
 
 test-api-authority: ## api-family authority tests
 	cd api/authority && $(MAKE) test
+
+test-api-selling: ## api-family selling tests
+	cd api/selling && $(MAKE) test
 
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test

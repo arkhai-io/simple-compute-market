@@ -982,18 +982,27 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
 ## 5. Selling, part one: issuance, settlement persistence, and the bundle
 
 Delivers `domains/api/selling` (`arkhai_api_selling`) with the storefront's
-issuance orchestration, settlement persistence, evidence services, carriers,
-and `SellingContributions` (D3, D7, D11, D12; `api-family` "A domain
-contributes through one typed bundle per side", "The issuance projection reads
-the accepted listing"). Touches the new project,
+issuance orchestration, settlement persistence, evidence services, and
+`SellingContributions`, and the carriers in `domains/api/contracts` (D3, D7,
+D11, D12; `api-family` "A domain contributes through one typed bundle per
+side", "The issuance projection reads the accepted listing"). Touches the new project,
 `arkhai_apicredits/settlement/fulfillment.py` and `issuance_evidence.py`,
 `arkhai_apicredits/schema.py`, and under `apicredits_storefront/`:
 `settlement_repository.py`, `settlement_models.py`, `settlement_composition.py`,
 `domain_runtime.py`, `services/issuance_evidence.py`,
 `services/fulfillment_service.py`, `listing_binding.py`,
 `listing_source_check.py`, and `arkhai_apicredits/listings/reconciler.py`.
+Amended at implementation: the carriers' move also touches
+`domains/api/contracts`; rewiring the moved modules' callers touches
+`apicredits_storefront/` `container.py`, `server.py`, `negotiation_runtime.py`,
+`settlement_stages.py`, `utils/sqlite_client.py`, `controllers/settle_controller.py`
+and `issuance_evidence_controller.py`, and `services/listing_service.py`,
+`publication_service.py`, and `payment_settlement_service.py`; and the new
+project's wiring touches both Makefiles, `tests.yml`, `publish-pypi.yml`,
+`manifests/published-distributions.json`, `RELEASING.md`, and, for the
+selling library's core-storefront edge, `ARCHITECTURE.toml`.
 
-- [ ] 5.1 `domains/api/selling/` (`arkhai-api-selling` 0.1.0; dependencies
+- [x] 5.1 `domains/api/selling/` (`arkhai-api-selling` 0.1.0; dependencies
       `arkhai-api`, `arkhai-api-contracts`, `arkhai-api-client`, `arkhai-core`,
       `arkhai-core-storefront`, `arkhai-kit-identity`,
       `arkhai-kit-settlement-runtime`, `arkhai-kit-negotiation-runtime`,
@@ -1005,11 +1014,65 @@ the accepted listing"). Touches the new project,
       `IssuanceProjection` callable type, optional publication guards, optional
       acceptance hook, optional public-result extension, and the consumption
       rule, each typed against the package that defines it. (D7.)
-- [ ] 5.2 `carriers.py`: the message, terms, materialization, receipt, and
-      result base classes bound to a kind literal, moved from
-      `arkhai_apicredits/schema.py`; the API-credits schema module becomes
-      bindings of them plus `ApiCreditsListing`. (D3.)
-- [ ] 5.3 `issuance.py`: the delivery orchestration moved from
+      *Done 2026-10-23.* `arkhai-api-selling` 0.1.0 declares what its source
+      imports: `arkhai-api`, `arkhai-api-client`, `arkhai-core`,
+      `arkhai-core-storefront`, `arkhai-kit-capacity-publication`,
+      `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`,
+      `arkhai-kit-policy`, `arkhai-kit-resource-pools`,
+      `arkhai-kit-settlement-runtime`, `httpx` (the failure webhook), and
+      `pydantic`; no mechanism kit. Of this task's list, `arkhai-api-contracts`
+      (reached through the client), `arkhai-kit-site-client`, and
+      `arkhai-kit-storefront` are imported by nothing yet and are left for the
+      sections that import them; `arkhai-kit-resource-pools-contracts` is in
+      the dev group for the tests' backing labels. `contributions.py`:
+      `SellingContributions`, a frozen dataclass of the label, the `kind`
+      literal (`<schema>.v1`), `offering_mode`, `contribution_id`,
+      `table_prefix`, `listing_schema` (a pydantic model carrying
+      `listing_resource`), `publication_mapping`, `issuance_projection`,
+      `consumption_rule`, and the optional `publication_guards`,
+      `acceptance_hook` (typed against `market_negotiation_runtime.Acceptance`),
+      and `public_result_extension`, validated at construction. The
+      settlement-evidence kind, listing-source kind, table names, and
+      credentials-reference prefix are spelled from `kind` and `table_prefix`,
+      which for API credits reproduces `api_credits.settlement-evidence.v1`,
+      `api_credits.quota-listing.v1`, `api_credit_*`, and
+      `api-credit-credential.v1`. The projection maps a `listing_resource` to
+      an `IssuanceSubject` (service, quota resource, endpoint); the library
+      adds the quantity and key from the accepted terms, which are the
+      vocabulary's purchase shape and the same for every domain, so the
+      projection can also be applied at publication, where there are no
+      terms. The consumption rule is the rule's kind, `FIXED_PER_REQUEST`,
+      not an amount: the per-request amount is the gate's setting, the
+      storefront reads none, and adding one would change the configuration
+      baseline (owner told at this section's start). `selling` depends on the
+      core storefront, a composition, for its domain registry; the owner chose
+      an exception row owned by `kit-owned-storefront-auth-and-persistence`
+      beside the four of the same shape, and D2 and D14 say so.
+- [x] 5.2 `domains/api/contracts/src/arkhai_api_contracts/carriers.py`: the
+      message, terms, materialization, receipt, and result base classes bound
+      to a kind literal, moved from `arkhai_apicredits/schema.py`; the
+      API-credits schema module becomes bindings of them plus
+      `ApiCreditsListing`. `contracts`, not `selling`, because the domain's
+      codecs bind them and its buyer installs those codecs (D3, amended at
+      this section's start by the owner's decision). (D3.)
+      *Done.* `carriers.py`: the `Message` (over the vocabulary's
+      `ProvisionTerms`), `Materialization`, `Receipt`, and `Result` bases and
+      cached `message_model`, `terms_model`, `materialization_model(kind,
+      listing_resource)`, `receipt_model`, and `result_model` factories; the
+      materialization takes the domain's listing-resource model, its one
+      domain-typed field. `contracts` declares `arkhai-core` (the message's
+      `SettlementSelection`), allowlisted, and bumps to 0.3.0. `schema.py`
+      binds the five and keeps `ApiCreditsListing`; the five bound classes'
+      field order and JSON schema, title and description aside, were compared
+      with the classes they replace before those were deleted and are
+      identical. Their class names are now `Message` and the like, which
+      changes the JSON-schema title, the repr, and pydantic error headers; no
+      recorded OpenAPI document names them, so nothing on the wire changes,
+      as section 2 accepted for the terms. Unit: `test_carriers.py` (21)
+      validates each of the five carriers under each of two kinds and refuses
+      the same payload under the other kind, refuses three invalid purchases,
+      and carries a domain resource model in the materialization.
+- [x] 5.3 `issuance.py`: the delivery orchestration moved from
       `fulfillment.py`, taking the issuance command from the bundle's
       projection applied to the accepted listing and terms recorded on the
       thread, never the current listing; refusing before publication and before
@@ -1020,13 +1083,78 @@ the accepted listing"). Touches the new project,
       labels parameterized by the bundle's prefix so API credits keeps
       `api_credit_*`. `failure_policy.py` from `fulfillment_service.py`. (D7,
       D12, D13.)
-- [ ] 5.4 `quota_listing.py`: the listing binding, source check, and quota
+      *Done.* `issuance.py`: `issuance_subject` (the projection, refusing a
+      listing that names no service or quota resource with
+      `MissingQuotaResource` naming the listing), `delivery` (the evidence
+      envelope under the bundle's kind), `settlement_evidence`,
+      `prepare_issuance_request`, `connection_payload`, `fulfill`,
+      `fulfill_from_hold` (the hold lookup the storefront's hook made), and the
+      mechanism-neutral helpers the stages and payment service share,
+      `accepted_agreement`, `persist_delivery`, `project_progress`,
+      `progress_result`, `SettleResult`, and `SettlementRefusal`, moved from
+      `settlement_stages.py` because they consume `delivery` and the stores.
+      The compensating rollback is the Alkahest continuation's and stays with
+      the stage for section 8. "The accepted listing and terms recorded on the
+      thread": no storefront table holds a copy of the accepted listing, and
+      adding one would change the schema baseline. The Agreement pins the
+      listing's ID, every settlement path loads the listing by that ID, the
+      storefront writes a listing's resource once at creation, and
+      republishing creates another listing, so evidence is recorded from the
+      listing the buyer accepted; the source check (5.4) also refuses a
+      listing whose stored resource differs from the one its immutable binding
+      pinned (owner told at this section's start). A service identity
+      rewritten in place would not be caught, so the write-once rule is stated
+      in D7 and the `api-family` delta as every composing storefront's
+      obligation; no storefront path rewrites a listing's resource today.
+      The Agreement's `listing_hash` cannot stand in for a recorded copy: it
+      covers the whole stored row, status and timestamps included, which
+      change after acceptance. The selling library decodes a stored
+      `listing_resource` kept as JSON text itself
+      (`stored_listing_resource`) rather than relying on a domain schema that
+      parses it. The refusal before
+      publication is in `quota_listing.prepare_listing_binding`, which the
+      listing service calls before it writes; before acceptance, in the source
+      check the runtime runs before every acceptance. `fulfill`'s
+      `issuance_input_invalid` branch is gone: `delivery` refused the same
+      input first, so it was unreachable. A public-result extension rides in
+      the result and `persist_delivery` merges it beside the connection payload,
+      refusing a key that is private or already public. `evidence_store.py`:
+      `IssuanceEvidenceRepository`, `PrivateResultRepository`, and
+      `IssuanceEvidenceService` over the vocabulary's label-parameterized
+      evidence, their tables from the prefix; `IssuanceEvidenceService.body`
+      builds a body under its label. `settlement_store.py`: `SettlementRepository`,
+      tables from the prefix; a second unreachable branch, after a `raise`,
+      was dropped in the move. `failure_policy.py`: `build_failure_policy` with
+      the release-capacity, emit-event, webhook, and refund actions over
+      injected collaborators (capacity runtime, reopen pass, webhook target,
+      stage table, composition, stage-event log). `arkhai_apicredits/settlement/fulfillment.py`
+      and `issuance_evidence.py` are deleted; `settlement/__init__.py` exports
+      only the payer validator section 8 moves.
+- [x] 5.4 `quota_listing.py`: the listing binding, source check, and quota
       reconciler moved from `listing_binding.py`, `listing_source_check.py`, and
       `reconciler.py`, with the offering mode, contribution identifier, and
       source kind read from the bundle. `settlement_composition.py`: the
       seller stage table construction and settlement registry over injected
       stage entries, mechanism-neutral. (D7.)
-- [ ] 5.5 The API-credits storefront composes part one: its `container.py`
+      *Done.* `quota_listing.py`: `quota_pool`, `registration`,
+      `prepare_listing_binding` (taking the listing's resource and recording
+      the projected quota resource), `listing_binding`, `listing_source`,
+      `build_listing_source_check`, and the reconciler's
+      `QuotaListingSource`, `stale_open_listing_ids`, and
+      `reopenable_listing_ids`, each reading the offering mode, contribution
+      identifier, and source kind from the bundle. The reconciler's
+      `listing_quota_resource_id`, used by no production code, is not moved:
+      the projection replaces it. `settlement_composition.py`:
+      `build_settlement_registry`, `enabled_mechanism_clients`, the frozen
+      `SellingSettlementComposition` (bundle, stage table, and the runtime
+      parts; `accepted_settlement_artifacts`, `readiness`,
+      `accepted_obligation_dispatch`, `publication_artifacts`), and the
+      coordinator's `prepare_settlement`, `reserve_settlement`,
+      `fulfill_settlement`, and `persist_settlement_outcome` over the injected
+      table. The storefront's `ApiCreditsSettlementComposition` subclasses it
+      with the Alkahest release conditions and the payment service, which are
+      mechanism-specific and move in section 8.
+- [x] 5.5 The API-credits storefront composes part one: its `container.py`
       fills `SellingContributions` (projection from `service_name` and
       `resource_id`, fixed amount, no guard, no hook, no extension) and passes
       it; the moved modules are deleted from the storefront and the domain
@@ -1034,10 +1162,135 @@ the accepted listing"). Touches the new project,
       tests for the projection's accepted-listing rule and the missing-resource
       refusal; the storefront's existing settlement integration tests pass
       against the kit. (D13.)
-- [ ] 5.6 Verification: `make test-api-selling` (unit, library integration),
+      *Done.* `container.py` holds `SELLING_CONTRIBUTIONS` (label, `api_credits.v1`,
+      `api_credits`, `apicredits`, `api_credit`, `ApiCreditsListing`, the
+      named-service mapping, the projection from `service_name`,
+      `resource_id`, and `base_url`, `FIXED_PER_REQUEST`, no guard, hook, or
+      extension). It is there rather than in `domain_runtime.py` because the
+      stages, the payment service, and the SQLite client read it, and
+      `domain_runtime.py` imports the stage table, so a bundle there would
+      import in a cycle; `domain_runtime.py` keeps only the contract. Its
+      coordinator hooks moved to `settlement_composition`, and the two
+      `serialize_api_credit_settlement*` functions, which nothing called, are
+      dropped. Deleted from the storefront: `settlement_repository.py`,
+      `services/issuance_evidence.py`, `listing_binding.py`,
+      `listing_source_check.py`; `settlement_models.py` is unchanged, since
+      `ApiCreditsSettleRequest` is a component of the recorded OpenAPI document
+      and its binding is section 7's. Deleted from the domain library:
+      `listings/reconciler.py` besides 5.3's two; it now depends on
+      `arkhai-api-contracts>=0.3.0` and no longer on the client, and bumps to
+      0.9.0. The storefront declares `arkhai-api-selling`, makes `arkhai-api`
+      a runtime dependency (the unmounted evidence controller imports it),
+      moves `arkhai-kit-resource-pools` to its dev group (only its tests import
+      it now), and bumps to 0.12.0. Tests moved to `selling` with the code:
+      the generic issuance, hold, and retry cases from
+      `test_settlement_fulfillment.py`, the reconciler cases from
+      `test_concept_modules.py`, and `test_issuance_evidence_repository.py`;
+      the domain's `test_issuance_evidence.py` is deleted with its module; the
+      vocabulary's `test_evidence.py` gains the field-by-field mismatch cases
+      it had and the vocabulary lacked (condition anchor, obligation, service,
+      resource, key id and mode, claimant, request digest), and its pin
+      test's storefront-path case is the storefront's `test_issuance_pins.py`.
+      Selling's suite runs under a neutral `example` bundle whose listing names
+      its fields differently from API credits, and its tests name no domain
+      value. What is unit-tested in `selling`: that issuance reads the listing
+      recorded in the evidence, the evidence records the listing the
+      Agreement names (`test_issuance.py`); the missing-resource refusal
+      before publication (`test_quota_listing.py`) and before acceptance
+      through the source check, with the resource-mismatch refusal
+      (`test_quota_listing.py`, over a fake repository and site); dispatch to
+      the accepted mechanism's stage (`test_settlement_composition.py`).
+      That a settlement loads the listing by the Agreement's ID is the
+      stages' and payment service's existing code, exercised by the
+      storefront's settlement tests; no test republishes a listing and
+      settles, since no storefront path rewrites one. The storefront tests
+      API credits' projection (`test_settlement_fulfillment.py`) and the
+      resource-mismatch refusal against its real repository
+      (`test_listing_source_check.py`, application integration).
+- [x] 5.6 Verification: `make test-api-selling` (unit, library integration),
       `make -C domains/apicredits/storefront test` (application integration:
       1.5's baselines diff to zero), `make test`, `make check-packaging`.
       End-to-end: `e2e_credits_deal`, `e2e_credits_payment_deal`.
+      *Done 2026-10-23.* `make test-api-selling` 53 passed (`tests/unit/` 43,
+      unit, over fakes; `tests/integration/` 10, library integration of the
+      three stores, the open-deal query, and a delivery's private secret and
+      public extension through `persist_delivery` and `progress_result`,
+      against real SQLite under the `example` prefix, in tables
+      `tests/bundles.py` creates with the storefront's DDL until section 7
+      moves the migrations; both directories are packages, so each runs on
+      its own). `domains/api/contracts` 37 (unit; 21 new for the carriers);
+      the vocabulary 61 (unit; 8 new evidence mismatch cases). `make -C
+      domains/apicredits/storefront test` 187 passed (unit and application
+      integration; 197 before: 12 cases moved to `selling` with their code, 2
+      added), with 1.5's route, OpenAPI, authentication, refusal, health,
+      configuration, and schema baselines and the storefront pins
+      unchanged. The domain library 19 (unit and library integration; 32
+      before: the 12 evidence cases left with their module, which the
+      vocabulary's suite covers, and the storefront-path pin case is the
+      storefront's), client 25, authority 70, service 42,
+      buyer 27, e2e unit 80. `make test`: every suite passed except, all
+      inherited and recorded by 1.7 to 4.5, the provisioning dotenv-layering
+      unit test, the VM storefront's two Alkahest toolchain tests, the three
+      provisioning IaC relay-teardown shell tests, the release-tooling cases
+      that read the stale `.claude/worktrees/` checkout (the
+      `test_publish_matrix` release-table rows, the three API-credits rows
+      among them, and the whole-tree uv-setup and Python-version checks, all
+      passing on a copy without it), and the `--eval` case the macOS make
+      3.81 lacks; Helm is not installed, so the render checks are unrun.
+      `make check-packaging` passes on the copy: uv setup, locks (the new
+      selling lock and the contracts, client, authority, domain, service,
+      buyer, storefront, and `e2e-tests` locks relocked under uv 0.11.17),
+      Python version, layout, and all four architecture parts with the new
+      exception row; in place they report only the stale checkout. Comment
+      hygiene reports only the stale checkout. `make check-change` reports
+      only the two `api-family` citations closeout creates; its agent-skills
+      part fails on the copy only because the copy omits `.claude/`, and
+      passes in place. End-to-end: owed to validation. `e2e_credits_deal`
+      (Alkahest) and `e2e_credits_payment_deal` (payments) exercise the
+      storefront's issuance, evidence, settlement stores, binding, and source
+      check through `selling` once deployed; `e2e_credits_service_rollback`
+      compares images whose service differs in the relocked contracts.
+      **Handoff.** The bundle is `container.SELLING_CONTRIBUTIONS`; section 6
+      reads its `publication_mapping` and `publication_guards` in the listing
+      service and publication (today the listing service builds the
+      named-service resource itself and calls `prepare_listing_binding`, which
+      refuses a resource-less listing) and applies `acceptance_hook` in the
+      negotiation runtime; `consumption_rule` is read by nothing yet. The
+      storefront's `ApiCreditsSettlementComposition` subclasses
+      `SellingSettlementComposition` with the Alkahest release conditions and
+      the payment service, which section 8 moves; the stages, the payment
+      service, and the SQLite client read the bundle from the container, and
+      the stages' payment and Alkahest helpers read `composition.contributions`
+      where they hold a composition. `tests/bundles.py` copies the storefront's
+      table DDL until section 7 moves the migrations into `persistence.py`,
+      when it should create the tables through them. The unmounted
+      issuance-evidence controller now imports the vocabulary, so the
+      storefront declares `arkhai-api` until section 7 drops the router.
+      The fresh-context check's accepted findings are fixed above: the
+      unreachable branch, the family code's citation of the API-credits spec,
+      the stored listing resource the kit relied on a domain schema to
+      decode, the function-local imports the storefront tests gained, the
+      domain values in selling's tests, the missing source-check, composition,
+      open-deal, refund, and delivery-projection tests, the discriminating
+      carrier test, the evidence mismatch cases, an extension test with a
+      secret present, and every note wording above; D7 and the `api-family`
+      delta now state the projection's split, the pin, the write-once rule,
+      the source check's resource refusal, the consumption rule's kind, and the
+      bundle's naming fields. Declined, with the reason: the exception row's
+      shape against `ARCHITECTURE.md`'s no-new-edge sentence is the owner's
+      decision (D2); `kit-owned-storefront-auth-and-persistence`'s own design
+      does not yet name `arkhai-api-selling` among the edges it retires,
+      another change's document this section does not edit, so the owner is
+      told. The connection payload's keys, the fulfilled message, and the
+      `credit` wording are the family's prepaid-credit delivery shape and
+      recorded bytes D14 holds fixed, now stated in D7. `selling`'s
+      `arkhai-kit-resource-pools` dependency for the pool-declaration reader
+      is 5.1's planned edge, and the reader's placement is the divergence
+      `ARCHITECTURE.md` already names. The storefront's binding tests patch
+      that module's own collaborator functions, as the file's existing tests
+      do, because the fulfillment hook's signature is fixed by core; the
+      failure actions' order is the selling library's dispatch and is tested
+      there.
 
 ## 6. Selling, part two: negotiation, publication, and lifecycle
 
@@ -1116,7 +1369,10 @@ Alkahest-only storefront is installed"). Touches the two new projects,
 `apicredits_storefront/settlement_stages.py`,
 `services/payment_settlement_service.py`, `arkhai_apicredits/settlement/payments.py`,
 the escrow guard in `arkhai_apicredits/negotiation/policies.py`,
-`docs/development/ARCHITECTURE.toml`.
+`docs/development/ARCHITECTURE.toml`, and (amended at section 5) the
+storefront's `settlement_composition.py`, whose `ApiCreditsSettlementComposition`
+keeps the Alkahest release conditions and the payment service until the two
+distributions own them.
 
 - [ ] 8.1 `domains/api/selling-alkahest/` (`arkhai-api-selling-alkahest`
       0.1.0; dependencies `arkhai-api-selling`, `arkhai-kit-alkahest`): the
@@ -1285,6 +1541,9 @@ change to implementation.
 | D2 — a family's distributions split only where a rule or dependency weight forces it; an anticipated split is recorded with its trigger | `docs/development/ARCHITECTURE.md#family-kits` |
 | D3, D8 — the vocabulary's contents and label-parameterized digests | `openspec/specs/api-family/spec.md`; `openspec/specs/api-credits/architecture.md#idempotency-boundaries` |
 | D4 — plain-data route declarations adapted by the authority | `openspec/specs/api-family/spec.md` |
+| D3 — the negotiation and delivery carriers live in `contracts`, so a buyer installs no selling machinery | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
+| D7 — the projection's split, the pin as the Agreement's listing ID with write-once listing resources, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D5 — side-split mechanism distributions | `openspec/specs/api-family/spec.md`; `docs/development/ARCHITECTURE.md#family-kits` |
 | D6 — per-domain service roots, the capacity profile | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `docs/development/ARCHITECTURE.md#runtime-service-map` and `#authority-boundaries` |
 | D6 — the authority's startup: the migration chain, then the profile's pool seeded in initialization and every stored pool's declarations checked; the API-credits service's in-process migrations are the library's | `openspec/specs/api-credits/architecture.md#implementation-composition`; `docs/development/DEPLOYMENT_AND_CONFIG.md` (migrations at startup) |

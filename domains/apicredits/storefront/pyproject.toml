@@ -1,13 +1,15 @@
 [project]
 name = "arkhai-apicredits-storefront"
-version = "0.11.0"
+version = "0.12.0"
 license = "MIT"
 description = "Seller-side storefront for the API-credits domain: quota-backed listings, sync negotiation with ownership/quota guards, issuance-backed settlement."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-core>=0.4.0",
+    "arkhai-api>=0.1.0",
     "arkhai-api-client>=0.1.0",
-    "arkhai-apicredits-domain>=0.8.0",
+    "arkhai-api-selling>=0.1.0",
+    "arkhai-apicredits-domain>=0.9.0",
     "arkhai-core-registry-client>=0.12.1",
     "arkhai-core-storefront>=0.14.0",
     "arkhai-kit-capacity-publication==0.10.1",
@@ -20,8 +22,6 @@ dependencies = [
     "arkhai-kit-storefront==0.8.0",
     "arkhai-kit-negotiation-runtime==0.5.1",
     "arkhai-kit-site-client>=0.9.0",
-    # Reading a quota resource's pool declarations from the site's projection.
-    "arkhai-kit-resource-pools>=0.7.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
@@ -53,8 +53,8 @@ dev = [
     # for directly: run results and the run log, the publisher-trust refresh,
     # the resolved buyer identity, and registry authorities. Test-only.
     "arkhai-core-buyer>=0.5.0",
-    # The settlement tests build label-bound issuance results from the vocabulary. Test-only.
-    "arkhai-api>=0.1.0",
+    # The resolved pool declarations the listing-binding helper binds listings under. Test-only.
+    "arkhai-kit-resource-pools>=0.7.0",
 ]
 
 [tool.uv]

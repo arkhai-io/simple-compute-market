@@ -14,13 +14,14 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from arkhai_api_selling.settlement_store import SettlementRepository
 from core_storefront.sqlite_client import SQLiteClient as CoreSQLiteClient
 from core_storefront.sqlite_migrations import MigrationLike
 from market_identity import Identity
+from market_core import SettlementEvidence
 from market_settlement_runtime import settlement_migrations
 
-from apicredits_storefront.settlement_repository import SettlementRepository
-from market_core import SettlementEvidence
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 
 from .config import settings
 from .migrations import APICREDITS_MIGRATIONS
@@ -78,35 +79,35 @@ class SQLiteClient(CoreSQLiteClient):
             )
 
     async def save_settlement_evidence(self, evidence: SettlementEvidence) -> SettlementEvidence:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).store, evidence)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).store, evidence)
 
     async def load_settlement_evidence(self, *, negotiation_id: str) -> SettlementEvidence | None:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).get, negotiation_id)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).get, negotiation_id)
 
     async def load_issuance_progress(self, *, reference: str) -> dict[str, Any] | None:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).progress, reference)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).progress, reference)
 
     async def save_issuance_progress(self, *, negotiation_id: str, **fields: Any) -> dict[str, Any]:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).checkpoint, negotiation_id, **fields)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).checkpoint, negotiation_id, **fields)
 
     async def claim_credit_delivery_start(self, *, negotiation_id: str) -> bool:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).claim_delivery_start, negotiation_id)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).claim_delivery_start, negotiation_id)
 
     async def record_credit_refund_intent(self, *, negotiation_id: str) -> dict[str, Any]:
-        return await asyncio.to_thread(SettlementRepository(self.db_path).record_refund_intent, negotiation_id)
+        return await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).record_refund_intent, negotiation_id)
 
     async def abandon_credit_refund_intent(self, *, negotiation_id: str, prior_status: str) -> None:
         await asyncio.to_thread(
-            SettlementRepository(self.db_path).abandon_refund_intent, negotiation_id, prior_status=prior_status,
+            SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).abandon_refund_intent, negotiation_id, prior_status=prior_status,
         )
 
     async def complete_credit_refund(self, *, negotiation_id: str) -> None:
-        await asyncio.to_thread(SettlementRepository(self.db_path).complete_refund, negotiation_id)
+        await asyncio.to_thread(SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).complete_refund, negotiation_id)
 
     async def list_unsettled_payment_negotiations(self, *, mechanism: str, limit: int) -> list[str]:
         """Accepted deals of ``mechanism`` with no verified receipt, open credit issuance, or a refund left `refunding`."""
         return await asyncio.to_thread(
-            SettlementRepository(self.db_path).unsettled_negotiations, mechanism=mechanism, limit=limit,
+            SettlementRepository(self.db_path, SELLING_CONTRIBUTIONS).unsettled_negotiations, mechanism=mechanism, limit=limit,
         )
 
     async def save_credit_terms(

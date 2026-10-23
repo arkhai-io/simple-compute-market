@@ -77,15 +77,16 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-contracts"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
+    { name = "arkhai-core" },
     { name = "arkhai-kit-identity" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_api_contracts-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_api_contracts-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -157,6 +158,17 @@ dev = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "arkhai-core"
+version = "0.4.1"
+source = { registry = "../../../.dist" }
+dependencies = [
+    { name = "pydantic" },
+]
+wheels = [
+    { path = "arkhai_core-0.4.1-py3-none-any.whl" },
 ]
 
 [[package]]

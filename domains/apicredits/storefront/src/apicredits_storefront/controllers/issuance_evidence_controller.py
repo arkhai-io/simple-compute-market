@@ -5,22 +5,17 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 
-from arkhai_apicredits.settlement.issuance_evidence import (
-    SignedApiCreditsIssuanceEvidenceV1,
-)
+from arkhai_api.evidence import SignedIssuanceEvidenceV1
+from arkhai_api_selling.evidence_store import IssuanceEvidenceService
 from fastapi import APIRouter, Depends, HTTPException, Request
 from market_identity import Identity
-
-from apicredits_storefront.services.issuance_evidence import (
-    ApiCreditsIssuanceEvidenceService,
-)
 
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 EvidenceAuthenticator = Callable[[Request], Awaitable[Identity]]
 
 
 def make_issuance_evidence_router(
-    get_service: Callable[[], ApiCreditsIssuanceEvidenceService],
+    get_service: Callable[[], IssuanceEvidenceService],
     authenticate: EvidenceAuthenticator,
 ) -> APIRouter:
     """Build the resolver route with mandatory caller authentication injection."""
@@ -29,14 +24,14 @@ def make_issuance_evidence_router(
 
     @router.get(
         "/issuance-evidence/{evidence_digest}",
-        response_model=SignedApiCreditsIssuanceEvidenceV1,
+        response_model=SignedIssuanceEvidenceV1,
         name="resolve_api_credit_issuance_evidence",
     )
     async def resolve_api_credit_issuance_evidence(
         evidence_digest: str,
         request: Request,
-        service: ApiCreditsIssuanceEvidenceService = Depends(get_service),
-    ) -> SignedApiCreditsIssuanceEvidenceV1:
+        service: IssuanceEvidenceService = Depends(get_service),
+    ) -> SignedIssuanceEvidenceV1:
         if not _SHA256.fullmatch(evidence_digest):
             raise HTTPException(status_code=422, detail="invalid evidence digest")
         await authenticate(request)

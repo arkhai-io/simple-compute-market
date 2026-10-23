@@ -10,6 +10,11 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from arkhai_api_selling.quota_listing import (
+    ListingSourceCheck,
+    build_listing_source_check,
+    listing_binding,
+)
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_stages import build_api_credit_accepted_artifacts
 from market_alkahest.proposals import (
@@ -42,11 +47,6 @@ from market_negotiation_runtime import (
 from market_policy.scalar_policies import _amount_from_proposal
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.listing_binding import api_credit_listing_binding
-from apicredits_storefront.listing_source_check import (
-    ListingSourceCheck,
-    build_listing_source_check,
-)
 from apicredits_storefront.services.capacity_client import (
     build_capacity_client,
 )
@@ -107,7 +107,7 @@ class _QuotaSnapshot:
         self._listing_id = listing_id
 
     async def snapshot(self) -> list[dict[str, Any]] | None:
-        binding = await api_credit_listing_binding(self._repository, self._listing_id)
+        binding = await listing_binding(self._repository, self._listing_id)
         if binding is None:
             raise NegotiationStateError(
                 f"listing {self._listing_id!r} has no durable capacity binding"
@@ -710,6 +710,7 @@ def build_api_credit_negotiation_runtime(
     through the aggregate capacity client.
     """
     source_check = listing_source_check or build_listing_source_check(
+        _container.SELLING_CONTRIBUTIONS,
         lambda repository: build_capacity_client(lambda: repository)
     )
 

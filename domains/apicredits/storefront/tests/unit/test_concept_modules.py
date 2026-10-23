@@ -1,9 +1,8 @@
-"""API-credits concept modules: terms, pricing, reconciler, guards."""
+"""API-credits concept modules: terms, pricing, guards."""
 
 from __future__ import annotations
 
 import pytest
-from market_resource_pools_contracts.backing import BACKED, UNBACKED
 from apicredits_storefront import negotiation_runtime
 from market_core.schemas import RateValue, derive_settlement_option_id
 from market_negotiation_runtime import NegotiationTerms
@@ -12,12 +11,6 @@ from market_identity import Ed25519Signer, Identity, IdentityScheme
 from arkhai_apicredits.listings.pricing import (
     determine_strategy_from_order,
     extract_unit_price_from_order,
-)
-from arkhai_apicredits.listings.reconciler import (
-    CreditListingSource,
-    listing_quota_resource_id,
-    reopenable_credit_listing_ids,
-    stale_open_credit_listing_ids,
 )
 from arkhai_apicredits.negotiation.storefront_round import _seller_reference_amount
 from arkhai_apicredits.negotiation.policies import (
@@ -147,68 +140,6 @@ def test_unit_price_hidden_reserve_falls_back_then_refuses():
 def test_strategy_is_maximize_for_token_offers():
     assert determine_strategy_from_order(_listing()) == "maximize"
     assert determine_strategy_from_order({"listing_resource": {"gpu_model": "H200"}}) is None
-
-
-# ---------------------------------------------------------------------------
-# Reconciler
-# ---------------------------------------------------------------------------
-
-def _source(listing_id, resource_id, status, closed_by=None):
-    # Site and quota resource come from the listing's binding.
-    return CreditListingSource(listing_id, status, closed_by, "tokens", resource_id)
-
-
-def _judge(backing):
-    return lambda _source, available: backing.judge(lambda: None, available)
-
-
-def test_reconciler_close_on_exhaustion_and_reopen():
-    sources = [
-        _source("L-a", "svc-a", "open"),
-        _source("L-b", "svc-b", "open"),
-        _source("L-c", "svc-a", "closed", "reconciliation"),
-    ]
-    judge = _judge(BACKED)
-    availability = {("tokens", "svc-a"): 0, ("tokens", "svc-b"): 12}
-    assert stale_open_credit_listing_ids(sources, availability=availability, judge=judge) == ["L-a"]
-    assert reopenable_credit_listing_ids(sources, availability=availability, judge=judge) == []
-
-    availability = {("tokens", "svc-a"): 3, ("tokens", "svc-b"): 12}
-    assert stale_open_credit_listing_ids(sources, availability=availability, judge=judge) == []
-    assert reopenable_credit_listing_ids(sources, availability=availability, judge=judge) == ["L-c"]
-
-
-def test_reconciler_reopens_only_what_reconciliation_closed():
-    sources = [
-        _source("L-seller", "svc-a", "closed", "seller"),
-        _source("L-quota", "svc-a", "closed", "reconciliation"),
-    ]
-    availability = {("tokens", "svc-a"): 5}
-    assert reopenable_credit_listing_ids(
-        sources, availability=availability, judge=_judge(BACKED)
-    ) == ["L-quota"]
-
-
-def test_reconciler_unknown_availability_is_conservative():
-    sources = [_source("L-a", "svc-a", "open")]
-    judge = _judge(BACKED)
-    # Authority unreachable: close nothing, reopen nothing.
-    assert stale_open_credit_listing_ids(sources, availability=None, judge=judge) == []
-    assert reopenable_credit_listing_ids(sources, availability=None, judge=judge) == []
-    # Resource gone from the ledger: the listing must not stay open.
-    assert stale_open_credit_listing_ids(sources, availability={}, judge=judge) == ["L-a"]
-
-
-def test_availability_closes_no_listing_its_backing_does_not_bound():
-    sources = [_source("L-a", "svc-a", "open")]
-
-    assert stale_open_credit_listing_ids(
-        sources, availability={}, judge=_judge(UNBACKED)
-    ) == []
-
-
-def test_a_non_token_listing_names_no_quota_resource():
-    assert listing_quota_resource_id({"listing_resource": {"gpu_model": "H200"}}) is None
 
 
 # ---------------------------------------------------------------------------

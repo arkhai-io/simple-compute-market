@@ -165,6 +165,7 @@ async def harness(tmp_path):
         issuer = Issuer(db)
         composition = SimpleNamespace(
             domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+            contributions=_container.SELLING_CONTRIBUTIONS,
         )
         composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
             db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
@@ -333,6 +334,7 @@ def _restart(tmp_path, h, *, approved: bool):
     issuer = Issuer(db)
     composition = SimpleNamespace(
         domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+        contributions=_container.SELLING_CONTRIBUTIONS,
     )
     composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
         db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM

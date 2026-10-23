@@ -21,6 +21,7 @@ def wheels(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
         "api_contracts": (REPO / "domains" / "api" / "contracts", "arkhai_api_contracts-*.whl"),
         "api_client": (REPO / "domains" / "api" / "client", "arkhai_api_client-*.whl"),
         "api_authority": (REPO / "domains" / "api" / "authority", "arkhai_api_authority-*.whl"),
+        "api_selling": (REPO / "domains" / "api" / "selling", "arkhai_api_selling-*.whl"),
         "domain": (
             APICREDITS,
             "arkhai_apicredits_domain-*.whl",

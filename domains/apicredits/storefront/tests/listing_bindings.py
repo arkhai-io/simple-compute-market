@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding
 from market_resource_pools import ResolvedPool
 from market_resource_pools_contracts.backing import BACKED, CapacityBacking
 
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.listing_binding import (
-    QuotaPool,
-    prepare_api_credit_listing_binding,
-)
 
 
 async def upsert_bound_listing(
@@ -28,10 +26,11 @@ async def upsert_bound_listing(
     in a pool declaring ``backing`` that advertises API credits.
     """
     resource = listing["listing_resource"]
-    binding = prepare_api_credit_listing_binding(
+    binding = prepare_listing_binding(
+        SELLING_CONTRIBUTIONS,
         listing_id=listing_id,
         site_id=str(resource["capacity_site_id"]),
-        resource_id=str(resource["resource_id"]),
+        listing_resource=resource,
         pool=QuotaPool(pool_id, ResolvedPool(backing, frozenset({"api_credits"}), True)),
         domain=get_market_domain_contract(),
     )

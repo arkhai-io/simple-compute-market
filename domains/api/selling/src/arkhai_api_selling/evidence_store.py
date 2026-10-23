@@ -1,28 +1,35 @@
-"""Immutable issuance evidence and private credential result persistence."""
+"""Immutable issuance evidence and private credential result persistence.
+
+Both repositories write the domain's own tables, named from its bundle's table
+prefix, and sign and decode evidence under its issuance label.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
-from arkhai_apicredits.settlement.issuance_evidence import (
-    ApiCreditsIssuanceEvidenceBodyV1,
-    ExpectedApiCreditsIssuanceEvidenceV1,
-    SignedApiCreditsIssuanceEvidenceV1,
+from arkhai_api.evidence import (
+    ExpectedIssuanceEvidenceV1,
+    IssuanceEvidenceBodyV1,
+    SignedIssuanceEvidenceV1,
     canonical_signed_issuance_evidence,
     decode_signed_issuance_evidence,
-    encode_portable_issuance_fulfillment_ref,
+    encode_portable_fulfillment_ref,
     issuance_evidence_digest,
-    sign_api_credits_issuance_evidence,
-    verify_api_credits_issuance_evidence,
+    sign_issuance_evidence,
+    verify_issuance_evidence,
 )
 from market_identity import Identity, Signer, TrustedIdentitySet
 from pydantic import BaseModel, ConfigDict, Field
+
+from arkhai_api_selling.contributions import SellingContributions
 
 
 class IssuanceEvidenceConflict(RuntimeError):
@@ -42,7 +49,7 @@ class FulfillmentPublisher(Protocol):
     ) -> str: ...
 
 
-class ApiCreditPrivateResult(BaseModel):
+class PrivateResult(BaseModel):
     """Domain-private bearer result; serialization and repr omit the secret."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -57,7 +64,7 @@ class ApiCreditPrivateResult(BaseModel):
 @dataclass(frozen=True)
 class EvidencePublication:
     evidence_digest: str
-    evidence: SignedApiCreditsIssuanceEvidenceV1
+    evidence: SignedIssuanceEvidenceV1
     canonical_evidence: str
 
 
@@ -71,27 +78,29 @@ class PortableEvidencePublication:
 class IssuanceEvidenceRepository:
     """SQLite repository keyed by digest and unique fulfillment identity."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, contributions: SellingContributions) -> None:
         self._db_path = str(db_path)
+        self._label = contributions.label
+        self._table = contributions.table("issuance_evidence")
 
     def store(
         self,
-        evidence: SignedApiCreditsIssuanceEvidenceV1,
+        evidence: SignedIssuanceEvidenceV1,
     ) -> EvidencePublication:
         canonical = canonical_signed_issuance_evidence(evidence)
-        digest = issuance_evidence_digest(evidence)
+        digest = issuance_evidence_digest(self._label, evidence)
         fulfillment_id = evidence.body.fulfillment_id
         connection = sqlite3.connect(self._db_path, timeout=30)
         try:
             connection.execute("BEGIN IMMEDIATE")
             by_digest = connection.execute(
-                "SELECT fulfillment_id, signed_evidence "
-                "FROM api_credit_issuance_evidence WHERE evidence_digest = ?",
+                f"SELECT fulfillment_id, signed_evidence "
+                f"FROM {self._table} WHERE evidence_digest = ?",
                 (digest,),
             ).fetchone()
             by_fulfillment = connection.execute(
-                "SELECT evidence_digest, signed_evidence "
-                "FROM api_credit_issuance_evidence WHERE fulfillment_id = ?",
+                f"SELECT evidence_digest, signed_evidence "
+                f"FROM {self._table} WHERE fulfillment_id = ?",
                 (fulfillment_id,),
             ).fetchone()
             if by_digest is not None:
@@ -109,7 +118,7 @@ class IssuanceEvidenceRepository:
                 connection.commit()
                 return EvidencePublication(digest, evidence, canonical)
             connection.execute(
-                "INSERT INTO api_credit_issuance_evidence"
+                f"INSERT INTO {self._table}"
                 "(evidence_digest, fulfillment_id, signed_evidence, created_at) "
                 "VALUES (?, ?, ?, ?)",
                 (
@@ -127,34 +136,34 @@ class IssuanceEvidenceRepository:
         finally:
             connection.close()
 
-    def get(self, evidence_digest: str) -> SignedApiCreditsIssuanceEvidenceV1 | None:
+    def get(self, evidence_digest: str) -> SignedIssuanceEvidenceV1 | None:
         connection = sqlite3.connect(self._db_path, timeout=30)
         try:
             row = connection.execute(
-                "SELECT signed_evidence FROM api_credit_issuance_evidence "
-                "WHERE evidence_digest = ?",
+                f"SELECT signed_evidence FROM {self._table} WHERE evidence_digest = ?",
                 (evidence_digest,),
             ).fetchone()
         finally:
             connection.close()
         if row is None:
             return None
-        evidence = decode_signed_issuance_evidence(str(row[0]))
-        if issuance_evidence_digest(evidence) != evidence_digest:
+        evidence = decode_signed_issuance_evidence(self._label, str(row[0]))
+        if issuance_evidence_digest(self._label, evidence) != evidence_digest:
             raise IssuanceEvidenceConflict(
                 "stored issuance evidence no longer matches its digest"
             )
         return evidence
 
 
-class ApiCreditPrivateResultRepository:
+class PrivateResultRepository:
     """Owner-authenticated storage for a newly issued bearer credential."""
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(self, db_path: str | Path, contributions: SellingContributions) -> None:
         self._db_path = str(db_path)
+        self._table = contributions.table("private_results")
+        self._ref_prefix = contributions.credentials_ref_prefix
 
-    @staticmethod
-    def credentials_ref(fulfillment_id: str, owner: Identity) -> str:
+    def credentials_ref(self, fulfillment_id: str, owner: Identity) -> str:
         digest = hashlib.sha256(
             (
                 fulfillment_id
@@ -164,7 +173,7 @@ class ApiCreditPrivateResultRepository:
                 + owner.identifier
             ).encode("utf-8")
         ).hexdigest()
-        return f"api-credit-credential.v1:{digest}"
+        return f"{self._ref_prefix}:{digest}"
 
     def store(
         self,
@@ -173,7 +182,7 @@ class ApiCreditPrivateResultRepository:
         owner: Identity,
         key_id: str,
         secret: str,
-    ) -> ApiCreditPrivateResult:
+    ) -> PrivateResult:
         reference = self.credentials_ref(fulfillment_id, owner)
         public_binding = (
             fulfillment_id,
@@ -185,13 +194,13 @@ class ApiCreditPrivateResultRepository:
         try:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT fulfillment_id, owner_scheme, owner_id, key_id, secret "
-                "FROM api_credit_private_results WHERE credentials_ref = ? ",
+                f"SELECT fulfillment_id, owner_scheme, owner_id, key_id, secret "
+                f"FROM {self._table} WHERE credentials_ref = ? ",
                 (reference,),
             ).fetchone()
             by_fulfillment = connection.execute(
-                "SELECT credentials_ref, owner_scheme, owner_id, key_id, secret "
-                "FROM api_credit_private_results WHERE fulfillment_id = ?",
+                f"SELECT credentials_ref, owner_scheme, owner_id, key_id, secret "
+                f"FROM {self._table} WHERE fulfillment_id = ?",
                 (fulfillment_id,),
             ).fetchone()
             if row is not None and row[:4] != public_binding:
@@ -213,7 +222,7 @@ class ApiCreditPrivateResultRepository:
                 )
             if row is None and by_fulfillment is None:
                 connection.execute(
-                    "INSERT INTO api_credit_private_results"
+                    f"INSERT INTO {self._table}"
                     "(credentials_ref, fulfillment_id, owner_scheme, owner_id, "
                     " key_id, secret, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
@@ -228,8 +237,7 @@ class ApiCreditPrivateResultRepository:
                 )
             elif row is not None and row[4] != secret:
                 connection.execute(
-                    "UPDATE api_credit_private_results SET secret = ? "
-                    "WHERE credentials_ref = ?",
+                    f"UPDATE {self._table} SET secret = ? WHERE credentials_ref = ?",
                     (secret, reference),
                 )
             connection.commit()
@@ -238,7 +246,7 @@ class ApiCreditPrivateResultRepository:
             raise
         finally:
             connection.close()
-        return ApiCreditPrivateResult(
+        return PrivateResult(
             credentials_ref=reference,
             fulfillment_id=fulfillment_id,
             owner=owner,
@@ -251,12 +259,12 @@ class ApiCreditPrivateResultRepository:
         *,
         credentials_ref: str,
         owner: Identity,
-    ) -> ApiCreditPrivateResult | None:
+    ) -> PrivateResult | None:
         connection = sqlite3.connect(self._db_path, timeout=30)
         try:
             row = connection.execute(
-                "SELECT fulfillment_id, owner_scheme, owner_id, key_id, secret "
-                "FROM api_credit_private_results WHERE credentials_ref = ?",
+                f"SELECT fulfillment_id, owner_scheme, owner_id, key_id, secret "
+                f"FROM {self._table} WHERE credentials_ref = ?",
                 (credentials_ref,),
             ).fetchone()
         finally:
@@ -266,7 +274,7 @@ class ApiCreditPrivateResultRepository:
         stored_owner = Identity(scheme=row[1], identifier=row[2])
         if stored_owner != owner:
             raise PrivateResultAccessError("private result belongs to another principal")
-        return ApiCreditPrivateResult(
+        return PrivateResult(
             credentials_ref=credentials_ref,
             fulfillment_id=row[0],
             owner=stored_owner,
@@ -275,13 +283,14 @@ class ApiCreditPrivateResultRepository:
         )
 
 
-class ApiCreditsIssuanceEvidenceService:
+class IssuanceEvidenceService:
     """Signs, verifies, stores, resolves, and digest-publishes issuance evidence."""
 
     def __init__(
         self,
         repository: IssuanceEvidenceRepository,
         *,
+        contributions: SellingContributions,
         signer: Signer,
         trusted_issuers: TrustedIdentitySet,
         clock: Callable[[], int] = lambda: int(time.time()),
@@ -290,23 +299,28 @@ class ApiCreditsIssuanceEvidenceService:
         if signer.identity not in trusted_issuers:
             raise ValueError("evidence signer is not in the trusted issuer set")
         self._repository = repository
+        self._label = contributions.label
         self._signer = signer
         self._trusted_issuers = trusted_issuers
         self._clock = clock
         self._max_future_skew_seconds = max_future_skew_seconds
 
+    def body(self, **fields: object) -> IssuanceEvidenceBodyV1:
+        """An evidence body under this service's label."""
+        return IssuanceEvidenceBodyV1(domain=self._label.name, **fields)
+
     def publish(
         self,
-        body: ApiCreditsIssuanceEvidenceBodyV1,
+        body: IssuanceEvidenceBodyV1,
     ) -> EvidencePublication:
-        evidence = sign_api_credits_issuance_evidence(body, self._signer)
+        evidence = sign_issuance_evidence(self._label, body, self._signer)
         self._verify_self_consistent(evidence)
         return self._repository.store(evidence)
 
     def resolve(
         self,
         evidence_digest: str,
-    ) -> SignedApiCreditsIssuanceEvidenceV1 | None:
+    ) -> SignedIssuanceEvidenceV1 | None:
         evidence = self._repository.get(evidence_digest)
         if evidence is None:
             return None
@@ -317,12 +331,13 @@ class ApiCreditsIssuanceEvidenceService:
         self,
         evidence_digest: str,
         *,
-        expected: ExpectedApiCreditsIssuanceEvidenceV1,
-    ) -> SignedApiCreditsIssuanceEvidenceV1 | None:
+        expected: ExpectedIssuanceEvidenceV1,
+    ) -> SignedIssuanceEvidenceV1 | None:
         evidence = self._repository.get(evidence_digest)
         if evidence is None:
             return None
-        verify_api_credits_issuance_evidence(
+        verify_issuance_evidence(
+            self._label,
             evidence,
             expected=expected,
             trusted_issuers=self._trusted_issuers,
@@ -333,7 +348,7 @@ class ApiCreditsIssuanceEvidenceService:
 
     async def publish_portable(
         self,
-        body: ApiCreditsIssuanceEvidenceBodyV1,
+        body: IssuanceEvidenceBodyV1,
         *,
         publisher: FulfillmentPublisher,
         resolver_id: str,
@@ -343,7 +358,8 @@ class ApiCreditsIssuanceEvidenceService:
             condition_anchor=body.condition_anchor,
             evidence=publication.canonical_evidence,
         )
-        fulfillment_ref = encode_portable_issuance_fulfillment_ref(
+        fulfillment_ref = encode_portable_fulfillment_ref(
+            self._label,
             resolver_id=resolver_id,
             attestation_uid=attestation_uid,
             evidence_digest=publication.evidence_digest,
@@ -356,10 +372,10 @@ class ApiCreditsIssuanceEvidenceService:
 
     def _verify_self_consistent(
         self,
-        evidence: SignedApiCreditsIssuanceEvidenceV1,
+        evidence: SignedIssuanceEvidenceV1,
     ) -> None:
         body = evidence.body
-        expected = ExpectedApiCreditsIssuanceEvidenceV1(
+        expected = ExpectedIssuanceEvidenceV1(
             condition_anchor=body.condition_anchor,
             obligation_ref=body.obligation_ref,
             fulfillment_id=body.fulfillment_id,
@@ -376,7 +392,8 @@ class ApiCreditsIssuanceEvidenceService:
             request_digest=body.request_digest,
             funding_expiration_unix=body.committed_at_unix,
         )
-        verify_api_credits_issuance_evidence(
+        verify_issuance_evidence(
+            self._label,
             evidence,
             expected=expected,
             trusted_issuers=self._trusted_issuers,

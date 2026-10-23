@@ -3,10 +3,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from arkhai_apicredits.listings.reconciler import (
-    CreditListingSource,
-    reopenable_credit_listing_ids,
-    stale_open_credit_listing_ids,
+from arkhai_api_selling.quota_listing import (
+    BoundQuotaSource,
+    QuotaListingSource,
+    QuotaPool,
+    QuotaPoolUnavailable,
+    listing_binding,
+    listing_source,
+    quota_pool,
+    reopenable_listing_ids,
+    stale_open_listing_ids,
 )
 from market_capacity_publication import (
     BoundListing,
@@ -19,14 +25,7 @@ from market_capacity_publication import (
 )
 from registry_client import ListingRequest, UpdateListingRequest
 
-from apicredits_storefront.listing_binding import (
-    BoundQuotaSource,
-    QuotaPool,
-    QuotaPoolUnavailable,
-    api_credit_listing_binding,
-    api_credit_listing_source,
-    quota_pool,
-)
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.services.capacity_client import build_capacity_runtime
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
@@ -51,7 +50,7 @@ class ApiCreditPublicationHooks:
     async def binding_for_listing(
         self, listing_id: str
     ) -> PublicationBinding | None:
-        return await api_credit_listing_binding(self._db, listing_id)
+        return await listing_binding(self._db, listing_id)
 
 
 def _make_registry_client():
@@ -117,19 +116,19 @@ async def converge_registries(db: Any) -> dict[str, tuple[str, ...]]:
 
 async def _credit_listing_sources(
     db: Any, rows: list[dict[str, Any]]
-) -> tuple[list[CreditListingSource], dict[str, BoundQuotaSource]]:
+) -> tuple[list[QuotaListingSource], dict[str, BoundQuotaSource]]:
     """Each listing's status and durable binding, read for reconciliation."""
-    sources: list[CreditListingSource] = []
+    sources: list[QuotaListingSource] = []
     bound: dict[str, BoundQuotaSource] = {}
     for row in rows:
         listing_id = str(row.get("listing_id") or "")
-        source = await api_credit_listing_source(db, listing_id)
+        source = await listing_source(db, listing_id)
         if source is None:
             raise CapacityBindingError("API-credit listing has no durable capacity binding")
         bound[listing_id] = source
         binding = source.binding
         sources.append(
-            CreditListingSource(
+            QuotaListingSource(
                 listing_id=listing_id,
                 status=str(row.get("status") or ""),
                 closed_by=row.get("closed_by"),
@@ -143,7 +142,7 @@ async def _credit_listing_sources(
 async def close_token_listings_after_capacity_change(db: Any, availability: dict) -> list[str]:
     rows = await db.list_listings(status="open", limit=200)
     sources, bound = await _credit_listing_sources(db, rows)
-    ids = stale_open_credit_listing_ids(
+    ids = stale_open_listing_ids(
         sources,
         availability=availability,
         judge=lambda source, available: bound[source.listing_id].binding.backing.judge(
@@ -195,6 +194,7 @@ async def _bound_pools(
             continue
         try:
             pools[listing_id] = quota_pool(
+                SELLING_CONTRIBUTIONS,
                 site_pools, resource_id=binding.source_id, pool_id=source.pool_id
             )
         except QuotaPoolUnavailable as exc:
@@ -258,7 +258,7 @@ async def reopen_token_listings_after_capacity_change(db: Any, availability: dic
         # A listing reopens only while its bound pool is known to support it.
         return _source_problem(bound[listing_id], pools[listing_id])
 
-    ids = reopenable_credit_listing_ids(
+    ids = reopenable_listing_ids(
         sources,
         availability=availability,
         judge=lambda source, available: bound[source.listing_id].binding.backing.judge(

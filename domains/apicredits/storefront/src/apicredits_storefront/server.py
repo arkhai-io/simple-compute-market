@@ -13,6 +13,13 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any
 
+from arkhai_api_selling.quota_listing import registration
+from arkhai_api_selling.settlement_composition import (
+    fulfill_settlement,
+    persist_settlement_outcome,
+    prepare_settlement,
+    reserve_settlement,
+)
 from core_storefront.app_composition import StorefrontAppConfig
 from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
@@ -32,14 +39,7 @@ from market_storefront_kit import (
 )
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.domain_runtime import (
-    fulfill_api_credit_settlement,
-    get_market_domain_contract,
-    persist_api_credit_settlement_outcome,
-    prepare_api_credit_settlement,
-    reserve_api_credit_settlement,
-)
-from apicredits_storefront.listing_binding import api_credit_registration
+from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.negotiation_runtime import (
     build_api_credit_negotiation_runtime,
@@ -56,6 +56,7 @@ from apicredits_storefront.lifecycle_steps import (
 from apicredits_storefront.startup_refusal import require_startable_storefront
 from apicredits_storefront.startup import _startup_tasks
 from apicredits_storefront.settlement_composition import (
+    SELLER_STAGES,
     ApiCreditsSettlementComposition,
     build_api_credit_settlement_composition,
     build_storefront_settlement_registry,
@@ -182,20 +183,21 @@ def _build_api_credit_services(
     settlement_coordinator = SettlementJobCoordinator(
         settlement_runtime,
         prepare=partial(
-            prepare_api_credit_settlement,
+            prepare_settlement,
+            SELLER_STAGES,
             sqlite_client=sqlite_client,
             local_principal=marketplace_signer.identity,
             composition=settlement_composition,
         ),
         reserve_start=partial(
-            reserve_api_credit_settlement,
+            reserve_settlement,
             sqlite_client,
             settlement_runtime=settlement_runtime,
             wake_servicing=settlement_worker.wake,
         ),
-        fulfill=fulfill_api_credit_settlement,
+        fulfill=partial(fulfill_settlement, SELLER_STAGES),
         persist_outcome=partial(
-            persist_api_credit_settlement_outcome,
+            persist_settlement_outcome,
             sqlite_client,
         ),
         wake_servicing=settlement_worker.wake,
@@ -302,7 +304,7 @@ def build_api_credits_storefront_registry(
 ) -> StorefrontDomainRegistry:
     """Build the explicit one-registration API-credit storefront registry."""
 
-    return StorefrontDomainRegistry((api_credit_registration(domain),))
+    return StorefrontDomainRegistry((registration(_container.SELLING_CONTRIBUTIONS, domain),))
 
 
 def build_api_credits_storefront_app(

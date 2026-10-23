@@ -252,6 +252,14 @@ since = 2026-10-13
 reason = "The vocabulary's publication adapter uses PublicationSource, which moves to a storefront contracts kit."
 
 [[exceptions]]
+rule = "layer"
+project = "arkhai-api-selling"
+target = "arkhai-core-storefront"
+owner = "kit-owned-storefront-auth-and-persistence"
+since = 2026-10-23
+reason = "The selling library writes listing bindings and registrations through the storefront role's domain registry, which moves to a storefront contracts kit."
+
+[[exceptions]]
 rule = "scope"
 project = "arkhai-vms-storefront"
 target = "arkhai-bare-metal"

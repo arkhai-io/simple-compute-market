@@ -40,12 +40,12 @@ without the ledger.
 - **Eleven projects, each forced by a rule.** The vocabulary `arkhai_api`
   (purchase shape, issuance models, digests, evidence, the label type;
   foundation kits only, naming no domain's label); `contracts` and `client`
-  for the authority's wire models, plain-data route declarations, and typed
-  client; three side libraries whose dependencies the other sides do not need —
+  for the family's wire models and negotiation carriers, the authority's
+  plain-data route declarations, and its typed client; three side libraries whose dependencies the other sides do not need —
   `authority` (key service, ledger, quota-as-capacity composition, migrations,
   route services, the declaration adapter; never the client), `selling`
   (issuance and settlement composition, negotiation adapters, quota listing
-  binding and publication, carriers, route services, persistence, the selling
+  binding and publication, route services, persistence, the selling
   bundle), and `buying` (buy, negotiate, settle, and listing flows, the buying
   bundle); `gate` for the bearer gate; and four mechanism libraries split by
   side, `selling-alkahest`, `selling-arkhai-payments`, `buying-alkahest`, and

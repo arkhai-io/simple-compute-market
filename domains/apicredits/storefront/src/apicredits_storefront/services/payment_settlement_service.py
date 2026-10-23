@@ -45,7 +45,7 @@ from market_arkhai_payments import (
 from market_core import SettlementEvidence
 from market_identity import Identity
 
-from apicredits_storefront.settlement_stages import (
+from arkhai_api_selling.issuance import (
     SettlementRefusal,
     SettleResult,
     accepted_agreement,
@@ -102,7 +102,9 @@ class ApiCreditPaymentSettlementService:
         retryable: bool = False,
     ) -> dict[str, Any]:
         if progress is not None:
-            payload = await project_progress(self.db, progress, owner=buyer)
+            payload = await project_progress(
+                self.composition.contributions, self.db, progress, owner=buyer
+            )
         else:
             payload = {"escrow_uid": negotiation_id, "negotiation_id": negotiation_id}
         if status is not None:
@@ -194,6 +196,7 @@ class ApiCreditPaymentSettlementService:
             raise SettlementRefusal(409, "credit provisioning terms are unavailable")
         try:
             evidence = settlement_evidence(
+                self.composition.contributions,
                 agreement,
                 raw,
                 reference=data.transaction_id,
@@ -291,7 +294,9 @@ class ApiCreditPaymentSettlementService:
         refunded = current is not None and current.status in _REFUND_STATES
         if result.get("status") == "fulfilled" or not refunded:
             # Credits issued before a refund are recorded beside it.
-            progress = await persist_delivery(self.db, evidence, result, public_ref=negotiation_id)
+            progress = await persist_delivery(
+                self.composition.contributions, self.db, evidence, result, public_ref=negotiation_id
+            )
         if refunded:
             return SettleResult(200, await payload(progress, status="refunded"))
         if progress["status"] == "provisioning":
