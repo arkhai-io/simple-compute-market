@@ -1,0 +1,2198 @@
+{
+  "components": {
+    "schemas": {
+      "AdjustRequest": {
+        "properties": {
+          "delta": {
+            "title": "Delta",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "delta"
+        ],
+        "title": "AdjustRequest",
+        "type": "object"
+      },
+      "CapacityBucketProjectionResponse": {
+        "properties": {
+          "capacity_buckets": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Capacity Buckets",
+            "type": "array"
+          },
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "digest",
+          "capacity_buckets"
+        ],
+        "title": "CapacityBucketProjectionResponse",
+        "type": "object"
+      },
+      "CapacityEventsResponse": {
+        "description": "Versioned event page for ``GET /api/v1/capacity/events``.\n\n``latest_version`` reflects the feed head even when ``events`` is a\ntruncated page, so pollers know to keep paging; a subscriber that\ndetects a gap against what it last applied resyncs from a snapshot.",
+        "properties": {
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "latest_version": {
+            "title": "Latest Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "latest_version"
+        ],
+        "title": "CapacityEventsResponse",
+        "type": "object"
+      },
+      "CommitRequest": {
+        "properties": {
+          "deal_ref": {
+            "additionalProperties": true,
+            "description": "The deal the reservation now serves; an escrow it names is recorded where the reservation has none.",
+            "title": "Deal Ref",
+            "type": "object"
+          },
+          "idempotency_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Ref"
+          },
+          "lease_end_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Derived lease expiry timestamp. Omit for an open-ended commit.",
+            "title": "Lease End Utc"
+          },
+          "lease_start_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lease start. Omit/null means now.",
+            "title": "Lease Start Utc"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          }
+        },
+        "title": "CommitRequest",
+        "type": "object"
+      },
+      "ConsumeBatchItem": {
+        "properties": {
+          "amount": {
+            "minimum": 1.0,
+            "title": "Amount",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "key_id": {
+            "minLength": 1,
+            "title": "Key Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key_id",
+          "amount"
+        ],
+        "title": "ConsumeBatchItem",
+        "type": "object"
+      },
+      "ConsumeBatchRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsumeBatchItem"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ConsumeBatchRequest",
+        "type": "object"
+      },
+      "ConsumeBatchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "title": "ConsumeBatchResponse",
+        "type": "object"
+      },
+      "ConsumeRequest": {
+        "properties": {
+          "amount": {
+            "minimum": 1.0,
+            "title": "Amount",
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "ConsumeRequest",
+        "type": "object"
+      },
+      "GrantListResponse": {
+        "properties": {
+          "grants": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Grants",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grants",
+          "total"
+        ],
+        "title": "GrantListResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Identity": {
+        "additionalProperties": false,
+        "description": "A canonical scheme-tagged marketplace principal.",
+        "properties": {
+          "identifier": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Identifier",
+            "type": "string"
+          },
+          "scheme": {
+            "$ref": "#/components/schemas/IdentityScheme"
+          }
+        },
+        "required": [
+          "scheme",
+          "identifier"
+        ],
+        "title": "Identity",
+        "type": "object"
+      },
+      "IdentityScheme": {
+        "description": "Identity schemes supported by the marketplace wire contract.",
+        "enum": [
+          "eip191",
+          "ed25519"
+        ],
+        "title": "IdentityScheme",
+        "type": "string"
+      },
+      "IssuanceRequest": {
+        "additionalProperties": false,
+        "description": "Complete immutable command for one credits grant.",
+        "properties": {
+          "capacity_reservation_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Reservation Id"
+          },
+          "fulfillment_id": {
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Fulfillment Id",
+            "type": "string"
+          },
+          "key": {
+            "$ref": "#/components/schemas/KeyDisposition"
+          },
+          "negotiation_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "quantity": {
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "request_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Request Digest",
+            "type": "string"
+          },
+          "resource_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "schema": {
+            "const": "arkhai.api-credits.issuance-request.v1",
+            "default": "arkhai.api-credits.issuance-request.v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "service": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Service",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fulfillment_id",
+          "negotiation_id",
+          "owner",
+          "service",
+          "resource_id",
+          "quantity",
+          "key",
+          "request_digest"
+        ],
+        "title": "IssuanceRequest",
+        "type": "object"
+      },
+      "IssuanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "already_issued": {
+            "default": false,
+            "title": "Already Issued",
+            "type": "boolean"
+          },
+          "balance": {
+            "title": "Balance",
+            "type": "integer"
+          },
+          "capacity_reservation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Reservation Id"
+          },
+          "committed_at_unix": {
+            "title": "Committed At Unix",
+            "type": "integer"
+          },
+          "fulfillment_id": {
+            "title": "Fulfillment Id",
+            "type": "string"
+          },
+          "grant_id": {
+            "title": "Grant Id",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "key_mode": {
+            "enum": [
+              "new",
+              "existing"
+            ],
+            "title": "Key Mode",
+            "type": "string"
+          },
+          "negotiation_id": {
+            "title": "Negotiation Id",
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Identity"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "request_digest": {
+            "title": "Request Digest",
+            "type": "string"
+          },
+          "resource_id": {
+            "title": "Resource Id",
+            "type": "string"
+          },
+          "schema": {
+            "const": "arkhai.api-credits.issuance-result.v1",
+            "default": "arkhai.api-credits.issuance-result.v1",
+            "title": "Schema",
+            "type": "string"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fulfillment_id",
+          "grant_id",
+          "negotiation_id",
+          "owner",
+          "service",
+          "resource_id",
+          "quantity",
+          "key_mode",
+          "key_id",
+          "balance",
+          "request_digest",
+          "committed_at_unix"
+        ],
+        "title": "IssuanceResponse",
+        "type": "object"
+      },
+      "KeyDisposition": {
+        "additionalProperties": false,
+        "properties": {
+          "key_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Id"
+          },
+          "mode": {
+            "enum": [
+              "new",
+              "existing"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "KeyDisposition",
+        "type": "object"
+      },
+      "KeyListResponse": {
+        "properties": {
+          "keys": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keys",
+          "total"
+        ],
+        "title": "KeyListResponse",
+        "type": "object"
+      },
+      "MatchResponse": {
+        "properties": {
+          "match": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          }
+        },
+        "title": "MatchResponse",
+        "type": "object"
+      },
+      "ProbeRequest": {
+        "properties": {
+          "claim": {
+            "additionalProperties": true,
+            "title": "Claim",
+            "type": "object"
+          },
+          "lease_duration_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested lease duration in seconds for window-aware matching.",
+            "title": "Lease Duration Seconds"
+          },
+          "lease_start_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested lease start. Omit/null means now.",
+            "title": "Lease Start Utc"
+          }
+        },
+        "title": "ProbeRequest",
+        "type": "object"
+      },
+      "ProjectionIdentityResponse": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "digest"
+        ],
+        "title": "ProjectionIdentityResponse",
+        "type": "object"
+      },
+      "ReleaseRequest": {
+        "description": "Body accepted by ``POST /api/v1/capacity/releases``.\n\nIdentify the reservation either directly or by the deal ref it was\nreserved under (escrow_uid).",
+        "properties": {
+          "capacity_reservation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capacity Reservation Id"
+          },
+          "deal_ref": {
+            "additionalProperties": true,
+            "title": "Deal Ref",
+            "type": "object"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "failure_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recorded on the reservation when releasing after a failure.",
+            "title": "Failure Reason"
+          }
+        },
+        "title": "ReleaseRequest",
+        "type": "object"
+      },
+      "ReservationListResponse": {
+        "properties": {
+          "reservations": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Reservations",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reservations",
+          "total"
+        ],
+        "title": "ReservationListResponse",
+        "type": "object"
+      },
+      "ReservationResponse": {
+        "properties": {
+          "reservation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation"
+          }
+        },
+        "title": "ReservationResponse",
+        "type": "object"
+      },
+      "ReserveRequest": {
+        "properties": {
+          "claim": {
+            "additionalProperties": true,
+            "title": "Claim",
+            "type": "object"
+          },
+          "deal_ref": {
+            "additionalProperties": true,
+            "description": "Opaque storefront bookkeeping keys (listing_id, escrow_uid, owner callback), recorded on the reservation so deal-scoped events route back to the owning storefront.",
+            "title": "Deal Ref",
+            "type": "object"
+          },
+          "lease_duration_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested lease duration in seconds for window-aware matching.",
+            "title": "Lease Duration Seconds"
+          },
+          "lease_start_utc": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested lease start. Omit/null means now.",
+            "title": "Lease Start Utc"
+          },
+          "ttl_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional soft-hold TTL (two-phase reserve): the reservation auto-expires unless committed before the deadline.",
+            "title": "Ttl Seconds"
+          }
+        },
+        "title": "ReserveRequest",
+        "type": "object"
+      },
+      "ResourceListResponse": {
+        "properties": {
+          "resources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Resources",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "resources",
+          "total"
+        ],
+        "title": "ResourceListResponse",
+        "type": "object"
+      },
+      "ResourcePoolProjectionResponse": {
+        "properties": {
+          "digest": {
+            "title": "Digest",
+            "type": "string"
+          },
+          "resource_pools": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Resource Pools",
+            "type": "array"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "digest",
+          "resource_pools"
+        ],
+        "title": "ResourcePoolProjectionResponse",
+        "type": "object"
+      },
+      "ResourceRegisterRequest": {
+        "description": "Body accepted by ``PUT /api/v1/capacity/resources/{resource_id}``.\n\nThe declaration's fields, with the resource id taken from the path. Two\nfields differ from a declaration for the endpoint's existing callers:\n``resource_type`` defaults, and ``capacity`` may be replaced by the\nlegacy scalar ``total_units``.",
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "description": "Categorical facts claims match by equality (gpu_model, region, \u2026). None may name one of the declaration's own identity fields.",
+            "propertyNames": {
+              "minLength": 1
+            },
+            "title": "Attributes",
+            "type": "object"
+          },
+          "capacity": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "propertyNames": {
+                  "minLength": 1
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multidimensional total capacity, authoritative for exactly the dimensions it names, e.g. {'gpu_count': 8, 'vcpu_count': 192, 'ram_gb': 2048, 'disk_gb': 20000}. When omitted, the declaration is {<mirror dimension>: total_units}.",
+            "title": "Capacity"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "host_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The host this capacity is delivered through, if any. At most one declaration may name a given host.",
+            "title": "Host Id"
+          },
+          "pool_id": {
+            "description": "The Resource Pool this declaration belongs to. Required: a declaration is replaced whole, so a defaulted pool would move it.",
+            "minLength": 1,
+            "title": "Pool Id",
+            "type": "string"
+          },
+          "resource_subtype": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e.g. the GPU model slug ('h200').",
+            "title": "Resource Subtype"
+          },
+          "resource_type": {
+            "default": "compute.gpu",
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "total_units": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legacy scalar total of the composition's mirror dimension. Used only when ``capacity`` is omitted; when both are given they must agree on that dimension.",
+            "title": "Total Units"
+          }
+        },
+        "required": [
+          "pool_id"
+        ],
+        "title": "ResourceRegisterRequest",
+        "type": "object"
+      },
+      "SnapshotResponse": {
+        "properties": {
+          "resources": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Resources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "resources"
+        ],
+        "title": "SnapshotResponse",
+        "type": "object"
+      },
+      "TruncateLeaseRequest": {
+        "properties": {
+          "lease_end_utc": {
+            "title": "Lease End Utc",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_end_utc"
+        ],
+        "title": "TruncateLeaseRequest",
+        "type": "object"
+      },
+      "UsageListResponse": {
+        "properties": {
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "events",
+          "total"
+        ],
+        "title": "UsageListResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifyRequest": {
+        "properties": {
+          "secret": {
+            "minLength": 1,
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "title": "VerifyRequest",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Keys, prepaid credit grants, and consumption accounting for token-gated services sold on the marketplace, plus this site's quota ledger.\n\n## Authentication\n\nEvery non-health request carries a marketplace signature, and every response is signed in return -- refusals included. Callers are authorised by role: `seller` for the storefront selling these credits, `service` for the gated application spending them, and `admin` for manual operation.\n\nA deployment with no identity provisioned falls back to the `X-Admin-Key` shared-secret gate.\n\nCallers are the seller's storefront (issuance, guard lookups, capacity) and the gated service's middlewares (consume/verify). `/health`, `/docs`, and `/redoc` bypass authentication.",
+    "title": "API-Credits Service",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/capacity/events": {
+      "get": {
+        "description": "Anonymous availability deltas newer than ``after``.\n\nEvents carry *that* availability changed and where \u2014 never whose\ndeal caused it.",
+        "operationId": "events_api_v1_capacity_events_get",
+        "parameters": [
+          {
+            "description": "Last applied version.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Last applied version.",
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityEventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Versioned capacity-change feed",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/probe": {
+      "post": {
+        "operationId": "probe_api_v1_capacity_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dry-run claim match",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/releases": {
+      "post": {
+        "description": "Release by capacity_reservation_id or by deal ref (escrow_uid).\n\nIdempotent: releasing an already-released or unknown reservation\nreturns ``reservation: null``.",
+        "operationId": "release_api_v1_capacity_releases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Return held capacity to the pool",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/reservations": {
+      "get": {
+        "operationId": "list_reservations_api_v1_capacity_reservations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "escrow_uid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Escrow Uid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List ledger reservations",
+        "tags": [
+          "capacity"
+        ]
+      },
+      "post": {
+        "description": "Reserve capacity matching the claim.\n\nReturns ``reservation: null`` (not an error status) when nothing\nmatches \u2014 \"no capacity\" is a routine answer the aggregator routes\naround, not an exceptional condition.",
+        "operationId": "reserve_api_v1_capacity_reservations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReserveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Atomically check-and-reserve capacity",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/reservations/{capacity_reservation_id}": {
+      "get": {
+        "operationId": "get_reservation_api_v1_capacity_reservations__capacity_reservation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capacity_reservation_id",
+            "required": true,
+            "schema": {
+              "title": "Capacity Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a ledger reservation",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/reservations/{capacity_reservation_id}/commit": {
+      "post": {
+        "operationId": "commit_api_v1_capacity_reservations__capacity_reservation_id__commit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capacity_reservation_id",
+            "required": true,
+            "schema": {
+              "title": "Capacity Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm a reservation into an active lease",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease": {
+      "post": {
+        "description": "Shorten an active lease (settlement decided the deal is over).\n\nThe injected compute lease watchdog observes the new expiry through the\nnormal lease-end path. Returns ``reservation: null`` when the reservation\nis unknown or no longer held.",
+        "operationId": "truncate_lease_api_v1_capacity_reservations__capacity_reservation_id__truncate_lease_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "capacity_reservation_id",
+            "required": true,
+            "schema": {
+              "title": "Capacity Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TruncateLeaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "End a lease early",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/resources": {
+      "get": {
+        "operationId": "list_resources_api_v1_capacity_resources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List ledger resources with availability",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/resources/{resource_id}": {
+      "put": {
+        "description": "Declare, or replace the declaration of, one capacity resource.\n\nThe operator administration surface for sellable capacity. A\ndeclaration is authoritative for the shape and quantity it names \u2014\nevery dimension in ``capacity``, including any GPU count \u2014 and for\nnothing it omits. Whether it may be admitted against is decided by its\npool, not by the declaration.\n\nThe request replaces the whole declaration, which is why ``pool_id``\nis required. Moving a resource to another pool is refused while it\nholds a live capacity obligation (409). A ``host_id`` another resource\nalready names is refused (409); a pool the site does not have, or an\ninconsistent or empty declaration, is refused (422).",
+        "operationId": "register_resource_api_v1_capacity_resources__resource_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "resource_id",
+            "required": true,
+            "schema": {
+              "title": "Resource Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResourceRegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Register Resource Api V1 Capacity Resources  Resource Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declare or update a capacity resource",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/site-capacity-buckets": {
+      "get": {
+        "operationId": "capacity_bucket_projection_api_v1_capacity_site_capacity_buckets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityBucketProjectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Capacity Bucket Projection",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/site-capacity-buckets/version": {
+      "get": {
+        "operationId": "capacity_bucket_projection_version_api_v1_capacity_site_capacity_buckets_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectionIdentityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Capacity Bucket Projection Version",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/site-resource-pools": {
+      "get": {
+        "operationId": "resource_pool_projection_api_v1_capacity_site_resource_pools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourcePoolProjectionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Resource Pool Projection",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/site-resource-pools/version": {
+      "get": {
+        "operationId": "resource_pool_projection_version_api_v1_capacity_site_resource_pools_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectionIdentityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Resource Pool Projection Version",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/capacity/snapshot": {
+      "get": {
+        "description": "Negotiation-time policy input; consumes nothing.",
+        "operationId": "snapshot_api_v1_capacity_snapshot_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Advisory availability snapshot",
+        "tags": [
+          "capacity"
+        ]
+      }
+    },
+    "/api/v1/issuance": {
+      "post": {
+        "description": "Commit or replay one immutable fulfillment grant.",
+        "operationId": "issue_api_v1_issuance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssuanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fulfill a deal: quota commit + key + credit grant",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/issuance/{fulfillment_id}": {
+      "get": {
+        "operationId": "get_issuance_api_v1_issuance__fulfillment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "fulfillment_id",
+            "required": true,
+            "schema": {
+              "title": "Fulfillment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve a committed grant without bearer material",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys": {
+      "get": {
+        "operationId": "list_keys_api_v1_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List keys (no secrets)",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/consume-batch": {
+      "post": {
+        "description": "Items are independent; per-item outcomes return in order with\na 200 overall (a failed item is not an HTTP failure).",
+        "operationId": "consume_batch_api_v1_keys_consume_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumeBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsumeBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply a middleware flush of consume items",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}": {
+      "get": {
+        "description": "The negotiation guards' key\u2192owner lookup rides this endpoint.",
+        "operationId": "get_key_api_v1_keys__key_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Key Api V1 Keys  Key Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Key detail \u2014 status, ownership claim, balance",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/adjust": {
+      "post": {
+        "operationId": "adjust_api_v1_keys__key_id__adjust_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adjust Api V1 Keys  Key Id  Adjust Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Operator credit adjustment (recorded as a grant)",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/consume": {
+      "post": {
+        "operationId": "consume_api_v1_keys__key_id__consume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decrement credits (402 when exhausted)",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/grants": {
+      "get": {
+        "operationId": "list_grants_api_v1_keys__key_id__grants_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Credit grants for a key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/revoke": {
+      "post": {
+        "operationId": "revoke_api_v1_keys__key_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Api V1 Keys  Key Id  Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke a key (idempotent)",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/usage": {
+      "get": {
+        "operationId": "list_usage_api_v1_keys__key_id__usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_id",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consumption log for a key (paged by event id)",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/keys/{key_id}/verify": {
+      "post": {
+        "description": "POST (not GET) so the secret rides the body, never a URL.",
+        "operationId": "verify_api_v1_keys__key_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify Api V1 Keys  Key Id  Verify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify a presented bearer secret",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
+    "/api/v1/system/health": {
+      "get": {
+        "operationId": "health_api_v1_system_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Api V1 System Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/system/version": {
+      "get": {
+        "operationId": "version_api_v1_system_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Version Api V1 System Version Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Issuance (market-facing), consume/verify (middleware-facing), and key administration.",
+      "name": "keys"
+    },
+    {
+      "description": "Site-authority quota ledger \u2014 snapshot, probe, reserve/commit/release, and the versioned event feed.",
+      "name": "capacity"
+    },
+    {
+      "description": "Health and version.",
+      "name": "system"
+    }
+  ]
+}

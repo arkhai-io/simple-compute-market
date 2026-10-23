@@ -1,0 +1,2957 @@
+{
+  "migrations": [
+    "20260604_000_listing_resource_timestamps",
+    "20260604_004_negotiation_amount_text_columns",
+    "20260604_005_escrows_and_listings",
+    "20260722_001_capacity_holds_reservation_id",
+    "20260810_003_negotiation_provision_terms",
+    "20260811_001_marketplace_principals_v2",
+    "20260811_002_replay_attempt_leases",
+    "20260815_001_storefront_domain_bindings",
+    "20260911_001_listing_resource_column",
+    "20260923_001_listing_binding_capacity_backing",
+    "20260923_002_listing_binding_capacity_backing_required",
+    "20260923_003_listing_closed_by",
+    "20261001_001_listing_rate_structure",
+    "20260810_001_settlement_obligation_lifecycle",
+    "20260810_002_settlement_servicing_runtime",
+    "20260811_003_settlement_principal_authorization",
+    "20260815_004_settlement_mechanism_materialization_params",
+    "20260810_001_escrow_settlement_identity",
+    "20260815_002_issuance_evidence"
+  ],
+  "tables": {
+    "api_credit_issuance_evidence": {
+      "columns": [
+        {
+          "default": null,
+          "name": "evidence_digest",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "signed_evidence",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "evidence_digest"
+          ],
+          "name": "sqlite_autoindex_api_credit_issuance_evidence_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "fulfillment_id"
+          ],
+          "name": "sqlite_autoindex_api_credit_issuance_evidence_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE api_credit_issuance_evidence (\n          evidence_digest TEXT PRIMARY KEY,\n          fulfillment_id TEXT NOT NULL UNIQUE,\n          signed_evidence TEXT NOT NULL,\n          created_at TEXT NOT NULL\n        )",
+      "triggers": []
+    },
+    "api_credit_issuance_progress": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "public_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "name": "public_result",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "credentials_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "delivery_started_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_api_credit_issuance_progress_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "public_ref"
+          ],
+          "name": "sqlite_autoindex_api_credit_issuance_progress_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE api_credit_issuance_progress (\n          negotiation_id TEXT PRIMARY KEY,\n          public_ref TEXT NOT NULL UNIQUE,\n          status TEXT NOT NULL CHECK(status IN ('provisioning', 'ready', 'failed')),\n          fulfillment_uid TEXT,\n          public_result TEXT NOT NULL DEFAULT '{}',\n          credentials_ref TEXT,\n          reason TEXT,\n          delivery_started_at TEXT,\n          created_at TEXT NOT NULL,\n          updated_at TEXT NOT NULL\n        )",
+      "triggers": []
+    },
+    "api_credit_private_results": {
+      "columns": [
+        {
+          "default": null,
+          "name": "credentials_ref",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "owner_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "secret",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "owner_scheme",
+            "owner_id",
+            "credentials_ref"
+          ],
+          "name": "idx_api_credit_private_result_owner",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_api_credit_private_result_owner ON api_credit_private_results(owner_scheme, owner_id, credentials_ref)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "credentials_ref"
+          ],
+          "name": "sqlite_autoindex_api_credit_private_results_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "fulfillment_id"
+          ],
+          "name": "sqlite_autoindex_api_credit_private_results_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE api_credit_private_results (\n          credentials_ref TEXT PRIMARY KEY,\n          fulfillment_id TEXT NOT NULL UNIQUE,\n          owner_scheme TEXT NOT NULL,\n          owner_id TEXT NOT NULL,\n          key_id TEXT NOT NULL,\n          secret TEXT NOT NULL,\n          created_at TEXT NOT NULL\n        )",
+      "triggers": []
+    },
+    "api_credit_settlement_evidence": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "mechanism",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "agreement_digest",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "settlement_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "evidence",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_api_credit_settlement_evidence_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "settlement_ref"
+          ],
+          "name": "sqlite_autoindex_api_credit_settlement_evidence_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE api_credit_settlement_evidence (\n          negotiation_id TEXT PRIMARY KEY,\n          mechanism TEXT NOT NULL,\n          agreement_digest TEXT NOT NULL,\n          settlement_ref TEXT UNIQUE,\n          status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed', 'refunding', 'refunded')),\n          evidence TEXT NOT NULL\n        )",
+      "triggers": []
+    },
+    "auth_replay_reservations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "request_id",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "response_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "response_body",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "attempt_token",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "lease_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "principal_scheme",
+            "principal_identifier",
+            "request_id"
+          ],
+          "name": "sqlite_autoindex_auth_replay_reservations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE auth_replay_reservations (\n                  principal_scheme TEXT NOT NULL,\n                  principal_identifier TEXT NOT NULL,\n                  request_id TEXT NOT NULL,\n                  request_hash TEXT NOT NULL,\n                  response_status INTEGER,\n                  response_body TEXT,\n                  attempt_token TEXT,\n                  lease_until INTEGER,\n                  created_at TEXT NOT NULL,\n                  PRIMARY KEY (principal_scheme, principal_identifier, request_id)\n                )",
+      "triggers": []
+    },
+    "capacity_holds": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "payload",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_capacity_holds_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE capacity_holds (\n                  negotiation_id TEXT PRIMARY KEY,\n                  listing_id TEXT,\n                  capacity_reservation_id TEXT NOT NULL,\n                  payload TEXT,\n                  expires_at TEXT,\n                  created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))\n                )",
+      "triggers": []
+    },
+    "credentials": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "granted_to",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "password",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "ssh_commands",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "ssh_key_path_host",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "key_type",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "listing_id",
+            "granted_to"
+          ],
+          "name": "idx_credentials_listing_granted",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_credentials_listing_granted ON credentials(listing_id, granted_to)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "listing_id"
+          ],
+          "name": "idx_credentials_listing_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_credentials_listing_id ON credentials(listing_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_credentials_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE credentials (\n                  id TEXT PRIMARY KEY,\n                  listing_id TEXT NOT NULL,\n                  role TEXT NOT NULL,\n                  granted_to TEXT NOT NULL,\n                  password TEXT,\n                  ssh_commands TEXT,\n                  ssh_key_path_host TEXT,\n                  key_type TEXT,\n                  created_at TEXT NOT NULL\n                )",
+      "triggers": []
+    },
+    "credit_deal_terms": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "quantity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "'new'",
+          "name": "key_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_credit_deal_terms_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE credit_deal_terms (\n              negotiation_id TEXT PRIMARY KEY,\n              quantity INTEGER NOT NULL,\n              key_mode TEXT NOT NULL DEFAULT 'new',\n              key_id TEXT,\n              created_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))\n            )",
+      "triggers": []
+    },
+    "deal_heartbeats": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "deal_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "seller_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "seller_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "sent_at_unix",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "name": "payload",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "received_at_unix",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "REAL"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "deal_ref",
+            "sent_at_unix"
+          ],
+          "name": "idx_heartbeats_deal",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_heartbeats_deal ON deal_heartbeats(deal_ref, sent_at_unix)",
+          "unique": false
+        }
+      ],
+      "sql": "CREATE TABLE deal_heartbeats (\n                  id INTEGER PRIMARY KEY AUTOINCREMENT,\n                  deal_ref TEXT NOT NULL,\n                  buyer_scheme TEXT NOT NULL,\n                  buyer_identifier TEXT NOT NULL,\n                  seller_scheme TEXT NOT NULL,\n                  seller_identifier TEXT NOT NULL,\n                  sent_at_unix REAL NOT NULL,\n                  payload TEXT,\n                  received_at_unix REAL NOT NULL\n                )",
+      "triggers": []
+    },
+    "escrows": {
+      "columns": [
+        {
+          "default": null,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "chain_name",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "escrow_address",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "is_primary",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "provisioning_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "connection_details",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "tenant_credentials",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_context",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_phase",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "processing_owner",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "processing_lease_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "obligation_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "obligation_index",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id",
+            "obligation_index"
+          ],
+          "name": "idx_credit_escrows_negotiation_obligation",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_credit_escrows_negotiation_obligation ON escrows(negotiation_id, obligation_index)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "obligation_ref"
+          ],
+          "name": "idx_credit_escrows_obligation_ref",
+          "origin": "c",
+          "sql": "CREATE UNIQUE INDEX idx_credit_escrows_obligation_ref ON escrows(obligation_ref) WHERE obligation_ref IS NOT NULL",
+          "unique": true
+        },
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "idx_escrows_negotiation",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_escrows_negotiation ON escrows(negotiation_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "idx_escrows_status",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_escrows_status ON escrows(status)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "escrow_uid"
+          ],
+          "name": "sqlite_autoindex_escrows_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE escrows (\n                  escrow_uid TEXT PRIMARY KEY,\n                  negotiation_id TEXT NOT NULL,\n                  status TEXT NOT NULL,\n                  chain_name TEXT,\n                  escrow_address TEXT,\n                  is_primary INTEGER NOT NULL DEFAULT 1,\n                  fulfillment_uid TEXT,\n                  provisioning_job_id TEXT,\n                  connection_details TEXT,\n                  tenant_credentials TEXT,\n                  reason TEXT,\n                  -- Durable physical-fulfillment identity, so a caller can\n                  -- resume checking progress after a storefront restart\n                  -- without redispatching. Distinct from fulfillment_uid\n                  -- above (the on-chain settlement-claim identity) --\n                  -- see ARCHITECTURE.md's \"Shared vocabulary and identities\".\n                  capacity_reservation_id TEXT,\n                  settlement_resource_id TEXT,\n                  fulfillment_id TEXT,\n                  fulfillment_context TEXT,\n                  fulfillment_phase TEXT,\n                  processing_owner TEXT,\n                  processing_lease_until TEXT,\n                  created_at TEXT NOT NULL,\n                  updated_at TEXT NOT NULL\n                , obligation_ref TEXT, obligation_index INTEGER)",
+      "triggers": []
+    },
+    "identity_audit": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "action",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "actor_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "actor_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "target_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "target_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "operation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "authority",
+            "operation_id"
+          ],
+          "name": "sqlite_autoindex_identity_audit_1",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE identity_audit (\n                  id INTEGER PRIMARY KEY AUTOINCREMENT,\n                  authority TEXT NOT NULL,\n                  subject TEXT NOT NULL,\n                  action TEXT NOT NULL,\n                  actor_scheme TEXT NOT NULL,\n                  actor_identifier TEXT NOT NULL,\n                  target_scheme TEXT,\n                  target_identifier TEXT,\n                  operation_id TEXT NOT NULL,\n                  created_at INTEGER NOT NULL,\n                  UNIQUE (authority, operation_id)\n                )",
+      "triggers": []
+    },
+    "identity_bindings": {
+      "columns": [
+        {
+          "default": null,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 4,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "overlap_until",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "authority",
+          "table": "identity_subjects",
+          "to": "authority"
+        },
+        {
+          "from": "subject",
+          "table": "identity_subjects",
+          "to": "subject"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "authority",
+            "principal_scheme",
+            "principal_identifier"
+          ],
+          "name": "idx_identity_binding_active_owner",
+          "origin": "c",
+          "sql": "CREATE UNIQUE INDEX idx_identity_binding_active_owner\n                ON identity_bindings (\n                  authority, principal_scheme, principal_identifier\n                )\n                WHERE status IN ('primary', 'overlap')\n                ",
+          "unique": true
+        },
+        {
+          "columns": [
+            "authority",
+            "subject",
+            "principal_scheme",
+            "principal_identifier"
+          ],
+          "name": "sqlite_autoindex_identity_bindings_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE identity_bindings (\n                  authority TEXT NOT NULL,\n                  subject TEXT NOT NULL,\n                  principal_scheme TEXT NOT NULL,\n                  principal_identifier TEXT NOT NULL,\n                  status TEXT NOT NULL CHECK (\n                    status IN ('primary', 'overlap', 'disabled', 'retired')\n                  ),\n                  overlap_until INTEGER,\n                  created_at INTEGER NOT NULL,\n                  updated_at INTEGER NOT NULL,\n                  PRIMARY KEY (\n                    authority, subject, principal_scheme, principal_identifier\n                  ),\n                  FOREIGN KEY (authority, subject)\n                    REFERENCES identity_subjects(authority, subject)\n                )",
+      "triggers": []
+    },
+    "identity_claims": {
+      "columns": [
+        {
+          "default": null,
+          "name": "claim_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "resource_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "operation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "claim_id"
+          ],
+          "name": "sqlite_autoindex_identity_claims_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "resource_id",
+            "role",
+            "operation_id"
+          ],
+          "name": "sqlite_autoindex_identity_claims_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE identity_claims (\n                  claim_id TEXT PRIMARY KEY,\n                  resource_id TEXT NOT NULL,\n                  role TEXT NOT NULL,\n                  principal_scheme TEXT NOT NULL,\n                  principal_identifier TEXT NOT NULL,\n                  operation_id TEXT NOT NULL,\n                  status TEXT NOT NULL,\n                  created_at TEXT NOT NULL,\n                  UNIQUE (resource_id, role, operation_id)\n                )",
+      "triggers": []
+    },
+    "identity_rotations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "nonce",
+          "not_null": true,
+          "primary_key": 3,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "intent_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "current_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "current_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "replacement_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "replacement_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "overlap_until",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "authority",
+            "subject",
+            "nonce"
+          ],
+          "name": "sqlite_autoindex_identity_rotations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE identity_rotations (\n                  authority TEXT NOT NULL,\n                  subject TEXT NOT NULL,\n                  nonce TEXT NOT NULL,\n                  intent_hash TEXT NOT NULL,\n                  current_scheme TEXT NOT NULL,\n                  current_identifier TEXT NOT NULL,\n                  replacement_scheme TEXT NOT NULL,\n                  replacement_identifier TEXT NOT NULL,\n                  overlap_until INTEGER NOT NULL,\n                  applied_at INTEGER NOT NULL,\n                  PRIMARY KEY (authority, subject, nonce)\n                )",
+      "triggers": []
+    },
+    "identity_subjects": {
+      "columns": [
+        {
+          "default": null,
+          "name": "authority",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "subject",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "authority",
+            "subject"
+          ],
+          "name": "sqlite_autoindex_identity_subjects_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE identity_subjects (\n                  authority TEXT NOT NULL,\n                  subject TEXT NOT NULL,\n                  role TEXT NOT NULL,\n                  created_at INTEGER NOT NULL,\n                  updated_at INTEGER NOT NULL,\n                  PRIMARY KEY (authority, subject)\n                )",
+      "triggers": []
+    },
+    "listings": {
+      "columns": [
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "listing_resource",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_resource",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "max_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "seller_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "seller_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "oracle_address",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "paused",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "accepted_escrows",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "settlement_options",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "publication_clauses",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "demands",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "storefront_url",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "closed_by",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "rate_structure",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "created_at"
+          ],
+          "name": "idx_listings_created_at",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_listings_created_at ON listings(created_at)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "idx_listings_status",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_listings_status ON listings(status)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "name": "idx_listings_updated_at",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_listings_updated_at ON listings(updated_at)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "listing_id"
+          ],
+          "name": "sqlite_autoindex_listings_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE listings (\n                  listing_id TEXT PRIMARY KEY,\n                  status TEXT NOT NULL,\n                  created_at TEXT NOT NULL,\n                  updated_at TEXT NOT NULL,\n                  listing_resource TEXT NOT NULL,\n                  fulfillment_resource TEXT,\n                  max_duration_seconds INTEGER,\n                  seller_scheme TEXT NOT NULL,\n                  seller_identifier TEXT NOT NULL,\n                  oracle_address TEXT,\n                  paused INTEGER NOT NULL DEFAULT 0,\n                  accepted_escrows TEXT,\n                  settlement_options TEXT,\n                  publication_clauses TEXT,\n                  demands TEXT\n                , storefront_url TEXT, closed_by TEXT CHECK (closed_by IN ('seller', 'reconciliation')), rate_structure TEXT)",
+      "triggers": [
+        {
+          "name": "listing_closed_by_consistent_insert",
+          "sql": "CREATE TRIGGER listing_closed_by_consistent_insert\n            BEFORE INSERT ON listings\n            WHEN (NEW.status = 'closed' AND NEW.closed_by IS NULL)\n              OR (NEW.status IS NOT 'closed' AND NEW.closed_by IS NOT NULL)\n            BEGIN\n              SELECT RAISE(\n                ABORT, 'a closed listing records closed_by; an open one does not'\n              );\n            END"
+        },
+        {
+          "name": "listing_closed_by_consistent_update",
+          "sql": "CREATE TRIGGER listing_closed_by_consistent_update\n            BEFORE UPDATE ON listings\n            WHEN (NEW.status = 'closed' AND NEW.closed_by IS NULL)\n              OR (NEW.status IS NOT 'closed' AND NEW.closed_by IS NOT NULL)\n            BEGIN\n              SELECT RAISE(\n                ABORT, 'a closed listing records closed_by; an open one does not'\n              );\n            END"
+        },
+        {
+          "name": "listings_principal_insert",
+          "sql": "CREATE TRIGGER listings_principal_insert\n            BEFORE INSERT ON listings\n            WHEN NEW.storefront_url IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        },
+        {
+          "name": "listings_principal_update",
+          "sql": "CREATE TRIGGER listings_principal_update\n            BEFORE UPDATE ON listings\n            WHEN NEW.storefront_url IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        }
+      ]
+    },
+    "negotiation_local_state": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "our_initial_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "our_strategy",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "negotiation_id",
+          "table": "negotiation_threads",
+          "to": "negotiation_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id",
+            "owner_id"
+          ],
+          "name": "sqlite_autoindex_negotiation_local_state_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE negotiation_local_state (\n                  negotiation_id TEXT NOT NULL,\n                  owner_id TEXT NOT NULL,\n                  our_initial_price TEXT,\n                  our_strategy TEXT,\n                  PRIMARY KEY(negotiation_id, owner_id),\n                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id)\n                )",
+      "triggers": []
+    },
+    "negotiation_messages": {
+      "columns": [
+        {
+          "default": null,
+          "name": "message_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "round",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "sender_role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "sender_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "sender_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "our_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "their_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "proposed_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "action_taken",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "message_type",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "timestamp",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "negotiation_id",
+          "table": "negotiation_threads",
+          "to": "negotiation_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "idx_negotiation_messages_negotiation_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_messages_negotiation_id ON negotiation_messages(negotiation_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "negotiation_id",
+            "round"
+          ],
+          "name": "idx_negotiation_messages_round",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_messages_round ON negotiation_messages(negotiation_id, round)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "negotiation_id",
+            "round"
+          ],
+          "name": "sqlite_autoindex_negotiation_messages_1",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE negotiation_messages (\n                  message_id INTEGER PRIMARY KEY AUTOINCREMENT,\n                  negotiation_id TEXT NOT NULL,\n                  round INTEGER NOT NULL,\n                  sender_role TEXT NOT NULL,\n                  sender_scheme TEXT NOT NULL,\n                  sender_identifier TEXT NOT NULL,\n                  our_price TEXT,\n                  their_price TEXT,\n                  proposed_price TEXT,\n                  action_taken TEXT NOT NULL,\n                  message_type TEXT NOT NULL,\n                  timestamp TEXT NOT NULL,\n                  FOREIGN KEY(negotiation_id) REFERENCES negotiation_threads(negotiation_id),\n                  UNIQUE(negotiation_id, round)\n                )",
+      "triggers": [
+        {
+          "name": "negotiation_messages_principal_insert",
+          "sql": "CREATE TRIGGER negotiation_messages_principal_insert\n            BEFORE INSERT ON negotiation_messages\n            WHEN NEW.sender_role IS NULL OR NEW.sender_scheme IS NULL OR NEW.sender_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        },
+        {
+          "name": "negotiation_messages_principal_update",
+          "sql": "CREATE TRIGGER negotiation_messages_principal_update\n            BEFORE UPDATE ON negotiation_messages\n            WHEN NEW.sender_role IS NULL OR NEW.sender_scheme IS NULL OR NEW.sender_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        }
+      ]
+    },
+    "negotiation_threads": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "our_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "their_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "our_agent_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "their_agent_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'active'",
+          "name": "status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "terminal_state",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "requested_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "requested_start_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_escrow_proposal",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "provision_terms",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "settlement_plan",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "agreed_price",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "agreed_duration_seconds",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "agreed_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "agreement_bytes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "BLOB"
+        },
+        {
+          "default": null,
+          "name": "settlement_data",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "seller_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "seller_identifier",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "matched_offer_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "domain_listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "site_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "domain_identity",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "contract_major",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "contract_minor",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "domain_identity",
+            "contract_major",
+            "contract_minor",
+            "offering_mode"
+          ],
+          "name": "idx_negotiation_threads_domain_binding",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_domain_binding ON negotiation_threads(domain_identity, contract_major, contract_minor, offering_mode)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "domain_listing_id"
+          ],
+          "name": "idx_negotiation_threads_domain_listing",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_domain_listing ON negotiation_threads(domain_listing_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "our_agent_id"
+          ],
+          "name": "idx_negotiation_threads_our_agent_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_our_agent_id ON negotiation_threads(our_agent_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "our_listing_id"
+          ],
+          "name": "idx_negotiation_threads_our_listing_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_our_listing_id ON negotiation_threads(our_listing_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "idx_negotiation_threads_status",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_status ON negotiation_threads(status)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "their_agent_id"
+          ],
+          "name": "idx_negotiation_threads_their_agent_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_their_agent_id ON negotiation_threads(their_agent_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "their_listing_id"
+          ],
+          "name": "idx_negotiation_threads_their_listing_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_negotiation_threads_their_listing_id ON negotiation_threads(their_listing_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_negotiation_threads_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE negotiation_threads (\n                  negotiation_id TEXT PRIMARY KEY,\n                  our_listing_id TEXT,\n                  their_listing_id TEXT,\n                  our_agent_id TEXT,\n                  their_agent_id TEXT,\n                  status TEXT DEFAULT 'active',\n                  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n                  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),\n                  terminal_state TEXT,\n                  -- Buyer's duration ask, captured at /negotiate/new and validated\n                  -- against the listing's max_duration_seconds (NULL there means\n                  -- unlimited). Stays for the lifetime of the thread; the agreed\n                  -- value below is just an echo when the negotiation succeeds.\n                  requested_duration_seconds INTEGER,\n                  requested_start_utc TEXT,\n                  -- Buyer's escrow shape proposal \u2014 opaque JSON blob captured at\n                  -- /negotiate/new (validated against the listing's acceptance\n                  -- set). Persisted because settlement-time verification\n                  -- reconstructs the expected on-chain obligation_data from\n                  -- this; reading from the thread instead of re-deriving from\n                  -- the listing means the negotiated artifact is the literal\n                  -- source of truth.\n                  buyer_escrow_proposal TEXT,\n                  -- Accepted schema-owned delivery input, reloaded server-side\n                  -- rather than trusted from a later settlement request.\n                  provision_terms TEXT,\n                  -- Immutable accepted settlement plan pinned at seller acceptance.\n                  settlement_plan TEXT,\n                  -- Committed agreement artifact: populated when terminal_state='success'.\n                  -- Captures the negotiation's output as queryable state so settlement\n                  -- can run (or be retried) as a separate step without replaying rounds.\n                  agreed_price TEXT,\n                  agreed_duration_seconds INTEGER,\n                  agreed_at TEXT,\n                  agreement_bytes BLOB,\n                  settlement_data TEXT,\n                  buyer_scheme TEXT,\n                  buyer_identifier TEXT,\n                  seller_scheme TEXT,\n                  seller_identifier TEXT,\n                  matched_offer_id TEXT, domain_listing_id TEXT, site_id TEXT, offering_mode TEXT, domain_identity TEXT, contract_major INTEGER, contract_minor INTEGER,\n                  CHECK ((buyer_scheme IS NULL) = (buyer_identifier IS NULL)),\n                  CHECK ((seller_scheme IS NULL) = (seller_identifier IS NULL))\n                )",
+      "triggers": [
+        {
+          "name": "negotiation_domain_binding_complete_insert",
+          "sql": "CREATE TRIGGER negotiation_domain_binding_complete_insert\n        BEFORE INSERT ON negotiation_threads\n        WHEN (\n          NEW.domain_listing_id IS NULL\n          OR NEW.site_id IS NULL\n          OR NEW.offering_mode IS NULL\n          OR NEW.domain_identity IS NULL\n          OR NEW.contract_major IS NULL\n          OR NEW.contract_minor IS NULL\n        ) AND NOT (\n          NEW.domain_listing_id IS NULL\n          AND NEW.site_id IS NULL\n          AND NEW.offering_mode IS NULL\n          AND NEW.domain_identity IS NULL\n          AND NEW.contract_major IS NULL\n          AND NEW.contract_minor IS NULL\n        )\n        BEGIN\n          SELECT RAISE(ABORT, 'negotiation domain binding is incomplete');\n        END"
+        },
+        {
+          "name": "negotiation_domain_binding_immutable",
+          "sql": "CREATE TRIGGER negotiation_domain_binding_immutable\n        BEFORE UPDATE OF\n          domain_listing_id, site_id, offering_mode, domain_identity,\n          contract_major, contract_minor\n        ON negotiation_threads\n        WHEN OLD.domain_identity IS NOT NULL\n          AND (\n            NOT (OLD.domain_listing_id IS NEW.domain_listing_id)\n            OR NOT (OLD.site_id IS NEW.site_id)\n            OR NOT (OLD.offering_mode IS NEW.offering_mode)\n            OR NOT (OLD.domain_identity IS NEW.domain_identity)\n            OR NOT (OLD.contract_major IS NEW.contract_major)\n            OR NOT (OLD.contract_minor IS NEW.contract_minor)\n          )\n        BEGIN\n          SELECT RAISE(ABORT, 'negotiation domain binding is immutable');\n        END"
+        },
+        {
+          "name": "negotiation_domain_binding_owner_insert",
+          "sql": "CREATE TRIGGER negotiation_domain_binding_owner_insert\n        BEFORE INSERT ON negotiation_threads\n        WHEN NEW.domain_identity IS NOT NULL\n          AND NOT EXISTS (\n            SELECT 1\n            FROM storefront_listing_bindings binding\n            WHERE binding.listing_id = NEW.domain_listing_id\n              AND binding.site_id = NEW.site_id\n              AND binding.offering_mode = NEW.offering_mode\n              AND binding.domain_identity = NEW.domain_identity\n              AND binding.contract_major = NEW.contract_major\n              AND binding.contract_minor = NEW.contract_minor\n          )\n        BEGIN\n          SELECT RAISE(ABORT, 'negotiation domain binding disagrees with listing');\n        END"
+        },
+        {
+          "name": "negotiation_domain_binding_owner_update",
+          "sql": "CREATE TRIGGER negotiation_domain_binding_owner_update\n        BEFORE UPDATE OF\n          domain_listing_id, site_id, offering_mode, domain_identity,\n          contract_major, contract_minor\n        ON negotiation_threads\n        WHEN NEW.domain_identity IS NOT NULL\n          AND NOT EXISTS (\n            SELECT 1\n            FROM storefront_listing_bindings binding\n            WHERE binding.listing_id = NEW.domain_listing_id\n              AND binding.site_id = NEW.site_id\n              AND binding.offering_mode = NEW.offering_mode\n              AND binding.domain_identity = NEW.domain_identity\n              AND binding.contract_major = NEW.contract_major\n              AND binding.contract_minor = NEW.contract_minor\n          )\n        BEGIN\n          SELECT RAISE(ABORT, 'negotiation domain binding disagrees with listing');\n        END"
+        },
+        {
+          "name": "negotiation_threads_principal_insert",
+          "sql": "CREATE TRIGGER negotiation_threads_principal_insert\n            BEFORE INSERT ON negotiation_threads\n            WHEN NEW.buyer_scheme IS NULL OR NEW.buyer_identifier IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        },
+        {
+          "name": "negotiation_threads_principal_update",
+          "sql": "CREATE TRIGGER negotiation_threads_principal_update\n            BEFORE UPDATE ON negotiation_threads\n            WHEN NEW.buyer_scheme IS NULL OR NEW.buyer_identifier IS NULL OR NEW.seller_scheme IS NULL OR NEW.seller_identifier IS NULL\n            BEGIN\n              SELECT RAISE(ABORT, 'canonical principal fields are required');\n            END"
+        }
+      ]
+    },
+    "publications": {
+      "columns": [
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "registry_url",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "payload_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "published_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "registry_assigned_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "registry_url"
+          ],
+          "name": "idx_publications_registry",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_publications_registry ON publications(registry_url)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "name": "idx_publications_status",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_publications_status ON publications(status)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "listing_id",
+            "registry_url"
+          ],
+          "name": "sqlite_autoindex_publications_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE publications (\n                  listing_id TEXT NOT NULL,\n                  registry_url TEXT NOT NULL,\n                  payload_json TEXT NOT NULL,\n                  published_at INTEGER NOT NULL,\n                  registry_assigned_id TEXT,\n                  status TEXT NOT NULL,\n                  last_error TEXT,\n                  PRIMARY KEY (listing_id, registry_url)\n                )",
+      "triggers": []
+    },
+    "schema_migrations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE schema_migrations (\n          id TEXT PRIMARY KEY,\n          applied_at TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))\n        )",
+      "triggers": []
+    },
+    "service_peers": {
+      "columns": [
+        {
+          "default": null,
+          "name": "peer_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "role",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "site_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_scheme",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "principal_identifier",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "peer_id"
+          ],
+          "name": "sqlite_autoindex_service_peers_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "role",
+            "site_id"
+          ],
+          "name": "sqlite_autoindex_service_peers_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "role",
+            "principal_scheme",
+            "principal_identifier"
+          ],
+          "name": "sqlite_autoindex_service_peers_3",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE service_peers (\n                  peer_id TEXT PRIMARY KEY,\n                  role TEXT NOT NULL,\n                  site_id TEXT NOT NULL,\n                  principal_scheme TEXT NOT NULL,\n                  principal_identifier TEXT NOT NULL,\n                  status TEXT NOT NULL CHECK (status IN ('active', 'disabled', 'retired')),\n                  created_at TEXT NOT NULL,\n                  updated_at TEXT NOT NULL,\n                  UNIQUE (role, site_id),\n                  UNIQUE (role, principal_scheme, principal_identifier)\n                )",
+      "triggers": []
+    },
+    "settlement_obligations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "obligation_ref",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "agreement_ref",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "obligation_index",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "obligation_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "obligation",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "name": "mechanism_params",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "payer_principal",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "claimant_principal",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "mechanism_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "mechanism_status",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'{}'",
+          "name": "mechanism_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "buyer_action",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "condition_anchor",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "materialization_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "condition_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "collection_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "reclaim_state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "materialization_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "status_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "collection_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "reclaim_receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "version",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "agreement_ref",
+            "obligation_index"
+          ],
+          "name": "idx_settlement_obligations_agreement",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_settlement_obligations_agreement ON settlement_obligations(agreement_ref, obligation_index)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "mechanism_ref"
+          ],
+          "name": "idx_settlement_obligations_mechanism_ref",
+          "origin": "c",
+          "sql": "CREATE UNIQUE INDEX idx_settlement_obligations_mechanism_ref ON settlement_obligations(mechanism_ref) WHERE mechanism_ref IS NOT NULL",
+          "unique": true
+        },
+        {
+          "columns": [
+            "obligation_ref"
+          ],
+          "name": "sqlite_autoindex_settlement_obligations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "agreement_ref",
+            "obligation_index"
+          ],
+          "name": "sqlite_autoindex_settlement_obligations_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE settlement_obligations (\n          obligation_ref TEXT PRIMARY KEY,\n          agreement_ref TEXT NOT NULL,\n          obligation_index INTEGER NOT NULL CHECK (obligation_index >= 0),\n          obligation_hash TEXT NOT NULL,\n          obligation TEXT NOT NULL,\n          mechanism_params TEXT NOT NULL DEFAULT '{}',\n          payer_principal TEXT NOT NULL,\n          claimant_principal TEXT NOT NULL,\n          mechanism_ref TEXT,\n          mechanism_status TEXT,\n          mechanism_state TEXT NOT NULL DEFAULT '{}',\n          buyer_action TEXT,\n          condition_anchor TEXT,\n          fulfillment_ref TEXT,\n          materialization_state TEXT NOT NULL DEFAULT 'pending',\n          condition_state TEXT NOT NULL DEFAULT 'pending',\n          collection_state TEXT NOT NULL DEFAULT 'pending',\n          reclaim_state TEXT NOT NULL DEFAULT 'pending',\n          materialization_receipt TEXT,\n          status_receipt TEXT,\n          collection_receipt TEXT,\n          reclaim_receipt TEXT,\n          last_error TEXT,\n          version INTEGER NOT NULL DEFAULT 0,\n          created_at TEXT NOT NULL,\n          updated_at TEXT NOT NULL,\n          UNIQUE (agreement_ref, obligation_index)\n        )",
+      "triggers": [
+        {
+          "name": "settlement_principals_insert_required",
+          "sql": "CREATE TRIGGER settlement_principals_insert_required BEFORE INSERT ON settlement_obligations WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
+        },
+        {
+          "name": "settlement_principals_update_required",
+          "sql": "CREATE TRIGGER settlement_principals_update_required BEFORE UPDATE OF payer_principal, claimant_principal ON settlement_obligations WHEN NEW.payer_principal IS NULL OR NEW.payer_principal = '' OR NEW.claimant_principal IS NULL OR NEW.claimant_principal = '' BEGIN SELECT RAISE(ABORT, 'settlement principals required'); END"
+        }
+      ]
+    },
+    "settlement_operations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "obligation_ref",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "operation",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "request_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": "0",
+          "name": "uncertain_acknowledgement",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "receipt",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "last_error",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "lease_owner",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "lease_until_unix",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "name": "next_attempt_unix",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "REAL"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "obligation_ref",
+          "table": "settlement_obligations",
+          "to": "obligation_ref"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "state",
+            "next_attempt_unix",
+            "lease_until_unix"
+          ],
+          "name": "idx_settlement_operations_due",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_settlement_operations_due ON settlement_operations(state, next_attempt_unix, lease_until_unix)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "obligation_ref",
+            "operation"
+          ],
+          "name": "sqlite_autoindex_settlement_operations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE settlement_operations (\n          obligation_ref TEXT NOT NULL,\n          operation TEXT NOT NULL,\n          request_hash TEXT NOT NULL,\n          state TEXT NOT NULL DEFAULT 'pending',\n          attempts INTEGER NOT NULL DEFAULT 0,\n          uncertain_acknowledgement INTEGER NOT NULL DEFAULT 0,\n          receipt TEXT,\n          last_error TEXT,\n          lease_owner TEXT,\n          lease_until_unix REAL,\n          next_attempt_unix REAL,\n          created_at TEXT NOT NULL,\n          updated_at TEXT NOT NULL,\n          PRIMARY KEY (obligation_ref, operation),\n          FOREIGN KEY (obligation_ref) REFERENCES settlement_obligations(obligation_ref)\n        )",
+      "triggers": []
+    },
+    "stage_events": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "ts",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "stage",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "event",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "data",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "idx_stage_events_negotiation_id",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_stage_events_negotiation_id ON stage_events(negotiation_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "stage"
+          ],
+          "name": "idx_stage_events_stage",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_stage_events_stage ON stage_events(stage)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "ts"
+          ],
+          "name": "idx_stage_events_ts",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_stage_events_ts ON stage_events(ts)",
+          "unique": false
+        }
+      ],
+      "sql": "CREATE TABLE stage_events (\n                  id INTEGER PRIMARY KEY AUTOINCREMENT,\n                  ts TEXT NOT NULL,\n                  stage TEXT NOT NULL,\n                  event TEXT NOT NULL,\n                  negotiation_id TEXT,\n                  listing_id TEXT,\n                  escrow_uid TEXT,\n                  data TEXT NOT NULL\n                )",
+      "triggers": []
+    },
+    "storefront_domain_artifacts": {
+      "columns": [
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "artifact_slot",
+          "not_null": true,
+          "primary_key": 2,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "offering_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "domain_identity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "contract_major",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "contract_minor",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "artifact_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": "STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "negotiation_id",
+          "table": "negotiation_threads",
+          "to": "negotiation_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "domain_identity",
+            "contract_major",
+            "contract_minor",
+            "offering_mode"
+          ],
+          "name": "idx_storefront_domain_artifacts_binding",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_storefront_domain_artifacts_binding ON storefront_domain_artifacts(domain_identity, contract_major, contract_minor, offering_mode)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "negotiation_id",
+            "artifact_slot"
+          ],
+          "name": "sqlite_autoindex_storefront_domain_artifacts_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE storefront_domain_artifacts (\n          negotiation_id TEXT NOT NULL,\n          artifact_slot TEXT NOT NULL,\n          offering_mode TEXT NOT NULL,\n          domain_identity TEXT NOT NULL,\n          contract_major INTEGER NOT NULL CHECK (contract_major >= 1),\n          contract_minor INTEGER NOT NULL CHECK (contract_minor >= 0),\n          artifact_json TEXT NOT NULL,\n          created_at TEXT NOT NULL DEFAULT (\n            STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')\n          ),\n          PRIMARY KEY (negotiation_id, artifact_slot),\n          FOREIGN KEY (negotiation_id)\n            REFERENCES negotiation_threads(negotiation_id)\n        )",
+      "triggers": [
+        {
+          "name": "storefront_domain_artifact_immutable",
+          "sql": "CREATE TRIGGER storefront_domain_artifact_immutable\n        BEFORE UPDATE ON storefront_domain_artifacts\n        WHEN NOT (OLD.negotiation_id IS NEW.negotiation_id)\n          OR NOT (OLD.artifact_slot IS NEW.artifact_slot)\n          OR NOT (OLD.offering_mode IS NEW.offering_mode)\n          OR NOT (OLD.domain_identity IS NEW.domain_identity)\n          OR NOT (OLD.contract_major IS NEW.contract_major)\n          OR NOT (OLD.contract_minor IS NEW.contract_minor)\n          OR NOT (OLD.artifact_json IS NEW.artifact_json)\n        BEGIN\n          SELECT RAISE(ABORT, 'storefront domain artifact is immutable');\n        END"
+        },
+        {
+          "name": "storefront_domain_artifact_owner_insert",
+          "sql": "CREATE TRIGGER storefront_domain_artifact_owner_insert\n        BEFORE INSERT ON storefront_domain_artifacts\n        WHEN NOT EXISTS (\n          SELECT 1\n          FROM negotiation_threads thread\n          WHERE thread.negotiation_id = NEW.negotiation_id\n            AND thread.offering_mode = NEW.offering_mode\n            AND thread.domain_identity = NEW.domain_identity\n            AND thread.contract_major = NEW.contract_major\n            AND thread.contract_minor = NEW.contract_minor\n        )\n        BEGIN\n          SELECT RAISE(ABORT, 'domain artifact disagrees with negotiation binding');\n        END"
+        }
+      ]
+    },
+    "storefront_listing_bindings": {
+      "columns": [
+        {
+          "default": null,
+          "name": "listing_id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "site_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "physical_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "offering_mode",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "domain_identity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "contract_major",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "contract_minor",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "derivation_key",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "source_envelope_json",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "last_reconciled_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "capacity_backing",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "listing_id",
+          "table": "listings",
+          "to": "listing_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "domain_identity",
+            "contract_major",
+            "contract_minor"
+          ],
+          "name": "idx_storefront_listing_bindings_domain",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_storefront_listing_bindings_domain ON storefront_listing_bindings(domain_identity, contract_major, contract_minor)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "site_id",
+            "offering_mode"
+          ],
+          "name": "idx_storefront_listing_bindings_site",
+          "origin": "c",
+          "sql": "CREATE INDEX idx_storefront_listing_bindings_site ON storefront_listing_bindings(site_id, offering_mode)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "listing_id"
+          ],
+          "name": "sqlite_autoindex_storefront_listing_bindings_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "derivation_key"
+          ],
+          "name": "sqlite_autoindex_storefront_listing_bindings_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE storefront_listing_bindings (\n          listing_id TEXT PRIMARY KEY,\n          site_id TEXT NOT NULL,\n          pool_id TEXT,\n          physical_resource_id TEXT,\n          offering_mode TEXT NOT NULL,\n          domain_identity TEXT NOT NULL,\n          contract_major INTEGER NOT NULL CHECK (contract_major >= 1),\n          contract_minor INTEGER NOT NULL CHECK (contract_minor >= 0),\n          derivation_key TEXT NOT NULL UNIQUE,\n          source_envelope_json TEXT NOT NULL,\n          last_reconciled_at TEXT NOT NULL, capacity_backing TEXT CHECK (capacity_backing IN ('backed', 'unbacked')),\n          FOREIGN KEY (listing_id) REFERENCES listings(listing_id)\n        )",
+      "triggers": [
+        {
+          "name": "storefront_listing_binding_backing_required",
+          "sql": "CREATE TRIGGER storefront_listing_binding_backing_required\n        BEFORE INSERT ON storefront_listing_bindings\n        WHEN NEW.capacity_backing IS NULL\n        BEGIN\n          SELECT RAISE(ABORT, 'listing binding requires capacity_backing');\n        END"
+        },
+        {
+          "name": "storefront_listing_binding_immutable",
+          "sql": "CREATE TRIGGER storefront_listing_binding_immutable\n    BEFORE UPDATE OF\n      listing_id, site_id, pool_id, physical_resource_id, offering_mode,\n      domain_identity, contract_major, contract_minor, derivation_key,\n      source_envelope_json, capacity_backing\n    ON storefront_listing_bindings\n    WHEN NOT (OLD.listing_id IS NEW.listing_id)\n      OR NOT (OLD.site_id IS NEW.site_id)\n      OR NOT (OLD.pool_id IS NEW.pool_id)\n      OR NOT (OLD.physical_resource_id IS NEW.physical_resource_id)\n      OR NOT (OLD.offering_mode IS NEW.offering_mode)\n      OR NOT (OLD.domain_identity IS NEW.domain_identity)\n      OR NOT (OLD.contract_major IS NEW.contract_major)\n      OR NOT (OLD.contract_minor IS NEW.contract_minor)\n      OR NOT (OLD.derivation_key IS NEW.derivation_key)\n      OR NOT (OLD.source_envelope_json IS NEW.source_envelope_json)\n      OR NOT (OLD.capacity_backing IS NEW.capacity_backing)\n    BEGIN\n      SELECT RAISE(ABORT, 'storefront listing binding is immutable');\n    END"
+        },
+        {
+          "name": "storefront_listing_binding_insert_owner",
+          "sql": "CREATE TRIGGER storefront_listing_binding_insert_owner\n        BEFORE INSERT ON storefront_listing_bindings\n        WHEN NOT EXISTS (\n          SELECT 1 FROM listings WHERE listing_id = NEW.listing_id\n        )\n        BEGIN\n          SELECT RAISE(ABORT, 'listing binding requires an existing listing');\n        END"
+        }
+      ]
+    }
+  }
+}

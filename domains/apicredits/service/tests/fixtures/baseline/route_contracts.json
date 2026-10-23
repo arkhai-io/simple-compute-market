@@ -1,0 +1,328 @@
+{
+  "capacity": [
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "PUT",
+      "operation": "capacity_resource_put",
+      "optional_body_resource": false,
+      "path_resource": "resource_id",
+      "pattern": "/api/v1/capacity/resources/(?P<resource_id>[^/]+)"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_resources_list",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/resources"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_resource_pools_version",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/site-resource-pools/version"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_resource_pools_get",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/site-resource-pools"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_buckets_version",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/site-capacity-buckets/version"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_buckets_get",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/site-capacity-buckets"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_snapshot",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/snapshot"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "capacity_probe",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/probe"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "capacity_reserve",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/reservations"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "capacity_commit",
+      "optional_body_resource": false,
+      "path_resource": "reservation_id",
+      "pattern": "/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/commit"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": "capacity_reservation_id",
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "capacity_release",
+      "optional_body_resource": true,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/releases"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "capacity_truncate_lease",
+      "optional_body_resource": false,
+      "path_resource": "reservation_id",
+      "pattern": "/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)/truncate-lease"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_reservations_list",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/reservations"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_reservation_get",
+      "optional_body_resource": false,
+      "path_resource": "reservation_id",
+      "pattern": "/api/v1/capacity/reservations/(?P<reservation_id>[^/]+)"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "capacity_events",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/capacity/events"
+    }
+  ],
+  "credits": [
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": "fulfillment_id",
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_issue",
+      "optional_body_resource": true,
+      "path_resource": null,
+      "pattern": "/api/v1/issuance"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_issuance_get",
+      "optional_body_resource": false,
+      "path_resource": "fulfillment_id",
+      "pattern": "/api/v1/issuance/(?P<fulfillment_id>[^/]+)"
+    },
+    {
+      "allowed_roles": [
+        "service"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_key_consume_batch",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/keys/consume-batch"
+    },
+    {
+      "allowed_roles": [
+        "service"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_key_consume",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/consume"
+    },
+    {
+      "allowed_roles": [
+        "seller",
+        "service"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_key_verify",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/verify"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "POST",
+      "operation": "credits_key_revoke",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/revoke"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": false,
+      "method": "POST",
+      "operation": "credits_key_adjust",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/adjust"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_key_grants_list",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/grants"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_key_usage_list",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)/usage"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_keys_list",
+      "optional_body_resource": false,
+      "path_resource": null,
+      "pattern": "/api/v1/keys"
+    },
+    {
+      "allowed_roles": [
+        "seller"
+      ],
+      "body_resource": null,
+      "exact_retry_safe": true,
+      "method": "GET",
+      "operation": "credits_key_get",
+      "optional_body_resource": false,
+      "path_resource": "key_id",
+      "pattern": "/api/v1/keys/(?P<key_id>[^/]+)"
+    }
+  ],
+  "unsigned_paths": [
+    "/api/v1/system/health",
+    "/api/v1/system/version",
+    "/docs",
+    "/docs/oauth2-redirect",
+    "/health",
+    "/openapi.json",
+    "/redoc"
+  ]
+}

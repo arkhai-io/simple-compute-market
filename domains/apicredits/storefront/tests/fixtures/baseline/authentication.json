@@ -1,0 +1,329 @@
+[
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "pause_lifecycle_loops",
+    "operation": "admin_pause_lifecycle_loops",
+    "path": "/api/v1/admin/lifecycle/pause",
+    "probe": "unsigned request answered 401",
+    "resource": "lifecycle",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "resume_lifecycle_loops",
+    "operation": "admin_resume_lifecycle_loops",
+    "path": "/api/v1/admin/lifecycle/resume",
+    "probe": "unsigned request answered 401",
+    "resource": "lifecycle",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "dry_run_lifecycle_cycle",
+    "operation": "admin_dry_run_lifecycle_cycle",
+    "path": "/api/v1/admin/lifecycle/{loop}/dry-run",
+    "probe": "unsigned request answered 401",
+    "resource": "settlement-servicing",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "run_lifecycle_cycle",
+    "operation": "admin_run_lifecycle_cycle",
+    "path": "/api/v1/admin/lifecycle/{loop}/run-cycle",
+    "probe": "unsigned request answered 401",
+    "resource": "settlement-servicing",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "pause",
+    "operation": "admin_pause",
+    "path": "/api/v1/admin/pause",
+    "probe": "unsigned request answered 401",
+    "resource": "",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "resume",
+    "operation": "admin_resume",
+    "path": "/api/v1/admin/resume",
+    "probe": "unsigned request answered 401",
+    "resource": "",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "GET",
+    "name": "AdminSettleController.wait_for_settlement",
+    "operation": "admin_settle_wait",
+    "path": "/api/v1/admin/settle/{escrow_uid}/wait",
+    "probe": "unsigned request answered 401",
+    "resource": "0xbaseline?timeout=5",
+    "role": "admin"
+  },
+  {
+    "method": "GET",
+    "name": "ListingsController.list_listings",
+    "operation": null,
+    "path": "/api/v1/listings",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "admitted_roles": [
+      "seller"
+    ],
+    "method": "POST",
+    "name": "ListingsController.publish_from_quota",
+    "operation": "create_listing",
+    "path": "/api/v1/listings/publish-from-quota",
+    "probe": "unsigned request answered 401",
+    "resource": "ed25519:yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc",
+    "role": "seller"
+  },
+  {
+    "method": "GET",
+    "name": "ListingsController.get_listing",
+    "operation": null,
+    "path": "/api/v1/listings/{listing_id}",
+    "probe": "unsigned request answered 404",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "admitted_roles": [
+      "seller"
+    ],
+    "method": "POST",
+    "name": "ListingsController.close_listing",
+    "operation": "close_listing",
+    "path": "/api/v1/listings/{listing_id}/close",
+    "probe": "unsigned request answered 401",
+    "resource": "L-baseline",
+    "role": "seller"
+  },
+  {
+    "method": "GET",
+    "name": "NegotiationsController.list_negotiations",
+    "operation": null,
+    "path": "/api/v1/listings/{listing_id}/negotiations",
+    "probe": "unsigned request answered 404",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "method": "GET",
+    "name": "NegotiationsController.get_negotiation",
+    "operation": null,
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}",
+    "probe": "unsigned request answered 404",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "NegotiationsController.advance_negotiation",
+    "operation": "NegotiationsController.advance_negotiation",
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}/advance",
+    "probe": "unsigned request answered 401",
+    "resource": "/api/v1/listings/L-baseline/negotiations/N-baseline/advance",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "NegotiationsController.force_accept_negotiation",
+    "operation": "admin_force_accept_negotiation",
+    "path": "/api/v1/listings/{listing_id}/negotiations/{neg_id}/force-accept",
+    "probe": "unsigned request answered 401",
+    "resource": "L-baseline/N-baseline",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "ListingsController.pause_listing",
+    "operation": "ListingsController.pause_listing",
+    "path": "/api/v1/listings/{listing_id}/pause",
+    "probe": "unsigned request answered 401",
+    "resource": "/api/v1/listings/L-baseline/pause",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "POST",
+    "name": "ListingsController.resume_listing",
+    "operation": "ListingsController.resume_listing",
+    "path": "/api/v1/listings/{listing_id}/resume",
+    "probe": "unsigned request answered 401",
+    "resource": "/api/v1/listings/L-baseline/resume",
+    "role": "admin"
+  },
+  {
+    "admitted_roles": [
+      "buyer"
+    ],
+    "method": "POST",
+    "name": "NegotiateController.negotiate_new",
+    "operation": "negotiate_new",
+    "path": "/api/v1/negotiate/new",
+    "probe": "unsigned request answered 401",
+    "resource": "L-baseline",
+    "role": "buyer"
+  },
+  {
+    "admitted_roles": [
+      "buyer"
+    ],
+    "method": "POST",
+    "name": "NegotiateController.negotiate_continue",
+    "operation": "negotiate_continue",
+    "path": "/api/v1/negotiate/{neg_id}",
+    "probe": "unsigned request answered 401",
+    "resource": "N-baseline",
+    "role": "buyer"
+  },
+  {
+    "admitted_roles": [
+      "buyer"
+    ],
+    "method": "POST",
+    "name": "SettleController.settle_escrow",
+    "operation": "settle_escrow",
+    "path": "/api/v1/settle/{escrow_uid}",
+    "probe": "unsigned request answered 401",
+    "resource": "0xbaseline",
+    "role": "buyer"
+  },
+  {
+    "method": "GET",
+    "name": "SettleController.settle_status",
+    "operation": "settle_status",
+    "path": "/api/v1/settle/{escrow_uid}/status",
+    "probe": "state resolved before authentication; recorded from the contract",
+    "resource": "0xbaseline",
+    "role": "buyer"
+  },
+  {
+    "admitted_roles": [
+      "seller"
+    ],
+    "method": "POST",
+    "name": "refund_settlement",
+    "operation": "refund_settlement",
+    "path": "/api/v1/settlements/{negotiation_id}/refund",
+    "probe": "unsigned request answered 401",
+    "resource": "N-baseline",
+    "role": "seller"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "GET",
+    "name": "SystemController.stream_events",
+    "operation": "admin_system_events",
+    "path": "/api/v1/system/events",
+    "probe": "unsigned request answered 401",
+    "resource": "system-events?limit=100&since_id=0&stream=false",
+    "role": "admin"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.health_versioned",
+    "operation": null,
+    "path": "/api/v1/system/health",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "admitted_roles": [
+      "admin"
+    ],
+    "method": "GET",
+    "name": "SystemController.system_status",
+    "operation": "admin_system_status",
+    "path": "/api/v1/system/status",
+    "probe": "unsigned request answered 401",
+    "resource": "system/status",
+    "role": "admin"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_html",
+    "operation": null,
+    "path": "/docs",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_redirect",
+    "operation": null,
+    "path": "/docs/oauth2-redirect",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "method": "GET",
+    "name": "SystemController.health_bare",
+    "operation": null,
+    "path": "/health",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "method": "GET",
+    "name": "openapi",
+    "operation": null,
+    "path": "/openapi.json",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  },
+  {
+    "method": "GET",
+    "name": "redoc_html",
+    "operation": null,
+    "path": "/redoc",
+    "probe": "unsigned request answered 200",
+    "resource": null,
+    "role": "public"
+  }
+]

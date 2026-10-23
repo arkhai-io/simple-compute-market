@@ -1,0 +1,167 @@
+[
+  {
+    "method": "GET",
+    "name": "events",
+    "path": "/api/v1/capacity/events"
+  },
+  {
+    "method": "POST",
+    "name": "probe",
+    "path": "/api/v1/capacity/probe"
+  },
+  {
+    "method": "POST",
+    "name": "release",
+    "path": "/api/v1/capacity/releases"
+  },
+  {
+    "method": "GET",
+    "name": "list_reservations",
+    "path": "/api/v1/capacity/reservations"
+  },
+  {
+    "method": "POST",
+    "name": "reserve",
+    "path": "/api/v1/capacity/reservations"
+  },
+  {
+    "method": "GET",
+    "name": "get_reservation",
+    "path": "/api/v1/capacity/reservations/{capacity_reservation_id}"
+  },
+  {
+    "method": "POST",
+    "name": "commit",
+    "path": "/api/v1/capacity/reservations/{capacity_reservation_id}/commit"
+  },
+  {
+    "method": "POST",
+    "name": "truncate_lease",
+    "path": "/api/v1/capacity/reservations/{capacity_reservation_id}/truncate-lease"
+  },
+  {
+    "method": "GET",
+    "name": "list_resources",
+    "path": "/api/v1/capacity/resources"
+  },
+  {
+    "method": "PUT",
+    "name": "register_resource",
+    "path": "/api/v1/capacity/resources/{resource_id}"
+  },
+  {
+    "method": "GET",
+    "name": "capacity_bucket_projection",
+    "path": "/api/v1/capacity/site-capacity-buckets"
+  },
+  {
+    "method": "GET",
+    "name": "capacity_bucket_projection_version",
+    "path": "/api/v1/capacity/site-capacity-buckets/version"
+  },
+  {
+    "method": "GET",
+    "name": "resource_pool_projection",
+    "path": "/api/v1/capacity/site-resource-pools"
+  },
+  {
+    "method": "GET",
+    "name": "resource_pool_projection_version",
+    "path": "/api/v1/capacity/site-resource-pools/version"
+  },
+  {
+    "method": "GET",
+    "name": "snapshot",
+    "path": "/api/v1/capacity/snapshot"
+  },
+  {
+    "method": "POST",
+    "name": "issue",
+    "path": "/api/v1/issuance"
+  },
+  {
+    "method": "GET",
+    "name": "get_issuance",
+    "path": "/api/v1/issuance/{fulfillment_id}"
+  },
+  {
+    "method": "GET",
+    "name": "list_keys",
+    "path": "/api/v1/keys"
+  },
+  {
+    "method": "POST",
+    "name": "consume_batch",
+    "path": "/api/v1/keys/consume-batch"
+  },
+  {
+    "method": "GET",
+    "name": "get_key",
+    "path": "/api/v1/keys/{key_id}"
+  },
+  {
+    "method": "POST",
+    "name": "adjust",
+    "path": "/api/v1/keys/{key_id}/adjust"
+  },
+  {
+    "method": "POST",
+    "name": "consume",
+    "path": "/api/v1/keys/{key_id}/consume"
+  },
+  {
+    "method": "GET",
+    "name": "list_grants",
+    "path": "/api/v1/keys/{key_id}/grants"
+  },
+  {
+    "method": "POST",
+    "name": "revoke",
+    "path": "/api/v1/keys/{key_id}/revoke"
+  },
+  {
+    "method": "GET",
+    "name": "list_usage",
+    "path": "/api/v1/keys/{key_id}/usage"
+  },
+  {
+    "method": "POST",
+    "name": "verify",
+    "path": "/api/v1/keys/{key_id}/verify"
+  },
+  {
+    "method": "GET",
+    "name": "health",
+    "path": "/api/v1/system/health"
+  },
+  {
+    "method": "GET",
+    "name": "version",
+    "path": "/api/v1/system/version"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_html",
+    "path": "/docs"
+  },
+  {
+    "method": "GET",
+    "name": "swagger_ui_redirect",
+    "path": "/docs/oauth2-redirect"
+  },
+  {
+    "method": "GET",
+    "name": "health",
+    "path": "/health"
+  },
+  {
+    "method": "GET",
+    "name": "openapi",
+    "path": "/openapi.json"
+  },
+  {
+    "method": "GET",
+    "name": "redoc_html",
+    "path": "/redoc"
+  }
+]

@@ -1,0 +1,877 @@
+{
+  "migrations": [
+    "20260731_001_apicredits_schema_baseline",
+    "20260811_002_canonical_owner_principals",
+    "20260815_003_fulfillment_grants",
+    "20260922_004_pool_advertisement_and_backing",
+    "20261005_005_reservation_release_requested_at"
+  ],
+  "tables": {
+    "api_keys": {
+      "columns": [
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "secret_hash",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "status",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "balance",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": null,
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "sqlite_autoindex_api_keys_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE api_keys (\n\tkey_id VARCHAR NOT NULL, \n\tsecret_hash VARCHAR NOT NULL, \n\towner_scheme VARCHAR, \n\towner_id VARCHAR, \n\tstatus VARCHAR NOT NULL, \n\tbalance INTEGER NOT NULL, \n\tcreated_at DATETIME NOT NULL, \n\tupdated_at DATETIME NOT NULL, \n\tPRIMARY KEY (key_id)\n)",
+      "triggers": []
+    },
+    "capacity_buckets": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "backing_resource_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "pool_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "host_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_type",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_subtype",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "total_units",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "capacity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "attributes",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "backing_resource_id"
+          ],
+          "name": "ix_capacity_buckets_backing_resource_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_buckets_backing_resource_id ON capacity_buckets (backing_resource_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "pool_id"
+          ],
+          "name": "ix_capacity_buckets_pool_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_buckets_pool_id ON capacity_buckets (pool_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_bucket_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "backing_resource_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "host_id"
+          ],
+          "name": "sqlite_autoindex_capacity_buckets_3",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE capacity_buckets (\n\tcapacity_bucket_id VARCHAR NOT NULL, \n\tbacking_resource_id VARCHAR NOT NULL, \n\tpool_id VARCHAR, \n\thost_id VARCHAR, \n\tresource_type VARCHAR NOT NULL, \n\tresource_subtype VARCHAR, \n\ttotal_units INTEGER, \n\tcapacity JSON NOT NULL, \n\tattributes JSON NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tcreated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tupdated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tPRIMARY KEY (capacity_bucket_id), \n\tCONSTRAINT uq_capacity_buckets_backing_resource UNIQUE (backing_resource_id), \n\tUNIQUE (host_id)\n)",
+      "triggers": []
+    },
+    "capacity_events": {
+      "columns": [
+        {
+          "default": null,
+          "name": "version",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "kind",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "occurred_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "resource_id"
+          ],
+          "name": "ix_capacity_events_resource_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_events_resource_id ON capacity_events (resource_id)",
+          "unique": false
+        }
+      ],
+      "sql": "CREATE TABLE capacity_events (\n\tversion INTEGER NOT NULL, \n\tkind VARCHAR NOT NULL, \n\tresource_id VARCHAR, \n\tdimensions JSON, \n\tclaim_attributes JSON, \n\toccurred_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tPRIMARY KEY (version)\n)",
+      "triggers": []
+    },
+    "capacity_reservation_debits": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "capacity_bucket_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "capacity_bucket_id",
+          "table": "capacity_buckets",
+          "to": "capacity_bucket_id"
+        },
+        {
+          "from": "capacity_reservation_id",
+          "table": "capacity_reservations",
+          "to": "capacity_reservation_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "capacity_bucket_id"
+          ],
+          "name": "ix_capacity_reservation_debits_capacity_bucket_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_reservation_debits_capacity_bucket_id ON capacity_reservation_debits (capacity_bucket_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "name": "sqlite_autoindex_capacity_reservation_debits_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE capacity_reservation_debits (\n\tcapacity_reservation_id VARCHAR NOT NULL, \n\tcapacity_bucket_id VARCHAR NOT NULL, \n\tdimensions JSON NOT NULL, \n\tcreated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tupdated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tPRIMARY KEY (capacity_reservation_id), \n\tCONSTRAINT uq_capacity_reservation_debits_reservation UNIQUE (capacity_reservation_id), \n\tFOREIGN KEY(capacity_reservation_id) REFERENCES capacity_reservations (capacity_reservation_id) ON DELETE CASCADE, \n\tFOREIGN KEY(capacity_bucket_id) REFERENCES capacity_buckets (capacity_bucket_id) ON DELETE RESTRICT\n)",
+      "triggers": []
+    },
+    "capacity_reservations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "settlement_resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "units",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "dimensions",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "claim_attributes",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "state",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "deal_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "escrow_uid",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "hold_expires_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "offering_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "executor_target",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "release_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "executor_ref",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": null,
+          "name": "lease_start_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "lease_end_utc",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "create_job_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "failure_reason",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "failure_message",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "TEXT"
+        },
+        {
+          "default": null,
+          "name": "released_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "release_requested_at",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "escrow_uid"
+          ],
+          "name": "ix_capacity_reservations_escrow_uid",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_reservations_escrow_uid ON capacity_reservations (escrow_uid)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "settlement_resource_id"
+          ],
+          "name": "ix_capacity_reservations_settlement_resource_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_reservations_settlement_resource_id ON capacity_reservations (settlement_resource_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "state"
+          ],
+          "name": "ix_capacity_reservations_state",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_capacity_reservations_state ON capacity_reservations (state)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "capacity_reservation_id"
+          ],
+          "name": "sqlite_autoindex_capacity_reservations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE capacity_reservations (\n\tcapacity_reservation_id VARCHAR NOT NULL, \n\tsettlement_resource_id VARCHAR, \n\tunits INTEGER NOT NULL, \n\tdimensions JSON, \n\tclaim_attributes JSON, \n\tstate VARCHAR NOT NULL, \n\tdeal_ref JSON, \n\tescrow_uid VARCHAR, \n\thold_expires_at VARCHAR, \n\toffering_mode VARCHAR, \n\texecutor_target VARCHAR, \n\trelease_job_id VARCHAR, \n\texecutor_ref JSON, \n\tlease_start_utc VARCHAR, \n\tlease_end_utc VARCHAR, \n\tcreate_job_id VARCHAR, \n\tfailure_reason VARCHAR, \n\tfailure_message TEXT, \n\treleased_at VARCHAR, \n\trelease_requested_at VARCHAR, \n\tcreated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tupdated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tPRIMARY KEY (capacity_reservation_id)\n)",
+      "triggers": []
+    },
+    "consumption_events": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "amount",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "idempotency_key",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "occurred_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "key_id",
+          "table": "api_keys",
+          "to": "key_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "ix_consumption_events_key_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_consumption_events_key_id ON consumption_events (key_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "key_id",
+            "idempotency_key"
+          ],
+          "name": "sqlite_autoindex_consumption_events_1",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE consumption_events (\n\tid INTEGER NOT NULL, \n\tkey_id VARCHAR NOT NULL, \n\tamount INTEGER NOT NULL, \n\tidempotency_key VARCHAR, \n\toccurred_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT uq_consumption_idem UNIQUE (key_id, idempotency_key), \n\tFOREIGN KEY(key_id) REFERENCES api_keys (key_id)\n)",
+      "triggers": []
+    },
+    "credit_grants": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "key_id",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "fulfillment_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "negotiation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "service",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "resource_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "key_mode",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "key_target_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_scheme",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "owner_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "request_digest",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "capacity_reservation_id",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "result_balance",
+          "not_null": false,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "quantity",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "INTEGER"
+        },
+        {
+          "default": null,
+          "name": "reason",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "granted_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [
+        {
+          "from": "key_id",
+          "table": "api_keys",
+          "to": "key_id"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "key_id"
+          ],
+          "name": "ix_credit_grants_key_id",
+          "origin": "c",
+          "sql": "CREATE INDEX ix_credit_grants_key_id ON credit_grants (key_id)",
+          "unique": false
+        },
+        {
+          "columns": [
+            "fulfillment_id"
+          ],
+          "name": "sqlite_autoindex_credit_grants_1",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "negotiation_id"
+          ],
+          "name": "sqlite_autoindex_credit_grants_2",
+          "origin": "u",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE credit_grants (\n\tid INTEGER NOT NULL, \n\tkey_id VARCHAR NOT NULL, \n\tfulfillment_id VARCHAR, \n\tnegotiation_id VARCHAR, \n\tservice VARCHAR, \n\tresource_id VARCHAR, \n\tkey_mode VARCHAR, \n\tkey_target_id VARCHAR, \n\towner_scheme VARCHAR, \n\towner_id VARCHAR, \n\trequest_digest VARCHAR, \n\tcapacity_reservation_id VARCHAR, \n\tresult_balance INTEGER, \n\tquantity INTEGER NOT NULL, \n\treason VARCHAR NOT NULL, \n\tgranted_at DATETIME NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(key_id) REFERENCES api_keys (key_id), \n\tUNIQUE (fulfillment_id), \n\tUNIQUE (negotiation_id)\n)",
+      "triggers": []
+    },
+    "resource_pools": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": true,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "label",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "provider",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "VARCHAR"
+        },
+        {
+          "default": null,
+          "name": "enabled",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "BOOLEAN"
+        },
+        {
+          "default": null,
+          "name": "policy_tags",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "JSON"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "updated_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "DATETIME"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_resource_pools_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE resource_pools (\n\tid VARCHAR NOT NULL, \n\tlabel VARCHAR NOT NULL, \n\tprovider VARCHAR NOT NULL, \n\tenabled BOOLEAN NOT NULL, \n\tpolicy_tags JSON NOT NULL, \n\tcreated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tupdated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, \n\tPRIMARY KEY (id)\n)",
+      "triggers": []
+    },
+    "schema_migrations": {
+      "columns": [
+        {
+          "default": null,
+          "name": "id",
+          "not_null": false,
+          "primary_key": 1,
+          "type": "VARCHAR"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "applied_at",
+          "not_null": true,
+          "primary_key": 0,
+          "type": "TIMESTAMP"
+        }
+      ],
+      "foreign_keys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "name": "sqlite_autoindex_schema_migrations_1",
+          "origin": "pk",
+          "sql": null,
+          "unique": true
+        }
+      ],
+      "sql": "CREATE TABLE schema_migrations (\n                id VARCHAR PRIMARY KEY,\n                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n            )",
+      "triggers": []
+    }
+  }
+}

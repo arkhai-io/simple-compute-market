@@ -1,0 +1,196 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "evidence_digest": "sha256:6b0f84200999a00257e52819c74eb7b4815ef5cb20b141f28b625a60ba66feda",
+        "fulfillment_id": "api-credit-fulfillment.v1:a3014aee6cd33e7899d7b023ffeee7be22087e919c8b38055dcee7151d8c1d4d",
+        "portable_fulfillment_ref": "{\"attestation_uid\":\"attestation:pin-1\",\"evidence_digest\":\"sha256:6b0f84200999a00257e52819c74eb7b4815ef5cb20b141f28b625a60ba66feda\",\"resolver_id\":\"api-credit-resolver.v1\",\"schema\":\"arkhai.api-credits.portable-fulfillment-ref.v1\"}",
+        "request_digest": "sha256:5f75f3e22b81f2ba1abed303187f29b1cf1397ca6ade760714f9cd3afedb3385",
+        "signed_evidence": "{\"body\":{\"buyer\":{\"identifier\":\"0xabcdef0000000000000000000000000000000001\",\"scheme\":\"eip191\"},\"capability\":\"api-credits.issuance.v1\",\"claimant\":{\"identifier\":\"Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM\",\"scheme\":\"ed25519\"},\"committed_at_unix\":2000000000,\"condition_anchor\":\"condition:pin-1\",\"domain\":\"api-credits\",\"fulfillment_id\":\"api-credit-fulfillment.v1:a3014aee6cd33e7899d7b023ffeee7be22087e919c8b38055dcee7151d8c1d4d\",\"grant_id\":\"api-credit-fulfillment.v1:a3014aee6cd33e7899d7b023ffeee7be22087e919c8b38055dcee7151d8c1d4d\",\"issuer\":{\"identifier\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"scheme\":\"ed25519\"},\"key_id\":\"ak_0123456789abcdef\",\"key_mode\":\"new\",\"obligation_ref\":\"obligation:pin-1\",\"owner\":{\"identifier\":\"0xabcdef0000000000000000000000000000000001\",\"scheme\":\"eip191\"},\"protocol\":\"arkhai.api-credits.issuance-evidence.v1\",\"quantity\":3,\"request_digest\":\"sha256:5f75f3e22b81f2ba1abed303187f29b1cf1397ca6ade760714f9cd3afedb3385\",\"resource_id\":\"weather-quota\",\"schema_version\":\"1\",\"service\":\"weather-api\",\"status\":\"committed\"},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"yI8GL0Js0b3RS4sDdQYiJLA7f9MtukV8xprEwi2CvlYfydxV6LGirG5VYH1x704W0Khbh66eEaw_xETW5LS3BQ\"}}"
+      },
+      "inputs": {
+        "attestation_uid": "attestation:pin-1",
+        "claimant": {
+          "identifier": "Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM",
+          "scheme": "ed25519"
+        },
+        "committed_at_unix": 2000000000,
+        "condition_anchor": "condition:pin-1",
+        "issuer": {
+          "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "scheme": "ed25519"
+        },
+        "key": {
+          "mode": "new"
+        },
+        "key_id": "ak_0123456789abcdef",
+        "name": "new-key-eip191-small",
+        "negotiation_id": "neg-pin-1",
+        "obligation_ref": "obligation:pin-1",
+        "owner": {
+          "identifier": "0xabcdef0000000000000000000000000000000001",
+          "scheme": "eip191"
+        },
+        "quantity": 3,
+        "resolver_id": "api-credit-resolver.v1",
+        "resource_id": "weather-quota",
+        "service": "weather-api"
+      },
+      "name": "new-key-eip191-small"
+    },
+    {
+      "expected": {
+        "evidence_digest": "sha256:55afc180bf5d783976ae27d2c20bdeba2df17cdb978aa3b49de833aeab8904f5",
+        "fulfillment_id": "api-credit-fulfillment.v1:3c14a7b11d681d5afef47e1cee075ad87264c6e371222545fdea87a7d0092d21",
+        "portable_fulfillment_ref": "{\"attestation_uid\":\"attestation:pin-2\",\"evidence_digest\":\"sha256:55afc180bf5d783976ae27d2c20bdeba2df17cdb978aa3b49de833aeab8904f5\",\"resolver_id\":\"api-credit-resolver.v1\",\"schema\":\"arkhai.api-credits.portable-fulfillment-ref.v1\"}",
+        "request_digest": "sha256:71978573f341b58ac0057f31cf9fe9cb4596744d0aee9d99eebf3e11ef52ea88",
+        "signed_evidence": "{\"body\":{\"buyer\":{\"identifier\":\"0xabcdef0000000000000000000000000000000001\",\"scheme\":\"eip191\"},\"capability\":\"api-credits.issuance.v1\",\"claimant\":{\"identifier\":\"Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM\",\"scheme\":\"ed25519\"},\"committed_at_unix\":2000000100,\"condition_anchor\":\"condition:pin-2\",\"domain\":\"api-credits\",\"fulfillment_id\":\"api-credit-fulfillment.v1:3c14a7b11d681d5afef47e1cee075ad87264c6e371222545fdea87a7d0092d21\",\"grant_id\":\"api-credit-fulfillment.v1:3c14a7b11d681d5afef47e1cee075ad87264c6e371222545fdea87a7d0092d21\",\"issuer\":{\"identifier\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"scheme\":\"ed25519\"},\"key_id\":\"ak_0123456789abcdef\",\"key_mode\":\"existing\",\"obligation_ref\":\"obligation:pin-2\",\"owner\":{\"identifier\":\"0xabcdef0000000000000000000000000000000001\",\"scheme\":\"eip191\"},\"protocol\":\"arkhai.api-credits.issuance-evidence.v1\",\"quantity\":10,\"request_digest\":\"sha256:71978573f341b58ac0057f31cf9fe9cb4596744d0aee9d99eebf3e11ef52ea88\",\"resource_id\":\"weather-quota\",\"schema_version\":\"1\",\"service\":\"weather-api\",\"status\":\"committed\"},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"FGXiY0vJXwiOWITfkTw_9F4ab5gDhAbdyQBYTrE7-5ivFDIA2U7QVWXxF_hd6sGDSexlI3D_3Gpa27AnogPRAA\"}}"
+      },
+      "inputs": {
+        "attestation_uid": "attestation:pin-2",
+        "claimant": {
+          "identifier": "Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM",
+          "scheme": "ed25519"
+        },
+        "committed_at_unix": 2000000100,
+        "condition_anchor": "condition:pin-2",
+        "issuer": {
+          "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "scheme": "ed25519"
+        },
+        "key": {
+          "key_id": "ak_0123456789abcdef",
+          "mode": "existing"
+        },
+        "key_id": "ak_0123456789abcdef",
+        "name": "existing-key-eip191-topup",
+        "negotiation_id": "neg-pin-2",
+        "obligation_ref": "obligation:pin-2",
+        "owner": {
+          "identifier": "0xabcdef0000000000000000000000000000000001",
+          "scheme": "eip191"
+        },
+        "quantity": 10,
+        "resolver_id": "api-credit-resolver.v1",
+        "resource_id": "weather-quota",
+        "service": "weather-api"
+      },
+      "name": "existing-key-eip191-topup"
+    },
+    {
+      "expected": {
+        "evidence_digest": "sha256:7279d014f6b8e81e57102c7b0424defb118acaa6782b9e14d05869b1ca2db3ee",
+        "fulfillment_id": "api-credit-fulfillment.v1:46300ad8f2afef88d371a8a0a3163ddcfa69870471c0f5abde424d3c4561b984",
+        "portable_fulfillment_ref": "{\"attestation_uid\":\"attestation:pin-3\",\"evidence_digest\":\"sha256:7279d014f6b8e81e57102c7b0424defb118acaa6782b9e14d05869b1ca2db3ee\",\"resolver_id\":\"api-credit-resolver.v1\",\"schema\":\"arkhai.api-credits.portable-fulfillment-ref.v1\"}",
+        "request_digest": "sha256:577eb9cb27e65a1b3bdec17972985fbf3520ea597764534224f43f24541b68e8",
+        "signed_evidence": "{\"body\":{\"buyer\":{\"identifier\":\"ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ\",\"scheme\":\"ed25519\"},\"capability\":\"api-credits.issuance.v1\",\"claimant\":{\"identifier\":\"Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM\",\"scheme\":\"ed25519\"},\"committed_at_unix\":2000000200,\"condition_anchor\":\"condition:pin-3\",\"domain\":\"api-credits\",\"fulfillment_id\":\"api-credit-fulfillment.v1:46300ad8f2afef88d371a8a0a3163ddcfa69870471c0f5abde424d3c4561b984\",\"grant_id\":\"api-credit-fulfillment.v1:46300ad8f2afef88d371a8a0a3163ddcfa69870471c0f5abde424d3c4561b984\",\"issuer\":{\"identifier\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"scheme\":\"ed25519\"},\"key_id\":\"ak_fedcba9876543210\",\"key_mode\":\"new\",\"obligation_ref\":\"obligation:pin-3\",\"owner\":{\"identifier\":\"ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ\",\"scheme\":\"ed25519\"},\"protocol\":\"arkhai.api-credits.issuance-evidence.v1\",\"quantity\":1,\"request_digest\":\"sha256:577eb9cb27e65a1b3bdec17972985fbf3520ea597764534224f43f24541b68e8\",\"resource_id\":\"weather-quota\",\"schema_version\":\"1\",\"service\":\"weather-api\",\"status\":\"committed\"},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"dkBNaOCqcX75cxBcYXAXcdzw3KBlkAt1On_xuXuiZ4QmxKe8oXQu2HPI3Ziek5WvIrH2lHM9exNmG0R_zaEqAQ\"}}"
+      },
+      "inputs": {
+        "attestation_uid": "attestation:pin-3",
+        "claimant": {
+          "identifier": "Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM",
+          "scheme": "ed25519"
+        },
+        "committed_at_unix": 2000000200,
+        "condition_anchor": "condition:pin-3",
+        "issuer": {
+          "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "scheme": "ed25519"
+        },
+        "key": {
+          "mode": "new"
+        },
+        "key_id": "ak_fedcba9876543210",
+        "name": "new-key-ed25519-single-unit",
+        "negotiation_id": "neg-pin-3",
+        "obligation_ref": "obligation:pin-3",
+        "owner": {
+          "identifier": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+          "scheme": "ed25519"
+        },
+        "quantity": 1,
+        "resolver_id": "api-credit-resolver.v1",
+        "resource_id": "weather-quota",
+        "service": "weather-api"
+      },
+      "name": "new-key-ed25519-single-unit"
+    },
+    {
+      "expected": {
+        "evidence_digest": "sha256:a5e90d128eb1cff39c0c34a982cd3f50711e2581b570eec206bac4c903dc6134",
+        "fulfillment_id": "api-credit-fulfillment.v1:1e297d8b2d9e329e08104ff0774638fafcb784b19886c41dde43be107857e3d1",
+        "portable_fulfillment_ref": "{\"attestation_uid\":\"attestation:pin-4\",\"evidence_digest\":\"sha256:a5e90d128eb1cff39c0c34a982cd3f50711e2581b570eec206bac4c903dc6134\",\"resolver_id\":\"api-credit-resolver.v1\",\"schema\":\"arkhai.api-credits.portable-fulfillment-ref.v1\"}",
+        "request_digest": "sha256:d42dce94cb26862f132026c8a78b7dabe4e8b12dd85ba49183eca510b06ee4a4",
+        "signed_evidence": "{\"body\":{\"buyer\":{\"identifier\":\"SB7edy2hV4XJ5ZoIYgG4w_nDBxKeP8bX80qk3-1YFOU\",\"scheme\":\"ed25519\"},\"capability\":\"api-credits.issuance.v1\",\"claimant\":{\"identifier\":\"Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM\",\"scheme\":\"ed25519\"},\"committed_at_unix\":2000000300,\"condition_anchor\":\"condition:pin-4\",\"domain\":\"api-credits\",\"fulfillment_id\":\"api-credit-fulfillment.v1:1e297d8b2d9e329e08104ff0774638fafcb784b19886c41dde43be107857e3d1\",\"grant_id\":\"api-credit-fulfillment.v1:1e297d8b2d9e329e08104ff0774638fafcb784b19886c41dde43be107857e3d1\",\"issuer\":{\"identifier\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"scheme\":\"ed25519\"},\"key_id\":\"ak_fedcba9876543210\",\"key_mode\":\"existing\",\"obligation_ref\":\"obligation:pin-4\",\"owner\":{\"identifier\":\"SB7edy2hV4XJ5ZoIYgG4w_nDBxKeP8bX80qk3-1YFOU\",\"scheme\":\"ed25519\"},\"protocol\":\"arkhai.api-credits.issuance-evidence.v1\",\"quantity\":250,\"request_digest\":\"sha256:d42dce94cb26862f132026c8a78b7dabe4e8b12dd85ba49183eca510b06ee4a4\",\"resource_id\":\"quota-main\",\"schema_version\":\"1\",\"service\":\"inference\",\"status\":\"committed\"},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"hH58COH2MWSUIKVfzZsR4HLCWKZaWssyTugw3SDyYidadA9w_u7LliiOOB5IWzigQN5kJkPoKi-H1TiZKTrFDQ\"}}"
+      },
+      "inputs": {
+        "attestation_uid": "attestation:pin-4",
+        "claimant": {
+          "identifier": "Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM",
+          "scheme": "ed25519"
+        },
+        "committed_at_unix": 2000000300,
+        "condition_anchor": "condition:pin-4",
+        "issuer": {
+          "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "scheme": "ed25519"
+        },
+        "key": {
+          "key_id": "ak_fedcba9876543210",
+          "mode": "existing"
+        },
+        "key_id": "ak_fedcba9876543210",
+        "name": "existing-key-ed25519-large",
+        "negotiation_id": "neg-pin-4",
+        "obligation_ref": "obligation:pin-4",
+        "owner": {
+          "identifier": "SB7edy2hV4XJ5ZoIYgG4w_nDBxKeP8bX80qk3-1YFOU",
+          "scheme": "ed25519"
+        },
+        "quantity": 250,
+        "resolver_id": "api-credit-resolver.v1",
+        "resource_id": "quota-main",
+        "service": "inference"
+      },
+      "name": "existing-key-ed25519-large"
+    },
+    {
+      "expected": {
+        "evidence_digest": "sha256:c3e5cd0689aa2ecdbb1680dc4caf46f0c8abd3e33662962c7624e944e8f7c00d",
+        "fulfillment_id": "api-credit-fulfillment.v1:7c1618f9e6a39a8dbd53342879f3e64109e6447197cd6d98214675b3b5c091d7",
+        "portable_fulfillment_ref": "{\"attestation_uid\":\"attestation:pin-5\",\"evidence_digest\":\"sha256:c3e5cd0689aa2ecdbb1680dc4caf46f0c8abd3e33662962c7624e944e8f7c00d\",\"resolver_id\":\"api-credit-resolver.v1\",\"schema\":\"arkhai.api-credits.portable-fulfillment-ref.v1\"}",
+        "request_digest": "sha256:1495ea5d3b3b499d8190ed7cabb81e8cce3b5191f9f03247575cea17354b9911",
+        "signed_evidence": "{\"body\":{\"buyer\":{\"identifier\":\"0x9999000000000000000000000000000000000003\",\"scheme\":\"eip191\"},\"capability\":\"api-credits.issuance.v1\",\"claimant\":{\"identifier\":\"Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM\",\"scheme\":\"ed25519\"},\"committed_at_unix\":2000000400,\"condition_anchor\":\"condition:pin-5\",\"domain\":\"api-credits\",\"fulfillment_id\":\"api-credit-fulfillment.v1:7c1618f9e6a39a8dbd53342879f3e64109e6447197cd6d98214675b3b5c091d7\",\"grant_id\":\"api-credit-fulfillment.v1:7c1618f9e6a39a8dbd53342879f3e64109e6447197cd6d98214675b3b5c091d7\",\"issuer\":{\"identifier\":\"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\"scheme\":\"ed25519\"},\"key_id\":\"ak_00000000deadbeef\",\"key_mode\":\"new\",\"obligation_ref\":\"obligation:pin-5\",\"owner\":{\"identifier\":\"0x9999000000000000000000000000000000000003\",\"scheme\":\"eip191\"},\"protocol\":\"arkhai.api-credits.issuance-evidence.v1\",\"quantity\":7,\"request_digest\":\"sha256:1495ea5d3b3b499d8190ed7cabb81e8cce3b5191f9f03247575cea17354b9911\",\"resource_id\":\"quota-main\",\"schema_version\":\"1\",\"service\":\"inference\",\"status\":\"committed\"},\"proof\":{\"scheme\":\"ed25519\",\"value\":\"GKkJDXua8qHs4VdqOwvE3xZ9MP9BheKCSLBa5gKd7jOHTCUofEaV98u4EMHYQhUK6FlnU1fSTxpvH6KHxCJQBA\"}}"
+      },
+      "inputs": {
+        "attestation_uid": "attestation:pin-5",
+        "claimant": {
+          "identifier": "Q83AI9ItX54QfRoGk0V9NdHRDrfSHHIRkvVvXeQGZdM",
+          "scheme": "ed25519"
+        },
+        "committed_at_unix": 2000000400,
+        "condition_anchor": "condition:pin-5",
+        "issuer": {
+          "identifier": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "scheme": "ed25519"
+        },
+        "key": {
+          "mode": "new"
+        },
+        "key_id": "ak_00000000deadbeef",
+        "name": "new-key-eip191-other-service",
+        "negotiation_id": "neg-pin-5.with:punctuation_allowed-by-the-ref",
+        "obligation_ref": "obligation:pin-5",
+        "owner": {
+          "identifier": "0x9999000000000000000000000000000000000003",
+          "scheme": "eip191"
+        },
+        "quantity": 7,
+        "resolver_id": "api-credit-resolver.v1",
+        "resource_id": "quota-main",
+        "service": "inference"
+      },
+      "name": "new-key-eip191-other-service"
+    }
+  ]
+}

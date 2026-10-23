@@ -16,7 +16,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
-.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits
+.PHONY: build-bare-metal-storefront build-e2e-base build-e2e-vm build-e2e-bare-metal build-e2e-apicredits build-apicredits-service-prekit
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
@@ -454,8 +454,24 @@ build-e2e-vm: build-e2e-base ## Build the VM end-to-end lane's images
 build-e2e-bare-metal: build-e2e-base ## Build the bare-metal end-to-end lane's images
 	$(MAKE) -j3 build-registry build-provisioning build-bare-metal-storefront
 
-build-e2e-apicredits: build-e2e-base ## Build the API-credit end-to-end lane's images
+build-e2e-apicredits: build-e2e-base build-apicredits-service-prekit ## Build the API-credit end-to-end lane's images
 	$(MAKE) -j4 build-registry build-apicredits-service build-apicredits-storefront build-apicredits-sample-app
+
+# The previous service release, built from the pinned base commit's own
+# wheelhouse in a temporary worktree.
+APICREDITS_SERVICE_PREKIT_COMMIT := 9720ac59697a132f48913b91448c8224ece35cde
+APICREDITS_SERVICE_PREKIT_WORKTREE := $(CURDIR)/.worktrees/apicredits-service-prekit
+
+build-apicredits-service-prekit: ## Build arkhai:apicredits-service-prekit, the previous service release, from the pinned base commit
+	git cat-file -e $(APICREDITS_SERVICE_PREKIT_COMMIT)^{commit} 2>/dev/null || \
+		git fetch --depth 1 origin $(APICREDITS_SERVICE_PREKIT_COMMIT)
+	git worktree remove --force $(APICREDITS_SERVICE_PREKIT_WORKTREE) 2>/dev/null || true
+	git worktree prune
+	git worktree add --detach $(APICREDITS_SERVICE_PREKIT_WORKTREE) $(APICREDITS_SERVICE_PREKIT_COMMIT)
+	( $(MAKE) -C $(APICREDITS_SERVICE_PREKIT_WORKTREE) dist && \
+	  cd $(APICREDITS_SERVICE_PREKIT_WORKTREE) && docker build --ulimit nofile=65536:65536 \
+		-f domains/apicredits/service/Dockerfile -t arkhai:apicredits-service-prekit . ); \
+	status=$$?; git worktree remove --force $(APICREDITS_SERVICE_PREKIT_WORKTREE); exit $$status
 
 # Seller-only build: the two runtime images a seller actually needs
 # (`arkhai:storefront`, `arkhai:compute-provisioning`) and just the wheels they
