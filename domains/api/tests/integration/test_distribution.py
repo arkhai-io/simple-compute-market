@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[4]
 _REQUIRES_DIST = re.compile(r"^Requires-Dist: ([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 

@@ -28,7 +28,7 @@ from arkhai_api.issuance import (
 from arkhai_api.labels import IssuanceLabel
 
 PINS = (
-    Path(__file__).resolve().parents[3]
+    Path(__file__).resolve().parents[4]
     / "domains"
     / "apicredits"
     / "tests"

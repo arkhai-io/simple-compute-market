@@ -5,7 +5,7 @@ import pytest
 from arkhai_api.issuance import issuance_request_model
 from arkhai_api.labels import IssuanceLabel
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "arkhai_api"
+SRC = Path(__file__).resolve().parents[2] / "src" / "arkhai_api"
 
 
 def test_a_label_spells_every_schema_string():

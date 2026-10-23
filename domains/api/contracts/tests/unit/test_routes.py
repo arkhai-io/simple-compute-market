@@ -9,7 +9,7 @@ import pytest
 from arkhai_api_contracts import operations
 from arkhai_api_contracts.routes import AUTHORITY_ROUTES, route
 
-BASELINE = Path(__file__).resolve().parents[4] / "domains" / "apicredits" / "service" / "tests" / "fixtures" / "baseline"
+BASELINE = Path(__file__).resolve().parents[5] / "domains" / "apicredits" / "service" / "tests" / "fixtures" / "baseline"
 ROUTE_CONTRACTS = json.loads((BASELINE / "route_contracts.json").read_text(encoding="utf-8"))
 MOUNTED = json.loads((BASELINE / "routes.json").read_text(encoding="utf-8"))
 AUTHORITY_PATHS = ("/api/v1/issuance", "/api/v1/keys")

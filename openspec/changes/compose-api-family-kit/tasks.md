@@ -277,7 +277,10 @@ above.
       and dumps `exclude_none`, `ProvisionTerms.purchase(...)` (today's
       `make_api_credits_provision_terms`), the four payload accessors, and
       `provision_terms_model(kind)`, a cached `create_model` subclass binding
-      `kind` to the literal, so equal kinds yield one class. `labels.py`:
+      `kind` to the literal, so equal kinds yield one class; the bound class is
+      named `ProvisionTerms`, so pydantic error headers no longer read
+      `ApiCreditsProvisionTerms` (`ApiCreditsMessage`, which subclasses it,
+      keeps its name). `labels.py`:
       `IssuanceLabel`, a frozen dataclass of the label `name` (lowercase words
       joined by hyphens) and a `fulfillment_id_prefix` derived as
       `<name>-fulfillment.v1` unless given, with properties spelling the
@@ -339,7 +342,9 @@ above.
       the wheel requires `arkhai-kit-identity` and `pydantic` alone, installs
       it into a fresh environment, and imports every module with no core,
       storefront, settlement-runtime, negotiation-runtime, site, or API-credits
-      package findable. Unit, 53 passed.
+      package findable. 53 passed: `tests/unit/` unit, `tests/integration/`
+      (the distribution test, which builds, installs, and imports in a
+      subprocess) library integration.
 - [x] 2.5 `domains/api/contracts/` (`arkhai-api-contracts` 0.1.0; dependencies
       `pydantic`, `arkhai-core`, `arkhai-kit-identity`, `arkhai-api`):
       `src/arkhai_api_contracts/models.py`, the authority's wire models moved
@@ -362,11 +367,13 @@ above.
       is wire. Dependencies are `arkhai-api`, `arkhai-kit-identity`, and
       `pydantic`, which are also its allowlist; `arkhai-core`, which this task
       lists, is neither imported nor needed, so it is not declared. Unit:
-      `test_routes.py` compares the declarations to the service baseline's
-      `route_contracts.json` credits table field for field, resolves every
-      mounted `/api/v1/issuance` and `/api/v1/keys` route in `routes.json` to
-      exactly one declaration and no unsigned path to any, and checks each
-      operation is declared once; `test_models.py` compares each wire model's
+      `test_routes.py` compares the declarations to the recorded credits
+      table in the service baseline's `route_contracts.json` field for field
+      (the recording the service's own baseline test holds equal to
+      `route_contracts.py`), resolves every mounted `/api/v1/issuance` and
+      `/api/v1/keys` route recorded in `routes.json` to exactly one
+      declaration and no unsigned path to any, and checks each operation is
+      declared once; `test_models.py` compares each wire model's
       JSON schema, under the `api-credits` label and with null defaults
       dropped as FastAPI drops them, to the baseline `openapi.json` component
       of the same name, and checks the bound response carries the secret and
@@ -395,17 +402,21 @@ above.
       the accessors re-exported; `API_CREDITS_PROVISION_VERSION`,
       `ApiCreditsKeyIntent`, and `ApiCreditsProvisionPayload` had no consumer
       and are gone. The domain library declares `arkhai-api>=0.1.0` and bumps
-      to 0.7.0, a published wheel whose requirements changed. Domain library 45
-      passed (unit; the install tests library integration), the pins among
-      them; storefront 196, buyer 27, service 79 passed unchanged (unit and
-      application integration), 1.3–1.5's baselines among them. The two-kind
-      test is 2.4's.
+      to 0.7.0, a published wheel whose requirements changed. The terms
+      consumers' tests are the storefront's and buyer's, which pass unchanged:
+      storefront 196, buyer 27, service 79 (unit and application integration),
+      1.3–1.5's baselines among them; domain library 45 (unit; the install
+      tests library integration), the pins among them. The two-kind test is
+      2.4's: one accepted payload and five refusals under both kinds, and the
+      consumers' suites are the evidence the API-credits binding is
+      unchanged.
 - [x] 2.8 Wiring: `dist-api`, `dist-api-contracts`, `test-api` in
       `domains/Makefile` and the root `Makefile`; rows in `tests.yml`;
       published-package rows and `publish-pypi.yml` entries; locks.
       *Done.* Both Makefiles gain the three targets, in `dist`, `dist-ci`, and
       `test`, with `dist-apicredits-domain` depending on `dist-api`;
-      `tests.yml` two matrix rows; `publish-pypi.yml` the push path, two
+      `tests.yml` two matrix rows (the root `dist` and `dist-ci` reach the two
+      wheels through `dist-domains`, as every domain wheel); `publish-pypi.yml` the push path, two
       filters, and two `PACKAGES` entries; `manifests/published-distributions.json`
       both, after the identity kit; `RELEASING.md` two rows and `arkhai-api`
       on the domain library's. Locks: the two new projects, and the domain,
@@ -457,9 +468,19 @@ above.
       code until sections 3 and 5 rewire their callers. Relock under uv
       0.11.17 with `uvx uv@0.11.17` behind a `uv` shim on `PATH`, and run
       the whole-tree checks on a copy excluding `.claude/`, until the stale
-      worktree is removed by the session that owns it. Section 2 is committed
-      on `feat/compose-api-family-kit-s2-vocabulary`, stacked on section 1's
-      branch.
+      worktree is removed by the session that owns it. The fresh-context
+      check accepted: shorter module docstrings, the redundant Makefile
+      comment, the two wheels built twice by the root `dist`, the unit and
+      integration split of the new suites, a development-value comment on a
+      test address, and the promotion rows for the two `ARCHITECTURE.md`
+      sentences the family row falsifies. Declined: a comment stating the
+      route declarations' order matters, since every pair is disjoint under
+      full-path match and method and the route test proves one match per
+      mounted route; and moving the pins and baselines into a shipped fixture
+      package, since they are section 1's recordings, owned by the domain's
+      tests by design and read by path. Section 2 is committed on
+      `feat/compose-api-family-kit-s2-vocabulary`, stacked on section 1's
+      branch, the review's fixes as a second commit.
 
 ## 3. The typed client and one digest implementation
 
@@ -861,6 +882,7 @@ change to implementation.
 | Accepted decision | Permanent location |
 |---|---|
 | D1, D2 — the `api` family, its root, and the rule-derived distribution set | `docs/development/ARCHITECTURE.md#family-kits` |
+| D1 — API credits has a family: the `#scope` sentence naming it as the domain with none, and the `#repository-layers` sentence presenting `domains/compute` as the family vocabulary, name both families | `docs/development/ARCHITECTURE.md#scope`; `docs/development/ARCHITECTURE.md#repository-layers` |
 | D2 — a family's distributions split only where a rule or dependency weight forces it; an anticipated split is recorded with its trigger | `docs/development/ARCHITECTURE.md#family-kits` |
 | D3, D8 — the vocabulary's contents and label-parameterized digests | `openspec/specs/api-family/spec.md`; `openspec/specs/api-credits/architecture.md#idempotency-boundaries` |
 | D4 — plain-data route declarations adapted by the authority | `openspec/specs/api-family/spec.md` |

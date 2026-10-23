@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from arkhai_api.labels import IssuanceLabel
 from arkhai_api_contracts import models
 
-BASELINE = Path(__file__).resolve().parents[4] / "domains" / "apicredits" / "service" / "tests" / "fixtures" / "baseline"
+BASELINE = Path(__file__).resolve().parents[5] / "domains" / "apicredits" / "service" / "tests" / "fixtures" / "baseline"
 COMPONENTS = json.loads((BASELINE / "openapi.json").read_text(encoding="utf-8"))["components"]["schemas"]
 API_CREDITS = IssuanceLabel("api-credits", "api-credit-fulfillment.v1")
 INFERENCE = IssuanceLabel("inference")
@@ -60,6 +60,7 @@ def test_the_response_is_bound_to_its_label_and_carries_the_secret():
         "fulfillment_id": identity,
         "grant_id": identity,
         "negotiation_id": "neg-1",
+        # A development value never used on any network.
         "owner": {"scheme": "eip191", "identifier": "0xabcdef0000000000000000000000000000000001"},
         "service": "weather-api",
         "resource_id": "weather-quota",

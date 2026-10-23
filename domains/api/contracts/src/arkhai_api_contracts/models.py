@@ -1,11 +1,4 @@
-"""The authority's wire models.
-
-The issuance command and its key disposition are the vocabulary's; the
-response is the authority's full projection of the committed grant, bearer
-secret included, which only the requester's typed client sees. Each class's
-docstring is part of the served OpenAPI document, so the models carry only the
-descriptions the document records.
-"""
+"""The authority's wire models; each class docstring enters the served OpenAPI document."""
 
 from __future__ import annotations
 

@@ -36,8 +36,6 @@ dist-compute: ## Build arkhai-compute wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_compute-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-compute produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-# The api-family vocabulary API credits binds, and the authority's contracts
-# beneath it; built before the API-credits wheels that depend on them.
 dist-api: ## Build arkhai-api wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd api && uv build --wheel --out-dir $(DIST_DIR)
