@@ -67,6 +67,13 @@ def test_an_issuance_refusal_is_recorded_status_and_body(record, reason, message
     assert {"status": status, "body": body} == REFUSALS[record]
 
 
+def test_issuance_onto_a_revoked_key_is_a_409_naming_the_key():
+    service = AuthorityRouteService(_Keys(issue=IssuanceError("key_revoked", "key 'ak_missing' is revoked")))
+    assert _refusal(lambda: service.issue(_request())) == (
+        409, {"error": "key_revoked", "detail": "key 'ak_missing' is revoked"},
+    )
+
+
 def test_an_invalid_issuance_input_is_a_422_with_its_detail():
     service = AuthorityRouteService(_Keys(issue=ValueError("owner is required")))
     assert _refusal(lambda: service.issue(_request())) == (422, {"detail": "owner is required"})

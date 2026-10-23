@@ -903,7 +903,16 @@ project and every module under `domains/apicredits/service/src/apicredits_servic
       the baseline, and the parity test read the adapted table from
       `main`, the signed round-trip takes it from the adapter, and each
       takes the label from `config`. 41 passed with every 1.3 and 1.4
-      record diffing to zero.
+      record diffing to zero; the version record holds the response's
+      shape and service identity, the number itself being the installed
+      distribution's, now 0.8.0. The owner's review asked for coverage of
+      issuance onto a revoked existing key, which 1.3 left out of the
+      refusal record: the route service maps it to the 409
+      `{"error": "key_revoked", "detail": ...}` the controller served
+      (unit), the key service refuses the top-up with no grant, balance, or
+      quota change (library integration), and the served refusal reaches
+      the family client as status, reason, and detail (application
+      integration, `test_signed_authority.py`).
 
 - [x] 4.5 Verification: `make test-api-authority` (unit, library integration
       against SQLite), `make -C domains/apicredits/service test` (application

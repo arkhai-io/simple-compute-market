@@ -709,6 +709,23 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
 
 
 @pytest.mark.asyncio
+async def test_issuance_onto_a_revoked_key_is_refused_as_served(signed_app):
+    from arkhai_api_client import AuthorityError
+
+    await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
+    seller = _seller_client(signed_app)
+    issued = await seller.submit_issuance(_credit_request("neg-revoked-1", 2))
+    await seller.revoke_key(issued.key_id)
+
+    with pytest.raises(AuthorityError) as refused:
+        await seller.submit_issuance(_credit_request("neg-revoked-2", 1, existing_key=issued.key_id))
+
+    assert (refused.value.status_code, refused.value.reason) == (409, "key_revoked")
+    assert refused.value.detail == f"key {issued.key_id!r} is revoked"
+    assert (await seller.get_key(issued.key_id))["balance"] == 2
+
+
+@pytest.mark.asyncio
 async def test_batch_consumption_and_the_key_administration_surface(signed_app):
     """Batch spending, then every key-administration read and write the seller holds."""
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)

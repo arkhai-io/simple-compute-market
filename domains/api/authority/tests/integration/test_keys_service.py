@@ -393,6 +393,20 @@ def test_consume_batch_keeps_order_and_isolates_failures(service):
     assert results[-1]["balance"] == 0
 
 
+def test_a_top_up_onto_a_revoked_key_is_refused_without_a_grant(service, ledger):
+    new = _issue(service, negotiation_id="0xr1", quantity=4, key_mode="new", **BUYER)
+    service.revoke(new["key_id"])
+    before = ledger.snapshot()[0]["available_units"]
+
+    with pytest.raises(IssuanceError) as refused:
+        _issue(service, negotiation_id="0xr2", quantity=2, key_mode="existing", key_id=new["key_id"], **BUYER)
+
+    assert refused.value.reason == "key_revoked"
+    assert service.get_key(new["key_id"])["balance"] == 4
+    assert len(service.list_grants(new["key_id"])) == 1
+    assert ledger.snapshot()[0]["available_units"] == before
+
+
 def test_verify_checks_secret_and_status(service):
     new = _issue(service, negotiation_id="0xv1", quantity=1, key_mode="new", **BUYER)
     key_id, secret = new["key_id"], new["secret"]
