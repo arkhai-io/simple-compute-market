@@ -308,7 +308,14 @@ the driver that runs the synchronous core publication runner in a worker thread
 and returns each source callback to the event loop, the cycle report, and the
 registry convergence every publication pass ends with. A domain contribution
 supplies only schema-opaque candidates and codecs plus hooks that resolve each
-listing's durable capacity binding. Each storefront keeps its domain's cycle
+listing's durable capacity binding. VM capacity reconciliation and publication share a runtime lock covering refreshed
+projection acquisition, the existing full-shape close/reopen decision and registry
+convergence. Capacity-event workers also reconcile quiet cycles and startup, so a
+consumed event or restart cannot strand registry delivery. Desired listing status
+and existing per-registry records, including missing records, carry retry intent;
+a reopen is acknowledged only after both payload publication and registry status
+succeed. This worker path is outside settlement: registry failure never changes a
+committed reservation's success. Each storefront keeps its domain's cycle
 semantics — which sources it reads, what it derives, closes, and holds — and
 composes them onto that driver; VM publication reads the kit's site projections
 and capacity events, while bare-metal publication fetches each site's

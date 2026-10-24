@@ -635,6 +635,9 @@ async def test_round_zero_evaluation_runs_the_inventory_guard(negotiating_world)
     # The declaration shrinks below the listing's count; no cycle has run, so
     # the listing is still open and only the guard can notice.
     world.pools[0] = pool("broker-a", backing="unbacked", gpu_count=1)
+    # Advance the projection boundary, not publication; snapshots are detached
+    # from the site's mutable declaration just as remote responses are.
+    await world.client.admin_refresh_site_projections()
     refused = await evaluate()
 
     # A policy rejection refuses the opening, as negotiate/new would.

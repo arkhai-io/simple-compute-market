@@ -245,6 +245,10 @@ async def drain_site_events_once(
             )
             applied.append(fields)
             cursor.last_applied = int(event.get("version") or cursor.last_applied)
+        if not positioned and not resynced and not events:
+            # Feed progress is not delivery success. Quiet cycles also repair
+            # missed projections and registry writes, including after restart.
+            await full_reconcile()
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -286,8 +290,9 @@ async def site_events_poller(
 ) -> None:
     """Tail one site authority's capacity-event feed into the local bus.
 
-    Positions at the feed head, runs ``full_reconcile`` once to converge
-    with anything missed while down, then polls for new versions and
+    Positions at the feed head and runs ``full_reconcile`` to converge
+    with anything missed while down. Quiet cycles repeat it to recover
+    failed projection refreshes and registry delivery. Polls for new versions and
     emits each as a site-tagged ``CapacityDelta`` on the aggregate bus.
     A feed head that moves backwards (ledger reset) re-runs the full
     reconcile instead of replaying. ``full_reconcile`` is the domain's

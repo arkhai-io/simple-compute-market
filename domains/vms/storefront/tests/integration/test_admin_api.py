@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from typing import AsyncIterator
 
 import httpx
@@ -44,7 +44,7 @@ from market_storefront.utils.sqlite_client import SQLiteClient
 from market_storefront.services.system_service import SystemService
 from storefront_client.client import StorefrontClient, StorefrontClientError
 from tests._settings_overrides import settings_overrides
-from tests.fake_site import site_capacity
+from tests.fake_site import capacity_bucket_rows, site_capacity
 
 
 _TEST_SELLER_PRINCIPAL = Identity(
@@ -955,9 +955,14 @@ class TestRealOrchestrationCacheToReconciliation:
             revision=1,
             digest="abc",
         )
+        resource_pools_cache._client = SimpleNamespace(snapshot=AsyncMock(return_value=(
+            resource_pools_cache._identity, resource_pools_cache._value,
+        )))
         caches = spc.SiteProjectionCaches(
             resource_pools=resource_pools_cache,
-            capacity_buckets=ProjectionCache(client=None),
+            capacity_buckets=ProjectionCache(client=SimpleNamespace(snapshot=AsyncMock(return_value=(
+                resource_pools_cache._identity, capacity_bucket_rows(resource_pools_cache._value),
+            )))),
         )
         fake = _fake_pool_site()
         site = CapacitySite(

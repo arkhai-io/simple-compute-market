@@ -4,7 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -150,6 +150,7 @@ class PublicationRuntime(Generic[PayloadT]):
         """Publish only a candidate whose durable binding matches exactly."""
         await self._require_persisted_binding(candidate.listing_id, candidate.binding)
         self._hooks.validate_candidate(candidate)
+        await self._mark_pending(candidate.listing_id, self._registry_urls)
         return await publish_listing_to_registries(
             candidate.payload,
             enabled=self._enabled,
@@ -188,6 +189,7 @@ class PublicationRuntime(Generic[PayloadT]):
             status="closed",
             closed_by=closed_by,
         )
+        await self._mark_pending(listing.listing_id, self._registry_urls)
         return await close_listing_in_registries(
             listing.listing_id,
             enabled=self._enabled,
@@ -219,23 +221,10 @@ class PublicationRuntime(Generic[PayloadT]):
             status="open",
             reopened_by=reopened_by,
         )
-        published = await self.publish(candidate)
-        if published.get("status") != "published":
-            return published
-        # Publishing refreshes the payload a registry holds but not its status,
-        # so a listing a registry recorded as closed is reopened explicitly. The
-        # result is recorded so a registry that stays closed is seen as diverged.
-        reopened = await reopen_listing_in_registries(
-            candidate.listing_id,
-            enabled=self._enabled,
-            registry_client_factory=self._open_registry_client,
-            update_listing_request_factory=self._update_listing_request_factory,
-            select_target_registries=self._registries_to_target,
-            record_publications=self._record_publications,
+        return await self._publish_and_reopen(
+            candidate.listing_id, candidate.payload, self._registry_urls,
+            on_published=self._on_published,
         )
-        if reopened.get("status") == "error":
-            return reopened
-        return published
 
     async def reconcile(
         self, plan: ReconciliationPlan[PayloadT]
@@ -417,6 +406,7 @@ class PublicationRuntime(Generic[PayloadT]):
             return [url for url in urls if url in targets]
 
         if divergence.listing_status == "closed":
+            await self._mark_pending(divergence.listing_id, divergence.registry_urls)
             await close_listing_in_registries(
                 divergence.listing_id,
                 enabled=self._enabled,
@@ -429,25 +419,58 @@ class PublicationRuntime(Generic[PayloadT]):
         listing = await self._repository.load_listing(listing_id=divergence.listing_id)
         if listing is None:
             return
+        await self._publish_and_reopen(
+            divergence.listing_id, listing, divergence.registry_urls,
+        )
+
+    async def _mark_pending(self, listing_id: str, urls: Sequence[str]) -> None:
+        """Persist retry intent before I/O; do not send if it cannot be saved."""
+        if not self._enabled:
+            return
+        for url in urls:
+            await self._repository.upsert_publication(
+                listing_id=listing_id, registry_url=url, payload={},
+                status="failed", registry_assigned_id=None,
+                last_error="registry delivery pending",
+            )
+
+    async def _publish_and_reopen(
+        self, listing_id: str, listing: Any, urls: Sequence[str],
+        *, on_published: PublishedEvent | None = None,
+    ) -> dict[str, Any]:
+        await self._mark_pending(listing_id, urls)
+        published_urls: set[str] = set()
+
+        async def payload_results(_listing_id: str, results: list[dict[str, Any]]) -> None:
+            published_urls.update(r["registry_url"] for r in results if r.get("success"))
+            # Payload upsert does not reopen a registry row. Keep delivery
+            # pending until that same registry also acknowledges open status.
+            await self._record_results(_listing_id, results, success_status="failed")
+
+        async def published_targets(_listing_id: str, _urls: list[str]) -> list[str]:
+            return [url for url in urls if url in published_urls]
+
         published = await publish_listing_to_registries(
             listing,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             listing_request_factory=self._listing_request_factory,
             storefront_url=self._storefront_url,
-            record_publications=self._record_publications,
-            registry_urls=divergence.registry_urls,
+            record_publications=payload_results,
+            on_published=on_published,
+            registry_urls=urls,
         )
         if published.get("status") != "published":
-            return
-        await reopen_listing_in_registries(
-            divergence.listing_id,
+            return published
+        reopened = await reopen_listing_in_registries(
+            listing_id,
             enabled=self._enabled,
             registry_client_factory=self._open_registry_client,
             update_listing_request_factory=self._update_listing_request_factory,
-            select_target_registries=diverged,
+            select_target_registries=published_targets,
             record_publications=self._record_publications,
         )
+        return reopened if reopened.get("status") == "error" else published
 
     async def _record_publications(
         self, listing_id: str, results: list[dict[str, Any]]

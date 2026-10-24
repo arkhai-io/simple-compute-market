@@ -85,6 +85,7 @@ from tests.fake_site import (
     TEST_MARKETPLACE_SIGNER,
     FakeSite,
     capacity_runtime_over_sites,
+    capacity_bucket_rows,
 )
 
 SITE = "site-a"
@@ -400,7 +401,16 @@ class HarnessProjectionClient:
                     resource_id = member.get("physical_resource_id")
                     if resource_id in self.site.resources:
                         member["available"] = self.site.available_dimensions(resource_id)
-        return await self.version(), self.pools
+        return await self.version(), deepcopy(self.pools)
+
+
+class HarnessBucketClient:
+    def __init__(self, pools: HarnessProjectionClient) -> None:
+        self._pools = pools
+
+    async def snapshot(self):
+        identity, pools = await self._pools.snapshot()
+        return identity, capacity_bucket_rows(pools)
 
 
 def _projection_caches(client: HarnessProjectionClient):
@@ -410,7 +420,7 @@ def _projection_caches(client: HarnessProjectionClient):
     resource_pools._identity = ProjectionIdentity(revision=1, digest="publication")
     return site_projection_cache.SiteProjectionCaches(
         resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
+        capacity_buckets=ProjectionCache(client=HarnessBucketClient(client)),
     )
 
 
@@ -593,6 +603,9 @@ async def publication_app(
             {SITE: site, **({SITE_B: site_b} if site_b is not None else {})},
             sqlite_client_factory=lambda: db,
         )
+        stack.enter_context(patch.object(
+            site_projection_cache, "build_capacity_client", lambda _factory: capacity.client(),
+        ))
         registration = registry.resolve_mode("vm")
         listings = ListingService(
             registry=registry,

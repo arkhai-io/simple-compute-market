@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+from market_site.projections import capacity_bucket_projection
 from market_identity import (
     EMPTY_BODY,
     ResponseEnvelope,
@@ -222,6 +223,15 @@ class FakeSite:
         ):
             return httpx.Response(200, json=self._pool_projection_generation())
 
+        if request.method == "GET" and path in (
+            "/api/v1/capacity/site-capacity-buckets",
+            "/api/v1/capacity/site-capacity-buckets/version",
+        ):
+            generation = self._pool_projection_generation()
+            if not path.endswith("/version"):
+                generation["capacity_buckets"] = capacity_bucket_rows(self.served_pool_projection())
+            return httpx.Response(200, json=generation)
+
         if path == "/api/v1/capacity/snapshot":
             return httpx.Response(
                 200,
@@ -418,7 +428,11 @@ class FakeSite:
             if not row["enabled"]:
                 continue
             attrs = row["attributes"]
-            top_level = {"resource_id": rid, "pool_id": rid}
+            pool_id = next((
+                pool["pool_id"] for pool in self.served_pool_projection()
+                if any(member["physical_resource_id"] == rid for member in pool["resources"])
+            ), rid)
+            top_level = {"resource_id": rid, "pool_id": pool_id}
             mismatched = any(
                 attrs.get(k, top_level.get(k)) != v
                 for k, v in claim.items()
@@ -581,6 +595,15 @@ def _pool_projection_rows(fake: FakeSite) -> list[dict[str, Any]]:
     ]
 
 
+def capacity_bucket_rows(pools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project the fake site's pool members through the real bucket contract."""
+    return capacity_bucket_projection(
+        {**member, "pool_id": pool["pool_id"],
+         "resource_id": member["physical_resource_id"]}
+        for pool in pools for member in pool.get("resources", [])
+    )
+
+
 class _FakePoolProjectionClient:
     """The fake authority's pool projection, as its site would serve it.
 
@@ -588,9 +611,10 @@ class _FakePoolProjectionClient:
     refreshes the site after changing its capacity sees its own change.
     """
 
-    def __init__(self, fake: FakeSite, *, site_name: str) -> None:
+    def __init__(self, fake: FakeSite, *, site_name: str, buckets: bool = False) -> None:
         self._fake = fake
         self._site_name = site_name
+        self._buckets = buckets
 
     def identity(self):
         from core_storefront.site_projections import ProjectionIdentity
@@ -604,7 +628,8 @@ class _FakePoolProjectionClient:
         return self.identity()
 
     async def snapshot(self):
-        return self.identity(), _pool_projection_rows(self._fake)
+        pools = _pool_projection_rows(self._fake)
+        return self.identity(), capacity_bucket_rows(pools) if self._buckets else pools
 
 
 def _pool_projection_caches(fake: FakeSite, *, site_name: str):
@@ -619,7 +644,9 @@ def _pool_projection_caches(fake: FakeSite, *, site_name: str):
     resource_pools._identity = client.identity()
     return SiteProjectionCaches(
         resource_pools=resource_pools,
-        capacity_buckets=ProjectionCache(client=None),
+        capacity_buckets=ProjectionCache(
+            client=_FakePoolProjectionClient(fake, site_name=site_name, buckets=True),
+        ),
     )
 
 

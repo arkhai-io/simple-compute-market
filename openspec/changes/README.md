@@ -9,6 +9,16 @@ Statuses here describe readiness, not merely whether a checklist exists:
 - **blocked** — retain design/specification, but do not begin blocked implementation;
 - **deferred** — no implementation checklist until the recorded activation condition is met.
 
+## Focused VM availability repair
+
+`reconcile-vm-listings-on-capacity-events` uses the existing fit, provenance and
+registry-convergence owners; it has no dependency edge on negotiation probes,
+shape envelopes or resizing.
+
+| Change | Status | Acceptance boundary |
+|---|---|---|
+| [`reconcile-vm-listings-on-capacity-events`](reconcile-vm-listings-on-capacity-events/) | implemented and promoted; focused checks passed, review pending | Fresh, serialized finite VM offers in both listing modes; same-ID recovery and durable per-registry repair on quiet cycles and restart. No hosted purchase qualification or deployment changes |
+
 ## Focused registry repair
 
 | Change | Status | Acceptance boundary |

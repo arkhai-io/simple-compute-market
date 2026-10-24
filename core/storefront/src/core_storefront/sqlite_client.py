@@ -3581,8 +3581,9 @@ class SQLiteClient:
         """Registry records that disagree with their listing's local status.
 
         An open listing should be ``published`` at every registry that records
-        it and a closed one ``unpublished``; any other record there — a failed
-        publish, close, or reopen — is a registry that has not converged. Only
+        it and a closed one ``unpublished``; a missing record or any other
+        status is a registry that has not converged. Missing records cover
+        client-construction and result-persistence failures across restart. Only
         the given (configured) registries and open or closed listings are read.
         Returns ``listing_id``, ``listing_status``, and ``registry_url`` rows
         ordered by listing and registry.
@@ -3592,20 +3593,23 @@ class SQLiteClient:
             return []
 
         def _load() -> list[dict[str, Any]]:
-            placeholders = ", ".join("?" for _ in urls)
+            targets = ", ".join("(?)" for _ in urls)
             conn = sqlite3.connect(self.db_path)
             try:
                 rows = conn.execute(
                     f"""
-                    SELECT p.listing_id, l.status, p.registry_url
-                    FROM publications p
-                    JOIN listings l ON l.listing_id = p.listing_id
-                    WHERE p.registry_url IN ({placeholders})
+                    WITH targets(registry_url) AS (VALUES {targets})
+                    SELECT l.listing_id, l.status, t.registry_url
+                    FROM listings l CROSS JOIN targets t
+                    LEFT JOIN publications p
+                      ON p.listing_id = l.listing_id AND p.registry_url = t.registry_url
+                    WHERE l.status IN ('open', 'closed')
                       AND (
-                        (l.status = 'open' AND p.status != 'published')
+                        p.listing_id IS NULL
+                        OR (l.status = 'open' AND p.status != 'published')
                         OR (l.status = 'closed' AND p.status != 'unpublished')
                       )
-                    ORDER BY p.listing_id, p.registry_url
+                    ORDER BY l.listing_id, t.registry_url
                     """,
                     urls,
                 ).fetchall()

@@ -51,6 +51,7 @@ from market_capacity_publication import (
 
 import market_storefront.container as container
 from market_storefront.services.shape_feasibility import vm_shape_feasibility
+from market_storefront.services.site_projection_cache import fresh_listing_projections
 from market_storefront.lifecycle import PUBLICATION, gate, idle
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_wiring import (
@@ -59,8 +60,6 @@ from market_storefront.publication_wiring import (
 )
 from market_storefront.services.capacity_client import (
     capacity_binding_for_listing,
-    site_capacity_buckets,
-    site_pool_projection,
 )
 from market_storefront.services.publication_service import (
     _candidate,
@@ -156,12 +155,15 @@ class VmPublicationCycle:
     # -- cycle -----------------------------------------------------------
 
     async def run(self) -> dict[str, Any]:
+        async with self._capacity.reconciliation_lock:
+            return await self._run_serialized()
+
+    async def _run_serialized(self) -> dict[str, Any]:
         self._sites = tuple(self._capacity.site_ids)
         if not self._sites:
             await self._converge_registries()
             return self._report()
-        self._projection = site_pool_projection()
-        self._buckets = site_capacity_buckets()
+        self._projection, self._buckets = await fresh_listing_projections(self._sites)
         try:
             self._availability = dict(await self._capacity.availability())
         except Exception as exc:
