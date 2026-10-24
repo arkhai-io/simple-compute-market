@@ -10,7 +10,7 @@ from __future__ import annotations
 import apicredits_storefront.settlement_stages as settlement_stages
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import _decode_terms
+from arkhai_api_selling.negotiation import decode_terms as _decode_terms
 from market_alkahest.proposals import ReleaseConditionError
 from market_core.schemas import ProvisionTerms
 from market_identity import Ed25519Signer

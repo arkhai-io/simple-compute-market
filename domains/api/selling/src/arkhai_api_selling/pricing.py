@@ -1,12 +1,4 @@
-"""API-credits listing pricing helpers.
-
-Listings are unit-priced: ``accepted_escrows[*].rates`` carries
-``{"field": "amount", "per": "token", "value": <base units>}`` and the
-negotiated scalar amount is ``quantity × unit rate``. The
-per-unit→absolute translation happens where the seller's reference
-amount is computed (the round hook) and, buyer-side, in the policy
-surface (work item 5).
-"""
+"""Per-credit pricing: a listing's amount is ``quantity × rate``, exact in integer base units."""
 
 from __future__ import annotations
 
@@ -16,11 +8,27 @@ from collections.abc import Mapping
 from fractions import Fraction
 from typing import Any
 
-from arkhai_apicredits.listings.models import resource_is_api_credits
-from market_core.schemas import SettlementOption, SettlementSelection
+from market_core.schemas import SettlementOption
 from market_policy.scalar_policies import selected_settlement_artifact
 
+from arkhai_api_selling.contributions import SellingContributions
+from arkhai_api_selling.issuance import decode_stored
+
 _MAX_BASE_UNIT_AMOUNT = 2**256 - 1
+_PER_CREDIT = frozenset({"credit", "token", "request"})
+
+
+def domain_listing_resource(
+    contributions: SellingContributions, value: Any
+) -> dict[str, Any] | None:
+    """``value`` as the domain's listing schema reads it, or None when it is not the domain's."""
+    try:
+        listing = contributions.listing_schema.model_validate(
+            {"listing_resource": decode_stored(value)}
+        )
+    except ValueError:
+        return None
+    return listing.listing_resource.model_dump(mode="json")
 
 
 def _settlement_options(order: dict[str, Any]) -> list[SettlementOption]:
@@ -36,42 +44,20 @@ def _settlement_options(order: dict[str, Any]) -> list[SettlementOption]:
 def checked_credit_total(unit_rate: Any, quantity: Any) -> int:
     """Multiply exact integer base units and reject fractions or overflow."""
     if isinstance(unit_rate, bool) or isinstance(quantity, bool):
-        raise ValueError("API-credit rate and quantity must be integers")
+        raise ValueError("credit rate and quantity must be integers")
     try:
         rate = int(unit_rate)
         count = int(quantity)
     except (TypeError, ValueError) as exc:
-        raise ValueError("API-credit rate and quantity must be integers") from exc
+        raise ValueError("credit rate and quantity must be integers") from exc
     if rate != unit_rate or count != quantity:
-        raise ValueError("API-credit pricing does not admit fractional base units")
+        raise ValueError("credit pricing does not admit fractional base units")
     if rate < 0 or count < 1:
-        raise ValueError("API-credit rate must be non-negative and quantity positive")
+        raise ValueError("credit rate must be non-negative and quantity positive")
     total = rate * count
     if total > _MAX_BASE_UNIT_AMOUNT:
-        raise ValueError("API-credit quantity-scaled amount exceeds uint256")
+        raise ValueError("credit quantity-scaled amount exceeds uint256")
     return total
-
-
-def selected_unit_price(
-    order: dict[str, Any],
-    selection: SettlementSelection,
-) -> int:
-    """Return the exact selected option's per-credit base-unit amount."""
-    matches = [
-        option
-        for option in _settlement_options(order)
-        if option.option_id == selection.option_id
-        and option.mechanism == selection.mechanism
-    ]
-    if len(matches) != 1:
-        raise ValueError("settlement selection does not exact-match one listing option")
-    amount_rates = [rate for rate in matches[0].rates if rate.field == "amount"]
-    if len(amount_rates) != 1:
-        raise ValueError("selected API-credit option requires one amount rate")
-    rate = amount_rates[0]
-    if rate.per not in {"credit", "token", "request"}:
-        raise ValueError("selected API-credit option rate is not per credit")
-    return checked_credit_total(rate.value, 1)
 
 
 def _accepted_escrows(order: dict[str, Any]) -> list[dict[str, Any]]:
@@ -106,10 +92,10 @@ def _selected_option_rate(option: Mapping[str, Any]) -> int | None:
     if not amount_rates:
         return None
     if len(amount_rates) != 1:
-        raise ValueError("selected API-credit option has more than one amount rate")
+        raise ValueError("selected credit option has more than one amount rate")
     rate = amount_rates[0]
-    if rate.per not in {"credit", "token", "request"}:
-        raise ValueError("selected API-credit option rate is not per credit")
+    if rate.per not in _PER_CREDIT:
+        raise ValueError("selected credit option rate is not per credit")
     return checked_credit_total(rate.value, 1)
 
 
@@ -121,15 +107,9 @@ def extract_unit_price_from_order(
 ) -> int | Fraction:
     """The seller's per-credit floor for the option a buyer's proposal selects.
 
-    The seller negotiates from the selected settlement artifact's rate: the
-    settlement option a ``settlement_selection`` names, or the accepted escrow an
-    escrow proposal names, which need not be the listing's first. When that
-    artifact advertises no rate the listing is a hidden reserve for it and the
-    floor is ``[seller.pricing].default_min_price``. Without a proposal that
-    selects anything, the listing's first advertised rate stands in. With no
-    rate and no floor there is nothing to negotiate against and the negotiation
-    is refused. See openspec/specs/negotiation-protocol/spec.md, "The seller's
-    reference amount is the selected option's rate".
+    The selected option's or escrow's rate, else the configured floor where it advertises
+    none; with neither the negotiation is refused. See openspec/specs/negotiation-protocol/spec.md,
+    "The seller's reference amount is the selected option's rate".
     """
     selected = selected_settlement_artifact(order, proposal)
     selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
@@ -167,11 +147,7 @@ _DECIMAL_TEXT = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
 
 
 def _exact_floor(value: Any, *, listing_id: Any) -> Fraction | None:
-    """``default_min_price`` as an exact rational, or None when unset.
-
-    Base units reach on-chain settlement, so the floor is parsed from its
-    decimal text and never through a binary float.
-    """
+    """``default_min_price`` as an exact rational parsed from decimal text, or None when unset."""
     if value is None:
         return None
     if isinstance(value, (bool, float)):
@@ -191,10 +167,12 @@ def _exact_floor(value: Any, *, listing_id: Any) -> Fraction | None:
     return Fraction(text)
 
 
-def determine_strategy_from_order(order: dict[str, Any] | None) -> str | None:
-    """Sellers of prepaid credits always maximize the scalar amount."""
+def determine_strategy(
+    contributions: SellingContributions, order: Mapping[str, Any] | None
+) -> str | None:
+    """Sellers of prepaid credits always maximize the scalar amount of their own listings."""
     if not order:
         return None
-    if resource_is_api_credits(order.get("listing_resource")):
+    if domain_listing_resource(contributions, order.get("listing_resource")) is not None:
         return "maximize"
     return None

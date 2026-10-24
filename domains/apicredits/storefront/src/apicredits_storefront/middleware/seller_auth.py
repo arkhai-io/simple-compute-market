@@ -7,7 +7,7 @@ import json
 from fastapi import HTTPException, Request
 from market_identity import EMPTY_BODY
 
-from apicredits_storefront.listing_publication import seller_resource
+from arkhai_api_selling.publish_route import seller_resource
 from apicredits_storefront.middleware.response_auth import bind_response_contract
 from core_storefront.auth import AuthError, authenticate_request
 

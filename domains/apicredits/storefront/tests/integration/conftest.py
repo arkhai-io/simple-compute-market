@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import market_policy.negotiation_thread as thread_module
 import pytest
-from apicredits_storefront import negotiation_runtime as runtime_module
+from apicredits_storefront import container, server
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store
@@ -16,11 +16,7 @@ from tests.integration.credit_negotiation import FakeCapacity, anvil_chain, seed
 def fake_capacity(monkeypatch):
     capacity = FakeCapacity()
 
-    monkeypatch.setattr(
-        runtime_module,
-        "build_capacity_client",
-        lambda factory: capacity,
-    )
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "client", lambda factory: capacity)
     return capacity
 
 
@@ -31,7 +27,7 @@ def key_records(monkeypatch):
     async def _lookup(key_id: str):
         return records.get(key_id)
 
-    monkeypatch.setattr(runtime_module, "lookup_key_record", _lookup)
+    monkeypatch.setattr(server, "lookup_key_record", _lookup)
     return records
 
 

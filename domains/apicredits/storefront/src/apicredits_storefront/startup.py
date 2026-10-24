@@ -1,17 +1,14 @@
-"""Storefront startup hooks: preflight + background tasks."""
+"""The storefront's startup preflight: the credits service must answer before trading starts."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
-from core_storefront.escrow_identity import backfill_escrow_obligation_records
-from market_core import MarketDomainContract
+import httpx
 
-from apicredits_storefront.lifecycle_steps import register_api_credit_loops
 from apicredits_storefront.utils import config
-from apicredits_storefront.utils.config import BASE_URL_OVERRIDE, settings
+from apicredits_storefront.utils.config import settings
 
 logging.basicConfig(
     level=getattr(logging, str(settings.get("log_level", "INFO")).upper(), logging.INFO)
@@ -20,10 +17,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def _preflight_credits_service() -> None:
+async def preflight_credits_service() -> None:
     """Block startup until the credits service responds, or give up."""
-    import httpx
-
     url = config.credits_service_url()
     if not url:
         raise RuntimeError(
@@ -61,220 +56,3 @@ async def _preflight_credits_service() -> None:
             "storefront anyway (issuance will fail until it is reachable)."
         )
     logger.error(msg + " Continuing because fail_on_unreachable=false.")
-
-
-async def _startup_tasks(
-    *, domain: MarketDomainContract, capacity_runtime: Any | None = None
-) -> None:
-    """Initialize background tasks for the exact app-selected domain.
-
-    ``capacity_runtime`` is the runtime the capacity-event pollers drain, the
-    one the storefront's configuration composes unless given.
-    """
-    from market_policy.identity import Identity
-    from market_policy.negotiation_thread import get_thread_store
-
-    import apicredits_storefront.container as _container
-
-    if _container.resolved_market_domain is not domain:
-        raise RuntimeError(
-            "API-credit startup is not bound to the app-selected "
-            "market-domain contract object"
-        )
-
-    storefront_url = BASE_URL_OVERRIDE or f"http://localhost:{settings.port}"
-    get_thread_store(
-        sqlite_client=_container.resolved_sqlite_client,
-        identity=Identity(agent_url=storefront_url),
-    )
-    logger.info(
-        "[STARTUP] Negotiation thread store initialized (storefront_url=%s)",
-        storefront_url,
-    )
-
-    loops = _container.resolved_loop_controller
-    if loops is None:
-        raise RuntimeError("loop controller is not initialized")
-
-    settlement_runtime = _container.resolved_settlement_runtime
-    marketplace_signer = _container.resolved_marketplace_signer
-    if settlement_runtime is not None and marketplace_signer is not None:
-        backfilled = await backfill_escrow_obligation_records(
-            sqlite_client=_container.resolved_sqlite_client,
-            settlement_runtime=settlement_runtime,
-            local_principal=marketplace_signer.identity,
-        )
-        if backfilled:
-            logger.info(
-                "[STARTUP] Backfilled %d legacy escrow obligation records",
-                backfilled,
-            )
-
-    if _container.resolved_settlement_worker is None:
-        raise RuntimeError("settlement servicing worker is not initialized")
-
-    await _preflight_credits_service()
-
-    await _seed_demo_listing()
-
-    # Every loop starts here, after the escrow backfill the servicing sweep
-    # depends on and the credits-service preflight: each sweep's timer and the
-    # capacity-event pollers' fan-out, which `start_loops` starts together.
-    # With `[credits].fail_on_unreachable = false` the preflight may have given
-    # up on an unreachable credits service, and the loops start all the same.
-    intervals = register_api_credit_loops(loops, capacity_runtime=capacity_runtime)
-    loops.start_loops(task_logger=logger)
-    for name, interval in intervals.items():
-        logger.info("[STARTUP] %s loop started (interval=%ss)", name, interval)
-
-
-def _capacity_authority_site():
-    """Resolve the explicitly pinned site used for demo quota registration."""
-    from apicredits_storefront.services.capacity_client import _capacity_settings
-
-    sites, _ = _capacity_settings()
-    selected = str(settings.get("capacity.seed_site", "") or "")
-    if selected:
-        try:
-            return sites[selected]
-        except KeyError as exc:
-            raise RuntimeError(f"unknown capacity.seed_site {selected!r}") from exc
-    if len(sites) != 1:
-        raise RuntimeError("capacity.seed_site is required with multiple sites")
-    return next(iter(sites.values()))
-
-
-# The quota resource belongs to the credits authority's system-created default
-# pool; a declaration must name its pool explicitly.
-_QUOTA_POOL_ID = "default"
-
-
-async def _register_seed_quota(*, resource_id: str, total_units: int) -> None:
-    """Register the demo quota resource in the credits-service ledger.
-
-    The ledger is the credits service's; the storefront is a client, so
-    registration goes through the typed capacity-administration client
-    (``SiteCapacityClient`` only reads/commits, never registers). A
-    re-registration on restart re-asserts the resource.
-    """
-    from market_site_client import SiteCapacityAdminClient, SiteCapacityAdminClientError
-
-    import apicredits_storefront.container as container
-
-    site = _capacity_authority_site()
-    signer = container.resolved_marketplace_signer
-    if signer is None:
-        raise RuntimeError("marketplace signer is unavailable for quota registration")
-    admin_client = SiteCapacityAdminClient(
-        site.url,
-        signer=signer,
-        expected_authorities=site.expected_authorities,
-        timeout=30.0,
-        transport=None,
-        max_timestamp_skew=300,
-    )
-    try:
-        await admin_client.register_resource(
-            resource_id,
-            pool_id=_QUOTA_POOL_ID,
-            capacity={"units": total_units},
-            resource_type="api_credits",
-        )
-    except SiteCapacityAdminClientError as exc:
-        raise RuntimeError(
-            f"quota registration for {resource_id!r} at {site.url!r} failed: {exc}"
-        ) from exc
-    logger.info(
-        "[STARTUP] Seeded quota resource %s (total_units=%d) in the ledger",
-        resource_id,
-        total_units,
-    )
-
-
-async def _seed_demo_listing() -> None:
-    """Self-seed one quota-backed listing from a ``[seed]`` config block.
-
-    Demo/e2e convenience, mirroring the VM storefront's CSV inventory
-    seed: with a ``[seed]`` block present, register the quota resource
-    and publish a listing from it on startup, so a fresh ``compose up``
-    has something to discover without an out-of-band admin step. Omit
-    the block in production — operators seed quota and publish via the
-    admin API / CLI. Seed failures are logged, not fatal: the storefront
-    still serves, and the cause is visible in its logs.
-    """
-    seed = settings.get("seed")
-    if not isinstance(seed, dict) or not seed.get("resource_id"):
-        return
-    resource_id = str(seed["resource_id"])
-    try:
-        import apicredits_storefront.container as _container
-        from apicredits_storefront.utils.config import CHAINS
-
-        db = _container.resolved_sqlite_client
-        # Idempotent: skip if a listing already derives from this resource.
-        existing = await db.list_listings(status="open", limit=500)
-        for row in existing or []:
-            listing_resource = row.get("listing_resource") or {}
-            if isinstance(listing_resource, str):
-                import json as _json
-
-                try:
-                    listing_resource = _json.loads(listing_resource)
-                except (ValueError, TypeError):
-                    listing_resource = {}
-            if isinstance(listing_resource, dict) and listing_resource.get("resource_id") == resource_id:
-                logger.info(
-                    "[STARTUP] Demo listing for resource %s already present; "
-                    "skipping seed",
-                    resource_id,
-                )
-                return
-
-        await _register_seed_quota(
-            resource_id=resource_id,
-            total_units=int(seed.get("total_units", 100)),
-        )
-
-        chain = str(seed.get("chain", "anvil"))
-        chain_cfg = CHAINS.get(chain)
-        if chain_cfg is None:
-            raise RuntimeError(f"seed chain {chain!r} is not configured")
-        escrow_address = seed.get("escrow_address")
-        if not escrow_address:
-            from market_alkahest.alkahest import (
-                get_erc20_escrow_obligation_default,
-            )
-
-            escrow_address = get_erc20_escrow_obligation_default(
-                chain,
-                config_path=chain_cfg.alkahest_address_config_path,
-            )
-        price = str(seed.get("price_per_token", "1"))
-        accepted_escrows = [
-            {
-                "chain_name": chain,
-                "escrow_address": str(escrow_address).lower(),
-                "literal_fields": {"token": str(seed["token"])},
-                "rates": [{"field": "amount", "per": "token", "value": price}],
-            }
-        ]
-
-        listing_service = _container.resolved_listing_service
-        if listing_service is None:
-            raise RuntimeError("listing service is not initialized")
-        result = await listing_service.publish_from_quota(
-            resource_id=resource_id,
-            service_name=str(seed.get("service_name", "service")),
-            accepted_escrows=accepted_escrows,
-            description=seed.get("description"),
-            openapi_url=seed.get("openapi_url"),
-            base_url=seed.get("base_url"),
-        )
-        logger.info(
-            "[STARTUP] Seeded demo listing %s (service=%s, registry=%s)",
-            result.get("listing_id"),
-            seed.get("service_name"),
-            result.get("registry_status"),
-        )
-    except Exception as exc:  # noqa: BLE001 — seed must not crash the storefront
-        logger.error("[STARTUP] Demo listing seed failed: %s", exc, exc_info=True)

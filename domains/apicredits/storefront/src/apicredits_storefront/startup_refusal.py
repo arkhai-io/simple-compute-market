@@ -21,7 +21,7 @@ from apicredits_storefront.retired_settings import (
     RETIRED_SETTINGS_HEADING,
     retired_setting_problems,
 )
-from apicredits_storefront.services.capacity_client import (
+from apicredits_storefront.utils.config import (
     capacity_poll_interval,
     configured_site_ids,
 )

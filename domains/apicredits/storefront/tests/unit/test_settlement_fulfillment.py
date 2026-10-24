@@ -38,6 +38,7 @@ from arkhai_api_selling.settlement_composition import (
     reserve_settlement,
 )
 from arkhai_apicredits.label import API_CREDITS_LABEL
+from apicredits_storefront import container, server
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
@@ -273,7 +274,6 @@ async def test_the_failure_policy_dispatches_this_storefronts_configured_actions
 async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     tmp_path, monkeypatch,
 ):
-    from apicredits_storefront import container
     from apicredits_storefront.services import fulfillment_service
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
@@ -298,8 +298,8 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     )
     reopen = AsyncMock(return_value=["L-tok"])
     events, stage_event = _events()
-    monkeypatch.setattr(fulfillment_service, "build_capacity_runtime", lambda _factory: capacity)
-    monkeypatch.setattr(fulfillment_service, "reopen_token_listings_after_capacity_change", reopen)
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda _factory: capacity)
+    monkeypatch.setattr(container.QUOTA_PUBLICATION, "reopen_after_capacity_change", reopen)
     monkeypatch.setattr(fulfillment_service, "get_sqlite_client", lambda: db)
     monkeypatch.setattr(fulfillment_service, "stage_event", stage_event)
     monkeypatch.setattr(fulfillment_service, "_configured_failure_actions", lambda: ("release_capacity", "emit_event"))
@@ -335,7 +335,6 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
 async def settled_db(tmp_path, monkeypatch):
     """A DB with an accepted token negotiation, via the real sync flow."""
     import market_policy.negotiation_thread as thread_module
-    from apicredits_storefront import negotiation_runtime as negotiation_module
     from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.utils import config as config_module
     from apicredits_storefront.utils.sqlite_client import SQLiteClient
@@ -353,11 +352,7 @@ async def settled_db(tmp_path, monkeypatch):
         async def reserve(self, **kwargs):
             return None  # no hold; issuance reserves fresh
 
-    monkeypatch.setattr(
-        negotiation_module,
-        "build_capacity_client",
-        lambda factory: _Capacity(),
-    )
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "client", lambda factory: _Capacity())
 
     monkeypatch.setattr(
         config_module.settings.wallet,
@@ -417,7 +412,7 @@ async def settled_db(tmp_path, monkeypatch):
         storefront_url="http://seller:8002",
         seller_principal=_SELLER_PRINCIPAL,
     )
-    response = await negotiation_module.build_api_credit_negotiation_runtime(
+    response = await server.build_api_credit_negotiation_runtime(
         get_market_domain_contract()
     ).start(
         repository=client,

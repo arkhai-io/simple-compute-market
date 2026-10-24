@@ -1,13 +1,14 @@
 [project]
 name = "arkhai-api-selling"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
-description = "The api family's selling library: issuance from verified settlement, settlement and evidence persistence, the quota-backed listing, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
+description = "The api family's selling library: negotiation, publication, the quota-backed listing and its lifecycle, issuance from verified settlement, settlement and evidence persistence, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-api>=0.1.0",
     "arkhai-api-client>=0.1.0",
     "arkhai-core>=0.4.0",
+    "arkhai-core-registry-client>=0.12.1",
     "arkhai-core-storefront>=0.16.0",
     "arkhai-kit-capacity-publication>=0.10.2",
     "arkhai-kit-identity>=0.4.0",
@@ -15,6 +16,8 @@ dependencies = [
     "arkhai-kit-policy>=0.5.0",
     "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-settlement-runtime>=0.4.0",
+    "arkhai-kit-site-client>=0.11.0",
+    "arkhai-kit-storefront>=0.8.0",
     "httpx>=0.27",
     "pydantic>=2",
 ]

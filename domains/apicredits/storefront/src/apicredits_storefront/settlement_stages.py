@@ -25,7 +25,12 @@ from market_alkahest import (
     AlkahestFulfillmentPublisher,
     create_alkahest_registration,
 )
-from market_alkahest.proposals import accepted_escrow_artifacts_from_proposal
+from market_alkahest.proposals import (
+    ReleaseConditionError,
+    SettlementPlanMaterializationError,
+    accepted_escrow_artifacts_from_proposal,
+    authorized_escrow_proposal_at_amount,
+)
 from market_alkahest.escrow_verification import verify_escrow_for_settlement
 from market_arkhai_payments import create_arkhai_payments_registration
 from market_core import SettlementEvidence
@@ -38,7 +43,6 @@ from market_negotiation_runtime import OfferUnfulfillableError
 from market_settlement_runtime import PreparedSettlement, FulfillmentOutcome, derive_obligation_ref
 from core_storefront.stage_log import stage_event
 
-from apicredits_storefront.services.capacity_client import build_capacity_runtime
 from apicredits_storefront.utils.config import CHAINS, settings
 from arkhai_apicredits.negotiation.terms import provision_quantity
 
@@ -123,6 +127,34 @@ def build_api_credit_accepted_artifacts(
             expiration_unix=accepted.get("expiration_unix"),
         ).model_dump(mode="json", exclude_none=True)
     return artifacts
+
+
+class AlkahestEscrowAcceptance:
+    """The escrow path of an acceptance, under the release condition the listing authorizes."""
+
+    def offer(self, acceptance: Any) -> dict[str, Any]:
+        try:
+            return authorized_escrow_proposal_at_amount(
+                proposal=acceptance.pinned_proposal,
+                listing=acceptance.listing_record,
+                agreed_amount=acceptance.agreed_amount,
+                uses_scalar_amount=acceptance.uses_scalar_amount,
+            )
+        except ReleaseConditionError as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
+
+    def accept(self, acceptance: Any) -> dict[str, Any]:
+        try:
+            return build_api_credit_accepted_artifacts(
+                buyer_principal=acceptance.buyer_principal,
+                seller_principal=acceptance.seller_principal,
+                proposal=acceptance.pinned_proposal,
+                agreed_amount=acceptance.agreed_amount,
+                uses_scalar_amount=acceptance.uses_scalar_amount,
+                listing=acceptance.listing_record,
+            )
+        except (ReleaseConditionError, SettlementPlanMaterializationError) as exc:
+            raise OfferUnfulfillableError(str(exc)) from exc
 
 
 async def _prepare_alkahest_settlement(
@@ -316,7 +348,7 @@ class ArkhaiPaymentsSellerStage:
                 "units": int(quantity),
                 "resource_id": binding.source_id,
             }
-            capacity = build_capacity_runtime(lambda: repository)
+            capacity = container.QUOTA_CAPACITY.runtime(lambda: repository)
 
             async def reserve() -> Any:
                 return await capacity.reserve(

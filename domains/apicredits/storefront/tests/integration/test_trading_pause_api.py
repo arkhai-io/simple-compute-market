@@ -13,9 +13,7 @@ from __future__ import annotations
 import httpx
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from fastapi import FastAPI
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from market_negotiation_runtime import StorefrontPausedError

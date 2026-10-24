@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import partial
 
+from arkhai_api_selling.negotiation import default_seller_round_hook
+from arkhai_apicredits.negotiation.policies import accepted_escrow_proposal
+
+from apicredits_storefront.container import QUOTA_PUBLICATION, SELLING_CONTRIBUTIONS
 from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 from market_core import (
     DomainCapability,
@@ -22,13 +28,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
     from apicredits_storefront.services.fulfillment_service import (
         fulfill_credit_obligation,
     )
-    from apicredits_storefront.services.publication_service import (
-        publish_order_to_registry,
-    )
     from arkhai_apicredits.domain_runtime import market_domain
-    from arkhai_apicredits.negotiation.storefront_round import (
-        default_seller_round_hook,
-    )
 
     base = market_domain()
     capabilities = {
@@ -42,10 +42,14 @@ def _build_market_domain_contract() -> MarketDomainContract:
             base,
             declared_capabilities=base.declared_capabilities | capabilities,
             storefront=ImmutableStorefrontCapability(
-                run_negotiation_policy=default_seller_round_hook,
+                run_negotiation_policy=partial(
+                    default_seller_round_hook,
+                    SELLING_CONTRIBUTIONS,
+                    normalize_escrow_proposal=accepted_escrow_proposal,
+                ),
             ),
             publication=ImmutablePublicationCapability(
-                publish=publish_order_to_registry,
+                publish=lambda listing: QUOTA_PUBLICATION.publish(get_sqlite_client(), listing),
             ),
             settlement=ImmutableSettlementCapability(
                 seller_stages=SELLER_STAGES,

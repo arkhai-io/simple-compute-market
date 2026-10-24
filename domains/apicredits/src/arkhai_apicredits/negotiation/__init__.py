@@ -1,9 +1,6 @@
-"""API-credits negotiation policies and term helpers."""
+"""API-credits negotiation: its purchase terms and its escrow proposal step."""
 
-from arkhai_apicredits.negotiation import policies as policies
-from arkhai_apicredits.negotiation.storefront_round import (
-    default_seller_round_hook,
-)
+from arkhai_apicredits.negotiation.policies import accepted_escrow_proposal
 from arkhai_apicredits.negotiation.terms import (
     API_CREDITS_PROVISION_KIND,
     ApiCreditsProvisionTerms,
@@ -16,9 +13,8 @@ from arkhai_apicredits.negotiation.terms import (
 __all__ = [
     "API_CREDITS_PROVISION_KIND",
     "ApiCreditsProvisionTerms",
-    "default_seller_round_hook",
+    "accepted_escrow_proposal",
     "make_api_credits_provision_terms",
-    "policies",
     "provision_key_id",
     "provision_key_mode",
     "provision_quantity",

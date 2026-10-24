@@ -44,11 +44,3 @@ def coerce_resource_dict(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
-
-
-def resource_is_api_credits(resource: Any) -> bool:
-    """True when the resource is an API-credits offering."""
-    if isinstance(resource, ApiCreditsResource):
-        return True
-    coerced = coerce_resource_dict(resource)
-    return coerced.get("kind") == API_CREDITS_KIND

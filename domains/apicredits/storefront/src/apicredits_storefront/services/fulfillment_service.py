@@ -16,12 +16,8 @@ from market_core import SettlementEvidence
 from market_settlement_runtime import FailurePolicy
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.services.capacity_client import build_capacity_runtime
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
-)
-from apicredits_storefront.services.publication_service import (
-    reopen_token_listings_after_capacity_change,
 )
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.utils.config import settings
@@ -48,8 +44,8 @@ def build_api_credit_failure_policy() -> FailurePolicy:
     """Compose the family's failure actions over this storefront's collaborators."""
     return build_failure_policy(
         actions_provider=_configured_failure_actions,
-        capacity_runtime=lambda db: build_capacity_runtime(lambda: db),
-        reopen_listings=reopen_token_listings_after_capacity_change,
+        capacity_runtime=lambda db: _container.QUOTA_CAPACITY.runtime(lambda: db),
+        reopen_listings=_container.QUOTA_PUBLICATION.reopen_after_capacity_change,
         webhook_target=_failure_webhook_target,
         stages=SELLER_STAGES,
         composition=lambda: _container.resolved_settlement_composition,

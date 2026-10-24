@@ -36,12 +36,10 @@ from storefront_client.settlement_routes import SETTLE_STATUS
 import apicredits_storefront.container as container
 import apicredits_storefront.server as server
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.lifecycle_steps import (
-    api_credit_loop_controller,
-    register_api_credit_lifecycle_steps,
+from arkhai_api_selling.lifecycle import (
+    loop_controller,
 )
 from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.services.system_service import SystemService
 from apicredits_storefront.utils.sqlite_client import SQLiteClient
 from tests._settings_overrides import settings_overrides
 
@@ -149,9 +147,9 @@ class Probe:
                 sqlite_client=db, continue_negotiation=_unused, stage_event=stage_event
             ),
         )
-        monkeypatch.setattr(container, "resolved_system_service", SystemService(sqlite_client=db))
-        self.loops = api_credit_loop_controller()
-        register_api_credit_lifecycle_steps(self.loops)
+        monkeypatch.setattr(container, "resolved_system_service", server.build_system_service(db))
+        self.loops = loop_controller()
+        container.STOREFRONT_LOOPS.register_steps(self.loops)
         monkeypatch.setattr(container, "resolved_loop_controller", self.loops)
         monkeypatch.setattr(
             admin_auth,

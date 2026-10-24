@@ -155,7 +155,7 @@ dist-api-client: dist-identity ## Build arkhai-api-client wheel into .dist/ (dom
 dist-api-authority: dist-identity dist-ci-kits ## Build arkhai-api-authority wheel into .dist/ (domains/Makefile builds the vocabulary and contracts first)
 	cd domains && $(MAKE) dist-api-authority DIST_DIR=$(DIST_DIR)
 
-dist-api-selling: dist-identity dist-core dist-arkhai-core-storefront dist-ci-kits dist-policy ## Build arkhai-api-selling wheel into .dist/ (domains/Makefile builds the vocabulary, contracts, and client first)
+dist-api-selling: dist-identity dist-core dist-registry-client dist-arkhai-core-storefront dist-ci-kits dist-policy ## Build arkhai-api-selling wheel into .dist/ (domains/Makefile builds the vocabulary, contracts, and client first)
 	cd domains && $(MAKE) dist-api-selling DIST_DIR=$(DIST_DIR)
 
 dist-apicredits-domain: dist-core dist-identity dist-alkahest dist-policy ## Build arkhai-apicredits-domain wheel into .dist/

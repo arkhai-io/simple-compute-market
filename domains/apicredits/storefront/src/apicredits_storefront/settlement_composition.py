@@ -24,6 +24,7 @@ from market_alkahest import (
     release_conditions,
     require_deliverable_release_model,
 )
+from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
@@ -112,6 +113,30 @@ class ApiCreditsSettlementComposition(SellingSettlementComposition):
             chains=chains,
             wallet_address=self.seller_wallet_address,
         )
+
+
+SEED_ESCROW_SETTINGS = frozenset({"chain", "escrow_address", "token", "price_per_token"})
+
+
+def seed_accepted_escrows(seed: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The one Alkahest escrow a ``[seed]`` table's listing accepts."""
+    chain = str(seed.get("chain", "anvil"))
+    chain_cfg = storefront_config.CHAINS.get(chain)
+    if chain_cfg is None:
+        raise RuntimeError(f"seed chain {chain!r} is not configured")
+    escrow_address = seed.get("escrow_address") or get_erc20_escrow_obligation_default(
+        chain, config_path=chain_cfg.alkahest_address_config_path
+    )
+    return [
+        {
+            "chain_name": chain,
+            "escrow_address": str(escrow_address).lower(),
+            "literal_fields": {"token": str(seed["token"])},
+            "rates": [
+                {"field": "amount", "per": "token", "value": str(seed.get("price_per_token", "1"))}
+            ],
+        }
+    ]
 
 
 def require_api_credit_release_model(settlement_config: Any = None) -> None:

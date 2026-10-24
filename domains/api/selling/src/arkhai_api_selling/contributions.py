@@ -67,8 +67,9 @@ class ConsumptionRule(enum.Enum):
 class SellingContributions:
     """One domain's contributions to the selling library.
 
-    ``kind`` is ``<schema>.v1``, from whose stem the envelope kinds are spelled;
-    ``table_prefix`` names the domain's tables and its credentials reference.
+    ``kind`` is ``<schema>.v1``, from whose stem the envelope kinds and the
+    opening guard's name are spelled; ``table_prefix`` names the domain's
+    tables, its credentials reference, and the one refusal code that names it.
     """
 
     label: IssuanceLabel

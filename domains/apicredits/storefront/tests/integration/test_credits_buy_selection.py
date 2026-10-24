@@ -42,15 +42,12 @@ from market_identity import TrustedIdentitySet
 from typer.testing import CliRunner
 
 import apicredits_storefront.container as container
-from apicredits_storefront import settlement_stages as seller_settlement_stages
 from apicredits_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.middleware.response_auth import authenticate_response
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
@@ -108,7 +105,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
     )
     holds = QuotaHolds()
     monkeypatch.setattr(
-        seller_settlement_stages, "build_capacity_runtime", lambda _factory: holds
+        container.QUOTA_CAPACITY, "runtime", lambda _factory: holds
     )
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)

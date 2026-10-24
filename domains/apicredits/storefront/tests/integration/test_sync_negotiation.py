@@ -12,12 +12,11 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
-from apicredits_storefront import negotiation_runtime as runtime_module
+from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    _place_quota_hold,
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
+from apicredits_storefront.settlement_composition import SELLER_STAGES
+from arkhai_api_selling.negotiation import place_quota_hold
 from core_storefront.models.negotiation_models import NegotiateNewResponse
 from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError
 from market_alkahest.alkahest import encode_recipient_demand
@@ -184,7 +183,7 @@ async def test_quota_guard_reads_only_the_listings_own_site(db, monkeypatch, key
                 for row in await site.snapshot()
             ]
 
-    monkeypatch.setattr(runtime_module, "build_capacity_client", lambda factory: _TwoSites())
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "client", lambda factory: _TwoSites())
 
     with pytest.raises(OfferUnfulfillableError) as exc:
         await _start(db, amount=300, quantity=3)
@@ -276,6 +275,18 @@ async def test_bisection_counter_round_scales_by_quantity(
     assert int(thread["agreed_price"]) == 275
 
 
+async def test_an_opened_thread_takes_its_listings_binding(db, fake_capacity, key_records):
+    """The thread is bound when it opens, before anything is accepted."""
+    with settings_overrides(**{"negotiation.policies": ["bisection"]}):
+        opening = await _start(db, amount=250, quantity=3)
+    assert opening["action"] == "counter"
+
+    thread = await db.load_thread_binding(negotiation_id=opening["negotiation_id"])
+    listing = await db.load_listing_binding(listing_id="L-tok")
+    assert thread.listing_id == "L-tok"
+    assert (thread.site_id, thread.binding) == (listing.site_id, listing.binding)
+
+
 async def test_force_accept_records_what_a_negotiated_acceptance_records(
     db, fake_capacity, key_records
 ):
@@ -314,8 +325,6 @@ async def test_force_accept_records_what_a_negotiated_acceptance_records(
 
 async def test_payment_selection_places_quota_hold(db, monkeypatch):
     """A payment deal holds its quota between acceptance and the buyer's approval."""
-    from apicredits_storefront import settlement_stages
-
     class CapacityRuntime:
         async def reserve(self, _binding, *, claim, deal_ref, ttl_seconds):
             return {
@@ -325,11 +334,7 @@ async def test_payment_selection_places_quota_hold(db, monkeypatch):
                 "hold_expires_at": "2099-01-01 00:00",
             }
 
-    monkeypatch.setattr(
-        settlement_stages,
-        "build_capacity_runtime",
-        lambda _factory: CapacityRuntime(),
-    )
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda _factory: CapacityRuntime())
     acceptance = SimpleNamespace(
         negotiation_id="neg-payment",
         listing_id="L-tok",
@@ -349,7 +354,7 @@ async def test_payment_selection_places_quota_hold(db, monkeypatch):
     )
 
     with settings_overrides(**{"capacity.hold_ttl_seconds": 300}):
-        await _place_quota_hold(db, acceptance, {})
+        await place_quota_hold(SELLER_STAGES, {}, db, acceptance)
 
     hold = await db.load_capacity_hold(negotiation_id="neg-payment")
     assert hold["capacity_reservation_id"] == "alloc-payment"

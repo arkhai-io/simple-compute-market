@@ -1,52 +1,45 @@
-"""ListingService — quota-backed listing lifecycle.
-
-A credit listing derives from a quota resource in the credits service's
-ledger (ARCHITECTURE.md, "API-credits market domain — Market shape"): ``publish_from_quota``
-reads the resource's availability, writes the local listing row with an
-``api_credits.v1`` listing_resource naming that resource, and fans out to the
-registries. Closing goes through the shared publication path.
-"""
+"""Creating and publishing a listing over a quota resource, as the domain's mapping of an operator's request."""
 
 from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding, quota_pool
 from core_storefront.stage_log import stage_event
+from market_core import MarketDomainContract
 from market_identity import Identity
 
-from apicredits_storefront.container import SELLING_CONTRIBUTIONS
-from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.services import capacity_client
-from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.utils.config import (
-    BASE_URL_OVERRIDE,
-    settlement_publication_defaults,
-)
+from arkhai_api_selling.capacity import QuotaCapacity
+from arkhai_api_selling.contributions import QuotaSource, SellingContributions
+from arkhai_api_selling.issuance import issuance_subject
+from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding, quota_pool
 
 logger = logging.getLogger(__name__)
 
+ReleaseConditions = Callable[[Sequence[Mapping[str, Any]]], list[dict[str, Any]]]
+"""The release conditions a listing advertising accepted escrows publishes."""
 
-def _admissible_settlement_terms(
+
+def admissible_settlement_terms(
     pool: QuotaPool,
+    stages: Mapping[str, Any],
     *,
     accepted_escrows: list[dict[str, Any]],
     settlement_options: list[dict[str, Any]],
+    escrow_mechanism: str | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Keep only the settlement terms the pool's backing lets a listing publish.
+    """The settlement terms the pool's backing lets a listing publish.
 
-    Each seller stage declares whether settling through it issues against
-    quota; where no admission authority stands behind the pool, such a stage
-    would take a buyer's funds for credits that cannot be reserved, so its
-    terms are dropped, and a listing left with none is refused.
+    Without an admission authority, a stage that issues against quota would take funds
+    for credits that cannot be reserved, so its terms are dropped.
     """
     backing = pool.declaration.backing
 
     def fulfils_through_capacity(mechanism: str) -> bool:
-        return SELLER_STAGES[mechanism].fulfils_through_capacity
+        return stages[mechanism].fulfils_through_capacity
 
     kept_options, dropped = backing.admissible_settlement(
         settlement_options,
@@ -54,9 +47,10 @@ def _admissible_settlement_terms(
         fulfils_through_capacity=fulfils_through_capacity,
     )
     if accepted_escrows:
-        # Accepted escrows are the Alkahest publication form.
+        if escrow_mechanism is None:
+            raise ValueError("this storefront publishes no accepted escrows")
         _, escrow_dropped = backing.admissible_settlement(
-            ("alkahest.v1",),
+            (escrow_mechanism,),
             mechanism=str,
             fulfils_through_capacity=fulfils_through_capacity,
         )
@@ -75,37 +69,45 @@ def _admissible_settlement_terms(
 class ListingService:
     def __init__(
         self,
+        contributions: SellingContributions,
         *,
-        sqlite_client,
+        sqlite_client: Any,
         seller_principal: Identity,
-        settlement_composition,
+        settlement_composition: Any,
+        domain: MarketDomainContract,
+        capacity: QuotaCapacity,
+        publish: Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]],
+        close: Callable[[str], Awaitable[dict[str, Any]]],
+        settlement_defaults: Callable[[], Sequence[Mapping[str, Any]]],
+        storefront_url: str | None,
+        escrow_mechanism: str | None = None,
+        release_conditions: ReleaseConditions | None = None,
     ) -> None:
+        self._contributions = contributions
         self._db = sqlite_client
         self._seller_principal = seller_principal
         self._settlement_composition = settlement_composition
+        self._domain = domain
+        self._capacity = capacity
+        self._publish = publish
+        self._close = close
+        self._settlement_defaults = settlement_defaults
+        self._storefront_url = storefront_url
+        self._escrow_mechanism = escrow_mechanism
+        self._release_conditions = release_conditions
 
     async def publish_from_quota(
         self,
         *,
         resource_id: str,
-        service_name: str,
         accepted_escrows: list[dict[str, Any]],
         settlement_clauses: list[dict[str, Any]] | None = None,
-        description: str | None = None,
-        openapi_url: str | None = None,
-        base_url: str | None = None,
         paused: bool = False,
+        **request: Any,
     ) -> dict[str, Any]:
-        """Create + publish a listing backed by a quota resource.
-
-        The resource must exist in the quota ledger with sellable units —
-        the listing's lifetime is tied to it from here on (capacity
-        deltas close it on exhaustion and reopen it on replenishment). Its
-        pool's declared backing is recorded on the listing's binding and
-        decides which settlement options the listing may publish.
-        """
+        """Create and publish a listing over ``resource_id``; ``request`` is what the domain's mapping reads."""
         clauses = (
-            settlement_publication_defaults()
+            tuple(self._settlement_defaults())
             if settlement_clauses is None
             else tuple(settlement_clauses)
         )
@@ -114,7 +116,6 @@ class ListingService:
                 {
                     "claimant_principal": self._seller_principal,
                     "resource_id": resource_id,
-                    "service": service_name,
                 },
                 list(clauses) if clauses else None,
             )
@@ -132,7 +133,7 @@ class ListingService:
             suffix = f" ({', '.join(blockers)})" if blockers else ""
             raise ValueError(f"no settlement alternative is ready{suffix}")
 
-        capacity = capacity_client.build_capacity_runtime(lambda: self._db)
+        capacity = self._capacity.runtime(lambda: self._db)
         availability = await capacity.availability()
         matches = [
             (site_id, units)
@@ -152,50 +153,65 @@ class ListingService:
             )
         projection = await capacity.site_client(capacity_site_id).resource_pool_projection()
         pool = quota_pool(
-            SELLING_CONTRIBUTIONS, projection["resource_pools"], resource_id=resource_id
+            self._contributions, projection["resource_pools"], resource_id=resource_id
         )
-        accepted_escrows, settlement_options = _admissible_settlement_terms(
-            pool, accepted_escrows=accepted_escrows, settlement_options=settlement_options
+        accepted_escrows, settlement_options = admissible_settlement_terms(
+            pool,
+            self._settlement_composition.stages,
+            accepted_escrows=accepted_escrows,
+            settlement_options=settlement_options,
+            escrow_mechanism=self._escrow_mechanism,
         )
-        demands = self._settlement_composition.release_conditions(accepted_escrows)
+        demands = (
+            self._release_conditions(accepted_escrows)
+            if accepted_escrows and self._release_conditions is not None
+            else []
+        )
 
-        listing = get_market_domain_contract().codecs.listing(
+        listing = self._domain.codecs.listing(
             {
-                "listing_resource": {
-                    "service_name": service_name,
-                    "description": description,
-                    "openapi_url": openapi_url,
-                    "base_url": base_url,
-                    "resource_id": resource_id,
-                    "capacity_site_id": capacity_site_id,
-                    "offering_mode": "api_credits",
-                },
+                "listing_resource": self._contributions.publication_mapping(
+                    request,
+                    QuotaSource(
+                        site_id=capacity_site_id,
+                        resource_id=resource_id,
+                        offering_mode=self._contributions.offering_mode,
+                    ),
+                ),
                 "accepted_escrows": accepted_escrows,
                 "settlement_options": settlement_options,
                 "demands": demands,
             }
         )
+        listing_resource = listing.listing_resource.model_dump(mode="json")
+        for guard in self._contributions.publication_guards:
+            reason = guard(listing_resource)
+            if reason is not None:
+                raise ValueError(reason)
         listing_id = str(uuid.uuid4())
+        binding = prepare_listing_binding(
+            self._contributions,
+            listing_id=listing_id,
+            site_id=capacity_site_id,
+            listing_resource=listing_resource,
+            pool=pool,
+            domain=self._domain,
+        )
         now_iso = datetime.now().isoformat()
         await self._db.upsert_listing_with_binding(
-            binding=prepare_listing_binding(
-                SELLING_CONTRIBUTIONS,
-                listing_id=listing_id,
-                site_id=capacity_site_id,
-                listing_resource=listing.listing_resource.model_dump(mode="json"),
-                pool=pool,
-                domain=get_market_domain_contract(),
-            ),
+            binding=binding,
             status="open",
             created_at=now_iso,
             updated_at=now_iso,
-            listing_resource=listing.listing_resource.model_dump(mode="json"),
+            listing_resource=listing_resource,
             accepted_escrows=listing.accepted_escrows,
-            settlement_options=[option.model_dump(mode="json") for option in listing.settlement_options],
+            settlement_options=[
+                option.model_dump(mode="json") for option in listing.settlement_options
+            ],
             demands=listing.demands,
             fulfillment_resource=None,
             max_duration_seconds=None,
-            storefront_url=BASE_URL_OVERRIDE,
+            storefront_url=self._storefront_url,
             seller_principal=self._seller_principal,
             oracle_address=None,
             paused=paused,
@@ -205,16 +221,16 @@ class ListingService:
             "token_listing_created",
             listing_id=listing_id,
             resource_id=resource_id,
-            service_name=service_name,
+            service_name=issuance_subject(
+                self._contributions, listing_resource, listing_id=listing_id
+            ).service,
             available_units=available,
         )
         if paused:
             return {"status": "created", "listing_id": listing_id}
 
         row = await self._db.load_listing(listing_id=listing_id)
-        publication = get_market_domain_contract().publication
-        assert publication is not None and publication.publish is not None
-        publish_result = await publication.publish(row or {})
+        publish_result = await self._publish(row or {})
         return {
             "status": "created",
             "listing_id": listing_id,
@@ -222,9 +238,7 @@ class ListingService:
         }
 
     async def close_listing(self, listing_id: str) -> dict[str, Any]:
-        from apicredits_storefront.services.publication_service import close_order
-
-        result = await close_order({"listing_id": listing_id})
+        result = await self._close(listing_id)
         return {
             "status": result.get("status", "closed"),
             "listing_id": listing_id,

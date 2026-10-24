@@ -21,9 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from arkhai_apicredits_buyer import negotiate_cli, payments, settlement_composition
 from arkhai_apicredits_buyer.cli import app as buyer_app
@@ -42,7 +40,6 @@ from market_identity import TrustedIdentitySet
 from typer.testing import CliRunner
 
 import apicredits_storefront.container as container
-from apicredits_storefront import settlement_stages
 from apicredits_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
@@ -92,7 +89,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ].agreement_artifacts(agreement, composition),
     )
     holds = QuotaHolds()
-    monkeypatch.setattr(settlement_stages, "build_capacity_runtime", lambda _factory: holds)
+    monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda _factory: holds)
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
     monkeypatch.setattr(container, "resolved_marketplace_signer", SELLER_SIGNER)

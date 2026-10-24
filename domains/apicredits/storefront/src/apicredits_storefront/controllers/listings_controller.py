@@ -13,13 +13,14 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi_utils.cbv import cbv
 
-import apicredits_storefront.container as _container
-from apicredits_storefront.listing_publication import (
+from arkhai_api_selling.publish_route import (
     PUBLISH_FROM_QUOTA_OPERATION,
     PUBLISH_FROM_QUOTA_PATH,
-    PublishFromQuotaRequest,
     PublishFromQuotaResponse,
 )
+
+import apicredits_storefront.container as _container
+from apicredits_storefront.container import PublishFromQuotaRequest
 from apicredits_storefront.middleware.admin_auth import require_admin_principal
 from apicredits_storefront.middleware.seller_auth import make_seller_auth_dep
 from core_storefront.models.listing_models import (
@@ -119,11 +120,7 @@ class ListingsController:
                 detail=f"Listing {listing_id} not found",
             )
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
-        from apicredits_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
-
-        publish_result = await publish_order_to_registry(row)
+        publish_result = await _container.QUOTA_PUBLICATION.publish(self._db, row)
         registry_status = publish_result.get("status", "unknown")
         return PauseListingResponse(
             listing_id=listing_id,
@@ -145,13 +142,10 @@ class ListingsController:
         try:
             result = await self._listing_svc.publish_from_quota(
                 resource_id=body.resource_id,
-                service_name=body.service_name,
                 accepted_escrows=body.accepted_escrows,
                 settlement_clauses=body.settlement_clauses,
-                description=body.description,
-                openapi_url=body.openapi_url,
-                base_url=body.base_url,
                 paused=body.paused,
+                **body.listing_request(),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

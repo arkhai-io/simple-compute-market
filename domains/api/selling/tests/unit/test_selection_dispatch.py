@@ -6,16 +6,10 @@ from collections.abc import Mapping
 from typing import Any
 
 import pytest
-from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    _accepted_selection_artifacts,
-    _decode_terms,
-)
-from market_core.schemas import (
-    ProvisionTerms,
-    SettlementPlan,
-    derive_settlement_option_id,
-)
+from arkhai_api.purchase import provision_terms_model
+from arkhai_api_selling.negotiation import _accepted_selection_artifacts
+from market_core import SettlementStageTable
+from market_core.schemas import SettlementPlan, derive_settlement_option_id
 from market_identity import Ed25519Signer
 from market_negotiation_runtime import OfferUnfulfillableError
 from market_settlement_runtime import (
@@ -27,9 +21,10 @@ from market_settlement_runtime import (
 )
 from pydantic import BaseModel, ConfigDict
 
+from tests.bundles import EXAMPLE
+
 _BUYER = Ed25519Signer(bytes.fromhex("11" * 32)).identity
 _SELLER = Ed25519Signer(bytes.fromhex("22" * 32)).identity
-_DOMAIN = get_market_domain_contract()
 
 INTRO_MECHANISM = "demo.intro.v1"
 
@@ -139,14 +134,7 @@ def _selection(option: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _terms(quantity: int = 3):
-    return _decode_terms(
-        _DOMAIN,
-        ProvisionTerms(
-            kind="api_credits.v1",
-            version=1,
-            payload={"quantity": quantity, "key": {"mode": "new"}},
-        ),
-    ).decoded
+    return provision_terms_model(EXAMPLE.kind).purchase(quantity=quantity)
 
 
 def _listing(option: Mapping[str, Any]) -> dict[str, Any]:
@@ -159,6 +147,8 @@ def _listing(option: Mapping[str, Any]) -> dict[str, Any]:
 def test_non_scalar_selection_accepts_amountless_with_mechanism_terms() -> None:
     option = _intro_option()
     artifacts = _accepted_selection_artifacts(
+        EXAMPLE,
+        SettlementStageTable({}),
         _intro_dispatch(),
         selection=_selection(option),
         option=option,
@@ -173,13 +163,15 @@ def test_non_scalar_selection_accepts_amountless_with_mechanism_terms() -> None:
     assert obligation.amount is None
     assert obligation.mechanism == INTRO_MECHANISM
     assert plan.service_terms[INTRO_MECHANISM]["channel"] == "telegram"
-    assert plan.service_terms["api_credits.v1"]["quantity"] == 3
+    assert plan.service_terms[EXAMPLE.kind]["quantity"] == 3
 
 
 def test_non_scalar_selection_rejects_a_proposed_amount() -> None:
     option = _intro_option()
     with pytest.raises(OfferUnfulfillableError, match="not_negotiable"):
         _accepted_selection_artifacts(
+            EXAMPLE,
+            SettlementStageTable({}),
             _intro_dispatch(),
             selection=_selection(option),
             option=option,

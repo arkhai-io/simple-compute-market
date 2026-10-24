@@ -127,11 +127,6 @@
       "dist": "arkhai-kit-capacity-publication"
     },
     {
-      "key": "api-selling",
-      "path": "domains/api/selling",
-      "dist": "arkhai-api-selling"
-    },
-    {
       "key": "kit-contact-exchange",
       "path": "kit/contact-exchange",
       "dist": "arkhai-kit-contact-exchange"
@@ -150,6 +145,11 @@
       "key": "kit-storefront",
       "path": "kit/storefront",
       "dist": "arkhai-kit-storefront"
+    },
+    {
+      "key": "api-selling",
+      "path": "domains/api/selling",
+      "dist": "arkhai-api-selling"
     },
     {
       "key": "compute",

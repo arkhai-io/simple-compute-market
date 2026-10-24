@@ -164,7 +164,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.9.0"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-api" },
@@ -172,7 +172,6 @@ dependencies = [
     { name = "arkhai-core" },
     { name = "arkhai-kit-alkahest" },
     { name = "arkhai-kit-arkhai-payments" },
-    { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
@@ -181,6 +180,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-kit-identity" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -192,7 +192,6 @@ requires-dist = [
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-policy" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.4.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -201,6 +200,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
 ]

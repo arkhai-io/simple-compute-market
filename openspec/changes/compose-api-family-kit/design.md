@@ -367,6 +367,25 @@ names. A storefront holds its bundle wherever its stages, services, and
 persistence can read it without an import cycle; the API-credits storefront
 holds it in `container.py`.
 
+The negotiation, publication, and lifecycle that `selling` owns read the
+bundle the same way. The opening guard registers under a name spelled from the
+kind's stem (`api_credits_round_zero_guard`), and the quota and key guards under
+their family names, so a configured chain resolves each as before; a listing is
+the domain's when its resource validates as the listing schema, and the quota
+guard reads its resource through the projection. The refusal codes are the
+family's, shared with the authority's issuance re-check, except the one that
+spelled the domain, which the table prefix spells (`api_credit_quantity_unavailable`);
+free-text refusal messages name no domain. Escrow handling is injected rather than
+imported, since `selling` knows no mechanism: the opening guard's escrow
+canonicalization, an `EscrowAcceptance` that offers and accepts an escrow, and
+the mechanism a listing's accepted escrows publish under with their release
+conditions; the API-credits storefront supplies the Alkahest ones until the
+selling-side mechanism distributions own them. The seed, the health checks, and
+the round's chain address books name their mechanism only through what the
+storefront passes. Reconciliation reads every listing in pages over all
+statuses, so a pass that changes statuses cannot move another listing across a
+page; a thread takes its listing's binding when it opens.
+
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,
 each gate, each buyer plugin — composes through its bundle, its capacity

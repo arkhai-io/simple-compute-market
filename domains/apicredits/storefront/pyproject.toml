@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-apicredits-storefront"
-version = "0.12.0"
+version = "0.13.0"
 license = "MIT"
 description = "Seller-side storefront for the API-credits domain: quota-backed listings, sync negotiation with ownership/quota guards, issuance-backed settlement."
 requires-python = ">=3.12,<3.14"
@@ -8,20 +8,17 @@ dependencies = [
     "arkhai-core>=0.4.0",
     "arkhai-api>=0.1.0",
     "arkhai-api-client>=0.1.0",
-    "arkhai-api-selling>=0.1.0",
-    "arkhai-apicredits-domain>=0.9.0",
-    "arkhai-core-registry-client>=0.12.1",
+    "arkhai-api-selling>=0.2.0",
+    "arkhai-apicredits-domain>=0.10.0",
     "arkhai-core-storefront>=0.16.0",
     "arkhai-kit-capacity-publication==0.10.2",
     "arkhai-kit-alkahest>=0.8.0",
     "arkhai-kit-arkhai-payments>=0.3.0",
     "arkhai-kit-config>=0.4.0",
     "arkhai-kit-identity==0.4.0",
-    "arkhai-kit-policy>=0.5.0",
     "arkhai-kit-settlement-runtime>=0.4.0",
     "arkhai-kit-storefront==0.8.0",
     "arkhai-kit-negotiation-runtime==0.5.1",
-    "arkhai-kit-site-client>=0.9.0",
     "alkahest-py==1.1.2",
     "fastapi~=0.115.8",
     # [all] carries typing-inspect, which fastapi_utils.cbv imports
@@ -55,7 +52,14 @@ dev = [
     "arkhai-core-buyer>=0.5.0",
     # The resolved pool declarations the listing-binding helper binds listings under. Test-only.
     "arkhai-kit-resource-pools>=0.7.0",
+    # The thread store and the quota site's client the negotiation and
+    # publication tests stand up. Test-only.
+    "arkhai-kit-policy>=0.5.0",
+    "arkhai-kit-site-client>=0.9.0",
 ]
+
+[tool.arkhai.architecture.runtime-dependencies]
+arkhai-kit-capacity-publication = "Pins the one capacity-publication release, and through it the one core storefront, that the selling library publishes and reconciles through in this storefront."
 
 [tool.uv]
 # Internal wheels come from the repo's .dist/ via the CLI flag — see the

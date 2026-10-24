@@ -26,17 +26,14 @@ from storefront_client.client import StorefrontClientError
 import apicredits_storefront.container as container
 import apicredits_storefront.server as server
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.lifecycle_steps import (
+from arkhai_api_selling.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     NEGOTIATION_WATCHDOG,
     SETTLEMENT_SERVICING,
-    api_credit_loop_controller,
+    loop_controller,
     capacity_site_loop_name,
-    register_api_credit_lifecycle_steps,
-    register_api_credit_loops,
 )
 from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.services.system_service import SystemService
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -98,14 +95,14 @@ async def storefront(db, monkeypatch):
         worker_id="test",
         interval_seconds=_LONG_INTERVAL,
     )
-    loops = api_credit_loop_controller()
+    loops = loop_controller()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", STOREFRONT_SIGNER)
     monkeypatch.setattr(container, "resolved_settlement_composition", None)
     monkeypatch.setattr(container, "resolved_settlement_worker", worker)
     monkeypatch.setattr(container, "resolved_loop_controller", loops)
     monkeypatch.setattr(
-        container, "resolved_system_service", SystemService(sqlite_client=db)
+        container, "resolved_system_service", server.build_system_service(db)
     )
     monkeypatch.setattr(
         admin_auth,
@@ -113,12 +110,12 @@ async def storefront(db, monkeypatch):
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )
     def start(site: _QuotaSite) -> None:
-        register_api_credit_lifecycle_steps(loops)
+        container.STOREFRONT_LOOPS.register_steps(loops)
         with settings_overrides(
             negotiation_watchdog_interval=_LONG_INTERVAL,
             settlement_servicing_interval_seconds=_LONG_INTERVAL,
         ):
-            register_api_credit_loops(loops, capacity_runtime=site)
+            container.STOREFRONT_LOOPS.register_loops(loops, capacity_runtime=site)
         loops.start_loops()
 
     app = server.build_api_credits_storefront_app(

@@ -6,18 +6,23 @@ import inspect
 
 from market_identity import Ed25519Signer
 
-from apicredits_storefront.listing_publication import (
+from arkhai_api_selling.publish_route import (
     PUBLISH_FROM_QUOTA_OPERATION,
     PUBLISH_FROM_QUOTA_PATH,
-    ApiCreditListingClient,
-    SyncApiCreditListingClient,
+    ListingClient,
+    PublishFromQuotaRequest,
+    SyncListingClient,
     seller_resource,
 )
 
 # A deterministic development key; never used on any network.
 SELLER = Ed25519Signer(b"\x22" * 32).identity
-REQUEST = {"resource_id": "svc-quota", "service_name": "Acme"}
+REQUEST = {"resource_id": "quota-a", "product": "Example"}
 RESPONSE = {"status": "created", "listing_id": "listing-1"}
+
+
+class ExampleRequest(PublishFromQuotaRequest):
+    product: str
 
 
 class _Recording:
@@ -43,19 +48,17 @@ def _public_methods(cls) -> dict[str, inspect.Signature]:
 
 
 def test_sync_and_async_clients_offer_the_same_methods():
-    assert _public_methods(ApiCreditListingClient) == _public_methods(
-        SyncApiCreditListingClient
-    )
+    assert _public_methods(ListingClient) == _public_methods(SyncListingClient)
 
 
 async def test_both_clients_sign_as_the_seller_on_its_own_principal():
     sync_transport, async_transport = _Recording(), _AsyncRecording()
 
-    sync_result = SyncApiCreditListingClient(
-        sync_transport, seller=SELLER
+    sync_result = SyncListingClient(
+        sync_transport, seller=SELLER, request_model=ExampleRequest
     ).publish_from_quota(REQUEST, request_id="r-1")
-    async_result = await ApiCreditListingClient(
-        async_transport, seller=SELLER
+    async_result = await ListingClient(
+        async_transport, seller=SELLER, request_model=ExampleRequest
     ).publish_from_quota(REQUEST, request_id="r-1")
 
     assert sync_result == async_result
@@ -66,5 +69,12 @@ async def test_both_clients_sign_as_the_seller_on_its_own_principal():
     assert kwargs["role"] == "seller"
     assert kwargs["operation"] == PUBLISH_FROM_QUOTA_OPERATION
     assert kwargs["resource"] == seller_resource(SELLER)
-    assert kwargs["body"]["resource_id"] == "svc-quota"
+    assert kwargs["body"]["resource_id"] == "quota-a"
+    assert kwargs["body"]["product"] == "Example"
     assert kwargs["request_id"] == "r-1"
+
+
+def test_a_request_hands_the_mapping_only_what_describes_the_listing():
+    request = ExampleRequest(resource_id="quota-a", product="Example", paused=True)
+
+    assert request.listing_request() == {"product": "Example"}

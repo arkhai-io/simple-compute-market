@@ -15,24 +15,11 @@ from apicredits_storefront.middleware.admin_auth import authenticate_admin
 from core_storefront.models.system_models import (
     STAGE_EVENT_PAGE_CAP,
     HealthResponse,
-    LoopStatus,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["system"])
-
-
-def _lifecycle_status() -> dict[str, LoopStatus] | None:
-    """Every lifecycle loop by name: its controller state and the outcome of
-    its last cycle, whether its timer or an operator's step ran it."""
-    loops = _container.resolved_loop_controller
-    if loops is None:
-        return None
-    return {
-        name: LoopStatus.model_validate(loop.to_dict())
-        for name, loop in loops.snapshot().items()
-    }
 
 
 @cbv(router)
@@ -69,10 +56,12 @@ class SystemController:
         await authenticate_admin(
             request, operation="admin_system_status", resource="system/status"
         )
-        body = await self._svc.get_health(include_registry=True)
-        body["paused"] = _container.trading_pause.paused
-        body["lifecycle"] = _lifecycle_status()
-        return HealthResponse(**body)
+        return HealthResponse(
+            **await self._svc.status(
+                paused=_container.trading_pause.paused,
+                loops=_container.resolved_loop_controller,
+            )
+        )
 
     @router.get(
         "/api/v1/system/events",

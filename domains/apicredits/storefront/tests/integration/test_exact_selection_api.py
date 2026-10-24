@@ -20,9 +20,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.negotiation_runtime import (
-    build_api_credit_negotiation_runtime,
-)
+from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from fastapi import FastAPI
 from market_alkahest import ALKAHEST_MECHANISM_ID

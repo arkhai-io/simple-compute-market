@@ -1,1 +1,1 @@
-"""The api family's selling library: issuance and settlement composition, persistence, and the quota listing, over each domain's bundle."""
+"""The api family's selling library: negotiation, publication, issuance, and settlement over each domain's bundle."""

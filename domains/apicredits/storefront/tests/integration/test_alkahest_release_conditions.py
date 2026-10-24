@@ -4,8 +4,8 @@ The real app and lifespan compose the storefront from configuration: its signer
 from a development credential supplied as the Secret boundary supplies it, its
 settlement composition, wallet, and chains, and the listing service the route
 reaches. Two seams stand in for what lies beyond the storefront: the quota
-site's capacity runtime, which the listing service resolves through
-``build_capacity_runtime``, and the startup tasks, which preflight the credits
+site's capacity runtime, which the listing service resolves through the
+container's ``QUOTA_CAPACITY``, and the startup tasks, which preflight the credits
 service and start the timer loops. The anvil chain's address book is the
 development chain's. Every address and key here is a deterministic development
 value, never used on a public network.
@@ -28,9 +28,9 @@ from market_identity import Ed25519Signer, TrustedIdentitySet
 from storefront_client import StorefrontClient
 
 import apicredits_storefront.server as server
+from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.listing_publication import ApiCreditListingClient
-from apicredits_storefront.services import capacity_client as capacity_module
+from arkhai_api_selling.publish_route import ListingClient
 from apicredits_storefront.utils import config as storefront_config
 from apicredits_storefront.utils import sqlite_client as sqlite_module
 from tests.integration.test_publish_reconcile import _QuotaRuntime
@@ -147,9 +147,7 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
 
     monkeypatch.setattr(server, "_startup_tasks", no_startup_tasks)
     monkeypatch.setattr(
-        capacity_module,
-        "build_capacity_runtime",
-        lambda factory: _QuotaRuntime({"svc-quota": 42}),
+        container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
     )
     app = _app()
     with _replaced(settlement=_settlement()):
@@ -165,8 +163,10 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
             ) as seller, StorefrontClient(
                 "http://seller", transport=transport
             ) as public:
-                created = await ApiCreditListingClient(
-                    seller, seller=SELLER_SIGNER.identity
+                created = await ListingClient(
+                    seller,
+                    seller=SELLER_SIGNER.identity,
+                    request_model=container.PublishFromQuotaRequest,
                 ).publish_from_quota(
                     {
                         "resource_id": "svc-quota",

@@ -398,31 +398,27 @@ def _restart(tmp_path, h, *, approved: bool):
 
 async def test_an_approved_payment_converges_after_restart_without_the_buyer(harness, tmp_path):
     """The buyer approved, never settled, and the storefront restarted: the seller issues credits."""
-    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
-
     h = await harness()
     restarted = _restart(tmp_path, h, approved=True)
 
     # The registered step: what the timer loop and an operator's step run.
-    done = await payment_reconciliation_step()
+    done = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == [NEGOTIATION]
     progress = await restarted.db.load_issuance_progress(reference=NEGOTIATION)
     assert progress["status"] == "ready"
 
-    again = await payment_reconciliation_step()
+    again = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
     assert again["attempted"] == 0
     assert restarted.issuer.issued == [NEGOTIATION]
 
 
 async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
-    from apicredits_storefront.lifecycle_steps import payment_reconciliation_step
-
     h = await harness()
     restarted = _restart(tmp_path, h, approved=False)
 
-    done = await payment_reconciliation_step()
+    done = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []
