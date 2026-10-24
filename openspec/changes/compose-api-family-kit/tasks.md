@@ -2044,12 +2044,8 @@ scenario "A storefront binds the negotiate route"). Touches
       does not change. `test_refusal_bodies.py` opens a payment-selected
       negotiation under a floor of `100` (bisection, a counter), then
       continues under each bad floor and asserts the exact 404 body through
-      the canonical client's generic signed request. Through its typed
-      continuation the client signs `proposal`, `settlement_selection`, and
-      `reason` as nulls, which this storefront's buyer authentication omits
-      from the canonical body (as the API-credits buyer sends it), so that
-      method is refused 403 before any route runs — pre-existing, outside
-      this section, recorded for the owner in 7.5's handoff. Unit (`selling`): the pricing
+      the canonical client's typed `negotiate_continue` (see the review round
+      below for the body the buyer's verification hashes). Unit (`selling`): the pricing
       tests pass a neutral key and the capacity tests another.
 - [x] 7.5 Verification: `make test-api-selling` (unit), `make -C
       domains/apicredits/storefront test` (application integration through the
@@ -2105,14 +2101,8 @@ scenario "A storefront binds the negotiate route"). Touches
       component name. The exception row for `selling`'s core-storefront edge
       now names the authentication, the SQLite client and migrations, the
       wire models, and the negotiation service's error this section added.
-      For the owner: (1) the canonical client's typed `negotiate_continue`
-      signs `proposal`, `settlement_selection`, and `reason` as nulls, while
-      this storefront's buyer authentication hashes the fields a request
-      states, as the API-credits buyer CLI sends them, so that method is
-      refused 403 by the API-credits storefront — pre-existing, moved
-      unchanged, and now marked as deferred debt in `test_refusal_bodies.py`,
-      which sends the continuation through the client's generic signed
-      request; (2) at opening the runtime answers every floor refusal naming
+      For the owner: (1) the typed-client continuation defect found and fixed
+      in the review round below; (2) at opening the runtime answers every floor refusal naming
       `default_min_price` as `offer_unfulfillable: no_floor_price`, so task
       7.4's three bodies are served from a continuation, not an opening;
       (3) `selling`'s `auth` is the one module in the library that imports
@@ -2138,6 +2128,36 @@ scenario "A storefront binds the negotiate route"). Touches
       with constructor injection, since `container.AUTH` is the one instance
       every binding reads. Section 7 is committed on
       `feat/compose-api-family-kit-s7-routes`, stacked on section 6's branch.
+      **Review round (2026-10-24).** The owner's review of the section's pull
+      request raised two blocking findings, fixed in a second commit:
+      - *Seller outcomes are recorded.* `verify_seller` never bound the
+        authenticated request to the response, so a seller mutation —
+        publish, close, refund — recorded no outcome and could run again
+        once its replay lease lapsed; the admin and buyer paths did bind.
+        Moved unchanged from the storefront's middleware, so pre-existing,
+        but a faulty invariant the family's library must not carry. It now
+        binds like the other roles: an exact retry replays the recorded
+        outcome, before and after the lease. `StorefrontAuth` takes an
+        optional `clock` so a test can age the reservation. Library
+        integration (`test_auth.py`): a seller's close runs once, and its
+        exact retry a day later, re-signed, answers from the record.
+      - *The body is verified as sent.* The buyer's verification hashed a
+        re-serialization of the parsed request with its unset and null fields
+        dropped, so a client that signed a null — the canonical client's
+        typed `negotiate_new` and `negotiate_continue` — was refused 403
+        while the API-credits buyer CLI, which sends no nulls, passed. Every
+        role's verification now hashes the request body as sent, which is
+        what each client signs, so both verify; the bindings no longer hand
+        the parsed model to the verification. Library integration: a buyer
+        verified over a body stating its optional fields as null and over
+        one leaving them out. `test_refusal_bodies.py` drives the three floor
+        refusals through the typed `negotiate_continue`, and its debt marker
+        is gone.
+      Evidence: `selling` 206 passed; API-credits storefront 174 passed, the
+      authentication, refusal, and every other baseline unchanged (the
+      baseline probes sign the dict they send); comment hygiene and the
+      change checks as before. The VM storefront's buyer verification hashes
+      its own re-serialization and is not this change's.
 
 ## 8. The selling-side mechanism distributions
 
@@ -2384,6 +2404,7 @@ change to implementation.
 | D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
 | D4 — the storefront composes the family client once at its composition boundary; the authority binds the contracts' wire models to its label and keeps no digest of its own | `openspec/specs/api-credits/architecture.md#implementation-composition` |
+| D11 — the storefront's authentication verifies the body as sent and records every role's outcome, so the canonical client and each domain's buyer both verify and a seller's exact retry replays after its lease | `openspec/specs/api-family/spec.md` |
 | D11 — route services in the kit, bindings in the compositions: `selling`'s `route_services` (one class per router, `RouteRefusal`), `auth` (`StorefrontAuth`, the library's one framework-facing module), and `persistence` (`StorefrontSQLiteClient`, the family's tables under the bundle's prefix, the purchase-terms table keeping the family name `credit_deal_terms`); the API-credits controllers as class-based bindings, since the recorded OpenAPI document carries the class in each route's name | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `openspec/specs/api-credits/architecture.md#implementation-composition` |
 | Open: the ledger-free split and inference's projection values | `openspec/specs/api-family/architecture.md` (current limits) |
 | New capability | `openspec/specs/README.md` |

@@ -96,17 +96,31 @@ class StorefrontAuth:
         signer: Callable[[], Signer | None],
         admin_principals: Callable[[], TrustedIdentitySet],
         seller_principal: Callable[[], Identity],
+        clock: Callable[[], int] | None = None,
     ) -> None:
         self._replay_store = replay_store
         self._signer = signer
         self._admin_principals = admin_principals
         self._seller_principal = seller_principal
+        self._clock = clock
 
     def _store(self) -> Any:
         store = self._replay_store()
         if store is None:
             raise HTTPException(status_code=503, detail=NOT_INITIALIZED)
         return store
+
+    def _now(self) -> int | None:
+        return self._clock() if self._clock is not None else None
+
+    @staticmethod
+    async def _sent_body(request: Request) -> Any:
+        """The body as the caller sent it, which is what the caller signed."""
+        raw = await request.body()
+        try:
+            return json.loads(raw) if raw else EMPTY_BODY
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="request body must be JSON") from exc
 
     async def require_admin_principal(self, request: Request) -> Identity:
         """Authenticate one of the trusted administrators under the route's own name and path."""
@@ -132,11 +146,7 @@ class StorefrontAuth:
         storefront's route name and path.
         """
         store = self._store()
-        raw_body = await request.body()
-        try:
-            body = json.loads(raw_body) if raw_body else EMPTY_BODY
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="request body must be JSON") from exc
+        body = await self._sent_body(request)
         bind_response_contract(request, operation=operation, resource=resource)
         try:
             authenticated = await authenticate_request(
@@ -148,6 +158,7 @@ class StorefrontAuth:
                 expected_role="admin",
                 replay_store=store,
                 allowed_principals=self._admin_principals().identities,
+                now=self._now(),
             )
         except AuthError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -163,16 +174,16 @@ class StorefrontAuth:
         resource_id: str,
         *,
         expected_principal: Identity,
-        body: object = EMPTY_BODY,
         allow_exact_retry: bool = False,
     ) -> AuthenticatedPrincipal:
-        """Verify and replay-reserve the claimed buyer before route dispatch."""
+        """Verify and replay-reserve the claimed buyer before route dispatch.
+
+        The signature is checked over the body as sent, so a client that signs
+        what it sends verifies whether it states its optional fields or leaves
+        them out.
+        """
         store = self._store()
-        payload = (
-            body.model_dump(mode="json", exclude_none=True, exclude_unset=True)
-            if hasattr(body, "model_dump")
-            else body
-        )
+        body = await self._sent_body(request)
         bind_response_contract(request, operation=operation, resource=resource_id)
         try:
             authenticated = await authenticate_request(
@@ -180,10 +191,11 @@ class StorefrontAuth:
                 method=request.method,
                 operation=operation,
                 resource=resource_id,
-                body=payload,
+                body=body,
                 expected_role="buyer",
                 replay_store=store,
                 expected_principal=expected_principal,
+                now=self._now(),
             )
         except AuthError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -214,9 +226,13 @@ class StorefrontAuth:
                 expected_role="seller",
                 replay_store=store,
                 expected_principal=self._seller_principal(),
+                now=self._now(),
             )
         except AuthError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        # Bound like the other roles, so the outcome is recorded and an exact
+        # retry replays it once the reservation's lease has lapsed.
+        bind_response_auth(request, authenticated, operation=operation, resource=resource_id)
         if not authenticated.dispatch_allowed:
             raise HTTPException(status_code=409, detail="request was already dispatched")
 

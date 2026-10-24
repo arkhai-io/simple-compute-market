@@ -12,8 +12,9 @@ import time
 
 import pytest
 from core_storefront.sqlite_client import SQLiteClient
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 from market_identity import (
     EMPTY_BODY,
     AuthenticatedResponse,
@@ -174,3 +175,110 @@ def test_an_exact_retry_of_a_signed_outcome_replays_it(storefront) -> None:
     assert (first.status_code, first.json()) == (200, {"ok": True})
     assert (retried.status_code, retried.json()) == (200, {"ok": True})
     assert retried.headers["X-Market-Request-ID"] == "admin-request-1"
+
+
+def _signed(signer: Ed25519Signer, *, role: str, method: str, operation: str, resource: str, request_id: str, body, timestamp: int) -> dict[str, str]:
+    signed = sign_request(
+        signer=signer,
+        envelope=RequestEnvelope(
+            role=role,
+            principal=signer.identity,
+            method=method,
+            operation=operation,
+            resource=resource,
+            request_id=request_id,
+            timestamp=timestamp,
+            body_hash=canonical_body_hash(body),
+        ),
+    )
+    return {
+        "X-Market-Signature-Version": signed.protocol,
+        "X-Market-Identity-Scheme": signed.principal.scheme.value,
+        "X-Market-Identity-Identifier": signed.principal.identifier,
+        "X-Market-Role": signed.role,
+        "X-Market-Request-ID": signed.request_id,
+        "X-Market-Timestamp": str(signed.timestamp),
+        "X-Market-Signature": signed.proof.value,
+    }
+
+
+BUYER = Ed25519Signer(bytes.fromhex("11" * 32))
+
+
+class _Continue(BaseModel):
+    """A buyer's continuation, its optional fields stated or left out."""
+
+    action: str
+    proposal: dict | None = None
+    reason: str | None = None
+
+
+@pytest.fixture
+def mutations(tmp_path):
+    """A seller mutation and a buyer route over a clock the test advances."""
+    db = SQLiteClient(db_path=str(tmp_path / "mutations.db"))
+    clock = {"now": 1_800_000_000}
+    auth = StorefrontAuth(
+        replay_store=lambda: db,
+        signer=lambda: STOREFRONT,
+        admin_principals=lambda: TrustedIdentitySet(identities=(ADMIN.identity,)),
+        seller_principal=lambda: STOREFRONT.identity,
+        clock=lambda: clock["now"],
+    )
+    app = FastAPI()
+    app.middleware("http")(auth.sign_responses)
+    runs = {"close": 0, "accept": 0}
+
+    @app.post("/listings/{listing_id}/close", dependencies=[Depends(auth.seller_dependency("close_listing"))])
+    async def close_listing(listing_id: str) -> dict[str, str]:
+        runs["close"] += 1
+        return {"listing_id": listing_id, "run": str(runs["close"])}
+
+    @app.post("/negotiate/{neg_id}")
+    async def negotiate_continue(neg_id: str, body: _Continue, request: Request) -> dict[str, str]:
+        await auth.verify_buyer(request, "negotiate_continue", neg_id, expected_principal=BUYER.identity)
+        runs["accept"] += 1
+        return {"neg_id": neg_id, "action": body.action}
+
+    return app, clock, runs
+
+
+def test_a_sellers_exact_retry_replays_its_recorded_outcome_past_the_lease(mutations) -> None:
+    """A seller mutation records its outcome, so an exact retry answers from the
+    record and never runs the mutation again, even once the reservation's lease
+    has lapsed, where an unrecorded reservation would have let it run twice."""
+    app, clock, runs = mutations
+    headers = _signed(
+        STOREFRONT, role="seller", method="POST", operation="close_listing",
+        resource="L-1", request_id="seller-close-1", body=EMPTY_BODY, timestamp=clock["now"],
+    )
+    with TestClient(app) as client:
+        first = client.post("/listings/L-1/close", headers=headers)
+        clock["now"] += 24 * 3600
+        headers["X-Market-Timestamp"] = str(clock["now"])
+        resigned = _signed(
+            STOREFRONT, role="seller", method="POST", operation="close_listing",
+            resource="L-1", request_id="seller-close-1", body=EMPTY_BODY, timestamp=clock["now"],
+        )
+        retried = client.post("/listings/L-1/close", headers=resigned)
+
+    assert (first.status_code, first.json()) == (200, {"listing_id": "L-1", "run": "1"})
+    assert (retried.status_code, retried.json()) == (200, {"listing_id": "L-1", "run": "1"})
+    assert runs["close"] == 1
+
+
+def test_a_buyer_is_verified_over_the_body_as_sent(mutations) -> None:
+    """A client that signs what it sends verifies whether it states its optional
+    fields as null or leaves them out."""
+    app, clock, runs = mutations
+    stated = {"action": "accept", "proposal": None, "reason": None}
+    sparse = {"action": "accept"}
+    with TestClient(app) as client:
+        for request_id, body in (("buyer-1", stated), ("buyer-2", sparse)):
+            headers = _signed(
+                BUYER, role="buyer", method="POST", operation="negotiate_continue",
+                resource="neg-1", request_id=request_id, body=body, timestamp=clock["now"],
+            )
+            response = client.post("/negotiate/neg-1", json=body, headers=headers)
+            assert (response.status_code, response.json()) == (200, {"neg_id": "neg-1", "action": "accept"}), response.text
+    assert runs["accept"] == 2

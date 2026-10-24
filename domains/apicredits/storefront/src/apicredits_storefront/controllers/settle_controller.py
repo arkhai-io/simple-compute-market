@@ -36,7 +36,7 @@ class SettleController:
         self, escrow_uid: str, body: ApiCreditsSettleRequest, request: Request
     ) -> Any:
         await _container.AUTH.verify_buyer(
-            request, SETTLE.operation, escrow_uid, expected_principal=body.buyer_principal, body=body
+            request, SETTLE.operation, escrow_uid, expected_principal=body.buyer_principal
         )
         outcome = await serve(_container.SETTLE_ROUTES.settle(escrow_uid, body))
         return JSONResponse(outcome.payload, status_code=outcome.status_code)

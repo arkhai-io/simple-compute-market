@@ -301,6 +301,27 @@ and its error to a response.
 - **THEN** the controller delegates every decision to the selling library's
   route service, and the same service serves the inference storefront's binding
 
+### Requirement: A storefront's authentication verifies what was sent and records every outcome
+
+The storefront authentication the selling library binds MUST verify each
+role's signature over the request body as the caller sent it, never over a
+re-serialization that drops or adds fields, and MUST record every
+authenticated outcome — administrator, buyer, and seller alike — so an exact
+retry of a mutation replays the recorded outcome whether or not its replay
+lease has lapsed.
+
+#### Scenario: A client states an optional field as null
+
+- **WHEN** a buyer signs and sends a continuation whose optional fields are
+  stated as null, and another sends one leaving them out
+- **THEN** both verify, and each is dispatched once
+
+#### Scenario: A seller retries a mutation after its lease
+
+- **WHEN** a seller's close is dispatched and the same signed request is sent
+  again after the replay lease has lapsed
+- **THEN** the recorded outcome is answered and the close does not run again
+
 ### Requirement: A configuration refusal names the composing storefront's key
 
 The selling library MUST read no configuration itself; a refusal for a setting

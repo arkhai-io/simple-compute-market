@@ -214,21 +214,9 @@ async def test_a_floor_refusal_names_the_storefronts_own_setting(served, db, fak
             )
         assert opened["action"] == "counter"
 
-        # Deferred debt, not a client method: the client's typed continuation
-        # signs every field, null ones included, where this storefront's buyer
-        # authentication hashes the fields the request states, as the API-credits
-        # buyer sends them, so `negotiate_continue` is refused 403 here. The
-        # generic signed request sends the body as the buyer would.
         with settings_overrides(**{"negotiation.policies": ["bisection"], "pricing.default_min_price": floor}):
             with pytest.raises(StorefrontClientError) as refused:
-                await buyer.authenticated_request(
-                    "POST",
-                    f"/api/v1/negotiate/{opened['negotiation_id']}",
-                    role="buyer",
-                    operation="negotiate_continue",
-                    resource=opened["negotiation_id"],
-                    body={"action": "accept", "buyer_principal": BUYER_PRINCIPAL.model_dump(mode="json")},
-                )
+                await buyer.negotiate_continue(opened["negotiation_id"], action="accept")
 
     assert (refused.value.status_code, json.loads(served.bodies[-1])) == (404, {"detail": message})
 

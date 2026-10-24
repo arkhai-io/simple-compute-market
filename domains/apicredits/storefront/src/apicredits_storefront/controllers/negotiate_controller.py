@@ -31,7 +31,6 @@ class NegotiateController:
             "negotiate_new",
             body.listing_id,
             expected_principal=body.buyer_principal,
-            body=body,
             allow_exact_retry=True,
         )
         return await serve(_container.NEGOTIATE_ROUTES.new(body, auth))
@@ -51,7 +50,6 @@ class NegotiateController:
             "negotiate_continue",
             neg_id,
             expected_principal=body.buyer_principal,
-            body=body,
             allow_exact_retry=True,
         )
         return await serve(_container.NEGOTIATE_ROUTES.continue_negotiation(neg_id, body, auth))

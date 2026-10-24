@@ -508,7 +508,11 @@ because the recorded OpenAPI document carries the class in each route's name
 and operation identifier. Authentication is `selling`'s `auth`:
 `StorefrontAuth` verifies administrators, buyers, and the seller and signs
 every response over the storefront's replay store, signer, administrators, and
-principal, each read when a request runs. It is the library's one
+principal, each read when a request runs. It verifies every role over the
+request body as sent, which is what each client signs, so a client that states
+an optional field as null and one that leaves it out both verify; and it binds
+every role's authenticated request to its response, so each outcome is
+recorded and an exact retry replays it after the reservation's lease as before. It is the library's one
 framework-facing module, since it reads the request and wraps the response,
 and the storefront kit already builds the FastAPI application every storefront
 runs. Persistence is `selling`'s `StorefrontSQLiteClient`: the core client
