@@ -41,13 +41,21 @@ job is SSH users, key material, and addressing, and an Ansible inventory is a po
 carrier for declarations because it exists to describe how to reach a machine.
 Keeping GPUs on hosts and moving the other dimensions to declarations would have
 left two partial authorities in one service. So declarations own every dimension,
-and a host's legacy GPU count is only input: where INI inventory enters, and once
-at upgrade, a host with GPUs that no declaration names gets a declaration derived
-from it, and after that its inventory no longer affects capacity.
+and a host's GPU count and model are descriptive. Only the ordered migration ever
+reads them for capacity: once, at upgrade, a host with GPUs that no declaration
+named received a declaration derived from it. No host write declares capacity —
+not an INI inventory applied at startup or through the import API, and not the
+host API — because a declaration made as a side effect of listing a host would sell
+it before its administrator decided how, and would make one host behave
+differently by the entry point that wrote it.
 
 One declaration type serves every entry point — single registration, a mounted or
-submitted definitions document, and derivation — with the same validation and the
-same refusals, so a declaration means the same thing however it arrives.
+submitted definitions document, and capacity import — with the same validation and
+the same refusals, so a declaration means the same thing however it arrives. Every
+declaration names its pool, and a stored row with none is malformed: it is reported
+by the administrative listing, so an operator can find and re-declare it, but is
+projected, admitted, scheduled, and moved as a member of no pool, rather than read
+as `default` or as a pool named for its resource.
 
 Administration composes with the ledger's serialization rather than around it. A
 declaration's checks against stored state (a pool move while the resource holds a

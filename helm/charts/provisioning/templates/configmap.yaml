@@ -60,3 +60,12 @@ data:
   capacity-definitions.yaml: |
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- /*
+    Operator files, rendered verbatim and mounted beside the profile. The chart
+    knows nothing of what they mean: a setting in `config` names one by path.
+    toYaml quotes a key YAML would read as another type and picks each block
+    scalar's indentation and chomping, so a file's content survives exactly.
+  */}}
+  {{- with .Values.configFiles }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}

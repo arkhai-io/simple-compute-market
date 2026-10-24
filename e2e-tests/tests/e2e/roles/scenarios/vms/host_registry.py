@@ -12,19 +12,17 @@ in three different stores:
   against. `register_resource` is the only thing that creates one, and nothing
   derives one from a host.
 
-That last point has cost two debugging loops. The host-derived fallback in the
-provisioner's inventory provider populates the *resource-pool projection*, which is
-what listing derivation reads — so a scenario registering only a host can publish
-listings it cannot sell against. Every claim path (`has_matching_inventory_guard`'s
-snapshot, `probe`, `reserve`) reads capacity buckets, and with no declaration they
-see an empty list. The refusal then surfaces as `no_matching_inventory`, several
-stages downstream of the missing setup.
+The resource-pool projection listing derivation reads is built from declarations
+alone, and every claim path (`has_matching_inventory_guard`'s snapshot, `probe`,
+`reserve`) reads capacity buckets, so a scenario registering only a host publishes
+and claims nothing. A missing declaration surfaces as `no_matching_inventory`,
+several stages downstream of the missing setup.
 
 One declaration per executor, and one executor per scenario. A second declaration on
 one machine sells the same hardware twice, which the provisioner's inventory loader
-refuses outright — and a shared executor is what previously let one scenario's GPU
-count break another's reservation. A fungible pool is therefore several executors
-with one declaration each, never several declarations on one.
+refuses outright — and on a shared executor one scenario's GPU count would change
+what another can reserve. A fungible pool is therefore several executors with one
+declaration each, never several declarations on one.
 
 A declaration's own id stays the commercial resource id the scenario's listing
 advertises, not the executor's alias: `compute_capacity_claim_from_order` pins the
@@ -61,12 +59,12 @@ from compute_provisioning_contracts import ConnectionSubmission, HostCreate, Hos
 #: what hardware exists; a declaration says how much of it is for sale, and the
 #: listing-reopen decision reads the declaration. Declaring four units for a
 #: scenario whose listing sells one leaves three available after the reserve, so
-#: the listing never closes — which is how this defaulted-to-4 and stayed
-#: invisible until a scenario asserted on listing closure.
+#: the listing never closes: a declaration states what its listing sells, never
+#: this count.
 E2E_HOST_GPU_COUNT = 4
 
-#: One executor per scenario. Sharing `kvm1` across all of them is what coupled the
-#: scenarios to each other, and is incompatible with one declaration per executor.
+#: One executor per scenario, so no scenario's declaration changes what another can
+#: reserve, as one declaration per executor requires.
 E2E_BUY_HOST = "kvm-buy"
 E2E_DEAL_HOST = "kvm-deal"
 E2E_DEAL_CLI_HOST = "kvm-deal-cli"
@@ -78,12 +76,8 @@ E2E_LISTING_SHAPES_HOST = "kvm-shapes"
 
 #: One pool per scenario, for the same reason as one executor per scenario: a
 #: pool's `listing_mode` is resolved per pool, and its structural default flips to
-#: `fungible` above one member. Sharing the system `default` pool would let adding a
-#: scenario silently change how another scenario's listings are published.
-#: The pool the provisioning service seeds from its own active configuration. Read
-#: for its provider configuration, never used to hold a scenario's capacity.
-SYSTEM_DEFAULT_POOL_ID = "default"
-
+#: `fungible` above one member. Sharing one pool would let adding a scenario
+#: silently change how another scenario's listings are published.
 E2E_BUY_POOL_ID = "compute-e2e-buy-pool"
 E2E_DEAL_POOL_ID = "compute-e2e-deal-pool"
 E2E_DEAL_CLI_POOL_ID = "compute-e2e-deal-cli-pool"
@@ -124,12 +118,12 @@ def register_e2e_pool(
     `specific_resource` at exactly one member — is only accidentally right for a
     pool about to gain a second member.
 
-    The provider configuration is inherited from the system `default` pool rather
-    than written here. An Ansible pool must carry a `playbook_path`, and its correct
-    value is deployment-specific — `/dev/null` under the mock profile, a container
-    path under docker, another under Helm. Copying the default pool's configuration
-    keeps a scenario's pools provisioning exactly the way that deployment already
-    provisions, and means a scenario never encodes a path belonging to one profile.
+    The pool states no provider configuration. Its playbook is the provisioning
+    service's configured `vm_playbook_path`, frozen into each job when the job is
+    prepared, and its correct value is deployment-specific — `/dev/null` under the
+    mock profile, a container path under docker, another under Helm — so a
+    scenario never encodes a path belonging to one profile, and reads no other
+    pool to learn one.
     """
     # Narrow on purpose: a 404 means "not created yet", which is the point of the
     # lookup. A transport or auth failure means the service is unreachable, and
@@ -175,7 +169,7 @@ def register_e2e_pool(
             **({"pricing": pricing} if pricing is not None else {}),
             **({"region": region} if region is not None else {}),
         },
-        provider_config=_default_pool_provider_config(provisioning_client),
+        provider_config={},
     ))
     return _pools(provisioning_client).get_pool(pool_id)
 
@@ -190,23 +184,6 @@ def _backed_declarations(deliverable_modes: tuple[str, ...]) -> dict[str, Any]:
         ADVERTISABLE_MODES_POLICY_TAG: list(deliverable_modes),
         CAPACITY_BACKING_POLICY_TAG: BACKED.label,
     }
-
-
-def _default_pool_provider_config(provisioning_client: Any) -> dict[str, Any]:
-    """The system default pool's provider configuration.
-
-    The default pool is seeded from the provisioning service's own active
-    configuration, so it is the one place a scenario can read a valid
-    `playbook_path` for whatever profile the stack is running under.
-    """
-    default_pool = _pools(provisioning_client).get_pool(SYSTEM_DEFAULT_POOL_ID)
-    config = dict(getattr(default_pool, "provider_config", None) or {})
-    assert config.get("playbook_path"), (
-        f"the {SYSTEM_DEFAULT_POOL_ID!r} pool reports no playbook_path "
-        f"({config!r}); an Ansible pool cannot be created without one, and this "
-        "scenario has no profile-independent value to substitute"
-    )
-    return config
 
 
 def register_e2e_host(

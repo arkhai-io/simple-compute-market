@@ -38,19 +38,26 @@ def _engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(
-        engine,
-        default_playbook_path="/playbooks/vm-operations.yaml",
-        default_inventory_group="kvm_hosts",
-    )
+    run_migrations(engine)
     return engine
 
 
-def _write_previous_version_pools(engine) -> None:
-    """Rewrite every pool into the shape the previous version stored."""
+def _add_default_pool(engine, policy_tags: dict) -> None:
+    """Store the ``default`` pool an older database holds."""
     with Session(engine) as db, db.begin():
-        default = db.get(ResourcePool, DEFAULT_POOL_ID)
-        default.policy_tags = {"deliverable_modes": ["vm"]}
+        db.add(ResourcePool(
+            id=DEFAULT_POOL_ID,
+            label="Default Pool",
+            provider="ansible",
+            enabled=True,
+            policy_tags=policy_tags,
+        ))
+
+
+def _write_previous_version_pools(engine) -> None:
+    """Store pools in the shape the previous version stored."""
+    _add_default_pool(engine, {"deliverable_modes": ["vm"]})
+    with Session(engine) as db, db.begin():
         db.add_all((
             ResourcePool(
                 id="single-mode",
@@ -86,13 +93,6 @@ def _tags(engine) -> dict[str, dict]:
             pool.id: dict(pool.policy_tags)
             for pool in db.query(ResourcePool).order_by(ResourcePool.id)
         }
-
-
-def test_fresh_bootstrap_declares_the_default_pool():
-    tags = _tags(_engine())[DEFAULT_POOL_ID]
-
-    assert tags["advertisable_modes"] == tags["deliverable_modes"]
-    assert tags["capacity_backing"] == "backed"
 
 
 def test_previous_version_pools_advertise_what_they_delivered_and_stay_backed(caplog):
@@ -155,11 +155,7 @@ def test_rerun_is_idempotent():
 
 def test_malformed_deliverable_set_is_drift_not_a_guess():
     engine = _engine()
-    with engine.begin() as connection:
-        connection.execute(
-            text("UPDATE resource_pools SET policy_tags=:tags WHERE id=:pool_id"),
-            {"tags": '{"deliverable_modes": "vm"}', "pool_id": DEFAULT_POOL_ID},
-        )
+    _add_default_pool(engine, {"deliverable_modes": "vm"})
 
     with pytest.raises(SchemaDriftError, match="pool 'default' policy_tags"):
         _migrate_pool_advertisement_and_backing(engine)

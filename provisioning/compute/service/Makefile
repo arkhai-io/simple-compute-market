@@ -23,7 +23,7 @@ reinit: ## Refresh local internal packages and adapters
 
 serve: ## Start the compute provisioning API and in-process workers
 	PROVISIONING_INVENTORY_PATH="$(IAC_DIR)/ansible/inventory/provisioning-hosts.ini" \
-	PROVISIONING_PLAYBOOK_PATH="$(IAC_DIR)/ansible/playbooks/single-tenant/vm-operations.yaml" \
+	PROVISIONING_VM_PLAYBOOK_PATH="$(IAC_DIR)/ansible/playbooks/single-tenant/vm-operations.yaml" \
 	PROVISIONING_BARE_METAL_PLAYBOOK_PATH="$(BARE_METAL_IAC_DIR)/ansible/playbooks/node-access.yaml" \
 	PROVISIONING_MANAGEMENT_VARS_PATH="$(IAC_DIR)/ansible/inventory/management-vars.yaml" \
 	uv run --find-links $(DIST_DIR) compute-provisioning-api

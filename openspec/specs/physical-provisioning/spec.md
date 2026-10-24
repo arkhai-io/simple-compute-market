@@ -341,7 +341,7 @@ Service composition MUST reject duplicate job-executor registrations for one `(o
 
 ### Requirement: Ansible fulfillment adapter
 
-The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job; the resolved playbook is the pool's `playbook_path` when the pool states one, and otherwise the service's `vm_playbook_path` as configured when the job is prepared. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
 
 Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
 
@@ -381,6 +381,11 @@ The fulfillment request's `connectivity` field MUST NOT carry relay configuratio
 
 - **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
 - **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
+
+#### Scenario: A VM pool states no playbook
+
+- **WHEN** a VM job is prepared for a pool whose provider configuration states no `playbook_path`
+- **THEN** the job's stored parameters carry the service's `vm_playbook_path` as configured at preparation
 
 ### Requirement: Generic provisioning has one package owner
 
@@ -443,14 +448,15 @@ on create and update. A capacity declaration's explicit `bare_metal_publication`
 view MUST carry the declaration's own pool. The `bare_metal.ansible` provider accepts no pool-local
 playbook, inventory-group, credential, or executor-target configuration:
 execution uses service-owned configuration and the scheduler-selected Physical
-Resource. The operator MUST register that Physical Resource and its explicit
+Resource, and a bare-metal job's stored parameters carry the service's
+`bare_metal_playbook_path` as configured when the job is prepared. The operator MUST register that Physical Resource and its explicit
 `bare_metal_publication` view through the authenticated capacity administration
 surface before the host is publishable.
 
 #### Scenario: Fresh selected-site inventory binds to a bare-metal pool
 
 - **WHEN** startup imports a `bare_metal.ansible` pool and then seeds a host whose inventory row names that pool
-- **THEN** the durable host row retains the exact pool id and unknown pool ids fail instead of falling back to `default`
+- **THEN** the durable host row retains the exact pool id and an unknown pool id fails the seed rather than leaving the host unplaced or assigning another pool
 
 #### Scenario: Publication retains the inventory pool binding
 
@@ -469,6 +475,11 @@ surface before the host is publishable.
 
 - **WHEN** a `bare_metal.ansible` pool contains a non-empty `provider_config`
 - **THEN** validation rejects the pool before it can authorize or dispatch fulfillment
+
+#### Scenario: The bare-metal playbook setting changes after a grant is prepared
+
+- **WHEN** `bare_metal_playbook_path` changes after a grant or reclaim job is prepared
+- **THEN** the job runs the playbook its stored parameters carry, and a job prepared afterwards carries the new one
 
 ### Requirement: A bare-metal publication view is built from its capacity declaration
 
@@ -544,7 +555,6 @@ obligation, MUST decline explicitly.
 - **WHEN** a serviced obligation's mechanism differs from its accepted Agreement's
 - **THEN** the hook refuses it and no entry's servicing acts
 
-
 ### Requirement: Bare-metal evidence is independent of escrow rows
 
 Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvidence by negotiation ID. Fulfillment and status MUST read that record's verified status/reference, not accept an escrow row as alternative proof or interpret a chain-name sentinel. Established identity/source evidence MUST be conflict-protected. Incompatible evidence/lifecycle schemas MUST require explicit database reset without legacy payment-row copying or fallback. Before protected recovery effects, the selected stage MUST revalidate authoritative source evidence; an Alkahest journal's materialization identity alone MUST NOT authorize physical delivery.
@@ -568,7 +578,6 @@ Bare-metal settlement stages MUST persist accepted-Agreement-bound SettlementEvi
 
 - **WHEN** recovery finds reclaim or collection in progress or completed, a non-ready mechanism status, or chain evidence no longer matching the accepted obligation
 - **THEN** it refuses before reservation, fulfillment, access or teardown effects
-
 
 ### Requirement: Physical payment fulfillment recovers on accepted evidence
 
@@ -1001,29 +1010,21 @@ inventory file.
 - **WHEN** a tenant's connection details are produced for that host
 - **THEN** they carry the connection address
 
-### Requirement: Legacy host capacity is derived into declarations
+### Requirement: Host writes declare no capacity
 
-A compute provisioner MUST create a capacity declaration for a host inventory record
-that carries a positive legacy GPU count and has no correlated declaration, at two
-points only: when host inventory is applied from an INI document — whether seeded at
-startup or submitted through the host import API — in the same transaction as the
-host upsert, and once, by ordered migration, for host records present at upgrade.
-Derivation MUST NOT run on a process start that applies no inventory, and MUST NOT
-run when a host is created or updated through the individual host API.
+A compute provisioner MUST NOT create a capacity declaration from a host record on any host write: not when host inventory is applied from an INI document, whether seeded at startup or submitted through the host import API, and not when a host is created or updated through the individual host API. A host's GPU count and model are descriptive and MUST NOT affect capacity. Capacity MUST be declared only through capacity registration, a capacity-definitions document, or capacity import. The ordered migration derived a declaration once for host records with a positive legacy GPU count present at upgrade.
 
 A host MUST be treated as already declared when any declaration names it as its
 `host_id`, which is also the only rule the capacity projection uses to correlate
 declarations to hosts.
-Derivation MUST NOT overwrite or merge into an existing declaration, and an
-operator-supplied declaration MUST win over any derivable legacy value.
 
 #### Scenario: Deployment configured only through host inventory
 
-- **WHEN** a provisioner seeds host inventory carrying legacy GPU counts from an INI
-  document and no capacity declarations exist
-- **THEN** a declaration is derived for each such host in the same transaction as
-  its host record
-- **AND** published capacity is unchanged from before declarations existed
+- **WHEN** a provisioner applies host inventory carrying GPU counts from an INI
+  document, at startup or through the host import API, and no capacity declarations
+  exist
+- **THEN** the hosts are registered, no capacity declaration is created for them, and
+  the capacity projection contains no entry for them
 
 #### Scenario: Existing hosts at upgrade
 
@@ -1034,28 +1035,27 @@ operator-supplied declaration MUST win over any derivable legacy value.
 
 #### Scenario: Operator declaration and legacy host value disagree
 
-- **WHEN** a host carries a legacy capacity value and an operator has declared
-  different capacity for the same Physical Resource
-- **THEN** the operator's declaration is retained unchanged and no derivation occurs
-  for that resource
+- **WHEN** a host carries a GPU count and an operator has declared different
+  capacity for the same Physical Resource
+- **THEN** the operator's declaration is retained unchanged and the host's value does
+  not affect it
 
 #### Scenario: A declaration's resource id differs from its host
 
 - **WHEN** a declaration whose resource id differs from a host's `host_id` names that
   host as its `host_id`
-- **THEN** the host is treated as declared and no second declaration is derived for it
+- **THEN** the host is treated as declared
 
 #### Scenario: A host is created through the individual host API
 
-- **WHEN** an operator creates a host with a legacy GPU count through the individual
-  host API
-- **THEN** no declaration is derived, and the host's capacity is declared through the
+- **WHEN** an operator creates a host with a GPU count through the individual host API
+- **THEN** no declaration is created, and the host's capacity is declared through the
   capacity administration surface
 
 #### Scenario: A host has no GPUs
 
-- **WHEN** host inventory is applied for a host whose legacy GPU count is zero
-- **THEN** no declaration is derived for it
+- **WHEN** host inventory is applied for a host whose GPU count is zero
+- **THEN** no declaration is created for it, as for any host
 
 ### Requirement: Capacity definitions are imported from a mounted document
 
@@ -1729,6 +1729,20 @@ Market-managed leases MUST record the executor target on an existing committed s
 - **WHEN** a lease is terminated and beginning its fulfillment's teardown fails
 - **THEN** the lease is `releasing` with the fulfillment as its handle, and the lease lifecycle begins the teardown on a later cycle, including after a restart
 
+### Requirement: A domain's service playbook setting is named for its domain
+
+The provisioning service MUST read the VM playbook from `vm_playbook_path` and the bare-metal playbook from `bare_metal_playbook_path`, and MUST refuse to start when its configuration sets the retired `playbook_path`, naming `vm_playbook_path` as its replacement. No alias for the retired name is read.
+
+#### Scenario: A configuration sets the retired key
+
+- **WHEN** the provisioning service starts with `playbook_path` set in any configuration layer
+- **THEN** startup fails with an error naming `vm_playbook_path`
+
+#### Scenario: A configuration sets the VM playbook
+
+- **WHEN** the provisioning service starts with `vm_playbook_path` set
+- **THEN** VM jobs whose pool states no playbook are prepared with that path
+
 ## Evidence
 
 - Bare-metal obligation servicing resolved from the accepted Agreement: `domains/bare_metal/storefront/tests/test_obligation_servicing.py` and `test_app_composition.py`.
@@ -1740,6 +1754,10 @@ Market-managed leases MUST record the executor target on an existing committed s
 - VM sizing precedence (committed reservation, pool default, unset), relay access-path selection, and teardown from the lease: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py` (`TestSizingPrecedence`, `TestRelayAccessPath`, `TestTeardown`); the delivered credentials and endpoint: `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries`.
 - Relay administration, token confidentiality, rebinding, and definition-document reconciliation: `provisioning/compute/service/tests/integration/test_relay_administration.py`, `test_relay_port_allocator.py`, `test_relay_port_leases.py`, `test_relays_api.py` through the canonical client, plus `tests/unit/services/test_definition_document_restart_safety.py`.
 - Relay ports held through fulfillment convergence, including a failed creation, and the reservation-released predicate reconciliation is given: `provisioning/compute/service/tests/integration/test_fulfillment_convergence.py`; their return with a reservation's capacity: `provisioning/compute/tests/integration/test_release.py` and `kit/site/tests/integration/test_ledger.py`.
+- Host writes declaring no capacity — an INI import and the startup inventory seed carrying `gpus=`, placed and unplaced, a host created and updated through the host API, and an operator's declaration surviving a re-import: `provisioning/compute/service/tests/integration/test_host_writes_declare_no_capacity_api.py` and `test_capacity_api.py`; the upgrade derivation: `provisioning/compute/service/tests/unit/test_legacy_host_capacity_migration.py`.
+- A VM job's playbook frozen at preparation, the pool's own or the service's `vm_playbook_path`, for create and teardown, and refused with neither: `domains/vms/provisioning/adapter/tests/unit/test_vm_fulfillment_plan.py`; through the typed client for a pool stating none: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`; an omitted or null pool playbook stored and a blank one refused: `provisioning/compute/service/tests/integration/test_ansible_pool_config_handler.py` and `test_pools_api.py`; the `ansible_pool_configs` rebuild: `test_vm_pool_config_migration.py`.
+- A bare-metal grant and reclaim carrying the configured playbook, and the codec passing it to the plan: `domains/bare_metal/provisioning/adapter/tests/test_bare_metal_fulfillment_plan.py` and `test_bare_metal_codec.py`; through the composed service: `provisioning/compute/service/tests/integration/test_bare_metal_mock_profile.py`.
+- `vm_playbook_path` resolution and refusal of the retired `playbook_path` in a profile and the environment layer: `provisioning/compute/service/tests/unit/test_config.py` and `test_worker.py`; through the app's lifespan: `provisioning/compute/service/tests/integration/test_retired_settings_startup.py`; the chart's renamed value and refused key: `helm/charts/provisioning/tests/test_render.py`.
 
 `PhysicalSettlementScheduler` and fulfillment-provider coordination are durable, not process-local: scheduling, acceptance, and dispatch state live in the fulfillment aggregate (see `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`), and a dedicated periodic worker recovers in-flight provider operations after a crash or restart (see `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker` and `docs/development/ARCHITECTURE.md#recovery-workers`). This is a database-wide SQLite writer guarantee, not a distributed multi-replica protocol.
 

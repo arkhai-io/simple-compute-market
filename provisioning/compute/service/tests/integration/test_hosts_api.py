@@ -251,6 +251,99 @@ class TestImportHosts:
         assert host.enabled is True
 
 
+def _inventory_line(host_id: str, address: str, pool: str | None) -> str:
+    """One INI entry; ``pool`` is the raw ``pool_id=`` value, or ``None`` to
+    state no pool at all."""
+    pool_var = "" if pool is None else f"  pool_id={pool}"
+    return (
+        f"{host_id}  ansible_host={address}  ansible_user=ubuntu  "
+        f"ansible_ssh_private_key_file=/home/appuser/.ssh/id_ed25519{pool_var}\n"
+    )
+
+
+class TestHostPlacement:
+    """A host's pool is optional, and only an explicit statement changes it."""
+
+    async def test_a_host_created_without_a_pool_reads_back_unplaced(self, client_and_queue):
+        client, _ = client_and_queue
+        created = await _register(client)
+        assert created.pool_id is None
+        assert (await client.family.get_host("kvm1")).pool_id is None
+        listed = await client.family.list_hosts()
+        assert [h.pool_id for h in listed.hosts if h.host_id == "kvm1"] == [None]
+
+    async def test_an_update_omitting_the_pool_keeps_it(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client, _SAMPLE_HOST.model_copy(update={"pool_id": "default"}))
+
+        updated = await client.family.update_host("kvm1", HostUpdate(gpu_model="A100"))
+
+        assert (updated.pool_id, updated.gpu_model) == ("default", "A100")
+
+    async def test_an_explicit_null_unplaces_the_host(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client, _SAMPLE_HOST.model_copy(update={"pool_id": "default"}))
+
+        updated = await client.family.update_host("kvm1", HostUpdate(pool_id=None))
+
+        assert updated.pool_id is None
+        assert (await client.family.get_host("kvm1")).pool_id is None
+
+    async def test_an_empty_inventory_pool_unplaces_an_existing_host(self, client_and_queue):
+        client, _ = client_and_queue
+        await client.host_import.import_hosts_from_text(
+            "[kvm_hosts]\n" + _inventory_line("kvm1", "10.0.0.1", "default")
+        )
+
+        result = await client.host_import.import_hosts_from_text(
+            "[kvm_hosts]\n" + _inventory_line("kvm1", "10.0.0.1", "")
+        )
+
+        assert [h.pool_id for h in result.hosts] == [None]
+        assert (await client.family.get_host("kvm1")).pool_id is None
+
+    async def test_an_inventory_stating_no_pool_keeps_an_existing_host_s_and_places_no_new_one(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        await _register(client, _SAMPLE_HOST.model_copy(update={"pool_id": "default"}))
+
+        result = await client.host_import.import_hosts_from_text(
+            "[kvm_hosts]\n"
+            + _inventory_line("kvm1", "10.0.0.99", None)
+            + _inventory_line("ww2", "10.0.0.2", None)
+        )
+
+        pools = {h.host_id: h.pool_id for h in result.hosts}
+        assert pools == {"kvm1": "default", "ww2": None}
+        kvm1 = await client.family.get_host("kvm1")
+        assert (kvm1.pool_id, kvm1.connection.public["ssh_host"]) == ("default", "10.0.0.99")
+        assert (await client.family.get_host("ww2")).pool_id is None
+
+    async def test_an_unknown_pool_is_refused_on_every_host_write(self, client_and_queue):
+        client, _ = client_and_queue
+        await _register(client, _SAMPLE_HOST.model_copy(update={"pool_id": "default"}))
+
+        with pytest.raises(ComputeProvisioningError) as on_create:
+            await client.family.register_host(
+                _SAMPLE_HOST.model_copy(update={"host_id": "ww2", "pool_id": "missing"})
+            )
+        with pytest.raises(ComputeProvisioningError) as on_update:
+            await client.family.update_host("kvm1", HostUpdate(pool_id="missing"))
+        with pytest.raises(ComputeProvisioningError) as on_import:
+            await client.host_import.import_hosts_from_text(
+                "[kvm_hosts]\n" + _inventory_line("kvm1", "10.0.0.99", "missing")
+            )
+
+        assert {on_create.value.status_code, on_update.value.status_code,
+                on_import.value.status_code} == {400}
+        kvm1 = await client.family.get_host("kvm1")
+        assert (kvm1.pool_id, kvm1.connection.public["ssh_host"]) == ("default", "10.0.0.1")
+        with pytest.raises(ComputeProvisioningError) as missing:
+            await client.family.get_host("ww2")
+        assert missing.value.status_code == 404
+
+
 class TestConnectivity:
     async def test_connectivity_registered_host(self, client_and_queue):
         client, _ = client_and_queue

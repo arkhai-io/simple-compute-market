@@ -10,7 +10,7 @@ from dynaconf import Dynaconf
 from market_identity import Ed25519Signer, Eip191Signer
 
 from compute_provisioning_service import config as config_module
-from compute_provisioning_service.config import Settings
+from compute_provisioning_service.config import RetiredSettingsError, Settings
 from compute_provisioning_service.identity import (
     IDENTITY_CREDENTIAL_ENV,
     resolve_identity_context,
@@ -240,3 +240,134 @@ def test_provisioning_bootstrap_dotenv_uses_environment_layer_without_dotenv_loc
     assert values.ENVIRONMENT_VS_DOTENV == "environment"
     assert values.LOCAL_ONLY == "settings"
     assert options.load_dotenv is True
+
+
+def _layered_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    profile: str = "",
+    environment: dict[str, str] | None = None,
+) -> Settings:
+    """The service's own settings file under one profile, loaded as the service
+    loads it, with no dotenv file in reach and no playbook setting in the
+    process environment beyond ``environment``, and no pool seed path there."""
+    monkeypatch.delenv("PROVISIONING_VM_PLAYBOOK_PATH", raising=False)
+    monkeypatch.delenv("PROVISIONING_PLAYBOOK_PATH", raising=False)
+    monkeypatch.delenv("PROVISIONING_POOL_SEED_PATH", raising=False)
+    for name, value in (environment or {}).items():
+        monkeypatch.setenv(name, value)
+    (tmp_path / "config-first.yml").write_text(profile)
+    monkeypatch.chdir(tmp_path)
+    options = replace(
+        config_module._BOOTSTRAP_OPTIONS,
+        default_config_directory=tmp_path,
+        load_dotenv=False,
+    )
+    monkeypatch.setattr(config_module, "_BOOTSTRAP_OPTIONS", options)
+    result = config_module._load_bootstrap(
+        {"CONFIG_DIRECTORY": str(tmp_path), "ACTIVE_PROFILES": "first"}
+    )
+    return Settings(result.settings)
+
+
+def test_the_vm_playbook_resolves_from_its_domain_named_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile='vm_playbook_path: "playbooks/vm.yaml"\n'
+    )
+
+    assert settings.resolved_vm_playbook_path == (tmp_path / "playbooks/vm.yaml").resolve()
+    assert settings.stated_retired_settings() == ()
+    settings.refuse_retired_settings()
+
+
+def test_the_packaged_defaults_state_no_retired_setting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch)
+
+    assert settings.resolved_vm_playbook_path == Path(
+        "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml"
+    )
+    settings.refuse_retired_settings()
+
+
+_SETTINGS_DIR = Path(config_module.__file__).parent
+
+
+def test_the_packaged_pool_seed_document_is_the_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch)
+
+    assert settings.resolved_pool_seed_path == (_SETTINGS_DIR / "seed/pools.yaml").resolve()
+    assert settings.resolved_pool_seed_path.is_file()
+
+
+def test_an_absolute_pool_seed_path_is_taken_as_stated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile=f'pool_seed_path: "{tmp_path / "pools.yaml"}"\n'
+    )
+
+    assert settings.resolved_pool_seed_path == (tmp_path / "pools.yaml").resolve()
+
+
+def test_a_relative_pool_seed_path_resolves_against_the_settings_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not against the working directory, which the profile loader moved to."""
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile='pool_seed_path: "seed/other.yaml"\n'
+    )
+
+    assert settings.resolved_pool_seed_path == (_SETTINGS_DIR / "seed/other.yaml").resolve()
+
+
+@pytest.mark.parametrize("value", ['""', '"  "'])
+def test_an_empty_pool_seed_path_disables_seeding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    settings = _layered_settings(tmp_path, monkeypatch, profile=f"pool_seed_path: {value}\n")
+
+    assert settings.resolved_pool_seed_path is None
+
+
+def test_the_retired_playbook_setting_in_a_profile_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path, monkeypatch, profile='playbook_path: "/opt/vm.yaml"\n'
+    )
+
+    assert settings.stated_retired_settings() == ("playbook_path",)
+    with pytest.raises(
+        RetiredSettingsError,
+        match=r"playbook_path \(state vm_playbook_path instead\)",
+    ):
+        settings.refuse_retired_settings()
+
+
+def test_the_retired_playbook_setting_in_the_environment_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _layered_settings(
+        tmp_path,
+        monkeypatch,
+        environment={"PROVISIONING_PLAYBOOK_PATH": "/opt/vm.yaml"},
+    )
+
+    with pytest.raises(RetiredSettingsError, match="vm_playbook_path"):
+        settings.refuse_retired_settings()

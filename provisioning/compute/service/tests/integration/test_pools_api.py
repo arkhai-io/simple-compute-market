@@ -5,11 +5,10 @@ All calls go through ProvisioningClients methods — no route strings in test
 code. ComputeProvisioningError is raised by the client on non-2xx responses.
 
 Coverage:
-  - The "default" pool always exists (seeded by db_engine, mirroring the
-    real migration's guarantee).
+  - The harness stores a pool named "default" (db_engine), an ordinary pool.
   - CRUD endpoints round-trip correctly through the client.
   - PUT replaces complete mutable state; PATCH updates only supplied fields.
-  - DELETE disables non-default pools; the default pool remains enabled.
+  - DELETE disables any pool, "default" included, and never deletes it.
   - Import/validate round-trip through the client and produce the expected
     created/updated/disabled/unchanged diff.
   - Hosts can be created against a pool created through this API, and
@@ -294,6 +293,32 @@ class TestVmSizeDefaultsThroughAdminApi:
         assert exc_info.value.status_code == 400
 
 
+class TestPlaybookLeftToTheService:
+    async def test_a_vm_pool_stating_no_configuration_is_accepted_and_exported(
+        self, client_and_queue,
+    ):
+        client, _ = client_and_queue
+        created = await client.pools.create_pool(
+            PoolCreate(
+                id="vm-unstated",
+                label="VM, service playbook",
+                provider="vm.ansible",
+                policy_tags={
+                    "deliverable_modes": ["vm"],
+                    "advertisable_modes": ["vm"],
+                    "capacity_backing": "backed",
+                },
+                provider_config={},
+            )
+        )
+        assert created.provider_config["playbook_path"] is None
+
+        exported = yaml.safe_load(await client.pools.export_pools_yaml())
+        (entry,) = [pool for pool in exported["pools"] if pool["id"] == "vm-unstated"]
+        assert entry["provider_config"]["playbook_path"] is None
+        assert "inventory_group" not in entry["provider_config"]
+
+
 class TestGetAndListPools:
     async def test_get_missing_pool_returns_404(self, client_and_queue):
         client, _ = client_and_queue
@@ -362,16 +387,14 @@ class TestDeletePool:
     async def test_delete_default_pool_disables_but_keeps_it_resolvable(
         self, client_and_queue
     ):
-        """`default` can be disabled like any other pool it just can never
-        be hard-deleted or stop being the fallback for hosts that omit pool_id.
-        See openspec/specs/fulfillment/spec.md,
-        decision 8."""
+        """`default` is disabled like any other pool, and like any other it
+        is never hard-deleted."""
         client, _ = client_and_queue
 
-        # The test fixture seeds "default" as a bare ResourcePool row with
-        # no matching Ansible side-table config (unlike the real migration
-        # seed). Give it one first — otherwise any update, not just
-        # disable, would 400 on missing provider_config.
+        # The test fixture stores "default" as a bare ResourcePool row with
+        # no matching Ansible side-table config. Give it one first —
+        # otherwise any update, not just disable, would 400 on missing
+        # provider_config.
         await client.pools.replace_pool(
             "default",
             PoolReplace(
@@ -389,15 +412,6 @@ class TestDeletePool:
         # Still resolvable via GET — not gone.
         pool = await client.pools.get_pool("default")
         assert pool.enabled is False
-
-        # Still the fallback for hosts that omit pool_id.
-        host = await client.family.register_host(
-            HostCreate(
-                host_id="kvm1",
-                connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
-            )
-        )
-        assert host.pool_id == "default"
 
 
 class TestImportAndValidatePools:
@@ -459,10 +473,33 @@ pools:
         result = await client.pools.validate_pools(bad_yaml)
         assert result.valid is False
         assert result.diff is None
-        assert {problem.code for problem in result.problems} >= {
-            "unknown_provider",
-            "missing_default_pool",
-        }
+        assert "unknown_provider" in {problem.code for problem in result.problems}
+
+    async def test_a_document_naming_no_default_pool_imports(self, client_and_queue):
+        """No pool name is required of a document. Applied authoritatively, it
+        disables the stored `default` it does not name, as any omitted pool."""
+        client, _ = client_and_queue
+        no_default = """
+pools:
+  - id: hetzner-eu-central
+    label: Hetzner EU Central
+    provider: vm.ansible
+    policy_tags:
+      advertisable_modes: []
+      capacity_backing: backed
+    provider_config:
+      playbook_path: playbooks/vm-operations-frp.yaml
+"""
+        validated = await client.pools.validate_pools(no_default)
+        assert validated.valid is True
+        assert validated.problems == []
+
+        result = await client.pools.import_pools(no_default)
+        assert result.applied is True
+        assert result.diff.created == ["hetzner-eu-central"]
+        assert result.diff.disabled == ["default"]
+        assert (await client.pools.get_pool("hetzner-eu-central")).enabled is True
+        assert (await client.pools.get_pool("default")).enabled is False
 
     async def test_export_round_trips(self, client_and_queue):
         client, _ = client_and_queue
@@ -487,15 +524,19 @@ class TestHostPoolIntegration:
         )
         assert host.pool_id == "hetzner-eu"
 
-    async def test_register_host_defaults_to_default_pool(self, client_and_queue):
+    async def test_a_host_registered_without_a_pool_is_in_none(self, client_and_queue):
+        """Not in `default`, though one is stored: no write places a host in a
+        pool it did not name."""
         client, _ = client_and_queue
+        assert (await client.pools.get_pool("default")).enabled is True
         host = await client.family.register_host(
             HostCreate(
                 host_id="kvm1",
                 connection=ssh_connection(ssh_host="10.0.0.1", ssh_user="ubuntu", key_path="/key"),
             )
         )
-        assert host.pool_id == "default"
+        assert host.pool_id is None
+        assert (await client.family.get_host("kvm1")).pool_id is None
 
     async def test_register_host_with_nonexistent_pool_returns_400(
         self, client_and_queue

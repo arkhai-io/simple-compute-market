@@ -9,7 +9,6 @@ dependencies = [
     "arkhai-compute-provisioning>=0.19.0",
     "arkhai-core>=0.4.0",
     "arkhai-kit-config>=0.2.0",
-    "arkhai-kit-resource-pools>=0.3.0",
     "pydantic>=2",
 ]
 

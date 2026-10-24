@@ -17,10 +17,6 @@ from vm_provisioning_adapter.requirement_delegates import (
     registered_requirement_delegate_names,
 )
 
-# The DB # column is still NOT NULL with no migration this round.
-# This is a compatibility placeholder only — nothing reads it.
-_UNUSED_INVENTORY_GROUP_COMPAT_VALUE = "__unused__"
-
 
 class AnsiblePoolConfigHandler:
     provider = "vm.ansible"
@@ -74,12 +70,16 @@ class AnsiblePoolConfigHandler:
             "requirement_delegate", DEFAULT_REQUIREMENT_DELEGATE
         )
         extra_vars = config.get("extra_vars", {})
-        if not isinstance(playbook_path, str) or not playbook_path.strip():
+        # Optional: a pool that states none runs the service's configured VM
+        # playbook. One that is stated must name something.
+        if playbook_path is not None and (
+            not isinstance(playbook_path, str) or not playbook_path.strip()
+        ):
             problems.append(
                 PoolConfigValidationProblem(
                     path="playbook_path",
-                    code="required_field",
-                    message="provider_config.playbook_path is required for provider='vm.ansible'",
+                    code="invalid_type",
+                    message="provider_config.playbook_path must be a non-empty string",
                 )
             )
         if not isinstance(requirement_delegate, str) or not requirement_delegate.strip():
@@ -242,7 +242,6 @@ class AnsiblePoolConfigHandler:
             db.add(row)
         row.playbook_path = normalized["playbook_path"]
         row.requirement_delegate = normalized["requirement_delegate"]
-        row.inventory_group = _UNUSED_INVENTORY_GROUP_COMPAT_VALUE
         row.extra_vars = normalized["extra_vars"]
         row.default_vm_ram = normalized["default_vm_ram"]
         row.default_vm_vcpus = normalized["default_vm_vcpus"]

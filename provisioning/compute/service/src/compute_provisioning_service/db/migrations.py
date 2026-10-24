@@ -17,7 +17,6 @@ from dataclasses import dataclass
 
 from sqlalchemy import Engine, MetaData, inspect, text
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateTable
 
 from market_resource_pools_contracts.backing import legacy_producer_backing
@@ -30,6 +29,7 @@ from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
     DEFAULT_POOL_ID,
+    Host,
     ResourcePool,
 )
 # VM's tables are VM's metadata, held in this database; this history creates and
@@ -47,27 +47,24 @@ class Migration:
 
 
 class SchemaDriftError(RuntimeError):
-    """Raised at startup when the DB schema is behind the code's expectations.
+    """Raised when a database is not in the shape the code can serve or migrate.
 
-    Per ARCHITECTURE.md § Schema Migration Execution: the service no longer
-    applies migrations automatically at startup. An operator (or the Helm
-    init container, or `make migrate` for local dev) must run them first.
+    The service does not apply migrations at startup: it refuses a database
+    behind the last known migration, and an operator (or the Helm init
+    container, or `make migrate` for local dev) must run them first. A
+    migration raises it for a database it cannot migrate without guessing.
+    See openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history.
     """
 
 
-def apply_schema_migrations(
-    engine: Engine,
-    *,
-    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
-    default_inventory_group: str = "kvm_hosts",
-    default_host_id: str | None = None,
-    seed_default_pool: bool = True,
-) -> None:
+def apply_schema_migrations(engine: Engine) -> None:
     """Apply all known migrations once, tracking completion in the database.
 
     Idempotent: migrations already recorded in ``schema_migrations`` are
     skipped, so this is safe to call repeatedly (the CLI entrypoint and the
     Helm init container both call it unconditionally on every run/restart).
+    Every migration takes only the engine, so the result depends on the code
+    and the stored data alone, never on the service's configuration.
     """
     _ensure_schema_migrations_table(engine)
     applied = _applied_migration_ids(engine)
@@ -75,17 +72,7 @@ def apply_schema_migrations(
     for migration in MIGRATIONS:
         if migration.id in applied:
             continue
-        if migration.id == "20260713_002_resource_pools_and_hosts_pool_id":
-            _migrate_resource_pools_and_hosts_pool_id(
-                engine,
-                default_playbook_path=default_playbook_path,
-                default_inventory_group=default_inventory_group,
-                seed_default_pool=seed_default_pool,
-            )
-        elif migration.id == "20261002_002_job_envelopes":
-            _migrate_job_envelopes(engine, default_host_id=default_host_id)
-        else:
-            migration.apply(engine)
+        migration.apply(engine)
         _record_migration(engine, migration.id)
         logger.info("Applied migration: %s", migration.id)
 
@@ -685,13 +672,28 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
     # joins on whichever the database has.
     host_columns = {c["name"] for c in inspect(connection).get_columns("hosts")}
     host_key = "host_id" if "host_id" in host_columns else "name"
+    # A pool configuration table an earlier definition of the model created
+    # has ``inventory_group`` until ``20261023_001_vm_pool_playbook_optional``
+    # drops it, later in the chain. One created from the current model, as a
+    # fresh database or ``_migrate_resource_pools_and_hosts_pool_id`` creates
+    # it, has none, so the column reads as NULL. That keeps a fresh database,
+    # which holds no lease, migrating; a lease found here then fails the
+    # compiler's pool configuration check, so a database that predates
+    # resource pools and still holds VM leases is refused rather than converted.
+    config_columns = {
+        c["name"] for c in inspect(connection).get_columns("ansible_pool_configs")
+    }
+    inventory_group = (
+        "apc.inventory_group" if "inventory_group" in config_columns else "NULL"
+    )
     rows = connection.execute(text(
         """
         SELECT vl.id AS lease_id, vl.allocation_id, vl.escrow_uid,
                vl.vm_host, vl.vm_target, vl.status, vl.create_job_id,
                vl.vm_remove_job_id, cr.capacity_reservation_id,
                cr.offering_mode, cr.executor_target, h.pool_id, rp.provider,
-               apc.playbook_path, apc.inventory_group, apc.extra_vars
+               apc.playbook_path, {inventory_group} AS inventory_group,
+               apc.extra_vars
         FROM vm_leases vl
         LEFT JOIN capacity_reservations cr
           ON cr.capacity_reservation_id = vl.allocation_id
@@ -700,7 +702,9 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
         LEFT JOIN ansible_pool_configs apc ON apc.pool_id = h.pool_id
         WHERE vl.status IN ('provisioning','leased','releasing','release_failed')
         ORDER BY vl.id
-        """.replace("{host_key}", _validate_sql_identifier(host_key))
+        """
+        .replace("{host_key}", _validate_sql_identifier(host_key))
+        .replace("{inventory_group}", inventory_group)
     )).mappings().all()
 
     seen_reservations: set[str] = set()
@@ -940,73 +944,57 @@ def _migrate_ansible_jobs_contract_fields(engine: Engine) -> None:
         )
 
 
-def _migrate_resource_pools_and_hosts_pool_id(
-    engine: Engine,
-    *,
-    default_playbook_path: str = "/opt/domains/vms/provisioning/iac/ansible/playbooks/single-tenant/vm-operations.yaml",
-    default_inventory_group: str = "kvm_hosts",
-    seed_default_pool: bool = True,
-) -> None:
-    """Create resource_pools/ansible_pool_configs, seed the "default" pool,
-    and add hosts.pool_id as NOT NULL.
+def _migrate_resource_pools_and_hosts_pool_id(engine: Engine) -> None:
+    """Create resource_pools/ansible_pool_configs and add ``hosts.pool_id``.
 
-    For an existing database, the default pool row must exist before the
-    hosts.pool_id column is added, since the column carries both a
-    NOT NULL constraint and a DEFAULT of DEFAULT_POOL_ID — on Postgres the
-    FK would fail validation against a not-yet-existing referenced row.
-    Pre-existing hosts are backfilled to "default" by the column DEFAULT
-    itself (SQLite and Postgres both apply DEFAULT to existing rows when a
-    NOT NULL column is added), so no separate UPDATE statement is needed.
+    The column is added ``NOT NULL`` with a default of ``default``, so the
+    database's existing hosts are placed in the pool named ``default``; the
+    hosts rebuild later in the chain drops both the constraint and the default.
+    The migration writes no row: which pools a site holds, and how each is
+    provisioned, is configuration that startup applies, and a migration's result
+    depends only on the code and the stored data.
 
-    This is the one deliberate exception to "migrations are schema-only":
-    seeding a single deterministic system row is what makes the NOT NULL
-    constraint possible without a nullable transitional state. It is not
-    open-ended business-logic seeding (that stays in app_runtime's YAML
-    pool-definitions import).
+    A database that holds hosts but no ``default`` pool predates resource pools.
+    Placing its hosts would need a pool and a provider this migration does not
+    know, so it is refused with :class:`SchemaDriftError` before any column is
+    added.
     """
     from market_resource_pools.db import Base as PoolsBase
 
+    _refuse_hosts_without_default_pool(engine)
+
     PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
     VmBase.metadata.tables["ansible_pool_configs"].create(bind=engine, checkfirst=True)
-
-    # A fresh database with a mounted pool document has no hosts to backfill;
-    # startup creates its default through ordinary atomic document import.
-    with Session(engine) as session:
-        exists = (
-            session.query(ResourcePool).filter(ResourcePool.id == DEFAULT_POOL_ID).one_or_none()
-        )
-        if exists is None and seed_default_pool:
-            session.add(ResourcePool(
-                id=DEFAULT_POOL_ID,
-                label="Default Pool",
-                provider="ansible",
-                enabled=True,
-                policy_tags={},
-            ))
-            session.flush()
-
-        config = (
-            session.query(AnsiblePoolConfig)
-            .filter(AnsiblePoolConfig.pool_id == DEFAULT_POOL_ID)
-            .one_or_none()
-        )
-        if config is None and seed_default_pool:
-            # Migration values intentionally come from active provisioning
-            # configuration: the default pool is a backwards-compatible
-            # representation of how all existing hosts are provisioned today.
-            session.add(AnsiblePoolConfig(
-                pool_id=DEFAULT_POOL_ID,
-                playbook_path=default_playbook_path,
-                inventory_group=default_inventory_group,
-                extra_vars={},
-            ))
-        session.commit()
 
     _add_column_if_missing(
         engine,
         "hosts",
         "pool_id",
         f"VARCHAR NOT NULL DEFAULT '{DEFAULT_POOL_ID}' REFERENCES resource_pools(id)",
+    )
+
+
+def _refuse_hosts_without_default_pool(engine: Engine) -> None:
+    with engine.connect() as connection:
+        if not _table_exists(connection, "hosts"):
+            return
+        hosts = connection.execute(text("SELECT COUNT(*) FROM hosts")).scalar_one()
+        if not hosts:
+            return
+        if _table_exists(connection, "resource_pools") and connection.execute(
+            text("SELECT 1 FROM resource_pools WHERE id = :id"),
+            {"id": DEFAULT_POOL_ID},
+        ).first() is not None:
+            return
+    raise SchemaDriftError(
+        f"The database holds {hosts} host(s) but no resource pool "
+        f"{DEFAULT_POOL_ID!r}: it predates resource pools, and migration "
+        "20260713_002_resource_pools_and_hosts_pool_id places existing hosts in "
+        f"{DEFAULT_POOL_ID!r} without creating it.\n"
+        f"Create the {DEFAULT_POOL_ID!r} pool, with provider 'ansible' and its "
+        "row in ansible_pool_configs naming the VM playbook its hosts run, then "
+        "apply migrations again; or migrate the database first with a release "
+        "whose migration still creates that pool."
     )
 
 
@@ -2441,8 +2429,10 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
     as its resource id is skipped and logged rather than overwritten. Host
     rows are not changed.
 
-    Written in SQL rather than through the service's derivation so that what
-    this migration does stays what it did when it shipped.
+    Written in SQL against the columns at this point in the migration chain,
+    not through the models, so a later model change cannot change what it
+    writes. It is the only derivation of capacity from hosts: no host write
+    declares capacity.
 
     Every row is planned before the first write.
     """
@@ -2710,12 +2700,18 @@ _LEGACY_CREDENTIAL_COLUMNS = (
 )
 
 
-def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None) -> None:
+def _migrate_job_envelopes(engine: Engine) -> None:
     """Store jobs' results and credentials as envelopes, with neutral routing columns.
 
-    A job row gains ``host_id``, taken from its parameters with the fallback job
-    execution applied (the parameter, else the job's target, else the
-    deployment's default host), has its ``offering_mode`` and ``action_kind``
+    A job row gains ``host_id`` only from evidence naming its physical host:
+    the row's own ``host_id``, else its ``host_id`` parameter, else, for a
+    bare-metal job alone, its ``executor_target``, where the bare-metal plan
+    writes the machine. A VM job's ``vm_target``, and its ``executor_target``,
+    which defaults to it, name the guest, never the host, so they are not read.
+    A job with no such evidence keeps ``host_id`` NULL and is logged by ID at
+    WARNING; if it is still queued, the job engine fails it at execution for
+    naming no host, rather than running it on a guessed one.
+    The row also has its ``offering_mode`` and ``action_kind``
     filled from its parameters where they were never recorded, gains
     ``executor_action`` (the action its executor runs, which routing reads and a
     contract action may differ from), and gains ``execution_handle``, the executor's opaque
@@ -2766,9 +2762,15 @@ def _migrate_job_envelopes(engine: Engine, *, default_host_id: str | None = None
                 or "create"
             )
             modes[job["id"]] = offering_mode
-            host_id = job["host_id"] or params.get("host_id") or (
-                params.get("executor_target") or params.get("vm_target") or default_host_id
-            )
+            host_id = job["host_id"] or params.get("host_id")
+            if not host_id and offering_mode == "bare_metal":
+                host_id = params.get("executor_target")
+            if not host_id:
+                host_id = None
+                logger.warning(
+                    "Job %s names no physical host; its host_id stays NULL",
+                    job["id"],
+                )
             # The route key every job is executed by, recorded on the row so
             # nothing reads it out of a job's parameters again.
             updates: dict[str, object] = {
@@ -3305,6 +3307,99 @@ def _migrate_vm_provider_identity(engine: Engine) -> None:
                 ))
 
 
+def _migrate_vm_pool_playbook_optional(engine: Engine) -> None:
+    """Let a VM pool leave its playbook to the service, and drop the inventory group.
+
+    A pool's ``playbook_path`` becomes nullable: a pool stating none runs the
+    service's configured VM playbook, frozen into each job when it is prepared.
+    ``inventory_group`` is dropped: the VM codec names its own inventory group
+    and nothing reads the column. Existing rows keep every other value.
+
+    SQLite cannot relax ``NOT NULL`` in place, so the table is rebuilt from the
+    model's current definition, which drops the column in the same step, by the
+    procedure ``_migrate_capacity_declaration_contract`` follows. A table
+    already in that shape, as a fresh database creates it, is left alone.
+    """
+    if not _table_exists(engine, "ansible_pool_configs"):
+        return
+    columns = {
+        c["name"]: c for c in inspect(engine).get_columns("ansible_pool_configs")
+    }
+    if columns["playbook_path"]["nullable"] and "inventory_group" not in columns:
+        return
+
+    model = AnsiblePoolConfig.__table__
+    rebuild_name = "ansible_pool_configs__rebuild"
+    # The tables its foreign keys name ride along, so its DDL can render them;
+    # only the rebuild itself is created.
+    metadata = MetaData()
+    ResourcePool.__table__.to_metadata(metadata)
+    VmBase.metadata.tables["relays"].to_metadata(metadata)
+    rebuild = model.to_metadata(metadata, name=rebuild_name)
+    for index in list(rebuild.indexes):
+        rebuild.indexes.discard(index)
+    shared = [c.name for c in model.columns if c.name in columns]
+    column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
+
+    with _schema_transaction(engine, foreign_keys_off=True) as connection:
+        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_name}"))
+        connection.execute(CreateTable(rebuild))
+        connection.execute(text(
+            f"INSERT INTO {rebuild_name} ({column_list}) "
+            f"SELECT {column_list} FROM ansible_pool_configs"
+        ))
+        connection.execute(text("DROP TABLE ansible_pool_configs"))
+        connection.execute(text(
+            f"ALTER TABLE {rebuild_name} RENAME TO ansible_pool_configs"
+        ))
+        for index in model.indexes:
+            index.create(connection, checkfirst=True)
+
+
+def _migrate_hosts_pool_optional(engine: Engine) -> None:
+    """Let a host be unplaced: ``hosts.pool_id`` loses its ``NOT NULL`` and default.
+
+    A host written without a pool belongs to none, and nothing supplies one: a
+    default would place the host in a pool nobody named. Existing hosts keep
+    their pools and every other value.
+
+    SQLite cannot relax a column in place, so the table is rebuilt from the
+    model's current definition by the procedure
+    ``_migrate_capacity_declaration_contract`` follows. A table already in that
+    shape, as a fresh database creates it, is left alone.
+    """
+    if not _table_exists(engine, "hosts"):
+        return
+    columns = {c["name"]: c for c in inspect(engine).get_columns("hosts")}
+    pool = columns.get("pool_id")
+    if pool is None or (pool["nullable"] and pool["default"] is None):
+        return
+
+    model = Host.__table__
+    rebuild_name = "hosts__rebuild"
+    # The table its foreign key names rides along, so its DDL can render it;
+    # only the rebuild itself is created.
+    metadata = MetaData()
+    ResourcePool.__table__.to_metadata(metadata)
+    rebuild = model.to_metadata(metadata, name=rebuild_name)
+    for index in list(rebuild.indexes):
+        rebuild.indexes.discard(index)
+    shared = [c.name for c in model.columns if c.name in columns]
+    column_list = ", ".join(_validate_sql_identifier(name) for name in shared)
+
+    with _schema_transaction(engine, foreign_keys_off=True) as connection:
+        connection.execute(text(f"DROP TABLE IF EXISTS {rebuild_name}"))
+        connection.execute(CreateTable(rebuild))
+        connection.execute(text(
+            f"INSERT INTO {rebuild_name} ({column_list}) "
+            f"SELECT {column_list} FROM hosts"
+        ))
+        connection.execute(text("DROP TABLE hosts"))
+        connection.execute(text(f"ALTER TABLE {rebuild_name} RENAME TO hosts"))
+        for index in model.indexes:
+            index.create(connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration("20260603_001_ansible_jobs_escrow_uid", _migrate_ansible_jobs_escrow_uid),
     Migration("20260603_002_hosts_public_host", _migrate_hosts_public_host),
@@ -3423,4 +3518,9 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_active_fulfillment_targets_on_reservations,
     ),
     Migration("20261019_001_vm_provider_identity", _migrate_vm_provider_identity),
+    Migration(
+        "20261023_001_vm_pool_playbook_optional",
+        _migrate_vm_pool_playbook_optional,
+    ),
+    Migration("20261023_002_hosts_pool_optional", _migrate_hosts_pool_optional),
 )

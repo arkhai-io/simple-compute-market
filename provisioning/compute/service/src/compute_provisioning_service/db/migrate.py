@@ -2,8 +2,11 @@
 
     compute-provisioning-migrate
 
-Invokes the same migration logic the application used to run in-process at
-startup (see ARCHITECTURE.md § Schema Migration Execution). Used by:
+Applies the service's migration chain to the configured database, which the
+application refuses to start without (see
+openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history).
+It reads only where the database is and how to log: the migrations take the
+engine alone. Used by:
 
   - The Helm init container (same image as the main Deployment container,
     different command) — ``Init:Error`` is an unambiguous signal in
@@ -33,13 +36,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     engine = create_db_engine(settings.database_url, settings.is_sqlite)
     logger.info("Applying migrations to %s ...", settings.database_url)
-    run_migrations(
-        engine,
-        default_playbook_path=str(settings.resolved_playbook_path),
-        default_inventory_group=str(settings.default_pool_inventory_group),
-        default_host_id=getattr(settings, "default_host_id", None),
-        pool_definitions_path=settings.resolved_pool_definitions_path,
-    )
+    run_migrations(engine)
     logger.info("Migrations applied successfully.")
 
 

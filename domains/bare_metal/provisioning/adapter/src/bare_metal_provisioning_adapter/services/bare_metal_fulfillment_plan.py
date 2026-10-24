@@ -3,7 +3,9 @@
 A grant installs the buyer's key for a tenant account on the whole host the
 lease sells; the reclaim that undoes it is prepared from the grant job's own
 parameters, so it removes exactly the access the grant gave, on the same host,
-with the reclaim policy the deployment configures.
+with the reclaim policy the deployment configures. Each job carries the access
+playbook the deployment configures when the job is prepared, so a later
+configuration change never rewrites an accepted operation.
 
 The sold unit is one whole host: the job runs against it and acts on it, so its
 ``host_id`` is both where the job runs and its ``executor_target``. The
@@ -14,6 +16,7 @@ for the access role, but it names nothing the fulfillment tracks.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -94,7 +97,13 @@ def _require_bare_metal(resource: SettlementResource) -> None:
 class BareMetalFulfillmentPlan:
     """Prepares a grant for a settled whole host, and the reclaim that undoes it."""
 
-    def __init__(self, *, reclaim_policy: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        playbook_path: str | os.PathLike[str],
+        reclaim_policy: str | None = None,
+    ) -> None:
+        self._playbook_path = os.fspath(playbook_path)
         # Validated here, at composition, so a deployment configured with a
         # policy the access role does not implement refuses to start.
         self._reclaim_policy = reclaim_policy_from(reclaim_policy)
@@ -146,6 +155,7 @@ class BareMetalFulfillmentPlan:
             ssh_public_key=_access_value(
                 access_ref, "ssh_public_key", "ssh_pubkey", "public_key"
             ),
+            playbook_path=self._playbook_path,
         )
         return PreparedJob(
             offering_mode=BARE_METAL_OFFERING_MODE,
@@ -186,10 +196,13 @@ class BareMetalFulfillmentPlan:
             raise ProviderConfigInvalidError(
                 "the grant's physical_host_id does not match the selected resource"
             )
+        # The reclaim takes the policy and playbook configured now, whatever
+        # the grant ran with; a grant stored without a playbook gains one.
         reclaim = grant.model_copy(
             update={
                 "action": NODE_RECLAIM_ACCESS_ACTION,
                 "reclaim_policy": self._reclaim_policy,
+                "playbook_path": self._playbook_path,
             }
         )
         return PreparedJob(

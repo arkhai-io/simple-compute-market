@@ -23,11 +23,6 @@ import pytest
 from compute_provisioning_ansible.runner import MaterializedInventory
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from market_site import CapacityLedgerService
-
-from compute_provisioning_service.services.capacity_derivation import (
-    LegacyHostCapacityDerivation,
-)
 
 from .conftest import (
     ProvisioningClients,
@@ -116,7 +111,6 @@ async def client_and_queue(
 ) -> AsyncIterator[tuple[ProvisioningClients, AsyncJobQueue, MockAnsibleRunner, AsyncProvisioningTestClient]]:
     _install_signed_asgi_transport(monkeypatch)
     mock_settings = MagicMock(
-        default_host_id="kvm1",
         default_max_retries=3,
         retry_backoff_initial_seconds=60,
         retry_backoff_multiplier=2.0,
@@ -126,7 +120,7 @@ async def client_and_queue(
         frp_server_addr="",
         frp_domain="",
         frp_dashboard_password="",
-        resolved_playbook_path=Path("/fake/playbook.yml"),
+        resolved_vm_playbook_path=Path("/fake/playbook.yml"),
         resolved_inventory_path=Path("/fake/hosts"),
         ssh_decryption_key="",
         database_url="sqlite:///:memory:",
@@ -149,13 +143,6 @@ async def client_and_queue(
     host_authority = HostAuthority(
         session_factory,
         codecs=ConnectionCodecs([SshConnectionCodec()]),
-        capacity_derivation=LegacyHostCapacityDerivation(
-            CapacityLedgerService(
-                session_factory,
-                unit_claim_keys=("units", "gpu_count"),
-                mirror_dimension="gpu_count",
-            )
-        ),
     )
     host_authority.register_host(HostCreate(
         host_id=HOST,
