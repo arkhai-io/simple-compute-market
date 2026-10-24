@@ -364,7 +364,15 @@ reservations its site refuses. A registry that already publishes the backing fie
 keeps it; an older reader ignores it.
 
 The storefront's VM publication runs on its own; bare-metal publication remains an
-operator-invoked command. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
+operator-invoked command. VM capacity-event reconciliation refreshes both site
+projection families before deciding fit, and shares serialization with the
+commercial publication cycle. It repairs per-registry delivery at startup and
+on quiet capacity cycles at `[capacity].poll_interval` (default 5 seconds),
+without waiting for the commercial publication timer (default 30 seconds).
+Failed projection refreshes hold listings instead of asserting exhaustion or
+recovery; registry failures remain retryable across restart. The existing
+storefront worker, marketplace signer and configured registry writer credentials
+are sufficient; no extra scheduler, service or manual publish watcher is needed. Storefront-wide terms of sale are configuration — `[pricing].settlements` and the per-model
 `[pricing.defaults.gpu.<model>].settlements`, `default_max_duration_seconds`, and
 the family rates `[pricing.defaults.gpu.<model>].rates` and
 `[pricing.defaults.<family>].rates` (see "Storefront listing shapes and pool

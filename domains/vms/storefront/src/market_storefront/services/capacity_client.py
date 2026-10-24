@@ -35,6 +35,7 @@ from compute_provisioning_contracts import (
     FulfillmentScheduleResponse,
     FulfillmentStatusResponse,
 )
+from core_storefront.stage_log import stage_event
 from core_storefront.aggregation import (
     PLACEMENT_POLICIES,
     AggregateCapacityClient,
@@ -43,6 +44,7 @@ from core_storefront.aggregation import (
 from market_capacity_publication import (
     run_capacity_event_pollers,
     CapacityReconcileContext,
+    CapacityReconciler,
     CapacityRuntime,
     CapacitySite,
     PublicationBinding,
@@ -50,7 +52,7 @@ from market_capacity_publication import (
 )
 from market_core import VersionedEnvelope
 from market_site import dict_resource_satisfies_claim
-from market_site_client import SiteCapacityClient
+from market_site_client import SiteCapacityClient as SiteCapacityClient
 
 from market_storefront.utils.config import get_provisioning_authorities
 
@@ -96,42 +98,34 @@ def _capacity_settings() -> tuple[dict[str, str], str]:
     return sites, placement
 
 
-_CONSUMING_DELTA_KINDS = frozenset({"reserved", "committed", "lease_truncated"})
-_MIXED_DIRECTION_DELTA_KINDS = frozenset({"capacity_changed"})
-
-
 def _capacity_reconciler(
     sqlite_client_factory: SQLiteClientFactory,
-) -> Callable[[CapacityReconcileContext], Any]:
+) -> CapacityReconciler:
     """Supply VM candidate semantics to the kit-owned reconciliation loop."""
 
     async def _reconcile(context: CapacityReconcileContext) -> None:
-        from core_storefront.stage_log import stage_event
-
+        # Composition imports are deferred: these adapters use this module's
+        # capacity wiring while building publication and projection services.
         from market_storefront.services.publication_service import (
+            _make_registry_client,
+            build_publication_runtime,
             close_stale_compute_listings_after_capacity_change,
             reopen_available_compute_listings_after_capacity_change,
         )
 
+        from market_storefront.services.site_projection_cache import fresh_listing_projections
+
         db = sqlite_client_factory()
-        projection = site_pool_projection()
-        buckets = site_capacity_buckets()
+        sites = tuple(site.site_id for site in context.projections)
+        projection, buckets = await fresh_listing_projections(sites)
         delta = context.delta
-        close = (
-            delta is None
-            or delta.kind in _CONSUMING_DELTA_KINDS
-            or delta.kind in _MIXED_DIRECTION_DELTA_KINDS
-        )
-        reopen = (
-            delta is None
-            or delta.kind == "released"
-            or delta.kind in _MIXED_DIRECTION_DELTA_KINDS
-        )
-        if close:
+        # Events are wakes, not desired-state commands: a delayed consuming
+        # event may already have been superseded by an authoritative release.
+        try:
             closed = await close_stale_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                configured_sites=[site.site_id for site in context.projections],
+                configured_sites=sites,
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -145,11 +139,10 @@ def _capacity_reconciler(
                     capacity_version=delta.version if delta is not None else None,
                     closed_listing_ids=closed,
                 )
-        if reopen:
             reopened = await reopen_available_compute_listings_after_capacity_change(
                 db.db_path,
                 sqlite_client=db,
-                configured_sites=[site.site_id for site in context.projections],
+                configured_sites=sites,
                 member_availability=dict(context.availability),
                 site_pool_projection=projection,
                 site_capacity_buckets=buckets,
@@ -163,6 +156,10 @@ def _capacity_reconciler(
                     capacity_version=delta.version if delta is not None else None,
                     reopened_listing_ids=reopened,
                 )
+        finally:
+            await build_publication_runtime(
+                db, registry_client_factory=_make_registry_client,
+            ).converge()
 
     return _reconcile
 

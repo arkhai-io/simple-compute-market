@@ -318,6 +318,8 @@ async def test_domain_hook_closes_and_reopens_with_exact_site_availability():
     reconcile = cc._capacity_reconciler(lambda: repository)
     projection = (CapacityProjection("default", ()),)
     with (
+        patch("market_storefront.services.publication_service.build_publication_runtime",
+              return_value=SimpleNamespace(converge=AsyncMock())),
         patch(
             "market_storefront.services.publication_service."
             "close_stale_compute_listings_after_capacity_change",
@@ -344,7 +346,7 @@ async def test_domain_hook_closes_and_reopens_with_exact_site_availability():
             )
         )
 
-    assert [name for name, _ in calls] == ["close", "reopen"]
+    assert [name for name, _ in calls] == ["close", "reopen", "close", "reopen"]
     assert calls[0][1] == {("default", "compute-kvm1-001"): 6}
 
 
@@ -363,6 +365,8 @@ async def test_domain_hook_runs_both_passes_for_mixed_capacity_change():
 
     reconcile = cc._capacity_reconciler(lambda: repository)
     with (
+        patch("market_storefront.services.publication_service.build_publication_runtime",
+              return_value=SimpleNamespace(converge=AsyncMock())),
         patch(
             "market_storefront.services.publication_service."
             "close_stale_compute_listings_after_capacity_change",
@@ -594,12 +598,16 @@ class TestReconcileListingsUsesCachedProjection:
             }
         ]
 
-        resource_pools_cache: ProjectionCache = ProjectionCache(client=None)
+        resource_pools_cache: ProjectionCache = ProjectionCache(client=SimpleNamespace(
+            snapshot=AsyncMock(return_value=(ProjectionIdentity(1, "abc"), pool_rows)),
+        ))
         resource_pools_cache._value = pool_rows
         resource_pools_cache._state = ProjectionState.loaded
         resource_pools_cache._identity = ProjectionIdentity(revision=1, digest="abc")
 
-        capacity_buckets_cache: ProjectionCache = ProjectionCache(client=None)
+        capacity_buckets_cache: ProjectionCache = ProjectionCache(client=SimpleNamespace(
+            snapshot=AsyncMock(return_value=(ProjectionIdentity(1, "def"), bucket_rows)),
+        ))
         capacity_buckets_cache._value = bucket_rows
         capacity_buckets_cache._state = ProjectionState.loaded
         capacity_buckets_cache._identity = ProjectionIdentity(revision=1, digest="def")
@@ -630,6 +638,7 @@ class TestReconcileListingsUsesCachedProjection:
             db_path,
             *,
             sqlite_client,
+            configured_sites=(),
             member_availability=None,
             site_pool_projection=None,
             site_capacity_buckets=None,
@@ -640,6 +649,8 @@ class TestReconcileListingsUsesCachedProjection:
         reconcile = cc._capacity_reconciler(lambda: repository)
         with (
             patch.dict(spc._caches, {"default": caches}, clear=True),
+            patch("market_storefront.services.publication_service.build_publication_runtime",
+                  return_value=SimpleNamespace(converge=AsyncMock())),
             patch(
                 "market_storefront.services.publication_service."
                 "close_stale_compute_listings_after_capacity_change",

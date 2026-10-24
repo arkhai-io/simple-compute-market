@@ -16,7 +16,7 @@ Stage 1 was proposal-only and committed before approval. Q10 authorizes retarget
 
 ### Fresh-known projections before fit
 
-Refresh both existing projection families for the sites being reconciled, then capture their successful values before the existing close/reopen selectors run. A failed family holds that site's listings; loaded-empty remains authoritative. Preserve last-good caches for status, not as proof of a successful new fit decision. Retry on the next capacity cycle, including when the event feed is quiet. No durable projection store.
+Refresh both existing projection families for the sites being reconciled, then capture their successful values before the existing close/reopen selectors run. A failed family holds that site's listings; loaded-empty remains authoritative. The kit's pre-existing strict all-site snapshot boundary is retained: an unavailable snapshot aborts and retries the pass instead of supplying unknown capacity as empty to another domain's hook. Preserve last-good caches for status, not as proof of a successful new fit decision. Retry on the next capacity cycle, including when the event feed is quiet. No durable projection store.
 
 ### One serialized decision boundary
 
@@ -24,7 +24,7 @@ Use the composed capacity runtime's lock for capacity-derived transitions and VM
 
 ### Durable delivery convergence
 
-Call the existing convergence operation after the refreshed decision even if there are no transitions. Keep failed or missing per-registry delivery records discoverable against current local status, independent of process cursors or future events. A later release supersedes a failed earlier close. Reuse the existing tables and registry payload/status operations; no outbox or schema change.
+Call the existing convergence operation after the refreshed decision even if there are no transitions. Keep failed or missing per-registry delivery records discoverable against current local status, independent of process cursors or future events. Mark the existing delivery row pending before network I/O, and do not acknowledge a reopen until the same registry accepts both payload publication and open status. This prevents an interruption or lost result write from falsely certifying a closed registry row as published. A later release supersedes a failed earlier close. Reuse the existing tables and registry payload/status operations; no outbox or schema change.
 
 ### Existing identity and seller intent
 
@@ -46,15 +46,15 @@ No new public state, endpoint or schema. Rebuild affected wheels and explicitly 
 
 The approved integration scenario drives the real app, SQLite persistence, lifecycle controls and publication runtime with controlled external site/registry boundaries. It observes 8→0 closing, →1 same-ID reopening, per-registry failure during quiet feeds and recovery through reconstructed process-like runtime state over the same database. Existing suites retain jurisdiction over fit edges, fragmentation, seller intent, event transport and registry fan-out.
 
-Stage 1 scoped strict validation passed with OpenSpec 1.14.3. Its former main baseline had 46 unrelated strict failures (SCM #301). The approved branch pins OpenSpec 1.14.0; revalidate using that documented version. Runtime, packaging and closeout results are recorded below when obtained. Live hosted end-to-end proof is deliberately unrun by instruction.
+Stage 1 scoped strict validation passed with OpenSpec 1.14.3. Its former main baseline had 46 unrelated strict failures (SCM #301). The approved branch pins OpenSpec 1.14.0; revalidate using that documented version. Execution evidence is in `docs/attachments/capacity-listing-reconciliation.md`: 584 focused/shared-package tests passed, with two existing core skips; packaging, architecture, comment hygiene and scoped citations passed. Replaying the original VM hook fails the approved property at the eighth reservation; both repaired modes pass. Focused typing retains two reproduced baseline diagnostics (SCM #303). Global strict validation on the approved base retains 16 reproduced failures; scoped validation passes. Hosted qualification and the Docker end-to-end pipeline are unrun; hosted purchases and deployment changes are explicitly prohibited.
 
 ## Design promotion record
 
 | Accepted decision | Permanent location | State |
 |---|---|---|
-| Fresh-known fit and serialized same-ID close/reopen | `openspec/specs/storefront-publication/spec.md`, `openspec/specs/storefront-publication/architecture.md#reconciliation` | Pending |
-| Durable per-registry quiet/restart recovery and seller precedence | Same subsystem spec and architecture | Pending |
-| Event-to-registry work is outside settlement | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` | Pending |
-| Existing process, cadence and signer/writer prerequisites | `docs/development/DEPLOYMENT_AND_CONFIG.md#combined-compute-family-storefront` | Pending |
-| Roadmap and campaign index currency | `docs/development/ROADMAP.md`, `openspec/changes/README.md` | Pending disposition |
+| Fresh-known fit and serialized same-ID close/reopen | `openspec/specs/storefront-publication/spec.md`, `openspec/specs/storefront-publication/architecture.md#reconciliation` | Promoted |
+| Durable per-registry quiet/restart recovery and seller precedence | Same subsystem spec and architecture, including pending delivery and two-phase reopen acknowledgement | Promoted |
+| Event-to-registry work is outside settlement | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` | Promoted |
+| Existing process, cadence and signer/writer prerequisites | `docs/development/DEPLOYMENT_AND_CONFIG.md#combined-compute-family-storefront` | Promoted |
+| Roadmap and campaign index currency | `openspec/changes/README.md` has an independent focused-repair row and no new dependency edges. `docs/development/ROADMAP.md` requires no edit: existing projection ownership and delivered shape semantics remain true; no negotiation, sizing or publication-policy goal is delivered here | Reviewed |
 | Approved base, test authorization and rollout-only restriction | This design and PR handoff | Temporary |

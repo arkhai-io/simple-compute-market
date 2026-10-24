@@ -222,6 +222,9 @@ class CapacityRuntime:
         self._reconcile_hook = reconcile
         self._site_client_factory = site_client_factory
         self._client: AggregateCapacityClient | None = None
+        # Hold from input acquisition through delivery, including domain
+        # publication cycles, so an older close cannot overtake a newer reopen.
+        self.reconciliation_lock = asyncio.Lock()
 
     @property
     def site_ids(self) -> tuple[str, ...]:
@@ -392,6 +395,10 @@ class CapacityRuntime:
         await self._run_reconcile(delta)
 
     async def _run_reconcile(self, delta: CapacityDelta | None) -> None:
+        async with self.reconciliation_lock:
+            await self._reconcile_current(delta)
+
+    async def _reconcile_current(self, delta: CapacityDelta | None) -> None:
         projections = await self.projections()
         availability: dict[tuple[str, str], int] = {}
         for projection in projections:
@@ -446,7 +453,7 @@ class CapacityRuntime:
         paused: Callable[[str], Callable[[], bool]] | None = None,
         wait: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
-        """Tail every configured authority and reconcile at feed boundaries.
+        """Tail every authority, reconciling feed boundaries and quiet cycles.
 
         ``paused`` is a factory, not a predicate: it receives a site id and
         returns that site's gate. The pollers run concurrently and each holds

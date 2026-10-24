@@ -5,16 +5,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from core_storefront.site_projections import (
     ProjectionCache,
     ProjectionCacheView,
     ProjectionIdentity,
+    ProjectionState,
 )
 from market_capacity_publication import remote_site_clients
 from market_storefront.services.capacity_client import build_capacity_client
-from market_storefront.services.publication_loop import wake_publication_loop
 from market_storefront.lifecycle import SITE_PROJECTION_POLLER, gate, idle
 
 logger = logging.getLogger(__name__)
@@ -215,6 +215,34 @@ async def refresh_site_projections(site_id: str) -> None:
             logger.exception("[PROJECTIONS] refreshing site %s failed", site_id)
 
 
+async def fresh_listing_projections(
+    site_ids: tuple[str, ...],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    """Capture both fresh families; a failed family holds its entire site.
+
+    Last-good cache values remain available for diagnostics but cannot justify
+    a new capacity decision after a failed refresh. Empty loaded values can.
+    """
+    pools: dict[str, list[dict[str, Any]]] = {}
+    buckets: dict[str, list[dict[str, Any]]] = {}
+    for site_id in site_ids:
+        await refresh_site_projections(site_id)
+        caches = _caches.get(site_id)
+        if caches is None:
+            continue
+        pool_view = caches.resource_pools.view()
+        bucket_view = caches.capacity_buckets.view()
+        if (
+            pool_view.state == ProjectionState.loaded
+            and bucket_view.state == ProjectionState.loaded
+            and pool_view.value is not None
+            and bucket_view.value is not None
+        ):
+            pools[site_id] = pool_view.value
+            buckets[site_id] = bucket_view.value
+    return pools, buckets
+
+
 def _resource_pool_identities() -> dict[str, Any]:
     return {
         site: caches.resource_pools.view().identity
@@ -223,6 +251,8 @@ def _resource_pool_identities() -> dict[str, Any]:
 
 
 async def site_projection_poller_loop(sqlite_client: Any) -> None:
+    # Publication reads this cache; importing its wake at module load cycles.
+    from market_storefront.services.publication_loop import wake_publication_loop
     from market_storefront.utils import config
 
     interval = float(
