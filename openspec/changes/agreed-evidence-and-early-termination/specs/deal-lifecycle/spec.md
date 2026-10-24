@@ -11,7 +11,7 @@ A payment event MUST be read from the payment authority the committed agreement 
 
 ### Requirement: Arbitration is per agreement and separate from payment
 
-A case MUST be filed about an agreement, not a part, at the intake of the regime its `adjudication` names. Arbitration events (filed, conceded, ruled, closed) MUST carry the case reference and be read from that regime's record, whose sequence is per agreement across its cases. A transaction MAY have any number of cases. The payment adapter MUST NOT file, concede, or decide cases. A party's arbitration adapter MUST only file, concede, and read; only the regime's dispute authority MAY perform dispute events.
+A case MUST be filed about an agreement, not a part, at the intake of the regime its `adjudication` names. Arbitration events (filed, ruled, closed) MUST carry the case reference and be read from that regime's record, whose sequence is per agreement across its cases. A transaction MAY have any number of cases. The payment adapter MUST NOT file or decide cases. A party's arbitration adapter MUST only file and read; only the regime's dispute authority MAY apply a case's outcome. Lifecycle events within the deal's terms, such as an entitled stop, MUST be applied by the party directly at the payment authority.
 
 #### Scenario: Two cases on one deal
 
@@ -62,7 +62,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `regime`, `dispute_window_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+A settlement option MAY carry `adjudication` (`version`, `regime`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
 
 #### Scenario: A term changes the option ID
 
@@ -115,13 +115,13 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
 - **THEN** the payer and the dispute authority are the only stop authorities, and the payee is not one
 
-### Requirement: A concession is a case the dispute authority processes automatically
+### Requirement: A concession is a dispute filed against oneself
 
-A `concede` MUST be a case the seller files against itself at the regime's intake. The dispute authority MUST process it without an adjudicator, applying its effects as it applies a ruling's; the seller MUST NOT apply them. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full.
+A concession MUST be a `dispute` filed by the party its requested outcome is against, not a command or event of its own. The dispute authority MUST rule for it without an adjudicator, applying its effects as it applies a ruling's; the seller MUST NOT apply them. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full.
 
 #### Scenario: A concession names a future end
 
-- **WHEN** a seller submits `concede` with a delivery end later than now
+- **WHEN** a seller files a concession with a delivery end later than now
 - **THEN** the arbitration adapter rejects it before contacting any authority
 
 #### Scenario: A seller concedes after hardware failure
@@ -129,9 +129,9 @@ A `concede` MUST be a case the seller files against itself at the regime's intak
 - **WHEN** a seller makes the default concession on a hosted `once` deal halfway through its term
 - **THEN** the dispute authority records the concession and applies a `reverse` of half the payment with the case reference in its payload, and the storefront reads the delivery end through `watch` and ends delivery now
 
-### Requirement: One dispute window is the whole dispute period
+### Requirement: A timely case keeps the deal's money held
 
-`adjudication.dispute_window_seconds` MUST be the period after the lease end within which a case is filed and decided. Each payment adapter MUST derive its holds from it, so that every hold on a deal's payment lasts until the lease end plus the window. An outcome MUST act only on funds still held. The regime MUST publish its maximum resolution time, and the window MUST NOT be shorter than it. A case filed later than the window's close minus that time MAY be decided after the holds end, and no hold is extended for it.
+`adjudication.dispute_window_seconds` MUST bound filing: each payment adapter MUST derive holds lasting until the lease end plus the window. A case MUST be timely when it reaches the dispute authority before the money it concerns has paid out. On accepting a timely case, the dispute authority MUST `extend` each part with held money, and MUST `lift` each once no case on the deal is open and its outcomes are applied. An extension MUST NOT exceed `case_hold_max_seconds` past each amount's normal payout; `null` MUST mean until resolved, and then the dispute authority MUST be an `extend` authority. An outcome MUST act only on money still held. The window MUST NOT be shorter than the regime's minimum.
 
 #### Scenario: A once deal's hold is derived
 
@@ -140,8 +140,18 @@ A `concede` MUST be a case the seller files against itself at the regime's intak
 
 #### Scenario: A case is filed at the last moment
 
-- **WHEN** a buyer files a case one minute before the window closes, and the ruling comes after the hold has ended
-- **THEN** the ruling's reverse is refused by the payment authority, and the hold was not extended
+- **WHEN** a buyer files a case one minute before a `once` hold pays out, and mediation rules a week later with `case_hold_max_seconds` null
+- **THEN** the dispute authority's `extend` kept the money held, its partial `reverse` is applied, and `lift` pays the remainder to the seller
+
+#### Scenario: A case is filed after payout
+
+- **WHEN** a buyer files a case after the `once` hold has paid out
+- **THEN** the payments service refuses `extend`, and the case can move no money at the payment authority
+
+#### Scenario: A bounded case hold expires
+
+- **WHEN** a case stays open longer than `case_hold_max_seconds` past the hold's normal end
+- **THEN** the held money pays out at the cap without a `lift`
 
 ### Requirement: Lifecycle commands have defined outcomes
 
@@ -269,7 +279,7 @@ Records MUST be kept while the deal, its physical recovery, or any case on it is
 
 ### Requirement: A dispute is one case payload
 
-A `dispute` or `concede` MUST carry one case about the agreement: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
+A `dispute` MUST carry one case about the agreement: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
 
 #### Scenario: A buyer files a dispute
 
