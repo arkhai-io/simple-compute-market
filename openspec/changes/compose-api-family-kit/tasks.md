@@ -1420,6 +1420,22 @@ selling library's core-storefront edge, `ARCHITECTURE.toml`.
       states. Evidence: `selling` 82 (unit, library integration); contracts
       37; API-credits storefront 190 (unit and application integration,
       baselines and pins unchanged); domain library 19.
+      **Third review round (2026-10-24).** A further review raised four
+      findings. The owner split them: the generic one is fixed here, the
+      three about the Alkahest stage go to section 8, which owns that stage.
+      - *Fixed: the Agreement names its thread's listing.*
+        `accepted_agreement` refuses an Agreement whose `listing_id` differs
+        from the thread's `our_listing_id`, so no mechanism combines one
+        listing's record with another's ID. Unit: the refusal, including a
+        thread naming none; through the storefront, the payment service over
+        HTTP (application integration) and the Alkahest coordinator each
+        refuse before recording evidence or issuing, and each issues when the
+        check is bypassed.
+      - *Moved to section 8:* uncertain issuance under Alkahest (8.1, 8.4),
+        and the attestation's submission intent and unknown outcome (8.5).
+        Each is the Alkahest stage's mechanism policy, which `selling` does
+        not depend on; `retry_uncertain = False` predates this change.
+      Evidence: `selling` 85; API-credits storefront 192.
 
 ## 6. Selling, part two: negotiation, publication, and lifecycle
 
@@ -1523,7 +1539,8 @@ distributions own them.
       callable, evidence and private-result stores, capacity runtime, chain
       client factory, settings values — as constructor arguments. Unit tests
       with injected fakes replacing the former reads of the storefront's
-      container and settings. (D5.)
+      container and settings. The stage does not move unchanged: it must
+      also meet 8.4 and 8.5 before this task is checked. (D5.)
 - [ ] 8.2 `domains/api/selling-arkhai-payments/`
       (`arkhai-api-selling-arkhai-payments` 0.1.0; dependencies
       `arkhai-api-selling`, `arkhai-kit-arkhai-payments`): the seller payments
@@ -1541,14 +1558,17 @@ distributions own them.
       `retry_uncertain = False` turns a timeout, a retryable 5xx, or a lost
       acknowledgement into a terminal failure whose failure policy can release
       quota the authority already committed. Keep an uncertain outcome
-      pending and re-drive it under the same fulfillment identity, compensate
-      only after a definite refusal, and prove a commit-then-timeout case.
-- [ ] 8.5 Chain-acknowledgement loss does not revoke a fulfilled grant: the
-      stage already keeps the grant on an unknown attestation outcome, but a
-      crash between submission and recording leaves no trace of the
-      submission. Record a submission identity before submitting, and
-      reconcile chain state after an unknown outcome or a restart rather
-      than leaving it to an operator.
+      pending and re-drive it under the same fulfillment identity, keep the
+      capacity hold, compensate only after a definite refusal, and prove a
+      timeout and a lost response after commit at library integration.
+- [ ] 8.5 The attestation meets `settlement-servicing`'s "A fulfillment
+      submission with an unknown outcome is never repeated": record a
+      first-write-wins submission intent before submitting, so a crash after
+      submission cannot lead a re-drive to attest twice; and park an unknown
+      outcome, or an intent with no reference, for an operator instead of
+      failing the settlement, with the delivered credential stored privately
+      so it is not lost. Prove the crash-after-submission and unknown-outcome
+      cases.
 - [ ] 8.6 Accepted obligations are serviced after their mechanism is
       disabled: `enabled_mechanism_clients` builds a client only for an
       enabled section, so obligations accepted under Alkahest strand when it is

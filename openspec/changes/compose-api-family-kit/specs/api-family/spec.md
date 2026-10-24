@@ -160,6 +160,13 @@ The selling library MUST read no domain field name of its own.
 - **THEN** the issuance command and the delivered connection payload carry
   the service and endpoint recorded at acceptance
 
+#### Scenario: An Agreement names another listing than its negotiation
+
+- **WHEN** the accepted Agreement's listing differs from the listing its
+  negotiation thread names
+- **THEN** settlement is refused under every mechanism before any evidence is
+  recorded or any credit issued
+
 #### Scenario: An issuance result answers another request
 
 - **WHEN** the authority's signed issuance result differs from the submitted

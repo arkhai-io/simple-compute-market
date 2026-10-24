@@ -634,6 +634,42 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
     assert json.loads(progress["public_result"]["connection_details"])["service_name"] == resource["service_name"]
 
 
+async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(settled_db, monkeypatch):
+    db, neg_id = settled_db
+    from apicredits_storefront import settlement_stages
+    from market_core.schemas import Agreement
+
+    async def verify(**_kwargs):
+        return 0
+
+    issued = []
+
+    async def issue(request):
+        issued.append(request)
+        return _issuance_result(request)
+
+    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
+    thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
+    raw = thread["agreement_bytes"]
+    agreement = Agreement.model_validate_json(raw.tobytes() if isinstance(raw, memoryview) else raw)
+    elsewhere = agreement.model_copy(update={"listing_id": "listing-elsewhere"})
+    with sqlite3.connect(db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET agreement_bytes = ? WHERE negotiation_id = ?",
+            (elsewhere.model_dump_json(exclude_none=True).encode(), neg_id),
+        )
+    _runtime, _worker, coordinator = _build_settlement_composition(db, credits_client=_FakeAuthority(issue))
+
+    with pytest.raises(ValueError, match="listing differs from negotiation"):
+        await coordinator.start(
+            escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=object(),
+            chain_name="anvil", request=_settlement_request(neg_id),
+        )
+    assert issued == []
+    assert await db.load_settlement_evidence(negotiation_id=neg_id) is None
+    assert await db.load_escrow(escrow_uid="0xdeal") is None
+
+
 async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailable(
     settled_db, monkeypatch,
 ):

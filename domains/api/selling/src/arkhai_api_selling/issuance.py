@@ -129,6 +129,8 @@ def accepted_agreement(thread: Mapping[str, Any]) -> tuple[Agreement, bytes]:
         raise ValueError("accepted Agreement seller differs from negotiation")
     if agreement.negotiation_id != thread["negotiation_id"]:
         raise ValueError("accepted Agreement negotiation binding differs")
+    if agreement.listing_id != thread.get("our_listing_id"):
+        raise ValueError("accepted Agreement listing differs from negotiation")
     return agreement, raw
 
 

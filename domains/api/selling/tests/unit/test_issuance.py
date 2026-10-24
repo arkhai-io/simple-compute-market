@@ -12,6 +12,7 @@ from market_core import SettlementEvidence
 
 from arkhai_api_selling.issuance import (
     MissingQuotaResource,
+    accepted_agreement as read_accepted_agreement,
     connection_payload,
     delivery,
     fulfill,
@@ -132,6 +133,30 @@ def test_evidence_records_the_listing_the_agreement_names():
     assert recorded.listing_id == "L-accepted"
     assert recorded.listing_resource == {**LISTING, "offering_mode": None}
     assert accepted.evidence["kind"] == "example.settlement-evidence.v1"
+
+
+def _thread(agreement, raw, **changes):
+    return {
+        "negotiation_id": agreement.negotiation_id,
+        "our_listing_id": agreement.listing_id,
+        "terminal_state": "success",
+        "agreement_bytes": raw,
+        "buyer_principal": agreement.buyer,
+        "seller_principal": agreement.seller,
+        **changes,
+    }
+
+
+def test_the_accepted_agreement_names_its_threads_listing():
+    agreement, raw = accepted_agreement("L-accepted")
+    assert read_accepted_agreement(_thread(agreement, raw))[0].listing_id == "L-accepted"
+
+
+@pytest.mark.parametrize("thread_listing", ["L-other", None])
+def test_an_agreement_for_another_listing_than_its_thread_is_refused(thread_listing):
+    agreement, raw = accepted_agreement("L-accepted")
+    with pytest.raises(ValueError, match="listing differs from negotiation"):
+        read_accepted_agreement(_thread(agreement, raw, our_listing_id=thread_listing))
 
 
 async def test_issuance_reads_the_listing_recorded_in_the_evidence():

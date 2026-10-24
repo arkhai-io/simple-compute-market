@@ -92,11 +92,11 @@ def _option() -> SettlementOption:
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
-async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
+async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, agreement_listing: str = LISTING):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     agreement = Agreement(
         negotiation_id=NEGOTIATION,
-        listing_id=LISTING,
+        listing_id=agreement_listing,
         listing_hash="0" * 64,
         buyer=BUYER.identity.model_dump(mode="json"),
         seller=SELLER.identity.model_dump(mode="json"),
@@ -153,7 +153,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage):
 
 @pytest.fixture
 async def harness(tmp_path):
-    async def build(*, actions=("emit_event",), enabled=True):
+    async def build(*, actions=("emit_event",), enabled=True, agreement_listing=LISTING):
         db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
         payments = FakePaymentsClient()
         config = ArkhaiPaymentsConfig(
@@ -165,7 +165,7 @@ async def harness(tmp_path):
             development_auth=True,
         )
         stage = servicing_stage(config, client_for_owner=payments)
-        data = await _seed(db, stage)
+        data = await _seed(db, stage, agreement_listing=agreement_listing)
         issuer = Issuer(db)
         composition = SimpleNamespace(
             domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
@@ -268,6 +268,25 @@ async def test_a_listing_changed_after_acceptance_settles_what_was_accepted(harn
     evidence = await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION)
     accepted = evidence.evidence["delivery"]["listing_resource"]
     assert (accepted["service_name"], accepted["base_url"]) == ("sample", "http://sample.local")
+
+
+async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(harness):
+    h = await harness(agreement_listing="listing-elsewhere")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    await upsert_bound_listing(
+        h.db, listing_id="listing-elsewhere", status="open", created_at=now, updated_at=now,
+        listing_resource={
+            "service_name": "elsewhere", "resource_id": "svc-quota", "capacity_site_id": "quota",
+            "offering_mode": "api_credits", "base_url": "http://elsewhere.local",
+        },
+        accepted_escrows=[], fulfillment_resource=None, max_duration_seconds=None,
+        storefront_url="http://test", seller_principal=SELLER.identity,
+    )
+
+    h.serve()
+    assert await _status_code(lambda: h.buyer.settle_agreement(NEGOTIATION)) == 409
+    assert h.issuer.issued == []
+    assert await h.db.load_settlement_evidence(negotiation_id=NEGOTIATION) is None
 
 
 async def test_an_impostor_receipt_is_refused_without_a_grant(harness):

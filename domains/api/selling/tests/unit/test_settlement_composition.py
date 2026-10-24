@@ -37,6 +37,7 @@ def _thread():
     agreement, raw = accepted_agreement("L-1")
     return {
         "negotiation_id": agreement.negotiation_id,
+        "our_listing_id": agreement.listing_id,
         "terminal_state": "success",
         "agreement_bytes": raw,
         "buyer_principal": agreement.buyer,
