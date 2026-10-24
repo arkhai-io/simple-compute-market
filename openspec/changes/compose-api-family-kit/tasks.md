@@ -1793,6 +1793,16 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       repository (it passes in the checkout), and GNU make's `--eval` case,
       as 1.7 records.
 
+      **Owner decisions (2026-10-24).** Two of the questions left above are
+      settled. *Correction to 6.3:* the API-credits storefront no longer keeps
+      an exact capacity-publication pin with a runtime reason; its source does
+      not import the kit, so the declaration moves to its dev group, where the
+      three storefront tests that import it read it, and the runtime reason is
+      removed. The lock still resolves 0.10.3, through `selling`. *D12:* "its
+      seed" is the `[seed]` values API credits keeps; the seed code is the
+      family's, in `selling`, and D12 now says so. The exception row's owner
+      stays open.
+
 ## 7. Selling, part three: route services, authentication, persistence client, and bindings
 
 Delivers the storefront's route services and persistence in `selling` and
@@ -2069,7 +2079,7 @@ change to implementation.
 | D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
-| D7, D12 — pricing and the negotiation guards are the family's, not API credits' | `openspec/specs/api-credits/architecture.md` (what the domain owns) |
+| D7, D12 — pricing, the negotiation guards, and the seed code are the family's, not API credits'; API credits keeps its `[seed]` values | `openspec/specs/api-credits/architecture.md` (what the domain owns) |
 | D7 — core's per-negotiation artifacts gain a `listing` slot (`arkhai-core-storefront` 0.16.0) | `openspec/specs/market-composition/architecture.md` (domain artifacts) |
 | A delivery's public record is safe and final: the result checked against its request, the secret-free extension, terminal progress | `openspec/specs/api-family/spec.md` |
 | D5 — side-split mechanism distributions | `openspec/specs/api-family/spec.md`; `docs/development/ARCHITECTURE.md#family-kits` |

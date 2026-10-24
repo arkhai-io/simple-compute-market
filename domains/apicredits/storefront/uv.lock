@@ -233,7 +233,6 @@ dependencies = [
     { name = "arkhai-core-storefront-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-alkahest", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-arkhai-payments", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-kit-capacity-publication", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-negotiation-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -252,6 +251,7 @@ dependencies = [
 dev = [
     { name = "arkhai-apicredits-buyer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core-buyer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "arkhai-kit-capacity-publication", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-resource-pools", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -271,7 +271,6 @@ requires-dist = [
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.10.3" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.5.1" },
@@ -290,6 +289,7 @@ requires-dist = [
 dev = [
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = ">=0.10.3" },
     { name = "arkhai-kit-policy", specifier = ">=0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },

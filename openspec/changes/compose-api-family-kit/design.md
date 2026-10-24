@@ -488,6 +488,11 @@ schema, the kind bindings, and the bundle values, and its override row in
 `ARCHITECTURE.toml` is retired, because the mechanism codecs that earned it
 move to the mechanism distributions.
 
+"Its seed" is the seed's values: the quota, listing, and escrow settings under
+`[seed]` that API credits configures and passes in. The code that registers the
+seeded quota and publishes the seeded listing is the family's, in `selling`,
+since any quota-backed domain of the family seeds the same way.
+
 ### D13. Slices, each leaving no copy behind
 
 "Every domain that implemented it MUST compose the kit implementation in the
