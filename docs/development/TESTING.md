@@ -236,6 +236,15 @@ submit a real job and poll for completion.
 in Kubernetes (`helm/templates/tests/`, per-chart `templates/tests/`
 directories).
 
+A smoke check that writes state belongs in an integration test instead. The
+provisioning smoke checks carry two markers: `provisioning_readonly` for
+reads of health, system status, hosts, and host connectivity, and
+`provisioning_security` for authentication enforcement, which sends an
+unsigned read to a protected route and expects 401 or 403, so it needs no
+administrator credential. The provisioning chart's test hook selects
+`provisioning_readonly or provisioning_security`, and its render test holds
+the hook to that expression.
+
 ### 4. System Integration Tests (End-to-End)
 
 **What they cover:** Cross-service contracts — scenarios that require
@@ -471,8 +480,8 @@ proving that no execution layer relies on another layer's earlier decision:
 - `kit/fulfillment` scheduler tests withdraw a declaration after reservation;
   orchestration tests withdraw it after provider input is prepared and assert
   no provider dispatch occurs.
-- Provisioning migration tests cover fresh bootstrap, the system-owned default
-  pool, exact derivation from provider/playbook/delegate configuration,
+- Provisioning migration tests cover fresh bootstrap, a `default` pool stored
+  before offering modes (migration creates none), exact derivation from provider/playbook/delegate configuration,
   idempotent rerun, narrowing, INFO evidence, malformed drift, single-proof
   backfill, conflicting proof, unproved active rows, and terminal rows.
 - Advertisement and backing declarations follow the same split.

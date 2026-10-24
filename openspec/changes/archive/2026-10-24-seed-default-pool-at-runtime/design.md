@@ -359,6 +359,58 @@ no default, and `ansible_pool_configs` with `playbook_path` nullable and
 their pools and are not seeded. An older image writes the dropped
 `inventory_group` column, so recovery after the migration rolls forward.
 
+## Implementation findings
+
+Kept here from the section notes, which closeout compressed.
+
+- **Plan corrections.** `run_migrations` creates every model table before the
+  versioned chain, so on a fresh database `ansible_pool_configs` already lacks
+  `inventory_group` when the legacy lease conversion `20260724_001` runs; that
+  conversion now reads the column only where it exists. A database predating
+  resource pools that still holds VM leases is therefore refused at
+  `20260724_001` rather than converted; every live database is past it, and
+  `20260713_002` refuses such a database first, with an actionable message. For
+  the same reason a legacy-chain test cannot add a dropped column after a
+  mid-chain create: its fixture pre-creates the table. A refusal of the retired
+  `playbook_path` in `compute-provisioning-migrate` was added in section 1 and
+  removed in section 7, once migration stopped reading the VM playbook (D6); the
+  service's startup step is the one refusal.
+- **The rebuilds copy the current model.** Both table rebuilds create their
+  table from the current SQLAlchemy model, as `_migrate_capacity_declaration_contract`
+  does, and copy referenced tables into the rebuild's metadata so `CreateTable`
+  can render the foreign keys. A later model change adding a `NOT NULL` column
+  without a server default, or dropping a column, would change what these
+  migrations do on an older database. Stated, not fixed:
+  `hollow-pre-floor-provisioning-migrations` owns the policy for applied
+  migrations.
+- **A pool-less declaration is excluded everywhere.** Beyond the ledger reads the
+  plan named, `kit/site` read a pool-less row as a pool named for its resource id
+  in scheduling candidates, both projections, and the exact matcher the VM
+  storefront injects for ranking; each now excludes it, so ranking agrees with
+  admission. The administrative listing and the snapshot keep the row, with
+  `pool_id: null`, so an operator can find and re-declare it. Each read logs it at
+  WARNING; rate-limiting was declined, since no write path produces such a row and
+  one appearing is an operator's database edit the log should keep naming.
+- **Packaging guard and `configFiles`.** No packaging check holds the seed in the
+  wheel: the service image installs only the wheel, and every stack starting
+  without a pool document — the VM compose lane and both Helm releases — reads the
+  seed from it, so a wheel without it fails those starts. No deployed check of
+  `configFiles` was added (implementation review 60's triage): the chart render
+  tests prove the file renders and mounts and the profile names it, the startup
+  test proves seeding from a given path, and the step between is a ConfigMap key
+  delivered by a `subPath` mount, which is how every deployed profile already
+  reaches the container.
+- **Declined review items.** Package version bumps and dependency floors for the
+  incompatible interface changes (`HostResponse.pool_id` nullable,
+  `InventoryHost`'s default, the pool-change hook signature, the INI parser
+  importing `POOL_UNSTATED`, the plans' required playbook keywords) are not made
+  here: `docs/development/RELEASING.md` bumps versions when a release is cut, and
+  the release that ships this change owes every bump and floor together. Moving
+  the service's `tests/unit` modules that run real SQLite was declined: the
+  misplacement predates the change. The runtime tests set `ACTIVE_PROFILES`
+  rather than inject a seam, because each runtime selects its runner from that
+  variable.
+
 ## Open Questions
 
 - Should a capacity declaration naming a host be required to sit in that host's
@@ -400,3 +452,7 @@ configuration needs the optional playbook.
 | D6 migration reads no configuration | `openspec/specs/deployment-state/spec.md` (Service-owned migration history); `docs/development/DEPLOYMENT_AND_CONFIG.md` (Migrations at startup) |
 | D7 smoke tests | `docs/development/TESTING.md` |
 | Roadmap gap closed | `docs/development/ROADMAP.md` (Goal 1) |
+| Implementation findings above | This change record only: plan corrections, limitations, and declined review items are change history; the rebuilds' dependence on the current model is for `hollow-pre-floor-provisioning-migrations` to weigh |
+
+Where each decision was written, as a heading anchor, is the design promotion
+record at the end of `tasks.md`.

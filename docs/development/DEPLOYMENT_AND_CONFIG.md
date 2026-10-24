@@ -70,6 +70,18 @@ through Dynaconf — it is read from the resolved settings at startup and
 written into `os.environ` once, explicitly, rather than set as a pod env
 var).
 
+**A setting that belongs to one domain is named for it.** The compute
+provisioning service reads the VM playbook from `vm_playbook_path` and the
+bare-metal playbook from `bare_metal_playbook_path`; neither has an alias. A
+renamed setting is refused rather than ignored, because an ignored key would
+silently fall back to a default the operator meant to replace: the service's
+first startup step refuses a configuration stating the retired `playbook_path`
+in any layer, environment included, naming `vm_playbook_path`, and the
+provisioning chart's values schema refuses `config.playbook_path`. A setting
+retired because the service stopped needing it, such as
+`default_pool_inventory_group` and `default_host_id`, is not refused, since
+ignoring it changes nothing the service does.
+
 ## Kubernetes: ConfigMap and Secret mounting
 
 All application configuration travels through mounted files, never
@@ -96,6 +108,18 @@ application Deployment and to Helm test pods.
 - A pod sets only `ACTIVE_PROFILES` (the list of profile names to layer,
   comma-separated) and `CONFIG_DIRECTORY` (where the mounted files live)
   as environment variables.
+- A file a setting names by path, rather than a value, reaches the
+  provisioning service through the chart's `configFiles` map: each entry's
+  content renders verbatim into the ConfigMap and mounts read-only at
+  `/app/config/<name>`, and the operator names that path under `config`, as
+  `config.pool_seed_path` names a replacement pool seed. The chart gives the
+  file no meaning and derives no setting from it, so it stays config-neutral.
+  Its schema takes a single file name Kubernetes accepts as a ConfigMap key,
+  and refuses `.` and names beginning `..`, the names the chart mounts itself
+  (its definition documents), and `config.yml`, `config-*.yml`, and their
+  `.yaml` forms, which the service would load as profiles around the
+  rendered one. Each file renders through `toYaml` and each mount's name is
+  quoted, so content and name reach the container exactly as given.
 
 **The rule behind the pod rule.** Every configuration value of a storefront
 reaches it through its configuration system: its configuration files and its
@@ -674,20 +698,35 @@ configured. The chart's schema refuses the pool and capacity paths under
 supplies none is managed entirely through the API.
 
 Startup imports them in dependency order: relays, then pools (which may name a
-relay), then host inventory, then capacity (whose declarations name a pool and
-may name a host). A capacity document naming a pool other than `default` needs
-that pool supplied beside it on a first boot.
+relay), then the pool seed on a fresh site, then host inventory, then capacity
+(whose declarations name a pool and may name a host). Every pool a capacity
+document names must exist when it is imported: from the pool document, or, on a
+fresh site with none, from the seed.
 
-On a first boot with a pool document configured, the document creates the
-`default` pool: migration seeds none, so `default` takes the provider and
-configuration the document declares, before any host is admitted. A bare-metal
-site therefore declares `default` as `bare_metal.ansible`, and a VM site as
-`vm.ansible`. A configured document that is missing or invalid fails startup;
-the service does not fall back to a VM default. A first boot is judged by
-whether any pool or host is stored, so a migration interrupted before it stored
-either still leaves `default` to the document when it is retried. With no pool
-document configured, migration seeds a VM `default` from the configured
-playbook. A database that already holds pools or hosts keeps its `default`.
+Migration creates no pool, and no pool name is special: a pool document need
+not name `default`, and any pool may be disabled. A configured pool document
+creates the pools it declares, with their providers, before any host or
+declaration can name them; one that is missing or invalid fails startup, and
+the seed does not stand in for it.
+
+A site that configures no pool document and stores no pool, enabled or
+disabled, is seeded at startup from the document `pool_seed_path` names. The
+default, `seed/pools.yaml` packaged with the service beside its `settings.toml`
+(a relative path resolves against that directory), declares `vm-default`
+(`vm.ansible`) and `bare-metal-default` (`bare_metal.ansible`), each delivering
+and advertising its own mode, backed, and with no provider configuration, so a
+VM job in `vm-default` runs the service's `vm_playbook_path`. The seed is
+applied through the same validation and import as a pool document, in one
+transaction, records no digest, and is never applied again: a site holding pools
+is never seeded, and an edit to the seed reaches no existing site. The seed
+pools sell nothing until capacity is declared into them. An operator replaces
+the seed by pointing `pool_seed_path` at another pool document — under Helm,
+one supplied through the provisioning chart's `configFiles` — or disables
+seeding with an empty `pool_seed_path`, which starts a fresh site with no pool.
+A seed that applies and is missing or invalid fails startup; where it does not
+apply it is not read, so a dangling path never fails a serving site. One process
+initializes a database: two starting together on one fresh database can both
+find no pool, and the second fails its start, then skips the seed on restart.
 
 A pool's provider is fixed at creation. A changed pool document that names a
 different provider for an existing pool is refused whole: validate-only reports
@@ -727,6 +766,12 @@ and is not read again. Execution renders its inventory from the registered host
 record the work names, never from the file. A host added to the file after first boot is
 therefore not registered, and dispatch to it is refused until it is imported
 through `POST /api/v1/hosts/import` or registered through `POST /api/v1/hosts`.
+No host write, from the inventory, the import API, or the host API, places a host
+in a pool it does not name or declares any of its capacity: an INI entry's
+`pool_id=<id>` places or moves the host, an empty `pool_id=` unplaces it, and an
+entry with no `pool_id` leaves an existing host's pool unchanged and a new host
+unplaced. `gpus=` and `gpu_model=` are descriptive; a host sells only through a
+capacity declaration.
 
 ### Reconciliation follows the document, not the process
 
@@ -767,7 +812,7 @@ the API is one relay, not two.
 
 A capacity declaration absent from the document is **retained**, as a relay is.
 An unnamed declaration may have been registered through the API, derived from a
-host's inventory, or be backing a live reservation, and none of those is what an
+host's inventory by the upgrade migration, or be backing a live reservation, and none of those is what an
 operator editing an unrelated entry means to switch off. A capacity document
 therefore adds and updates declarations and never removes one; disabling is an
 explicit `enabled: false`, in the document or through the API.
@@ -781,8 +826,8 @@ declaration with the registration API's field names — `resource_id`, `pool_id`
 exactly the effect of the same `PUT /api/v1/capacity/resources/{resource_id}`.
 
 - **An entry replaces the declaration it names.** A field it omits is cleared,
-  not kept, so an entry adopting a declaration derived from host inventory must
-  restate its `host_id`, and an omitted `enabled` re-enables one disabled through
+  not kept, so an entry adopting a declaration the upgrade migration derived
+  from host inventory must restate its `host_id`, and an omitted `enabled` re-enables one disabled through
   the API.
 - **Entries equal to the stored declaration write nothing** and emit no capacity
   event, so reapplying a document — or one changed only in comments or layout —
@@ -855,6 +900,25 @@ deployment topology:
 
 See `docs/development/TESTING.md` for how migration behavior itself is
 validated (fresh bootstrap, idempotent rerun, drift detection).
+
+The compute provisioning migration reads no operational configuration:
+`compute-provisioning-migrate` reads only its database URL and log level, so
+one database migrates to the same schema and rows under any profile. What a
+site configures — its pools, their seed, its playbooks — is applied by the
+service's own startup, after migration. Migration therefore creates no pool. A
+database whose hosts predate resource pools and that holds no `default` pool is
+refused by the resource-pool migration with a schema-drift error saying what to
+create; every live database is past that migration. A job recorded before job
+envelopes takes its host only from evidence naming its physical host — the
+row's `host_id`, then its `host_id` parameter, then, for a bare-metal job alone,
+its `executor_target` — never from a VM job's guest target; a job with none
+keeps no host, is logged by ID at WARNING, and if still queued fails at
+execution as naming no host.
+
+The migrations that make a host's pool and a VM pool's playbook optional
+rebuild `hosts` and `ansible_pool_configs` in place, keeping every row's
+values, and drop the unread `ansible_pool_configs.inventory_group`. An older
+image writes that column, so recovery after these migrations rolls forward.
 
 The VM provider is named `vm.ansible`. A provisioning database with pools or
 fulfillment records under the historical name `ansible` is migrated to the
