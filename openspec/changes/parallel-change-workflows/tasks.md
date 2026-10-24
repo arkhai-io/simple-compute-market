@@ -2309,6 +2309,55 @@ owner, then to an implementation run. Touches `scripts/change_workflow/cli.py`,
       `make implement`, where the owner resumes a session with `claude --resume`
       themselves. End to end: none; the next implementation run the owner sends
       to a session, and the next run a wake-up follows, are its working evidence.
+      Pilot triage (127, 128, with validation 126), decided with the owner:
+      - 127 O2 / 128 R5 (design block of that label): a repeat pass over a fix
+        triage committed is read like a first pass. `_round` names `round-view`
+        with `base`, the commit the earlier pass's review read — before the fix's
+        validation and review in the workspace, beside them (`reading`) in a clone
+        — and the pass's triage waits for an owner record saved after that triage
+        finished; with no fix there is nothing to read. The triage and
+        orchestrate skills, the guide, `round_view.py`'s docstring, and the delta
+        ("Triage of an implementation round", scenario "A repeat round's fix is
+        read") say so.
+      - 128 R2: `history_log_path` (`find_records`, then `log_path`) is what
+        `make change-cost` and `run_change_step.py log` read, so a cleaned-up
+        change beside a records-less active directory is reported; writes keep
+        `log_path`.
+      - 128 R1: at `done` the orchestrating session runs `make -C <clone>
+        change-history`, so the workspace holds archive cleanup's own line; the
+        delta's clone requirement says so.
+      - 128 R3: every step skill says Make runs without `-C <a checkout>`; the
+        validate skill reads snapshot JSON with Read or Grep; the triage skill
+        gains implementation's wait rule.
+      - 127 O1, as the owner directed it: `scripts/check_uv_version.py` (`make
+        check-uv-version`, uv ≥ 0.12) runs before `make lock` builds or relocks
+        anything and first in validation's step 1; validate's step table gains its
+        rule; `tests.yml` and `e2e.yml` install uv 0.12.19;
+        `BUILD_AND_PACKAGING.md` documents it. No `uv.toml` pin, no relock: the fix
+        commit's CI run on 0.12.19 shows whether the locks need one.
+      Evidence. Unit: `test_change_next_step.py` (a repeat pass read then
+      validated in the workspace; read beside its validation and review in a
+      clone; a first pass's record numbered after its review not answering for
+      the fix; no fix, nothing to read; an abbreviated base; a repeat pass that
+      advances; a third pass over the second's review; a failed fix validation
+      triaged before the repeat review), `test_change_cost.py` and
+      `test_run_change_step.py` (an archived change's records beside a
+      records-less active directory), `test_check_uv_version.py`. `uv run
+      --no-project --with pytest pytest -q scripts/tests`: 1572 passed; `make
+      test`: passed, after `make dist-clean` (a first run failed 11
+      `provisioning/compute` host-authority tests on a stale compute-contracts
+      wheel built Oct 22, which this diff does not touch), rerun after the
+      fresh-context fixes; `make check-packaging`, `make check-agent-skills`,
+      `make check-comment-hygiene`, `make check-change
+      CHANGE=parallel-change-workflows`: passed. A fresh-context check of the diff
+      against `66ce8f1f6` found, all fixed: a clone's first-pass owner record,
+      numbered after the review it was read beside, taken for the repeat pass's
+      reading (now judged by when it was saved); `run_change_step.py log` failing
+      before the records lookup; an abbreviated base taken for another pass's
+      view; a repeat-pass reading named over a lone failed fix validation; the uv
+      check's docstring overclaiming CI; `make lock`'s check not ordered under
+      `-j`; and missing repeat-pass tests. End to end: none; the next repeat round
+      and the next archive cleanup in a clone are its working evidence.
 
 ## 9. The pilot's evidence and the containerization decision
 
@@ -2386,7 +2435,8 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         together, in a fresh session" rewritten for the reading in the workspace
         beside validation (D2, D3: why the reading no longer gates validation;
         tooling refuses rather than taking silent risks with the owner's
-        uncommitted work); "Validation observes a committed slice" rewritten for the
+        uncommitted work) and for a repeat pass's reading of its fix, over the
+        commit the earlier pass's review read (127 O2 / 128 R5); "Validation observes a committed slice" rewritten for the
         change's namespace (D4: fixed per-change rather than commit tags, the
         upgrade from zero, the advisory capacity figure, written only when measured,
         78 F2) and for the `ci` part (D15–D17: no publishing workflow dispatchable,
@@ -2405,7 +2455,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         resumed, through `ALLOW` (D19); "The orchestrator relays and routes" for its
         workflow maintenance, the owner's instructions, merges of `dev`, and the
         conflict tiers (D8, D20 rule 6, D20.1–D20.3); a new "History lives in the
-        owner's workspace" (D11); "Current limits" rewritten (one orchestrating
+        owner's workspace" (D11; the copy repeated at `done` for archive
+        cleanup's own line, and reports read through `find_records`, 128 R1,
+        128 R2); "Current limits" rewritten (one orchestrating
         session per change; the container per change, as 9.3 decided; side work
         chosen to stay clear of the critical-path goal's files, D9).
       - `docs/agents/change-workflow.md` — already written in sections 4, 8, 8A,

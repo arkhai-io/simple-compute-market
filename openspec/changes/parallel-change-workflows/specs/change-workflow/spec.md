@@ -23,7 +23,9 @@ act, after every record it writes, archive cleanup MUST copy the change's record
 and the validation evidence they name, into the owner's workspace at the same
 paths; the copy MUST be safe to repeat, MUST extend a file there whose contents
 are a prefix of the clone's, and MUST NOT otherwise overwrite a file there,
-refusing and naming any whose contents differ. A step that reads another change's
+refusing and naming any whose contents differ; once archive cleanup's own outcome is
+logged, the orchestrating session MUST repeat the copy, so the workspace holds that
+outcome too. A step that reads another change's
 or an earlier change's records MUST look for them in its own checkout and then in
 the owner's workspace. A clone MUST be removed only on the owner's command; the
 removal MUST first repeat the copy, and MUST proceed only once the clone's records,
@@ -75,7 +77,9 @@ evidence the clone does not hold MUST be named in the removal's report.
 
 - **WHEN** a design session reads the reviews of a change whose archive was cleaned
   up in its clone
-- **THEN** it finds them in the owner's workspace, at the archived change's path
+- **THEN** it finds them in the owner's workspace, at the archived change's path,
+  even where the workspace's branch also carries the change's active directory
+  without them, and a report of the change's cost or log reads them there
 
 #### Scenario: The owner removes a clone too early
 
@@ -406,7 +410,11 @@ in the owner's workspace, on that workspace's copy of the change's branch, and M
 NOT move the branch in the clone; validation and the implementation review MUST start
 when the round's sections are committed, beside the reading; and triage MUST NOT start
 until the owner has answered on the round, with notes or with none, and the answer is
-saved as the round's owner record. For a change worked in the owner's workspace, while
+saved as the round's owner record. When a round's triage records another round and
+commits a fix, the repeat pass MUST be read in the same way, as one set of changes
+from the commit that triage's review read to the fix's commit, and its triage MUST
+NOT start until the owner has answered on that pass; an answer saved before that
+triage finished answers only for the earlier pass. For a change worked in the owner's workspace, while
 its branch is moved to show the round, review, validation, triage, and implementation
 MUST NOT start. Ending the reading MUST return the branch to the round's commit when
 the owner made no commit while it was moved, and otherwise to the last of those
@@ -437,6 +445,14 @@ read them again.
 - **WHEN** a point in the owner's notes rests on a claim the files contradict
 - **THEN** triage says so, with the evidence, and nothing changes until the owner
   has recorded a disposition
+
+#### Scenario: A repeat round's fix is read
+
+- **WHEN** a round's triage recorded another round and committed a fix, and the
+  owner's only record on the round was saved before that triage finished, even
+  one numbered after the review it triaged
+- **THEN** the owner is shown the fix as uncommitted changes over the commit that
+  review read, and the repeat pass's triage waits for the owner's answer on it
 
 #### Scenario: A review and a validation describe different commits
 

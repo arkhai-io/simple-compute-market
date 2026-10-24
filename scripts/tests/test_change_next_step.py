@@ -709,19 +709,144 @@ def test_an_earlier_rounds_token_does_not_decide_a_triage_in_progress(
 
 # Another round runs the review again, validating only a fix committed since.
 
-def test_another_implementation_round_with_a_fix_is_validated_first(tmp_path: Path) -> None:
+def _saved_earlier(root: Path, *names: str) -> None:
+    """Dates each named file of `reviews/`, in order, long before anything the test
+    writes next: a pass's records and its triage were saved before the next pass."""
+    for offset, name in enumerate(names):
+        os.utime(_reviews(root) / name, (1000 + offset, 1000 + offset))
+
+
+def _first_pass(root: Path, *records: str, reviewed: str = "e" * 40,
+                review: str = "03-implementation.md") -> None:
+    """A first pass of records, then `review`, triaged as another round."""
+    for name in records:
+        _record(root, name, text=_validation(reviewed) if name.endswith("validation.md")
+                else "x", triage="Evidence.")
+    _triaged(root, review, "Another round", reviewed=reviewed)
+    _saved_earlier(root, *records, review, review.replace(".md", ".triage.md"))
+
+
+def test_another_implementation_round_with_a_fix_is_read_then_validated(
+        tmp_path: Path) -> None:
     root = _repository(tmp_path, "in implementation")
     _round(root, [[2]])
     _check(root, TASKS.replace("- [ ] 2.1", "- [x] 2.1"))
-    _record(root, "01-validation.md", text=_validation("e" * 40), triage="Evidence.")
-    _triaged(root, "02-implementation.md", "Another round", reviewed="e" * 40)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
 
+    unread = _next(root)
+    _record(root, "04-implementation-owner.md")
     unvalidated = _next(root)
-    _record(root, "03-validation.md", text=_validation(HEAD))
+    _record(root, "05-validation.md", text=_validation(HEAD))
     validated = _next(root)
 
+    # The first pass's owner record is not the fix's reading.
+    assert (unread["step"], unread["base"]) == ("round-view", "e" * 40)
+    assert "workspace" not in unread
     assert unvalidated["step"] == "validate"
     assert (validated["step"], validated["kind"]) == ("review", "implementation")
+
+
+def test_a_repeat_pass_in_a_clone_is_read_beside_its_validation_and_review(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
+
+    validating = _in_clone(root)
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    _record(root, "05-implementation.md", reviewed=HEAD)
+    unread = _in_clone(root)
+    first_pass_view = _in_clone(root, view=_clone_view(root))
+    _record(root, "06-implementation-owner.md")
+    read = _in_clone(root)
+
+    assert (validating["step"], validating["reading"], validating["base"]) == (
+        "validate", True, "e" * 40)
+    assert validating["workspace"] == str(WORKSPACE)
+    assert (unread["step"], unread["base"], unread["workspace"]) == (
+        "round-view", "e" * 40, str(WORKSPACE))
+    # A view over the round's own base is an earlier pass's, not this one's.
+    assert first_pass_view["step"] == "owner" and "earlier round" in first_pass_view["reason"]
+    assert read["step"] == "triage"
+
+
+def test_a_repeat_pass_with_no_fix_has_nothing_to_read(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md", reviewed=HEAD)
+
+    result = _in_clone(root)
+    _record(root, "04-implementation.md", reviewed=HEAD)
+
+    assert (result["step"], "reading" in result) == ("review", False)
+    assert _in_clone(root)["step"] == "triage"
+
+
+def test_a_first_pass_read_beside_its_review_does_not_answer_for_the_fix(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    # In a clone the owner's answer on the first pass may land after its review.
+    _record(root, "02-validation.md", text=_validation("e" * 40), triage="Evidence.")
+    _triaged(root, "03-implementation.md", "Another round", reviewed="e" * 40)
+    _record(root, "04-implementation-owner.md", triage="Evidence.")
+    _saved_earlier(root, "02-validation.md", "03-implementation.md",
+                   "04-implementation-owner.md", "03-implementation.triage.md")
+
+    result = _in_clone(root)
+
+    assert (result["step"], result["reading"], result["base"]) == ("validate", True, "e" * 40)
+
+
+def test_a_view_over_an_abbreviated_base_is_the_passs_own(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md", reviewed="e" * 12)
+    _record(root, "04-validation.md", text=_validation(HEAD))
+    _record(root, "05-implementation.md", reviewed=HEAD)
+    view = rounds.View(CHANGE, f"feat/{CHANGE}", "e" * 40, HEAD, clone=str(root))
+
+    result = _in_clone(root, view=view)
+
+    assert result["step"] == "owner" and "save their answer" in result["reason"]
+
+
+def test_a_repeat_pass_that_advances_moves_on(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
+    _record(root, "04-implementation-owner.md", triage="Evidence.")
+    _record(root, "05-validation.md", text=_validation(HEAD), triage="Evidence.")
+    _triaged(root, "06-implementation.md", "Advance", reviewed=HEAD)
+
+    result = _in_clone(root)
+
+    # The next round, which no plan maps here, so the owner agrees it.
+    assert (result["step"], result["round"]) == ("owner", ["3"])
+
+
+def test_a_third_pass_is_read_over_the_second_passs_review(tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
+    _first_pass(root, "04-implementation-owner.md", "05-validation.md",
+                reviewed="f" * 40, review="06-implementation.md")
+
+    result = _in_clone(root)
+
+    assert (result["step"], result["base"]) == ("validate", "f" * 40)
+
+
+def test_a_failed_fix_validation_before_the_repeat_review_is_triaged_alone(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    _committed_round(root)
+    _first_pass(root, "01-validation.md", "02-implementation-owner.md")
+    _record(root, "04-validation.md", text=_validation(HEAD, "failed"))
+
+    result = _in_clone(root)
+
+    assert result["step"] == "triage" and "04-validation.md" in result["reason"]
 
 
 def test_another_round_with_no_fix_runs_whatever_the_validation_said(tmp_path: Path) -> None:

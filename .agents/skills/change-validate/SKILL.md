@@ -58,7 +58,10 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push.
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names. Read a snapshot's
+  JSON with Read or Grep, never with an inline interpreter (`python3 -c`), which
+  no rule admits since it admits any program.
 - **The end is an outcome.** An environmental failure (section 5) is a
   `question` naming the evidence and the remedy, awaiting the owner's word; once
   answered, take only the action the answer names, and rerun the part. When the
@@ -77,6 +80,11 @@ round-view-closed` says the same; stop and ask the owner to run `make round-done
 A view the owner opens in their workspace for a change worked in its own clone
 moves nothing here, and validation runs beside it.
 
+- **uv.** `make check-uv-version`, first: it fails, naming both versions, when the
+  installed uv is older than the repository's minimum, since an older uv writes
+  locks the repository's would not and every environment it builds is suspect. A
+  failure is environmental (section 5): a `question` naming the installed version
+  and the remedy, installing a uv at least the minimum, which is the owner's call.
 - **Branch.** The checked-out branch carries the change: its directory and latest
   commits are on it. Several changes are often in flight in one checkout; if the
   branch belongs to another change, stop and ask the owner — unless the change's

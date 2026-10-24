@@ -263,10 +263,13 @@ files and log and recompute rather than presuming the direct conversation's
 result. For `done`, report the archived change and stop; the owner creates its
 pull request. For a change worked in its clone, archive cleanup has copied its
 history into the workspace, where sessions working other changes find it
-(`python3 scripts/find_change.py --records <change>`); lines and records written in
-the clone after it reach the workspace with the next `make -C <clone> change-history
-CHANGE=<change>`, or when the owner removes the clone after the merge with `make
-change-clone-remove CHANGE=<change>`, which copies them first. Removing a clone is
+(`python3 scripts/find_change.py --records <change>`), but its own log line is
+written after that copy: at `done`, before reporting, run `make -C <clone>
+change-history CHANGE=<change>`, so the workspace holds archive cleanup's outcome
+too, and relay what it reports. Lines and records written in the clone later
+reach the workspace with the next such copy, or when the owner removes the clone
+after the merge with `make change-clone-remove CHANGE=<change>`, which copies them
+first. Removing a clone is
 the owner's alone: never run it.
 
 ## Read every denial before advancing
@@ -393,6 +396,13 @@ The records and the owner's notes go to a fresh triage session together. Triage
 commits accepted fixes, pushes them, and records `## Next`; the computation then
 names validation of the fix commit, and the next round, the pre-closeout review,
 or another review round as the triage recorded.
+
+**A repeat pass.** When a triage records another round over a fix it committed,
+the owner reads the fix as they read the round: the computation's `round-view`,
+or its validation or review carrying `reading`, then names `base`, the commit the
+earlier pass's review read. Open the view with `make round-view CHANGE=<change>
+BASE=<base>`, in the workspace or in place as above, and save the owner's answer
+as a new owner record; the first pass's record answers only for the first pass.
 
 ## Maintain the workflow
 

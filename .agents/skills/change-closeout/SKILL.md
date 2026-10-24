@@ -56,7 +56,8 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push.
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names.
 - **The end is an outcome.** Each point this skill puts to the owner is a
   `question`. A part that would need a code edit ends with `returned`,
   `return_to` `implementation`, and `evidence` naming the closeout task's notes,

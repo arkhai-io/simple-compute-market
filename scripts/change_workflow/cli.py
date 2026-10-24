@@ -18,8 +18,8 @@ from typing import Sequence
 
 from check_change_index import index_rows
 from change_workflow.common import KINDS, ORCHESTRATOR, ROOT, StepError
-from change_workflow.log import (branch_decisions, last_entries, log_path, note_orchestrator,
-                                 note_round, read_log)
+from change_workflow.log import (branch_decisions, history_log_path, last_entries, log_path,
+                                 note_orchestrator, note_round, read_log)
 from change_workflow.records import git_head
 from change_workflow.review import DEFAULT_BASE, review_and_log
 from change_workflow.watch import denial_report, watch
@@ -149,7 +149,8 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
     args = _parser().parse_args(argv)
     wrapper = wrapper or Wrapper(root=root)
     try:
-        path = log_path(wrapper.root, args.change)
+        path = (history_log_path if args.command == "log" else log_path)(wrapper.root,
+                                                                          args.change)
         if args.command == "run":
             sections = expand_sections(args.sections)
             words = (f"section {args.sections}" if len(sections) == 1

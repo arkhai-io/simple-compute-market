@@ -40,7 +40,10 @@ moves nothing, naming the file or commit and the way back. Staging done during t
 view is not kept; the content is.
 
 The base is the commit the change's latest `round` line recorded as the round
-started, unless one is given. A round line naming no commit — one recorded after
+started, unless one is given. A repeat pass, over a fix triage committed after
+recording another round, is given its base — the commit the earlier pass's review
+read, which the next-step computation names — so the view shows the fix alone. A
+round line naming no commit — one recorded after
 the fact, with `--after` — falls back to the commit named by the latest triaged
 validation record, where the previous round ended, which is the round's start
 only when nothing landed on the branch between rounds.

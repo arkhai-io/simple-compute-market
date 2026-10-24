@@ -55,7 +55,8 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push.
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names.
 - **The end is an outcome.** Once the plan is written and checked, its report
   (section 6) written, and the status set and the plan committed and pushed
   (section 7), end with `finished`, its `message` the report, `next` naming the

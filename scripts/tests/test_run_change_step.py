@@ -96,6 +96,21 @@ def test_an_archived_changes_log_is_found_by_its_name(tmp_path: Path) -> None:
     assert read_log(archived / "reviews" / "workflow.jsonl")[0]["decision"] == "d"
 
 
+def test_a_cleaned_up_changes_log_is_printed_from_its_archived_records(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    archived = tmp_path / "openspec/changes/archive" / f"2026-10-20-{CHANGE}"
+    (archived / "reviews").mkdir(parents=True)
+    record_outcome(archived / "reviews" / "workflow.jsonl", "validate", VALID["finished"],
+                   session="s", commit=COMMIT)
+    # The workspace's branch carries the change's active directory, without records.
+    (tmp_path / "openspec/changes" / CHANGE).mkdir()
+
+    assert main(["log", CHANGE], root=tmp_path) == 0
+
+    assert [json.loads(line)["step"] for line in capsys.readouterr().out.splitlines()] == [
+        "validate"]
+
+
 def test_a_non_ascii_digit_is_a_section_name() -> None:
     assert parse_sections("²") == [["²"]]
 

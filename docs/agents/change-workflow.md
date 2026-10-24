@@ -369,7 +369,10 @@ above). For a change worked in the workspace the view moves the branch its steps
 run on, so it comes first, and while it is open every step that could commit
 refuses (`make round-view-closed`). The owner's notes on the round go to triage
 with the reviews; under orchestration, the orchestrating session opens and closes
-the view and saves the notes.
+the view and saves the notes. When the round's triage records another round over a
+fix it committed, the owner reads the fix the same way before the repeat pass is
+triaged: `make round-view CHANGE=<change> BASE=<commit>`, over the commit that
+triage's review read, which the next-step computation names as `base`.
 
 ### The review directory
 

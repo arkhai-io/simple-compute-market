@@ -13,7 +13,8 @@ log, and whether a round view is open, and prints one JSON object:
   `validate`, `review` (with its `kind`), `validate-and-review`, `triage`,
   `closeout`, or `archive-cleanup`; for a change in its own clone, a `round-view`,
   or a validation or review that runs beside the owner's reading (`reading`),
-  names the `workspace` the reading takes place in;
+  names the `workspace` the reading takes place in; the reading of a repeat pass,
+  over a fix triage committed, names its `base`, the commit the view starts from;
 - `{"step": "clone", "arguments": …}` when the change's clone is to be created,
   or finished, with `make change-clone` and those arguments;
   `{"step": "in-clone", "clone": …}` when the change is worked in its clone, where
@@ -750,6 +751,14 @@ class Computation:
         owner's workspace while its validation and review run in the clone, so the
         reading holds triage alone: triage is named once the owner record, the
         review, and the validation all exist and the workspace's view is closed.
+
+        A triage that records another round over a committed fix opens a repeat
+        pass, read in the same way from the commit that triage's review read: the
+        fix is work the owner has not seen, and the repeat round exists because it
+        changed something central. The pass's reading is an owner record saved after
+        that triage finished — in a clone the first pass's record may be numbered
+        after the review, since it is read beside it — and the result naming the
+        reading carries the pass's `base`.
         """
         state = self.state
         mine = [r for r in state.records if r.number > current.get("after", 0)]
@@ -759,16 +768,30 @@ class Computation:
                                          "validation"}:
             return {"step": "round-view",
                     "reason": "the round's sections are committed; the owner reads the round"}
-        unread = in_clone and "implementation-owner" not in kinds
+        again = next((r for r in reversed(mine) if r.review_kind == "implementation"
+                      and r.next_token() == ANOTHER_ROUND), None)
+        base = again.reviewed_commit if again and self.fixed_since(again) else None
+        if again is None:
+            unread = in_clone and "implementation-owner" not in kinds
+        else:
+            # Records are never rewritten, so a record's time is when it was saved,
+            # and a triage file's is when `## Next` ended it.
+            finished = again.triage.stat().st_mtime_ns
+            unread = base is not None and not any(
+                r.kind == "implementation-owner" and r.number > again.number
+                and r.path.stat().st_mtime_ns > finished for r in mine)
+        pass_base = {"base": base} if base else {}
         view = state.workspace_view if in_clone else None
-        # A view the owner left open over an earlier round, following its fixes, is
-        # not this round's reading; this round's needs it closed first.
-        started = current.get("commit")
-        if view is not None and started and view.base != started:
+        # A view the owner left open over an earlier round, or an earlier pass,
+        # following its fixes, is not this pass's reading; this one needs it closed
+        # first. A base may be named by an abbreviated commit, a pasted review's.
+        started = base or current.get("commit")
+        if view is not None and started and not (view.base.startswith(started)
+                                                  or started.startswith(view.base)):
             if unread:
-                return _owner("a view of an earlier round is open in the workspace: run "
-                              "`make round-done` there, so this round can be read over its "
-                              "own base", round_view=state.change,
+                return _owner("a view of an earlier round, or of this round's earlier pass, "
+                              "is open in the workspace: run `make round-done` there, so this "
+                              "pass can be read over its own base", round_view=state.change,
                               workspace=str(state.workspace))
             view = None
         viewing = view is not None
@@ -789,8 +812,12 @@ class Computation:
             return result
         # A validation that passed, or was inconclusive, has no finding: the fix
         # commit's validation alone opens no triage, though one opened for the
-        # round's other records triages it beside them.
-        untriaged = [r for r in mine if not r.triaged]
+        # round's other records triages it beside them. A repeat pass's owner record
+        # waits for the pass's own review, as a first pass's does.
+        reviewing = again is not None and not any(
+            r.review_kind == "implementation" and r.number > again.number for r in mine)
+        untriaged = [r for r in mine if not r.triaged
+                     and not (reviewing and r.kind == "implementation-owner")]
         if any(not r.needs_no_triage for r in untriaged):
             if viewing:
                 return _owner(("the owner is reading the round in the workspace: save their "
@@ -801,17 +828,31 @@ class Computation:
                                "still open in the workspace: run `make round-done` there "
                                "before triage"),
                               round_view=state.change, workspace=str(state.workspace))
-            if unread:
-                return {"step": "round-view", "workspace": str(state.workspace),
+            # Before a repeat pass's review is in, a fix commit's failed validation
+            # is triaged alone, and the reading waits for the review.
+            if unread and not reviewing:
+                return {"step": "round-view", **pass_base,
+                        **({"workspace": str(state.workspace)} if in_clone else {}),
                         "reason": "the round's validation and review are in, and the owner "
-                                  "reads the round in the workspace before triage"}
+                                  "reads the round" + (" in the workspace" if in_clone else "")
+                                  + " before triage"}
             return {"step": "triage", "reason": ", ".join(r.path.name for r in untriaged)
                                                 + " have no triage"}
         review = governing([r for r in mine if r.review_kind == "implementation"])
         if waiting := self.not_advancing(review):
             return waiting
         if review.next_token() == ANOTHER_ROUND:
-            return self.another_round(review, "implementation")
+            if unread and not in_clone:
+                # As on the first pass, the view moves the branch the fix's
+                # validation and review would run on, so the reading comes first.
+                return {"step": "round-view", **pass_base,
+                        "reason": f"{review.triage.name} records another round over a "
+                                  "fix; the owner reads the fix"}
+            result = self.another_round(review, "implementation")
+            if unread and not viewing and result["step"] in ("validate", "review"):
+                result.update(reading=True, workspace=str(state.workspace), **pass_base)
+                result["reason"] += "; the owner reads the fix in the workspace beside it"
+            return result
         if waiting := self.validated("the round's fixes need validating"):
             return waiting
         if all(s.complete for s in work):

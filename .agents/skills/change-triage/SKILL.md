@@ -34,7 +34,10 @@ would squash the round into it; ask the owner to run `make round-done` first.
 
 The round is the commits from its base — the `commit` on the change's latest
 `round` line, which `python3 scripts/run_change_step.py log <change>` prints — to
-`HEAD`. Record `HEAD` as the round's head. For a change worked in its own clone —
+`HEAD`. A repeat pass, after a triage of the round recorded Another round and
+committed a fix, is the fix alone: its base is the commit that triage's review
+read, and the owner reads it as they read the round, so its notes are an owner
+record saved after that triage finished. Record `HEAD` as the round's head. For a change worked in its own clone —
 this checkout's `.git/config` names a `[remote "workspace"]` — the owner read the
 round in their workspace and may have committed there, on the change's branch;
 `make round-done` left any such commit on the round's head. Bring them in with
@@ -79,12 +82,23 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push. Remove a tracked file with
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
+  helm test-render`. Remove a tracked file with
   `git rm`; no rule allows `rm`, which would also reach files Git cannot restore.
 - **Every reply is a turn.** This step is a discussion: each reply to the owner
   ends its turn with an outcome, the reply in full as its `message` — `question`
   while you wait for the owner's answer or disposition. The orchestrating session
   shows the owner every message and resumes this session with each reply.
+- **A turn's end is its outcome.** Never end a turn with work still running: the
+  wrapper logs that turn's report as the run's end, and what the work later finds
+  reaches nobody. Run the fresh-context check's subagent in the foreground, never
+  with `run_in_background`. Run a long command such as `make test` in the
+  background as written, with no redirect of its output — a redirect is a write no
+  rule admits, and the harness keeps a background command's output in a file — and
+  wait for it inside one Bash call, with a blocking `tail -f … | grep -m1` on that
+  file matching the line it prints when it ends, repeated when the call times out
+  — never with Monitor, a wake-up, or a shell loop.
 - **The end is an outcome.** Each finding you present (step 3) and the question
   whether another round is merited (step 6) is a `question`. When the dispositions
   are recorded, the accepted fixes and every tracked edit committed and pushed, and
@@ -171,10 +185,14 @@ For an implementation round, also take:
   CHANGE=<change>`, which shows it as uncommitted changes until `make round-done`:
   for a change worked in its own clone, in the owner's workspace while validation
   and the review run in the clone; for a change worked in the owner's workspace,
-  in this checkout, before validation and the review. Under orchestration the
-  orchestrating session saves the notes as the round's record. Otherwise ask for
-  them if the owner has not pasted them, and save them exactly as pasted as the
-  next numbered record, `NN-implementation-owner.md`.
+  in this checkout, before validation and the review. A repeat pass is read the
+  same way over its own base, `make round-view CHANGE=<change> BASE=<the commit
+  the earlier pass's review read>`; an owner record saved before that pass's
+  triage finished is the earlier pass's, never this one's. Under orchestration the orchestrating session
+  saves the notes as the round's record. Otherwise ask for them if the owner has
+  not pasted them, naming that command so the owner can read what the notes are
+  about, and save them exactly as pasted as the next numbered record,
+  `NN-implementation-owner.md`.
   Label the points `O1`, `O2`, … in the order they appear — in the triage file and
   the ledger only, never in the saved notes — and then each commit the owner made
   while reading, which the pull above brought in, as a point after them; and

@@ -30,7 +30,7 @@ from typing import Any, Sequence
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
 from change_workflow.outcome import outcome_problems
 from change_workflow.records import next_number
-from find_change import ChangeNotFound, change_directory
+from find_change import ChangeNotFound, change_directory, find_records
 
 LOG = "workflow.jsonl"
 
@@ -44,6 +44,21 @@ def log_path(root: Path, change: str) -> Path:
         return change_directory(root, change) / "reviews" / LOG
     except ChangeNotFound as exc:
         raise StepError(str(exc)) from exc
+
+
+def history_log_path(root: Path, change: str) -> Path:
+    """The log a report of the change's history reads: wherever its records are.
+
+    A cleaned-up change's records are in its archive directory, in this checkout or,
+    from another change's clone, in the owner's workspace; the workspace may also
+    hold the change's active directory from a branch, without them, which
+    `log_path` would prefer. Only reports read through this; a step's own lines are
+    written where `log_path` says, in the checkout working the change.
+    """
+    try:
+        return find_records(root, change) / LOG
+    except ChangeNotFound:
+        return log_path(root, change)
 
 
 def _parse(path: Path, text: str) -> list[Entry]:

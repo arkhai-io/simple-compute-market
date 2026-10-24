@@ -53,7 +53,9 @@ the session, and every turn ends with an outcome matching
   with `stopped`, `reason` saying why, and `denials` empty.
 - **Git runs in this checkout.** Run Git in the current checkout, never with `-C`:
   the step already runs in the checkout it reads, and no rule allows `git -C`, since
-  a wildcard after `-C` would also span a push.
+  a wildcard after `-C` would also span a push. Run Make here too, never `make -C
+  <a checkout>`: `-C` names only a subdirectory a skill names, such as `make -C
+  helm teardown`.
 - **The end is an outcome.** When the cleanup and any figure are committed and
   pushed, the pull request drafted, and the history copied (step 10), end with
   `finished`, `next` naming the owner creating the pull request; you never create

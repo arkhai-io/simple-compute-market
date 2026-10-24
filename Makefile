@@ -12,7 +12,7 @@ FOUNDRY_VERSION := v1.5.1
 DIST_DIR := ${CURDIR}/.dist
 IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 
-.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-python-version check-project-layout lock
+.PHONY: helm-values-schema e2e-dev-identities e2e-dev-identities-env e2e-vms-dev-env e2e-apicredits-dev-env e2e-apicredits-stack-env e2e-bare-metal-dev-env review-wheelhouse review-wheelhouse-scope build build-dev build-seller build-apicredits-service build-apicredits-storefront build-apicredits-sample-app test test-core test-compute-provisioning-contracts test-compute-provisioning-client test-compute-provisioning test-compute-provisioning-ansible test-provisioning test-provisioning-iac test-registry test-storefront test-bare-metal test-compute test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware test-kits dist dist-release dist-ci dist-ci-kits dist-storefront-client dist-policy dist-compute-provisioning-contracts dist-compute-provisioning-client dist-compute-provisioning dist-compute-provisioning-service dist-compute-provisioning-ansible dist-compute-provisioning-service dist-kits dist-registry-client dist-registry dist-identity dist-core dist-arkhai-core-buyer dist-arkhai-core-storefront dist-bare-metal-storefront dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer dist-alkahest dist-config dist-clean init init-prerequisites init-submodules init-zero-tier init-buyer init-storefront init-bare-metal-storefront init-arkhai-core-registry push-runtime-artifacts push-images push-dev-image check-packaging check-uv-setup check-locks check-uv-version check-python-version check-project-layout lock
 .PHONY: check-architecture check-architecture-layers check-architecture-scope check-architecture-dependencies check-architecture-kinds check-architecture-change architecture-report
 .PHONY: test-release-tooling test-deployment-packaging test-registry-client test-provisioning-adapter test-e2e-unit
 .PHONY: dist-arkhai-core-registry
@@ -790,8 +790,14 @@ helm-values-schema: ## Regenerate each storefront's config definition in its Hel
 	cd domains/vms/storefront && uv run --frozen --no-sync python -m market_storefront.values_schema write --root ../../..
 	cd domains/bare_metal/storefront && uv run --frozen --no-sync python -m arkhai_bare_metal_storefront.values_schema write --root ../../..
 
-lock: dist ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+# An older uv writes locks differently, and check-locks would pass them; the
+# check runs before the wheelhouse is built, even under -j.
+lock: check-uv-version ## Relock projects against current wheels without installing anything (PROJECTS="dir ..." narrows it)
+	@$(MAKE) --no-print-directory dist
 	python3 scripts/uv_project.py lock $(PROJECTS)
+
+check-uv-version: ## Fail if the installed uv is older than the minimum that writes this repository's locks
+	@python3 scripts/check_uv_version.py
 
 check-packaging: dist ## Run every packaging check against the tree and a freshly built wheelhouse
 	@$(MAKE) --no-print-directory check-uv-setup check-locks check-python-version check-project-layout check-architecture

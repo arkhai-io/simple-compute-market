@@ -916,6 +916,23 @@ wake-up to wait for one. Rejected: the wrapper choosing a "substantive" outcome 
 guess that hides the later turn); denying `ScheduleWakeup` in the step table (covers
 wake-ups only, and adds a denial to read on every run that tries one).
 
+### 127 O2 / 128 R5 — A repeat round's fix is read by the owner
+
+The pilot's second implementation round went from a triage recording Another round
+over a fix — a new chart interface — straight to that fix's validation and review,
+and its triage then asked the owner for notes on code no view had shown them. The
+computation counted an owner record anywhere in the round as its reading, and the
+view's refresh "follows triage's fixes" only while a view stays open through
+triage, which a clone's reading may not. A repeat pass is now read like a first
+one: once a triage records another round over a committed fix, the computation
+names a round view of the fix, over the commit that triage's review read (`base`),
+beside the fix's validation and review in a clone and before them in the workspace;
+the pass's triage waits for an owner record saved after that triage finished — not
+merely numbered after its review, since in a clone the first pass's answer can land
+after the review it is read beside. A repeat pass with no fix has nothing to read. Rejected: asking no notes on a repeat pass
+(cheaper, but the commits a repeat round exists for are the ones the owner would
+not see); counting the first pass's notes for both (the owner read none of the fix).
+
 ### The implementation cadence
 
 Four rounds:
