@@ -61,7 +61,12 @@ def test_domain_wheel_owns_shared_concepts(wheels: dict[str, Path]) -> None:
             "arkhai_apicredits/settlement/fulfillment.py",
             "arkhai_apicredits/settlement/issuance_evidence.py",
             "arkhai_apicredits/listings/reconciler.py",
+            "arkhai_apicredits/negotiation/policies.py",
+            "arkhai_apicredits/settlement/payments.py",
         }
+    )
+    assert _requirements(wheels["domain"]).keys().isdisjoint(
+        {"arkhai-kit-alkahest", "arkhai-kit-arkhai-payments"}
     )
 
 
@@ -95,7 +100,7 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
     correctly moved.
     """
     expected = {
-        "domain": {"arkhai-api", "arkhai-api-contracts", "arkhai-core", "arkhai-kit-arkhai-payments"},
+        "domain": {"arkhai-api", "arkhai-api-contracts", "arkhai-core"},
         "buyer": {
             "arkhai-apicredits-domain",
             "arkhai-core",
@@ -104,10 +109,11 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
         },
         "storefront": {
             "arkhai-api-selling",
+            "arkhai-api-selling-alkahest",
+            "arkhai-api-selling-arkhai-payments",
             "arkhai-apicredits-domain",
             "arkhai-core",
             "arkhai-core-storefront",
-            "arkhai-kit-arkhai-payments",
         },
     }
     for role, names in expected.items():

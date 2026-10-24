@@ -36,10 +36,7 @@ import apicredits_storefront.container as _container
 from apicredits_storefront.controllers.settle_controller import router, settlements_router
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.services.fulfillment_service import build_api_credit_failure_policy
-from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.services.payment_settlement_service import (
-    ApiCreditPaymentSettlementService,
-)
+from apicredits_storefront.container import SELLER_STAGES
 from apicredits_storefront.container import storefront_sqlite_client
 from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
@@ -169,11 +166,8 @@ async def harness(tmp_path):
         data = await _seed(db, stage, agreement_listing=agreement_listing)
         issuer = Issuer(db)
         composition = SimpleNamespace(
-            domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+            domain=SimpleNamespace(fulfillment=issuer), servicing={ARKHAI_PAYMENTS_MECHANISM: stage},
             contributions=_container.SELLING_CONTRIBUTIONS, stages=SELLER_STAGES,
-        )
-        composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-            db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
         )
         _container.resolved_sqlite_client = db
         _container.resolved_marketplace_signer = SELLER
@@ -386,11 +380,8 @@ def _restart(tmp_path, h, *, approved: bool):
     stage = servicing_stage(config, client_for_owner=payments)
     issuer = Issuer(db)
     composition = SimpleNamespace(
-        domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
+        domain=SimpleNamespace(fulfillment=issuer), servicing={ARKHAI_PAYMENTS_MECHANISM: stage},
         contributions=_container.SELLING_CONTRIBUTIONS,
-    )
-    composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-        db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
     )
     _container.resolved_sqlite_client = db
     _container.resolved_settlement_composition = composition
@@ -403,14 +394,14 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
     restarted = _restart(tmp_path, h, approved=True)
 
     # The registered step: what the timer loop and an operator's step run.
-    done = await _container.payment_reconciliation_step()
+    done = await _container.PAYMENTS_STAGE.reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == [NEGOTIATION]
     progress = await restarted.db.load_issuance_progress(reference=NEGOTIATION)
     assert progress["status"] == "ready"
 
-    again = await _container.payment_reconciliation_step()
+    again = await _container.PAYMENTS_STAGE.reconciliation_step()
     assert again["attempted"] == 0
     assert restarted.issuer.issued == [NEGOTIATION]
 
@@ -419,7 +410,7 @@ async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_
     h = await harness()
     restarted = _restart(tmp_path, h, approved=False)
 
-    done = await _container.payment_reconciliation_step()
+    done = await _container.PAYMENTS_STAGE.reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []
@@ -474,7 +465,7 @@ async def test_completed_deals_never_crowd_out_an_unsettled_one(harness):
         _complete(h.db.db_path, completed)
     h.serve()
 
-    service = _container.resolved_settlement_composition.payment_service(h.db)
+    service = _container.PAYMENTS_STAGE.service(h.db, _container.resolved_settlement_composition)
     done = await service.reconcile_once(limit=1)
 
     assert (done.attempted, done.failed) == (1, 0)
@@ -490,7 +481,7 @@ async def test_a_malformed_agreement_never_stops_reconciliation(harness):
     )
     h.serve()
 
-    service = _container.resolved_settlement_composition.payment_service(h.db)
+    service = _container.PAYMENTS_STAGE.service(h.db, _container.resolved_settlement_composition)
     done = await service.reconcile_once(limit=1)
 
     assert (done.attempted, done.failed) == (1, 0)

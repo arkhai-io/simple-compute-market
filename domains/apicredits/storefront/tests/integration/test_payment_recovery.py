@@ -19,10 +19,7 @@ from market_identity import Ed25519Signer
 
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.services.payment_settlement_service import (
-    ApiCreditPaymentSettlementService,
-)
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
 from apicredits_storefront.container import storefront_sqlite_client
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
@@ -74,11 +71,8 @@ async def payment_context(tmp_path):
     )
     issuance = IssuanceBoundary()
     composition = SimpleNamespace(
-        domain=get_market_domain_contract(), credits_client=issuance, arkhai_payments_stage=kit_stage,
+        domain=get_market_domain_contract(), credits_client=issuance, servicing={ARKHAI_PAYMENTS_MECHANISM: kit_stage},
         contributions=SELLING_CONTRIBUTIONS,
-    )
-    composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
-        db=store, composition=composition, stage=kit_stage, mechanism=ARKHAI_PAYMENTS_MECHANISM,
     )
     stage = SELLER_STAGES[ARKHAI_PAYMENTS_MECHANISM]
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

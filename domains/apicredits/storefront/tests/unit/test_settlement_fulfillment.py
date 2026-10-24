@@ -11,10 +11,11 @@ from functools import partial
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
-from market_alkahest import RECIPIENT_RELEASE
+from market_alkahest import ALKAHEST_MECHANISM_ID
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from market_core import SettlementEvidence
+from market_core import SettlementEvidence, SettlementStageTable
 from market_identity import Ed25519Signer
 
 from arkhai_api.issuance import IssuanceRequest, issuance_result_model
@@ -40,7 +41,6 @@ from arkhai_api_selling.settlement_composition import (
 from arkhai_apicredits.label import API_CREDITS_LABEL
 from apicredits_storefront import container, server
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS
-from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.container import storefront_sqlite_client
 from tests.integration.credit_negotiation import FakeCapacity
 from tests.listing_bindings import upsert_bound_listing
@@ -135,62 +135,6 @@ def _private_results(tmp_path):
 # ---------------------------------------------------------------------------
 # API-credit issuance through the selling library
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("chain_error", "rolled_back"),
-    [("execution reverted", True), ("rpc down", False)],
-)
-async def test_an_attestation_failure_rolls_back_only_when_nothing_reached_the_chain(
-    tmp_path, chain_error, rolled_back,
-):
-    """A reverted submission created no attestation; an unexplained failure may
-    have been mined, so the grant stands for an operator to reconcile."""
-    from apicredits_storefront import settlement_stages
-    from market_identity import TrustedIdentitySet
-
-    async def fake_issue(request):
-        return _issuance_result(request, secret="ak_new.secret")
-
-    rollbacks = []
-    async def fake_rollback(**kwargs):
-        rollbacks.append(kwargs)
-        return {"rolled_back": True}
-    async def fake_submit(*args):
-        raise RuntimeError(chain_error)
-    authority = _FakeAuthority(fake_issue, fake_rollback)
-    signer = Ed25519Signer(bytes.fromhex("22"*32))
-    path = tmp_path / "evidence.db"
-    storefront_sqlite_client(str(path))
-    evidence_service = IssuanceEvidenceService(
-        IssuanceEvidenceRepository(path, SELLING_CONTRIBUTIONS),
-        contributions=SELLING_CONTRIBUTIONS, signer=signer,
-        trusted_issuers=TrustedIdentitySet(identities=(signer.identity,)),
-        clock=lambda: 2_000_000_000,
-    )
-    events, stage_event = _events()
-    evidence = _evidence("neg-chain", mechanism="alkahest.v1")
-    result = await fulfill(
-        SELLING_CONTRIBUTIONS, evidence=evidence, credits_client=authority, stage_event=stage_event,
-    )
-    composition = SimpleNamespace(
-        local_principal=signer.identity, evidence_service=evidence_service, credits_client=authority,
-        contributions=SELLING_CONTRIBUTIONS,
-    )
-    result = await settlement_stages.AlkahestSellerStage(
-        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
-    ).continue_delivery(
-        result, evidence=evidence, client=SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=fake_submit)),
-        composition=composition,
-    )
-    assert result["status"] == "error"
-    assert [e[1] for e in events] == ["credits_issued", "fulfilled"]
-    if rolled_back:
-        assert rollbacks[0]["settlement_ref"] == "neg-chain" and rollbacks[0]["key_mode"] == "new"
-        assert "grant_unknown" not in result
-    else:
-        assert rollbacks == []
-        assert result["grant_unknown"] is True and "operator" in result["message"]
 
 
 async def test_the_fulfillment_hook_issues_under_this_storefronts_bundle(monkeypatch):
@@ -440,7 +384,7 @@ async def settled_db(tmp_path, monkeypatch):
     return client, response["negotiation_id"]
 
 
-def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
+def _build_settlement_composition(db, *, verify_escrow, on_outcome=None, credits_client=None):
     from market_settlement_runtime import (
         ConditionOutcome,
         EffectOutcome,
@@ -479,7 +423,8 @@ def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
     from market_identity import TrustedIdentitySet
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     composition = SimpleNamespace(
-        domain=get_market_domain_contract(), local_principal=signer.identity,
+        domain=get_market_domain_contract(), local_principal=signer.identity, runtime=runtime,
+        repository=repository,
         credits_client=credits_client, contributions=SELLING_CONTRIBUTIONS,
         evidence_service=IssuanceEvidenceService(
             IssuanceEvidenceRepository(db.db_path, SELLING_CONTRIBUTIONS),
@@ -488,6 +433,10 @@ def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
             clock=lambda: 2_000_000_000,
         ),
     )
+    stages = SettlementStageTable({
+        ALKAHEST_MECHANISM_ID: container.alkahest_stage(verify_escrow=verify_escrow),
+    })
+
     async def persist(prepared, outcome):
         await persist_settlement_outcome(db, prepared, outcome)
         if on_outcome is not None:
@@ -496,7 +445,7 @@ def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
         runtime,
         prepare=partial(
             prepare_settlement,
-            SELLER_STAGES,
+            stages,
             sqlite_client=db,
             local_principal=_SELLER_PRINCIPAL,
             composition=composition,
@@ -507,7 +456,7 @@ def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
             settlement_runtime=runtime,
             wake_servicing=worker.wake,
         ),
-        fulfill=partial(fulfill_settlement, SELLER_STAGES),
+        fulfill=partial(fulfill_settlement, stages),
         persist_outcome=persist,
         wake_servicing=worker.wake,
     )
@@ -516,7 +465,6 @@ def _build_settlement_composition(db, *, on_outcome=None, credits_client=None):
 
 async def test_settlement_coordinator_verifies_issues_and_stores_credentials(settled_db, monkeypatch):
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages
     verified = []
     issued = []
 
@@ -532,11 +480,10 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     async def attest(payload, escrow_uid):
         attested.append((json.loads(payload), escrow_uid))
         return "0xfulfill"
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
     client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
     completed = asyncio.Event()
     runtime, worker, coordinator = _build_settlement_composition(
-        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+        db, verify_escrow=verify, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
     )
     result = await coordinator.start(
         escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
@@ -574,12 +521,58 @@ async def test_settlement_coordinator_verifies_issues_and_stores_credentials(set
     assert len(issued) == 1
 
 
+async def test_an_uncertain_issuance_leaves_the_deal_open_for_the_redrive(settled_db):
+    """The coordinator records a deferred delivery as open, and the next start re-drives it."""
+    db, neg_id = settled_db
+
+    async def verify(**_kwargs):
+        return 0
+
+    issued = []
+
+    async def issue(request):
+        issued.append(request)
+        if len(issued) == 1:
+            raise httpx.ReadTimeout("issuance timed out")
+        return _issuance_result(request)
+
+    async def attest(_payload, _escrow_uid):
+        return "0xfulfill"
+
+    client = SimpleNamespace(string_obligation=SimpleNamespace(do_obligation=attest))
+    outcomes = []
+    done = asyncio.Event()
+
+    def on_outcome():
+        outcomes.append(1)
+        done.set()
+
+    _runtime, _worker, coordinator = _build_settlement_composition(
+        db, verify_escrow=verify, on_outcome=on_outcome, credits_client=_FakeAuthority(issue),
+    )
+    await coordinator.start(
+        escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
+        request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(done.wait(), timeout=5)
+    assert (await db.load_issuance_progress(reference="0xdeal"))["status"] == "provisioning"
+    assert (await db.load_escrow(escrow_uid="0xdeal"))["status"] == "provisioning"
+
+    done.clear()
+    await coordinator.start(
+        escrow_uid="0xdeal", negotiation_id=neg_id, mechanism_client=client, chain_name="anvil",
+        request=_settlement_request(neg_id),
+    )
+    await asyncio.wait_for(done.wait(), timeout=5)
+    assert (await db.load_issuance_progress(reference="0xdeal"))["status"] == "ready"
+    assert issued[0].fulfillment_id == issued[1].fulfillment_id
+
+
 async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted(settled_db, monkeypatch):
     """The service and accepted escrows change in place under the same quota
     resource, which the source check cannot see; the escrow is verified and
     issuance runs against the listing the buyer accepted."""
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages
 
     verified = []
 
@@ -596,7 +589,6 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
     async def attest(_payload, _escrow_uid):
         return "0xfulfill"
 
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     listing = await db.load_listing(listing_id=thread["our_listing_id"])
     stored = listing["listing_resource"]
@@ -609,7 +601,7 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
     )
     completed = asyncio.Event()
     _runtime, _worker, coordinator = _build_settlement_composition(
-        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+        db, verify_escrow=verify, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
     )
 
     await coordinator.start(
@@ -629,7 +621,6 @@ async def test_a_listing_changed_after_acceptance_issues_what_the_buyer_accepted
 
 async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(settled_db, monkeypatch):
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages
     from market_core.schemas import Agreement
 
     async def verify(**_kwargs):
@@ -641,7 +632,6 @@ async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(se
         issued.append(request)
         return _issuance_result(request)
 
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
     thread = await db.load_negotiation_thread_row(negotiation_id=neg_id)
     raw = thread["agreement_bytes"]
     agreement = Agreement.model_validate_json(raw.tobytes() if isinstance(raw, memoryview) else raw)
@@ -651,7 +641,9 @@ async def test_an_agreement_naming_another_listing_than_its_thread_is_refused(se
             "UPDATE negotiation_threads SET agreement_bytes = ? WHERE negotiation_id = ?",
             (elsewhere.model_dump_json(exclude_none=True).encode(), neg_id),
         )
-    _runtime, _worker, coordinator = _build_settlement_composition(db, credits_client=_FakeAuthority(issue))
+    _runtime, _worker, coordinator = _build_settlement_composition(
+        db, verify_escrow=verify, credits_client=_FakeAuthority(issue)
+    )
 
     with pytest.raises(ValueError, match="listing differs from negotiation"):
         await coordinator.start(
@@ -667,7 +659,6 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
     settled_db, monkeypatch,
 ):
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages
 
     chain_reads = []
     issued = []
@@ -685,10 +676,9 @@ async def test_verified_prepare_delivers_when_further_chain_reads_are_unavailabl
     async def attest(_payload, _escrow_uid):
         return "0xfulfill"
 
-    monkeypatch.setattr(settlement_stages, "verify_escrow_for_settlement", verify)
     completed = asyncio.Event()
     _, _, coordinator = _build_settlement_composition(
-        db, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
+        db, verify_escrow=verify, on_outcome=completed.set, credits_client=_FakeAuthority(issue),
     )
     await coordinator.start(
         escrow_uid="0xverified", negotiation_id=neg_id,
@@ -709,16 +699,10 @@ async def test_ready_progress_recovers_into_shared_servicing(
     monkeypatch,
 ):
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages as escrow_verification
 
     async def fake_verify(**_kwargs):
         return 0
 
-    monkeypatch.setattr(
-        escrow_verification,
-        "verify_escrow_for_settlement",
-        fake_verify,
-    )
     assert await db.insert_escrow(
         escrow_uid="0xlegacy-ready",
         negotiation_id=neg_id,
@@ -736,7 +720,7 @@ async def test_ready_progress_recovers_into_shared_servicing(
         negotiation_id=neg_id, public_ref="0xlegacy-ready", status="ready",
         fulfillment_uid="0xlegacy-fulfillment",
     )
-    runtime, worker, coordinator = _build_settlement_composition(db)
+    runtime, worker, coordinator = _build_settlement_composition(db, verify_escrow=fake_verify)
     result = await coordinator.start(
         escrow_uid="0xlegacy-ready",
         negotiation_id=neg_id,
@@ -758,18 +742,12 @@ async def test_settlement_coordinator_fails_closed_on_bad_escrow(
     monkeypatch,
 ):
     db, neg_id = settled_db
-    from apicredits_storefront import settlement_stages as escrow_verification
     from market_alkahest.escrow_verification import EscrowVerificationError
 
     async def fake_verify(**kwargs):
         raise EscrowVerificationError("amount mismatch")
 
-    monkeypatch.setattr(
-        escrow_verification,
-        "verify_escrow_for_settlement",
-        fake_verify,
-    )
-    _, _, coordinator = _build_settlement_composition(db)
+    _, _, coordinator = _build_settlement_composition(db, verify_escrow=fake_verify)
     with pytest.raises(EscrowVerificationError):
         await coordinator.start(
             escrow_uid="0xbad",
@@ -827,16 +805,3 @@ def test_a_stored_listing_row_is_projected_before_the_domain_validates_it():
     assert listing.listing_resource.service_name == "weather-api"
     assert listing.listing_resource.resource_id == "weather-quota"
     assert listing.accepted_escrows == row["accepted_escrows"]
-
-
-async def test_a_stage_without_seller_refunds_refuses_the_route_and_skips_the_action():
-    from apicredits_storefront.settlement_stages import AlkahestSellerStage, SettlementRefusal
-
-    stage = AlkahestSellerStage(
-        fulfils_through_capacity=True, release_models=frozenset({RECIPIENT_RELEASE})
-    )
-    with pytest.raises(SettlementRefusal) as refused:
-        await stage.refund(db=None, composition=None, negotiation_id="neg-alkahest")
-    assert refused.value.status_code == 409
-    skipped = await stage.refund_before_delivery(db=None, composition=None, negotiation_id="neg-alkahest")
-    assert skipped == {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}

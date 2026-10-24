@@ -1,4 +1,4 @@
-"""Receipt-gated API-credit issuance and seller refunds for Arkhai payments.
+"""Receipt-gated credit issuance and seller refunds for Arkhai payments.
 
 Credits are issued only after the exact accepted Agreement has a matching signed
 receipt. The normal deal flow never refunds: a failed issuance is recorded as
@@ -29,10 +29,7 @@ from arkhai_api_selling.issuance import (
     settlement_evidence,
 )
 from arkhai_api_selling.quota_listing import accepted_listing_resource
-from core_storefront.models.settle_models import (
-    AgreementSettleResponse,
-    RefundSettlementResponse,
-)
+from arkhai_api_selling.route_services import checked_refund_payload, checked_settle_payload
 from market_arkhai_payments import (
     MandatePolicyError,
     NothingToReverse,
@@ -59,7 +56,7 @@ logger = logging.getLogger(__name__)
 _REFUND_STATES = frozenset({"refunding", "refunded"})
 
 
-class ApiCreditPaymentSettlementService:
+class PaymentSettlementService:
     """Payment settlement for one storefront database under the seller's trusted policy.
 
     ``mechanism`` is the key the payment entry is registered under in the
@@ -119,8 +116,7 @@ class ApiCreditPaymentSettlementService:
         )
         # The neutral fields are a cross-domain contract; refuse to emit a
         # payload that would not parse as one.
-        AgreementSettleResponse.model_validate(payload)
-        return payload
+        return checked_settle_payload(payload)
 
     async def reconcile_once(self, *, limit: int = 100) -> ReconciliationPass:
         """Advance accepted payment deals a buyer has not settled, without the buyer.
@@ -271,7 +267,9 @@ class ApiCreditPaymentSettlementService:
 
         fulfillment = self.composition.domain.fulfillment
         if fulfillment is None:
-            raise SettlementRefusal(503, "API-credit fulfillment is unavailable")
+            raise SettlementRefusal(
+                503, f"{self.composition.contributions.refusal_noun} fulfillment is unavailable"
+            )
         if progress is None:
             progress = await self.db.save_issuance_progress(
                 negotiation_id=negotiation_id, public_ref=negotiation_id, status="provisioning",
@@ -290,7 +288,7 @@ class ApiCreditPaymentSettlementService:
             # An unknown issuance outcome stays retryable under the same grant
             # identity; it must not be recorded as a failure.
             logger.warning(
-                "API-credit issuance for payment %s is retryable after error: %s",
+                "credit issuance for payment %s is retryable after error: %s",
                 negotiation_id,
                 exc,
             )
@@ -397,8 +395,7 @@ class ApiCreditPaymentSettlementService:
                 data=data, existing=evidence, refund=True,
             )
         await self._complete_refund(negotiation_id, agreement_json, data)
-        RefundSettlementResponse.model_validate(refunded)
-        return SettleResult(200, refunded)
+        return SettleResult(200, checked_refund_payload(refunded))
 
     async def _complete_refund(
         self, negotiation_id: str, agreement: Mapping[str, Any], data: PaymentSettlementData
@@ -430,4 +427,4 @@ class ApiCreditPaymentSettlementService:
         await self.db.complete_credit_refund(negotiation_id=negotiation_id)
 
 
-__all__ = ["ApiCreditPaymentSettlementService"]
+__all__ = ["PaymentSettlementService"]

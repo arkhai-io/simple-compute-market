@@ -20,13 +20,14 @@ from market_arkhai_payments import (
     PaymentApproval,
     PaymentApprovalDeclined,
 )
+from market_arkhai_payments.models import AccountId
 from market_config.config_loader import load_user_config
 from market_core.schemas import Agreement, SettlementOption, SettlementSelection
 from market_settlement_runtime import SettlementConfig
 
-from arkhai_apicredits.settlement import (
-    validate_payer_account,
-)
+
+def validate_payer_account(value: Any) -> str:
+    return AccountId.model_validate(value).root
 
 
 def configured_payer_account() -> str:

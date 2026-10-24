@@ -35,6 +35,8 @@ from core_storefront.models.negotiation_models import (
     NegotiationListResponse,
 )
 from core_storefront.models.settle_models import (
+    AgreementSettleResponse,
+    RefundSettlementResponse,
     SettleRequest,
     SettleStatusResponse,
     SettleWaitResponse,
@@ -96,6 +98,18 @@ def _required(value: Any, detail: str = NOT_INITIALIZED) -> Any:
 
 def _kit_refusal(exc: LifecycleRouteError) -> RouteRefusal:
     return RouteRefusal(exc.status_code, exc.detail)
+
+
+def checked_settle_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """A stage's settle payload, refused unless it parses as the cross-domain settle response."""
+    AgreementSettleResponse.model_validate(payload)
+    return dict(payload)
+
+
+def checked_refund_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """A stage's refund payload, refused unless it parses as the cross-domain refund response."""
+    RefundSettlementResponse.model_validate(payload)
+    return dict(payload)
 
 
 class QuotaSettleRequest(SettleRequest):
@@ -704,4 +718,6 @@ __all__ = [
     "SettleOutcome",
     "SettleRoutes",
     "SystemRoutes",
+    "checked_refund_payload",
+    "checked_settle_payload",
 ]

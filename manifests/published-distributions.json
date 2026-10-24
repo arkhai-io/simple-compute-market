@@ -152,6 +152,16 @@
       "dist": "arkhai-api-selling"
     },
     {
+      "key": "api-selling-alkahest",
+      "path": "domains/api/selling-alkahest",
+      "dist": "arkhai-api-selling-alkahest"
+    },
+    {
+      "key": "api-selling-arkhai-payments",
+      "path": "domains/api/selling-arkhai-payments",
+      "dist": "arkhai-api-selling-arkhai-payments"
+    },
+    {
       "key": "compute",
       "path": "domains/compute",
       "dist": "arkhai-compute"

@@ -17,7 +17,7 @@ from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from arkhai_api_selling.negotiation import place_quota_hold
 from core_storefront.models.negotiation_models import NegotiateNewResponse
 from market_negotiation_runtime import NegotiationStateError, OfferUnfulfillableError

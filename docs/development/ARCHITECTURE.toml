@@ -207,15 +207,6 @@ owner = "align-package-paths-with-layers"
 since = 2026-10-13
 reason = "The VM Alkahest settlement codec, whose name does not carry its mechanism."
 
-[[overrides]]
-project = "arkhai-apicredits-domain"
-layer = "specialization"
-kind = "library"
-scope = ["api", "apicredits", "alkahest", "arkhai-payments"]
-owner = "align-package-paths-with-layers"
-since = 2026-10-13
-reason = "The API-credits domain holds both mechanisms' settlement codecs, and its name carries neither."
-
 # Divergences the check reports, each owned by the change that removes it. A
 # row excuses one finding of the rule it names and fails once it excuses
 # nothing; its owner may not be archived while the row stands.

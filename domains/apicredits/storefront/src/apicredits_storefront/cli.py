@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import typer
-from market_alkahest.alkahest import get_erc20_escrow_obligation_default
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -143,24 +142,21 @@ def publish_cmd(
             typer.echo("--price-per-token must be a base-unit integer", err=True)
             raise typer.Exit(code=2)
 
-        resolved_escrow = escrow_address
-        if not resolved_escrow:
+        address_config_path = None
+        if not escrow_address:
             chain_cfg = CHAINS.get(chain)
             if chain_cfg is None:
                 typer.echo(f"chain {chain!r} is not configured", err=True)
                 raise typer.Exit(code=2)
-            resolved_escrow = get_erc20_escrow_obligation_default(
-                chain, config_path=chain_cfg.alkahest_address_config_path
-            )
+            address_config_path = chain_cfg.alkahest_address_config_path
         accepted_escrows = [
-            {
-                "chain_name": chain,
-                "escrow_address": resolved_escrow.lower(),
-                "literal_fields": {"token": token},
-                "rates": [
-                    {"field": "amount", "per": "token", "value": price_per_token}
-                ],
-            }
+            _container.ALKAHEST_STAGE.accepted_escrow(
+                chain_name=chain,
+                address_config_path=address_config_path,
+                token=token,
+                price_per_token=price_per_token,
+                escrow_address=escrow_address,
+            )
         ]
 
     # The same listing service the running storefront composes, with its

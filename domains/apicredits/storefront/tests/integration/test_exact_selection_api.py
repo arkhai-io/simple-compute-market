@@ -21,7 +21,7 @@ import httpx
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from fastapi import FastAPI
 from market_alkahest import ALKAHEST_MECHANISM_ID
 from market_arkhai_payments import (
@@ -93,7 +93,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ),
         client_for_owner=FakePaymentsClient(),
     )
-    composition = SimpleNamespace(arkhai_payments_stage=stage)
+    composition = SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: stage})
     runtime = build_api_credit_negotiation_runtime(
         _DOMAIN,
         accepted_obligation_dispatch={

@@ -10,13 +10,15 @@ import pytest
 
 from core_storefront.auth import signed_response_headers
 from core_storefront.capacity import CapacityDelta
+from market_alkahest.dev_chain import anvil_address_book_path
 from market_capacity_publication import CapacityReconcileContext
+from market_config.config_loader import ChainConfig
 from market_core.schemas import SettlementOption
 
 from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_listing_service
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from tests.integration.credit_negotiation import payment_option
@@ -118,8 +120,24 @@ class _QuotaRuntime:
         }
 
 
+class _NoMechanismSections:
+    def mechanism_config(self, _key):
+        return None
+
+
 class _SettlementComposition:
     stages = SELLER_STAGES
+    # The escrow's release conditions derive from the development chain's
+    # address book under no configured section.
+    settlement_config = _NoMechanismSections()
+    mechanism_resources = {
+        "chains": {
+            "anvil": ChainConfig(
+                name="anvil", rpc_url="http://anvil.test", chain_id=31337,
+                alkahest_address_config_path=str(anvil_address_book_path()),
+            )
+        }
+    }
 
     async def readiness(self) -> tuple[()]:
         return ()
@@ -130,9 +148,6 @@ class _SettlementComposition:
         _clauses,
     ) -> tuple[list[dict], list[dict], tuple[()]]:
         return [], [], ()
-
-    def release_conditions(self, _accepted_escrows) -> list[dict]:
-        return []
 
 
 def _listing_service(db, composition):

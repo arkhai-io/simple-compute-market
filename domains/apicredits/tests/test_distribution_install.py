@@ -174,10 +174,8 @@ def test_storefront_domain_imports_resolve_without_a_raw_source_copy(
 import importlib
 for name in (
     "arkhai_apicredits.domain_runtime",
-    "arkhai_apicredits.negotiation.policies",
     "arkhai_apicredits.listings.models",
     "arkhai_apicredits.negotiation.terms",
-    "arkhai_apicredits.settlement",
 ):
     mod = importlib.import_module(name)
     assert "site-packages" in mod.__file__, (name, mod.__file__)

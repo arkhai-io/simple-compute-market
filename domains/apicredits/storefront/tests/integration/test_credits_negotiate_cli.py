@@ -22,7 +22,7 @@ from types import SimpleNamespace
 import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
-from apicredits_storefront.settlement_composition import SELLER_STAGES
+from apicredits_storefront.container import SELLER_STAGES
 from arkhai_apicredits_buyer import negotiate_cli, payments, settlement_composition
 from arkhai_apicredits_buyer.cli import app as buyer_app
 from core_buyer import orchestration
@@ -79,7 +79,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ),
         client_for_owner=FakePaymentsClient(),
     )
-    composition = SimpleNamespace(arkhai_payments_stage=stage)
+    composition = SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: stage})
     runtime = build_api_credit_negotiation_runtime(
         _DOMAIN,
         accepted_obligation_dispatch={ARKHAI_PAYMENTS_MECHANISM: None},

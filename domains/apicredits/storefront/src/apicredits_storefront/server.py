@@ -23,19 +23,19 @@ from arkhai_api_selling.negotiation import build_negotiation_runtime
 from arkhai_api_selling.quota_listing import build_listing_source_check, registration
 from arkhai_api_selling.system import SystemService
 from arkhai_api_selling.settlement_composition import (
+    SellingSettlementComposition,
     fulfill_settlement,
     persist_settlement_outcome,
     prepare_settlement,
     reserve_settlement,
 )
 from core_storefront.app_composition import StorefrontAppConfig
-from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
 )
 from core_storefront.services.negotiation_service import NegotiationService
 from core_storefront.stage_log import set_stage_event_db_path, stage_event
-from market_alkahest import ALKAHEST_MECHANISM_ID
+from market_alkahest import ALKAHEST_CONFIG_KEY
 from market_core import MarketDomainContract
 from market_settlement_runtime import SettlementJobCoordinator
 from market_storefront_kit import (
@@ -49,23 +49,22 @@ from market_storefront_kit import (
 )
 
 import apicredits_storefront.container as _container
-from apicredits_storefront.container import get_sqlite_client
+from apicredits_storefront.container import (
+    get_sqlite_client,
+    mechanism_health,
+    mechanism_startup_steps,
+)
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.services.fulfillment_service import (
     build_api_credit_failure_policy,
 )
 from apicredits_storefront.services.keys_lookup import lookup_key_record
-from apicredits_storefront.settlement_stages import AlkahestEscrowAcceptance
 from apicredits_storefront.startup import preflight_credits_service
 from apicredits_storefront.startup_refusal import require_startable_storefront
 from apicredits_storefront.settlement_composition import (
-    SELLER_STAGES,
-    ApiCreditsSettlementComposition,
     build_api_credit_settlement_composition,
     build_storefront_settlement_registry,
-    SEED_ESCROW_SETTINGS,
-    require_api_credit_release_model,
-    seed_accepted_escrows,
+    validate_mechanism_configuration,
 )
 from apicredits_storefront.utils.config import (
     BASE_URL_OVERRIDE,
@@ -109,7 +108,7 @@ class ApiCreditsStorefrontServices:
     settlement_runtime: Any
     settlement_worker: Any
     settlement_coordinator: Any
-    settlement_composition: ApiCreditsSettlementComposition
+    settlement_composition: SellingSettlementComposition
     issuance_evidence_service: Any
     private_result_repository: Any
     failure_policy: Any
@@ -130,7 +129,7 @@ def build_api_credit_negotiation_runtime(
     return build_negotiation_runtime(
         _container.SELLING_CONTRIBUTIONS,
         domain,
-        stages=SELLER_STAGES,
+        stages=_container.SELLER_STAGES,
         round_settings=round_settings,
         capacity_client=lambda repository: _container.QUOTA_CAPACITY.client(lambda: repository),
         key_lookup=lookup_key_record,
@@ -140,7 +139,7 @@ def build_api_credit_negotiation_runtime(
             _container.SELLING_CONTRIBUTIONS,
             lambda repository: _container.QUOTA_CAPACITY.client(lambda: repository),
         ),
-        escrow=AlkahestEscrowAcceptance(),
+        escrow=_container.ALKAHEST_STAGE.escrow_acceptance,
         seller_round_hook=seller_round_hook,
         accepted_obligation_dispatch=accepted_obligation_dispatch,
         settlement_artifacts_builder=settlement_artifacts_builder,
@@ -165,21 +164,18 @@ def build_listing_service(
         close=lambda listing_id: _container.QUOTA_PUBLICATION.close(sqlite_client, listing_id),
         settlement_defaults=settlement_publication_defaults,
         storefront_url=BASE_URL_OVERRIDE,
-        escrow_mechanism=ALKAHEST_MECHANISM_ID,
-        release_conditions=settlement_composition.release_conditions,
+        escrow_mechanism=_container.ALKAHEST_STAGE.mechanism,
+        release_conditions=partial(
+            _container.ALKAHEST_STAGE.release_conditions, settlement_composition
+        ),
     )
-
-
-def _alkahest_check() -> dict[str, str]:
-    configured = _container.configured_chain_names()
-    return {"alkahest": ",".join(sorted(configured)) if configured else "unconfigured"}
 
 
 def build_system_service(sqlite_client: Any) -> SystemService:
     return SystemService(
         sqlite_client=sqlite_client,
         settings=system_settings,
-        mechanism_checks=_alkahest_check,
+        mechanism_checks=lambda: mechanism_health(_container.SELLER_STAGES),
         signer=lambda: _container.resolved_marketplace_signer,
     )
 
@@ -193,8 +189,8 @@ def listing_seed() -> ListingSeed:
         site=lambda: seed_site(
             capacity_sites()[0], str(settings.get("capacity.seed_site", "") or "")
         ),
-        accepted_escrows=seed_accepted_escrows,
-        settlement_settings=SEED_ESCROW_SETTINGS,
+        accepted_escrows=_container.ALKAHEST_STAGE.seed_accepted_escrows,
+        settlement_settings=_container.ALKAHEST_STAGE.seed_escrow_settings,
         # The credits authority seeds its quota pool as `default`.
         pool_id="default",
     )
@@ -202,20 +198,6 @@ def listing_seed() -> ListingSeed:
 
 async def _seed_demo_listing() -> None:
     await listing_seed().run(seed_settings())
-
-
-async def _backfill_escrow_records() -> None:
-    runtime = _container.resolved_settlement_runtime
-    signer = _container.resolved_marketplace_signer
-    if runtime is None or signer is None:
-        return
-    backfilled = await backfill_escrow_obligation_records(
-        sqlite_client=_container.resolved_sqlite_client,
-        settlement_runtime=runtime,
-        local_principal=signer.identity,
-    )
-    if backfilled:
-        logger.info("[STARTUP] Backfilled %d legacy escrow obligation records", backfilled)
 
 
 async def _startup_tasks(
@@ -239,7 +221,7 @@ async def _startup_tasks(
         storefront_url=BASE_URL_OVERRIDE or f"http://localhost:{settings.port}",
         preflight=preflight_credits_service,
         seed=_seed_demo_listing,
-        startup_steps=(_backfill_escrow_records,),
+        startup_steps=mechanism_startup_steps(_container.SELLER_STAGES),
         capacity_runtime=capacity_runtime,
     )
 
@@ -269,10 +251,10 @@ def _build_api_credit_services(
     domain: MarketDomainContract,
 ) -> ApiCreditsStorefrontServices:
     # Before anything is constructed: a renamed setting, a capacity
-    # configuration that cannot be read, or an Alkahest release model this
-    # storefront cannot deliver, stops startup.
+    # configuration that cannot be read, or a mechanism configuration a
+    # composed stage cannot honour, stops startup.
     require_startable_storefront()
-    require_api_credit_release_model()
+    validate_mechanism_configuration()
     marketplace_signer = resolve_identity_signer()
     resolve_admin_identities()
     if settings.enable_registry_discovery:
@@ -282,11 +264,9 @@ def _build_api_credit_services(
         settlement_config_mapping(),
         role="seller",
     )
-    alkahest_section = settlement_config.mechanism_config("alkahest")
-    alkahest_enabled = bool(
-        alkahest_section is not None and getattr(alkahest_section, "enabled", False)
-    )
-    if alkahest_enabled:
+    # A configured section services the deals accepted under it whether or not
+    # it publishes, so its chain clients are built either way.
+    if settlement_config.mechanism_config(ALKAHEST_CONFIG_KEY) is not None:
         alkahest_clients = _build_alkahest_clients()
     else:
         alkahest_clients = {}
@@ -299,7 +279,7 @@ def _build_api_credit_services(
     settlement_composition = build_api_credit_settlement_composition(
         domain=domain,
         sqlite_client=sqlite_client,
-        alkahest_clients=alkahest_clients,
+        chain_clients=alkahest_clients,
         marketplace_signer=marketplace_signer,
         failure_policy=failure_policy,
     )
@@ -317,7 +297,7 @@ def _build_api_credit_services(
         settlement_runtime,
         prepare=partial(
             prepare_settlement,
-            SELLER_STAGES,
+            _container.SELLER_STAGES,
             sqlite_client=sqlite_client,
             local_principal=marketplace_signer.identity,
             composition=settlement_composition,
@@ -328,7 +308,7 @@ def _build_api_credit_services(
             settlement_runtime=settlement_runtime,
             wake_servicing=settlement_worker.wake,
         ),
-        fulfill=partial(fulfill_settlement, SELLER_STAGES),
+        fulfill=partial(fulfill_settlement, _container.SELLER_STAGES),
         persist_outcome=partial(
             persist_settlement_outcome,
             sqlite_client,
@@ -370,7 +350,6 @@ async def _start_api_credit_services(
 
     _container.resolved_market_domain = services.domain
     _container.resolved_sqlite_client = services.sqlite_client
-    _container.resolved_alkahest_clients = services.alkahest_clients
     _container.resolved_settlement_repository = services.settlement_repository
     _container.resolved_settlement_runtime = services.settlement_runtime
     _container.resolved_settlement_worker = services.settlement_worker

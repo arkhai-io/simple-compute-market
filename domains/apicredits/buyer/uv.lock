@@ -164,7 +164,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-buyer"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -216,21 +216,18 @@ dev = [{ name = "pytest", specifier = ">=8.0.0" }]
 
 [[package]]
 name = "arkhai-apicredits-domain"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
     { name = "arkhai-api-contracts" },
     { name = "arkhai-core" },
-    { name = "arkhai-kit-alkahest" },
-    { name = "arkhai-kit-arkhai-payments" },
     { name = "arkhai-kit-policy" },
-    { name = "arkhai-kit-settlement-runtime" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_domain-0.10.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_domain-0.11.0-py3-none-any.whl" },
 ]
 
 [[package]]

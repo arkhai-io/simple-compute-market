@@ -2171,9 +2171,18 @@ the escrow guard in `arkhai_apicredits/negotiation/policies.py`,
 `docs/development/ARCHITECTURE.toml`, and (amended at section 5) the
 storefront's `settlement_composition.py`, whose `ApiCreditsSettlementComposition`
 keeps the Alkahest release conditions and the payment service until the two
-distributions own them.
+distributions own them. Amended at implementation: the mechanism-neutral parts
+the stages need touch `selling`'s `settlement_composition.py` (servicing clients
+for every configured section, per-mechanism servicing, the deferred outcome) and
+`route_services.py` (the settle and refund payload checks); the composition's
+wiring touches the storefront's `container.py` (which now holds the seller
+table), `server.py`, `domain_runtime.py`, `cli.py`, and
+`services/fulfillment_service.py`; deleting the domain library's payer validator
+touches the buyer's `payments.py`; and the two projects' wiring touches both
+Makefiles, `tests.yml`, `publish-pypi.yml`, `manifests/published-distributions.json`,
+and `RELEASING.md`.
 
-- [ ] 8.1 `domains/api/selling-alkahest/` (`arkhai-api-selling-alkahest`
+- [x] 8.1 `domains/api/selling-alkahest/` (`arkhai-api-selling-alkahest`
       0.1.0; dependencies `arkhai-api-selling`, `arkhai-kit-alkahest`): the
       seller Alkahest stage, the accepted escrow artifacts builder, and the
       escrow negotiation guard, each taking its collaborators — delivery
@@ -2182,12 +2191,79 @@ distributions own them.
       with injected fakes replacing the former reads of the storefront's
       container and settings. The stage does not move unchanged: it must
       also meet 8.4 and 8.5 before this task is checked. (D5.)
-- [ ] 8.2 `domains/api/selling-arkhai-payments/`
+      *Done 2026-10-24.* `arkhai-api-selling-alkahest` 0.1.0 declares what its
+      source imports: `arkhai-api-selling`, `arkhai-kit-alkahest`, and the
+      `arkhai-core`, `arkhai-kit-identity`, `arkhai-kit-negotiation-runtime`,
+      and `arkhai-kit-settlement-runtime` its stage reads. `stage.py`:
+      `AlkahestSellerStage(contributions, ...)` over injected `chains`,
+      `seller_wallet`, `composition`, `sqlite_client`, `backfill_escrows`, and
+      `stage_event` providers, with `verify_escrow` and `escrow_client`
+      defaulting to the kit's — where the storefront's stage read its
+      container and settings; the delivery callable, the evidence and
+      private-result stores, and the credits client come from the
+      composition it is handed, as before. `negotiation.py`: the escrow
+      proposal step (`accepted_escrow_proposal`, from the domain library's
+      `policies.py`), the accepted escrow artifacts builder
+      (`accepted_escrow_artifacts`, over the chain address books it is
+      given), and `AlkahestEscrowAcceptance`. `publication.py`: the release
+      conditions, `accepted_escrow` (the seed's and the publish command's
+      one escrow entry, the default escrow address from the chain's book),
+      `seed_accepted_escrows`, and `SEED_ESCROW_SETTINGS`. The stage also
+      carries its lifecycle contributions (8.7) and its configuration check
+      (the release model, formerly `require_api_credit_release_model`). It
+      imports no core storefront module: the stage-event log and core's
+      escrow backfill are injected, so no new exception row is needed. Unit
+      (16, over fakes and the kit's real negotiation functions with the
+      development chain's address book): the proposal step, the artifacts'
+      parties and selection, the refusal of a listing authorizing no
+      condition, the acceptance's refusal as unfulfillable, the escrow and
+      release-condition refusals, the configuration refusal enabled or not,
+      health, the backfill step, the servicing client, and the refund
+      refusal. Library integration: `test_delivery.py` and
+      `test_servicing.py` (8.4 to 8.6). The two unit tests of the artifacts
+      builder and the refund test moved here from the storefront's suite;
+      the storefront's attestation-rollback test is superseded by
+      `test_delivery.py`.
+- [x] 8.2 `domains/api/selling-arkhai-payments/`
       (`arkhai-api-selling-arkhai-payments` 0.1.0; dependencies
       `arkhai-api-selling`, `arkhai-kit-arkhai-payments`): the seller payments
       stage, the receipt-gated issuance service, and the payer and clause
       validators, injected the same way. (D5.)
-- [ ] 8.3 The API-credits storefront's seller table composes the two entries
+      *Done.* `arkhai-api-selling-arkhai-payments` 0.1.0 declares
+      `arkhai-api-selling`, `arkhai-kit-arkhai-payments`, and the `arkhai-api`
+      (the purchase quantity), `arkhai-core`, `arkhai-kit-identity`,
+      `arkhai-kit-negotiation-runtime`, `arkhai-kit-settlement-runtime`, and
+      `arkhai-kit-storefront` (the lifecycle route error) its source imports.
+      `stage.py`: `ArkhaiPaymentsSellerStage(contributions, ...)` over injected
+      `capacity`, `hold_ttl_seconds`, `composition`, `sqlite_client`,
+      `reconciliation_interval`, and `stage_event`, with an optional
+      `client_for_owner`; its quota hold reads the offering mode from the
+      bundle and the quantity from the vocabulary, where it named
+      `api_credits` and read the domain's terms. `service.py`:
+      `PaymentSettlementService`, the receipt-gated issuance and refund
+      service moved unchanged in behaviour; its one refusal naming the domain
+      (`API-credit fulfillment is unavailable`) is spelled from the bundle's
+      `refusal_noun`, so the body is byte-identical. The settle and refund
+      payload checks against core's wire models are `selling`'s
+      `checked_settle_payload` and `checked_refund_payload`, beside the route
+      services that answer with them, so the library imports no core
+      storefront module. `validators.py`: `validate_payer_account` and
+      `validate_payment_publication_clause`, whose refusal takes the noun
+      (byte-identical for API credits). The kit's servicing stage is built
+      from the configured section by the stage's `servicing`, and the
+      composition holds it in the new mechanism-neutral
+      `SellingSettlementComposition.servicing`, keyed by mechanism, where
+      `ApiCreditsSettlementComposition` held `arkhai_payments_stage`. One
+      message changed, in no baseline: an acceptance selecting payments with
+      payments not serviced raises "Arkhai payments is not enabled" where it
+      read "... for API credits". Unit (9, over fakes): the payer and clause
+      validators (the refusal's exact text), the selection checks,
+      servicing enabled or not, the reconciliation loop contributed only
+      while serviced, its refusal before persistence, and the refusals
+      without servicing. The receipt-gated service is exercised through the
+      storefront's application-integration suites (`test_payment_settlement.py`,
+      `test_payment_recovery.py`), which now compose it through the stage.
+- [x] 8.3 The API-credits storefront's seller table composes the two entries
       from the new distributions; `settlement_stages.py`,
       `payment_settlement_service.py`, and `settlement/payments.py` are deleted;
       the domain library drops `arkhai-kit-alkahest` and
@@ -2195,14 +2271,66 @@ distributions own them.
       removed and `make check-architecture` reports nothing for it. A packaging
       test that a storefront environment composing only `alkahest.v1` installs
       no payments distribution. (D2, D12, D13.)
-- [ ] 8.4 Uncertain issuance stays retryable under Alkahest: the stage's
+      *Done.* `container.py` holds `SELLER_STAGES` over `ALKAHEST_STAGE` and
+      `PAYMENTS_STAGE`, built by `alkahest_stage()` and `payments_stage()`
+      with the storefront's providers (a test replaces one collaborator, the
+      escrow verifier, through the same factory rather than patching a
+      module); it moved from `settlement_composition.py` because the stages'
+      loops feed `STOREFRONT_LOOPS`, also in the container, and the
+      composition module imports the container. `settlement_composition.py`
+      builds a plain `SellingSettlementComposition`; the
+      `ApiCreditsSettlementComposition` subclass, `SEED_ESCROW_SETTINGS`,
+      `seed_accepted_escrows`, and `require_api_credit_release_model` are
+      gone (`validate_mechanism_configuration` asks each stage). Deleted:
+      `settlement_stages.py`, `services/payment_settlement_service.py`, the
+      domain library's `settlement/` and `negotiation/policies.py`. The
+      domain library drops `arkhai-kit-alkahest`, `arkhai-kit-arkhai-payments`,
+      and `arkhai-kit-settlement-runtime` (only the payment validator imported
+      it) and bumps to 0.11.0; its `ARCHITECTURE.toml` override row is
+      removed, and `make check-architecture` holds every rule over the tree
+      without it. The buyer imported the payer validator from the domain
+      library; it now validates the account through the payments kit's
+      `AccountId` itself (0.5.1; section 10 moves it). The storefront declares
+      the two distributions, keeps `arkhai-kit-alkahest` for the chain clients
+      it builds and the release model it selects, moves
+      `arkhai-kit-arkhai-payments` to its dev group (its tests build payment
+      fixtures), and bumps to 0.15.0; `selling` is 0.4.0. Packaging tests:
+      `selling-alkahest`'s `test_packaging.py` reads its own lock, which
+      stands in for a storefront environment composing only `alkahest.v1`
+      (it resolves `selling` and the escrow library, plus their dev group), and finds `selling` and the escrow library and no
+      payments kit, payments library, or buying distribution;
+      `selling-arkhai-payments`' does the same for payments, finding no escrow
+      library (the Alkahest kit itself stays, since the storefront kit
+      depends on it). The domain library's wheel tests assert it requires
+      neither mechanism kit and carries neither moved module.
+- [x] 8.4 Uncertain issuance stays retryable under Alkahest: the stage's
       `retry_uncertain = False` turns a timeout, a retryable 5xx, or a lost
       acknowledgement into a terminal failure whose failure policy can release
       quota the authority already committed. Keep an uncertain outcome
       pending and re-drive it under the same fulfillment identity, keep the
       capacity hold, compensate only after a definite refusal, and prove a
       timeout and a lost response after commit at library integration.
-- [ ] 8.5 The attestation meets `settlement-servicing`'s "A fulfillment
+      *Done.* The stage's `retry_uncertain` is `True`, so `selling`'s
+      `fulfill` answers a timeout, a retryable status (0, 408, 425, 429, 5xx),
+      a transport error, and a result answering another request as
+      `pending`, running no failure policy and keeping the hold row; a
+      definite refusal still runs the policy. The stage returns a pending
+      issuance as the runtime's `deferred` outcome, which
+      `persist_settlement_outcome` (in `selling`) now leaves open — it recorded
+      every non-fulfilled outcome as failed — so progress stays
+      `provisioning` and the escrow row unfailed, and the buyer's status call
+      re-drives it through the coordinator under the same fulfillment
+      identity, which the request's digest and identity derive from the
+      negotiation. A protocol violation (an unparsable result, a refused
+      extension) stays a failure that compensates nothing, as before. Library
+      integration (`test_delivery.py`, the storefront's real SQLite through
+      `selling`'s client and the real settlement journal): a timeout, a
+      retryable 503, and a response lost after the authority committed each
+      defer with no failure policy, rollback, or submission and the hold
+      kept, then deliver on the re-drive with the same fulfillment identity
+      and request digest and release the hold; a definite 409 fails and runs
+      the policy.
+- [x] 8.5 The attestation meets `settlement-servicing`'s "A fulfillment
       submission with an unknown outcome is never repeated": record a
       first-write-wins submission intent before submitting, so a crash after
       submission cannot lead a re-drive to attest twice; and park an unknown
@@ -2210,15 +2338,59 @@ distributions own them.
       failing the settlement, with the delivered credential stored privately
       so it is not lost. Prove the crash-after-submission and unknown-outcome
       cases.
-- [ ] 8.6 Accepted obligations are serviced after their mechanism is
+      *Done.* The attestation runs through the settlement runtime's
+      fulfillment operation journal, as bare metal's does: the stage reserves
+      the obligation's `fulfill` operation under its own worker identity,
+      completes with a recorded reference without publishing again, parks a
+      recorded submission with no reference, records the submission
+      (`{"evidence_digest": ...}`, first write wins) before calling the
+      chain, records the UID and completes the fulfillment on `published`,
+      parks `outcome_unknown` with the reason `alkahest_submission_outcome_unknown`,
+      and withdraws the submission and compensates the grant on
+      `not_submitted` or `rejected`. A failure before the submission is
+      recorded releases the lease and compensates, as before; a journal it
+      cannot reach, or a lease another attempt holds, defers. A parked deal
+      is `deferred`: its progress stays `provisioning`, the credential is
+      stored privately through `persist_delivery`, and the parked count is
+      the runtime's `manual_required_count`. Library integration
+      (`test_delivery.py`): a published attestation completes the operation
+      and binds the obligation; a lost chain answer parks it with the
+      credential readable by its owner, no rollback, and a re-drive that does
+      not submit again; a process stopped after submitting (the chain call
+      cancelled, so nothing after it runs) leaves a submission, and a
+      restarted stage parks it without submitting; a reverted and an
+      underfunded submission withdraw it and roll the grant back. A parked
+      deal now reads `provisioning` (202) to its buyer, where the unknown
+      outcome read `failed`; no baseline records the status.
+- [x] 8.6 Accepted obligations are serviced after their mechanism is
       disabled: `enabled_mechanism_clients` builds a client only for an
       enabled section, so obligations accepted under Alkahest strand when it is
       disabled and the storefront restarts. Build servicing clients for every
       configured mechanism with recoverable accepted work, whatever its
       publication setting, and prove accept, disable, restart, recover.
+      *Done.* `selling`'s `enabled_mechanism_clients` is
+      `servicing_mechanism_clients`: a client for every configured section,
+      enabled or not, refusing an enabled section whose client cannot be
+      built and skipping a disabled one, as the VM storefront's composition
+      does. "With recoverable accepted work" is read as every configured
+      section, since a section owns the deals accepted under it; no client is
+      built for an unconfigured mechanism. The storefront builds its Alkahest
+      chain clients whenever the section is configured, where it built them
+      only when enabled. Unit (`selling`): enabled, disabled, unbuildable,
+      and unconfigured sections, and the enabled refusal. Library integration
+      (`selling-alkahest`'s `test_servicing.py`, the real journal and the
+      real registration): an obligation accepted and fulfilled under an
+      enabled section is collected by the servicing worker of a runtime
+      rebuilt over a disabled one; it would fail under the old enabled-only
+      clients, which built none for a disabled section. Application
+      integration (`test_alkahest_release_conditions.py`): the storefront
+      started with the section disabled builds its chain clients and composes
+      the Alkahest servicing client over them. One reader-visible change: a
+      configured but disabled section's `alkahest` health value lists its
+      chains, where it read `unconfigured`, since its clients are now built.
       (8.4 to 8.6 were found by the external implementation review of section
       5; each behaviour predates this change and moved unchanged.)
-- [ ] 8.7 The mechanism-specific lifecycle leaves the API-credits composition
+- [x] 8.7 The mechanism-specific lifecycle leaves the API-credits composition
       for the mechanism distributions that own it: the payment-reconciliation
       loop, which `container.py` contributes to `StorefrontLoops` as a
       `ContributedLoop` (`PAYMENT_RECONCILIATION`, `payment_reconciliation_step`,
@@ -2236,11 +2408,109 @@ distributions own them.
       proves an Alkahest-only storefront registers no payment loop and a
       payments-only storefront runs no escrow backfill. (Found by the
       implementation review of section 6.)
-- [ ] 8.8 Verification: `make test-api-selling-alkahest` and
+      *Done.* Each stage contributes `contributed_loops()`, `startup_steps()`,
+      `health_checks()`, `servicing()`, and `validate_configuration()`;
+      `ArkhaiPaymentsSellerStage` contributes the payment reconciliation loop
+      (same name, route, interval key, and step body as
+      `container._payment_loops` had) while payments is serviced, and
+      `AlkahestSellerStage` the escrow backfill startup step and the
+      `alkahest` health check (the text `server._alkahest_check` served, read
+      from the composition's chain clients; see 8.6 for a disabled section). The storefront aggregates
+      them through `container.mechanism_loops`, `mechanism_startup_steps`,
+      and `mechanism_health` over its table. Its remaining mechanism names
+      are the table's two entries, the Alkahest chain clients it builds, and
+      what it wires from the Alkahest stage: the listing service's escrow
+      mechanism and release conditions, the escrow acceptance, the contract's
+      escrow proposal step (`escrow_proposal_step`), the seed's escrow
+      settings and entries, and the publish command's escrow entry
+      (`accepted_escrow`), so no storefront module imports either library but
+      the container. `AlkahestEscrowAcceptance`,
+      `accepted_escrow_proposal`, `seed_accepted_escrows`,
+      `SEED_ESCROW_SETTINGS`, `_backfill_escrow_records`, `_alkahest_check`,
+      `_payment_loops`, `payment_reconciliation_step`, and
+      `resolved_alkahest_clients` are gone from the storefront and the domain
+      library. `selling` keeps the reconciliation query
+      `list_unsettled_payment_negotiations`, a read of the family's settlement
+      tables parameterized by mechanism, not lifecycle. Unit
+      (`tests/unit/test_mechanism_contributions.py`): a storefront whose table
+      composes only the Alkahest stage registers no payment loop through
+      `StorefrontLoops`, and one composing only payments registers it and
+      runs no escrow backfill, while the Alkahest table runs it; the
+      storefront's own table contributes both.
+- [x] 8.8 Verification: `make test-api-selling-alkahest` and
       `make test-api-selling-arkhai-payments` (unit, library integration),
       `make -C domains/apicredits/storefront test` (application integration,
       baselines zero), `make test`, `make check-packaging`. End-to-end:
       `e2e_credits_deal` (Alkahest), `e2e_credits_payment_deal` (payments).
+      *Done 2026-10-24.* `make test-api-selling-alkahest` 29 passed (16 unit,
+      13 library integration against the storefront's real SQLite through
+      `selling`'s client and the real settlement journal), `require-wheels`
+      passing; `make test-api-selling-arkhai-payments` 9 passed (unit).
+      `make test-api-selling` 211 (unit and library integration). `make -C
+      domains/apicredits/storefront test` 174 passed (unit and application
+      integration): 1.5's route, OpenAPI, authentication, refusal, health,
+      configuration, and schema baselines diff to zero, and the pins hold.
+      Domain library 16, buyer 27, service 42. `make -k test` on a copy of the
+      tracked and new files without the other session's stale checkout:
+      every suite passed but for the failures 1.7 to 7.5 record — the three
+      IaC relay-teardown shell tests, the VM storefront's two Alkahest
+      toolchain tests, and GNU make's `--eval` case; Helm is not installed,
+      so the render checks are unrun. On that copy `make check-packaging`
+      passes (uv setup, locks — the two new locks and the selling, domain,
+      buyer, storefront, and `e2e-tests` locks under uv 0.11.17, unchanged by
+      the run — Python version, layout, and all four architecture parts
+      without the domain library's override row). In place, `make
+      check-comment-hygiene` reports only the stale checkout and `make
+      check-change` only it and the two `api-family` documents closeout
+      creates. End-to-end: owed to validation. `e2e_credits_deal` settles
+      through the Alkahest stage (escrow verification, issuance, the
+      journaled attestation) and its contributed backfill and health;
+      `e2e_credits_payment_deal` through the payment stage and its
+      reconciliation loop, and reports a blocked skip in a pipeline with no
+      payments target, as before; `e2e_credits_service_rollback` is
+      unaffected, since the service installs neither library. No scenario
+      was added: parking and the uncertain re-drive have no deployed seam.
+      **Handoff.** The seller table is `container.SELLER_STAGES`, built by
+      `alkahest_stage()` and `payments_stage()`; a test replaces a
+      collaborator through those factories. The payments kit's servicing
+      stage is `composition.servicing[ARKHAI_PAYMENTS_MECHANISM]`, and the
+      payment service is `PAYMENTS_STAGE.service(db, composition)`. Section
+      10's buyer-side libraries can follow the same shape; the buyer's local
+      `validate_payer_account` moves with them. A parked escrow deal stays
+      `provisioning` for its buyer, and the stage reads its `fulfill`
+      operation's state through `composition.repository` before issuing, so a
+      poll never reissues it; resolving a parked deal is an operator's, and
+      no operator route exists for it in this storefront. Every buyer status
+      poll of an open escrow deal still re-verifies the escrow on chain
+      before the stage finds it parked, as status re-drives did before.
+      **Fresh-context check.** It found two defects, both fixed: a parked deal
+      was reissued at the authority on every status poll, rotating an unused
+      new key's secret and logging a lost lease (the stage now returns
+      `deferred` for a parked operation before issuing, and a manual-required
+      reservation no longer parks again; the test authority now rotates a
+      replayed secret, and the parked test asserts one issuance and the same
+      credential after a re-drive); and a parked deal recorded the issuance's
+      identity as its progress `fulfillment_uid`, which the store would then
+      refuse to replace with the attestation's (it records none until
+      resolved; the test resolves one). Accepted besides: a coordinator test
+      that a deferred delivery leaves progress and the escrow row open and the
+      next start delivers under one fulfillment identity
+      (`test_settlement_fulfillment.py`); library tests for a recorded
+      reference completing without publishing and a lease another attempt
+      holds deferring; the application test now asserts the chain clients
+      were built for a disabled section; the storefront reaches the escrow
+      proposal step, seed settings, and publish entry through the stage; the
+      health change, the packaging test's stand-in, and the remaining names
+      disclosed above; the `api-credits` architecture companion named as a
+      promotion destination; `servicing_mechanism_clients` no longer swallows
+      `TypeError` and logs the cause; the publication's `assert` replaced by a
+      check. Declined: the startup test's patch of
+      `server.mechanism_startup_steps`, beside the file's existing patches of
+      `preflight_credits_service` and `_seed_demo_listing`, since its
+      composition stand-in has no runtime for the backfill; and the
+      journal-unreachable and post-publication record-failure branches stay
+      untested, each a log-and-continue of a call the published and parked
+      tests exercise.
 
 ## 9. The gate
 
@@ -2395,6 +2665,9 @@ change to implementation.
 | D7 — core's per-negotiation artifacts gain a `listing` slot (`arkhai-core-storefront` 0.16.0) | `openspec/specs/market-composition/architecture.md` (domain artifacts) |
 | A delivery's public record is safe and final: the result checked against its request, the secret-free extension, terminal progress | `openspec/specs/api-family/spec.md` |
 | D5 — side-split mechanism distributions | `openspec/specs/api-family/spec.md`; `docs/development/ARCHITECTURE.md#family-kits` |
+| D5, D7 — each selling-side mechanism stage takes every collaborator as a constructor argument and supplies its negotiation step, loops, startup steps, health checks, configuration checks, and servicing (`SellingSettlementComposition.servicing`); a storefront registers what the stages its table composes contribute | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| Escrow delivery: uncertain issuance stays open and is re-driven under its fulfillment identity (`deferred` outcome); the attestation's submission is journaled in the settlement runtime before submitting, and an unknown outcome or a reference-less submission parks the obligation with the credential stored privately | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` (the escrow stage's use of the settlement journal, beside bare metal's); `openspec/specs/api-credits/architecture.md` ("Failure and compensation": an unknown attestation outcome parks rather than compensates) |
+| A storefront builds the servicing client of every configured mechanism, enabled or not (`servicing_mechanism_clients`) | `openspec/specs/api-family/spec.md` |
 | D6 — per-domain service roots, the capacity profile | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `docs/development/ARCHITECTURE.md#runtime-service-map` and `#authority-boundaries` |
 | D6 — the authority's startup: the migration chain, then the profile's pool seeded in initialization and every stored pool's declarations checked; the API-credits service's in-process migrations are the library's | `openspec/specs/api-credits/architecture.md#implementation-composition`; `docs/development/DEPLOYMENT_AND_CONFIG.md` (migrations at startup) |
 | D7 — the contribution bundles and the issuance projection | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |

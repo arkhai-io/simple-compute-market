@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from market_alkahest import ReleaseModelError
+from market_alkahest import ALKAHEST_MECHANISM_ID, ReleaseModelError
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_config.config_loader import ChainConfig
@@ -185,3 +185,22 @@ async def test_a_published_listing_advertises_the_recipient_arbiter_paying_the_s
             "demand_data": {"recipient": SELLER_WALLET.lower()},
         }
     ]
+
+
+async def test_a_disabled_section_still_composes_the_servicing_client_its_deals_need(
+    storefront, monkeypatch
+):
+    """Deals accepted under Alkahest are serviced after it stops publishing."""
+
+    async def no_startup_tasks(*, domain):
+        return None
+
+    chain_client = object()
+    monkeypatch.setattr(server, "_startup_tasks", no_startup_tasks)
+    monkeypatch.setattr(server, "_build_alkahest_clients", lambda: {"anvil": chain_client})
+    app = _app()
+    with _replaced(settlement=_settlement(enabled=False)):
+        async with app.router.lifespan_context(app):
+            composition = container.resolved_settlement_composition
+            assert ALKAHEST_MECHANISM_ID in composition.mechanism_clients
+            assert composition.mechanism_resources["get_client"]("anvil") is chain_client

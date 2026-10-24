@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-api-selling"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "The api family's selling library: negotiation, publication, the quota-backed listing and its lifecycle, issuance from verified settlement, the storefront's persistence, authentication, and route services, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
 requires-python = ">=3.12,<3.14"

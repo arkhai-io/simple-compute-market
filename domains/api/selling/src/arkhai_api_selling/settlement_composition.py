@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from arkhai_api_client import AuthorityClient
@@ -39,24 +39,50 @@ def build_settlement_registry(stages: SettlementStageTable) -> SettlementConfigu
     )
 
 
-def enabled_mechanism_clients(
+def servicing_mechanism_clients(
     stages: SettlementStageTable,
     registry: SettlementConfigurationRegistry,
     settlement_config: Any,
     resources: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """The client each enabled mechanism's stage builds from ``resources``, if it builds one."""
+    """The client each configured mechanism's stage builds from ``resources``, if it builds one.
+
+    A configured section owns the deals accepted under it whether or not it
+    publishes new ones, so a disabled section's client is built too; one that
+    cannot be built is skipped, since a disabled section requires nothing.
+    """
     clients: dict[str, Any] = {}
     for registration in registry.ordered_registrations(settlement_config, role="seller"):
         section = settlement_config.mechanism_config(registration.config_key)
-        if section is None or not getattr(section, "enabled", False):
-            continue
         stage = stages.get(registration.mechanism_id)
-        if stage is not None:
+        if section is None or stage is None:
+            continue
+        try:
             client = stage.client(resources)
-            if client is not None:
-                clients[registration.mechanism_id] = client
+        except (KeyError, ValueError) as exc:
+            if getattr(section, "enabled", False):
+                raise
+            logger.warning(
+                "[SETTLEMENT] disabled mechanism %s has no servicing client: %s",
+                registration.mechanism_id,
+                exc,
+            )
+            continue
+        if client is not None:
+            clients[registration.mechanism_id] = client
     return clients
+
+
+def mechanism_servicing(
+    stages: SettlementStageTable, settlement_config: Any
+) -> dict[str, Any]:
+    """Each stage's servicing of the deals accepted under its configured section, where it has one."""
+    servicing: dict[str, Any] = {}
+    for mechanism, stage in stages.items():
+        built = stage.servicing(settlement_config)
+        if built is not None:
+            servicing[mechanism] = built
+    return servicing
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +104,7 @@ class SellingSettlementComposition:
     evidence_service: IssuanceEvidenceService
     private_results: PrivateResultRepository
     failure_policy: Any
+    servicing: Mapping[str, Any] = field(default_factory=dict)
 
     def accepted_settlement_artifacts(self, agreement: Mapping[str, Any]) -> dict[str, Any]:
         mechanism = agreement["settlement"]["mechanism"]
@@ -304,6 +331,15 @@ async def persist_settlement_outcome(
             fulfillment_uid=outcome.fulfillment_ref,
             connection_details=outcome.public_result.get("connection_details"),
             tenant_credentials=None,
+        )
+        return
+    if outcome.status == "deferred":
+        # The stage left the deal open, for a re-drive or an operator, and
+        # recorded what it delivered; nothing is failed.
+        logger.warning(
+            "[SETTLE] settlement deferred for %s: %s",
+            prepared.mechanism_ref,
+            outcome.reason,
         )
         return
     reason = outcome.reason or "fulfillment failed"

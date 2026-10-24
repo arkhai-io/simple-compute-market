@@ -212,6 +212,68 @@ change afterwards.
   `failed` write
 - **THEN** the write is refused and the recorded progress is unchanged
 
+### Requirement: A mechanism's selling-side behaviour lives in its distribution
+
+Each selling-side mechanism distribution MUST provide its seller stage with every
+collaborator injected, and through that stage its negotiation step, timer loops,
+startup steps, health checks, and configuration checks. The selling library and a
+domain's storefront composition MUST hold none of these; a storefront MUST register
+exactly what the stages its table composes contribute.
+
+#### Scenario: An Alkahest-only storefront starts
+
+- **WHEN** a storefront's seller table composes only the escrow stage
+- **THEN** no payment reconciliation loop is registered, and the escrow backfill runs
+  at startup
+
+#### Scenario: A payments-only storefront starts
+
+- **WHEN** a storefront's seller table composes only the payment stage
+- **THEN** no escrow backfill runs, and payment reconciliation is registered while
+  payments is serviced
+
+### Requirement: Escrow delivery is retried without repeating an effect
+
+Under the escrow mechanism, an issuance whose outcome is unknown MUST stay open and be
+re-driven under the same fulfillment identity, keeping its capacity hold; an issued
+grant MUST be compensated only after a definite refusal or a definite non-submission of
+its attestation. The attestation's submission MUST be recorded before it is submitted,
+and an unknown outcome, or a recorded submission with no reference, MUST park the
+obligation for an operator with the delivered credential stored privately.
+
+#### Scenario: Issuance times out
+
+- **WHEN** an issuance times out, answers a retryable server error, or loses its
+  response after the authority committed
+- **THEN** no failure policy runs, the hold stays, and the re-drive issues under the
+  same fulfillment identity and request digest
+
+#### Scenario: The process stops after submitting the attestation
+
+- **WHEN** the attestation's submission was recorded and submitted, and the process
+  stopped before its reference was recorded
+- **THEN** the next attempt does not submit, the obligation waits for an operator, and
+  the grant stands
+
+#### Scenario: The attestation's outcome is unknown
+
+- **WHEN** the chain's answer to the attestation is lost
+- **THEN** the obligation waits for an operator, the buyer's credential is readable
+  from its private result, and no re-drive submits again
+
+### Requirement: Accepted deals are serviced after their mechanism stops publishing
+
+A storefront MUST build the servicing client of every mechanism its configuration
+names, enabled for publication or not, so obligations accepted under a mechanism are
+serviced after it is disabled and the storefront restarts. A disabled section whose
+client cannot be built MUST NOT stop startup.
+
+#### Scenario: A mechanism is disabled after acceptance
+
+- **WHEN** an obligation is accepted under the escrow, the escrow is disabled, and the
+  storefront restarts
+- **THEN** the restarted storefront's servicing worker checks and collects it
+
 ### Requirement: Each domain composes the authority kit in its own service root
 
 The authority library MUST own the key service, the prepaid ledger, the

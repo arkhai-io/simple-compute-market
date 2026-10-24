@@ -6,14 +6,14 @@ from dataclasses import replace
 from functools import partial
 
 from arkhai_api_selling.negotiation import default_seller_round_hook
-from arkhai_apicredits.negotiation.policies import accepted_escrow_proposal
 
 from apicredits_storefront.container import (
+    ALKAHEST_STAGE,
     QUOTA_PUBLICATION,
+    SELLER_STAGES,
     SELLING_CONTRIBUTIONS,
     get_sqlite_client,
 )
-from apicredits_storefront.settlement_composition import SELLER_STAGES
 
 from market_core import (
     DomainCapability,
@@ -48,7 +48,7 @@ def _build_market_domain_contract() -> MarketDomainContract:
                 run_negotiation_policy=partial(
                     default_seller_round_hook,
                     SELLING_CONTRIBUTIONS,
-                    normalize_escrow_proposal=accepted_escrow_proposal,
+                    normalize_escrow_proposal=ALKAHEST_STAGE.escrow_proposal_step,
                 ),
             ),
             publication=ImmutablePublicationCapability(

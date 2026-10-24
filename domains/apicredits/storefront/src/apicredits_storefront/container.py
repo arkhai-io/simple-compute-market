@@ -1,14 +1,15 @@
 """The storefront's dependency container.
 
 The selling bundle and the parts composed over it — the capacity runtime,
-publication, the loops, authentication, and the route services — are fixed for
-the process; the ``resolved_*`` services are set once by the lifespan in
-``server.py``, and each composed part reads them when a request or cycle runs.
+publication, the seller stage table, the loops, authentication, and the route
+services — are fixed for the process; the ``resolved_*`` services are set once
+by the lifespan in ``server.py``, and each composed part reads them when a
+request or cycle runs.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 from arkhai_api_selling.auth import StorefrontAuth
@@ -33,11 +34,17 @@ from arkhai_api_selling.route_services import (
     SystemRoutes,
 )
 from arkhai_api_selling.system import SystemService
+from arkhai_api_selling_alkahest.stage import AlkahestSellerStage
+from arkhai_api_selling_arkhai_payments.stage import ArkhaiPaymentsSellerStage
 from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.schema import API_CREDITS_SCHEMA_KIND, ApiCreditsListing
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.multi_registry_client import MultiRegistryClient
+from core_storefront.stage_log import stage_event
+from market_alkahest import RECIPIENT_RELEASE
+from market_core import SettlementStageTable
 from market_identity import Identity
-from market_storefront_kit import LifecycleRouteError, TradingPause
+from market_storefront_kit import TradingPause
 
 from apicredits_storefront.utils import config
 
@@ -52,9 +59,7 @@ if TYPE_CHECKING:
         SettlementServicingWorker,
         SettlementSQLiteRepository,
     )
-    from apicredits_storefront.settlement_composition import (
-        ApiCreditsSettlementComposition,
-    )
+    from arkhai_api_selling.settlement_composition import SellingSettlementComposition
     from market_identity import Signer
     from market_storefront_kit import StorefrontLoopController
 
@@ -167,38 +172,66 @@ QUOTA_CAPACITY = QuotaCapacity(
 QUOTA_PUBLICATION = QuotaPublication(
     SELLING_CONTRIBUTIONS, capacity=QUOTA_CAPACITY, registry=_registry_publication
 )
-PAYMENT_RECONCILIATION = "payment_reconciliation"
 
 
-def _payment_service() -> Any | None:
-    composition = resolved_settlement_composition
-    if composition is None:
-        return None
-    if resolved_sqlite_client is None:
-        raise LifecycleRouteError(503, "storefront persistence is not initialized")
-    return composition.payment_service(resolved_sqlite_client)
+def alkahest_stage(**collaborators: Any) -> AlkahestSellerStage:
+    """This storefront's Alkahest entry, with any of ``collaborators`` in place of its own."""
+    defaults: dict[str, Any] = {
+        # A credit grant releases to the seller once issued; nothing here
+        # judges an oracle's verdict or splits a refund, so only the recipient
+        # model is delivered.
+        "fulfils_through_capacity": True,
+        "release_models": frozenset({RECIPIENT_RELEASE}),
+        "chains": lambda: config.CHAINS,
+        "seller_wallet": lambda: str(config.settings.get("wallet.address", "") or ""),
+        "composition": lambda: resolved_settlement_composition,
+        "sqlite_client": lambda: resolved_sqlite_client,
+        "backfill_escrows": backfill_escrow_obligation_records,
+        "stage_event": stage_event,
+    }
+    return AlkahestSellerStage(SELLING_CONTRIBUTIONS, **{**defaults, **collaborators})
 
 
-async def payment_reconciliation_step() -> Mapping[str, Any]:
-    service = _payment_service()
-    if service is None:
-        return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
-    done = await service.reconcile_once()
-    return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
+def payments_stage(**collaborators: Any) -> ArkhaiPaymentsSellerStage:
+    """This storefront's Arkhai payments entry, with any of ``collaborators`` in place of its own."""
+    defaults: dict[str, Any] = {
+        "fulfils_through_capacity": True,
+        "capacity": QUOTA_CAPACITY,
+        "hold_ttl_seconds": lambda: float(config.settings.get("capacity.hold_ttl_seconds", 0) or 0),
+        "composition": lambda: resolved_settlement_composition,
+        "sqlite_client": lambda: resolved_sqlite_client,
+        "reconciliation_interval": lambda: config.seconds_setting("payment_reconciliation_interval", 30),
+        "stage_event": stage_event,
+    }
+    return ArkhaiPaymentsSellerStage(SELLING_CONTRIBUTIONS, **{**defaults, **collaborators})
 
 
-def _payment_loops() -> tuple[ContributedLoop, ...]:
-    """Payment reconciliation, a loop only while Arkhai payments is composed."""
-    if _payment_service() is None:
-        return ()
-    return (
-        ContributedLoop(
-            PAYMENT_RECONCILIATION,
-            route="payment-reconciliation",
-            step=payment_reconciliation_step,
-            interval_seconds=config.seconds_setting("payment_reconciliation_interval", 30),
-        ),
-    )
+ALKAHEST_STAGE = alkahest_stage()
+PAYMENTS_STAGE = payments_stage()
+SELLER_STAGES = SettlementStageTable({
+    ALKAHEST_STAGE.mechanism: ALKAHEST_STAGE,
+    PAYMENTS_STAGE.mechanism: PAYMENTS_STAGE,
+})
+
+
+def mechanism_loops(stages: SettlementStageTable) -> tuple[ContributedLoop, ...]:
+    """The loops the composed mechanisms contribute."""
+    return tuple(loop for stage in stages.values() for loop in stage.contributed_loops())
+
+
+def mechanism_startup_steps(
+    stages: SettlementStageTable,
+) -> tuple[Callable[[], Awaitable[None]], ...]:
+    """The startup steps the composed mechanisms contribute."""
+    return tuple(step for stage in stages.values() for step in stage.startup_steps())
+
+
+def mechanism_health(stages: SettlementStageTable) -> dict[str, str]:
+    """The health checks the composed mechanisms contribute."""
+    checks: dict[str, str] = {}
+    for stage in stages.values():
+        checks.update(stage.health_checks())
+    return checks
 
 
 STOREFRONT_LOOPS = StorefrontLoops(
@@ -206,7 +239,7 @@ STOREFRONT_LOOPS = StorefrontLoops(
     settlement_worker=lambda: resolved_settlement_worker,
     capacity=QUOTA_CAPACITY,
     settings=config.LOOP_SETTINGS,
-    contributed_loops=_payment_loops,
+    contributed_loops=lambda: mechanism_loops(SELLER_STAGES),
 )
 
 AUTH = StorefrontAuth(
@@ -247,10 +280,9 @@ resolved_settlement_runtime: "SettlementRuntime | None" = None
 resolved_settlement_worker: "SettlementServicingWorker | None" = None
 resolved_settlement_coordinator: "SettlementJobCoordinator | None" = None
 resolved_failure_policy: "FailurePolicy | None" = None
-resolved_settlement_composition: "ApiCreditsSettlementComposition | None" = None
+resolved_settlement_composition: "SellingSettlementComposition | None" = None
 resolved_issuance_evidence_service: "IssuanceEvidenceService | None" = None
 resolved_private_result_repository: "PrivateResultRepository | None" = None
-resolved_alkahest_clients: dict[str, Any] = {}
 resolved_listing_service: "ListingService | None" = None
 resolved_negotiation_service: "NegotiationService | None" = None
 resolved_negotiation_runtime: "NegotiationRuntime | None" = None
@@ -283,7 +315,6 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     global resolved_settlement_composition
     global resolved_issuance_evidence_service
     global resolved_private_result_repository
-    global resolved_alkahest_clients
     global resolved_listing_service
     global resolved_negotiation_service
     global resolved_system_service
@@ -305,7 +336,6 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     resolved_settlement_composition = None
     resolved_issuance_evidence_service = None
     resolved_private_result_repository = None
-    resolved_alkahest_clients = {}
     resolved_listing_service = None
     resolved_negotiation_service = None
     resolved_system_service = None
@@ -313,13 +343,3 @@ def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:
     if resolved_loop_controller is not None:
         resolved_loop_controller.clear_loops()
     resolved_loop_controller = None
-
-
-def get_alkahest_client(chain_name: str) -> Any | None:
-    """Return the AlkahestClient for ``chain_name``, or ``None`` if absent."""
-    return resolved_alkahest_clients.get(chain_name)
-
-
-def configured_chain_names() -> list[str]:
-    """Return the chains that have a live AlkahestClient available."""
-    return list(resolved_alkahest_clients.keys())

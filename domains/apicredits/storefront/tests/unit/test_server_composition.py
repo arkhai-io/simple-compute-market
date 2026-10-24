@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import arkhai_api_selling.lifecycle as lifecycle_module
 import pytest
+from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM
 from market_identity import Ed25519Signer
 from storefront_client.settlement_routes import unmounted_settlement_routes
 
@@ -117,7 +118,7 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     """
     domain = get_market_domain_contract()
     composition = (
-        SimpleNamespace(payment_service=lambda _db: object()) if payments else None
+        SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: object()}) if payments else None
     )
     monkeypatch.setattr(container, "resolved_settlement_composition", composition)
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
@@ -144,6 +145,7 @@ async def test_startup_registers_and_starts_every_loop(monkeypatch, payments):
     monkeypatch.setattr(lifecycle_module, "get_thread_store", lambda **_kwargs: None)
     monkeypatch.setattr(server, "preflight_credits_service", _noop)
     monkeypatch.setattr(server, "_seed_demo_listing", _noop)
+    monkeypatch.setattr(server, "mechanism_startup_steps", lambda _stages: ())
 
     timed = {"negotiation_watchdog", "settlement_servicing"}
     if payments:
@@ -336,7 +338,7 @@ def test_an_unusable_payment_reconciliation_interval_refuses_its_registration(mo
     monkeypatch.setattr(
         container,
         "resolved_settlement_composition",
-        SimpleNamespace(payment_service=lambda _db: object()),
+        SimpleNamespace(servicing={ARKHAI_PAYMENTS_MECHANISM: object()}),
     )
     monkeypatch.setattr(container, "resolved_sqlite_client", object())
     with settings_overrides(payment_reconciliation_interval=0):

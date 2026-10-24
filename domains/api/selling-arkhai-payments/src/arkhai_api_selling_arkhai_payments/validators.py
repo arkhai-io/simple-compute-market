@@ -1,4 +1,4 @@
-"""API-credit vocabulary on the shared Arkhai payments surface: payer and rate validation."""
+"""The payer and publication-clause checks a credit sale makes on the Arkhai payments surface."""
 
 from __future__ import annotations
 
@@ -13,8 +13,11 @@ def validate_payer_account(value: Any) -> str:
     return AccountId.model_validate(value).root
 
 
-def validate_payment_publication_clause(value: Any) -> SettlementPublicationClause:
-    """Map supported credit units to the shared integer-base-unit rate surface."""
+def validate_payment_publication_clause(value: Any, *, noun: str) -> SettlementPublicationClause:
+    """Map supported credit units to the shared integer-base-unit rate surface.
+
+    ``noun`` names what is sold, as the composing storefront's refusals spell it.
+    """
     clause = SettlementPublicationClause.model_validate(value)
     if (
         clause.mechanism != ARKHAI_PAYMENTS_MECHANISM
@@ -22,7 +25,7 @@ def validate_payment_publication_clause(value: Any) -> SettlementPublicationClau
         or clause.rate is None
         or not clause.rate.isdigit()
     ):
-        raise ValueError("API-credit payment rate must be integer base units per credit")
+        raise ValueError(f"{noun} payment rate must be integer base units per credit")
     return clause
 
 

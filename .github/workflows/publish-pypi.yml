@@ -109,6 +109,8 @@ jobs:
             api-client: ['domains/api/client/**', '.github/workflows/publish-pypi.yml']
             api-authority: ['domains/api/authority/**', '.github/workflows/publish-pypi.yml']
             api-selling: ['domains/api/selling/**', '.github/workflows/publish-pypi.yml']
+            api-selling-alkahest: ['domains/api/selling-alkahest/**', '.github/workflows/publish-pypi.yml']
+            api-selling-arkhai-payments: ['domains/api/selling-arkhai-payments/**', '.github/workflows/publish-pypi.yml']
             bare-metal: ['domains/bare_metal/pyproject.toml', 'domains/bare_metal/src/**', 'domains/bare_metal/tests/**', '.github/workflows/publish-pypi.yml']
             bare-metal-storefront: ['domains/bare_metal/storefront/**', '.github/workflows/publish-pypi.yml']
             bare-metal-buyer: ['domains/bare_metal/buyer/**', '.github/workflows/publish-pypi.yml']
@@ -176,6 +178,8 @@ jobs:
             {"key": "api-client",             "path": "domains/api/client",               "dist": "arkhai-api-client"},
             {"key": "api-authority",          "path": "domains/api/authority",            "dist": "arkhai-api-authority"},
             {"key": "api-selling",            "path": "domains/api/selling",              "dist": "arkhai-api-selling"},
+            {"key": "api-selling-alkahest",   "path": "domains/api/selling-alkahest",     "dist": "arkhai-api-selling-alkahest"},
+            {"key": "api-selling-arkhai-payments", "path": "domains/api/selling-arkhai-payments", "dist": "arkhai-api-selling-arkhai-payments"},
             {"key": "bare-metal",            "path": "domains/bare_metal",              "dist": "arkhai-bare-metal"},
             {"key": "bare-metal-storefront", "path": "domains/bare_metal/storefront",   "dist": "arkhai-bare-metal-storefront"},
             {"key": "bare-metal-buyer",      "path": "domains/bare_metal/buyer",        "dist": "arkhai-bare-metal-buyer"},

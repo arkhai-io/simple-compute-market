@@ -390,9 +390,10 @@ canonicalization, an `EscrowAcceptance` that offers and accepts an escrow, and
 the mechanism a listing's accepted escrows publish under with their release
 conditions. A mechanism's timer loops and startup steps are contributed to
 `selling`'s lifecycle as registrations (`ContributedLoop`, startup steps), never
-named by it. The API-credits storefront supplies the Alkahest and payments
-contributions until the selling-side mechanism distributions own them (task
-8.7). Reconciliation reads every listing by the core store's keyset over
+named by it. Each selling-side mechanism distribution's stage supplies them, with
+its negotiation step, health checks, configuration checks, and servicing, and a
+storefront registers what the stages its table composes contribute, so the
+storefront names a mechanism only where it selects one. Reconciliation reads every listing by the core store's keyset over
 `(created_at, listing_id)`, which no write changes, so a pass visits each
 listing once. A thread takes its listing's binding when it opens, and the
 opening is one transaction: the negotiation runtime's `open_negotiation` hook
