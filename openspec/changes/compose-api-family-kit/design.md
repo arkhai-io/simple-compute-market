@@ -381,8 +381,9 @@ those it served before the kit. A listing's amount rate is the one `amount`
 rate its selected option or escrow states, in a per-credit unit; two, or one in
 another unit, are refused, and the configured floor applies only where none is
 stated. The domain's publication guards run wherever a listing publishes: at
-creation, on an administrator's resume, and on a reconciliation reopen, where a
-refused listing stays closed. Escrow handling is injected rather than imported,
+creation, on an administrator's resume, on a reconciliation reopen, where a
+refused listing stays closed, and on a registry divergence repair, which leaves
+a refused open listing unrepaired. Escrow handling is injected rather than imported,
 since `selling` knows no mechanism: the opening guard's escrow
 canonicalization, an `EscrowAcceptance` that offers and accepts an escrow, and
 the mechanism a listing's accepted escrows publish under with their release
@@ -394,6 +395,14 @@ contributions until the selling-side mechanism distributions own them (task
 `(created_at, listing_id)`, which no write changes, so a pass visits each
 listing once; a thread takes its listing's binding when it opens, and whether
 the opening's writes commit in one transaction is task 7.3's.
+
+The family's storefronts share one configuration layout for what `selling`
+reports on: `selling` reads no configuration itself, but a refusal for a
+missing or malformed setting names the key a family storefront spells it
+under (`[seller.pricing].default_min_price`, `[capacity.sites]`), so the
+operator is pointed at the line to fix and API credits' messages stay
+byte-identical. A family storefront that laid its settings out differently
+would need these names passed in.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,

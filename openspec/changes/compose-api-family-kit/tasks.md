@@ -1800,8 +1800,15 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       three storefront tests that import it read it, and the runtime reason is
       removed. The lock still resolves 0.10.3, through `selling`. *D12:* "its
       seed" is the `[seed]` values API credits keeps; the seed code is the
-      family's, in `selling`, and D12 now says so. The exception row's owner
-      stays open.
+      family's, in `selling`, and D12 now says so. *Exception row:* the row
+      and its owner stay; its reason now says where each edge resolves under
+      the owning change's carve-out — the registry types, status models, and
+      capacity protocols to the storefront contracts kit, the stage log and
+      placement policies with the rest of `core/storefront` to
+      `kit/storefront`, both permitted targets for `selling`. *Configuration
+      key names:* `selling`'s refusals keep naming `[seller.pricing]` and
+      `[capacity.sites]`; D7 records the shared layout as the family's
+      convention.
 
 ## 7. Selling, part three: route services, authentication, persistence client, and bindings
 
@@ -2076,6 +2083,7 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — the family's storefronts share one configuration layout, which `selling`'s refusals name (`[seller.pricing]`, `[capacity.sites]`) though it reads no configuration | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
