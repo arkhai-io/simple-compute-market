@@ -2,7 +2,7 @@
 
 ### Requirement: Mechanism clause fields stay in their namespace
 
-Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The lifecycle term codec's common fields (`adjudication.*`, `early_termination.*`, `bond.*`) are the one exception: the codec owns them for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
+Mechanism-contributed clause fields MUST live under the mechanism's configuration-key namespace and declare their applicable roles, operators, and value types. The lifecycle term codec's common fields (`adjudication.*`, `early_termination.*`) are the one exception: the codec owns them for every mechanism. The shared foundation MUST own registration, grammar integration, ordering, common status, exact option correlation, and composition, and MUST NOT interpret chain-, arbiter-, condition-, or financial-authority fields.
 
 #### Scenario: A mechanism contributes a clause field
 
@@ -42,6 +42,15 @@ Each affected role MUST provide dry-run and write modes that map still-supported
 
 - **WHEN** migration encounters `[Settlement.alkahest].interruptible = true`
 - **THEN** it writes `release_models = ["interruptible"]` and removes the flag
+
+### Requirement: Each mechanism's option carries its own parameters
+
+Alkahest options MUST carry their escrow policy in mechanism-owned parameters; legacy Alkahest listing fields remain supported by the escrow path and MUST NOT become requirements of Arkhai payments. An `arkhai.payments.v1` option MUST carry the mechanism-owned payee account, approval window, and agreement-deposit setting needed to derive and disclose its payment policy, and its hold follows the option's `adjudication.dispute_window_seconds`.
+
+#### Scenario: Arkhai payment option is published
+
+- **WHEN** a seller publishes an `arkhai.payments.v1` option
+- **THEN** the option identifies its payee account, approval window, dispute window, and agreement-deposit setting while core exposes only the shared option envelope
 
 ## ADDED Requirements
 

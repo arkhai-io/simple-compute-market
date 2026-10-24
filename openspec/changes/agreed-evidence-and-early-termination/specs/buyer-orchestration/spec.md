@@ -32,7 +32,7 @@ The typed storefront client MUST settle an Agreement-settled deal with `settle_a
 
 ### Requirement: Buyer lifecycle actions go through the buyer half
 
-Buyer payment commands, dispute filing, and read MUST go through the buyer half of the lifecycle interface, dispatched by the domain's buyer stage table, without core buyer code binding the lifecycle kits. After a filed dispute the buyer client MUST send a `hint` to the seller.
+Dispute filing, read, and any payment command the deal's parts offer the buyer MUST go through the buyer half of the lifecycle interface, dispatched by the domain's buyer stage table, without core buyer code binding the lifecycle kits. After a filed dispute the buyer client MUST send a `hint` to the seller.
 
 #### Scenario: A buyer files a dispute on a hosted deal
 

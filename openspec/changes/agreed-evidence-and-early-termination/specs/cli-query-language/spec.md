@@ -2,7 +2,7 @@
 
 ### Requirement: Settlement fields have common and mechanism-owned namespaces
 
-The settlement DSL MUST reserve common fields for immutable option identity and mechanism-neutral values, including mechanism, option ID, and asset, and the lifecycle term codec's projections (`adjudication.regime`, `early_termination.payer`, `early_termination.payee`, `early_termination.payee.notice_seconds`, `bond.amount`). A settlement registration MAY contribute typed public projection fields only under its configuration-key namespace, such as `arkhai_payments.deposit_agreement` or `alkahest.chain`. Unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC, or non-public fields MUST be rejected. Shared parsing and selection MUST treat contributed values as typed projections and MUST NOT interpret opaque mechanism parameters.
+The settlement DSL MUST reserve common fields for immutable option identity and mechanism-neutral values, including mechanism, option ID, and asset, and the lifecycle term codec's projections (`adjudication.regime`, `early_termination.payer`, `early_termination.payee`, `early_termination.payee.notice_seconds`). A settlement registration MAY contribute typed public projection fields only under its configuration-key namespace, such as `arkhai_payments.deposit_agreement`, `arkhai_payments.approval_window`, or `alkahest.chain`. Unknown, role-inapplicable, secret, credential, provider-administrator, raw RPC, or non-public fields MUST be rejected. Shared parsing and selection MUST treat contributed values as typed projections and MUST NOT interpret opaque mechanism parameters.
 
 #### Scenario: Qualified Arkhai payment field is used
 
