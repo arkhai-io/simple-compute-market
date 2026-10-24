@@ -67,10 +67,14 @@ def _read_toml(path: Path) -> dict:
         raise DerivationError(f"{path} is not valid TOML: {exc}") from None
 
 
-def wheelhouse_requirements(project: Path, wheelhouse: Path) -> dict[str, str]:
-    """Each package the project's lock resolves from ``wheelhouse``, normalised, with the version it records."""
+def wheelhouse_requirements(project: Path, wheelhouse: Path) -> list[tuple[str, str]]:
+    """Each (normalised name, version) pair the project's lock resolves from ``wheelhouse``.
+
+    A lock may hold one name at several versions, under different markers; each
+    is a wheel the wheelhouse must hold.
+    """
     lock = project / "uv.lock"
-    requirements: dict[str, str] = {}
+    requirements: set[tuple[str, str]] = set()
     for package in _read_toml(lock).get("package", []):
         registry = (package.get("source") or {}).get("registry")
         if not isinstance(registry, str) or "://" in registry:
@@ -80,13 +84,24 @@ def wheelhouse_requirements(project: Path, wheelhouse: Path) -> dict[str, str]:
                 f"{lock} resolves {package['name']} from {registry}, which is "
                 f"not the repository wheelhouse"
             )
-        requirements[normalise(package["name"])] = str(package["version"])
-    return dict(sorted(requirements.items()))
+        requirements.add((normalise(package["name"]), str(package["version"])))
+    return sorted(requirements)
 
 
 def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
     """Normalised names the project's lock resolves from ``wheelhouse``."""
-    return list(wheelhouse_requirements(project, wheelhouse))
+    return sorted({name for name, _ in wheelhouse_requirements(project, wheelhouse)})
+
+
+def wheels_present(wheelhouse: Path) -> set[tuple[str, str]]:
+    """The (normalised name, version) pairs ``wheelhouse`` holds a wheel for."""
+    present: set[tuple[str, str]] = set()
+    for wheel in wheelhouse.glob("*.whl"):
+        # A wheel file name is name-version[-build]-python-abi-platform.whl.
+        parts = wheel.name[: -len(".whl")].split("-")
+        if len(parts) >= 5:
+            present.add((normalise(parts[0]), parts[1]))
+    return present
 
 
 def declared_distribution(project: Path) -> tuple[str, str]:
@@ -136,10 +151,11 @@ def _each(flag: str, values: Sequence[str]) -> list[str]:
 def missing_wheels(project: Path, root: Path) -> list[str]:
     """Each internal package the project's lock names without a wheel at the locked version, as ``name==version``."""
     wheelhouse = root / WHEELHOUSE_NAME
+    present = wheels_present(wheelhouse)
     return [
         f"{name}=={version}"
-        for name, version in wheelhouse_requirements(project, wheelhouse).items()
-        if not any(wheelhouse.glob(f"{name.replace('-', '_')}-{version}-*.whl"))
+        for name, version in wheelhouse_requirements(project, wheelhouse)
+        if (name, version) not in present
     ]
 
 

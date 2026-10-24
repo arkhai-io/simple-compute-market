@@ -1850,6 +1850,18 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
         composition's key is task 7.4.
       - *The exception row.* Its reason and the owner-decision note above no
         longer assert destinations the owning change has not settled.
+      - *Inherited, not this section's:* the kit's convergence reads each
+        listing's status with its divergence and repairs to that status, so a
+        status that changes between the read and the repair is repaired to
+        the earlier one until the next pass; the race is the
+        capacity-publication kit's, and predates this change.
+      - *Fourth round (2026-10-24):* `require-wheels` checks every (normalised
+        name, version) pair the lock records, matching wheels by their
+        normalised name, so a name locked at two versions needs both wheels
+        (`scripts/tests`, 15 passed). Task 7.4 is now the decision — the
+        refusals name the composition's key, with the three affected 404
+        bodies named and no baseline to re-record — and the promotion record
+        carries only that final contract.
       Evidence, from a copy of the tracked files only, in the reviewer's order:
       `make test-api-selling` 163 passed; `make dist` passes; `make
       check-packaging` passes with every lock unchanged; `make test-api-selling`
@@ -1899,16 +1911,21 @@ scenario "A storefront binds the negotiate route"). Touches
       (Found by the implementation review of section 6; the separate commits
       predate this change. Nothing in section 6 claims the opening is
       transactional.)
-- [ ] 7.4 `selling`'s configuration refusals name the composing storefront's
-      own key: the pricing floor's and the capacity sites' refusals take the
-      setting's name from the composition (API credits: `[pricing].default_min_price`,
-      `[capacity.sites]`) in place of the fixed text `[seller.pricing].default_min_price`,
-      which no storefront's settings spell. The API-credits pricing refusal
-      text changes with it, so the owner decides at this task whether to
-      re-record that refusal's body once as an accepted baseline change or to
-      keep the fixed text as the compatibility text. (Found by the
-      implementation review of section 6, which claimed the text named a
-      family layout; D7 now states what it names.)
+- [ ] 7.4 `selling`'s configuration refusals name the key the composing
+      storefront spells: the pricing floor's three refusals (unconfigured;
+      not a number, twice) and the capacity sites' refusal take the setting's
+      name from the composition. API credits passes
+      `[pricing].default_min_price` and `[capacity.sites]`. Compatibility: the
+      three pricing refusals are served 404 as `{"detail": <message>}` by the
+      negotiate route and change from `[seller.pricing].default_min_price`,
+      which no storefront's settings spell, to `[pricing].default_min_price`;
+      no compatibility baseline records them (`configuration.json` lists the
+      setting, not a body), so none is re-recorded, and the corrected bodies
+      are asserted byte-exact through the canonical client in
+      `test_refusal_bodies.py`. The capacity refusal is a startup refusal, not
+      a served body, and its text is already API credits' key, so it does not
+      change. Every other refusal body stays byte-identical. (Found by the
+      implementation review of section 6.)
 - [ ] 7.5 Verification: `make test-api-selling` (unit), `make -C
       domains/apicredits/storefront test` (application integration through the
       typed storefront client: every route's baseline diffs to zero, the
@@ -2143,7 +2160,7 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
-| D7 — `selling`'s configuration refusals carry fixed text: `[capacity.sites]` is API credits' key, `[seller.pricing].default_min_price` is no storefront's, and the text stays byte-identical until task 7.4 names the composition's key | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — `selling`'s configuration refusals name the key the composing storefront spells (API credits: `[pricing].default_min_price`, `[capacity.sites]`); task 7.4 delivers it | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair, where the hook runs on the stored listing as it is republished; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |

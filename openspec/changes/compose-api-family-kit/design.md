@@ -404,9 +404,11 @@ keep the text the storefronts served before the kit, which names
 the floor there — API credits reads `[pricing].default_min_price`, as the
 compute storefronts do — so the text does not point an operator at the key
 they edit, and it is kept byte-identical for compatibility. The capacity
-refusal names `[capacity.sites]`, which is API credits' key. Naming the
-composing storefront's own key is task 7.4's, with the API-credits refusal
-text re-recorded once if the owner accepts that change.
+refusal names `[capacity.sites]`, which is API credits' key. The contract the
+family keeps is that a configuration refusal names the key the composing
+storefront spells, which task 7.4 delivers: the three pricing refusals, served
+404 on the negotiate route and recorded in no baseline, change to
+`[pricing].default_min_price` for API credits, and no other body changes.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,
