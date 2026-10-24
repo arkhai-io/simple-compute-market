@@ -243,7 +243,7 @@ Resource Pool policy metadata MUST support stable domain-neutral keys for `listi
 
 Each Resource Pool MUST declare the set of offering modes its configured provider can deliver under the domain-neutral `deliverable_modes` policy tag. The shared resource-pool capability MUST validate this declaration as a JSON-compatible set of unique, non-empty strings and expose typed resolution and membership behavior without defining which names are meaningful to a domain. An absent or empty declaration authorizes no mode and MUST NOT be widened by a default.
 
-Create, replace, patch, bulk import, projection, and canonical export MUST use the existing policy-tag channel and precedence. An existing pool's initial set MUST be derived only from durable provider, playbook, and registered requirement-delegate configuration that proves the pool can deliver that mode. Derivation MUST include the system-owned `default` pool, MUST NOT use reservation history as capability evidence, MUST replace an unproved legacy declaration with the exact proved set, and MUST report each derived set at INFO.
+Create, replace, patch, bulk import, projection, and canonical export MUST use the existing policy-tag channel and precedence. An existing pool's initial set MUST be derived only from durable provider, playbook, and registered requirement-delegate configuration that proves the pool can deliver that mode. Derivation MUST cover every stored pool, whatever its ID, MUST NOT use reservation history as capability evidence, MUST replace an unproved legacy declaration with the exact proved set, and MUST report each derived set at INFO.
 
 #### Scenario: Pool declares two modes
 
@@ -257,7 +257,7 @@ Create, replace, patch, bulk import, projection, and canonical export MUST use t
 
 #### Scenario: Existing default pool is migrated
 
-- **WHEN** the default pool has an Ansible playbook and the registered VM requirement delegate
+- **WHEN** a stored pool named `default` has an Ansible playbook and the registered VM requirement delegate
 - **THEN** migration declares exactly `vm`, reports that conclusion, and does not infer another mode from historical reservations
 
 #### Scenario: Legacy declaration is wider than configuration
@@ -485,8 +485,8 @@ both tags on the existing policy-tag channel. A producer that emits either tag M
 emit it for every Resource Pool it projects, so that a consumer can distinguish a
 producer that predates the tag from a producer that omitted it for one pool.
 
-On upgrade, every existing Resource Pool — including the system-owned `default`
-pool and pools held by any service that stores its own Resource Pools — MUST have
+On upgrade, every stored Resource Pool, whatever its ID — including pools held by
+any service that stores its own Resource Pools — MUST have
 both tags written by migration: `advertisable_modes` equal to its proved
 deliverable set, and `capacity_backing: backed`. Migration MUST overwrite any value
 previously stored under either key, MUST report each derived value at INFO, and MUST
