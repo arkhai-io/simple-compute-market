@@ -773,16 +773,22 @@ priority order, each with its harness and effort. The wrapper MUST run the first
 available model, MUST fall to the next only when one is unavailable — a usage
 limit, a missing sign-in, or a missing harness — and MUST record on the run's log
 line the model and effort that ran. The table MUST NOT name a Fable or Astra model,
-and a row MUST NOT list two models of one vendor. A model of another harness MUST
-appear only on a row whose limits that harness can enforce. A run whose models are
+and a row MUST NOT list two models of one vendor, a vendor being the account a model
+bills: Codex and pi's `openai-codex` provider are one OpenAI subscription, and Claude
+and pi's `anthropic` provider one Anthropic account. A model of another harness MUST
+appear only on a row whose limits that harness can enforce; Codex, pi, and bb threads
+MAY appear on the review row alone, since a review's only output is its final message.
+An OpenAI model on pi MUST run through `openai-codex`, never the per-token `openai`
+provider. A run whose models are
 all unavailable MUST end stopped, naming the reason; a network error MUST be retried
 and MUST NOT cause a fallback. A waiting run MUST be resumed only on the model it ran
 on. A review run on a model other than its row's first MUST name its reviewer's
 harness and model in its record, and a review MUST continue a previous reviewer's
 session only on the same harness. The owner MAY name, for one review run by hand,
-any model, outside the table's policy, or an effort for its models; a model named
-MUST then be the run's only one, with no fallback, and the record and its log line
-MUST mark the run as an override.
+any model, outside the table's policy, a harness — Codex, Claude, pi, or a bb thread
+the owner can watch and join — or an effort for its models; a model named MUST then
+be the run's only one, with no fallback, and the record and its log line MUST mark
+the run as an override.
 The orchestrating session MUST NOT name one.
 
 #### Scenario: The owner reviews on a model the table forbids
@@ -797,9 +803,19 @@ The orchestrating session MUST NOT name one.
 - **THEN** the review runs on the row's next model, Claude, its record and log line
   name the reviewer's harness and model, and triage follows as usual
 
+#### Scenario: The owner reviews as a bb thread
+
+- **WHEN** the owner runs a review by hand on the bb harness, naming a bb provider
+  and its model
+- **THEN** the review runs as a bb thread in the checkout, linked to the owner's
+  thread when there is one; its final output is published as the record, which
+  names the thread as its session, and the next review of that kind tells the same
+  thread to review again
+
 #### Scenario: A row names a forbidden model
 
-- **WHEN** the step table names a Fable model, or two Claude models on one row
+- **WHEN** the step table names a Fable model, two Claude models on one row, Codex
+  beside pi's `openai-codex` provider, or an OpenAI model on pi's `openai` provider
 - **THEN** the wrapper refuses to load the table, naming the row
 
 #### Scenario: A step's only model is at its usage limit
@@ -812,7 +828,9 @@ The orchestrating session MUST NOT name one.
 
 Each unattended run's log line MUST record its cost: for a Claude run, the dollars,
 turns, duration, and input, output, cache-read, and cache-write tokens of that run
-alone, over all its turns; for a Codex review, the tokens it reports. Where a run's
+alone, over all its turns; for a Codex review, the tokens it reports; for a pi
+review, the dollars and tokens its messages report. A review run as a bb thread
+records none, since bb reports no cost to its caller. Where a run's
 own dollars cannot be told from its session's earlier turns — a crashed run before
 it, or turns the wrapper did not run — the line MUST mark its dollars as partial. A resumed
 run MUST also record the time since its session's last turn of any kind and whether

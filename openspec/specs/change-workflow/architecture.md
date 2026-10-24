@@ -248,17 +248,26 @@ so a second model of the same vendor is no fallback. Codex appears only where it
 sandbox can hold a step to its limits, which is the review alone, falling back to
 Claude when Codex is unavailable: a review on a second model reads the work with
 another eye, a review on Claude is better than none, and halting on a missing
-reviewer only costs the owner time. A step whose one model is unavailable stops with
+reviewer only costs the owner time. pi and bb threads may run the review too: they
+hold a reviewer to its limits only by its prompt, which is enough when the step's
+only output is a final message the wrapper checks, and not for a step that commits
+or relocks. A vendor is the account a model bills, not the harness that runs it:
+pi's `openai-codex` provider is the ChatGPT subscription Codex uses, so the two are
+one vendor, and an OpenAI model on pi goes through that subscription rather than the
+per-token API. A step whose one model is unavailable stops with
 the time its limit resets. A network error is retried, never a reason to fall back.
 A waiting run resumes only on the model it ran on, since a session cannot move
-between harnesses. The owner may name any model for a review run by hand, outside
-the policy on purpose; the record says so, and the orchestrating session never does.
+between harnesses. The owner may name any model or harness for a review run by hand,
+outside the policy on purpose; the record says so, and the orchestrating session
+never does. A review run as a bb thread is one the owner can watch and step into; its
+thread is the reviewer's session, told to review again next round.
 
 ## Every run records its cost
 
 Each log line carries the model and effort that ran and what the run cost: for a
-Claude run its own dollars, turns, duration, and tokens, and for a Codex review the
-tokens it reports. A resumed session's dollar total is its running total, so a run's
+Claude run its own dollars, turns, duration, and tokens, for a Codex review the
+tokens it reports, and for a pi review the dollars and tokens its messages report;
+bb reports no cost to its caller, so a bb thread's review records none. A resumed session's dollar total is its running total, so a run's
 dollars are that total less the session's previous one, and are marked partial when
 something intervened — a crashed run, or turns the owner took over. A resumed run
 also records the gap since its session's last turn and whether it read the prompt

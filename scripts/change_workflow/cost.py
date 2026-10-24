@@ -64,6 +64,27 @@ def codex_cost(transcript: Path) -> Entry:
     return {"tokens": sum(int(count.replace(",", "")) for count in counts)} if counts else {}
 
 
+def pi_cost(transcript: Path) -> Entry:
+    """The dollars and tokens a pi review's assistant messages report, summed over
+    the attempts its transcript holds."""
+    usd, tokens, seen = 0.0, 0, False
+    text = transcript.read_text("utf-8", "replace") if transcript.is_file() else ""
+    for line in text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = event.get("message") if isinstance(event, dict) else None
+        if (event.get("type") != "message_end" or not isinstance(message, dict)
+                or message.get("role") != "assistant"):
+            continue
+        usage = message.get("usage") or {}
+        seen = True
+        tokens += int(usage.get("totalTokens") or 0)
+        usd += float((usage.get("cost") or {}).get("total") or 0)
+    return {"usd": round(usd, 6), "tokens": tokens} if seen else {}
+
+
 @dataclass(frozen=True)
 class Conversation:
     """What Claude Code's own record of a session says: how many turns it holds,
@@ -173,8 +194,15 @@ def measured_cost(results: Sequence[dict[str, Any]], first_usage: dict[str, Any]
 def review_cost(transcript: Path, log: Path, session: str | None, harness: str | None,
                 started: datetime) -> Entry:
     """What a review's run cost, read from its transcript: the tokens Codex
-    reports, or a Claude run's cost as a step's is measured, against the total its
-    session's last logged review left when it continues one."""
+    reports, a pi run's dollars and tokens, or a Claude run's cost as a step's is
+    measured, against the total its session's last logged review left when it
+    continues one. A bb thread's run records none: bb reports no cost to its
+    caller."""
+    if harness == "pi":
+        cost = pi_cost(transcript)
+        return {"cost": cost} if cost else {}
+    if harness == "bb":
+        return {}
     if harness != "claude":
         cost = codex_cost(transcript)
         return {"cost": cost} if cost else {}

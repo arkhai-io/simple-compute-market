@@ -21,6 +21,7 @@ from change_workflow.log import (branch_decisions, last_entries, log_path, note_
                                  note_round, read_log)
 from change_workflow.records import git_head
 from change_workflow.review import DEFAULT_BASE, review_and_log
+from change_workflow.steps import HARNESSES
 from change_workflow.watch import denial_report, watch
 from change_workflow.wrapper import Wrapper
 
@@ -75,8 +76,12 @@ def _parser() -> argparse.ArgumentParser:
     review.add_argument("--base", default=DEFAULT_BASE)
     review.add_argument("--model", default=None,
                         help="the owner's choice of reviewer for this run, outside the review "
-                             "row's policy: a claude- model runs on Claude, any other on Codex, "
-                             "with no fallback")
+                             "row's policy, with no fallback: a claude- model runs on Claude, a "
+                             "<provider>/<model> on pi, any other on Codex, unless --harness "
+                             "names one; a bb thread's is <bb provider>/<model>")
+    review.add_argument("--harness", default=None, choices=HARNESSES,
+                        help="the owner's choice of harness for this run: the given model's, "
+                             "or the review row's entry for it")
     review.add_argument("--effort", default=None,
                         help="the owner's choice of effort for this run: the given model's, or "
                              "every entry's of the review row")
@@ -146,6 +151,7 @@ def main(argv: Sequence[str] | None = None, root: Path = ROOT,
         if args.command == "review":
             line = review_and_log(args.change, args.kind, root=wrapper.root, base=args.base,
                                   model=args.model or None, effort=args.effort or None,
+                                  harness=args.harness or None,
                                   fresh=args.fresh, unvalidated=args.unvalidated)
             if line["outcome"] == "stopped":
                 print(f"ERROR: {line['reason']}", file=sys.stderr)

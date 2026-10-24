@@ -1,9 +1,11 @@
-"""A review of a change, run read-only on the review row's models and published as
-the change's next numbered record.
+"""A review of a change, run on the review row's models and published as the
+change's next numbered record.
 
 A review runs the `change-review` skill in Codex's read-only sandbox first, and
-when Codex is unavailable, on Claude with no rule that edits; either way the
-reviewer cannot change what it reviews. Its final message is the review. It is
+when Codex is unavailable, on Claude with no rule that edits. A row may also name a
+pi model or a bb thread, and the owner may run one by hand; those are told not to
+edit and are not otherwise held to it, since the review's only output is its final
+message. Its final message is the review. It is
 checked for the review format before it is published as the change's next numbered
 `reviews/NN-<kind>.md`, the only authoritative record of its findings; the session
 goes to `reviews/transcripts/NN-<kind>.log`, a transcript no review or triage step
@@ -23,6 +25,8 @@ earlier record never counts.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
 import sys
@@ -32,9 +36,12 @@ from typing import Any, Callable
 
 from change_workflow.common import KINDS, ROOT, Clock, Entry, StepError, utc_now
 from change_workflow.cost import review_cost
-from change_workflow.harness import (NETWORK_RETRIES, CodexRunner, Reached, Runner,
-                                     claude_command, codex_command, missing_program,
-                                     resume_command, run_claude, run_codex, unreachable)
+from change_workflow.harness import (NETWORK_RETRIES, BbRunner, CodexRunner, Reached, Runner,
+                                     bb_continue_command, bb_output_command, bb_show_command,
+                                     bb_start_command, bb_wait_command, claude_command,
+                                     codex_command, missing_program, pi_command, pi_result,
+                                     resume_command, run_bb, run_claude, run_codex,
+                                     unreachable)
 from change_workflow.log import LOG, log_path, record_outcome
 from change_workflow.records import (NUMBERED, TRANSCRIPTS, ChangedSince, changed_since,
                                      next_number, validation_problem)
@@ -43,6 +50,8 @@ from change_workflow.stream import Stream, transcript_denials
 from find_change import ChangeNotFound, change_directory, is_archived
 
 DEFAULT_BASE = "dev"
+# How many minute-long waits a review thread is given to finish: six hours.
+BB_WAITS = 360
 SECTIONS = ("Summary", "Assessment", "Questions", "Findings", "Readiness")
 FIELDS = {
     "Lens": {"direction", "consistency", "testing", "documentation", "architecture",
@@ -195,23 +204,48 @@ def prior_session(reviews: Path, kind: str) -> tuple[str, str, str] | None:
     return None
 
 
+def model_harness(model: str, harness: str | None = None) -> str:
+    """The harness the owner's model runs on: the one named, else read from its name.
+
+    A `claude-` model runs on Claude, a `<provider>/<model>` on pi, and any other on
+    Codex; a bb thread is only ever named.
+    """
+    if harness:
+        if harness not in HARNESSES:
+            raise ReviewError(f"unknown harness {harness!r}; expected one of "
+                              + ", ".join(HARNESSES))
+        return harness
+    if model.startswith("claude-"):
+        return "claude"
+    return "pi" if "/" in model else "codex"
+
+
 def review_models(rules: StepRules, model: str | None = None,
-                  effort: str | None = None) -> tuple[Model, ...]:
+                  effort: str | None = None, harness: str | None = None) -> tuple[Model, ...]:
     """The review's models in order, or the owner's own choice for one run.
 
     The step table is the workflow's policy, and the loader holds it to that. A
     model given for one run is the owner's choice for a review run by hand and is
     outside that policy on purpose, a forbidden model included: it replaces the
-    whole list, with no fallback, since the owner chose it, and its harness is read
-    from its name, a `claude-` model on Claude and any other on Codex. Its effort
-    is the one given, else the table's for that harness. An effort given alone
-    replaces every entry's. The orchestrating session gives neither, and the record
-    says when either was given.
+    whole list, with no fallback, since the owner chose it, on the harness named or
+    read from its name (`model_harness`). Its effort is the one given, else the
+    table's for that harness. A harness named alone runs the row's entry for it. An
+    effort given alone replaces every entry's. The orchestrating session gives none
+    of them, and the record says when any was given.
     """
     if model:
-        harness = "claude" if model.startswith("claude-") else "codex"
+        harness = model_harness(model, harness)
+        if harness in ("pi", "bb") and "/" not in model:
+            raise ReviewError(f"a {harness} reviewer is named <provider>/<model>, not {model!r}")
         table = next((entry.effort for entry in rules.models if entry.harness == harness), None)
         return (Model(harness, model, effort or table),)
+    if harness:
+        model_harness("", harness)
+        named = tuple(Model(entry.harness, entry.model, effort or entry.effort)
+                      for entry in rules.models if entry.harness == harness)
+        if not named:
+            raise ReviewError(f"the review row has no {harness} model; name one with --model")
+        return named
     if effort:
         return tuple(Model(entry.harness, entry.model, effort) for entry in rules.models)
     return rules.models
@@ -262,6 +296,111 @@ def _claude_attempt(model: Model, prompt: str, continuing: str | None, draft: Pa
     return status, unreachable(stream.failure_text(status)), stream.session
 
 
+def _pi_attempt(model: Model, prompt: str, continuing: str | None, draft: Path, log: Path,
+                root: Path, runner: Runner,
+                echo: Callable[[str], None] | None) -> tuple[int | None, Reached, str | None]:
+    """One run of the review on pi, its final message written to `draft`."""
+    session = continuing or str(uuid.uuid4())
+    command = pi_command(prompt, model, root / ".agents" / "skills" / "change-review",
+                         session, REVIEW_UNATTENDED)
+    start = log.stat().st_size if log.is_file() else 0
+    with log.open("a", encoding="utf-8") as stream:
+        def feed(line: str) -> None:
+            stream.write(line)
+            if echo is not None and (said := pi_result(line)[0]):
+                echo("» " + said.strip().splitlines()[0][:150])
+        try:
+            status = runner(command, root, feed)
+        except FileNotFoundError as exc:
+            if not missing_program(exc, command):
+                raise
+            return None, ("unavailable", f"{command[0]} is not installed"), None
+    final, errors = pi_result(log.read_bytes()[start:].decode("utf-8", "replace"))
+    if status == 0 and final:
+        draft.write_text(final, "utf-8")
+        return status, None, session
+    return status, unreachable(errors), session
+
+
+def _bb_json(output: str) -> Entry:
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _bb_error(output: str) -> str:
+    error = _bb_json(output).get("error")
+    return str(error.get("message", "")) if isinstance(error, dict) else output
+
+
+def _bb_project(root: Path, runner: BbRunner, log: Path) -> str | None:
+    """The bb project the checkout belongs to: the calling thread's, else the one
+    whose git remote is the checkout's origin."""
+    if project := os.environ.get("BB_PROJECT_ID"):
+        return project
+    remote = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
+                            capture_output=True, text=True, check=False).stdout.strip()
+    status, output = runner(["bb", "project", "list", "--json"], None, log)
+    try:
+        projects = json.loads(output) if status == 0 else []
+    except json.JSONDecodeError:
+        projects = []
+    return next((entry.get("id") for entry in projects if isinstance(entry, dict)
+                 and remote and entry.get("gitRemoteUrl") == remote), None)
+
+
+def _bb_attempt(model: Model, prompt: str, continuing: str | None, draft: Path, log: Path,
+                root: Path, runner: BbRunner, title: str) -> tuple[int | None, Reached, str | None]:
+    """One run of the review as a bb thread, its final output written to `draft`.
+
+    The thread is started, or the earlier review's thread told the continuing
+    prompt, then waited on until it is idle again and its final output read. bb
+    takes no system prompt, so the unattended instructions lead the prompt. A
+    thread is busy from the moment it is started or told, so the first idle it
+    reaches ends this run's turn. The wait is taken a minute at a time, checking
+    between waits for a thread that failed, which never goes idle.
+    """
+    message = f"{REVIEW_UNATTENDED} Do not edit any file.\n\n{prompt}"
+    if continuing:
+        command = bb_continue_command(continuing, model)
+    else:
+        command = bb_start_command(model, root, title, _bb_project(root, runner, log),
+                                   os.environ.get("BB_THREAD_ID"))
+    try:
+        status, output = runner(command, message, log)
+    except FileNotFoundError as exc:
+        if not missing_program(exc, command):
+            raise
+        return None, ("unavailable", f"{command[0]} is not installed"), None
+    if status != 0:
+        return status, unreachable(_bb_error(output)), continuing
+    thread = continuing
+    if not thread:
+        started = _bb_json(output)
+        nested = started.get("thread")
+        thread = started.get("id") or (nested.get("id") if isinstance(nested, dict) else None)
+    if not isinstance(thread, str) or not thread:
+        return 1, None, None
+    for _ in range(BB_WAITS):
+        status, output = runner(bb_wait_command(thread), None, log)
+        if status == 0:
+            break
+        shown, details = runner(bb_show_command(thread), None, log)
+        nested = _bb_json(details).get("thread")
+        if shown != 0 or (isinstance(nested, dict) and nested.get("status") == "error"):
+            return status, unreachable(_bb_error(details)), thread
+    else:
+        return 1, None, thread
+    status, output = runner(bb_output_command(thread), None, log)
+    final = _bb_json(output).get("output")
+    if status == 0 and isinstance(final, str) and final.strip():
+        draft.write_text(final, "utf-8")
+        return status, None, thread
+    return status or 1, unreachable(_bb_error(output)), thread
+
+
 def _marker_text(text: str) -> str:
     """`text` on one line, safe inside an HTML comment."""
     return " ".join(text.split()).replace("-->", "->")
@@ -270,6 +409,7 @@ def _marker_text(text: str) -> str:
 def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str | None = None,
                effort: str | None = None, fresh: bool = False, root: Path = ROOT,
                runner: CodexRunner = run_codex, claude: Runner = run_claude,
+               pi: Runner = run_claude, bb: BbRunner = run_bb, harness: str | None = None,
                unvalidated: bool = False, head: Callable[[Path], str] = _reviewed_head,
                changed_since: ChangedSince = changed_since, steps_path: Path = STEP_TABLE,
                clock: Clock = utc_now,
@@ -316,7 +456,7 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     claude_ran = False
     finished = False
     try:
-        for ran in review_models(steps["review"], model, effort):
+        for ran in review_models(steps["review"], model, effort, harness):
             continuing = prior[1] if prior and prior[0] == ran.harness else None
             prompt = (continuation_prompt(kind, change, base, prior[2]) if prior and continuing
                       else review_prompt(kind, change, base))
@@ -325,6 +465,12 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
                 if ran.harness == "codex":
                     status, reached, session = _codex_attempt(ran, prompt, continuing, draft, log,
                                                               root, runner)
+                elif ran.harness == "pi":
+                    status, reached, session = _pi_attempt(ran, prompt, continuing, draft, log,
+                                                           root, pi, echo)
+                elif ran.harness == "bb":
+                    status, reached, session = _bb_attempt(ran, prompt, continuing, draft, log,
+                                                           root, bb, f"Review: {change} ({kind})")
                 else:
                     claude_ran = True
                     status, reached, session = _claude_attempt(
@@ -379,7 +525,7 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     markers = [f"<!-- reviewer-session: {ran.harness}:{session} -->"] if session else []
     markers.append(f"<!-- reviewer: {ran.harness} {ran.model}"
                    + (f" {ran.effort}" if ran.effort else "") + " -->")
-    if model or effort:
+    if model or effort or harness:
         markers.append(OVERRIDE_MARKER)
     markers += [f"<!-- reviewer-unavailable: {entry['harness']} {entry['model']}: "
                 f"{_marker_text(entry['reason'])} -->" for entry in passed_over]
@@ -440,7 +586,8 @@ def review_and_log(change: str, kind: str, *, root: Path = ROOT, clock: Clock = 
     head = options.get("head", _reviewed_head)
     started = clock()
     # The owner's choice of reviewer marks every line of the run, however it ends.
-    override: Entry = {"override": True} if options.get("model") or options.get("effort") else {}
+    override: Entry = ({"override": True} if options.get("model") or options.get("effort")
+                       or options.get("harness") else {})
 
     def stopped(reason: str, record: Entry | None = None) -> Entry:
         try:
