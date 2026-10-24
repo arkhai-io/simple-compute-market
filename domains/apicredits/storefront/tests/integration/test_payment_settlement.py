@@ -35,12 +35,13 @@ from storefront_client import StorefrontClient, StorefrontClientError
 import apicredits_storefront.container as _container
 from apicredits_storefront.controllers.settle_controller import router, settlements_router
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.services.fulfillment_service import build_api_credit_failure_policy
+from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.services.payment_settlement_service import (
     ApiCreditPaymentSettlementService,
 )
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from tests._settings_overrides import settings_overrides
 from tests.listing_bindings import upsert_bound_listing
@@ -92,7 +93,7 @@ def _option() -> SettlementOption:
     return SettlementOption(option_id=derive_settlement_option_id(**body), **body)
 
 
-async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, agreement_listing: str = LISTING):
+async def _seed(db: StorefrontSQLiteClient, stage: PaymentSellerStage, *, agreement_listing: str = LISTING):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     agreement = Agreement(
         negotiation_id=NEGOTIATION,
@@ -154,7 +155,7 @@ async def _seed(db: SQLiteClient, stage: PaymentSellerStage, *, agreement_listin
 @pytest.fixture
 async def harness(tmp_path):
     async def build(*, actions=("emit_event",), enabled=True, agreement_listing=LISTING):
-        db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
+        db = storefront_sqlite_client(db_path=str(tmp_path / "credits.db"))
         payments = FakePaymentsClient()
         config = ArkhaiPaymentsConfig(
             enabled=enabled,
@@ -169,7 +170,7 @@ async def harness(tmp_path):
         issuer = Issuer(db)
         composition = SimpleNamespace(
             domain=SimpleNamespace(fulfillment=issuer), arkhai_payments_stage=stage,
-            contributions=_container.SELLING_CONTRIBUTIONS,
+            contributions=_container.SELLING_CONTRIBUTIONS, stages=SELLER_STAGES,
         )
         composition.payment_service = lambda store: ApiCreditPaymentSettlementService(
             db=store, composition=composition, stage=stage, mechanism=ARKHAI_PAYMENTS_MECHANISM
@@ -180,7 +181,7 @@ async def harness(tmp_path):
         app = FastAPI()
         app.include_router(router)
         app.include_router(settlements_router)
-        app.middleware("http")(authenticate_response)
+        app.middleware("http")(_container.AUTH.sign_responses)
         transport = httpx.ASGITransport(app=app)
         publishers = TrustedIdentitySet(identities=(SELLER.identity,))
         built = SimpleNamespace(
@@ -370,7 +371,7 @@ async def test_a_refund_after_issuance_start_records_both(harness):
 
 def _restart(tmp_path, h, *, approved: bool):
     """A fresh composition over the same SQLite file, as after a process restart."""
-    db = SQLiteClient(db_path=str(tmp_path / "credits.db"))
+    db = storefront_sqlite_client(db_path=str(tmp_path / "credits.db"))
     payments = FakePaymentsClient()
     if approved:
         payments.serve(build_signed_receipt(signer=SERVICE, mandate=h.data.mandate))

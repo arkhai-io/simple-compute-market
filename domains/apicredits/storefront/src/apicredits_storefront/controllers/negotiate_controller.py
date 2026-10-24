@@ -2,75 +2,31 @@
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Mapping
-from typing import Any
-
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi_utils.cbv import cbv
-from market_storefront_kit import opening_proposal
-from pydantic import ValidationError
-
-import apicredits_storefront.container as _container
-from apicredits_storefront.middleware import buyer_auth
-from apicredits_storefront.utils.config import BASE_URL_OVERRIDE
 from core_storefront.models.negotiation_models import (
     NegotiateContinueRequest,
     NegotiateContinueResponse,
     NegotiateNewRequest,
     NegotiateNewResponse,
 )
-from market_negotiation_runtime import (
-    NegotiationRuntime,
-    NegotiationUnavailableError,
-    OfferUnfulfillableError,
-    StorefrontPausedError,
-)
+from fastapi import APIRouter, Request
+from fastapi_utils.cbv import cbv
 
-logger = logging.getLogger(__name__)
+import apicredits_storefront.container as _container
+from apicredits_storefront.controllers.binding import serve
 
 router = APIRouter(prefix="/api/v1/negotiate", tags=["negotiate"])
 
 
-def _seller_principal():
-    signer = _container.resolved_marketplace_signer
-    if signer is None:
-        raise HTTPException(status_code=503, detail="storefront is not initialized")
-    return signer.identity
-
-
 @cbv(router)
 class NegotiateController:
-    def __init__(
-        self,
-        db=Depends(lambda: _container.resolved_sqlite_client),
-        runtime: NegotiationRuntime = Depends(
-            lambda: _container.resolved_negotiation_runtime
-        ),
-    ) -> None:
-        if runtime is None:
-            raise RuntimeError(
-                "negotiation controller requires the composed kit runtime"
-            )
-        self._db = db
-        self._runtime = runtime
-
     @router.post(
         "/new",
         response_model=NegotiateNewResponse,
         summary="Start a new negotiation",
-        description=(
-            "Requires shared body-bound marketplace signature version 2 headers."
-        ),
+        description="Requires shared body-bound marketplace signature version 2 headers.",
     )
-    async def negotiate_new(
-        self,
-        body: NegotiateNewRequest,
-        request: Request,
-    ) -> NegotiateNewResponse:
-
-        seller_principal = _seller_principal()
-        auth = await buyer_auth._verify(
+    async def negotiate_new(self, body: NegotiateNewRequest, request: Request) -> NegotiateNewResponse:
+        auth = await _container.AUTH.verify_buyer(
             request,
             "negotiate_new",
             body.listing_id,
@@ -78,119 +34,19 @@ class NegotiateController:
             body=body,
             allow_exact_retry=True,
         )
-        if auth.exact_retry:
-            if auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            status_code, payload = auth.recorded_outcome
-            if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=payload)
-            return NegotiateNewResponse.model_validate(payload)
-
-        try:
-            result = await self._runtime.start(
-                repository=self._db,
-                listing_id=body.listing_id,
-                buyer_principal=body.buyer_principal,
-                seller_principal=seller_principal,
-                actor_principal=auth.principal,
-                terms=body.provision_terms,
-                proposal=opening_proposal(
-                    body.proposal,
-                    body.settlement_selection,
-                ),
-                seller_agent_url=BASE_URL_OVERRIDE or "",
-                buyer_agent_url=body.buyer_agent_url,
-            )
-        except StorefrontPausedError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error": "paused",
-                    "reason": exc.reason,
-                    "hint": "Storefront or listing is paused.",
-                },
-            )
-        except OfferUnfulfillableError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "offer_unfulfillable",
-                    "reason": exc.reason,
-                    "listing_id": exc.listing_id,
-                    "hint": (
-                        "Seller refused: listing is closed, the quota cannot "
-                        "cover the requested quantity, or the key claim was "
-                        "rejected. See `reason`."
-                    ),
-                },
-            )
-        except NegotiationUnavailableError as exc:
-            # The listing's source could not be confirmed; nothing is known to be
-            # wrong, so a retry may succeed.
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error": "listing_source_unavailable",
-                    "reason": exc.reason,
-                    "listing_id": exc.listing_id,
-                    "hint": "The seller could not confirm the listing; retry later.",
-                },
-            )
-        except ValidationError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "incompatible_provision_terms",
-                    "reason": str(exc),
-                },
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Exception as exc:
-            logger.error("[NEGOTIATE/new] %s", exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-
-        # Building the response has its own handler, deliberately not the
-        # one above. It was previously outside every `except`, so a
-        # `ValidationError` here escaped to FastAPI, which answered 500
-        # through `uvicorn.error` -- a logger the storefront does not route
-        # to stdout. A wire-shape mismatch between the runtime and this
-        # model therefore produced a 500 with no traceback anywhere in the
-        # container logs.
-        #
-        # Not folded into the block above, because that one maps
-        # `ValidationError` to a 400 `incompatible_provision_terms`: that
-        # classification is about the *buyer's* terms, and reusing it for
-        # the seller's own response would blame the caller for a defect on
-        # this side.
-        try:
-            return NegotiateNewResponse(**result)
-        except Exception as exc:
-            logger.error(
-                "[NEGOTIATE/new] response does not satisfy "
-                "NegotiateNewResponse: %s",
-                exc,
-                exc_info=True,
-            )
-            raise HTTPException(status_code=500, detail=str(exc))
+        return await serve(_container.NEGOTIATE_ROUTES.new(body, auth))
 
     @router.post(
         "/{neg_id}",
         response_model=NegotiateContinueResponse,
         summary="Advance an existing negotiation",
-        description=(
-            "Requires shared body-bound marketplace signature version 2 headers."
-        ),
+        description="Requires shared body-bound marketplace signature version 2 headers.",
     )
     async def negotiate_continue(
         self,
-        neg_id: str,
-        body: NegotiateContinueRequest,
-        request: Request,
+        neg_id: str, body: NegotiateContinueRequest, request: Request
     ) -> NegotiateContinueResponse:
-
-        seller_principal = _seller_principal()
-        auth = await buyer_auth._verify(
+        auth = await _container.AUTH.verify_buyer(
             request,
             "negotiate_continue",
             neg_id,
@@ -198,92 +54,4 @@ class NegotiateController:
             body=body,
             allow_exact_retry=True,
         )
-        if auth.exact_retry:
-            if auth.recorded_outcome is None:
-                raise HTTPException(status_code=409, detail="request retry is pending")
-            status_code, payload = auth.recorded_outcome
-            if status_code >= 400:
-                raise HTTPException(status_code=status_code, detail=payload)
-            return NegotiateContinueResponse.model_validate(payload)
-
-        if (
-            body.action == "counter"
-            and body.proposal is None
-            and body.settlement_selection is None
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="'proposal' required for counter",
-            )
-
-        proposal_payload = opening_proposal(
-            body.proposal,
-            body.settlement_selection,
-        )
-        candidate_selection = (
-            proposal_payload.get("settlement_selection")
-            if isinstance(proposal_payload, Mapping)
-            else None
-        )
-        if body.action == "accept" and candidate_selection is not None:
-            thread = await self._db.load_negotiation_thread_row(negotiation_id=neg_id)
-            carrier = (
-                thread.get("buyer_escrow_proposal")
-                if isinstance(thread, Mapping)
-                and isinstance(thread.get("buyer_escrow_proposal"), Mapping)
-                else {}
-            )
-            pinned_selection = carrier.get("settlement_selection")
-            if (
-                not isinstance(candidate_selection, Mapping)
-                or not isinstance(pinned_selection, Mapping)
-                or dict(candidate_selection) != dict(pinned_selection)
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "opening settlement selection cannot change during negotiation"
-                    ),
-                )
-
-        try:
-            result = await self._runtime.continue_negotiation(
-                repository=self._db,
-                negotiation_id=neg_id,
-                buyer_action=body.action,
-                buyer_proposal=proposal_payload,
-                buyer_reason=body.reason,
-                buyer_principal=body.buyer_principal,
-                actor_principal=auth.principal,
-                actor_role="buyer",
-                seller_principal=seller_principal,
-            )
-        except OfferUnfulfillableError as exc:
-            # A buyer's accept on a listing its source no longer supports, or
-            # whose capacity is taken.
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "offer_unfulfillable",
-                    "reason": exc.reason,
-                    "listing_id": exc.listing_id,
-                },
-            )
-        except NegotiationUnavailableError as exc:
-            # The listing's source could not be confirmed; nothing is known to be
-            # wrong, so a retry may succeed.
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "error": "listing_source_unavailable",
-                    "reason": exc.reason,
-                    "listing_id": exc.listing_id,
-                    "hint": "The seller could not confirm the listing; retry later.",
-                },
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Exception as exc:
-            logger.error("[NEGOTIATE/%s] %s", neg_id, exc, exc_info=True)
-            raise HTTPException(status_code=500, detail=str(exc))
-        return NegotiateContinueResponse(**result)
+        return await serve(_container.NEGOTIATE_ROUTES.continue_negotiation(neg_id, body, auth))

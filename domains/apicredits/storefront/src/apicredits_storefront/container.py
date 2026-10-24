@@ -1,7 +1,9 @@
 """The storefront's dependency container.
 
-The selling bundle and the parts composed over it are fixed for the process; the
-``resolved_*`` services are set once by the lifespan in ``server.py``.
+The selling bundle and the parts composed over it — the capacity runtime,
+publication, the loops, authentication, and the route services — are fixed for
+the process; the ``resolved_*`` services are set once by the lifespan in
+``server.py``, and each composed part reads them when a request or cycle runs.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from arkhai_api_selling.auth import StorefrontAuth
 from arkhai_api_selling.capacity import QuotaCapacity
 from arkhai_api_selling.contributions import (
     ConsumptionRule,
@@ -19,12 +22,21 @@ from arkhai_api_selling.contributions import (
 from arkhai_api_selling.evidence_store import IssuanceEvidenceService, PrivateResultRepository
 from arkhai_api_selling.lifecycle import ContributedLoop, StorefrontLoops
 from arkhai_api_selling.listings import ListingService
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_api_selling.publication import QuotaPublication, RegistryPublication
 from arkhai_api_selling.publish_route import PublishFromQuotaRequest as QuotaPublishRequest
+from arkhai_api_selling.route_services import (
+    ListingRoutes,
+    NegotiateRoutes,
+    NegotiationRoutes,
+    SettleRoutes,
+    SystemRoutes,
+)
 from arkhai_api_selling.system import SystemService
 from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.schema import API_CREDITS_SCHEMA_KIND, ApiCreditsListing
 from core_storefront.multi_registry_client import MultiRegistryClient
+from market_identity import Identity
 from market_storefront_kit import LifecycleRouteError, TradingPause
 
 from apicredits_storefront.utils import config
@@ -45,8 +57,6 @@ if TYPE_CHECKING:
     )
     from market_identity import Signer
     from market_storefront_kit import StorefrontLoopController
-
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
 
 
 def _issuance_subject(listing_resource: Mapping[str, Any]) -> IssuanceSubject:
@@ -93,6 +103,37 @@ SELLING_CONTRIBUTIONS = SellingContributions(
     consumption_rule=ConsumptionRule.FIXED_PER_REQUEST,
     refusal_noun="API-credit",
 )
+
+
+def storefront_sqlite_client(db_path: str, **options: Any) -> StorefrontSQLiteClient:
+    """The storefront's persistence over ``db_path``, under the API-credits bundle."""
+    return StorefrontSQLiteClient(db_path, SELLING_CONTRIBUTIONS, **options)
+
+
+_sqlite_client: StorefrontSQLiteClient | None = None
+
+
+def get_sqlite_client(
+    *,
+    local_listing_principal: Identity | None = None,
+    expected_legacy_sellers: tuple[str, ...] | None = None,
+) -> StorefrontSQLiteClient:
+    """The process's one client over the configured database, composed on first use."""
+    global _sqlite_client
+    if _sqlite_client is None and (
+        local_listing_principal is None or expected_legacy_sellers is None
+    ):
+        raise RuntimeError(
+            "initial SQLite composition requires local listing migration context",
+        )
+    if _sqlite_client is None:
+        _sqlite_client = storefront_sqlite_client(
+            config.settings.db_path,
+            local_listing_principal=local_listing_principal,
+            expected_legacy_sellers=expected_legacy_sellers,
+        )
+    return _sqlite_client
+
 
 def _registry_client() -> MultiRegistryClient:
     signer = resolved_marketplace_signer
@@ -168,8 +209,39 @@ STOREFRONT_LOOPS = StorefrontLoops(
     contributed_loops=_payment_loops,
 )
 
+AUTH = StorefrontAuth(
+    replay_store=lambda: resolved_sqlite_client,
+    signer=lambda: resolved_marketplace_signer,
+    admin_principals=lambda: config.resolve_admin_identities(),
+    seller_principal=lambda: config.resolve_identity_config().principal,
+)
+
+LISTING_ROUTES = ListingRoutes(
+    repository=lambda: resolved_sqlite_client,
+    listing_service=lambda: resolved_listing_service,
+    publication=QUOTA_PUBLICATION,
+)
+NEGOTIATE_ROUTES = NegotiateRoutes(
+    repository=lambda: resolved_sqlite_client,
+    runtime=lambda: resolved_negotiation_runtime,
+    signer=lambda: resolved_marketplace_signer,
+    storefront_url=lambda: config.BASE_URL_OVERRIDE,
+)
+NEGOTIATION_ROUTES = NegotiationRoutes(
+    repository=lambda: resolved_sqlite_client,
+    negotiation_service=lambda: resolved_negotiation_service,
+    runtime=lambda: resolved_negotiation_runtime,
+    signer=lambda: resolved_marketplace_signer,
+)
+SETTLE_ROUTES = SettleRoutes(
+    repository=lambda: resolved_sqlite_client,
+    composition=lambda: resolved_settlement_composition,
+    coordinator=lambda: resolved_settlement_coordinator,
+    signer=lambda: resolved_marketplace_signer,
+)
+
 resolved_market_domain: "MarketDomainContract | None" = None
-resolved_sqlite_client: "SQLiteClient | None" = None
+resolved_sqlite_client: "StorefrontSQLiteClient | None" = None
 resolved_settlement_repository: "SettlementSQLiteRepository | None" = None
 resolved_settlement_runtime: "SettlementRuntime | None" = None
 resolved_settlement_worker: "SettlementServicingWorker | None" = None
@@ -189,6 +261,13 @@ resolved_loop_controller: "StorefrontLoopController | None" = None
 #: Whether this process opens new negotiations. Process-local and kept across
 #: lifespans: a restarted process trades again, and a lifespan does not reset it.
 trading_pause = TradingPause()
+
+SYSTEM_ROUTES = SystemRoutes(
+    repository=lambda: resolved_sqlite_client,
+    system_service=lambda: resolved_system_service,
+    trading_pause=trading_pause,
+    loops=lambda: resolved_loop_controller,
+)
 
 
 def clear_lifespan_state(*, domain: "MarketDomainContract") -> None:

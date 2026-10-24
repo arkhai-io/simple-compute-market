@@ -2,6 +2,7 @@ from __future__ import annotations
 import base64
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +15,7 @@ from market_negotiation_runtime import (
     NegotiationRuntime,
     NegotiationStateError,
     NegotiationTerms,
+    OpeningWrite,
     ResolvedNegotiation,
     RoundEvaluation,
     RoundRequest,
@@ -730,3 +732,58 @@ async def test_a_buyer_may_exit_an_interrupted_thread(interrupt) -> None:
 
     assert response["action"] == "exit"
     assert repository.threads["neg-fixed"]["terminal_state"] == "failure"
+
+
+@pytest.mark.asyncio
+async def test_an_opening_hook_receives_the_whole_opening_and_the_runtime_writes_none_of_it() -> None:
+    """With ``open_negotiation`` set, the thread, its opening message, and the
+    opening record reach the hook together, and the runtime neither creates
+    the thread nor appends the message nor calls ``persist_opening`` itself."""
+    repository = RecordingRepository()
+    harness = HookHarness()
+    hooks = harness.hooks()
+    received: list[OpeningWrite] = []
+
+    async def open_negotiation(candidate: RecordingRepository, write: OpeningWrite) -> None:
+        assert candidate is repository
+        assert candidate.threads == {}, "the runtime wrote the thread before the hook"
+        received.append(write)
+        await candidate.create_negotiation_thread(**write.thread)
+        await candidate.save_negotiation_message(**write.message)
+
+    hooks = replace(hooks, open_negotiation=open_negotiation)
+
+    async def resolve_opening(candidate, listing_id):
+        listing = await candidate.load_listing(listing_id=listing_id)
+        return ResolvedNegotiation(listing_id, listing, listing, hooks, "binding-1")
+
+    runtime = NegotiationRuntime(
+        resolve_opening=resolve_opening,
+        resolve_continuation=resolve_opening,
+        id_factory=lambda: "neg-fixed",
+        now=lambda: datetime(2026, 8, 15, tzinfo=UTC),
+    )
+
+    response = await runtime.start(
+        repository=repository,
+        listing_id="listing-1",
+        buyer_principal=_BUYER,
+        seller_principal=_SELLER,
+        actor_principal=_BUYER,
+        proposal={"price": 10},
+        terms={"units": 3},
+        seller_agent_url="https://seller.example",
+        buyer_agent_url="https://buyer.example",
+    )
+
+    (write,) = received
+    assert write.thread["negotiation_id"] == "neg-fixed"
+    assert write.thread["buyer_principal"] == _BUYER
+    assert write.thread["provision_terms"] == {"units": 3}
+    assert write.message["negotiation_id"] == "neg-fixed"
+    assert (write.message["sender_role"], write.message["action_taken"]) == ("buyer", "make_offer")
+    assert write.message["timestamp"] == "2026-08-15T00:00:00+00:00"
+    assert write.opening.terms.decoded == {"decoded": 3}
+    assert ("opening", {"decoded": 3}) not in repository.effects
+    assert repository.threads["neg-fixed"]["provision_terms"] == {"units": 3}
+    assert response["negotiation_id"] == "neg-fixed"

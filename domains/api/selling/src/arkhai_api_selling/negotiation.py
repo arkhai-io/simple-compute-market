@@ -36,7 +36,7 @@ from market_negotiation_runtime import (
     NegotiationStateError,
     NegotiationTerms,
     OfferUnfulfillableError,
-    OpeningRecord,
+    OpeningWrite,
     ResolvedNegotiation,
     RoundEvaluation,
     RoundRequest,
@@ -63,6 +63,7 @@ from market_policy.seller_round import SellerRoundResult
 
 from arkhai_api.purchase import provision_key_id, provision_key_mode, provision_quantity
 from arkhai_api_selling.contributions import SellingContributions
+from arkhai_api_selling.persistence import write_credit_terms
 from arkhai_api_selling.pricing import (
     checked_credit_total,
     determine_strategy,
@@ -374,6 +375,7 @@ def seller_reference_amount(
     quantity: int | None,
     *,
     noun: str,
+    floor_key: str,
     default_min_price: Any = None,
     proposal: Mapping[str, Any] | None = None,
 ) -> int:
@@ -381,6 +383,7 @@ def seller_reference_amount(
     unit = extract_unit_price_from_order(
         dict(listing),
         noun=noun,
+        floor_key=floor_key,
         default_min_price=default_min_price,
         proposal=dict(proposal) if isinstance(proposal, Mapping) else None,
     )
@@ -400,6 +403,7 @@ class _DefaultSellerRoundHook:
         negotiation_config: Any,
         chain_config_paths: Mapping[str, str | None] | None,
         default_min_price: Any,
+        floor_key: str,
         normalize_escrow_proposal: EscrowProposalNormalizer | None,
     ) -> None:
         self._contributions = contributions
@@ -408,6 +412,7 @@ class _DefaultSellerRoundHook:
         self._negotiation_config = negotiation_config
         self._chain_config_paths = chain_config_paths
         self._default_min_price = default_min_price
+        self._floor_key = floor_key
         self._normalize_escrow_proposal = normalize_escrow_proposal
 
     async def __call__(
@@ -453,6 +458,7 @@ class _DefaultSellerRoundHook:
                 listing_dict,
                 requested_quantity,
                 noun=self._contributions.refusal_noun,
+                floor_key=self._floor_key,
                 default_min_price=self._default_min_price,
                 proposal=their_proposal if isinstance(their_proposal, Mapping) else None,
             )
@@ -506,6 +512,7 @@ def default_seller_round_hook(
     negotiation_config: Any = None,
     chain_config_paths: Mapping[str, str | None] | None = None,
     default_min_price: Any = None,
+    floor_key: str,
     normalize_escrow_proposal: EscrowProposalNormalizer | None = None,
 ) -> SellerRoundHook:
     """The seller's round: capture the quota snapshot and key record, then run the synchronous chain."""
@@ -516,14 +523,20 @@ def default_seller_round_hook(
         negotiation_config=negotiation_config,
         chain_config_paths=chain_config_paths,
         default_min_price=default_min_price,
+        floor_key=floor_key,
         normalize_escrow_proposal=normalize_escrow_proposal,
     )
 
 
 @dataclass(frozen=True)
 class RoundSettings:
-    """What the seller's round reads from configuration, read once per round."""
+    """What the seller's round reads from configuration, read once per round.
 
+    ``floor_key`` is the floor setting as the composing storefront spells it,
+    which the pricing refusals name; the library reads no configuration itself.
+    """
+
+    floor_key: str
     negotiation_config: Any = None
     chain_config_paths: Mapping[str, str | None] | None = None
     default_min_price: Any = None
@@ -927,20 +940,27 @@ def _with_agreement(
     return artifacts
 
 
-async def _persist_opening(repository: Any, opening: OpeningRecord) -> None:
-    """Bind the thread to its listing's domain binding, then record its credit terms."""
-    await repository.copy_listing_binding_to_thread(
-        negotiation_id=opening.negotiation_id,
-        listing_id=opening.listing_id,
+async def open_negotiation(repository: Any, write: OpeningWrite) -> None:
+    """Record the opening in one transaction: the thread, its message, its listing's binding, and its purchase terms.
+
+    A failure in any of them leaves none, so no continuation finds a bound
+    thread without the terms it validates against.
+    """
+    decoded = write.opening.terms.decoded
+    quantity = provision_quantity(decoded)
+    terms = (
+        partial(
+            write_credit_terms,
+            negotiation_id=write.opening.negotiation_id,
+            quantity=int(quantity),
+            key_mode=provision_key_mode(decoded),
+            key_id=provision_key_id(decoded),
+        )
+        if quantity is not None
+        else None
     )
-    quantity = provision_quantity(opening.terms.decoded)
-    if quantity is None:
-        return
-    await repository.save_credit_terms(
-        negotiation_id=opening.negotiation_id,
-        quantity=int(quantity),
-        key_mode=provision_key_mode(opening.terms.decoded),
-        key_id=provision_key_id(opening.terms.decoded),
+    await repository.open_negotiation(
+        thread=write.thread, message=write.message, domain_writes=terms
     )
 
 
@@ -987,11 +1007,13 @@ def reference_amount(
     """quantity × the rate of the option the buyer's pinned proposal selects."""
     if not uses_scalar_amount:
         return 0
+    settings = round_settings()
     return seller_reference_amount(
         listing,
         provision_quantity(terms.decoded),
         noun=contributions.refusal_noun,
-        default_min_price=round_settings().default_min_price,
+        floor_key=settings.floor_key,
+        default_min_price=settings.default_min_price,
         proposal=pinned_proposal,
     )
 
@@ -1117,6 +1139,7 @@ def build_negotiation_runtime(
             negotiation_config=settings.negotiation_config,
             chain_config_paths=settings.chain_config_paths,
             default_min_price=settings.default_min_price,
+            floor_key=settings.floor_key,
         )
 
     async def resolve_opening(repository: Any, listing_id: str) -> ResolvedNegotiation:
@@ -1223,7 +1246,7 @@ def build_negotiation_runtime(
         listing_is_paused=listing_is_paused,
         storefront_is_paused=storefront_is_paused,
         stage_event=stage_event,
-        persist_opening=_persist_opening,
+        open_negotiation=open_negotiation,
         place_hold=lambda repository, acceptance: place_quota_hold(
             stages, dispatch, repository, acceptance
         ),

@@ -153,7 +153,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-selling"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -169,11 +169,12 @@ dependencies = [
     { name = "arkhai-kit-settlement-runtime", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "fastapi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_api_selling-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_api_selling-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -220,11 +221,10 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-storefront"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "arkhai-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-api-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-api-selling", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-apicredits-domain", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -249,6 +249,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "arkhai-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-apicredits-buyer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-core-buyer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-capacity-publication", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -262,18 +263,17 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-api", specifier = ">=0.1.0" },
     { name = "arkhai-api-client", specifier = ">=0.1.0" },
-    { name = "arkhai-api-selling", specifier = ">=0.2.0" },
+    { name = "arkhai-api-selling", specifier = ">=0.3.0" },
     { name = "arkhai-apicredits-domain", specifier = ">=0.10.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
-    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.5.1" },
+    { name = "arkhai-kit-negotiation-runtime", specifier = "==0.6.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.4.0" },
     { name = "arkhai-kit-storefront", specifier = "==0.8.0" },
     { name = "dynaconf", specifier = ">=3.0.0" },
@@ -287,9 +287,10 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "arkhai-api", specifier = ">=0.1.0" },
     { name = "arkhai-apicredits-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = ">=0.10.3" },
+    { name = "arkhai-kit-capacity-publication", specifier = ">=0.10.4" },
     { name = "arkhai-kit-policy", specifier = ">=0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.9.0" },
@@ -342,7 +343,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.17.0"
+version = "0.18.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -354,7 +355,7 @@ dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -420,7 +421,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.10.3"
+version = "0.10.4"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -428,7 +429,7 @@ dependencies = [
     { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.10.3-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.10.4-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -476,14 +477,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.1"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "arkhai-kit-policy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -1262,16 +1263,17 @@ wheels = [
 
 [[package]]
 name = "pydantic-settings"
-version = "2.14.1"
+version = "2.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "python-dotenv", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "typing-extensions", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "typing-inspection", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/07/60/1d1e59c9c90d54591469ada7d268251f71c24bdb765f1a8a832cee8c6653/pydantic_settings-2.14.1.tar.gz", hash = "sha256:e874d3bec7e787b0c9958277956ed9b4dd5de6a80e162188fdaff7c5e26fd5fa", size = 235551, upload-time = "2026-05-08T13:40:06.542Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/ca/7817b4bf0c4b15c6a6ab8cdf4cb96c268335a8ca2f525de93b6ebe4c7d28/pydantic_settings-2.16.1.tar.gz", hash = "sha256:aff602a1886338c2df3d1e958e2193a8dc33cec75b91f202e83fd98484b4b0da", size = 303436, upload-time = "2026-10-20T11:37:19.024Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/8d/f1af3832f5e6eb13ba94ee809e72b8ecb5eef226d27ee0bef7d963d943c7/pydantic_settings-2.14.1-py3-none-any.whl", hash = "sha256:6e3c7edfd8277687cdc598f56e5cff0e9bfff0910a3749deaa8d4401c3a2b9de", size = 60964, upload-time = "2026-05-08T13:40:04.958Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/74/fdf926afe145d8629c4b2ff57f4ea1d64ed7abc4d84d97463b2517a2547e/pydantic_settings-2.16.1-py3-none-any.whl", hash = "sha256:30f5313340da4e8f1b440d1910b92a5bc3ccbb6b4ba70ec2b8395bc921f418f5", size = 80771, upload-time = "2026-10-20T11:37:17.298Z" },
 ]
 
 [[package]]
@@ -1312,11 +1314,11 @@ wheels = [
 
 [[package]]
 name = "python-dotenv"
-version = "1.2.2"
+version = "1.2.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/26/2fbeedb218a787a5eea551c7532cac4e009f83d689dd2faa0d0353473f86/python_dotenv-1.2.4.tar.gz", hash = "sha256:f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0", size = 60824, upload-time = "2026-10-01T05:36:10Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
+    { url = "https://files.pythonhosted.org/packages/60/d1/38f3a3405989a89ac18390803e70c6ad7c7760da4f9b83cbeca0c44a0c72/python_dotenv-1.2.4-py3-none-any.whl", hash = "sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc", size = 23266, upload-time = "2026-10-01T05:36:08.633Z" },
 ]
 
 [[package]]

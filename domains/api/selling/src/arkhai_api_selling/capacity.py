@@ -25,12 +25,16 @@ class CapacitySite:
 
 
 def read_capacity_sites(
-    raw_sites: Any, raw_placement: Any
+    raw_sites: Any, raw_placement: Any, *, sites_key: str
 ) -> tuple[dict[str, CapacitySite], str]:
-    """Each configured site's URL and trusted authorities, and the placement; refused by key, never by value."""
+    """Each configured site's URL and trusted authorities, and the placement; refused by key, never by value.
+
+    ``sites_key`` is the sites table as the composing storefront spells it,
+    which each refusal names.
+    """
     placement = str(raw_placement or "fill_first").strip()
     if not raw_sites or not hasattr(raw_sites, "items"):
-        raise RuntimeError("[capacity.sites] must define explicit trusted site IDs")
+        raise RuntimeError(f"[{sites_key}] must define explicit trusted site IDs")
     sites: dict[str, CapacitySite] = {}
     for raw_name, raw_site in dict(raw_sites).items():
         site_id = str(raw_name).strip()
@@ -49,7 +53,7 @@ def read_capacity_sites(
         if trusted is None:
             # Raised outside the handler: a validation error keeps the value it refused.
             raise RuntimeError(
-                f"[capacity.sites.{site_id}.expected_authorities] must list one or two "
+                f"[{sites_key}.{site_id}.expected_authorities] must list one or two "
                 "valid principals"
             )
         sites[site_id] = CapacitySite(url, trusted)

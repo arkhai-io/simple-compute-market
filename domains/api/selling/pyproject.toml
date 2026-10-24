@@ -1,23 +1,25 @@
 [project]
 name = "arkhai-api-selling"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
-description = "The api family's selling library: negotiation, publication, the quota-backed listing and its lifecycle, issuance from verified settlement, settlement and evidence persistence, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
+description = "The api family's selling library: negotiation, publication, the quota-backed listing and its lifecycle, issuance from verified settlement, the storefront's persistence, authentication, and route services, and the mechanism-neutral settlement composition, over each domain's contribution bundle."
 requires-python = ">=3.12,<3.14"
 dependencies = [
     "arkhai-api>=0.1.0",
     "arkhai-api-client>=0.1.0",
     "arkhai-core>=0.4.0",
     "arkhai-core-registry-client>=0.12.1",
-    "arkhai-core-storefront>=0.17.0",
-    "arkhai-kit-capacity-publication>=0.10.3",
+    "arkhai-core-storefront>=0.18.0",
+    "arkhai-kit-capacity-publication>=0.10.4",
     "arkhai-kit-identity>=0.4.0",
-    "arkhai-kit-negotiation-runtime>=0.5.1",
+    "arkhai-kit-negotiation-runtime>=0.6.0",
     "arkhai-kit-policy>=0.5.0",
     "arkhai-kit-resource-pools>=0.7.0",
     "arkhai-kit-settlement-runtime>=0.4.0",
     "arkhai-kit-site-client>=0.11.0",
     "arkhai-kit-storefront>=0.8.0",
+    # The authentication module reads the request and signs the response.
+    "fastapi~=0.115.8",
     "httpx>=0.27",
     "pydantic>=2",
 ]

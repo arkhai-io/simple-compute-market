@@ -12,6 +12,8 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
+from apicredits_storefront.container import SELLING_CONTRIBUTIONS
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
@@ -285,6 +287,46 @@ async def test_an_opened_thread_takes_its_listings_binding(db, fake_capacity, ke
     listing = await db.load_listing_binding(listing_id="L-tok")
     assert thread.listing_id == "L-tok"
     assert (thread.site_id, thread.binding) == (listing.site_id, listing.binding)
+
+
+async def test_an_opening_whose_last_write_fails_leaves_no_thread_message_binding_or_terms(
+    db, fake_capacity, key_records
+):
+    """The opening is one transaction: a failure writing the credit terms, its
+    last write, rolls back the thread, its opening message, and its binding, so
+    no continuation finds a bound thread without the terms it validates against."""
+
+    class _TermsWriteFails(StorefrontSQLiteClient):
+        """The storefront's own client, whose opening fails after the domain's write."""
+
+        async def open_negotiation(self, *, domain_writes=None, **write):
+            def failing(conn):
+                domain_writes(conn)
+                raise sqlite3.OperationalError("the terms write failed")
+
+            return await super().open_negotiation(domain_writes=failing, **write)
+
+    failing_db = _TermsWriteFails(db.db_path, SELLING_CONTRIBUTIONS)
+    with settings_overrides(**{"negotiation.policies": ["bisection"]}):
+        with pytest.raises(sqlite3.OperationalError):
+            await build_api_credit_negotiation_runtime(_DOMAIN).start(
+                repository=failing_db,
+                listing_id="L-tok",
+                buyer_principal=BUYER_PRINCIPAL,
+                seller_principal=SELLER_PRINCIPAL,
+                proposal=proposal(250),
+                terms=terms(3),
+                seller_agent_url="http://seller:8002",
+                buyer_agent_url="http://buyer:9000",
+                actor_principal=BUYER_PRINCIPAL,
+            )
+
+    with sqlite3.connect(db.db_path) as conn:
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("negotiation_threads", "negotiation_messages", "credit_deal_terms")
+        }
+    assert counts == {"negotiation_threads": 0, "negotiation_messages": 0, "credit_deal_terms": 0}
 
 
 async def test_force_accept_records_what_a_negotiated_acceptance_records(

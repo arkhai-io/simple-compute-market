@@ -24,7 +24,7 @@ import os
 import sqlite3
 import time
 import uuid
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -1956,58 +1956,9 @@ class SQLiteClient:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                listing_row = conn.execute(
-                    """
-                    SELECT listing_id, site_id, offering_mode, domain_identity,
-                           contract_major, contract_minor
-                    FROM storefront_listing_bindings
-                    WHERE listing_id=?
-                    """,
-                    (listing_id,),
-                ).fetchone()
-                if listing_row is None:
-                    raise StorefrontDomainBindingError(
-                        f"listing {listing_id!r} has no domain binding"
-                    )
-                conn.execute(
-                    """
-                    UPDATE negotiation_threads
-                    SET domain_listing_id=?, site_id=?, offering_mode=?,
-                        domain_identity=?, contract_major=?, contract_minor=?
-                    WHERE negotiation_id=?
-                      AND domain_identity IS NULL
-                    """,
-                    (*listing_row, negotiation_id),
+                copied = self.copy_listing_binding(
+                    conn, negotiation_id=negotiation_id, listing_id=listing_id
                 )
-                row = conn.execute(
-                    """
-                    SELECT negotiation_id, domain_listing_id, site_id,
-                           offering_mode, domain_identity,
-                           contract_major, contract_minor
-                    FROM negotiation_threads
-                    WHERE negotiation_id=?
-                    """,
-                    (negotiation_id,),
-                ).fetchone()
-                if row is None:
-                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
-                copied = self._thread_binding_from_row(row)
-                expected = StorefrontThreadBinding(
-                    negotiation_id=negotiation_id,
-                    listing_id=str(listing_row[0]),
-                    site_id=str(listing_row[1]),
-                    binding=StorefrontDomainBinding(
-                        offering_mode=str(listing_row[2]),
-                        domain_identity=DomainIdentity(str(listing_row[3])),
-                        contract_major=int(listing_row[4]),
-                        contract_minor=int(listing_row[5]),
-                    ),
-                )
-                if copied != expected:
-                    raise StorefrontDomainBindingError(
-                        f"negotiation {negotiation_id!r} already has a "
-                        "different immutable domain binding"
-                    )
                 conn.commit()
                 return copied
             except Exception:
@@ -2017,6 +1968,69 @@ class SQLiteClient:
                 conn.close()
 
         return await asyncio.to_thread(_copy)
+
+    def copy_listing_binding(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        negotiation_id: str,
+        listing_id: str,
+    ) -> StorefrontThreadBinding:
+        """``copy_listing_binding_to_thread``'s writes inside the caller's open
+        transaction; neither commits nor rolls back."""
+        listing_row = conn.execute(
+            """
+            SELECT listing_id, site_id, offering_mode, domain_identity,
+                   contract_major, contract_minor
+            FROM storefront_listing_bindings
+            WHERE listing_id=?
+            """,
+            (listing_id,),
+        ).fetchone()
+        if listing_row is None:
+            raise StorefrontDomainBindingError(
+                f"listing {listing_id!r} has no domain binding"
+            )
+        conn.execute(
+            """
+            UPDATE negotiation_threads
+            SET domain_listing_id=?, site_id=?, offering_mode=?,
+                domain_identity=?, contract_major=?, contract_minor=?
+            WHERE negotiation_id=?
+              AND domain_identity IS NULL
+            """,
+            (*listing_row, negotiation_id),
+        )
+        row = conn.execute(
+            """
+            SELECT negotiation_id, domain_listing_id, site_id,
+                   offering_mode, domain_identity,
+                   contract_major, contract_minor
+            FROM negotiation_threads
+            WHERE negotiation_id=?
+            """,
+            (negotiation_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown negotiation {negotiation_id!r}")
+        copied = self._thread_binding_from_row(row)
+        expected = StorefrontThreadBinding(
+            negotiation_id=negotiation_id,
+            listing_id=str(listing_row[0]),
+            site_id=str(listing_row[1]),
+            binding=StorefrontDomainBinding(
+                offering_mode=str(listing_row[2]),
+                domain_identity=DomainIdentity(str(listing_row[3])),
+                contract_major=int(listing_row[4]),
+                contract_minor=int(listing_row[5]),
+            ),
+        )
+        if copied != expected:
+            raise StorefrontDomainBindingError(
+                f"negotiation {negotiation_id!r} already has a "
+                "different immutable domain binding"
+            )
+        return copied
 
     @staticmethod
     def _artifact_codec_name(artifact_slot: str) -> str:
@@ -2265,100 +2279,131 @@ class SQLiteClient:
             The actual round number that was assigned
         """
 
-        sender_scheme, sender_identifier = _principal_columns(sender_principal)
-
         def _save() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
-                cur = conn.cursor()
-                our_price_text = _amount_to_db_text(our_price)
-                their_price_text = _amount_to_db_text(their_price)
-                proposed_price_text = _amount_to_db_text(proposed_price)
-                thread = cur.execute(
-                    """
-                    SELECT buyer_scheme, buyer_identifier,
-                           seller_scheme, seller_identifier
-                    FROM negotiation_threads
-                    WHERE negotiation_id = ?
-                    """,
-                    (negotiation_id,),
-                ).fetchone()
-                if thread is None:
-                    raise KeyError(f"unknown negotiation {negotiation_id!r}")
-                if sender_role == "buyer" and thread[:2] != (
-                    sender_scheme,
-                    sender_identifier,
-                ):
-                    raise ValueError("buyer message author does not match negotiation")
-                if sender_role == "seller" and thread[2:] != (
-                    sender_scheme,
-                    sender_identifier,
-                ):
-                    raise ValueError("seller message author does not match negotiation")
-                if sender_role not in {"buyer", "seller", "admin", "service"}:
-                    raise ValueError("unsupported negotiation message sender role")
-
-                if round is None:
-                    # Compute next round atomically to avoid race conditions
-                    cur.execute(
-                        """
-                        SELECT COALESCE(MAX(round), -1) + 1
-                        FROM negotiation_messages
-                        WHERE negotiation_id = ?
-                        """,
-                        (negotiation_id,),
-                    )
-                    actual_round = cur.fetchone()[0]
-                else:
-                    actual_round = round
-
-                # Update thread updated_at
-                cur.execute(
-                    """
-                    UPDATE negotiation_threads SET updated_at = ? WHERE negotiation_id = ?
-                    """,
-                    (timestamp, negotiation_id),
-                )
-                # Insert message with ON CONFLICT handling to gracefully handle races
-                cur.execute(
-                    """
-                    INSERT INTO negotiation_messages(
-                        negotiation_id, round, sender_role,
-                        sender_scheme, sender_identifier, our_price, their_price,
-                        proposed_price, action_taken, message_type, timestamp
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(negotiation_id, round) DO UPDATE SET
-                        sender_role = excluded.sender_role,
-                        sender_scheme = excluded.sender_scheme,
-                        sender_identifier = excluded.sender_identifier,
-                        our_price = excluded.our_price,
-                        their_price = excluded.their_price,
-                        proposed_price = excluded.proposed_price,
-                        action_taken = excluded.action_taken,
-                        message_type = excluded.message_type,
-                        timestamp = excluded.timestamp
-                    """,
-                    (
-                        negotiation_id,
-                        actual_round,
-                        sender_role,
-                        sender_scheme,
-                        sender_identifier,
-                        our_price_text,
-                        their_price_text,
-                        proposed_price_text,
-                        action_taken,
-                        message_type,
-                        timestamp,
-                    ),
+                actual_round = self.insert_negotiation_message(
+                    conn,
+                    negotiation_id=negotiation_id,
+                    round=round,
+                    sender_principal=sender_principal,
+                    sender_role=sender_role,
+                    our_price=our_price,
+                    their_price=their_price,
+                    proposed_price=proposed_price,
+                    action_taken=action_taken,
+                    message_type=message_type,
+                    timestamp=timestamp,
                 )
                 conn.commit()
-                return int(actual_round)
+                return actual_round
             finally:
                 conn.close()
 
         return await asyncio.to_thread(_save)
+
+    def insert_negotiation_message(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        negotiation_id: str,
+        round: int | None = None,
+        sender_principal: Identity,
+        sender_role: str,
+        our_price: int | str | float | None,
+        their_price: int | str | float | None,
+        proposed_price: int | str | float | None,
+        action_taken: str,
+        message_type: str,
+        timestamp: str,
+    ) -> int:
+        """``save_negotiation_message``'s writes inside the caller's open
+        transaction, returning the round assigned; neither commits nor rolls back."""
+        sender_scheme, sender_identifier = _principal_columns(sender_principal)
+        cur = conn.cursor()
+        our_price_text = _amount_to_db_text(our_price)
+        their_price_text = _amount_to_db_text(their_price)
+        proposed_price_text = _amount_to_db_text(proposed_price)
+        thread = cur.execute(
+            """
+            SELECT buyer_scheme, buyer_identifier,
+                   seller_scheme, seller_identifier
+            FROM negotiation_threads
+            WHERE negotiation_id = ?
+            """,
+            (negotiation_id,),
+        ).fetchone()
+        if thread is None:
+            raise KeyError(f"unknown negotiation {negotiation_id!r}")
+        if sender_role == "buyer" and thread[:2] != (
+            sender_scheme,
+            sender_identifier,
+        ):
+            raise ValueError("buyer message author does not match negotiation")
+        if sender_role == "seller" and thread[2:] != (
+            sender_scheme,
+            sender_identifier,
+        ):
+            raise ValueError("seller message author does not match negotiation")
+        if sender_role not in {"buyer", "seller", "admin", "service"}:
+            raise ValueError("unsupported negotiation message sender role")
+
+        if round is None:
+            # Compute next round atomically to avoid race conditions
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(round), -1) + 1
+                FROM negotiation_messages
+                WHERE negotiation_id = ?
+                """,
+                (negotiation_id,),
+            )
+            actual_round = cur.fetchone()[0]
+        else:
+            actual_round = round
+
+        # Update thread updated_at
+        cur.execute(
+            """
+            UPDATE negotiation_threads SET updated_at = ? WHERE negotiation_id = ?
+            """,
+            (timestamp, negotiation_id),
+        )
+        # Insert message with ON CONFLICT handling to gracefully handle races
+        cur.execute(
+            """
+            INSERT INTO negotiation_messages(
+                negotiation_id, round, sender_role,
+                sender_scheme, sender_identifier, our_price, their_price,
+                proposed_price, action_taken, message_type, timestamp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(negotiation_id, round) DO UPDATE SET
+                sender_role = excluded.sender_role,
+                sender_scheme = excluded.sender_scheme,
+                sender_identifier = excluded.sender_identifier,
+                our_price = excluded.our_price,
+                their_price = excluded.their_price,
+                proposed_price = excluded.proposed_price,
+                action_taken = excluded.action_taken,
+                message_type = excluded.message_type,
+                timestamp = excluded.timestamp
+            """,
+            (
+                negotiation_id,
+                actual_round,
+                sender_role,
+                sender_scheme,
+                sender_identifier,
+                our_price_text,
+                their_price_text,
+                proposed_price_text,
+                action_taken,
+                message_type,
+                timestamp,
+            ),
+        )
+        return int(actual_round)
 
     async def load_negotiation_thread(
         self,
@@ -4036,6 +4081,64 @@ class SQLiteClient:
             provision_terms: Accepted schema-owned delivery terms persisted
                 for server-authoritative settlement start and restart.
         """
+        def _create() -> None:
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self.insert_negotiation_thread(
+                    conn,
+                    negotiation_id=negotiation_id,
+                    our_listing_id=our_listing_id,
+                    their_listing_id=their_listing_id,
+                    our_agent_id=our_agent_id,
+                    their_agent_id=their_agent_id,
+                    buyer_principal=buyer_principal,
+                    seller_principal=seller_principal,
+                    owner_id=owner_id,
+                    status=status,
+                    our_initial_price=our_initial_price,
+                    our_strategy=our_strategy,
+                    requested_duration_seconds=requested_duration_seconds,
+                    requested_start_utc=requested_start_utc,
+                    buyer_escrow_proposal=buyer_escrow_proposal,
+                    provision_terms=provision_terms,
+                    binding=binding,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        await asyncio.to_thread(_create)
+
+    def insert_negotiation_thread(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        negotiation_id: str,
+        our_listing_id: str,
+        their_listing_id: str,
+        our_agent_id: str,
+        their_agent_id: str,
+        buyer_principal: Identity,
+        seller_principal: Identity,
+        owner_id: str,
+        status: str = "active",
+        our_initial_price: int | str | float | None = None,
+        our_strategy: str | None = None,
+        requested_duration_seconds: int | None = None,
+        requested_start_utc: str | None = None,
+        buyer_escrow_proposal: dict[str, Any] | None = None,
+        provision_terms: dict[str, Any] | None = None,
+        binding: StorefrontThreadBinding | None = None,
+    ) -> None:
+        """``create_negotiation_thread``'s writes inside the caller's open transaction.
+
+        A caller composing a larger write holds the transaction; this neither
+        commits nor rolls back.
+        """
         buyer_scheme, buyer_identifier = _principal_columns(buyer_principal)
         seller_scheme, seller_identifier = _principal_columns(seller_principal)
         if binding is not None and (
@@ -4057,114 +4160,143 @@ class SQLiteClient:
             if binding is not None
             else (None, None, None, None, None, None)
         )
+        cur = conn.cursor()
+        timestamp = datetime.now().isoformat()
+        proposal_blob = (
+            json.dumps(buyer_escrow_proposal)
+            if buyer_escrow_proposal is not None
+            else None
+        )
+        provision_blob = (
+            json.dumps(provision_terms) if provision_terms is not None else None
+        )
+        our_initial_price_text = _amount_to_db_text(our_initial_price)
 
-        def _create() -> None:
+        # Insert public thread info (ignore if exists, it's shared)
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO negotiation_threads(
+                negotiation_id, our_listing_id, their_listing_id,
+                our_agent_id, their_agent_id, status,
+                requested_duration_seconds,
+                requested_start_utc,
+                buyer_escrow_proposal,
+                provision_terms,
+                buyer_scheme, buyer_identifier,
+                seller_scheme, seller_identifier,
+                domain_listing_id, site_id, offering_mode,
+                domain_identity, contract_major, contract_minor,
+                created_at, updated_at
+            )
+            VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?
+            )
+            """,
+            (
+                negotiation_id,
+                our_listing_id,
+                their_listing_id,
+                our_agent_id,
+                their_agent_id,
+                status,
+                requested_duration_seconds,
+                requested_start_utc,
+                proposal_blob,
+                provision_blob,
+                buyer_scheme,
+                buyer_identifier,
+                seller_scheme,
+                seller_identifier,
+                *binding_values,
+                timestamp,
+                timestamp,
+            ),
+        )
+        durable = cur.execute(
+            """
+            SELECT buyer_scheme, buyer_identifier,
+                   seller_scheme, seller_identifier,
+                   domain_listing_id, site_id, offering_mode,
+                   domain_identity, contract_major, contract_minor
+            FROM negotiation_threads
+            WHERE negotiation_id = ?
+            """,
+            (negotiation_id,),
+        ).fetchone()
+        if durable != (
+            buyer_scheme,
+            buyer_identifier,
+            seller_scheme,
+            seller_identifier,
+            *binding_values,
+        ):
+            raise ValueError(
+                "negotiation identifier is already bound to different "
+                "principals or domain binding"
+            )
+
+        # Insert private local state (upsert if needed)
+        cur.execute(
+            """
+            INSERT INTO negotiation_local_state(
+                negotiation_id, owner_id, our_initial_price, our_strategy
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(negotiation_id, owner_id) DO UPDATE SET
+                our_initial_price = excluded.our_initial_price,
+                our_strategy = excluded.our_strategy
+            """,
+            (
+                negotiation_id,
+                owner_id,
+                our_initial_price_text,
+                our_strategy,
+            ),
+        )
+
+    async def open_negotiation(
+        self,
+        *,
+        thread: Mapping[str, Any],
+        message: Mapping[str, Any],
+        domain_writes: Callable[[sqlite3.Connection], None] | None = None,
+    ) -> int:
+        """Record an opening in one transaction: the thread, its first message,
+        its listing's binding, and the domain's own opening state.
+
+        ``thread`` and ``message`` are ``create_negotiation_thread``'s and
+        ``save_negotiation_message``'s keyword arguments. ``domain_writes`` runs
+        last on the same connection, so a failure in any write leaves no row.
+        Returns the message's round.
+        """
+        thread_values = dict(thread)
+        message_values = dict(message)
+        if message_values.get("negotiation_id") != thread_values.get("negotiation_id"):
+            raise ValueError("opening message must belong to the opening thread")
+
+        def _open() -> int:
             conn = sqlite3.connect(self.db_path)
             try:
                 conn.execute("BEGIN IMMEDIATE")
-                cur = conn.cursor()
-                timestamp = datetime.now().isoformat()
-                proposal_blob = (
-                    json.dumps(buyer_escrow_proposal)
-                    if buyer_escrow_proposal is not None
-                    else None
+                self.insert_negotiation_thread(conn, **thread_values)
+                round_number = self.insert_negotiation_message(conn, **message_values)
+                self.copy_listing_binding(
+                    conn,
+                    negotiation_id=str(thread_values["negotiation_id"]),
+                    listing_id=str(thread_values["our_listing_id"]),
                 )
-                provision_blob = (
-                    json.dumps(provision_terms) if provision_terms is not None else None
-                )
-                our_initial_price_text = _amount_to_db_text(our_initial_price)
-
-                # Insert public thread info (ignore if exists, it's shared)
-                cur.execute(
-                    """
-                    INSERT OR IGNORE INTO negotiation_threads(
-                        negotiation_id, our_listing_id, their_listing_id,
-                        our_agent_id, their_agent_id, status,
-                        requested_duration_seconds,
-                        requested_start_utc,
-                        buyer_escrow_proposal,
-                        provision_terms,
-                        buyer_scheme, buyer_identifier,
-                        seller_scheme, seller_identifier,
-                        domain_listing_id, site_id, offering_mode,
-                        domain_identity, contract_major, contract_minor,
-                        created_at, updated_at
-                    )
-                    VALUES (
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?
-                    )
-                    """,
-                    (
-                        negotiation_id,
-                        our_listing_id,
-                        their_listing_id,
-                        our_agent_id,
-                        their_agent_id,
-                        status,
-                        requested_duration_seconds,
-                        requested_start_utc,
-                        proposal_blob,
-                        provision_blob,
-                        buyer_scheme,
-                        buyer_identifier,
-                        seller_scheme,
-                        seller_identifier,
-                        *binding_values,
-                        timestamp,
-                        timestamp,
-                    ),
-                )
-                durable = cur.execute(
-                    """
-                    SELECT buyer_scheme, buyer_identifier,
-                           seller_scheme, seller_identifier,
-                           domain_listing_id, site_id, offering_mode,
-                           domain_identity, contract_major, contract_minor
-                    FROM negotiation_threads
-                    WHERE negotiation_id = ?
-                    """,
-                    (negotiation_id,),
-                ).fetchone()
-                if durable != (
-                    buyer_scheme,
-                    buyer_identifier,
-                    seller_scheme,
-                    seller_identifier,
-                    *binding_values,
-                ):
-                    raise ValueError(
-                        "negotiation identifier is already bound to different "
-                        "principals or domain binding"
-                    )
-
-                # Insert private local state (upsert if needed)
-                cur.execute(
-                    """
-                    INSERT INTO negotiation_local_state(
-                        negotiation_id, owner_id, our_initial_price, our_strategy
-                    )
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(negotiation_id, owner_id) DO UPDATE SET
-                        our_initial_price = excluded.our_initial_price,
-                        our_strategy = excluded.our_strategy
-                    """,
-                    (
-                        negotiation_id,
-                        owner_id,
-                        our_initial_price_text,
-                        our_strategy,
-                    ),
-                )
-
+                if domain_writes is not None:
+                    domain_writes(conn)
                 conn.commit()
+                return round_number
             except Exception:
                 conn.rollback()
                 raise
             finally:
                 conn.close()
 
-        await asyncio.to_thread(_create)
+        return await asyncio.to_thread(_open)
 
     async def get_thread_info(
         self,

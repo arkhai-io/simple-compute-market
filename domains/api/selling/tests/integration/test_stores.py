@@ -21,6 +21,7 @@ from arkhai_api_selling.evidence_store import (
     PrivateResultRepository,
 )
 from arkhai_api_selling.issuance import persist_delivery, prepare_issuance_request, progress_result
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_api_selling.settlement_store import SettlementRepository
 from tests.bundles import BUYER, CLAIMANT, EXAMPLE, ISSUER, STRANGER, create_tables, with_extension
 
@@ -156,12 +157,25 @@ def test_progress_is_read_by_negotiation_or_public_reference(db_path):
 
 
 def _accept(db_path, negotiation_id: str, mechanism: str, created_at: str) -> None:
+    """An accepted thread under ``mechanism``, created at ``created_at``."""
     agreement = json.dumps({"settlement": {"mechanism": mechanism}})
+    client = StorefrontSQLiteClient(str(db_path), EXAMPLE)
     with sqlite3.connect(db_path) as conn:
+        client.insert_negotiation_thread(
+            conn,
+            negotiation_id=negotiation_id,
+            our_listing_id="L-1",
+            their_listing_id="",
+            our_agent_id="https://seller.example",
+            their_agent_id="https://buyer.example",
+            buyer_principal=BUYER,
+            seller_principal=CLAIMANT,
+            owner_id="https://seller.example",
+        )
         conn.execute(
-            "INSERT INTO negotiation_threads (negotiation_id, terminal_state, agreement_bytes, created_at) "
-            "VALUES (?, 'success', ?, ?)",
-            (negotiation_id, agreement.encode(), created_at),
+            "UPDATE negotiation_threads SET terminal_state = 'success', agreement_bytes = ?, created_at = ? "
+            "WHERE negotiation_id = ?",
+            (agreement.encode(), created_at, negotiation_id),
         )
 
 

@@ -41,7 +41,7 @@ from arkhai_apicredits.label import API_CREDITS_LABEL
 from apicredits_storefront import container, server
 from apicredits_storefront.container import SELLING_CONTRIBUTIONS
 from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.utils.migrations import _migrate_issuance_evidence
+from apicredits_storefront.container import storefront_sqlite_client
 from tests.integration.credit_negotiation import FakeCapacity
 from tests.listing_bindings import upsert_bound_listing
 
@@ -128,8 +128,7 @@ def _events():
 
 def _private_results(tmp_path):
     db_path = tmp_path / "hosted-private-results.db"
-    with sqlite3.connect(db_path) as connection:
-        _migrate_issuance_evidence(connection)
+    storefront_sqlite_client(str(db_path))
     return PrivateResultRepository(db_path, SELLING_CONTRIBUTIONS)
 
 
@@ -162,8 +161,7 @@ async def test_an_attestation_failure_rolls_back_only_when_nothing_reached_the_c
     authority = _FakeAuthority(fake_issue, fake_rollback)
     signer = Ed25519Signer(bytes.fromhex("22"*32))
     path = tmp_path / "evidence.db"
-    with sqlite3.connect(path) as connection:
-        _migrate_issuance_evidence(connection)
+    storefront_sqlite_client(str(path))
     evidence_service = IssuanceEvidenceService(
         IssuanceEvidenceRepository(path, SELLING_CONTRIBUTIONS),
         contributions=SELLING_CONTRIBUTIONS, signer=signer,
@@ -275,9 +273,9 @@ async def test_payment_refusal_releases_hold_using_negotiation_not_transaction(
     tmp_path, monkeypatch,
 ):
     from apicredits_storefront.services import fulfillment_service
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
 
-    db = SQLiteClient(str(tmp_path / "failure.db"))
+    db = storefront_sqlite_client(str(tmp_path / "failure.db"))
     now = datetime.now().isoformat()
     await upsert_bound_listing(
         db,
@@ -337,7 +335,7 @@ async def settled_db(tmp_path, monkeypatch):
     import market_policy.negotiation_thread as thread_module
     from apicredits_storefront.domain_runtime import get_market_domain_contract
     from apicredits_storefront.utils import config as config_module
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
     from market_core.schemas import EscrowProposal, ProvisionTerms
     from market_policy.identity import Identity
     from market_policy.negotiation_thread import get_thread_store
@@ -377,7 +375,7 @@ async def settled_db(tmp_path, monkeypatch):
             rpc_url="http://x",
         ),
     )
-    client = SQLiteClient(db_path=str(tmp_path / "settle.db"))
+    client = storefront_sqlite_client(db_path=str(tmp_path / "settle.db"))
     thread_module._thread_store = None
     get_thread_store(
         sqlite_client=client,

@@ -192,7 +192,7 @@ def listings_cmd(
         BASE_URL_OVERRIDE,
         resolve_identity_config,
     )
-    from apicredits_storefront.utils.sqlite_client import get_sqlite_client
+    from apicredits_storefront.container import get_sqlite_client
 
     rows = asyncio.run(
         get_sqlite_client(

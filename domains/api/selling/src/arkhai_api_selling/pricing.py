@@ -105,19 +105,27 @@ def _option_rate(option: Mapping[str, Any], *, noun: str) -> int | None:
     return checked_credit_total(rate.value, 1, noun=noun)
 
 
+def setting_text(key: str) -> str:
+    """How a refusal names a dotted setting: its table bracketed, then its key."""
+    table, _, name = key.rpartition(".")
+    return f"[{table}].{name}" if table else f"[{name}]"
+
+
 def extract_unit_price_from_order(
     order: dict[str, Any],
     *,
     noun: str,
+    floor_key: str,
     default_min_price: Any = None,
     proposal: Mapping[str, Any] | None = None,
 ) -> int | Fraction:
     """The seller's per-credit floor for the option a buyer's proposal selects.
 
     The selected option's or escrow's amount rate, else the configured floor where it
-    states none; with neither the negotiation is refused. See
-    openspec/specs/negotiation-protocol/spec.md, "The seller's reference amount is the
-    selected option's rate".
+    states none; with neither the negotiation is refused. ``floor_key`` is the
+    floor setting as the composing storefront spells it, which a refusal names.
+    See openspec/specs/negotiation-protocol/spec.md, "The seller's reference
+    amount is the selected option's rate".
     """
     selected = selected_settlement_artifact(order, proposal)
     selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
@@ -139,29 +147,30 @@ def extract_unit_price_from_order(
     if advertised is not None:
         return advertised
 
-    floor = _exact_floor(default_min_price, listing_id=order.get("listing_id"))
+    setting = setting_text(floor_key)
+    floor = _exact_floor(default_min_price, setting=setting, listing_id=order.get("listing_id"))
     if floor is not None and floor > 0:
         return floor
 
     raise ValueError(
         f"Listing {order.get('listing_id')} has hidden reserve (the selected "
-        "settlement artifact advertises no rate) and "
-        "[seller.pricing].default_min_price is not configured. The seller "
-        "has no floor to negotiate against; refusing the negotiation."
+        f"settlement artifact advertises no rate) and {setting} is not "
+        "configured. The seller has no floor to negotiate against; refusing "
+        "the negotiation."
     )
 
 
 _DECIMAL_TEXT = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
 
 
-def _exact_floor(value: Any, *, listing_id: Any) -> Fraction | None:
-    """``default_min_price`` as an exact rational parsed from decimal text, or None when unset."""
+def _exact_floor(value: Any, *, setting: str, listing_id: Any) -> Fraction | None:
+    """The configured floor as an exact rational parsed from decimal text, or None when unset."""
     if value is None:
         return None
     if isinstance(value, (bool, float)):
         raise ValueError(
-            f"[seller.pricing].default_min_price={value!r} is not a valid number "
-            "for an exact floor; state it as decimal text. Hidden-reserve "
+            f"{setting}={value!r} is not a valid number for an exact floor; "
+            "state it as decimal text. Hidden-reserve "
             f"listing {listing_id} has no usable floor."
         )
     text = str(value).strip()
@@ -169,7 +178,7 @@ def _exact_floor(value: Any, *, listing_id: Any) -> Fraction | None:
         return None
     if not _DECIMAL_TEXT.fullmatch(text):
         raise ValueError(
-            f"[seller.pricing].default_min_price={value!r} is not a valid number; "
+            f"{setting}={value!r} is not a valid number; "
             f"hidden-reserve listing {listing_id} has no usable floor."
         )
     return Fraction(text)

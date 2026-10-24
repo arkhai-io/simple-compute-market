@@ -38,7 +38,6 @@ import apicredits_storefront.container as container
 from apicredits_storefront.controllers.negotiate_controller import (
     router as negotiate_router,
 )
-from apicredits_storefront.middleware.response_auth import authenticate_response
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
     BUYER_SIGNER,
@@ -116,7 +115,7 @@ async def storefront(db, fake_capacity, key_records, monkeypatch):
         ],
     )
     app = FastAPI()
-    app.middleware("http")(authenticate_response)
+    app.middleware("http")(container.AUTH.sign_responses)
     app.include_router(negotiate_router)
     with settings_overrides(
         **{

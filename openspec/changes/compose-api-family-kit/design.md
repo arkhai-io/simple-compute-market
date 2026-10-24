@@ -394,21 +394,28 @@ named by it. The API-credits storefront supplies the Alkahest and payments
 contributions until the selling-side mechanism distributions own them (task
 8.7). Reconciliation reads every listing by the core store's keyset over
 `(created_at, listing_id)`, which no write changes, so a pass visits each
-listing once; a thread takes its listing's binding when it opens, and whether
-the opening's writes commit in one transaction is task 7.3's.
+listing once. A thread takes its listing's binding when it opens, and the
+opening is one transaction: the negotiation runtime's `open_negotiation` hook
+hands the storefront's persistence the thread, its opening message, and the
+opening record together, in place of its own separate writes, and `selling`
+runs them with the thread's purchase terms through the core client's
+`open_negotiation`, one connection and one commit, so a failed write leaves no
+thread, message, binding, or terms. VM and bare metal keep the runtime's
+separate writes until their own change adopts the hook.
 
 `selling` reads no configuration itself, so a refusal for a missing or
-malformed setting can only carry the text it was given. Its pricing refusals
-keep the text the storefronts served before the kit, which names
-`[seller.pricing].default_min_price`; no storefront in this repository spells
-the floor there — API credits reads `[pricing].default_min_price`, as the
-compute storefronts do — so the text does not point an operator at the key
-they edit, and it is kept byte-identical for compatibility. The capacity
-refusal names `[capacity.sites]`, which is API credits' key. The contract the
-family keeps is that a configuration refusal names the key the composing
-storefront spells, which task 7.4 delivers: the three pricing refusals, served
-404 on the negotiate route and recorded in no baseline, change to
-`[pricing].default_min_price` for API credits, and no other body changes.
+malformed setting names the key the composing storefront passes:
+`RoundSettings.floor_key` for the pricing floor and `read_capacity_sites`'s
+`sites_key` for the capacity sites, both dotted keys the refusal brackets as
+the storefront's own file spells them. API credits passes
+`pricing.default_min_price` and `capacity.sites`, so its three pricing
+refusals — an unconfigured floor, and a floor that is not a number, twice —
+name `[pricing].default_min_price`, where they once named
+`[seller.pricing].default_min_price`, a key no storefront spells. They reach
+the wire from a continuation round, which the negotiate route serves 404 as
+`{"detail": <message>}`; at opening the runtime answers any missing floor as
+`offer_unfulfillable: no_floor_price` before the message is served. No
+baseline records them, and no other body changes.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,
@@ -487,9 +494,30 @@ The route-contract pattern splits a route into wire models, a route contract, a
 typed client, a framework-free route service, and an HTTP binding that
 "belongs to whatever composes the process". `selling` and `authority` own the
 route services; each domain's storefront and each domain's service root own
-the bindings. The storefront controllers hold logic today, so the refactor
-moves it into route services first and leaves each binding a few lines. The
-unmounted issuance-evidence router is dropped, not moved.
+the bindings. The unmounted issuance-evidence router is dropped, not moved.
+
+The storefront's route services are `selling`'s `route_services`: one class
+per router — listings, negotiate, negotiations, settle, system — over
+providers of the collaborators the storefront resolves in its lifespan, each
+refusing with `RouteRefusal(status_code, detail)` and importing no web
+framework. The settle service reads the seller stage table from the
+settlement composition it is given, so the library holds no table of its own.
+A controller authenticates, calls its service, and serves the refusal as the
+response; the API-credits controllers stay the class-based views they were,
+because the recorded OpenAPI document carries the class in each route's name
+and operation identifier. Authentication is `selling`'s `auth`:
+`StorefrontAuth` verifies administrators, buyers, and the seller and signs
+every response over the storefront's replay store, signer, administrators, and
+principal, each read when a request runs. It is the library's one
+framework-facing module, since it reads the request and wraps the response,
+and the storefront kit already builds the FastAPI application every storefront
+runs. Persistence is `selling`'s `StorefrontSQLiteClient`: the core client
+plus the family's settlement tables under the bundle's prefix, its migration
+identifiers unchanged, and the purchase-terms table under the family name
+`credit_deal_terms`, since the terms are the vocabulary's shape and the
+API-credits schema baseline fixes the name. The storefront's composition holds
+the one client over its configured database and constructs each service once,
+in `container.py`.
 
 ### D12. What API credits keeps
 

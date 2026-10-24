@@ -8,9 +8,12 @@ from functools import partial
 from arkhai_api_selling.negotiation import default_seller_round_hook
 from arkhai_apicredits.negotiation.policies import accepted_escrow_proposal
 
-from apicredits_storefront.container import QUOTA_PUBLICATION, SELLING_CONTRIBUTIONS
+from apicredits_storefront.container import (
+    QUOTA_PUBLICATION,
+    SELLING_CONTRIBUTIONS,
+    get_sqlite_client,
+)
 from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 from market_core import (
     DomainCapability,

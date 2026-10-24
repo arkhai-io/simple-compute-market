@@ -40,9 +40,8 @@ from arkhai_api_selling.lifecycle import (
     loop_controller,
     capacity_site_loop_name,
 )
-from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.middleware.response_auth import authenticate_response
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -124,13 +123,13 @@ async def start_storefront(tmp_path, monkeypatch):
     Returns a factory taking the servicing interval and the capacity runtime;
     every other interval is far longer than any test waits.
     """
-    db = SQLiteClient(db_path=str(tmp_path / "lifecycle.db"))
+    db = storefront_sqlite_client(db_path=str(tmp_path / "lifecycle.db"))
     obligations = _Obligations()
     monkeypatch.setattr(container, "resolved_sqlite_client", db)
     monkeypatch.setattr(container, "resolved_marketplace_signer", STOREFRONT_SIGNER)
     monkeypatch.setattr(container, "resolved_settlement_composition", None)
     monkeypatch.setattr(
-        admin_auth,
+        storefront_config,
         "resolve_admin_identities",
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )
@@ -155,7 +154,7 @@ async def start_storefront(tmp_path, monkeypatch):
         capacity_aggregate = loops.start_loops()[CAPACITY_EVENTS_POLLER]
         started.append(loops)
         app = FastAPI()
-        app.middleware("http")(authenticate_response)
+        app.middleware("http")(container.AUTH.sign_responses)
         app.include_router(router)
         return _Storefront(app, loops, obligations, capacity_aggregate)
 

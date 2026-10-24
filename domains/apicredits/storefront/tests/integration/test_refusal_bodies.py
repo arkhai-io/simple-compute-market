@@ -22,7 +22,6 @@ from storefront_client import StorefrontClient, StorefrontClientError
 import apicredits_storefront.container as container
 from apicredits_storefront.controllers.negotiate_controller import router as negotiate_router
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from tests._settings_overrides import settings_overrides
 from tests.integration.credit_negotiation import (
@@ -30,6 +29,7 @@ from tests.integration.credit_negotiation import (
     BUYER_SIGNER,
     LISTING_ID,
     PAYEE_ACCOUNT,
+    PAYER_ACCOUNT,
     SELLER_PRINCIPAL,
     SELLER_SIGNER,
     payment_option,
@@ -75,7 +75,7 @@ async def served(db, fake_capacity, key_records, monkeypatch):
     monkeypatch.setattr(container, "resolved_negotiation_runtime", runtime)
     monkeypatch.setattr(container, "resolved_marketplace_signer", SELLER_SIGNER)
     app = FastAPI()
-    app.middleware("http")(authenticate_response)
+    app.middleware("http")(container.AUTH.sign_responses)
     app.include_router(negotiate_router)
     transport = _Recording(app)
     with settings_overrides(
@@ -145,6 +145,92 @@ async def test_a_pricing_refusal_body_is_unchanged(served, db):
     )
 
     assert (status, body) == (404, {"detail": "selected API-credit option rate is not per credit"})
+
+
+def _rateless_payment_option() -> SettlementOption:
+    """An option advertising no rate, so the seller negotiates from its configured floor."""
+    params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
+    return SettlementOption(
+        option_id=derive_settlement_option_id(
+            mechanism=ARKHAI_PAYMENTS_MECHANISM, asset="USD/2", rates=[], params=params
+        ),
+        mechanism=ARKHAI_PAYMENTS_MECHANISM,
+        asset="USD/2",
+        rates=[],
+        params=params,
+    )
+
+
+@pytest.mark.parametrize(
+    ("floor", "message"),
+    [
+        (
+            "",
+            "Listing L-tok has hidden reserve (the selected settlement artifact advertises "
+            "no rate) and [pricing].default_min_price is not configured. The seller has no "
+            "floor to negotiate against; refusing the negotiation.",
+        ),
+        (
+            1.5,
+            "[pricing].default_min_price=1.5 is not a valid number for an exact floor; state "
+            "it as decimal text. Hidden-reserve listing L-tok has no usable floor.",
+        ),
+        (
+            "abc",
+            "[pricing].default_min_price='abc' is not a valid number; hidden-reserve listing "
+            "L-tok has no usable floor.",
+        ),
+    ],
+    ids=["unconfigured", "not-a-number", "not-decimal-text"],
+)
+async def test_a_floor_refusal_names_the_storefronts_own_setting(served, db, fake_capacity, floor, message):
+    """The pricing floor's refusals name `[pricing].default_min_price`, the key this
+    storefront reads, and the negotiate route serves them 404 with the message as
+    their detail. They reach the wire from a continuation: at opening the runtime
+    answers any missing floor as `offer_unfulfillable: no_floor_price`."""
+    option = _rateless_payment_option()
+    await db.update_listing(listing_id=LISTING_ID, settlement_options=[option.model_dump(mode="json")])
+    selection = {
+        "mechanism": option.mechanism,
+        "option_id": option.option_id,
+        "expiration_unix": 1_900_000_000,
+        "params": {"payer_account": PAYER_ACCOUNT},
+    }
+    client = StorefrontClient(
+        "http://seller",
+        signer=BUYER_SIGNER,
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+        transport=served,
+    )
+    async with client as buyer:
+        with settings_overrides(**{"negotiation.policies": ["bisection"], "pricing.default_min_price": "100"}):
+            opened = await buyer.negotiate_new(
+                listing_id=LISTING_ID,
+                initial_amount=250,
+                provision_terms=terms(3).model_dump(mode="json"),
+                settlement_selection=selection,
+                selection_only=True,
+            )
+        assert opened["action"] == "counter"
+
+        # Deferred debt, not a client method: the client's typed continuation
+        # signs every field, null ones included, where this storefront's buyer
+        # authentication hashes the fields the request states, as the API-credits
+        # buyer sends them, so `negotiate_continue` is refused 403 here. The
+        # generic signed request sends the body as the buyer would.
+        with settings_overrides(**{"negotiation.policies": ["bisection"], "pricing.default_min_price": floor}):
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.authenticated_request(
+                    "POST",
+                    f"/api/v1/negotiate/{opened['negotiation_id']}",
+                    role="buyer",
+                    operation="negotiate_continue",
+                    resource=opened["negotiation_id"],
+                    body={"action": "accept", "buyer_principal": BUYER_PRINCIPAL.model_dump(mode="json")},
+                )
+
+    assert (refused.value.status_code, json.loads(served.bodies[-1])) == (404, {"detail": message})
 
 
 async def test_a_continuation_whose_recorded_terms_changed_is_refused_with_its_unchanged_message(

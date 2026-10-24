@@ -349,7 +349,9 @@ BASE_URL_OVERRIDE: str = str(settings.get("base_url", "http://localhost:8002"))
 def capacity_sites() -> tuple[dict[str, CapacitySite], str]:
     """Each configured capacity site, and the placement."""
     return read_capacity_sites(
-        settings.get("capacity.sites"), settings.get("capacity.placement", "")
+        settings.get("capacity.sites"),
+        settings.get("capacity.placement", ""),
+        sites_key="capacity.sites",
     )
 
 
@@ -382,6 +384,7 @@ LOOP_SETTINGS = LoopSettings(
 def round_settings() -> RoundSettings:
     """What the seller's round reads, read once per round."""
     return RoundSettings(
+        floor_key="pricing.default_min_price",
         negotiation_config=settings.get("negotiation"),
         chain_config_paths={
             name: chain.alkahest_address_config_path for name, chain in CHAINS.items()

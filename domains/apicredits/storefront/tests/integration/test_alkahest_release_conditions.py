@@ -32,7 +32,6 @@ from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from arkhai_api_selling.publish_route import ListingClient
 from apicredits_storefront.utils import config as storefront_config
-from apicredits_storefront.utils import sqlite_client as sqlite_module
 from tests.integration.test_publish_reconcile import _QuotaRuntime
 
 SEED = b"\x22" * 32
@@ -88,7 +87,7 @@ def storefront(tmp_path, monkeypatch):
     )
     # The process's database client is created by the first startup; each test
     # starts from none and leaves none behind.
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", None)
+    monkeypatch.setattr(container, "_sqlite_client", None)
     identity = SELLER_SIGNER.identity
     with _replaced(
         identity={
@@ -135,7 +134,7 @@ async def test_startup_refuses_a_release_model_api_credits_cannot_deliver(
                 pass
 
     # Refused before the storefront opened its database.
-    assert sqlite_module._sqlite_client is None
+    assert container._sqlite_client is None
     assert not storefront.exists()
 
 

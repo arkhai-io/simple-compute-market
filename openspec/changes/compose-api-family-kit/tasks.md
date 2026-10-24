@@ -1881,7 +1881,7 @@ scenario "A storefront binds the negotiate route"). Touches
 `apicredits_storefront/controllers/`, `middleware/`, `utils/`, `server.py`,
 `cli.py`, `container.py`.
 
-- [ ] 7.1 `route_services.py`: a framework-free route service for each
+- [x] 7.1 `route_services.py`: a framework-free route service for each
       storefront route the controllers serve today — listings and publish from
       quota, negotiate new and continue, negotiations list, get, advance, and
       force-accept, settle and status, admin settle wait, refund, system status
@@ -1890,14 +1890,92 @@ scenario "A storefront binds the negotiate route"). Touches
       moved from `middleware/`. `persistence.py`: the SQLite client subclass and
       the `api_credit_*` migrations with identifiers unchanged, the table prefix
       from the bundle. (D11, D12.)
-- [ ] 7.2 The API-credits storefront's controllers become bindings of a few
+      *Done 2026-10-24.* `route_services.py`: one class per router over
+      providers of the lifespan's collaborators — `ListingRoutes` (list, get,
+      pause, resume, publish from quota, close), `NegotiateRoutes` (new,
+      continue, with the exact-retry replay and every refusal body the
+      controllers served), `NegotiationRoutes` (list, get, advance, and
+      force-accept through the kit's control), `SettleRoutes` (settle, status
+      with the buyer admitted through an injected callback once the thread
+      names it, the wait's signed resource and the wait, refund), and
+      `SystemRoutes` (health, the administrator's status, the event read's
+      signed resource and its page or stream) — each refusing with
+      `RouteRefusal(status_code, detail)` and importing no web framework; the
+      settle service reads the stage table from the composition it is given,
+      so the library keeps none. The issuance-evidence router is deleted.
+      `auth.py`: `StorefrontAuth` over the replay store, signer,
+      administrators, and seller principal, each read per request — the
+      administrator dependency and explicit-contract authentication, the
+      buyer's body-bound verification with exact retries, the seller
+      dependency, and the response-signing middleware — the one module in
+      `selling` that imports the web framework, since it reads the request
+      and wraps the response (`selling` declares `fastapi`, which the
+      storefront kit already builds the application with). `persistence.py`:
+      `StorefrontSQLiteClient(db_path, contributions)`, the core client plus
+      the family's settlement tables named from the bundle's prefix, the two
+      migration identifiers unchanged, the purchase-terms table under the
+      family name `credit_deal_terms` (the terms are the vocabulary's shape and
+      the schema baseline fixes the name), the schema and unbound-listing
+      refusals naming the bundle's noun, and `write_credit_terms` for the
+      opening transaction (7.3). Unit, under the neutral `example` bundle:
+      `test_route_services.py` (the listing reads and refusals, every
+      opening refusal body, the exact retry, the counter and selection
+      checks, the introspection errors, settle's party, mechanism, stage, and
+      composition refusals and its three failure kinds, the status route's
+      admit-then-run order and not-found cases, the wait's stated timeout and
+      terminal poll, refund, health, status, and the event read's resource;
+      the continuation's source and server errors, the event page and stream,
+      and the refund's refusals are covered by the storefront's suite),
+      `test_negotiation_opening.py`; library integration, `test_auth.py` (the
+      storefront's two administrator cases, the uninitialized refusal, a
+      signed outcome replayed, over a real SQLite replay store; the buyer and
+      seller verifications are exercised through the storefront's bindings in
+      its suite) and `test_persistence.py` (prefixed tables and identifiers
+      against real SQLite, terms, the unbound-listing refusal, the opening
+      transaction).
+      `selling` 0.3.0; `tests/bundles.py` now builds the test tables through
+      the client, so no DDL is copied.
+- [x] 7.2 The API-credits storefront's controllers become bindings of a few
       lines each; `server.py` and `cli.py` keep app assembly and the admin
       commands; `utils/config.py` keeps the `APICREDITS_STOREFRONT_*` settings
       and builds the bundle's configured values; `startup_refusal.py` and
       `retired_settings.py` stay, as the root's own configuration refusal;
       `middleware/` and `utils/migrations.py` and `utils/sqlite_client.py` are
       deleted. (D11, D13.)
-- [ ] 7.3 A negotiation's opening commits in one transaction: the thread, its
+      *Done.* Each controller authenticates through `container.AUTH`, calls
+      its route service, and serves a `RouteRefusal` as the response
+      (`controllers/binding.py`); every decorator, summary, description,
+      response model, and handler name is unchanged, and the controllers stay
+      the class-based views they were, because the recorded OpenAPI document
+      carries the class in each route's name and operation identifier and
+      doubles each route's tag through it — a first attempt as plain functions
+      diffed the `routes`, `openapi`, and `authentication` baselines, so
+      `fastapi-utils` stays declared. `container.py` holds `AUTH`, the five
+      route services, `storefront_sqlite_client` and the process's
+      `get_sqlite_client`; `server.py` mounts `AUTH.sign_responses`;
+      `settlement_models.py` binds `ApiCreditsSettleRequest` to `selling`'s
+      `QuotaSettleRequest` under its recorded component name; `utils/config.py`
+      passes the keys of 7.4. Deleted: `middleware/`, `utils/migrations.py`,
+      `utils/sqlite_client.py`, `controllers/issuance_evidence_controller.py`,
+      and `tests/unit/test_admin_auth.py`, whose cases moved to `selling`.
+      The storefront drops `arkhai-api` from its runtime dependencies (nothing
+      in `src/` imports the vocabulary now; its tests do, from the dev group)
+      and bumps to 0.14.0. Tests patch `config.resolve_admin_identities` and
+      `container._sqlite_client` where they patched the middleware and the
+      client module, build clients through `storefront_sqlite_client`, and
+      install `container.AUTH.sign_responses`; the payment settlement test's
+      fake composition gains the `stages` the settle service reads. The two
+      attachments that imported the deleted client module now import the
+      container's factory (their fulfillment call keeps the signature it lost
+      earlier, as section 3 recorded). `RELEASING.md`'s storefront row drops
+      the vocabulary. One change a reader could observe, in no baseline: a
+      negotiate route reached before the runtime is composed answered 500
+      from the controller's constructor and answers 503 "storefront
+      negotiation is unavailable" from the route service, as the force-accept
+      route already did. 174 passed (unit and application integration): 1.5's
+      route, OpenAPI, authentication, refusal, health, configuration, and
+      schema baselines and the pins unchanged.
+- [x] 7.3 A negotiation's opening commits in one transaction: the thread, its
       opening message, its listing's binding, and its credit terms are written
       together or not at all. Today the negotiation runtime commits the thread
       and the opening message, then calls the domain's opening hook, whose
@@ -1911,7 +1989,33 @@ scenario "A storefront binds the negotiate route"). Touches
       (Found by the implementation review of section 6; the separate commits
       predate this change. Nothing in section 6 claims the opening is
       transactional.)
-- [ ] 7.4 `selling`'s configuration refusals name the key the composing
+      *Done.* The runtime gains an `open_negotiation` hook
+      (`OpenNegotiationHook`, `OpeningWrite`: the thread's and the message's
+      write arguments and the opening record); set, the runtime hands it the
+      whole opening and makes none of those writes itself; unset, it writes as
+      before, so VM and bare metal are unchanged
+      (`arkhai-kit-negotiation-runtime` 0.6.0, exact pins moved). The core
+      client gains `open_negotiation(thread, message, bind_to_listing,
+      domain_writes)`, one `BEGIN IMMEDIATE` over its connection-scoped
+      `insert_negotiation_thread`, `insert_negotiation_message`, and
+      `copy_listing_binding`, which its three async writes now call
+      (`arkhai-core-storefront` 0.18.0; the capacity-publication kit's exact
+      pin follows, 0.10.4, and the VM and bare-metal storefronts' and the
+      provisioning service's exact pins on it, with patch bumps: VM 0.17.3,
+      bare metal 0.17.3, provisioning service 0.17.5, and the VM storefront's
+      exact pin on bare metal). `selling`'s hook runs it with
+      `write_credit_terms` as the domain's write; `persist_opening` leaves
+      `selling`. Fault injection at three levels: core library integration
+      (`test_open_negotiation.py`: a failing domain write leaves no thread,
+      message, or binding; an unbound listing writes nothing); `selling`
+      library integration (`test_persistence.py`: a failing terms write after
+      the thread, message, and binding leaves none of the four); and through
+      the storefront's composed runtime against real SQLite
+      (`test_sync_negotiation.py`: the runtime given a subclass of the
+      storefront's client whose opening fails after the terms write, `start`
+      raises and the three tables are empty). Runtime unit: the hook receives
+      the whole opening and the runtime writes none of it.
+- [x] 7.4 `selling`'s configuration refusals name the key the composing
       storefront spells: the pricing floor's three refusals (unconfigured;
       not a number, twice) and the capacity sites' refusal take the setting's
       name from the composition. API credits passes
@@ -1926,12 +2030,114 @@ scenario "A storefront binds the negotiate route"). Touches
       a served body, and its text is already API credits' key, so it does not
       change. Every other refusal body stays byte-identical. (Found by the
       implementation review of section 6.)
-- [ ] 7.5 Verification: `make test-api-selling` (unit), `make -C
+      *Done.* `RoundSettings.floor_key` and `read_capacity_sites`'s `sites_key`
+      are the composition's dotted keys, which the refusals bracket as the
+      storefront's file spells them (`setting_text`: `[pricing].default_min_price`,
+      `[capacity.sites]`, `[capacity.sites.<site>.expected_authorities]`); API
+      credits passes `pricing.default_min_price` and `capacity.sites` in
+      `utils/config.py`. Correction to this task's premise: the three pricing
+      refusals reach the wire from a continuation round, where the runtime
+      calls the reference-amount hook unwrapped and the negotiate route serves
+      the `ValueError` 404 as `{"detail": <message>}`; at opening the runtime
+      answers any floor refusal naming `default_min_price` as
+      `offer_unfulfillable: no_floor_price` (409), kit behaviour this section
+      does not change. `test_refusal_bodies.py` opens a payment-selected
+      negotiation under a floor of `100` (bisection, a counter), then
+      continues under each bad floor and asserts the exact 404 body through
+      the canonical client's generic signed request. Through its typed
+      continuation the client signs `proposal`, `settlement_selection`, and
+      `reason` as nulls, which this storefront's buyer authentication omits
+      from the canonical body (as the API-credits buyer sends it), so that
+      method is refused 403 before any route runs — pre-existing, outside
+      this section, recorded for the owner in 7.5's handoff. Unit (`selling`): the pricing
+      tests pass a neutral key and the capacity tests another.
+- [x] 7.5 Verification: `make test-api-selling` (unit), `make -C
       domains/apicredits/storefront test` (application integration through the
       typed storefront client: every route's baseline diffs to zero, the
       startup refusal of a listing without a binding holds), `make test`,
       `make check-packaging`. End-to-end: `e2e_credits_deal`,
       `e2e_credits_payment_deal`.
+      *Done 2026-10-24.* `make test-api-selling` 204 passed from the root,
+      `require-wheels` passing (`tests/unit/` unit over fakes under the
+      `example` bundle; `tests/integration/` library integration against
+      real SQLite, the authentication over a real replay store among them).
+      `make -C domains/apicredits/storefront test` 174 passed (unit and
+      application integration through the real app over `ASGITransport` and
+      the canonical client; 1.5's route, OpenAPI, authentication, refusal,
+      health, configuration, and schema baselines diff to zero; the pins
+      hold; the unbound-listing startup refusal holds, now under the
+      bundle's noun). The packages the version cascade reaches: negotiation
+      runtime 62, core storefront 224 (2 skipped), capacity publication 97,
+      storefront kit 123, VM storefront 1103 unit and 446 integration, bare
+      metal 134 and its storefront 444, provisioning service 661 unit and 485
+      integration, e2e unit 80, VM domain 53. `make -k test`: every suite
+      passed except, all inherited and recorded by 1.7 to 6.6, the
+      provisioning dotenv-layering unit test, the three provisioning IaC
+      relay-teardown shell tests, the VM storefront's two Alkahest toolchain
+      tests, the release-tooling whole-tree checks and `test_publish_matrix`
+      rows that read the other session's stale `.claude/worktrees/` checkout,
+      one `test_validate_slice` case needing GNU make's `--eval`; and one this
+      section caused and fixed, the storefront's release-guide row still
+      naming `arkhai-api`, which passes on a copy without the stale checkout.
+      Helm is not installed, so the render checks are unrun. On that copy:
+      `make check-packaging` passes (uv setup, locks — the twelve relocked
+      under uv 0.11.17 — Python version, layout, all four architecture parts)
+      and `make check-comment-hygiene` passes; in place each reports only the
+      stale checkout. `make check-change` reports only the two `api-family`
+      documents closeout creates. End-to-end: owed to validation.
+      `e2e_credits_deal` drives the negotiate, settle, and status routes, and
+      `e2e_credits_payment_deal` the settle, status, and refund routes,
+      through the bindings over `selling`'s route services and
+      authentication, each opening through the one-transaction path; no
+      scenario was added, and `e2e_credits_service_rollback` is unaffected,
+      since the service does not install `selling`.
+      **Handoff.** The storefront's composition of the route services and
+      authentication is `container.py` (`AUTH`, `LISTING_ROUTES`,
+      `NEGOTIATE_ROUTES`, `NEGOTIATION_ROUTES`, `SETTLE_ROUTES`,
+      `SYSTEM_ROUTES`, `storefront_sqlite_client`, `get_sqlite_client`);
+      tests patch `storefront_config.resolve_admin_identities` and the
+      container's `resolved_*` and `_sqlite_client`. Section 8 moves
+      `settlement_stages.py`, `payment_settlement_service.py`, and the
+      composition's Alkahest and payments parts; `SettleRoutes` reads the
+      stage table from the composition, so it needs no change when the
+      entries move. The settle request base is `QuotaSettleRequest`; the
+      storefront's `ApiCreditsSettleRequest` subclasses it for its recorded
+      component name. The exception row for `selling`'s core-storefront edge
+      now names the authentication, the SQLite client and migrations, the
+      wire models, and the negotiation service's error this section added.
+      For the owner: (1) the canonical client's typed `negotiate_continue`
+      signs `proposal`, `settlement_selection`, and `reason` as nulls, while
+      this storefront's buyer authentication hashes the fields a request
+      states, as the API-credits buyer CLI sends them, so that method is
+      refused 403 by the API-credits storefront — pre-existing, moved
+      unchanged, and now marked as deferred debt in `test_refusal_bodies.py`,
+      which sends the continuation through the client's generic signed
+      request; (2) at opening the runtime answers every floor refusal naming
+      `default_min_price` as `offer_unfulfillable: no_floor_price`, so task
+      7.4's three bodies are served from a continuation, not an opening;
+      (3) `selling`'s `auth` is the one module in the library that imports
+      the web framework, and the family's third copy of the storefront's v2
+      authentication beside VM's and bare metal's — the plan's placement,
+      interim until `kit-owned-storefront-auth-and-persistence` moves the set
+      into the kit, as D2 and the exception row already record; the
+      `api-family` delta states the route services and the configuration
+      refusals and not that placement. The fresh-context check found no
+      layering, scope, packaging, or versioning breach; accepted from it: the
+      exception row's reason, the runtime test's imports at module level,
+      three unused imports the test rewiring left, the authentication test
+      moved to `integration/`, the storefront's fault injection through a
+      client subclass rather than a patched module function, the raw
+      continuation marked as debt, the spec delta narrowed and the refusal
+      key given its own requirement, the promotion row for the opening
+      naming the market-composition companion, `SettleRoutes` and core's
+      `open_negotiation` shedding an unused parameter each, the 500-to-503
+      disclosure above, and the evidence wordings in 7.1. Declined: dropping
+      the storefront-level fault test as a third copy, since it alone proves
+      the API-credits composition opens through the transaction; and
+      replacing the storefront tests' patches of `resolve_admin_identities`
+      with constructor injection, since `container.AUTH` is the one instance
+      every binding reads. Section 7 is committed on
+      `feat/compose-api-family-kit-s7-routes`, stacked on section 6's branch.
 
 ## 8. The selling-side mechanism distributions
 
@@ -2160,7 +2366,8 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
-| D7 — `selling`'s configuration refusals name the key the composing storefront spells (API credits: `[pricing].default_min_price`, `[capacity.sites]`); task 7.4 delivers it | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — `selling`'s configuration refusals name the key the composing storefront passes (`RoundSettings.floor_key`, `read_capacity_sites`'s `sites_key`; API credits: `[pricing].default_min_price`, `[capacity.sites]`); the pricing refusals reach the wire from a continuation, 404 `{"detail": <message>}` | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — an opening is one transaction: the negotiation runtime's `open_negotiation` hook (`arkhai-kit-negotiation-runtime` 0.6.0), the core client's `open_negotiation` with its connection-scoped thread, message, and binding writes (`arkhai-core-storefront` 0.18.0), and `selling`'s purchase-terms write in the same transaction; VM and bare metal adopt the hook in their own change | `openspec/specs/api-family/spec.md`; `openspec/specs/market-composition/architecture.md` (the negotiation runtime's opening unit of work, which VM and bare metal adopt in their own change) |
 | D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair, where the hook runs on the stored listing as it is republished; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
@@ -2177,6 +2384,6 @@ change to implementation.
 | D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
 | D4 — the storefront composes the family client once at its composition boundary; the authority binds the contracts' wire models to its label and keeps no digest of its own | `openspec/specs/api-credits/architecture.md#implementation-composition` |
-| D11 — route services in the kit, bindings in the compositions | `openspec/specs/api-family/spec.md`; `openspec/specs/api-credits/architecture.md#implementation-composition` |
+| D11 — route services in the kit, bindings in the compositions: `selling`'s `route_services` (one class per router, `RouteRefusal`), `auth` (`StorefrontAuth`, the library's one framework-facing module), and `persistence` (`StorefrontSQLiteClient`, the family's tables under the bundle's prefix, the purchase-terms table keeping the family name `credit_deal_terms`); the API-credits controllers as class-based bindings, since the recorded OpenAPI document carries the class in each route's name | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md`; `openspec/specs/api-credits/architecture.md#implementation-composition` |
 | Open: the ledger-free split and inference's projection values | `openspec/specs/api-family/architecture.md` (current limits) |
 | New capability | `openspec/specs/README.md` |

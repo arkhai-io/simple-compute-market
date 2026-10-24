@@ -24,7 +24,7 @@ from apicredits_storefront.services.payment_settlement_service import (
 )
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.settlement_models import ApiCreditsSettleRequest
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from arkhai_apicredits.negotiation.terms import make_api_credits_provision_terms
 from arkhai_api.issuance import issuance_result_model
 from arkhai_apicredits.label import API_CREDITS_LABEL
@@ -62,7 +62,7 @@ class IssuanceBoundary:
 
 @pytest.fixture
 async def payment_context(tmp_path):
-    db = SQLiteClient(str(tmp_path / "storefront.db"))
+    db = storefront_sqlite_client(str(tmp_path / "storefront.db"))
     payments = FakePaymentsClient()
     kit_stage = servicing_stage(
         ArkhaiPaymentsConfig(
@@ -141,7 +141,7 @@ async def test_lost_ack_recovery_revalidates_stored_receipt_without_rechecking(p
     reads = payments.count("get_transaction")
 
     payments.unavailable = True
-    context["db"] = SQLiteClient(context["db"].db_path)
+    context["db"] = storefront_sqlite_client(context["db"].db_path)
     ready = await stage.status(**context)
 
     assert ready.payload["status"] == "ready"

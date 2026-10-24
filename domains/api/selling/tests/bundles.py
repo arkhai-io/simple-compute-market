@@ -6,7 +6,6 @@ under it shows the library reads only what the bundle's projection returns.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -32,6 +31,7 @@ from market_core.schemas import Agreement, SettlementOption, derive_settlement_o
 from market_identity import Ed25519Signer
 from pydantic import BaseModel, ConfigDict
 
+from arkhai_api_selling.persistence import StorefrontSQLiteClient
 from arkhai_api_selling.contributions import (
     ConsumptionRule,
     IssuanceSubject,
@@ -140,55 +140,6 @@ def accepted_agreement(listing_id: str) -> tuple[Agreement, bytes]:
     return agreement, agreement.model_dump_json(exclude_none=True).encode()
 
 
-def create_tables(db_path: Path, contributions: SellingContributions = EXAMPLE) -> None:
-    """The storefront tables the selling stores write, named from the bundle's prefix."""
-    evidence = contributions.table("settlement_evidence")
-    progress = contributions.table("issuance_progress")
-    issuance_evidence = contributions.table("issuance_evidence")
-    private = contributions.table("private_results")
-    with sqlite3.connect(db_path) as conn:
-        conn.executescript(
-            f"""
-            CREATE TABLE negotiation_threads (
-              negotiation_id TEXT PRIMARY KEY,
-              terminal_state TEXT,
-              agreement_bytes BLOB,
-              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            );
-            CREATE TABLE {evidence} (
-              negotiation_id TEXT PRIMARY KEY,
-              mechanism TEXT NOT NULL,
-              agreement_digest TEXT NOT NULL,
-              settlement_ref TEXT UNIQUE,
-              status TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'failed', 'refunding', 'refunded')),
-              evidence TEXT NOT NULL
-            );
-            CREATE TABLE {progress} (
-              negotiation_id TEXT PRIMARY KEY,
-              public_ref TEXT NOT NULL UNIQUE,
-              status TEXT NOT NULL CHECK(status IN ('provisioning', 'ready', 'failed')),
-              fulfillment_uid TEXT,
-              public_result TEXT NOT NULL DEFAULT '{{}}',
-              credentials_ref TEXT,
-              reason TEXT,
-              delivery_started_at TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
-            );
-            CREATE TABLE {issuance_evidence} (
-              evidence_digest TEXT PRIMARY KEY,
-              fulfillment_id TEXT NOT NULL UNIQUE,
-              signed_evidence TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-            CREATE TABLE {private} (
-              credentials_ref TEXT PRIMARY KEY,
-              fulfillment_id TEXT NOT NULL UNIQUE,
-              owner_scheme TEXT NOT NULL,
-              owner_id TEXT NOT NULL,
-              key_id TEXT NOT NULL,
-              secret TEXT NOT NULL,
-              created_at TEXT NOT NULL
-            );
-            """
-        )
+def create_tables(db_path: Path, contributions: SellingContributions = EXAMPLE) -> StorefrontSQLiteClient:
+    """The storefront's schema, migrated by the selling library's own client under the bundle's prefix."""
+    return StorefrontSQLiteClient(str(db_path), contributions)

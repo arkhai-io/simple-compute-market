@@ -1,9 +1,8 @@
 """API-credits storefront FastAPI application.
 
-Mirrors the VM storefront's shape: ``FastAPI(lifespan=lifespan)``
-resolves singletons and starts the background tasks; controllers mount
-after the module-level app exists; admin auth via Security() on
-individual routers.
+The lifespan resolves the container's singletons and starts the background
+tasks; the controllers, bindings of the selling library's route services,
+mount after the module-level app exists.
 """
 
 from __future__ import annotations
@@ -50,8 +49,8 @@ from market_storefront_kit import (
 )
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.container import get_sqlite_client
 from apicredits_storefront.domain_runtime import get_market_domain_contract
-from apicredits_storefront.middleware.response_auth import authenticate_response
 from apicredits_storefront.services.fulfillment_service import (
     build_api_credit_failure_policy,
 )
@@ -82,7 +81,6 @@ from apicredits_storefront.utils.config import (
     settlement_publication_defaults,
     system_settings,
 )
-from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 logger = logging.getLogger(__name__)
 
@@ -490,7 +488,7 @@ def build_api_credits_storefront_app(
                     lifecycle_router,
                     trading_pause_router,
                 ),
-                middleware=(authenticate_response,),
+                middleware=(_container.AUTH.sign_responses,),
             ),
         )
     )

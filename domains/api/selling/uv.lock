@@ -178,7 +178,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-selling"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-api" },
@@ -194,6 +194,7 @@ dependencies = [
     { name = "arkhai-kit-settlement-runtime" },
     { name = "arkhai-kit-site-client" },
     { name = "arkhai-kit-storefront" },
+    { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
@@ -211,15 +212,16 @@ requires-dist = [
     { name = "arkhai-api-client", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
-    { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = ">=0.10.3" },
+    { name = "arkhai-core-storefront", specifier = ">=0.18.0" },
+    { name = "arkhai-kit-capacity-publication", specifier = ">=0.10.4" },
     { name = "arkhai-kit-identity", specifier = ">=0.4.0" },
-    { name = "arkhai-kit-negotiation-runtime", specifier = ">=0.5.1" },
+    { name = "arkhai-kit-negotiation-runtime", specifier = ">=0.6.0" },
     { name = "arkhai-kit-policy", specifier = ">=0.5.0" },
     { name = "arkhai-kit-resource-pools", specifier = ">=0.7.0" },
     { name = "arkhai-kit-settlement-runtime", specifier = ">=0.4.0" },
     { name = "arkhai-kit-site-client", specifier = ">=0.11.0" },
     { name = "arkhai-kit-storefront", specifier = ">=0.8.0" },
+    { name = "fastapi", specifier = "~=0.115.8" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
 ]
@@ -257,7 +259,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.17.0"
+version = "0.18.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -269,7 +271,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.17.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.18.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -307,7 +309,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.10.3"
+version = "0.10.4"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront" },
@@ -315,7 +317,7 @@ dependencies = [
     { name = "arkhai-kit-site-client" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.10.3-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.10.4-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -351,14 +353,14 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-negotiation-runtime"
-version = "0.5.1"
+version = "0.6.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity" },
     { name = "arkhai-kit-policy" },
 ]
 wheels = [
-    { path = "arkhai_kit_negotiation_runtime-0.5.1-py3-none-any.whl" },
+    { path = "arkhai_kit_negotiation_runtime-0.6.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -872,6 +874,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/1b/0b8548da7b31eba87ed58bca1d0de5dcb13a6c113e02c09019ec5a6716ed/eth_utils-6.0.0.tar.gz", hash = "sha256:eb54b2f82dd300d3142c49a89da195e823f5e5284d43203593f87c67bad92a96", size = 123457, upload-time = "2026-03-25T17:11:51.433Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/53/45/a20b907227b9d1aea2e36f7b12818d055629ca9bc65fc282b45738f28ca3/eth_utils-6.0.0-py3-none-any.whl", hash = "sha256:63cf48ee32c45541cb5748751909a8345c470432fb6f0fed4bd7c53fd6400469", size = 102473, upload-time = "2026-03-25T17:11:49.953Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.115.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/53/8c38a874844a8b0fa10dd8adf3836ac154082cf88d3f22b544e9ceea0a15/fastapi-0.115.14.tar.gz", hash = "sha256:b1de15cdc1c499a4da47914db35d0e4ef8f1ce62b624e94e0e5824421df99739", size = 296263, upload-time = "2025-06-26T15:29:08.21Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/50/b1222562c6d270fea83e9c9075b8e8600b8479150a18e4516a6138b980d1/fastapi-0.115.14-py3-none-any.whl", hash = "sha256:6c0c8bf9420bd58f565e585036d971872472b4f7d3f6c73b698e10cffdefb3ca", size = 95514, upload-time = "2025-06-26T15:29:06.49Z" },
 ]
 
 [[package]]
@@ -1554,6 +1570,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/87/69e86a23cd9ccef0d654c09dc69dfea6d62b1311d2f13ca3daab1bcd922e/sqlalchemy-2.1.6-cp313-cp313-win_amd64.whl", hash = "sha256:b9f0b92b4a88b630f1e67df816b43cb017bb583479917dd100541d4f490a9517", size = 2432597, upload-time = "2026-10-21T17:11:35.514Z" },
     { url = "https://files.pythonhosted.org/packages/98/90/a7f81395135cc5da724403ece4340f7e04c1ce752da15d0ad337591ec9c9/sqlalchemy-2.1.6-cp313-cp313-win_arm64.whl", hash = "sha256:bc495d00f235c3df6f376187a4ef48a56e162fdcc0a113ee34518332aa1aa2df", size = 2393224, upload-time = "2026-10-21T18:54:18.405Z" },
     { url = "https://files.pythonhosted.org/packages/c1/69/c75534e336b06b3fd3f76de73d89736510800e60c77c58d4e4ce18389018/sqlalchemy-2.1.6-py3-none-any.whl", hash = "sha256:106878cf3795cd3d357e2e858609f9e44f20f19b2d8e48a3532bef3f90b03fbe", size = 2063055, upload-time = "2026-10-21T18:42:10.234Z" },
+]
+
+[[package]]
+name = "starlette"
+version = "0.46.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/20/08dfcd9c983f6a6f4a1000d934b9e6d626cff8d2eeb77a89a68eef20a2b7/starlette-0.46.2.tar.gz", hash = "sha256:7f7361f34eed179294600af672f565727419830b54b7b084efe44bb82d2fccd5", size = 2580846, upload-time = "2025-04-13T13:56:17.942Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/0c/9d30a4ebeb6db2b25a841afbb80f6ef9a854fc3b41be131d249a977b4959/starlette-0.46.2-py3-none-any.whl", hash = "sha256:595633ce89f8ffa71a015caed34a5b2dc1c0cdb3f0f1fbd1e69339cf2abeec35", size = 72037, upload-time = "2025-04-13T13:56:16.21Z" },
 ]
 
 [[package]]

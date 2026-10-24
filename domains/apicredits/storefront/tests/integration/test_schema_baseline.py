@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "baseline" / "schema.json"
 
@@ -68,7 +68,7 @@ def describe_schema(conn: sqlite3.Connection) -> dict[str, Any]:
 
 
 def fresh_schema(directory: Path) -> dict[str, Any]:
-    db = SQLiteClient(db_path=str(directory / "baseline.db"))
+    db = storefront_sqlite_client(db_path=str(directory / "baseline.db"))
     conn = sqlite3.connect(db.db_path)
     try:
         return describe_schema(conn)

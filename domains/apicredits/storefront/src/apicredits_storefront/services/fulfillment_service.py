@@ -16,12 +16,12 @@ from market_core import SettlementEvidence
 from market_settlement_runtime import FailurePolicy
 
 import apicredits_storefront.container as _container
+from apicredits_storefront.container import get_sqlite_client
 from apicredits_storefront.services.credits_service_client import (
     get_credits_service_client,
 )
 from apicredits_storefront.settlement_composition import SELLER_STAGES
 from apicredits_storefront.utils.config import settings
-from apicredits_storefront.utils.sqlite_client import get_sqlite_client
 
 
 def _configured_failure_actions() -> Any:

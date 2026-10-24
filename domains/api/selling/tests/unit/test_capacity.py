@@ -20,7 +20,7 @@ SITES = {
 
 
 def test_configured_sites_are_read_with_their_trusted_authorities():
-    sites, placement = read_capacity_sites(SITES, None)
+    sites, placement = read_capacity_sites(SITES, None, sites_key="quota.sites")
 
     assert placement == "fill_first"
     assert sites["quota"].url == "http://quota.invalid:8082"
@@ -30,17 +30,17 @@ def test_configured_sites_are_read_with_their_trusted_authorities():
 @pytest.mark.parametrize(
     ("sites", "refusal"),
     [
-        (None, r"\[capacity.sites\] must define"),
+        (None, r"\[quota.sites\] must define"),
         ({"quota": {"url": "http://quota.invalid"}}, "capacity site 'quota' is incomplete"),
         (
             {"quota": {"url": "http://quota.invalid", "expected_authorities": {"identities": ["x"]}}},
-            r"\[capacity.sites.quota.expected_authorities\] must list",
+            r"\[quota.sites.quota.expected_authorities\] must list",
         ),
     ],
 )
 def test_an_unreadable_site_is_refused_by_its_key(sites, refusal):
     with pytest.raises(RuntimeError, match=refusal):
-        read_capacity_sites(sites, "fill_first")
+        read_capacity_sites(sites, "fill_first", sites_key="quota.sites")
 
 
 class _Store:
@@ -50,7 +50,7 @@ class _Store:
 
 def _capacity(signer=SELLER, placement="fill_first") -> QuotaCapacity:
     return QuotaCapacity(
-        sites=lambda: read_capacity_sites(SITES, placement),
+        sites=lambda: read_capacity_sites(SITES, placement, sites_key="quota.sites"),
         signer=lambda: signer,
         reconciler=lambda _factory: None,
     )

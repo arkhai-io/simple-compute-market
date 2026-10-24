@@ -5,7 +5,7 @@ from __future__ import annotations
 import market_policy.negotiation_thread as thread_module
 import pytest
 from apicredits_storefront import container, server
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from market_policy.identity import Identity
 from market_policy.negotiation_thread import get_thread_store
 
@@ -33,7 +33,7 @@ def key_records(monkeypatch):
 
 @pytest.fixture
 async def db(tmp_path):
-    client = SQLiteClient(db_path=str(tmp_path / "credits-storefront.db"))
+    client = storefront_sqlite_client(db_path=str(tmp_path / "credits-storefront.db"))
     thread_module._thread_store = None
     get_thread_store(
         sqlite_client=client,

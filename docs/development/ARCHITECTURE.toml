@@ -257,7 +257,7 @@ project = "arkhai-api-selling"
 target = "arkhai-core-storefront"
 owner = "kit-owned-storefront-auth-and-persistence"
 since = 2026-10-23
-reason = "The selling library imports from the storefront role its domain registry types (listing bindings, registrations, and the registry its accepted-listing records are keyed under), the system status models, the aggregate capacity client, the placement policies, and the stage-event log; where each lands is for the owning change to settle. Otherwise it writes through the repository its caller passes."
+reason = "The selling library imports from the storefront role its domain registry types (listing bindings, registrations, and the registry its accepted-listing records are keyed under), the system status models, the aggregate capacity client, the placement policies, the stage-event log, the marketplace request authentication and response signing it binds for a storefront, the SQLite market-state client and migrations its persistence extends, the listing, negotiation, settlement, and system wire models its route services answer with, and the negotiation service's error; where each lands is for the owning change to settle. Otherwise it writes through the repository its caller passes."
 
 [[exceptions]]
 rule = "scope"

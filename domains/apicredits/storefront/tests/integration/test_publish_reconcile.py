@@ -17,7 +17,6 @@ from apicredits_storefront import container
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_listing_service
 from apicredits_storefront.settlement_composition import SELLER_STAGES
-from apicredits_storefront.utils import sqlite_client as sqlite_module
 from market_site_client import SiteCapacityClient
 from market_identity import Ed25519Signer, TrustedIdentitySet
 from tests.integration.credit_negotiation import payment_option
@@ -147,9 +146,9 @@ def _listing_service(db, composition):
 
 @pytest.fixture
 async def db(tmp_path):
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
 
-    return SQLiteClient(db_path=str(tmp_path / "publish.db"))
+    return storefront_sqlite_client(db_path=str(tmp_path / "publish.db"))
 
 
 async def _insert_listing(db, listing_id: str, resource_id: str, status: str):
@@ -185,7 +184,7 @@ async def test_publish_from_quota_requires_registered_sellable_resource(
     db,
     monkeypatch,
 ):
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     runtime = _QuotaRuntime({"svc-quota": 42, "svc-empty": 0})
     monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
 
@@ -259,7 +258,7 @@ async def test_publish_from_quota_validates_listing_through_domain_runtime(
 
 
 async def test_capacity_deltas_close_and_reopen_token_listings(db, monkeypatch):
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
         container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-live": 10, "svc-dry": 5})
     )
@@ -284,7 +283,7 @@ async def test_capacity_release_does_not_reopen_a_listing_its_seller_closed(
 ):
     """The capacity-event reconciler, entered as a released delta, leaves a
     seller's close alone while still reopening a listing quota exhaustion closed."""
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
         container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-a": 5, "svc-b": 5})
     )
@@ -318,7 +317,7 @@ async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
 ):
     """Released quota reopens only a listing whose resource is still in the pool
     it was bound to, even when the new pool declares the same backing."""
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     await _insert_listing(db, "L-moved", "svc-a", "open")
     exhausted = await _QuotaRuntime({"svc-a": 0}).availability()
     assert await container.QUOTA_PUBLICATION.close_after_capacity_change(db, exhausted) == ["L-moved"]
@@ -334,7 +333,7 @@ async def test_a_resource_moved_to_another_pool_does_not_reopen_its_listing(
 
 async def _reconcile_release(db, monkeypatch, runtime):
     """Run the capacity reconciler as the ledger feeds a pool move: a release."""
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
     await container.QUOTA_PUBLICATION.reconciler(lambda: db)(
         CapacityReconcileContext(
@@ -375,7 +374,7 @@ async def test_an_unreadable_source_closes_no_open_listing(db, monkeypatch):
 
 
 def _quota_service(db, monkeypatch, runtime):
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(container.QUOTA_CAPACITY, "runtime", lambda factory: runtime)
     return _listing_service(db, _SettlementComposition())
 
@@ -443,10 +442,10 @@ async def test_an_unbacked_credits_pool_yields_no_listing(db, monkeypatch):
 
 
 async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
-    from apicredits_storefront.utils.sqlite_client import SQLiteClient
+    from apicredits_storefront.container import storefront_sqlite_client
 
     path = str(tmp_path / "unbound.db")
-    db = SQLiteClient(db_path=path)
+    db = storefront_sqlite_client(db_path=path)
     await db.upsert_listing(
         listing_id="L-old",
         status="open",
@@ -467,7 +466,7 @@ async def test_a_database_with_an_unbound_listing_is_refused(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="L-old.*fresh database"):
-        SQLiteClient(db_path=path)
+        storefront_sqlite_client(db_path=path)
 
 
 class _PaymentComposition(_SettlementComposition):
@@ -482,7 +481,7 @@ class _PaymentComposition(_SettlementComposition):
 
 async def test_a_published_payment_option_is_stored_as_its_json_value(db, monkeypatch):
     option = payment_option().model_dump(mode="json")
-    monkeypatch.setattr(sqlite_module, "_sqlite_client", db)
+    monkeypatch.setattr(container, "_sqlite_client", db)
     monkeypatch.setattr(
         container.QUOTA_CAPACITY, "runtime", lambda factory: _QuotaRuntime({"svc-quota": 42})
     )

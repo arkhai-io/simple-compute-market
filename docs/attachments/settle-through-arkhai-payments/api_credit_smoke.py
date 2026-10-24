@@ -17,7 +17,7 @@ from apicredits_storefront.services.payment_settlement_service import (
 from apicredits_storefront.settlement_composition import (
     build_storefront_settlement_registry,
 )
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_MECHANISM,
     PaymentApproval,
@@ -92,7 +92,7 @@ async def main(directory, phase, authority):
     settings = config()
     response = httpx.get("http://127.0.0.1:3181/health", trust_env=False)
     response.raise_for_status()
-    db = SQLiteClient(str(Path(directory) / "storefront.db"))
+    db = storefront_sqlite_client(str(Path(directory) / "storefront.db"))
     identifier = "api-smoke-" + Path(directory).name
 
     credits_client = AuthorityClient(

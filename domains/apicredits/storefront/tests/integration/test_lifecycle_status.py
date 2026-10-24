@@ -33,7 +33,7 @@ from arkhai_api_selling.lifecycle import (
     loop_controller,
     capacity_site_loop_name,
 )
-from apicredits_storefront.middleware import admin_auth
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 
 # Deterministic development keys for this test only; never used on any network.
@@ -105,7 +105,7 @@ async def storefront(db, monkeypatch):
         container, "resolved_system_service", server.build_system_service(db)
     )
     monkeypatch.setattr(
-        admin_auth,
+        storefront_config,
         "resolve_admin_identities",
         lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
     )

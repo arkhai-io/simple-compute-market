@@ -39,8 +39,8 @@ from apicredits_storefront.domain_runtime import get_market_domain_contract
 from arkhai_api_selling.lifecycle import (
     loop_controller,
 )
-from apicredits_storefront.middleware import admin_auth
-from apicredits_storefront.utils.sqlite_client import SQLiteClient
+from apicredits_storefront.container import storefront_sqlite_client
+from apicredits_storefront.utils import config as storefront_config
 from tests._settings_overrides import settings_overrides
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "baseline"
@@ -136,7 +136,7 @@ UNPROBED: dict[tuple[str, str], dict[str, Any]] = {
 class Probe:
 
     def __init__(self, db_path: Path, monkeypatch) -> None:
-        db = SQLiteClient(db_path=str(db_path))
+        db = storefront_sqlite_client(db_path=str(db_path))
         monkeypatch.setattr(container, "resolved_sqlite_client", db)
         monkeypatch.setattr(container, "resolved_marketplace_signer", STOREFRONT_SIGNER)
         monkeypatch.setattr(container, "resolved_negotiation_runtime", object())
@@ -152,7 +152,7 @@ class Probe:
         container.STOREFRONT_LOOPS.register_steps(self.loops)
         monkeypatch.setattr(container, "resolved_loop_controller", self.loops)
         monkeypatch.setattr(
-            admin_auth,
+            storefront_config,
             "resolve_admin_identities",
             lambda: TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
         )
