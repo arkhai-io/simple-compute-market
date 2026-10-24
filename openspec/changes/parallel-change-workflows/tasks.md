@@ -2365,7 +2365,7 @@ Delivers D9's evidence and open question 1's decision point, once the pilot's
 archive cleanup has run on this branch's tooling. Touches this change's documents
 only.
 
-- [ ] 9.1 Record from the pilot's log and records, citing their seq numbers: its
+- [x] 9.1 Record from the pilot's log and records, citing their seq numbers: its
       clone's creation and bootstrap; its validation in its own namespace beside
       this change's round-2 validation, with both namespaces, tags, and scenario
       pods; a round of it read in the owner's workspace, with any commit made during
@@ -2376,13 +2376,190 @@ only.
       pilot's and its conflicts; every denial and `orchestrator` line the clones
       produced. Clone removal is not among them: it runs after the pilot merges,
       which follows this change, so 8.7 is its evidence.
-- [ ] 9.2 Update `design.md`'s Risks with what the pilot confirmed or disproved.
-- [ ] 9.3 Decision gate (open question 1): the owner decides, with the agent, whether
+      Evidence, read from the pilot's log in its clone (97 lines; "P-seq" below),
+      this change's log ("seq"), the pilot's records and validation evidence, its
+      orchestrating session's transcript, and Git. The pilot ran from 2026-10-23
+      06:33Z (P-seq 1, design) to 2026-10-24 06:51Z (P-seq 97, archive cleanup):
+      one design and its review, a plan of one round in two sessions (P-seq 33,
+      `[[1, 2, 3], [4–9]]`), that round's two passes, a pre-closeout review,
+      closeout, its review, and archive cleanup, all unattended in its clone,
+      driven by its own orchestrating session started in the clone (seq 169).
+      - Clone and bootstrap. On the owner's word (seq 114) this change's
+        orchestrating session ran `make change-clone` for the pilot and for
+        `resolve-compute-family-findings`, each from this branch, for 7.3's run.
+        Both bootstraps failed at `init-buyer` (seq 115; 7.3's note): `make init`
+        relied on wheels and an environment the workspace had left behind. After
+        the fix, both clones were fast-forwarded to 297c64fa1 and their bootstraps
+        rerun (seq 118): the pilot's clone records `make init` started 07:07:49Z
+        and exit status 0 (`change-bootstrap.json`, `.status`), and its
+        `change-clone.json` the change and `feat/seed-default-pool-at-runtime`.
+        Fast-forwarded again to b1c1e044d with `make init-bare-metal-storefront`
+        (seq 121, 122) and, once round 3 was triaged, to 15b4b6ded with `make init`
+        rerun (seq 170). The bootstrap finished a day before the pilot's design
+        started, so no step waited on it; the computation's `clone` and `wait`
+        results were not met in the pilot, its clone made on the owner's word
+        rather than named by the computation.
+      - Validation in its own namespace. Not beside this change's round-2
+        validation, as planned: the owner held the pilot until round 3 was
+        triaged (seq 169), so its own validations (P-seq 51, 73, 81, 89, records
+        38, 59, 66, 73) ran on 2026-10-23 and 24, when no other change validated;
+        each found every other change's release at zero
+        (`other_namespaces_at_start`, `validate-parallel-change-workflows` and
+        `validate-resolve-compute-family-findings` among them). Its one Helm part
+        beside another change's was 7.3's second `make validate-parallel` attempt
+        (07:20:48–07:22:59Z on 2026-10-22, before round 2's validation, seq 125,
+        began): `validate-seed-default-pool-at-runtime` beside
+        `validate-resolve-compute-family-findings`, each on its own
+        `arkhai:{compute-provisioning,dev-env,e2e-tests,registry,storefront}-<change>`
+        images, each scenario pod `arkhai-node-operator-e2e-tests-e2e-scenarios`
+        in its own namespace, exit 0, every check passed (7.3). Across its five
+        Helm parts in its namespace the release went from a first install
+        (b1c1e044d, revision 1) to four upgrades over a namespace left at zero
+        (cb954190f, 0152385ad, f78ea4e8b, 29f9fecd9; revisions 2–5 in each
+        `deploy.log`), the 0152385ad upgrade over the pilot's own chart change
+        (the provisioning chart's `configFiles`); each overlay named the change's
+        own tags (`images.json`), each scenario pod exited 0; no upgrade was
+        refused, so the fallback stays unexercised on a real cluster. Every part
+        warned `metrics` and `capacity` and recorded no memory. Validation and the
+        implementation review ran side by side in the clone for each pass (P-seq
+        50 and 51, 73 and 75, 81 and 83).
+      - A round read in the owner's workspace. The pilot's orchestrating session
+        started validation and the review in the clone, then at 16:38:52Z on
+        2026-10-23 ran `make round-view` in the workspace: "Round of
+        seed-default-pool-at-runtime: 56bafe8a39bd..cb954190f415 is now uncommitted
+        changes on feat/seed-default-pool-at-runtime in this checkout." The review
+        (P-seq 50) and validation (P-seq 51) finished while it was open. The owner
+        answered (`39-implementation-owner.md`), made no commit during the view,
+        and `make round-done` at 18:29Z printed that the branch was back at the
+        round's commit, the worktree clean, and the workspace back on
+        `feat/parallel-change-workflows`; triage's `git pull --ff-only workspace
+        feat/seed-default-pool-at-runtime` brought nothing
+        (`37-implementation.triage.md`). The carrying of commits made during the
+        view, its refusals, and a refresh were not met. The view held 118 files,
+        11 of them brought by the three merges below (four skills, the step
+        table, the delta, the companion architecture, three
+        `scripts/change_workflow/` files, and one of their tests) — open question
+        2's case again. The
+        repeat pass over the fix 0152385ad opened no view and its triage asked for
+        notes on code no one had shown the owner (P-seq 76; 127 O2, 128 O5), now
+        fixed (8B.9's pilot triage note).
+      - Archive cleanup (P-seq 97, at fcd80e5c9). It released
+        `bring-host-inventory-under-definition-documents` and
+        `gpu-optional-compute-shapes`, set the row `archived`, wrote the pull
+        request draft, recorded no capacity figure — the Helm part measured no
+        memory, as no metrics source answers — leaving
+        `helm/validation-capacity.toml` unchanged, made no figure commit, deleted
+        `validate-seed-default-pool-at-runtime` and the change's nine images, and
+        copied 628 files into the workspace with none refused, the named evidence
+        of its four validated commits and pipeline run 40069878714 among them. The
+        copy ran before the wrapper wrote P-seq 97, so the workspace's log ends at
+        P-seq 96 (128 O1); the orchestrating session now copies again at `done`
+        (128 R1), and the pilot's copy gains the line at clone removal. `make
+        change-cost` read nothing for the archived change until 128 R2. Its draft
+        warned that the branch carried this branch's merges; on the owner's word it
+        was merged into this branch as PR #306 (da75bcebe, seq 177), not after this
+        change as D9 planned, so this change's pull request now carries it.
+      - Merges of this branch into the pilot's. The two planned merges were
+        fast-forwards, since the pilot had no commit of its own yet (seq 118, 170).
+        Three merges followed during its implementation, each between its steps,
+        on the owner's word, by this change's orchestrating session: 59041f6cb
+        (770acfd27: `git rm` for implementation and triage, design's one decision
+        per message; P-seq 38), 9419d691b (4976cb930: denials classified by every
+        reason; P-seq 39), and 461cd7b6b (66ce8f1f6: foreground subagents, `unzip
+        -l`; P-seq 47, made once the resume of P-seq 43 had ended, seq 173). None
+        conflicted, the index rows included: `git show --remerge-diff` shows no
+        resolution in any, nor in da75bcebe. All three fell inside the pilot's one
+        round, between its sessions, which D9's timing rule allows and which put
+        them in the round's view.
+      - Denials and `orchestrator` lines. Eighteen of the pilot's runs logged
+        denials, each read on its own `orchestrator` line (P-seq 2, 12, 28, 35,
+        37, 42, 44, 46, 49, 52, 54, 72, 74, 80, 82, 88, 90, 92); archive cleanup
+        logged none. All but three were `mode` gaps redone by an allowed route, or
+        not needed: Bash reads of the workspace's other records outside the clone
+        (P-seq 1, redone with Glob — the `--records` path 8.7 left unverified is
+        readable by Read, Glob, and Grep, not by Bash), inline `python3 -c` reads
+        of JSON (P-seq 27, 41, 51, 73), chained or piped reads, output redirected
+        to `/tmp`, `Monitor` and wait loops (P-seq 34, 36, 43, 79), `make -C <its
+        own checkout>` (P-seq 71, 87), `git config --get-regexp remote` (P-seq 53),
+        a `git diff` against a substituted merge base (P-seq 89, not redone,
+        disclosed in record 73), and a heredoc rewrite (P-seq 91, redone with
+        Edit). Three stopped a step or went to the owner: design's `git fetch
+        origin dev` and `git worktree add` for the `gpu-optional-compute-shapes`
+        proposal (P-seq 11, granted for one run, P-seq 12); implementation's `rm`
+        and `git rm` of two files task 6.1 deletes (P-seq 36, the stop; the owner
+        ran `git rm` and allowed it, P-seq 38–40), whose `git stash push` and
+        `git checkout --` were refused by deny rules (`subcommandResults`) and
+        undone by hand with Edit; and the wheel listing (P-seq 43, `unzip -l`
+        granted, then allowed to every step, seq 174). Implementation's P-seq 45
+        stopped on the account's session limit, not a denial, and resumed after
+        its reset (P-seq 46, 48); no run of this change was in progress then,
+        only `orchestrator` lines falling between seq 170 and 175. This change's orchestrating session's lines on
+        the clones: seq 114, 115, 117, 118, 120–122, 169–174, 176, 177. Section
+        7's implementation run, working on the clones, was denied reads of a
+        clone's bootstrap log and Git after `cd` into it (seq 117), redone with
+        Read, Grep, or Glob, and Git in a clone after `cd` (seq 120), not done:
+        the orchestrating session moves the clones. The gaps several steps
+        tripped became 128 R3's skill text.
+      Clone removal was not run: the pilot's branch is merged into this one, not
+      `origin/dev`, so `make change-clone-remove` refuses it until this change
+      merges (8.7 is its evidence). End to end: none; this is the pilot's working
+      evidence, and validation 139 at caa4cbc4c the latest of this change's own.
+- [x] 9.2 Update `design.md`'s Risks with what the pilot confirmed or disproved.
+      Note: each risk gains what the pilot showed — the clone's first `make init`
+      as the first build from the commit alone (confirmed, fixed in 7.3); the two
+      `feat/<change>` refs (not met); two releases on one node (the inactive
+      preflight confirmed, exhaustion untested); the merges (no conflict, the
+      index rows included; a merge between a round's sessions inside its view,
+      open question 2; the pilot merged into this branch); the usage limit (met
+      once); the index at a merge to `dev` (not yet tested); the scenario pod
+      (five parts from the images, four upgrades from zero, the fallback
+      unexercised). A new risk: an unattended step's Read, Glob, and Grep reach
+      any file the owner can read, while its Bash reads stay in its checkout.
+- [x] 9.3 Decision gate (open question 1): the owner decides, with the agent, whether
       to open a change to containerize the workflow, and the reasoning is recorded in
       `design.md`, the open question then closed or kept with its trigger. A change
       it decides to open is proposed afterwards on its own branch from `dev`, not
       here (D13 disposition).
-- [ ] 9.4 Verification: `make check-change CHANGE=parallel-change-workflows`.
+      Note: put to the owner with three options — open a proposal-only change now,
+      keep the question with triggers, or close it — and the agent's
+      recommendation, keeping it; the owner chose to keep it. Open question 1 in
+      `design.md` records the decision, its reasoning, the three triggers that
+      reopen it (contention or cluster-scoped resources a namespace cannot
+      separate; several changes orchestrated from one session; sandboxing
+      unattended steps from the owner's files), and the rejected options. No
+      change is opened. 10.9's "Current limits" item now names the triggers and
+      the read-scope risk beside the container per change.
+- [x] 9.4 Verification: `make check-change CHANGE=parallel-change-workflows`.
+      Evidence: `make check-change CHANGE=parallel-change-workflows`, passed
+      (comment hygiene, agent skills, citations, task list, change index, strict
+      validation); `make test`, passed, every suite, `make -C helm test-render`
+      included, though the section changes no code. End to end: none; no
+      `Owed by validation:` line, since the section changes only this change's
+      documents.
+      Handoff, for closeout and the pre-closeout review:
+      - Open question 2 (the round view mixing merges into a round) is due before
+        closeout and no task holds it. It was put to the owner beside 9.3, with
+        a synthetic base (a return to design or planning), its own change after
+        this one (recommended), or merges only between rounds; the owner's answer
+        named 9.3's option alone, so it is still open.
+      - D9 says the pilot's pull request merges after this change's; it was
+        merged into this branch instead (PR #306, seq 177). D9, D4's account of
+        the capacity file's merge conflict (moot, as no figure was written), and
+        10.6's "the pilot's row left as it is" should be read against that at
+        closeout (10.3, 10.4).
+      - The workspace's copy of the pilot's log lacks P-seq 97 until the pilot's
+        clone is removed, which runs the copy first; removal waits for this
+        change's merge into `dev`.
+      - 10.9's "Current limits" item was amended to name open question 1's
+        triggers and the read-scope risk added to Risks, so both have a
+        destination.
+      - A fresh-context check of the section's diff found no breach of the
+        guidance and, of eight claims spot-checked, one mislabel (the merges'
+        files in the pilot's view), fixed; it also found, and the section fixed,
+        three design sentences saying more than this evidence (the view
+        fast-forwarding, no port or volume colliding, the view's file count) and
+        the missing destination above. It did not check the round view's times,
+        which come from the pilot's orchestrating session's transcript.
 
 ## 10. Closeout
 
@@ -2458,8 +2635,10 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         owner's workspace" (D11; the copy repeated at `done` for archive
         cleanup's own line, and reports read through `find_records`, 128 R1,
         128 R2); "Current limits" rewritten (one orchestrating
-        session per change; the container per change, as 9.3 decided; side work
-        chosen to stay clear of the critical-path goal's files, D9).
+        session per change; the container per change, as 9.3 decided, with the
+        triggers that reopen it, open question 1; an unattended step's reads
+        reaching any file the owner can read, Risks; side work chosen to stay
+        clear of the critical-path goal's files, D9).
       - `docs/agents/change-workflow.md` — already written in sections 4, 8, 8A,
         and 8B;
         "Skills" gains `make change-clone`, `make change-clone-remove`, `make

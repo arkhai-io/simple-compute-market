@@ -1007,23 +1007,45 @@ pre-closeout review.
 ## Risks / Trade-offs
 
 - **A clone per change costs a first `make init`** and disk for its environments.
-  The bootstrap runs during design, which needs none of them.
+  The bootstrap runs during design, which needs none of them. The pilot confirmed
+  a further cost: a fresh clone's first `make init` is the first build from
+  nothing but the commit, and it failed on targets that had relied on wheels and
+  an environment the workspace's earlier builds left behind (7.3); fixed in
+  `make init`, and a bootstrap failure is put to the owner rather than retried,
+  as D6 decides.
 - **Two refs named `feat/<change>`** — the clone's and the workspace's reading
   copy — can diverge. Fast-forward-only in both directions refuses rather than
-  merges.
+  merges. Not met in the pilot: its one view opened and closed without a
+  refusal, the owner committed nothing during it, and triage's pull brought
+  nothing.
 - **Two releases at once on one node** may exhaust Docker Desktop's memory. The
   capacity figure is only as current as the last archive cleanup that wrote it,
   and absent until one does — on a cluster without `metrics-server`, which the
   development cluster is today, indefinitely, so the preflight stays inactive
   there; the preflight is an estimate, so two validations
   starting together can both pass it; an overflow the evidence shows to be
-  contention is rerun.
+  contention is rerun. The pilot confirmed the inactive preflight: its archive
+  cleanup recorded no figure, since none of its validations measured memory.
+  Two releases ran at once only in 7.3's scripted check, and fitted; no
+  validation of one change has yet overlapped another's, so exhaustion is
+  untested rather than disproved.
 - **The pilot's branch is merged from this change's branch** at least twice. The
-  merges are by hand on the owner's word and conflict on the index rows.
+  merges are by hand on the owner's word and conflict on the index rows. The
+  pilot disproved the conflicts: its three merges, made between its steps, and
+  its pull request into this branch were all clean, the index rows included;
+  the two planned merges were fast-forwards, as the pilot had no commit yet. It
+  showed instead that a merge between a round's sessions lies inside that
+  round's diff: eleven of the 118 files the pilot's round view showed were
+  workflow files those merges brought (open question 2). The pilot merged into this branch rather than after it
+  (this change's seq 177), so this change's pull request carries the pilot's
+  work.
 - **A usage limit stops every change's runs at once.** Parallel work spends the
-  account's limits faster.
+  account's limits faster. Met once: the pilot's implementation stopped on the
+  account's session limit and resumed after its reset (pilot seq 45–48), while no
+  run of this change was in progress.
 - **The index is edited on several branches.** Rows that sit next to each other
-  conflict when merged to `dev`.
+  conflict when merged to `dev`. Not yet tested at a merge to `dev`: the pilot
+  merged into this branch, cleanly.
 - **The scenario pod changes where the Helm scenarios run.** A scenario reading a
   file from the checkout rather than the image would need that file in the image.
   Neither `HELM_SCENARIOS` module
@@ -1031,16 +1053,45 @@ pre-closeout review.
   `e2e-tests/tests/e2e/roles/scenarios/core/test_alkahest_escrow_codecs.py`) does:
   the image copies `e2e-tests/src`, `tests`, `config`, `conftest.py`, and
   `settings.toml`, which is all they read. A scenario added to the list later must
-  hold to the same.
+  hold to the same. The pilot's five Helm parts ran the scenario pod from their
+  own images, each exiting 0, the four after the first upgrading the release over
+  a namespace left at zero, one of them over the pilot's own chart change; the
+  refused-upgrade fallback is still unexercised.
+- **An unattended step reads outside its checkout.** Its Read, Glob, and Grep
+  reach any file the owner can read — the workspace's records, which history
+  needs, and equally another clone's or the owner's own files — while Bash reads
+  outside the checkout are denied (pilot seq 1). The step table bounds commands,
+  not the files a step may read.
 
 ## Open Questions
 
 1. **A container per change.** Its own Docker daemon and kube cluster would
    isolate ports, images, releases, and Secrets entirely, and sandbox unattended
-   steps from the owner's machine. Decided in round 4, before this change's
-   closeout, whether to open it as its own change, proposed afterwards on its own
-   branch; revisit sooner if concurrent Helm validations exhaust one node. The owner can forward questions to a Claude Code on the web session about
+   steps from the owner's machine. The owner can forward questions to a Claude Code on the web session about
    how its environment provides Docker and with what isolation.
+
+   **Decided in round 4: no change is opened now; the question stays open with
+   its triggers.** Nothing in the pilot called for one: clones and per-change
+   namespaces kept every step and validation apart — each validation deployed
+   only its own tags into its own namespace, the scripted check found neither
+   release, volume, nor pod touched by the other (7.3), validation forwards no
+   port, and the node was never exhausted — while a
+   container costs an image, privileged Docker in Docker, a cold build cache and
+   a cluster per change, and mounted credentials (D1). What only a container
+   answers is the cluster-wide isolation and the new risk of an unattended
+   step's reads reaching any file the owner can read; neither has yet cost
+   anything. A change opened with no trigger met would wait in the index. The
+   question is reopened, as a change proposed on its own branch from `dev`, when:
+   - a validation fails because two changes' releases contend for one node, or
+     two changes need different cluster-scoped resources, which a namespace
+     cannot separate;
+   - orchestrating several changes from one session lands, and side-by-side
+     validations become routine rather than occasional;
+   - the owner wants unattended steps sandboxed from their own files.
+
+   Rejected: opening a proposal-only change now (a row with no trigger met, idle
+   in the index); closing the question (the read-scope and cluster-wide gaps
+   remain, and the owner wants the direction kept).
 2. **The round view mixes the branch's own changes with merges from `dev` (94
    O1).** The view resets the branch to the round's base (D2), so a merge from
    `dev` inside the round shows `dev`'s changes as uncommitted beside the round's
