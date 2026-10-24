@@ -672,11 +672,13 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
     # joins on whichever the database has.
     host_columns = {c["name"] for c in inspect(connection).get_columns("hosts")}
     host_key = "host_id" if "host_id" in host_columns else "name"
-    # Every database this conversion ran on as it was released had an inventory
-    # group on its pool configuration. A configuration table created from the
-    # current model has none, so the column reads as NULL. That keeps a fresh
-    # database, which holds no lease, migrating; a lease found here then fails
-    # the compiler's pool configuration check, so a database that predates
+    # A pool configuration table an earlier definition of the model created
+    # has ``inventory_group`` until ``20261023_001_vm_pool_playbook_optional``
+    # drops it, later in the chain. One created from the current model, as a
+    # fresh database or ``_migrate_resource_pools_and_hosts_pool_id`` creates
+    # it, has none, so the column reads as NULL. That keeps a fresh database,
+    # which holds no lease, migrating; a lease found here then fails the
+    # compiler's pool configuration check, so a database that predates
     # resource pools and still holds VM leases is refused rather than converted.
     config_columns = {
         c["name"] for c in inspect(connection).get_columns("ansible_pool_configs")
@@ -2427,8 +2429,9 @@ def _migrate_legacy_host_capacity_declarations(engine: Engine) -> None:
     as its resource id is skipped and logged rather than overwritten. Host
     rows are not changed.
 
-    Written in SQL so that what this migration does stays what it did when it
-    shipped. It is the only derivation of capacity from hosts: no host write
+    Written in SQL against the columns at this point in the migration chain,
+    not through the models, so a later model change cannot change what it
+    writes. It is the only derivation of capacity from hosts: no host write
     declares capacity.
 
     Every row is planned before the first write.

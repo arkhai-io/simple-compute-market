@@ -15,7 +15,13 @@ from market_resource_pools.db import (
     ResourcePool,
 )
 
-from market_site.db import HELD_RESERVATION_STATES, Base, CapacityReservation
+from market_site import CapacityDeclaration
+from market_site.db import (
+    HELD_RESERVATION_STATES,
+    Base,
+    CapacityBucket,
+    CapacityReservation,
+)
 from market_site.ledger import (
     ALLOCATION_MODE_EXCLUSIVE,
     ALLOCATION_MODE_SHAREABLE,
@@ -24,6 +30,7 @@ from market_site.ledger import (
     UndeclaredOfferingModeError,
     UnknownPoolError,
 )
+from market_site.projections import SiteProjectionService
 
 
 def _make_ledger(**kwargs) -> CapacityLedgerService:
@@ -1383,8 +1390,6 @@ def test_attribute_view_prefers_real_pool_id_over_attributes_json():
     """A row stored before registration refused declaration fields as
     attributes may carry both; the column must win. Registration can no
     longer write such a row, so the test stores it directly."""
-    from market_site.db import CapacityBucket
-
     ledger = _make_ledger()
     _declare_pool(ledger, "pool-a", "vm")
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="pool-a")
@@ -1399,8 +1404,6 @@ def test_attribute_view_prefers_real_pool_id_over_attributes_json():
 
 def _strip_stored_pool(ledger: CapacityLedgerService, resource_id: str) -> None:
     """Store a row with no pool, as no write can: every declaration names one."""
-    from market_site.db import CapacityBucket
-
     with ledger._session_factory() as db:
         row = db.query(CapacityBucket).filter_by(backing_resource_id=resource_id).one()
         row.pool_id = None
@@ -1434,8 +1437,6 @@ def test_a_row_with_no_stored_pool_is_not_admitted_against(caplog):
 def test_a_row_with_no_stored_pool_is_in_no_pool_for_reconciliation_and_reservations():
     """Re-declaring the row in `default` is a change, not a restatement, and a
     reservation backed by it resolves to no pool."""
-    from market_site import CapacityDeclaration
-
     ledger = _make_ledger()
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", "gpu_count": 1}, deal_ref={})
@@ -1458,8 +1459,6 @@ def test_a_row_with_no_stored_pool_is_in_no_pool_for_reconciliation_and_reservat
 
 
 def test_a_row_with_no_stored_pool_is_in_neither_projection(caplog):
-    from market_site.projections import SiteProjectionService
-
     ledger = _make_ledger()
     _declare_pool(ledger, "pool-a", "vm")
     ledger.register_resource(resource_id="r1", total_units=4, pool_id="default")

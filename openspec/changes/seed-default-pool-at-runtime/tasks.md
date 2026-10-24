@@ -1315,6 +1315,31 @@ render test; `dev-env/bare-metal/resource-pools.yaml`.
   `make test` exited 0; `make check-change` passed. Fresh-context compliance
   check of the diff: no comment-hygiene, accuracy, citation, or
   public-repository finding, and the old test name is cited nowhere else.
+  Round fix (pre-closeout review 67's triage, `reviews/67-pre-closeout.triage.md`):
+  - 67 F1 (section 4): `kit/site/tests/integration/test_ledger.py` imports
+    `CapacityDeclaration`, `CapacityBucket`, and `SiteProjectionService` at
+    module level; nothing kept them local, since the package's other tests
+    import both names at module level, and no function-local import remains in
+    the module.
+  - 67 F2 (sections 2 and 6): the VM lease backfill's comment on
+    `inventory_group` says the column exists only in a table an earlier model
+    definition created, until `20261023_001_vm_pool_playbook_optional` drops
+    it, and reads as NULL in one the current model created, the chain's own
+    `20260713_002` included; `_migrate_legacy_host_capacity_declarations`
+    says it is written in SQL against the columns at its point in the chain,
+    so a later model change cannot change what it writes.
+  Evidence for the round fix: `make check-comment-hygiene` passed; `make
+  check-packaging` passed; `make -C kit/site test` — library unit and
+  integration, 289 passed, the `test_ledger.py` cases among them; `make -C
+  provisioning/compute/service test` — unit 658 passed, persistence and
+  application integration 527 passed, after the final comment wording;
+  repository `make test` exited 0 (run before that rewording, which changed a
+  comment alone); `make check-change` passed. Fresh-context compliance check
+  of the diff: the imports are all at module level, used once each, none
+  duplicated; the capacity migration's docstring is accurate. Fixed: the
+  backfill comment first said a table the migration chain built still has
+  `inventory_group`, but the chain's `20260713_002` creates the table from the
+  current model, so only an earlier model's table has it.
 
 ## 10. Closeout
 
