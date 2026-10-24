@@ -181,3 +181,18 @@ def test_a_derivation_failure_runs_nothing(tmp_path, breakage):
     command = "install-wheel" if breakage == "no-version" else "reinit"
     assert uv_project.main([command, "--project", str(project)], root=root, run=run) == 2
     assert run.calls == []
+
+
+def test_require_wheels_names_each_internal_package_without_a_wheel(tmp_path, capsys):
+    root = _repository(tmp_path)
+    project = _project(root, sources={"arkhai-kit-site": WHEELHOUSE, "arkhai-kit-config": WHEELHOUSE})
+    (root / ".dist" / "arkhai_kit_site-1.0.0-py3-none-any.whl").write_bytes(b"")
+    run = _Recorder()
+
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=run) == 2
+    assert "lacks: arkhai-kit-config;" in capsys.readouterr().err
+    assert run.calls == []
+
+    (root / ".dist" / "arkhai_kit_config-1.0.0-py3-none-any.whl").write_bytes(b"")
+    assert uv_project.main(["require-wheels", "--project", str(project)], root=root, run=run) == 0
+    assert run.calls == []

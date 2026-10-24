@@ -168,8 +168,26 @@ class QuotaPublication:
         return await self.runtime(db).close(BoundListing(listing_id, binding), closed_by="seller")
 
     async def converge(self, db: Any) -> dict[str, tuple[str, ...]]:
-        """Repair every registry that missed a publish, close, or reopen."""
-        return await self.runtime(db).converge()
+        """Repair every registry that missed a publish, close, or reopen.
+
+        The repair republishes an open listing without the publication hook, so
+        an open listing the domain's guards refuse is left out and reported
+        unrepaired: it is never republished.
+        """
+        runtime = self.runtime(db)
+        repairable, refused = [], []
+        for divergence in await runtime.publication_divergence():
+            listing = (
+                await db.load_listing(listing_id=divergence.listing_id)
+                if divergence.listing_status != "closed"
+                else None
+            )
+            if listing is not None and self.refusal(listing) is not None:
+                refused.append(divergence.listing_id)
+            else:
+                repairable.append(divergence)
+        result = await runtime.converge(repairable)
+        return {**result, "unrepaired": (*result["unrepaired"], *refused)}
 
     async def _sources(
         self, db: Any, rows: list[dict[str, Any]]

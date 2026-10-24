@@ -14,6 +14,9 @@ the project's `uv.lock` when it runs, so no caller lists them:
   uv cache cannot supply a previous build of a same-version wheel.
 - `install-wheel` installs the project's own distribution, at the version its
   `pyproject.toml` declares, from the wheelhouse alone.
+- `require-wheels` fails, naming each one, when the wheelhouse lacks a wheel
+  for an internal package the project's lock names, so a later `reinit`
+  cannot resolve that package from an index instead.
 - `lock [PROJECT ...]` relocks projects against the current wheelhouse and
   installs nothing. It upgrades every internal package and every other
   repository distribution the lock names, so one that has drifted to a
@@ -124,6 +127,16 @@ def _each(flag: str, values: Sequence[str]) -> list[str]:
     return [arg for value in values for arg in (flag, value)]
 
 
+def missing_wheels(project: Path, root: Path) -> list[str]:
+    """Internal packages the project's lock names that have no wheel in the wheelhouse."""
+    wheelhouse = root / WHEELHOUSE_NAME
+    return [
+        name
+        for name in wheelhouse_packages(project, wheelhouse)
+        if not any(wheelhouse.glob(f"{name.replace('-', '_')}-*.whl"))
+    ]
+
+
 def reinit_command(project: Path, root: Path) -> list[str]:
     wheelhouse = root / WHEELHOUSE_NAME
     internal = wheelhouse_packages(project, wheelhouse)
@@ -199,6 +212,7 @@ def _parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("reinit", "sync the project environment, refreshing internal packages"),
         ("install-wheel", "install the project's own wheel from the wheelhouse"),
+        ("require-wheels", "fail when the wheelhouse lacks an internal package's wheel"),
     ):
         sub = commands.add_parser(name, help=help_text)
         sub.add_argument("--project", type=Path, default=Path.cwd())
@@ -222,6 +236,14 @@ def main(argv: Sequence[str] | None = None, *, root: Path = ROOT,
             planned = [(project, lock_command(project, root, repository)) for project in projects]
         else:
             project = args.project.resolve()
+            if args.command == "require-wheels":
+                missing = missing_wheels(project, root)
+                if missing:
+                    raise DerivationError(
+                        f"{project} needs wheels the wheelhouse lacks: {', '.join(missing)}; "
+                        "build them first"
+                    )
+                return 0
             if args.command == "reinit":
                 command = reinit_command(project, root)
             elif args.command == "image":

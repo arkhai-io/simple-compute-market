@@ -1757,6 +1757,42 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       pin: 661 unit (the dotenv-layering case failing, as 1.7 records) and 485
       integration. Helm is not installed, so the render checks are unrun.
 
+      **Second review round (2026-10-24).** A re-review raised two blockers.
+      - *Correction: the clean-copy packaging claim above was overstated.* The
+        copy it was made from kept a `.dist` built earlier, so the wheelhouse
+        was not clean. From a copy holding only tracked files, `make
+        test-api-selling` passed but its environment refresh resolved
+        `arkhai-kit-config` from PyPI, because the root `dist-api-selling` did
+        not build it, and rewrote the `selling` lock; `make check-packaging`
+        then reported that lock. The reviewer's run reported 232 lock problems
+        from its own starting state; the cause found here was this one. The
+        root `dist-api-selling` now builds the config kit too, and the root
+        `test-api-selling` runs `scripts/uv_project.py require-wheels`, which
+        refuses before any refresh when the wheelhouse lacks a wheel the
+        project installs, instead of letting the refresh fall back to an
+        index (`docs/development/BUILD_AND_PACKAGING.md`, project
+        environments). Unit: `require-wheels` names each internal package
+        without a wheel (`scripts/tests/test_uv_project.py`, 14 passed).
+      - *Guards on divergence repair.* `QuotaPublication.converge` loads each
+        divergent listing that is not closed and leaves out, reported
+        unrepaired, any the bundle's guards refuse; the kit's repair republishes
+        an open listing without the publication hook, so it is never given one.
+        Unit (`test_reconcile_order.py`): a refused open listing is reported
+        unrepaired and never republished while its neighbours and a closed
+        listing are repaired; it fails with the filter removed.
+      Evidence, from a copy of the tracked files only (no `.dist`, no
+      environments, no stale checkout), in the reviewer's order: `make
+      test-api-selling` 162 passed, `require-wheels` passing; `make dist`
+      passes; `make check-packaging` passes with every lock unchanged by the
+      run; `make test-api-selling` again 162 passed;
+      `make -C domains/apicredits/storefront test` 173 passed; `make
+      check-architecture` and `make check-comment-hygiene` pass; `make
+      check-change` reports only the two `api-family` documents closeout
+      creates; `git diff --check` is clean. `make test-release-tooling`: 1103
+      passed, 11 skipped, 2 failed — one because the copy is not a git
+      repository (it passes in the checkout), and GNU make's `--eval` case,
+      as 1.7 records.
+
 ## 7. Selling, part three: route services, authentication, persistence client, and bindings
 
 Delivers the storefront's route services and persistence in `selling` and
@@ -2030,7 +2066,7 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
-| D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, and reopen; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
 | D7, D12 — pricing and the negotiation guards are the family's, not API credits' | `openspec/specs/api-credits/architecture.md` (what the domain owns) |
@@ -2042,6 +2078,7 @@ change to implementation.
 | D7 — the contribution bundles and the issuance projection | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D9, D14 — the compatibility baselines and rollback directions | `openspec/specs/api-credits/spec.md` |
 | D9 — the baselines' refusal records diff bodies, the one exception to the rejection-path status-only rule; the API-credit lane mounts the engine socket and runs the upgrade/rollback scenario | `docs/development/TESTING.md` (rejection paths; the API-credit lane) |
+| D7 — a project's targeted test target builds its whole internal wheel set and refuses, through `uv_project.py require-wheels`, to refresh an environment the wheelhouse cannot supply | `docs/development/BUILD_AND_PACKAGING.md` (project environments) |
 | D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
 | D4 — the storefront composes the family client once at its composition boundary; the authority binds the contracts' wire models to its label and keeps no digest of its own | `openspec/specs/api-credits/architecture.md#implementation-composition` |
