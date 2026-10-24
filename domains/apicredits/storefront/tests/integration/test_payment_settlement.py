@@ -402,14 +402,14 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
     restarted = _restart(tmp_path, h, approved=True)
 
     # The registered step: what the timer loop and an operator's step run.
-    done = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
+    done = await _container.payment_reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == [NEGOTIATION]
     progress = await restarted.db.load_issuance_progress(reference=NEGOTIATION)
     assert progress["status"] == "ready"
 
-    again = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
+    again = await _container.payment_reconciliation_step()
     assert again["attempted"] == 0
     assert restarted.issuer.issued == [NEGOTIATION]
 
@@ -418,7 +418,7 @@ async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_
     h = await harness()
     restarted = _restart(tmp_path, h, approved=False)
 
-    done = await _container.STOREFRONT_LOOPS.payment_reconciliation_step()
+    done = await _container.payment_reconciliation_step()
 
     assert (done["attempted"], done["failed"]) == (1, 0)
     assert restarted.issuer.issued == []

@@ -373,18 +373,20 @@ def seller_reference_amount(
     listing: Mapping[str, Any],
     quantity: int | None,
     *,
+    noun: str,
     default_min_price: Any = None,
     proposal: Mapping[str, Any] | None = None,
 ) -> int:
     """quantity × the per-credit rate of the option ``proposal`` selects, exact for a rational floor."""
     unit = extract_unit_price_from_order(
         dict(listing),
+        noun=noun,
         default_min_price=default_min_price,
         proposal=dict(proposal) if isinstance(proposal, Mapping) else None,
     )
     count = int(quantity) if quantity is not None else 1
     if isinstance(unit, int):
-        return checked_credit_total(unit, count)
+        return checked_credit_total(unit, count, noun=noun)
     return math.floor(Fraction(unit) * count)
 
 
@@ -450,6 +452,7 @@ class _DefaultSellerRoundHook:
             seller_reference_amount(
                 listing_dict,
                 requested_quantity,
+                noun=self._contributions.refusal_noun,
                 default_min_price=self._default_min_price,
                 proposal=their_proposal if isinstance(their_proposal, Mapping) else None,
             )
@@ -586,13 +589,14 @@ def decode_terms(domain: MarketDomainContract, raw_terms: Any) -> NegotiationTer
 
 
 def _validate_opening(
+    noun: str,
     _listing: Any,
     _listing_record: Mapping[str, Any],
     terms: NegotiationTerms,
 ) -> None:
     if terms.decoded is None or provision_quantity(terms.decoded) is None:
         raise NegotiationStateError(
-            "a credit negotiation requires domain-valid provision terms"
+            f"{noun} negotiation requires domain-valid provision terms"
         )
 
 
@@ -941,6 +945,7 @@ async def _persist_opening(repository: Any, opening: OpeningRecord) -> None:
 
 
 async def _validate_continuation(
+    noun: str,
     repository: Any,
     _listing: Any,
     _listing_record: Mapping[str, Any],
@@ -949,7 +954,7 @@ async def _validate_continuation(
 ) -> None:
     negotiation_id = thread.get("negotiation_id")
     if not isinstance(negotiation_id, str) or not negotiation_id:
-        raise NegotiationStateError("the credit thread has no negotiation identity")
+        raise NegotiationStateError(f"{noun} thread has no negotiation identity")
     recorded = await repository.load_credit_terms(negotiation_id=negotiation_id)
     quantity = provision_quantity(terms.decoded)
     key_mode = provision_key_mode(terms.decoded)
@@ -957,7 +962,7 @@ async def _validate_continuation(
     if quantity is None:
         if recorded is not None:
             raise NegotiationStateError(
-                "recorded credit terms do not match the negotiation transcript"
+                f"recorded {noun} terms do not match the negotiation transcript"
             )
         return
     if not recorded or (
@@ -966,11 +971,12 @@ async def _validate_continuation(
         recorded.get("key_id"),
     ) != (int(quantity), key_mode, key_id):
         raise NegotiationStateError(
-            "recorded credit terms do not match the negotiation transcript"
+            f"recorded {noun} terms do not match the negotiation transcript"
         )
 
 
 def reference_amount(
+    contributions: SellingContributions,
     round_settings: Callable[[], RoundSettings],
     listing: Any,
     _listing_record: Mapping[str, Any],
@@ -984,6 +990,7 @@ def reference_amount(
     return seller_reference_amount(
         listing,
         provision_quantity(terms.decoded),
+        noun=contributions.refusal_noun,
         default_min_price=round_settings().default_min_price,
         proposal=pinned_proposal,
     )
@@ -1130,7 +1137,9 @@ def build_negotiation_runtime(
     ) -> ResolvedNegotiation:
         listing_id = thread.get("our_listing_id")
         if not isinstance(listing_id, str) or not listing_id:
-            raise NegotiationStateError("negotiation has no recorded credit listing")
+            raise NegotiationStateError(
+                f"negotiation has no recorded {contributions.refusal_noun} listing"
+            )
         record = await repository.load_listing(listing_id=listing_id)
         if not record:
             raise NegotiationStateError(f"Seller's order {listing_id} is gone from local DB")
@@ -1198,11 +1207,11 @@ def build_negotiation_runtime(
 
     hooks = NegotiationDomainHooks(
         decode_terms=lambda raw: decode_terms(domain, raw),
-        validate_opening=_validate_opening,
-        validate_continuation=_validate_continuation,
+        validate_opening=partial(_validate_opening, contributions.refusal_noun),
+        validate_continuation=partial(_validate_continuation, contributions.refusal_noun),
         evaluate_round=evaluate,
         determine_strategy=lambda listing, _record: determine_strategy(contributions, listing),
-        reference_amount=partial(reference_amount, round_settings),
+        reference_amount=partial(reference_amount, contributions, round_settings),
         amount_from_proposal=_amount,
         proposal_from_amount=_proposal_from_amount,
         agreement_terms=_agreement,

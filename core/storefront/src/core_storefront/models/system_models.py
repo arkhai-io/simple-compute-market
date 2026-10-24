@@ -114,6 +114,8 @@ class HealthResponse(BaseModel):
     #: its most recent cycle, the publication loop's included. Present on
     #: system status, not on the liveness probes.
     lifecycle: dict[str, LoopStatus] | None = None
+    #: The storefront's own marketplace principal; present on system status.
+    principal: Identity | None = None
 
 
 class AdminPauseResponse(BaseModel):

@@ -10,6 +10,7 @@
   "lifecycle": null,
   "listing_cardinality_mode_explanations": null,
   "paused": null,
+  "principal": null,
   "provisioning_contract_version": null,
   "publication_derivation": null,
   "site_projections": null,

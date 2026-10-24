@@ -267,11 +267,11 @@ requires-dist = [
     { name = "arkhai-api-selling", specifier = ">=0.2.0" },
     { name = "arkhai-apicredits-domain", specifier = ">=0.10.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront", specifier = ">=0.16.0" },
-    { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.17.0" },
+    { name = "arkhai-core-storefront-client", specifier = ">=0.27.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
-    { name = "arkhai-kit-capacity-publication", specifier = "==0.10.2" },
+    { name = "arkhai-kit-capacity-publication", specifier = "==0.10.3" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },
     { name = "arkhai-kit-identity", specifier = "==0.4.0" },
     { name = "arkhai-kit-negotiation-runtime", specifier = "==0.5.1" },
@@ -342,7 +342,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-core-storefront"
-version = "0.16.0"
+version = "0.17.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -354,19 +354,19 @@ dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront-0.16.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront-0.17.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-core-storefront-client"
-version = "0.26.0"
+version = "0.27.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-kit-identity", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "httpx", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_core_storefront_client-0.26.0-py3-none-any.whl" },
+    { path = "arkhai_core_storefront_client-0.27.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -420,7 +420,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-capacity-publication"
-version = "0.10.2"
+version = "0.10.3"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-core-storefront", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -428,7 +428,7 @@ dependencies = [
     { name = "arkhai-kit-site-client", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_kit_capacity_publication-0.10.2-py3-none-any.whl" },
+    { path = "arkhai_kit_capacity_publication-0.10.3-py3-none-any.whl" },
 ]
 
 [[package]]

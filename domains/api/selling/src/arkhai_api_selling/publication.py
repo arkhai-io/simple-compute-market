@@ -46,6 +46,21 @@ _CONSUMING = frozenset({"reserved", "committed", "lease_truncated"})
 _MIXED = frozenset({"capacity_changed"})
 
 
+class PublicationRefused(CapacityBindingError):
+    """A domain's publication guard refuses the listing."""
+
+
+def publication_refusal(
+    contributions: SellingContributions, listing_resource: Mapping[str, Any]
+) -> str | None:
+    """The first of the domain's publication guards to refuse ``listing_resource``, or None."""
+    for guard in contributions.publication_guards:
+        reason = guard(listing_resource)
+        if reason is not None:
+            return reason
+    return None
+
+
 @dataclass(frozen=True)
 class RegistryPublication:
     """Where and whether the storefront publishes, as configured when a pass runs."""
@@ -62,33 +77,37 @@ class QuotaPublicationHooks:
         self._db = db
 
     def validate_candidate(self, candidate: PublicationCandidate[dict[str, Any]]) -> None:
+        noun = self._contributions.refusal_noun
         resource = domain_listing_resource(
             self._contributions, candidate.payload.get("listing_resource")
         )
         if resource is None:
-            raise CapacityBindingError("the listing_resource is not the domain's")
+            raise CapacityBindingError(f"{noun} listing_resource is not the domain's")
         if self._contributions.offering_mode != candidate.binding.offering_mode:
-            raise CapacityBindingError("the listing_resource mode differs from its binding")
+            raise CapacityBindingError(f"{noun} listing_resource mode differs from binding")
+        reason = publication_refusal(self._contributions, resource)
+        if reason is not None:
+            raise PublicationRefused(reason)
 
     async def binding_for_listing(self, listing_id: str) -> PublicationBinding | None:
         return await listing_binding(self._db, listing_id)
 
 
 async def all_listings(db: Any, *, status: str) -> list[dict[str, Any]]:
-    """Every listing with ``status``.
+    """Every listing with ``status``, each read once.
 
-    Pages span every status, so a pass that changes statuses while reading cannot shift a page.
+    Pages run over every status by the store's keyset, which no write changes, so a
+    pass that changes statuses while reading neither repeats nor skips a listing.
     """
-    rows: dict[str, dict[str, Any]] = {}
-    offset = 0
+    rows: list[dict[str, Any]] = []
+    before: tuple[str, str] | None = None
     while True:
-        page = await db.list_listings(limit=LISTING_PAGE, offset=offset)
-        for row in page:
-            rows.setdefault(str(row.get("listing_id") or ""), row)
+        page = await db.list_listings(limit=LISTING_PAGE, before=before)
+        rows.extend(page)
         if len(page) < LISTING_PAGE:
             break
-        offset += LISTING_PAGE
-    return [row for row in rows.values() if row.get("status") == status]
+        before = (page[-1]["created_at"], page[-1]["listing_id"])
+    return [row for row in rows if row.get("status") == status]
 
 
 class QuotaPublication:
@@ -124,8 +143,15 @@ class QuotaPublication:
         listing_id = str(row.get("listing_id") or "")
         binding = await listing_binding(db, listing_id)
         if binding is None:
-            raise CapacityBindingError("the listing has no durable capacity binding")
+            raise CapacityBindingError(
+                f"{self._contributions.refusal_noun} listing has no durable capacity binding"
+            )
         return PublicationCandidate(str(row["listing_id"]), binding, dict(row))
+
+    def refusal(self, listing: Mapping[str, Any]) -> str | None:
+        """Why the domain's publication guards refuse a stored listing, or None."""
+        resource = domain_listing_resource(self._contributions, listing.get("listing_resource"))
+        return None if resource is None else publication_refusal(self._contributions, resource)
 
     async def publish(self, db: Any, listing: Mapping[str, Any]) -> dict[str, Any]:
         return await self.runtime(db).publish(await self._candidate(db, listing))
@@ -136,7 +162,9 @@ class QuotaPublication:
             return {"status": "error", "message": "Missing listing_id for close_listing"}
         binding = await listing_binding(db, listing_id)
         if binding is None:
-            raise CapacityBindingError("the listing has no durable capacity binding")
+            raise CapacityBindingError(
+                f"{self._contributions.refusal_noun} listing has no durable capacity binding"
+            )
         return await self.runtime(db).close(BoundListing(listing_id, binding), closed_by="seller")
 
     async def converge(self, db: Any) -> dict[str, tuple[str, ...]]:
@@ -153,7 +181,9 @@ class QuotaPublication:
             listing_id = str(row.get("listing_id") or "")
             source = await listing_source(db, listing_id)
             if source is None:
-                raise CapacityBindingError("the listing has no durable capacity binding")
+                raise CapacityBindingError(
+                    f"{self._contributions.refusal_noun} listing has no durable capacity binding"
+                )
             bound[listing_id] = source
             sources.append(
                 QuotaListingSource(
@@ -252,7 +282,7 @@ class QuotaPublication:
         candidates = []
         for listing_id in ids:
             row = await db.load_listing(listing_id=listing_id)
-            if row is not None:
+            if row is not None and self.refusal(row) is None:
                 candidates.append(await self._candidate(db, row))
         result = await self.runtime(db).reconcile(ReconciliationPlan(reopen=tuple(candidates)))
         return list(result["reopened"])

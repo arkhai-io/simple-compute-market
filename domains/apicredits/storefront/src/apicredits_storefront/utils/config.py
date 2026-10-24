@@ -375,7 +375,6 @@ def negotiation_watchdog_policy() -> NegotiationWatchdogPolicy:
 LOOP_SETTINGS = LoopSettings(
     watchdog=negotiation_watchdog_policy,
     settlement_servicing_interval=settlement_servicing_interval,
-    payment_reconciliation_interval=lambda: seconds_setting("payment_reconciliation_interval", 30),
     capacity_poll_interval=capacity_poll_interval,
 )
 

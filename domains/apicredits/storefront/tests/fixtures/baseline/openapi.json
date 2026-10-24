@@ -542,6 +542,16 @@
             ],
             "title": "Paused"
           },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Identity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provisioning_contract_version": {
             "anyOf": [
               {

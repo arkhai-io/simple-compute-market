@@ -15,6 +15,7 @@ from market_identity import Identity
 from arkhai_api_selling.capacity import QuotaCapacity
 from arkhai_api_selling.contributions import QuotaSource, SellingContributions
 from arkhai_api_selling.issuance import issuance_subject
+from arkhai_api_selling.publication import publication_refusal
 from arkhai_api_selling.quota_listing import QuotaPool, prepare_listing_binding, quota_pool
 
 logger = logging.getLogger(__name__)
@@ -184,10 +185,9 @@ class ListingService:
             }
         )
         listing_resource = listing.listing_resource.model_dump(mode="json")
-        for guard in self._contributions.publication_guards:
-            reason = guard(listing_resource)
-            if reason is not None:
-                raise ValueError(reason)
+        reason = publication_refusal(self._contributions, listing_resource)
+        if reason is not None:
+            raise ValueError(reason)
         listing_id = str(uuid.uuid4())
         binding = prepare_listing_binding(
             self._contributions,

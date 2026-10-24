@@ -119,6 +119,9 @@ class ListingsController:
                 status_code=404,
                 detail=f"Listing {listing_id} not found",
             )
+        refusal = _container.QUOTA_PUBLICATION.refusal(row)
+        if refusal is not None:
+            raise HTTPException(status_code=409, detail=refusal)
         await self._db.set_listing_paused(listing_id=listing_id, paused=False)
         publish_result = await _container.QUOTA_PUBLICATION.publish(self._db, row)
         registry_status = publish_result.get("status", "unknown")

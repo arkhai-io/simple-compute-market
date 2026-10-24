@@ -17,7 +17,7 @@ from arkhai_api_selling.contributions import (
     SellingContributions,
 )
 from arkhai_api_selling.evidence_store import IssuanceEvidenceService, PrivateResultRepository
-from arkhai_api_selling.lifecycle import StorefrontLoops
+from arkhai_api_selling.lifecycle import ContributedLoop, StorefrontLoops
 from arkhai_api_selling.listings import ListingService
 from arkhai_api_selling.publication import QuotaPublication, RegistryPublication
 from arkhai_api_selling.publish_route import PublishFromQuotaRequest as QuotaPublishRequest
@@ -25,7 +25,7 @@ from arkhai_api_selling.system import SystemService
 from arkhai_apicredits.label import API_CREDITS_LABEL
 from arkhai_apicredits.schema import API_CREDITS_SCHEMA_KIND, ApiCreditsListing
 from core_storefront.multi_registry_client import MultiRegistryClient
-from market_storefront_kit import TradingPause
+from market_storefront_kit import LifecycleRouteError, TradingPause
 
 from apicredits_storefront.utils import config
 
@@ -91,6 +91,7 @@ SELLING_CONTRIBUTIONS = SellingContributions(
     publication_mapping=_listing_resource,
     issuance_projection=_issuance_subject,
     consumption_rule=ConsumptionRule.FIXED_PER_REQUEST,
+    refusal_noun="API-credit",
 )
 
 def _registry_client() -> MultiRegistryClient:
@@ -125,16 +126,46 @@ QUOTA_CAPACITY = QuotaCapacity(
 QUOTA_PUBLICATION = QuotaPublication(
     SELLING_CONTRIBUTIONS, capacity=QUOTA_CAPACITY, registry=_registry_publication
 )
+PAYMENT_RECONCILIATION = "payment_reconciliation"
+
+
+def _payment_service() -> Any | None:
+    composition = resolved_settlement_composition
+    if composition is None:
+        return None
+    if resolved_sqlite_client is None:
+        raise LifecycleRouteError(503, "storefront persistence is not initialized")
+    return composition.payment_service(resolved_sqlite_client)
+
+
+async def payment_reconciliation_step() -> Mapping[str, Any]:
+    service = _payment_service()
+    if service is None:
+        return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
+    done = await service.reconcile_once()
+    return {"loop": PAYMENT_RECONCILIATION, "attempted": done.attempted, "failed": done.failed}
+
+
+def _payment_loops() -> tuple[ContributedLoop, ...]:
+    """Payment reconciliation, a loop only while Arkhai payments is composed."""
+    if _payment_service() is None:
+        return ()
+    return (
+        ContributedLoop(
+            PAYMENT_RECONCILIATION,
+            route="payment-reconciliation",
+            step=payment_reconciliation_step,
+            interval_seconds=config.seconds_setting("payment_reconciliation_interval", 30),
+        ),
+    )
+
+
 STOREFRONT_LOOPS = StorefrontLoops(
     sqlite_client=lambda: resolved_sqlite_client,
     settlement_worker=lambda: resolved_settlement_worker,
-    payment_service=lambda db: (
-        resolved_settlement_composition.payment_service(db())
-        if resolved_settlement_composition is not None
-        else None
-    ),
     capacity=QUOTA_CAPACITY,
     settings=config.LOOP_SETTINGS,
+    contributed_loops=_payment_loops,
 )
 
 resolved_market_domain: "MarketDomainContract | None" = None

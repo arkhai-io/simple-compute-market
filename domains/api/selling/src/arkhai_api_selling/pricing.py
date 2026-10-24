@@ -41,22 +41,22 @@ def _settlement_options(order: dict[str, Any]) -> list[SettlementOption]:
     return [SettlementOption.model_validate(entry) for entry in (raw or [])]
 
 
-def checked_credit_total(unit_rate: Any, quantity: Any) -> int:
+def checked_credit_total(unit_rate: Any, quantity: Any, *, noun: str) -> int:
     """Multiply exact integer base units and reject fractions or overflow."""
     if isinstance(unit_rate, bool) or isinstance(quantity, bool):
-        raise ValueError("credit rate and quantity must be integers")
+        raise ValueError(f"{noun} rate and quantity must be integers")
     try:
         rate = int(unit_rate)
         count = int(quantity)
     except (TypeError, ValueError) as exc:
-        raise ValueError("credit rate and quantity must be integers") from exc
+        raise ValueError(f"{noun} rate and quantity must be integers") from exc
     if rate != unit_rate or count != quantity:
-        raise ValueError("credit pricing does not admit fractional base units")
+        raise ValueError(f"{noun} pricing does not admit fractional base units")
     if rate < 0 or count < 1:
-        raise ValueError("credit rate must be non-negative and quantity positive")
+        raise ValueError(f"{noun} rate must be non-negative and quantity positive")
     total = rate * count
     if total > _MAX_BASE_UNIT_AMOUNT:
-        raise ValueError("credit quantity-scaled amount exceeds uint256")
+        raise ValueError(f"{noun} quantity-scaled amount exceeds uint256")
     return total
 
 
@@ -70,64 +70,72 @@ def _accepted_escrows(order: dict[str, Any]) -> list[dict[str, Any]]:
     return [entry for entry in (raw or []) if isinstance(entry, dict)]
 
 
-def _primary_rate_value(entry: dict[str, Any]) -> int | None:
-    rates = entry.get("rates")
-    if not isinstance(rates, list) or not rates:
+def _escrow_rate(escrow: Mapping[str, Any], *, noun: str) -> int | None:
+    """An escrow's one per-credit amount rate, or None when it states no amount rate."""
+    rates = escrow.get("rates")
+    amount_rates = [
+        rate
+        for rate in (rates if isinstance(rates, list) else ())
+        if isinstance(rate, Mapping) and rate.get("field") == "amount"
+    ]
+    if not amount_rates:
         return None
-    first = rates[0]
-    if not isinstance(first, dict):
-        return None
-    value = first.get("value")
+    if len(amount_rates) != 1:
+        raise ValueError(f"selected {noun} escrow has more than one amount rate")
+    rate = amount_rates[0]
+    if rate.get("per") not in _PER_CREDIT:
+        raise ValueError(f"selected {noun} escrow rate is not per credit")
+    value = rate.get("value")
     if isinstance(value, str) and value.strip().isdigit():
-        return int(value.strip())
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return None
+        value = int(value.strip())
+    return checked_credit_total(value, 1, noun=noun)
 
 
-def _selected_option_rate(option: Mapping[str, Any]) -> int | None:
-    """A selected settlement option's per-credit amount, or None if it has none."""
+def _option_rate(option: Mapping[str, Any], *, noun: str) -> int | None:
+    """A settlement option's one per-credit amount rate, or None when it states no amount rate."""
     parsed = SettlementOption.model_validate(option)
     amount_rates = [rate for rate in parsed.rates if rate.field == "amount"]
     if not amount_rates:
         return None
     if len(amount_rates) != 1:
-        raise ValueError("selected credit option has more than one amount rate")
+        raise ValueError(f"selected {noun} option has more than one amount rate")
     rate = amount_rates[0]
     if rate.per not in _PER_CREDIT:
-        raise ValueError("selected credit option rate is not per credit")
-    return checked_credit_total(rate.value, 1)
+        raise ValueError(f"selected {noun} option rate is not per credit")
+    return checked_credit_total(rate.value, 1, noun=noun)
 
 
 def extract_unit_price_from_order(
     order: dict[str, Any],
     *,
+    noun: str,
     default_min_price: Any = None,
     proposal: Mapping[str, Any] | None = None,
 ) -> int | Fraction:
     """The seller's per-credit floor for the option a buyer's proposal selects.
 
-    The selected option's or escrow's rate, else the configured floor where it advertises
-    none; with neither the negotiation is refused. See openspec/specs/negotiation-protocol/spec.md,
-    "The seller's reference amount is the selected option's rate".
+    The selected option's or escrow's amount rate, else the configured floor where it
+    states none; with neither the negotiation is refused. See
+    openspec/specs/negotiation-protocol/spec.md, "The seller's reference amount is the
+    selected option's rate".
     """
     selected = selected_settlement_artifact(order, proposal)
     selection = proposal.get("settlement_selection") if isinstance(proposal, Mapping) else None
     if isinstance(selection, Mapping):
         if selected is None:
             raise ValueError("settlement selection does not exact-match one listing option")
-        advertised = _selected_option_rate(selected)
+        advertised = _option_rate(selected, noun=noun)
     elif selected is not None:
-        advertised = _primary_rate_value(selected)
+        advertised = _escrow_rate(selected, noun=noun)
     else:
         accepted = _accepted_escrows(order)
-        advertised = _primary_rate_value(accepted[0]) if accepted else None
+        advertised = _escrow_rate(accepted[0], noun=noun) if accepted else None
         if advertised is None:
             options = _settlement_options(order)
             if options:
                 amount_rates = [r for r in options[0].rates if r.field == "amount"]
                 if len(amount_rates) == 1:
-                    advertised = checked_credit_total(amount_rates[0].value, 1)
+                    advertised = checked_credit_total(amount_rates[0].value, 1, noun=noun)
     if advertised is not None:
         return advertised
 

@@ -186,6 +186,8 @@ class HealthResponse:
     #: of its most recent cycle, whether its timer or an operator's step ran
     #: it; present on /api/v1/system/status where the storefront reports it.
     lifecycle: dict[str, Any] | None = None
+    #: The storefront's own marketplace principal; present on /api/v1/system/status.
+    principal: Identity | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -199,6 +201,7 @@ class HealthResponse:
             "disclosures",
             "settlement_manual_required",
             "lifecycle",
+            "principal",
         }
         raw_chain_id = d.get("chain_id")
         raw_manual = d.get("settlement_manual_required")
@@ -219,6 +222,9 @@ class HealthResponse:
                 int(raw_manual) if raw_manual is not None else None
             ),
             lifecycle=d.get("lifecycle"),
+            principal=(
+                Identity.model_validate(d["principal"]) if d.get("principal") is not None else None
+            ),
             extra={k: v for k, v in d.items() if k not in known},
         )
 

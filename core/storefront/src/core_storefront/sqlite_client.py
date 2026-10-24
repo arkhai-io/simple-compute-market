@@ -4500,9 +4500,13 @@ class SQLiteClient:
         paused: bool | None = None,
         limit: int = 50,
         offset: int = 0,
+        before: tuple[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Return a paginated list of orders with optional filters.
 
+        Rows are ordered newest first by ``(created_at, listing_id)``, which no
+        write changes. ``before`` is a keyset cursor, the last row's
+        ``(created_at, listing_id)``, so successive pages visit each listing once.
         Each row carries ``closed_by`` as :meth:`load_listing` does.
         """
 
@@ -4518,6 +4522,9 @@ class SQLiteClient:
                 if paused is not None:
                     clauses.append("paused = ?")
                     params.append(1 if paused else 0)
+                if before is not None:
+                    clauses.append("(created_at < ? OR (created_at = ? AND listing_id < ?))")
+                    params.extend((before[0], before[0], before[1]))
                 where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 cur.execute(
                     f"""
@@ -4533,7 +4540,7 @@ class SQLiteClient:
                            closed_by,
                            rate_structure
                     FROM listings {where}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, listing_id DESC
                     LIMIT ? OFFSET ?
                     """,
                     (*params, limit, offset),

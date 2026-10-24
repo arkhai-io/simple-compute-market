@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +16,6 @@ from core_storefront.domain_registry import (
     StorefrontDomainBindingError,
     StorefrontDomainRegistryError,
 )
-from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.stage_log import stage_event
 from market_capacity_publication import (
     CapacityBindingError,
@@ -45,7 +44,6 @@ logger = logging.getLogger(__name__)
 
 NEGOTIATION_WATCHDOG = "negotiation_watchdog"
 SETTLEMENT_SERVICING = "settlement_servicing"
-PAYMENT_RECONCILIATION = "payment_reconciliation"
 CAPACITY_EVENTS_POLLER = "capacity_events_poller"
 
 #: The errors whose messages a recorded cycle outcome may carry: their text names
@@ -92,8 +90,17 @@ class LoopSettings:
 
     watchdog: Callable[[], NegotiationWatchdogPolicy]
     settlement_servicing_interval: Callable[[], float]
-    payment_reconciliation_interval: Callable[[], float]
     capacity_poll_interval: Callable[[], float]
+
+
+@dataclass(frozen=True)
+class ContributedLoop:
+    """A timer loop a composed mechanism adds, registered and stepped like the storefront's own."""
+
+    name: str
+    route: str
+    step: Callable[[], Awaitable[Mapping[str, Any]]]
+    interval_seconds: float
 
 
 class StorefrontLoops:
@@ -104,15 +111,15 @@ class StorefrontLoops:
         *,
         sqlite_client: Callable[[], Any | None],
         settlement_worker: Callable[[], Any | None],
-        payment_service: Callable[[Callable[[], Any]], Any | None],
         capacity: QuotaCapacity,
         settings: LoopSettings,
+        contributed_loops: Callable[[], Sequence[ContributedLoop]] = tuple,
     ) -> None:
         self._sqlite_client = sqlite_client
         self._settlement_worker = settlement_worker
-        self._payment_service = payment_service
         self._capacity = capacity
         self._settings = settings
+        self._contributed_loops = contributed_loops
 
     def _db(self) -> Any:
         db = self._sqlite_client()
@@ -140,21 +147,6 @@ class StorefrontLoops:
             raise LifecycleRouteError(503, "settlement servicing worker is not initialized")
         processed = await worker.run_once()
         return {"loop": SETTLEMENT_SERVICING, "processed": int(processed)}
-
-    def payment_reconciliation_service(self) -> Any | None:
-        """The payment settlement service, or None when payments is not composed."""
-        return self._payment_service(self._db)
-
-    async def payment_reconciliation_step(self) -> Mapping[str, Any]:
-        service = self.payment_reconciliation_service()
-        if service is None:
-            return {"loop": PAYMENT_RECONCILIATION, "attempted": 0, "failed": 0}
-        done = await service.reconcile_once()
-        return {
-            "loop": PAYMENT_RECONCILIATION,
-            "attempted": done.attempted,
-            "failed": done.failed,
-        }
 
     def _capacity_runtime(self) -> CapacityRuntime:
         db = self._db()
@@ -216,13 +208,8 @@ class StorefrontLoops:
             route="settlement-servicing",
             step=self.settlement_servicing_step,
         )
-        # Registered with the loop it steps, which runs only when payments is composed.
-        if self.payment_reconciliation_service() is not None:
-            loops.register_step(
-                PAYMENT_RECONCILIATION,
-                route="payment-reconciliation",
-                step=self.payment_reconciliation_step,
-            )
+        for contributed in self._contributed_loops():
+            loops.register_step(contributed.name, route=contributed.route, step=contributed.step)
         loops.register_step(
             CAPACITY_EVENTS_POLLER,
             route="capacity-events",
@@ -260,14 +247,9 @@ class StorefrontLoops:
             NEGOTIATION_WATCHDOG: ("negotiation-watchdog", self.negotiation_watchdog_step),
             SETTLEMENT_SERVICING: ("settlement-servicing", self.settlement_servicing_step),
         }
-        if self.payment_reconciliation_service() is not None:
-            intervals[PAYMENT_RECONCILIATION] = (
-                self._settings.payment_reconciliation_interval()
-            )
-            steps[PAYMENT_RECONCILIATION] = (
-                "payment-reconciliation",
-                self.payment_reconciliation_step,
-            )
+        for contributed in self._contributed_loops():
+            intervals[contributed.name] = contributed.interval_seconds
+            steps[contributed.name] = (contributed.route, contributed.step)
         for name, (route, step) in steps.items():
             loops.register_loop(
                 name,
@@ -296,14 +278,17 @@ async def start_background_tasks(
     *,
     sqlite_client: Any,
     storefront_url: str,
-    settlement_runtime: Any | None,
-    marketplace_signer: Any | None,
     preflight: Callable[[], Awaitable[None]],
     seed: Callable[[], Awaitable[None]],
+    startup_steps: Sequence[Callable[[], Awaitable[None]]] = (),
     capacity_runtime: CapacityRuntime | None = None,
+    open_thread_store: Callable[..., Any] = get_thread_store,
 ) -> None:
-    """Initialize the thread store, backfill escrow records, run the preflight and seed, then start every loop."""
-    get_thread_store(
+    """Initialize the thread store, run the composed startup steps, the preflight, and the seed, then start every loop.
+
+    The loops start last, so a sweep never runs before a startup step its work depends on.
+    """
+    open_thread_store(
         sqlite_client=sqlite_client,
         identity=PolicyIdentity(agent_url=storefront_url),
     )
@@ -311,16 +296,8 @@ async def start_background_tasks(
         "[STARTUP] Negotiation thread store initialized (storefront_url=%s)",
         storefront_url,
     )
-    if settlement_runtime is not None and marketplace_signer is not None:
-        backfilled = await backfill_escrow_obligation_records(
-            sqlite_client=sqlite_client,
-            settlement_runtime=settlement_runtime,
-            local_principal=marketplace_signer.identity,
-        )
-        if backfilled:
-            logger.info(
-                "[STARTUP] Backfilled %d legacy escrow obligation records", backfilled
-            )
+    for step in startup_steps:
+        await step()
     await preflight()
     await seed()
     intervals = storefront_loops.register_loops(loops, capacity_runtime=capacity_runtime)

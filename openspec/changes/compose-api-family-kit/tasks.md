@@ -1682,6 +1682,80 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       pricing and capacity refusals name the storefront's configuration keys;
       `start_background_tasks` takes no thread-store seam, so the startup test
       patches the kit's import.
+      **Review round (2026-10-24).** An external review of the section's
+      commit (`7b097b91a`) raised nine findings. The owner withdrew the first:
+      no `selling` wrapper pages listings by domain, and core's
+      `list_listings` has no page cap. The owner made the transactional opening a
+      follow-up, task 7.3; section 6 claims none. The owner accepted the status
+      principal as an additive baseline change. The fixes, in one commit:
+      - *Stable reconciliation paging.* Core's `list_listings` orders by
+        `(created_at, listing_id)` and takes a `before` keyset cursor
+        (`arkhai-core-storefront` 0.17.0); `all_listings` pages by it. Core
+        integration (`test_listing_pages.py`): seven listings sharing one
+        timestamp, closed as they are read three to a page, are each read once,
+        and fail with the tie-break removed. `selling` library integration:
+        250 listings sharing one timestamp are each read once while a store
+        wrapper closes every page it serves. The exact-pin cascade follows:
+        capacity publication 0.10.3, the VM and bare-metal storefronts 0.17.2,
+        the provisioning service 0.17.4, and the VM storefront's exact pin on
+        bare metal; the core storefront client 0.27.0 for the principal, with
+        the provisioning service's exact pin on it.
+      - *The amount rate.* An escrow or option prices from its one `amount`
+        rate in a per-credit unit, wherever it sits in the list; two amount
+        rates, another unit, or a non-integer value are refused, and the floor
+        applies only where none is stated. Unit: amount after a duration rate,
+        no amount rate, duplicate, invalid unit, invalid value.
+      - *Byte-identical refusal bodies.* The bundle's `refusal_noun`, which API
+        credits sets to `API-credit`, restores every message section 6 had
+        generalized. Application integration (`test_refusal_bodies.py`,
+        through the canonical client with the response read at the transport):
+        the 409 quota refusal and the 404 pricing refusal bodies equal those
+        served before the kit, and a continuation over changed recorded terms
+        raises its unchanged message.
+      - *Guards on every publication path.* The publication hook runs the
+        bundle's guards and refuses with `PublicationRefused`; the reopen pass
+        leaves a refused listing closed and reopens the rest; an administrator's
+        resume is refused with 409 before anything is unpaused. Library
+        integration: publish refused, reconciliation reopening all but the
+        refused listing; storefront unit: the resume refused, the listing still
+        paused; creation keeps its pre-write check.
+      - *The status principal.* `HealthResponse` and the client's model carry
+        an optional `principal`; the API-credits `health` and `openapi`
+        baselines were re-recorded once, and the re-recording differs from the
+        committed fixtures only by that field (routes, authentication,
+        refusals, and configuration byte-identical). Application integration:
+        the signed status read returns the storefront's principal as a typed
+        field.
+      - *Mechanism lifecycle out of `selling`.* `StorefrontLoops` takes
+        contributed loops (`ContributedLoop`) and `start_background_tasks`
+        contributed startup steps and an injected thread store; the API-credits
+        container contributes payment reconciliation and the server the escrow
+        backfill, which task 8.7 moves to the mechanism distributions and after
+        which no residue is allowed. Unit: a storefront contributing nothing
+        registers only its own three loops and runs no startup step; a
+        contributed loop and step are registered and run in order. The exception
+        row no longer names the escrow backfill.
+      - *Reproducible targeted verification.* The root `test-api-selling` now
+        depends on the root `dist-api-selling`, which builds the selling
+        library's whole internal wheel set (adding the Alkahest kit the
+        storefront kit needs). From a copy with no wheelhouse and no
+        environments, `make test-api-selling` passes, 161.
+      Evidence, from a clean copy with no `.dist`, environments, or stale
+      checkout: `make test-api-selling` 161 passed (before and after
+      `make dist`); `make -C domains/apicredits/storefront test` 173 passed;
+      `make check-architecture` and `make check-packaging` pass;
+      `make check-comment-hygiene` passes; `make check-change` reports only the
+      two `api-family` citations closeout creates; `git diff --check` is clean.
+      `make -k test` from that copy: core 123, core storefront 220 (2
+      skipped), its client 62, capacity publication 97, storefront kit 123,
+      VM storefront 1103 unit and 446 integration, bare metal 134 and its
+      storefront 444, `selling` 161, the API-credits domain 16 and storefront
+      173, each passing but for the failures 1.7 to 5.6 record: the VM
+      storefront's two Alkahest toolchain tests, the three IaC relay-teardown
+      shell tests, and GNU make's `--eval` case. The provisioning service,
+      whose exact client pin the copy predated, was run in place after the
+      pin: 661 unit (the dotenv-layering case failing, as 1.7 records) and 485
+      integration. Helm is not installed, so the render checks are unrun.
 
 ## 7. Selling, part three: route services, authentication, persistence client, and bindings
 
@@ -1708,7 +1782,21 @@ scenario "A storefront binds the negotiate route"). Touches
       `retired_settings.py` stay, as the root's own configuration refusal;
       `middleware/` and `utils/migrations.py` and `utils/sqlite_client.py` are
       deleted. (D11, D13.)
-- [ ] 7.3 Verification: `make test-api-selling` (unit), `make -C
+- [ ] 7.3 A negotiation's opening commits in one transaction: the thread, its
+      opening message, its listing's binding, and its credit terms are written
+      together or not at all. Today the negotiation runtime commits the thread
+      and the opening message, then calls the domain's opening hook, whose
+      binding copy and credit-terms write commit separately, so a failed
+      credit-terms write leaves a bound thread every continuation refuses. Give
+      the runtime an opening unit of work the storefront's persistence runs in
+      one transaction, compose it for API credits as its persistence moves into
+      `selling`, and prove with a fault-injection test that a failure in the
+      last write leaves no thread, message, binding, or terms. VM and bare
+      metal open the same way and adopt the unit of work in their own change.
+      (Found by the implementation review of section 6; the separate commits
+      predate this change. Nothing in section 6 claims the opening is
+      transactional.)
+- [ ] 7.4 Verification: `make test-api-selling` (unit), `make -C
       domains/apicredits/storefront test` (application integration through the
       typed storefront client: every route's baseline diffs to zero, the
       startup refusal of a listing without a binding holds), `make test`,
@@ -1774,7 +1862,25 @@ distributions own them.
       publication setting, and prove accept, disable, restart, recover.
       (8.4 to 8.6 were found by the external implementation review of section
       5; each behaviour predates this change and moved unchanged.)
-- [ ] 8.7 Verification: `make test-api-selling-alkahest` and
+- [ ] 8.7 The mechanism-specific lifecycle leaves the API-credits composition
+      for the mechanism distributions that own it: the payment-reconciliation
+      loop, which `container.py` contributes to `StorefrontLoops` as a
+      `ContributedLoop` (`PAYMENT_RECONCILIATION`, `payment_reconciliation_step`,
+      `_payment_loops`), becomes a contribution `selling-arkhai-payments`
+      builds from its stage, and the escrow-obligation backfill, which
+      `server.py` passes to `start_background_tasks` as a startup step
+      (`_backfill_escrow_records`), becomes one `selling-alkahest` supplies.
+      With them go `seed_accepted_escrows` and `SEED_ESCROW_SETTINGS`
+      (`settlement_composition.py`), `AlkahestEscrowAcceptance`
+      (`settlement_stages.py`), `arkhai_apicredits.negotiation.policies.accepted_escrow_proposal`,
+      and the `alkahest` health check (`server._alkahest_check`). Afterwards no
+      mechanism-specific lifecycle, startup, negotiation, or health code
+      remains in `selling` or in the storefront composition beyond selecting
+      and registering the mechanism distributions' contributions; a test
+      proves an Alkahest-only storefront registers no payment loop and a
+      payments-only storefront runs no escrow backfill. (Found by the
+      implementation review of section 6.)
+- [ ] 8.8 Verification: `make test-api-selling-alkahest` and
       `make test-api-selling-arkhai-payments` (unit, library integration),
       `make -C domains/apicredits/storefront test` (application integration,
       baselines zero), `make test`, `make check-packaging`. End-to-end:
@@ -1924,6 +2030,9 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, and reopen; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
+| System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
 | D7, D12 — pricing and the negotiation guards are the family's, not API credits' | `openspec/specs/api-credits/architecture.md` (what the domain owns) |
 | D7 — core's per-negotiation artifacts gain a `listing` slot (`arkhai-core-storefront` 0.16.0) | `openspec/specs/market-composition/architecture.md` (domain artifacts) |
 | A delivery's public record is safe and final: the result checked against its request, the secret-free extension, terminal progress | `openspec/specs/api-family/spec.md` |

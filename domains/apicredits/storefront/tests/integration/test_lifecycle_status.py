@@ -160,6 +160,16 @@ async def test_every_loop_is_reported_with_its_state(storefront):
         assert lifecycle[name]["last_outcome"] is None, name
 
 
+async def test_the_signed_status_read_carries_the_storefronts_principal(storefront):
+    app, _loops, _obligations, _start = storefront
+
+    async with _admin(app) as admin:
+        status = await admin.get_system_status()
+
+    assert status.principal == STOREFRONT_SIGNER.identity
+    assert "principal" not in status.extra
+
+
 async def test_a_stepped_cycle_failing_on_an_unexpected_error_is_reported_by_type(storefront):
     """Spec scenarios "A stepped cycle fails" and "A cycle fails on an
     unexpected exception": status reports the step's failure with its stage and

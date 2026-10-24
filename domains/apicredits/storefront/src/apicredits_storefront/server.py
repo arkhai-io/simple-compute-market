@@ -30,6 +30,7 @@ from arkhai_api_selling.settlement_composition import (
     reserve_settlement,
 )
 from core_storefront.app_composition import StorefrontAppConfig
+from core_storefront.escrow_identity import backfill_escrow_obligation_records
 from core_storefront.domain_registry import (
     StorefrontDomainRegistry,
 )
@@ -205,6 +206,20 @@ async def _seed_demo_listing() -> None:
     await listing_seed().run(seed_settings())
 
 
+async def _backfill_escrow_records() -> None:
+    runtime = _container.resolved_settlement_runtime
+    signer = _container.resolved_marketplace_signer
+    if runtime is None or signer is None:
+        return
+    backfilled = await backfill_escrow_obligation_records(
+        sqlite_client=_container.resolved_sqlite_client,
+        settlement_runtime=runtime,
+        local_principal=signer.identity,
+    )
+    if backfilled:
+        logger.info("[STARTUP] Backfilled %d legacy escrow obligation records", backfilled)
+
+
 async def _startup_tasks(
     *, domain: MarketDomainContract, capacity_runtime: Any | None = None
 ) -> None:
@@ -224,10 +239,9 @@ async def _startup_tasks(
         loops,
         sqlite_client=_container.resolved_sqlite_client,
         storefront_url=BASE_URL_OVERRIDE or f"http://localhost:{settings.port}",
-        settlement_runtime=_container.resolved_settlement_runtime,
-        marketplace_signer=_container.resolved_marketplace_signer,
         preflight=preflight_credits_service,
         seed=_seed_demo_listing,
+        startup_steps=(_backfill_escrow_records,),
         capacity_runtime=capacity_runtime,
     )
 

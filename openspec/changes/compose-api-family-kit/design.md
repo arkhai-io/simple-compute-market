@@ -374,17 +374,26 @@ their family names, so a configured chain resolves each as before; a listing is
 the domain's when its resource validates as the listing schema, and the quota
 guard reads its resource through the projection. The refusal codes are the
 family's, shared with the authority's issuance re-check, except the one that
-spelled the domain, which the table prefix spells (`api_credit_quantity_unavailable`);
-free-text refusal messages name no domain. Escrow handling is injected rather than
-imported, since `selling` knows no mechanism: the opening guard's escrow
+spelled the domain, which the table prefix spells (`api_credit_quantity_unavailable`).
+Refusal messages name what is sold through the bundle's `refusal_noun`, which
+API credits sets to `API-credit`, so its error bodies are byte-identical to
+those it served before the kit. A listing's amount rate is the one `amount`
+rate its selected option or escrow states, in a per-credit unit; two, or one in
+another unit, are refused, and the configured floor applies only where none is
+stated. The domain's publication guards run wherever a listing publishes: at
+creation, on an administrator's resume, and on a reconciliation reopen, where a
+refused listing stays closed. Escrow handling is injected rather than imported,
+since `selling` knows no mechanism: the opening guard's escrow
 canonicalization, an `EscrowAcceptance` that offers and accepts an escrow, and
 the mechanism a listing's accepted escrows publish under with their release
-conditions; the API-credits storefront supplies the Alkahest ones until the
-selling-side mechanism distributions own them. The seed, the health checks, and
-the round's chain address books name their mechanism only through what the
-storefront passes. Reconciliation reads every listing in pages over all
-statuses, so a pass that changes statuses cannot move another listing across a
-page; a thread takes its listing's binding when it opens.
+conditions. A mechanism's timer loops and startup steps are contributed to
+`selling`'s lifecycle as registrations (`ContributedLoop`, startup steps), never
+named by it. The API-credits storefront supplies the Alkahest and payments
+contributions until the selling-side mechanism distributions own them (task
+8.7). Reconciliation reads every listing by the core store's keyset over
+`(created_at, listing_id)`, which no write changes, so a pass visits each
+listing once; a thread takes its listing's binding when it opens, and whether
+the opening's writes commit in one transaction is task 7.3's.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,

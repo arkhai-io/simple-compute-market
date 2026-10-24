@@ -1,37 +1,47 @@
-"""The storefront's loops: each step refuses before its collaborators exist, and payments steps only when composed."""
+"""The storefront's loops: each step refuses before its collaborators exist, and a mechanism's loops are only the ones it contributes."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
-from market_storefront_kit import LifecycleRouteError, NegotiationWatchdogPolicy
+from market_storefront_kit import LifecycleRouteError, NegotiationWatchdogPolicy, StorefrontLoopController
 
 from arkhai_api_selling.lifecycle import (
     CAPACITY_EVENTS_POLLER,
     NEGOTIATION_WATCHDOG,
-    PAYMENT_RECONCILIATION,
     SETTLEMENT_SERVICING,
+    ContributedLoop,
     LoopSettings,
     StorefrontLoops,
     loop_controller,
+    start_background_tasks,
 )
 
 SETTINGS = LoopSettings(
     watchdog=lambda: NegotiationWatchdogPolicy(timeout_seconds=60, interval_seconds=3600),
     settlement_servicing_interval=lambda: 3600,
-    payment_reconciliation_interval=lambda: 3600,
     capacity_poll_interval=lambda: 3600,
+)
+BASE_LOOPS = {NEGOTIATION_WATCHDOG, SETTLEMENT_SERVICING, CAPACITY_EVENTS_POLLER}
+
+
+async def _reconcile() -> dict:
+    return {"loop": "example_reconciliation"}
+
+
+RECONCILIATION = ContributedLoop(
+    "example_reconciliation", route="example-reconciliation", step=_reconcile, interval_seconds=60
 )
 
 
-def _loops(*, db=None, worker=None, payments=None) -> StorefrontLoops:
+def _loops(*, db=None, worker=None, contributed=()) -> StorefrontLoops:
     return StorefrontLoops(
         sqlite_client=lambda: db,
         settlement_worker=lambda: worker,
-        payment_service=lambda get_db: payments(get_db()) if payments else None,
         capacity=SimpleNamespace(configured_site_ids=lambda: ("quota",)),
         settings=SETTINGS,
+        contributed_loops=lambda: contributed,
     )
 
 
@@ -55,40 +65,63 @@ async def test_settlement_servicing_runs_the_workers_one_cycle():
     }
 
 
-async def test_payment_reconciliation_is_registered_and_stepped_only_while_payments_is_composed():
-    class Payments:
-        async def reconcile_once(self):
-            return SimpleNamespace(attempted=3, failed=1)
+def test_a_storefront_composing_no_mechanism_loop_registers_only_its_own():
+    steps, timers = loop_controller(), loop_controller()
+    loops = _loops()
 
-    without = loop_controller()
-    _loops().register_steps(without)
-    assert PAYMENT_RECONCILIATION not in without.step_routes().values()
-    assert await _loops().payment_reconciliation_step() == {
-        "loop": PAYMENT_RECONCILIATION,
-        "attempted": 0,
-        "failed": 0,
-    }
+    loops.register_steps(steps)
+    intervals = loops.register_loops(timers)
 
-    composed = _loops(db=object(), payments=lambda _db: Payments())
-    with_payments = loop_controller()
-    composed.register_steps(with_payments)
-    assert set(with_payments.step_routes().values()) == {
-        NEGOTIATION_WATCHDOG,
-        SETTLEMENT_SERVICING,
-        PAYMENT_RECONCILIATION,
-        CAPACITY_EVENTS_POLLER,
-    }
-    assert (await composed.payment_reconciliation_step())["attempted"] == 3
+    assert set(steps.step_routes().values()) == BASE_LOOPS
+    assert set(intervals) == BASE_LOOPS
+    assert f"{CAPACITY_EVENTS_POLLER}:quota" in timers.states()
 
 
-def test_registering_the_loops_declares_each_configured_sites_poller():
-    loops = loop_controller()
+def test_a_contributed_loop_is_registered_and_timed_like_the_storefronts_own():
+    steps, timers = loop_controller(), loop_controller()
+    loops = _loops(contributed=(RECONCILIATION,))
 
-    intervals = _loops().register_loops(loops)
+    loops.register_steps(steps)
+    intervals = loops.register_loops(timers)
 
-    assert intervals == {
-        NEGOTIATION_WATCHDOG: 3600,
-        SETTLEMENT_SERVICING: 3600,
-        CAPACITY_EVENTS_POLLER: 3600,
-    }
-    assert f"{CAPACITY_EVENTS_POLLER}:quota" in loops.states()
+    assert set(steps.step_routes().values()) == {*BASE_LOOPS, "example_reconciliation"}
+    assert intervals["example_reconciliation"] == 60
+
+
+async def test_startup_runs_only_the_composed_startup_steps():
+    ran: list[str] = []
+
+    async def step(name: str) -> None:
+        ran.append(name)
+
+    class Loops(StorefrontLoopController):
+        def start_loops(self, **_options):
+            ran.append("loops")
+            return {}
+
+    async def backfill() -> None:
+        await step("backfill")
+
+    await start_background_tasks(
+        _loops(),
+        Loops(),
+        sqlite_client=None,
+        storefront_url="https://seller.example",
+        preflight=lambda: step("preflight"),
+        seed=lambda: step("seed"),
+        open_thread_store=lambda **_store: None,
+    )
+    assert ran == ["preflight", "seed", "loops"]
+
+    ran.clear()
+    await start_background_tasks(
+        _loops(),
+        Loops(),
+        sqlite_client=None,
+        storefront_url="https://seller.example",
+        preflight=lambda: step("preflight"),
+        seed=lambda: step("seed"),
+        startup_steps=(backfill,),
+        open_thread_store=lambda **_store: None,
+    )
+    assert ran == ["backfill", "preflight", "seed", "loops"]
