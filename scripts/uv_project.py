@@ -15,8 +15,9 @@ the project's `uv.lock` when it runs, so no caller lists them:
 - `install-wheel` installs the project's own distribution, at the version its
   `pyproject.toml` declares, from the wheelhouse alone.
 - `require-wheels` fails, naming each one, when the wheelhouse lacks a wheel
-  for an internal package the project's lock names, so a later `reinit`
-  cannot resolve that package from an index instead.
+  for an internal package at the version the project's lock records, so a
+  later `reinit` cannot resolve that package from an index, or install a
+  stale wheel, instead.
 - `lock [PROJECT ...]` relocks projects against the current wheelhouse and
   installs nothing. It upgrades every internal package and every other
   repository distribution the lock names, so one that has drifted to a
@@ -66,10 +67,10 @@ def _read_toml(path: Path) -> dict:
         raise DerivationError(f"{path} is not valid TOML: {exc}") from None
 
 
-def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
-    """Normalised names the project's lock resolves from ``wheelhouse``."""
+def wheelhouse_requirements(project: Path, wheelhouse: Path) -> dict[str, str]:
+    """Each package the project's lock resolves from ``wheelhouse``, normalised, with the version it records."""
     lock = project / "uv.lock"
-    names: set[str] = set()
+    requirements: dict[str, str] = {}
     for package in _read_toml(lock).get("package", []):
         registry = (package.get("source") or {}).get("registry")
         if not isinstance(registry, str) or "://" in registry:
@@ -79,8 +80,13 @@ def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
                 f"{lock} resolves {package['name']} from {registry}, which is "
                 f"not the repository wheelhouse"
             )
-        names.add(normalise(package["name"]))
-    return sorted(names)
+        requirements[normalise(package["name"])] = str(package["version"])
+    return dict(sorted(requirements.items()))
+
+
+def wheelhouse_packages(project: Path, wheelhouse: Path) -> list[str]:
+    """Normalised names the project's lock resolves from ``wheelhouse``."""
+    return list(wheelhouse_requirements(project, wheelhouse))
 
 
 def declared_distribution(project: Path) -> tuple[str, str]:
@@ -128,12 +134,12 @@ def _each(flag: str, values: Sequence[str]) -> list[str]:
 
 
 def missing_wheels(project: Path, root: Path) -> list[str]:
-    """Internal packages the project's lock names that have no wheel in the wheelhouse."""
+    """Each internal package the project's lock names without a wheel at the locked version, as ``name==version``."""
     wheelhouse = root / WHEELHOUSE_NAME
     return [
-        name
-        for name in wheelhouse_packages(project, wheelhouse)
-        if not any(wheelhouse.glob(f"{name.replace('-', '_')}-*.whl"))
+        f"{name}=={version}"
+        for name, version in wheelhouse_requirements(project, wheelhouse).items()
+        if not any(wheelhouse.glob(f"{name.replace('-', '_')}-{version}-*.whl"))
     ]
 
 
@@ -212,7 +218,7 @@ def _parser() -> argparse.ArgumentParser:
     for name, help_text in (
         ("reinit", "sync the project environment, refreshing internal packages"),
         ("install-wheel", "install the project's own wheel from the wheelhouse"),
-        ("require-wheels", "fail when the wheelhouse lacks an internal package's wheel"),
+        ("require-wheels", "fail when the wheelhouse lacks an internal package's wheel at its locked version"),
     ):
         sub = commands.add_parser(name, help=help_text)
         sub.add_argument("--project", type=Path, default=Path.cwd())

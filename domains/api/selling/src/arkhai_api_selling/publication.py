@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,8 @@ from arkhai_api_selling.quota_listing import (
     reopenable_listing_ids,
     stale_open_listing_ids,
 )
+
+logger = logging.getLogger(__name__)
 
 #: The listing's bound pool could not be read; nothing about its source is known.
 SOURCE_UNCONFIRMED = "source_unconfirmed"
@@ -93,6 +96,46 @@ class QuotaPublicationHooks:
         return await listing_binding(self._db, listing_id)
 
 
+class _PublishableListings:
+    """The store as a registry repair reads it: a listing the publication hook refuses is absent.
+
+    The kit's repair republishes whatever ``load_listing`` returns, without the
+    hook it runs on every other publish, so the hook runs here on the very
+    object the kit will send. A refused listing reads as absent, is not
+    republished, and stays diverged for the kit to report.
+    """
+
+    def __init__(self, db: Any, hooks: QuotaPublicationHooks) -> None:
+        self._db = db
+        self._hooks = hooks
+
+    async def load_listing(self, *, listing_id: str) -> dict[str, Any] | None:
+        listing = await self._db.load_listing(listing_id=listing_id)
+        if listing is None:
+            return None
+        try:
+            binding = await self._hooks.binding_for_listing(listing_id)
+            if binding is None:
+                raise CapacityBindingError(f"listing {listing_id!r} has no durable capacity binding")
+            self._hooks.validate_candidate(PublicationCandidate(listing_id, binding, listing))
+        except CapacityBindingError as exc:
+            logger.warning("[REGISTRY] listing %s is not republished: %s", listing_id, exc)
+            return None
+        return listing
+
+    async def update_listing(self, **fields: Any) -> Any:
+        return await self._db.update_listing(**fields)
+
+    async def load_publications(self, **query: Any) -> list[dict[str, Any]]:
+        return await self._db.load_publications(**query)
+
+    async def list_publication_divergence(self, **query: Any) -> list[dict[str, Any]]:
+        return await self._db.list_publication_divergence(**query)
+
+    async def upsert_publication(self, **record: Any) -> Any:
+        return await self._db.upsert_publication(**record)
+
+
 async def all_listings(db: Any, *, status: str) -> list[dict[str, Any]]:
     """Every listing with ``status``, each read once.
 
@@ -125,10 +168,15 @@ class QuotaPublication:
         self._registry = registry
 
     def runtime(self, db: Any) -> PublicationRuntime[dict[str, Any]]:
+        return self._runtime(db, QuotaPublicationHooks(self._contributions, db))
+
+    def _runtime(
+        self, repository: Any, hooks: QuotaPublicationHooks
+    ) -> PublicationRuntime[dict[str, Any]]:
         registry = self._registry()
         return PublicationRuntime(
-            repository=db,
-            hooks=QuotaPublicationHooks(self._contributions, db),
+            repository=repository,
+            hooks=hooks,
             enabled=registry.enabled,
             registry_urls=registry.registry_urls,
             registry_client_factory=registry.client_factory,
@@ -170,24 +218,12 @@ class QuotaPublication:
     async def converge(self, db: Any) -> dict[str, tuple[str, ...]]:
         """Repair every registry that missed a publish, close, or reopen.
 
-        The repair republishes an open listing without the publication hook, so
-        an open listing the domain's guards refuse is left out and reported
-        unrepaired: it is never republished.
+        An open listing the publication hook refuses as stored now is never
+        republished and is reported unrepaired; the report reads the store after
+        the repairs, so it holds what is still diverged, however it was repaired.
         """
-        runtime = self.runtime(db)
-        repairable, refused = [], []
-        for divergence in await runtime.publication_divergence():
-            listing = (
-                await db.load_listing(listing_id=divergence.listing_id)
-                if divergence.listing_status != "closed"
-                else None
-            )
-            if listing is not None and self.refusal(listing) is not None:
-                refused.append(divergence.listing_id)
-            else:
-                repairable.append(divergence)
-        result = await runtime.converge(repairable)
-        return {**result, "unrepaired": (*result["unrepaired"], *refused)}
+        hooks = QuotaPublicationHooks(self._contributions, db)
+        return await self._runtime(_PublishableListings(db, hooks), hooks).converge()
 
     async def _sources(
         self, db: Any, rows: list[dict[str, Any]]

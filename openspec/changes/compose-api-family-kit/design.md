@@ -382,8 +382,9 @@ rate its selected option or escrow states, in a per-credit unit; two, or one in
 another unit, are refused, and the configured floor applies only where none is
 stated. The domain's publication guards run wherever a listing publishes: at
 creation, on an administrator's resume, on a reconciliation reopen, where a
-refused listing stays closed, and on a registry divergence repair, which leaves
-a refused open listing unrepaired. Escrow handling is injected rather than imported,
+refused listing stays closed, and on a registry divergence repair, which runs
+the publication hook on the stored listing it would republish and leaves one
+the hook refuses unrepaired. Escrow handling is injected rather than imported,
 since `selling` knows no mechanism: the opening guard's escrow
 canonicalization, an `EscrowAcceptance` that offers and accepts an escrow, and
 the mechanism a listing's accepted escrows publish under with their release
@@ -396,13 +397,16 @@ contributions until the selling-side mechanism distributions own them (task
 listing once; a thread takes its listing's binding when it opens, and whether
 the opening's writes commit in one transaction is task 7.3's.
 
-The family's storefronts share one configuration layout for what `selling`
-reports on: `selling` reads no configuration itself, but a refusal for a
-missing or malformed setting names the key a family storefront spells it
-under (`[seller.pricing].default_min_price`, `[capacity.sites]`), so the
-operator is pointed at the line to fix and API credits' messages stay
-byte-identical. A family storefront that laid its settings out differently
-would need these names passed in.
+`selling` reads no configuration itself, so a refusal for a missing or
+malformed setting can only carry the text it was given. Its pricing refusals
+keep the text the storefronts served before the kit, which names
+`[seller.pricing].default_min_price`; no storefront in this repository spells
+the floor there — API credits reads `[pricing].default_min_price`, as the
+compute storefronts do — so the text does not point an operator at the key
+they edit, and it is kept byte-identical for compatibility. The capacity
+refusal names `[capacity.sites]`, which is API credits' key. Naming the
+composing storefront's own key is task 7.4's, with the API-credits refusal
+text re-recorded once if the owner accepts that change.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,

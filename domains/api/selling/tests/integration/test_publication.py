@@ -1,4 +1,4 @@
-"""Reconciliation reads every listing, and publishes none a guard refuses, against the storefront's real persistence."""
+"""Reconciliation reads every listing, and neither publishes nor repairs one a guard refuses, against the storefront's real persistence."""
 
 from __future__ import annotations
 
@@ -203,3 +203,109 @@ async def test_reconciliation_reopens_every_listing_but_one_its_guard_refuses(tm
     assert len(reopened) == COUNT - 1
     assert "L-000" not in reopened
     assert (await client.load_listing(listing_id="L-000"))["status"] == "closed"
+
+
+_A = "https://registry-a.example"
+_B = "https://registry-b.example"
+
+
+class _Registries:
+    """Two registries; ``failing`` names the (operation, url) pairs that fail."""
+
+    urls = (_A, _B)
+
+    def __init__(self) -> None:
+        self.failing: set[tuple[str, str]] = set()
+        self.sent: list[tuple[str, str, str]] = []
+        self.on_publish = None
+
+    async def __aenter__(self) -> "_Registries":
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    def _results(self, operation: str, listing_id: str, urls) -> list[dict]:
+        results = []
+        for url in urls:
+            self.sent.append((operation, url, listing_id))
+            ok = (operation, url) not in self.failing
+            results.append(
+                {
+                    "registry_url": url,
+                    "success": ok,
+                    "response": {"ok": True} if ok else None,
+                    "error": None if ok else "unreachable",
+                }
+            )
+        return results
+
+    async def publish_listing_per_registry(self, *, payloads) -> list[dict]:
+        request = next(iter(payloads.values()))
+        if self.on_publish is not None:
+            await self.on_publish(request)
+        return self._results("publish", request.listing_id, payloads)
+
+    async def update_listing_per_registry(self, *, listing_id, payloads) -> list[dict]:
+        return self._results("update", listing_id, payloads)
+
+
+def _publishing_to(registries: _Registries) -> QuotaPublication:
+    """Publication to two registries under a bundle whose guard refuses ``L-000``."""
+    guarded = replace(
+        EXAMPLE, publication_guards=(lambda resource: "blocked" if resource.get("product") == "L-000" else None,)
+    )
+    return QuotaPublication(
+        guarded,
+        capacity=_Capacity(_Site()),
+        registry=lambda: RegistryPublication(
+            enabled=True,
+            registry_urls=registries.urls,
+            storefront_url="https://seller.example",
+            client_factory=lambda: registries,
+        ),
+    )
+
+
+async def _diverged_at_b(client: SQLiteClient, registries: _Registries, *listing_ids: str) -> None:
+    """Publish each listing while registry B is unreachable, so each diverges there."""
+    registries.failing = {("publish", _B)}
+    for listing_id in listing_ids:
+        await _publishing_to(registries).publish(client, await client.load_listing(listing_id=listing_id))
+    registries.failing = set()
+    registries.sent.clear()
+
+
+async def test_divergence_repair_republishes_only_a_listing_the_hook_accepts_as_stored(tmp_path):
+    client = await _storefront(tmp_path)
+    registries = _Registries()
+    await _diverged_at_b(client, registries, "L-000", "L-001", "L-002")
+    await _with_blocked_product(client)
+    await client.update_listing(listing_id="L-001", listing_resource={"gpu_model": "H200"})
+
+    result = await _publishing_to(registries).converge(client)
+
+    assert result["repaired"] == ("L-002",)
+    assert set(result["unrepaired"]) == {"L-000", "L-001"}
+    assert registries.sent == [("publish", _B, "L-002"), ("update", _B, "L-002")]
+    still_diverged = await _publishing_to(registries).runtime(client).publication_divergence()
+    assert {d.listing_id for d in still_diverged} == {"L-000", "L-001"}
+
+
+async def test_a_refused_listing_another_pass_repaired_meanwhile_is_not_reported_unrepaired(tmp_path):
+    client = await _storefront(tmp_path)
+    registries = _Registries()
+    await _diverged_at_b(client, registries, "L-000", "L-002")
+    await _with_blocked_product(client)
+
+    async def another_pass_repairs_the_refused_listing(_request) -> None:
+        await client.upsert_publication(
+            listing_id="L-000", registry_url=_B, payload={}, status="published"
+        )
+
+    registries.on_publish = another_pass_repairs_the_refused_listing
+    result = await _publishing_to(registries).converge(client)
+
+    assert set(result["repaired"]) == {"L-000", "L-002"}
+    assert result["unrepaired"] == ()
+    assert ("publish", _B, "L-000") not in registries.sent

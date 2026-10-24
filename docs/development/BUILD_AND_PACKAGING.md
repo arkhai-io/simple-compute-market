@@ -98,10 +98,12 @@ environment `reinit` built. A project with tests whose lock installs anything fr
 wheelhouse must have a `reinit` target.
 
 `reinit` resolves an internal package it cannot find in the wheelhouse from an index,
-rewriting the lock to match, so it must run after every internal wheel the lock names is
-built. `scripts/uv_project.py require-wheels --project <project>` refuses, naming each
-missing wheel, when one is not; a targeted root test target that builds only its own
-wheel set, such as `make test-api-selling`, runs it before the project's tests.
+rewriting the lock to match, and installs a wheel it finds there whatever its version,
+so it must run after every internal wheel the lock names is built at the version the
+lock records. `scripts/uv_project.py require-wheels --project <project>` refuses, naming
+each package and locked version without such a wheel, when one is not; a targeted root
+test target that builds only its own wheel set, such as `make test-api-selling`, runs it
+before the project's tests.
 
 ## Locks
 

@@ -1801,14 +1801,64 @@ and under `apicredits_storefront/`: `negotiation_runtime.py`,
       removed. The lock still resolves 0.10.3, through `selling`. *D12:* "its
       seed" is the `[seed]` values API credits keeps; the seed code is the
       family's, in `selling`, and D12 now says so. *Exception row:* the row
-      and its owner stay; its reason now says where each edge resolves under
-      the owning change's carve-out — the registry types, status models, and
-      capacity protocols to the storefront contracts kit, the stage log and
-      placement policies with the rest of `core/storefront` to
-      `kit/storefront`, both permitted targets for `selling`. *Configuration
-      key names:* `selling`'s refusals keep naming `[seller.pricing]` and
-      `[capacity.sites]`; D7 records the shared layout as the family's
-      convention.
+      and its owner stay, `kit-owned-storefront-auth-and-persistence` being
+      the follow-up that resolves `selling`'s edge; its reason names each
+      import and no destination, since that change's design has settled none.
+      (Its open question names the capacity protocols, not the stage log or
+      the status models; the handoff above overstates this as naming none.)
+      *Configuration key names:* `selling`'s refusals keep their
+      byte-identical text, and D7 now says what that text is: `[capacity.sites]`
+      is API credits' key; `[seller.pricing].default_min_price` is no
+      storefront's — API credits reads `[pricing].default_min_price`, as the
+      compute storefronts do — so the pricing refusal does not name the key an
+      operator edits. Naming the composition's key is task 7.4.
+
+      **Third review round (2026-10-24).** A re-review raised five findings,
+      all within this section.
+      - *The repair validates the exact payload.* The earlier fix checked a
+        listing, then let the kit reload and republish whatever it found, and
+        read a malformed resource as nothing to refuse. The kit's repair
+        republishes a diverged open listing as its repository returns it,
+        without the hook it runs on every other publish, and the VM storefront's
+        hook expects a typed payload, so the kit cannot run the hook on a stored
+        row for every domain. `QuotaPublication.converge` therefore runs the
+        kit's repair over a view of the store whose `load_listing` runs the
+        publication hook — the domain's resource, the binding's mode, the
+        guards — on the very object the kit will send, and returns nothing for
+        a listing the hook refuses; the listing is not republished and stays
+        diverged. Library integration (`test_publication.py`, the real store
+        and a two-registry fake): of three listings diverged at one registry,
+        the guard-refused and the foreign-resource listings are not
+        republished and remain diverged, the third is republished and reopened
+        there alone; both cases fail with the hook call removed. The kit-level
+        seam — a hook that builds a repair candidate for every domain — is the
+        capacity-publication kit's to add, not this section's.
+      - *An accurate repair report.* With no pre-filter, the report is the
+        kit's, read from the store after the repairs. Library integration: a
+        refused listing another pass repairs meanwhile is not reported
+        unrepaired. The unit test over a fake runtime is removed, since nothing
+        of its own remains to test.
+      - *`require-wheels` checks the locked version.* It names each internal
+        package as `name==version` whose wheel at the lock's version is absent,
+        so a stale same-name wheel no longer satisfies it (`scripts/tests`,
+        14 passed: a wheel at another version is still reported).
+      - *The pricing key.* D7 and the promotion record claimed the refusal
+        text named the family's configuration layout. It names
+        `[seller.pricing].default_min_price`, which no storefront spells (all
+        read `[pricing]`), while `[capacity.sites]` is API credits' key; D7
+        now says so, the text stays byte-identical, and naming the
+        composition's key is task 7.4.
+      - *The exception row.* Its reason and the owner-decision note above no
+        longer assert destinations the owning change has not settled.
+      Evidence, from a copy of the tracked files only, in the reviewer's order:
+      `make test-api-selling` 163 passed; `make dist` passes; `make
+      check-packaging` passes with every lock unchanged; `make test-api-selling`
+      again 163; `make -C domains/apicredits/storefront test` 173 passed;
+      `make test-release-tooling` 1103 passed, 11 skipped, 2 failed (the copy
+      is not a git repository; GNU make's `--eval`, as 1.7 records); `make
+      check-architecture` and `make check-comment-hygiene` pass; `make
+      check-change` reports only the two `api-family` documents closeout
+      creates; `git diff --check` is clean.
 
 ## 7. Selling, part three: route services, authentication, persistence client, and bindings
 
@@ -1849,7 +1899,17 @@ scenario "A storefront binds the negotiate route"). Touches
       (Found by the implementation review of section 6; the separate commits
       predate this change. Nothing in section 6 claims the opening is
       transactional.)
-- [ ] 7.4 Verification: `make test-api-selling` (unit), `make -C
+- [ ] 7.4 `selling`'s configuration refusals name the composing storefront's
+      own key: the pricing floor's and the capacity sites' refusals take the
+      setting's name from the composition (API credits: `[pricing].default_min_price`,
+      `[capacity.sites]`) in place of the fixed text `[seller.pricing].default_min_price`,
+      which no storefront's settings spell. The API-credits pricing refusal
+      text changes with it, so the owner decides at this task whether to
+      re-record that refusal's body once as an accepted baseline change or to
+      keep the fixed text as the compatibility text. (Found by the
+      implementation review of section 6, which claimed the text named a
+      family layout; D7 now states what it names.)
+- [ ] 7.5 Verification: `make test-api-selling` (unit), `make -C
       domains/apicredits/storefront test` (application integration through the
       typed storefront client: every route's baseline diffs to zero, the
       startup refusal of a listing without a binding holds), `make test`,
@@ -2083,8 +2143,8 @@ change to implementation.
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
-| D7 — the family's storefronts share one configuration layout, which `selling`'s refusals name (`[seller.pricing]`, `[capacity.sites]`) though it reads no configuration | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
-| D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — `selling`'s configuration refusals carry fixed text: `[capacity.sites]` is API credits' key, `[seller.pricing].default_min_price` is no storefront's, and the text stays byte-identical until task 7.4 names the composition's key | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
+| D7 — refusal messages through the bundle's `refusal_noun`; one per-credit amount rate per option or escrow; publication guards on creation, resume, reopen, and divergence repair, where the hook runs on the stored listing as it is republished; mechanism loops and startup steps as contributed registrations | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | Core listing pages are ordered by `(created_at, listing_id)` with a keyset cursor (`arkhai-core-storefront` 0.17.0) | `openspec/specs/storefront-publication/spec.md` (reconciliation reads every listing once) |
 | System status carries the storefront's own principal (core `HealthResponse`, client 0.27.0); the API-credits health and OpenAPI baselines were re-recorded once for this owner-accepted additive field | `openspec/specs/market-composition/spec.md` (system status); `openspec/specs/api-credits/spec.md` (baselines) |
 | D7, D12 — pricing, the negotiation guards, and the seed code are the family's, not API credits'; API credits keeps its `[seed]` values | `openspec/specs/api-credits/architecture.md` (what the domain owns) |
@@ -2096,7 +2156,7 @@ change to implementation.
 | D7 — the contribution bundles and the issuance projection | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D9, D14 — the compatibility baselines and rollback directions | `openspec/specs/api-credits/spec.md` |
 | D9 — the baselines' refusal records diff bodies, the one exception to the rejection-path status-only rule; the API-credit lane mounts the engine socket and runs the upgrade/rollback scenario | `docs/development/TESTING.md` (rejection paths; the API-credit lane) |
-| D7 — a project's targeted test target builds its whole internal wheel set and refuses, through `uv_project.py require-wheels`, to refresh an environment the wheelhouse cannot supply | `docs/development/BUILD_AND_PACKAGING.md` (project environments) |
+| D7 — a project's targeted test target builds its whole internal wheel set and refuses, through `uv_project.py require-wheels`, to refresh an environment the wheelhouse cannot supply at the locked versions | `docs/development/BUILD_AND_PACKAGING.md` (project environments) |
 | D14 — `build-apicredits-service-prekit`, `.worktrees/`, and `BUYER_MACHINE_DOCKER_SOCKET` | `docs/development/BUILD_AND_PACKAGING.md` (images); `e2e-tests/README.md` |
 | D10 — the gate, its parity test, the middleware's retirement | `openspec/specs/api-family/spec.md`; `docs/development/RELEASING.md` |
 | D4 — the storefront composes the family client once at its composition boundary; the authority binds the contracts' wire models to its label and keeps no digest of its own | `openspec/specs/api-credits/architecture.md#implementation-composition` |
