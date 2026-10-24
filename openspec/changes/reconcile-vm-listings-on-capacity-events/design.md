@@ -57,4 +57,4 @@ Stage 1 scoped strict validation passed with OpenSpec 1.14.3. Its former main ba
 | Event-to-registry work is outside settlement | `docs/development/ARCHITECTURE.md#capacity-publication-and-multi-domain-storefront-composition` | Promoted |
 | Existing process, cadence and signer/writer prerequisites | `docs/development/DEPLOYMENT_AND_CONFIG.md#combined-compute-family-storefront` | Promoted |
 | Roadmap and campaign index currency | `openspec/changes/README.md` has an independent focused-repair row and no new dependency edges. `docs/development/ROADMAP.md` requires no edit: existing projection ownership and delivered shape semantics remain true; no negotiation, sizing or publication-policy goal is delivered here | Reviewed |
-| Approved base, test authorization and rollout-only restriction | This design and PR handoff | Temporary |
+| Approved base, test authorization and rollout-only restriction | This design and [PR #304](https://github.com/arkhai-io/simple-compute-market/pull/304), open against `integration/arkhai-payments` | Temporary |

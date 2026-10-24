@@ -23,4 +23,4 @@
 
 - [x] 4.1 Review code, then promote verified behavior/rationale into storefront-publication spec/architecture, repository architecture and deployment guide; complete the promotion record. Check roadmap and campaign-index currency explicitly.
 - [x] 4.2 Run comment hygiene, inspect touched comments/imports, and compress completed task notes while preserving history. Run scoped documentation citations, packaging/architecture checks and strict OpenSpec validation; disclose unrelated failures and unrun pipeline checks.
-- [ ] 4.3 Commit with hooks enabled and open the PR against `integration/arkhai-payments` using `gh`. Include before/after evidence, limitations and rollout requiring image digest plus infrastructure source pin. Report URL; do not merge or change pins.
+- [x] 4.3 Committed with hooks enabled and opened [PR #304](https://github.com/arkhai-io/simple-compute-market/pull/304) against `integration/arkhai-payments`. PR includes before/after evidence, baseline validation limitations and image-digest/source-pin rollout. Left open for review; no merge, hosted purchase or pin changes. No automatic checks are attached on this non-staging/dev base.
