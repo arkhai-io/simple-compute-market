@@ -37,6 +37,7 @@ class _ScriptedService:
         self._consume = service.get("consume", {})
         self._cursor: dict[tuple[str, str], int] = defaultdict(int)
         self.verify_calls: dict[str, int] = defaultdict(int)
+        self.verified_secrets: list[str] = []
         self.consume_calls: dict[str, int] = defaultdict(int)
 
     def _next(self, kind: str, key_id: str, script: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +53,7 @@ class _ScriptedService:
         if path.endswith("/verify"):
             key_id = parts[-2]
             self.verify_calls[key_id] += 1
+            self.verified_secrets.append(json.loads(request.content)["secret"])
             body = self._next("verify", key_id, self._verify)
             return httpx.Response(200, json=body)
         if path.endswith("/consume"):
@@ -95,6 +97,7 @@ async def run_session(fixture: dict[str, Any]) -> None:
         for step in fixture["steps"]:
             before_v = sum(service.verify_calls.values())
             before_c = sum(service.consume_calls.values())
+            before_s = len(service.verified_secrets)
             decision = await gate.authorize(step["authorization"])
             made_v = sum(service.verify_calls.values()) - before_v
             made_c = sum(service.consume_calls.values()) - before_c
@@ -122,4 +125,8 @@ async def run_session(fixture: dict[str, Any]) -> None:
             )
             assert made_c == step["consume_calls"], (
                 f"[{name}] consume calls: got {made_c}, want {step['consume_calls']}"
+            )
+            sent = service.verified_secrets[before_s:]
+            assert sent == step["verified_secrets"], (
+                f"[{name}] verified secrets: got {sent}, want {step['verified_secrets']}"
             )

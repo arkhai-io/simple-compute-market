@@ -26,6 +26,7 @@ pub struct ScriptState {
     cursor: HashMap<(String, String), usize>,
     pub verify_calls: HashMap<String, usize>,
     pub consume_calls: HashMap<String, usize>,
+    pub verified_secrets: Vec<String>,
 }
 
 impl ScriptState {
@@ -55,10 +56,12 @@ type Shared = Arc<Mutex<ScriptState>>;
 async fn verify_handler(
     State(state): State<Shared>,
     Path(key_id): Path<String>,
-    Json(_body): Json<Value>,
+    Json(request): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
     let mut s = state.lock().unwrap();
     *s.verify_calls.entry(key_id.clone()).or_insert(0) += 1;
+    let secret = request["secret"].as_str().expect("verify sends a secret");
+    s.verified_secrets.push(secret.to_string());
     let script = s.verify.clone();
     let body = s.next("verify", &key_id, &script);
     (StatusCode::OK, Json(body))
@@ -90,6 +93,7 @@ pub async fn spawn_scripted_service(service: &Value) -> (String, Shared) {
         cursor: HashMap::new(),
         verify_calls: HashMap::new(),
         consume_calls: HashMap::new(),
+        verified_secrets: Vec::new(),
     }));
 
     let app = Router::new()

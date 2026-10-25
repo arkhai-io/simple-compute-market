@@ -52,9 +52,13 @@ async fn recorded_session_matches() {
         let name = step["name"].as_str().unwrap_or("");
         let authorization = step["authorization"].as_str();
 
-        let (before_v, before_c) = {
+        let (before_v, before_c, before_s) = {
             let s = state.lock().unwrap();
-            (s.total_verify_calls(), s.total_consume_calls())
+            (
+                s.total_verify_calls(),
+                s.total_consume_calls(),
+                s.verified_secrets.len(),
+            )
         };
         let decision = gate.authorize(authorization, None).await;
         let (made_v, made_c) = {
@@ -101,6 +105,17 @@ async fn recorded_session_matches() {
             made_c,
             step["consume_calls"].as_u64().unwrap() as usize,
             "[{name}] consume calls"
+        );
+        let want: Vec<&str> = step["verified_secrets"]
+            .as_array()
+            .expect("verified_secrets")
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            state.lock().unwrap().verified_secrets[before_s..],
+            want,
+            "[{name}] verified secrets"
         );
     }
 }

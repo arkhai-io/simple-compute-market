@@ -29,6 +29,10 @@ checks:
   cache), while another secret under the same key id is verified and, if
   refused, leaves the cached one in place; and a key already
   known-exhausted denies with **zero** consume calls.
+- `verified_secrets` — the exact secrets, in order, the step sent to
+  `verify`. A harness records the `secret` of every verify request body
+  and compares, so a gate that verifies a different secret than the one
+  presented — the cached one, say — fails the step.
 
 ## The scripted service
 
@@ -43,15 +47,16 @@ synchronous consume and the call trace is deterministic.
 ## Implementing a harness
 
 1. Stand up a mock credits service that records `verify`/`consume` calls
-   per key and replays the scripted responses, and drive the **real**
+   per key and the secret each verify sends, and replays the scripted
+   responses, and drive the **real**
    HTTP client against it (not a stub) so request shape and response
    parsing are validated too. The three reference harnesses do this with
    `httpx.MockTransport` (Python) and a real in-process HTTP server
    (`node:http` in TypeScript, `axum` in Rust).
 2. Build the gate from `config`.
-3. For each step: snapshot the call counters, call the gate with the
-   step's `Authorization`, then assert the decision and the per-step
-   call deltas.
+3. For each step: snapshot the call counters and recorded secrets, call
+   the gate with the step's `Authorization`, then assert the decision, the
+   per-step call deltas, and the secrets the step verified.
 
 The reference harnesses (identical structure in each language):
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Recorded verify/consume session every middleware implementation (Python, TypeScript, Rust) must reproduce. The gate runs in synchronous mode (flush_interval_seconds = 0) so each allowed request makes exactly one consume call and the trace is deterministic across languages. Steps assert the gate's HTTP-facing decision plus the number of verify/consume calls the step triggered, which pins the verify cache (a repeat of a verified secret skips verify, while another secret under the same key is verified) and the exhausted-key short-circuit (a drained key denies without a consume call).",
+  "description": "Recorded verify/consume session every middleware implementation (Python, TypeScript, Rust) must reproduce. The gate runs in synchronous mode (flush_interval_seconds = 0) so each allowed request makes exactly one consume call and the trace is deterministic across languages. Steps assert the gate's HTTP-facing decision, the number of verify/consume calls the step triggered, and the exact secrets the step sent to verify (`verified_secrets`), which pins the verify cache (a repeat of a verified secret skips verify, while another secret under the same key is verified) and the exhausted-key short-circuit (a drained key denies without a consume call).",
   "config": {
     "amount_per_request": 1,
     "verify_ttl_seconds": 30,
@@ -42,84 +42,96 @@
       "authorization": null,
       "expect": {"allowed": false, "status": 401, "error": "missing_api_key", "purchase": false},
       "verify_calls": 0,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": []
     },
     {
       "name": "a bearer with no key id is invalid",
       "authorization": "Bearer .nokey",
       "expect": {"allowed": false, "status": 401, "error": "invalid_api_key", "purchase": false},
       "verify_calls": 0,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": []
     },
     {
       "name": "first live request verifies then consumes",
       "authorization": "Bearer ak_live.s3cr3t",
       "expect": {"allowed": true, "status": 200},
       "verify_calls": 1,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": ["ak_live.s3cr3t"]
     },
     {
       "name": "second live request reuses the cached verify",
       "authorization": "Bearer ak_live.s3cr3t",
       "expect": {"allowed": true, "status": 200},
       "verify_calls": 0,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": []
     },
     {
       "name": "third live request drains the balance to zero",
       "authorization": "Bearer ak_live.s3cr3t",
       "expect": {"allowed": true, "status": 200},
       "verify_calls": 0,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": []
     },
     {
       "name": "fourth request hits 402 from the service and surfaces the purchase pointer",
       "authorization": "Bearer ak_live.s3cr3t",
       "expect": {"allowed": false, "status": 402, "error": "insufficient_credits", "purchase": true},
       "verify_calls": 0,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": []
     },
     {
       "name": "an exhausted key short-circuits without re-consuming",
       "authorization": "Bearer ak_live.s3cr3t",
       "expect": {"allowed": false, "status": 402, "error": "insufficient_credits", "purchase": true},
       "verify_calls": 0,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": []
     },
     {
       "name": "a revoked key is 403 and never consumes",
       "authorization": "Bearer ak_revoked.s3cr3t",
       "expect": {"allowed": false, "status": 403, "error": "key_revoked", "purchase": true},
       "verify_calls": 1,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": ["ak_revoked.s3cr3t"]
     },
     {
       "name": "an unknown key is 401 invalid and never consumes",
       "authorization": "Bearer ak_ghost.s3cr3t",
       "expect": {"allowed": false, "status": 401, "error": "invalid_api_key", "purchase": false},
       "verify_calls": 1,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": ["ak_ghost.s3cr3t"]
     },
     {
       "name": "a verified key's secret warms the cache",
       "authorization": "Bearer ak_shared.real",
       "expect": {"allowed": true, "status": 200},
       "verify_calls": 1,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": ["ak_shared.real"]
     },
     {
       "name": "another secret under a cached key is verified, refused, and never consumes",
       "authorization": "Bearer ak_shared.forged",
       "expect": {"allowed": false, "status": 401, "error": "invalid_api_key", "purchase": false},
       "verify_calls": 1,
-      "consume_calls": 0
+      "consume_calls": 0,
+      "verified_secrets": ["ak_shared.forged"]
     },
     {
       "name": "the refused secret leaves the verified one cached",
       "authorization": "Bearer ak_shared.real",
       "expect": {"allowed": true, "status": 200},
       "verify_calls": 0,
-      "consume_calls": 1
+      "consume_calls": 1,
+      "verified_secrets": []
     }
   ]
 }

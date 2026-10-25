@@ -4,7 +4,7 @@
  * Drives the real `TokenGate` + `TokensClient` against the in-process
  * `ScriptedService` over real HTTP, so the test exercises request
  * shaping and response parsing — not a stub. Mirrors the Python
- * reference runner (`python/tests/conformance_runner.py`) step for step.
+ * reference runner (`domains/api/gate/tests/conformance_runner.py`) step for step.
  */
 
 import assert from "node:assert/strict";
@@ -36,6 +36,7 @@ interface SessionStep {
   };
   verify_calls: number;
   consume_calls: number;
+  verified_secrets: string[];
 }
 
 export function loadSession(name = "session.json"): Session {
@@ -76,6 +77,7 @@ export async function runSession(session: Session): Promise<void> {
     for (const step of session.steps) {
       const beforeV = service.totalVerifyCalls();
       const beforeC = service.totalConsumeCalls();
+      const beforeS = service.verifiedSecrets.length;
       const decision = await gate.authorize(step.authorization);
       const madeV = service.totalVerifyCalls() - beforeV;
       const madeC = service.totalConsumeCalls() - beforeC;
@@ -92,6 +94,11 @@ export async function runSession(session: Session): Promise<void> {
       }
       assert.equal(madeV, step.verify_calls, `[${step.name}] verify calls`);
       assert.equal(madeC, step.consume_calls, `[${step.name}] consume calls`);
+      assert.deepEqual(
+        service.verifiedSecrets.slice(beforeS),
+        step.verified_secrets,
+        `[${step.name}] verified secrets`,
+      );
     }
   } finally {
     await service.close();
