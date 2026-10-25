@@ -8,16 +8,20 @@ import threading
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from core_storefront.publication_runner import PublicationPayload
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from core_storefront.publication_sources import PublicationSource
 
 from market_capacity_publication import (
+    PAYLOAD_UNBUILDABLE,
+    SETTLEMENT_MECHANISM_UNKNOWN,
     PublicationCycleDriver,
     PublicationCycleStopped,
     PublicationCycleReport,
+    RefusedCandidates,
     RegistryDivergence,
     SiteDerivationLog,
     converge_registries,
+    record_payload_refusal,
     site_derivations,
 )
 
@@ -408,3 +412,251 @@ async def test_nothing_diverged_means_nothing_is_sent():
 
     runtime.converge.assert_not_awaited()
     assert report.actions == []
+
+
+# -- payload refusals ---------------------------------------------------------
+
+_SOURCE = {"site_id": "site-a", "pool_id": "pool-1", "physical_resource_id": "r1"}
+
+
+def _recorded(refusal, *, listing_open):
+    report = PublicationCycleReport()
+    record_payload_refusal(report, _SOURCE, refusal, listing_open=listing_open)
+    (action,) = report.actions
+    return action
+
+
+@pytest.mark.parametrize("listing_open", [True, False])
+def test_a_refusal_configuration_rules_out_is_refused_whether_or_not_a_listing_is_open(
+    listing_open,
+):
+    action = _recorded(
+        NoSettlementOption("ruled out", mechanisms=("contact.v1",)),
+        listing_open=listing_open,
+    )
+
+    assert action == {
+        "action": "refuse",
+        **_SOURCE,
+        "reason": "no_settlement_option",
+        "mechanisms": ["contact.v1"],
+        "error": "ruled out",
+    }
+
+
+def test_an_unknown_mechanism_holds_an_open_listing():
+    action = _recorded(
+        NoSettlementOption(
+            "unreached", mechanisms=("alkahest.v1", "contact.v1"), unknown=("alkahest.v1",)
+        ),
+        listing_open=True,
+    )
+
+    assert (action["action"], action["reason"], action["mechanisms"]) == (
+        "hold",
+        SETTLEMENT_MECHANISM_UNKNOWN,
+        ["alkahest.v1"],
+    )
+
+
+def test_an_unknown_mechanism_with_no_open_listing_is_refused():
+    action = _recorded(
+        NoSettlementOption("unreached", mechanisms=("alkahest.v1",), unknown=("alkahest.v1",)),
+        listing_open=False,
+    )
+
+    assert (action["action"], action["reason"]) == ("refuse", SETTLEMENT_MECHANISM_UNKNOWN)
+
+
+def test_another_payload_failure_is_refused_with_its_text_as_detail():
+    action = _recorded(ValueError("clause unreadable"), listing_open=True)
+
+    assert action == {
+        "action": "refuse",
+        **_SOURCE,
+        "reason": PAYLOAD_UNBUILDABLE,
+        "error": "clause unreadable",
+    }
+
+
+def test_a_refusal_reaches_its_sites_derivation_and_its_error_text_is_not_its_identity(
+    caplog,
+):
+    """The entry is recorded under its site, and a standing refusal whose text
+    changes is not logged as a new entry."""
+    log = SiteDerivationLog()
+    for detail in ("first answer", "second answer"):
+        report = PublicationCycleReport()
+        record_payload_refusal(
+            report,
+            _SOURCE,
+            NoSettlementOption(detail, mechanisms=("contact.v1",)),
+            listing_open=False,
+        )
+        with caplog.at_level(logging.WARNING):
+            log.record("bare_metal", report, ["site-a"])
+
+    (refusal,) = log.latest()["site-a"]["refusals"]
+    assert refusal["reason"] == "no_settlement_option"
+    assert len([r for r in caplog.records if "refusals" in r.getMessage()]) == 1
+
+
+# -- refused candidates ---------------------------------------------------------
+
+
+class _Binding:
+    def __init__(self, listing_id):
+        self.listing_id = listing_id
+
+
+class _Listings:
+    """The storefront persistence a refused candidate's listing is found in."""
+
+    def __init__(self, listings=None, keys=None):
+        self.listings = listings or {}
+        self.keys = keys or {}
+
+    async def load_listing_binding_by_derivation(self, *, derivation_key):
+        listing_id = self.keys.get(derivation_key)
+        return None if listing_id is None else _Binding(listing_id)
+
+    async def load_listing(self, *, listing_id):
+        return self.listings.get(listing_id)
+
+
+_CANDIDATE = {"key": "key-1", **_SOURCE}
+
+
+def _refusals(report, listings, close=None):
+    closed: list[list[str]] = []
+
+    async def reconciliation_close(listing_ids):
+        closed.append(listing_ids)
+        if close is not None:
+            return close(listing_ids)
+        return {"closed": tuple(listing_ids), "failed_closes": ()}
+
+    refusals = RefusedCandidates(
+        report,
+        # Each coroutine runs to completion here, as the driver runs it on the
+        # cycle's event loop for a callback on the runner's thread.
+        call=asyncio.run,
+        listings=listings,
+        derivation_key=lambda candidate: candidate["key"],
+        derivation_source=lambda candidate: {
+            key: candidate[key] for key in ("site_id", "pool_id", "physical_resource_id")
+        },
+        reconciliation_close=reconciliation_close,
+    )
+    return refusals, closed
+
+
+_OPEN = _Listings(listings={"L1": {"status": "open"}}, keys={"key-1": "L1"})
+
+
+def test_a_refusal_is_recorded_under_its_site_and_returned_to_the_runner():
+    report = PublicationCycleReport()
+    refusals, _ = _refusals(report, _OPEN)
+    refusal = NoSettlementOption("ruled out", mechanisms=("contact.v1",))
+    # A cycle's candidates live for the whole cycle, as the runner holds every
+    # one it fails, so the refusals are tracked by identity; these are held too.
+    unreadable = dict(_CANDIDATE)
+    published = dict(_CANDIDATE)
+
+    assert refusals.refuse(_CANDIDATE, refusal) is refusal
+    assert refusals.refuse(unreadable, ValueError("unreadable")) == "unreadable"
+    assert [(item["action"], item["reason"], item["site_id"]) for item in report.actions] == [
+        ("refuse", "no_settlement_option", "site-a"),
+        ("refuse", PAYLOAD_UNBUILDABLE, "site-a"),
+    ]
+    assert refusals.refused(_CANDIDATE) and refusals.refused(unreadable)
+    assert refusals.refused(published) is False
+
+
+@pytest.mark.parametrize(
+    ("listings", "action"),
+    [(_OPEN, "hold"), (_Listings(), "refuse"), (
+        _Listings(listings={"L1": {"status": "closed"}}, keys={"key-1": "L1"}), "refuse"
+    )],
+    ids=["open-listing-held", "no-listing", "closed-listing"],
+)
+def test_an_unknown_mechanism_holds_only_an_open_listing(listings, action):
+    report = PublicationCycleReport()
+    refusals, _ = _refusals(report, listings)
+
+    refusals.refuse(
+        _CANDIDATE,
+        NoSettlementOption("unreached", mechanisms=("alkahest.v1",), unknown=("alkahest.v1",)),
+    )
+
+    ((recorded, reason),) = [(item["action"], item["reason"]) for item in report.actions]
+    assert (recorded, reason) == (action, SETTLEMENT_MECHANISM_UNKNOWN)
+
+
+def test_the_close_hook_closes_the_open_listing_through_reconciliation():
+    report = PublicationCycleReport()
+    refusals, closed = _refusals(report, _OPEN)
+
+    refusals.close_candidate_listing("db", "url", _CANDIDATE, "no_settlement_option")
+
+    assert closed == [["L1"]]
+    assert report.actions == [
+        {"action": "close", "listing_id": "L1", "reason": "no_settlement_option"}
+    ]
+
+
+def test_a_preview_records_the_close_and_applies_none():
+    report = PublicationCycleReport(dry_run=True)
+    refusals, closed = _refusals(report, _OPEN)
+
+    refusals.close_candidate_listing("db", "url", _CANDIDATE, "no_settlement_option")
+
+    assert closed == []
+    assert report.of("close") == [
+        {"action": "close", "listing_id": "L1", "reason": "no_settlement_option"}
+    ]
+
+
+@pytest.mark.parametrize(
+    "listings",
+    [
+        _Listings(),
+        _Listings(listings={"L1": {"status": "closed", "closed_by": "seller"}}, keys={"key-1": "L1"}),
+    ],
+    ids=["no-listing", "seller-closed"],
+)
+def test_the_close_hook_leaves_a_candidate_with_no_open_listing(listings):
+    report = PublicationCycleReport()
+    refusals, closed = _refusals(report, listings)
+
+    refusals.close_candidate_listing("db", "url", _CANDIDATE, "no_settlement_option")
+
+    assert closed == [] and report.actions == []
+
+
+def test_a_close_the_runtime_cannot_apply_is_a_failure():
+    report = PublicationCycleReport()
+    refusals, _ = _refusals(
+        report, _OPEN, close=lambda ids: {"closed": (), "failed_closes": tuple(ids)}
+    )
+
+    refusals.close_candidate_listing("db", "url", _CANDIDATE, "no_settlement_option")
+
+    assert report.actions == [
+        {"action": "fail", "listing_id": "L1", "reason": "local_close_failed"}
+    ]
+
+
+def test_a_close_that_raises_is_reported_and_raised():
+    def broken(_ids):
+        raise RuntimeError("database locked")
+
+    report = PublicationCycleReport()
+    refusals, _ = _refusals(report, _OPEN, close=broken)
+
+    with pytest.raises(RuntimeError, match="database locked"):
+        refusals.close_candidate_listing("db", "url", _CANDIDATE, "no_settlement_option")
+
+    assert report.actions == [
+        {"action": "fail", "source": _SOURCE, "reason": "close failed: database locked"}
+    ]

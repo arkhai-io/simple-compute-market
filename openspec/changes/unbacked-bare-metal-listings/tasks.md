@@ -3384,14 +3384,24 @@ with no settlement option yields no listing", "Publication derives all ready set
 options"). Touches `core/storefront`'s publication runner and sources, and the VM and
 bare-metal storefronts.
 
-- [ ] 18.1 `core/storefront/src/core_storefront/publication_runner.py`: a typed refusal a
+- [x] 18.1 `core/storefront/src/core_storefront/publication_runner.py`: a typed refusal a
       payload builder may return, stating whether every mechanism is ruled out by
       configuration; `publish_round` calls the source's close hook for such a refusal and
       otherwise reports it, leaving the listing as it is, as every other payload failure.
       `publication_sources.py` `PublicationSource` gains the close hook, with a default
       that closes nothing. Tests in `core/storefront/tests/unit/test_publication_runner.py`
       and `test_publication_sources.py` (unit) (D7).
-- [ ] 18.2 Bare metal `src/publication_composition.py` `publication_payload_builder`: the
+      Done: `NoSettlementOption(detail, *, mechanisms, unknown)`, a `ValueError` so a
+      create path raising it refuses as any unpublishable input, with
+      `ruled_out_by_configuration` (no mechanism unknown); `unknown` must be a subset of
+      `mechanisms`. `NO_SETTLEMENT_OPTION` is the reason the runner gives the hook,
+      `PublicationSource.close_candidate_listing(db_path, base_url, candidate, reason)`;
+      a refused candidate is reported in `failed` either way, and a hook that raises is
+      reported as that candidate's failure. Unit (`make -C core/storefront test`, 223
+      passed, 2 skipped): the close for a ruled-out refusal and for one naming no
+      mechanism, none for an unknown mechanism or another failure, a raising hook, the
+      subset rule, and the default hook.
+- [x] 18.2 Bare metal `src/publication_composition.py` `publication_payload_builder`: the
       untyped `ValueError` becomes the typed refusal, raised too when the payload carries no
       settlement option and no accepted escrow; the mechanisms of the admissible clauses
       (override, or configured clauses, after `admissible_settlement`) are classified from
@@ -3403,14 +3413,55 @@ bare-metal storefronts.
       `_reconciliation_close` as `no_settlement_option`; `_hold_pools_without_clauses` gives
       way, since a pool resolving no clause is a candidate whose every mechanism is ruled
       out, which closes (D7).
-- [ ] 18.3 VM `services/listing_service.py` (`_admissible_settlement_terms`,
+      Done. The builder raises the refusal naming no mechanism for an empty admissible
+      set; `settlement_composition.publication_payload` raises it, naming the clauses'
+      mechanisms and the unknown ones, when nothing builds. A mechanism is unknown when
+      its readiness is `MechanismReadiness.unknown` (unready, every blocker reachability);
+      a disabled section (`disabled` is a configuration blocker) and a ready mechanism
+      building no option, as contact exchange does for an origin with no contact, are
+      ruled out. `_build_payload` records through the kit's `record_payload_refusal` (in
+      18.3's note) and returns the refusal; `_close_candidate_listing` closes the open
+      listing under `candidate["derivation_key"]`, records a dry run's close without
+      applying it, and reports a close that raises. `_hold_pools_without_clauses` and
+      the cycle's unused `publication_clauses` parameter are gone. A candidate refused
+      while building its payload is no longer warned of every cycle: the site
+      derivation logs it when it appears.
+- [x] 18.3 VM `services/listing_service.py` (`_admissible_settlement_terms`,
       `derive_listing`) keeps the readiness `publication_artifacts` returns and raises the
       typed refusal; `services/publication_loop.py` `_create_request`'s no-clause case is the
       same refusal; `_build_payload` records it with site, pool, and resource; VM's close
       hook finds the open listing by the candidate's derivation key and closes it through
       `_reconciliation_close` (D7).
-- [ ] 18.4 Both storefronts' adapters (`arkhai_bare_metal/storefront_adapter.py`,
+      Done. `settlement_composition.publication_artifacts` returns empty artifacts with
+      their readiness rather than raising, and `reconcile_settlement_options` keeps its
+      own refusal. `_admissible_settlement_terms` takes the readiness and whether the
+      request supplied escrows (Alkahest counts among the mechanisms then) and raises the
+      refusal. `_create_request` refuses a candidate resolving no clause, and drops a
+      clause whose mechanism the storefront does not enable
+      (`publication_terms.enabled_publication_clauses`, reading each clause, DSL text or
+      mapping, through the kit's new `publication_clause_mechanism`), refusing a
+      candidate left with none as ruled out, naming the disabled mechanisms; bare metal
+      skips such a clause at readiness, so both close. The storefront's own configured
+      clauses are still compiled strictly: one naming a disabled mechanism is refused
+      whole, as before. The close hook finds the listing by
+      `publication_binding.vm_candidate_derivation_key`, split out of
+      `prepare_vm_listing_binding`. **Beyond the plan, shared by both domains:**
+      `MechanismReadiness.unknown` in `kit/settlement-runtime` (one definition of
+      "unknown"; API credits' own `_unknown` predates it and is left as it is); and
+      `kit/capacity-publication`'s `record_payload_refusal` with the reason codes
+      `SETTLEMENT_MECHANISM_UNKNOWN` and `PAYLOAD_UNBUILDABLE`, beside the site-derivation
+      log they feed. It records a ruled-out refusal as a refusal, an unknown mechanism as
+      a hold only when the candidate has an open listing and as a refusal otherwise, and
+      any other payload failure as `payload_unbuildable` with its text as `error`, every
+      entry at the top level under its site and pool (VM's also name the shape digest),
+      so every refusal now reaches the site's `refusals` in both storefronts (Section
+      17's handoff item).
+- [x] 18.4 Both storefronts' adapters (`arkhai_bare_metal/storefront_adapter.py`,
       `arkhai_vms/storefront_adapter.py`) pass the hook into the source (D7).
+      Done: the hook is a required adapter argument in both; VM's
+      `VmPublicationSourceCallbacks` carries it. Unit: `domains/bare_metal/tests/
+      test_storefront_adapter.py`, `domains/vms/domain/tests/test_storefront_adapter.py`,
+      VM `tests/unit/test_publication_wiring.py`.
 - [ ] 18.5 Tests: bare metal `tests/test_publication_cycle.py` (library) and VM
       `tests/integration/test_publication_loop.py` (application integration, through
       `StorefrontClient`): an open listing whose only mechanism is configured away closes as
@@ -3420,12 +3471,145 @@ bare-metal storefronts.
       nothing; a contact-only candidate whose origin has no contact yields no listing. Bare
       metal `tests/test_http_system.py`'s no-clause hold test becomes the close. VM
       `tests/unit/test_unbacked_settlement_options.py` (unit) follows the typed refusal (D7).
-- [ ] 18.6 Versions: `arkhai-core-storefront`, `arkhai-bare-metal`, `arkhai-vms`, both
+      **Partly delivered; left unchecked.** The bare-metal cases on unbacked candidates
+      cannot run through the cycle before 19.1 and are carried into 19.6 as mandatory
+      (notes below).
+      - VM, application integration through `StorefrontClient` over the
+        `tests/publication_app.py` harness (`tests/integration/test_publication_loop.py`,
+        60 passed): configured away (Alkahest unready for a configuration blocker) closes
+        and reopens under its identity; disabled, its clause a pool hint, closes, read
+        back closed by reconciliation, then reopens; no clause closes and reopens;
+        unreached (a reachability blocker) is held with its escrow terms, and with no
+        open listing is refused, not held; both kinds at once close; unreached beside a
+        contact exchange with no contact for the origin is held; a stored override
+        (`PoolOverrideClient.put_pool_override`) naming only Alkahest closes an open
+        unbacked contact listing, with no admissible mechanism, and restoring the contact
+        override reopens it; a restart giving the origin no contact closes the unbacked
+        listing while Alkahest is unreached; an unbacked contact-only candidate whose
+        origin has no contact yields no listing. **Fidelity:** every VM blocker comes
+        from the harness's `SettlementCompositionDouble`, which stands in for VM's
+        settlement composition, so these show the cycle's handling of readiness, not that
+        VM's real composition reports each kind; the kinds' sources are the mechanisms'
+        own unit suites. DSL clause text is unit-proven only
+        (`tests/unit/test_enabled_publication_clauses.py`): pool hints and overrides
+        reach the cycle as mappings, and the one string route is a per-model
+        `[pricing.defaults.gpu.<model>].settlements` given as JSON text.
+      - Bare metal, cycle orchestration over a real database with the production payload
+        builder and settlement composition (`tests/test_publication_cycle.py`; the
+        storefront is an application, so these are not integration evidence under
+        `TESTING.md`, as the file's docstring says), all on backed candidates:
+        configured away closes and reopens; unprobed is held, its stored terms unchanged,
+        and with no open listing refused; both kinds close; a disabled section closes, as
+        VM's does; a preview reports the close and applies none; a contact-only candidate
+        whose origin has no contact yields no listing, its standing refusal not warned
+        every cycle; unreached beside contact ruled out is held. Application integration
+        through the administrator's `StorefrontClient` (`tests/test_http_system.py`): the
+        no-clause close and same-identity reopen across restarts, its refusal in status.
+        Payload-builder calls only, not lifecycle: an unbacked candidate refused for
+        configuration whatever an inadmissible Alkahest answers, and an unbacked
+        candidate whose override names only Alkahest.
+      - VM unit (`tests/unit/test_unbacked_settlement_options.py`): the refusal's
+        mechanisms and unknown set for each blocker mix and backing.
+- [x] 18.6 Versions: `arkhai-core-storefront`, `arkhai-bare-metal`, `arkhai-vms`, both
       storefronts; `make lock`.
+      `arkhai-vms` 0.6.1 → 0.7.0 (its adapter takes a new required argument; no earlier
+      section bumped it), with the VM storefront's floor `>=0.7.0`. The rest already carry
+      this change's one bump (`docs/development/RELEASING.md`), as earlier sections'
+      notes record: `arkhai-core-storefront` 0.16.0 (Section 4), `arkhai-bare-metal`
+      0.13.0 (Section 15), both storefronts 0.22.0, `arkhai-kit-settlement-runtime` 0.5.0
+      (Section 3), `arkhai-kit-capacity-publication` 0.11.0 (Section 17). Floors on
+      `arkhai-core-storefront` rise to 0.16.0 in both domain packages' `storefront`
+      extra and dev group, for the close hook. `make lock` (the pinned uv 0.11.17)
+      changed 14 locks: the `arkhai-vms` version and those floors in seven, and
+      dependency markers alone in seven more and alongside the changes in two; kept as
+      generated, by the owner's decision.
 - [ ] 18.7 **Verify.** `make test-core`; `make test-vms-domain`, `make test-storefront`,
       `make test-bare-metal`; `make test`; `make check-packaging`. End-to-end:
       `e2e_compute_dynamic_listings` and `e2e_bare_metal_publication`; no scenario closes a
       listing for configuration, and integration is the evidence.
+      Historical results on an earlier pre-review candidate, not qualification of the
+      current tree, with uv 0.11.17 and Helm v4.3.0: `make test` passed, every
+      suite through the Helm render (among them core storefront 223 with 2 skipped,
+      settlement runtime 125, capacity publication 113, VM storefront unit 1116 with 1
+      skipped and integration 471, bare-metal domain 164, storefront 465, buyer 11,
+      adapter 50, API-credit storefront 239, e2e-tests unit 107, release tooling 1092).
+      An earlier focused run of the VM publication-loop file failed one new test whose
+      fixture disabled Alkahest while `[pricing].settlements` still named it, which the
+      storefront refuses as contradictory configuration; the test now states the clause
+      as a pool hint, and production validation is unchanged. `make check-packaging`
+      passed. **Left unchecked:** `make check-change` fails on the citation in the
+      handoff below, and the section's fresh-context check is outstanding. End-to-end: unrun here;
+      `e2e_compute_dynamic_listings` and `e2e_bare_metal_publication` run the changed
+      cycles once deployed, and no scenario closes a listing for configuration.
+
+Section 18 notes (handoff):
+
+- **Evidence gap, owned by 19.6.** The bare-metal cycle lifecycle of the scenario "A
+  pool override leaves no admissible clause" — an open unbacked contact listing, a
+  stored valid non-empty override naming only `alkahest.v1`, the reconciliation close
+  as `no_settlement_option` with its refusal and no publication, and the same listing
+  ID reopening once the contact clause is stored again — is **not proven** in this
+  section. It cannot be exercised before 19.1: `read_site_pools`
+  (`src/site_reading.py`) admits no unbacked pool, so no unbacked candidate reaches the
+  payload builder, and an unbacked listing seeded in the database would close as
+  `source_gone` before any override applied. The bare-metal tests of the unbacked
+  admissibility cases call the payload builder directly; they prove the refusal and its
+  classification, not the lifecycle. The pool-override record refuses an empty clause
+  list, so a backed bare-metal override always leaves an admissible clause, and that
+  refusal is unchanged. The VM equivalent runs through the real stored override and
+  cycle (18.5). 19.6 carries the bare-metal test as mandatory; Section 19 is not
+  complete without it.
+- **Two more bare-metal gaps, also owned by 19.6.** "An unbacked candidate's origin has
+  no contact" is shown through the cycle only on a backed candidate, and "An unreachable
+  mechanism the candidate could never publish" only through the payload builder, for the
+  same reason. 19.6 owes both as cycle tests.
+- **Configured clauses stay strict.** A disabled mechanism's clause stated in a pool hint
+  or an override is dropped and, alone, closes its listing; one stated in the
+  storefront's own `[pricing].settlements` is its configuration contradicting itself,
+  which `settlement_publication_defaults` refuses for the whole cycle, as before.
+- **First fresh-context check (eight findings), all taken up:** the permanent "A
+  storefront that cannot publish refuses to start" said a pool resolving no clause is
+  held, so the `storefront-publication` delta now modifies it; the stale permanent
+  passages are added to 23.9; bare metal's per-cycle warning of refused candidates is
+  gone; one "unknown" rule (`MechanismReadiness.unknown`) and one recording helper
+  (`record_payload_refusal`); both `startup_refusal.py` docstrings corrected; the
+  backed contact-only and unreached-beside-ruled-out cycle tests added; the builder
+  test renamed for what it shows.
+- **Second fresh-context check (eleven findings).** Taken up: a disabled mechanism now
+  closes in VM as in bare metal; an unknown mechanism with no open listing is a refusal,
+  not a hold; a close hook that raises is reported; the VM no-clause close and the held
+  bare-metal listing's unchanged terms are tested; the `settlement-configuration`
+  scenario "No enabled mechanism is ready" is modified by that capability's delta; 23.9
+  names both quickstart passages; the reason codes moved from core to the kit that owns
+  the derivation log; these notes state each test's level and fidelity. **Declined:**
+  sharing the close hooks, which differ in how each domain derives the key and closes
+  through its own reconciliation; a constructor on core's refusal reading readiness,
+  which would make core read a settlement-runtime concept it does not depend on (the
+  filter left in each domain is one line over `MechanismReadiness.unknown`); API
+  credits' own `_unknown`, outside this section; `replaced_setting`, the VM tests'
+  existing seam.
+- **Locks.** The pinned uv rewrites dependency markers in projects this section did not
+  touch, unlike Section 14's `make lock`; the cause was not found. The 14 locks are kept
+  as generated, by the owner's decision, and `make check-packaging` passes over them.
+- **Checkpoint publication and narrow continuation exception.** The owner authorized
+  committing and pushing this incomplete work and continuing Sections 19–22 despite
+  the known `make check-change` exit 2 for the missing citation target
+  `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, due in 22.1. This is not
+  a passing check or a general test waiver. No placeholder, checker weakening, or
+  repository-wide policy change is authorized. Resolve the real helper in 22.1 and
+  rerun the unchanged check.
+- **Current qualification remains incomplete.** The latest VM storefront run exited
+  2: units 1122 passed and 1 skipped; integration 474 passed and 1 failed.
+  `test_a_listing_every_registry_refused_is_published_once_they_answer` expected
+  `unreachable` and observed `timeout`. Its system-status HTTP health probe is not
+  replaced by the registry-client double; the runtime timeout phase and root cause
+  are not established. The proposed HTTP fake or loopback fixture repair remains
+  unapplied and requires separate approval; assertions and production timeout policy
+  are unchanged. Core storefront subsequently exited 0 (223 passed, 2 skipped),
+  but deliberate one-time approval provenance for that run is unproven because of a
+  prompt/input race; the result does not repair that provenance. Fresh review and
+  full qualification after the latest fixes remain outstanding. 18.5 and 18.7 stay
+  unchecked; Sections 19–22 are not complete.
 
 ## 19. Bare metal publishes unbacked listings
 
@@ -3468,6 +3652,28 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
       cases, and a bargaining round against an unbacked listing refused (D1, D2, D3, D8).
       Registry: `core/registry/tests/integration/test_capacity_backing_filter.py` already
       proves the exact filter; add a bare-metal listing case if it carries none.
+      **Required here, carried from Section 18** (its notes): the bare-metal cycle test
+      of the `storefront-publication` scenario "A pool override leaves no admissible
+      clause", which Section 18 could not exercise while bare metal refused unbacked
+      pools. In `tests/test_publication_cycle.py` (library), through the real pool
+      override store (`SQLitePoolOverrideStore`) and the real payload builder and cycle:
+      an unbacked pool's listing published and open with a contact-exchange option; a
+      stored, valid, non-empty override naming only `alkahest.v1` written; the next
+      cycle closes that listing as `no_settlement_option`, publishes nothing, and
+      records a refusal naming its site, pool, Physical Resource, and no admissible
+      mechanism; with the contact clause stored again, the next cycle reopens the same
+      listing ID. Alkahest's chain unprobed throughout, so the test also shows an
+      unknown mechanism the candidate cannot publish holds nothing. The override
+      record's refusal of an empty clause list is unchanged. Two further bare-metal
+      cycle tests are owed with it, for the same reason (Section 18 proved them only
+      on backed candidates or through the payload builder): an **unbacked** candidate
+      whose only admissible mechanism is contact exchange and whose origin has no
+      contact yields no listing and is recorded as a refusal naming its site, pool, and
+      Physical Resource ("An unbacked candidate's origin has no contact"); and an open
+      unbacked contact listing whose origin loses its contact closes as
+      `no_settlement_option` while Alkahest's chain is unreached ("An unreachable
+      mechanism the candidate could never publish"). Section 19 is not complete
+      without all three passing (D7).
 - [ ] 19.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
 - [ ] 19.8 **Verify.** `make test-bare-metal`; `make test-core` if the registry test
       changes; `make test`; `make check-packaging`. End-to-end:
@@ -3700,7 +3906,25 @@ change to implementation.
         hold; "Settlement option reconciliation" — classification of the admissible clauses'
         mechanisms, and its release-condition paragraph rewritten (conditions derived only
         under a ready Alkahest; an undeliverable model unready rather than a startup
-        refusal); "Autonomous publication" — the site-derivation log.
+        refusal); "Autonomous publication" — the site-derivation log, and its paragraph
+        saying a pool resolving no settlement clause "is held at compose" (such a pool's
+        candidates are refused and their open listings closed; a pool resolving no lease
+        bound is still held).
+      - The other permanent passages that still describe a pool resolving no settlement
+        clause as held (Section 18's fresh-context check): `docs/development/ARCHITECTURE.md`
+        "Storefront capacity boundary" ("a pool that resolves none is held and reported");
+        `docs/development/DEPLOYMENT_AND_CONFIG.md` "Storefront startup and site trust"
+        (the pool "is held and reported in system status's `publication_derivation`") and
+        "Storefront listing shapes and pool overrides" (`pool_settlement_clauses_missing`,
+        no longer reported); `docs/bare-metal-seller-quickstart.md`'s two passages, in
+        "Start and inspect" (a pool stating no settlement clause "is held and reported
+        instead") and in its list of what each cycle does (it "Holds … a pool … that
+        resolves no settlement clause"). Each now reads: the candidate is refused as
+        `no_settlement_option`, its open listing closed through reconciliation and
+        reopened once a clause resolves; a pool resolving no lease bound is still held.
+        The `settlement-configuration` scenario "No enabled mechanism is ready", which
+        said publication fails, is rewritten by that capability's delta at the archive
+        (23.11), not by hand.
       - `openspec/specs/physical-provisioning/architecture.md`: "Compute composition" — the
         view contract, the resource pass's pool context, and view problems; "Canonical
         requests, durable replay, and signed responses" — the signed failure after

@@ -13,6 +13,7 @@ from market_contact_exchange import (
     IntroductionSellerClient,
     format_introduction_timestamp,
 )
+from core_storefront.publication_runner import NoSettlementOption
 from market_core.schemas import derive_settlement_option_id
 from market_identity import (
     Eip191Signer,
@@ -336,17 +337,21 @@ async def test_accepted_introduction_survives_contact_disable(
             )
 
     restarted = _runtime(path, contact_enabled=False)
-    publication = await restarted.settlement_composition.publication_payload(
-        candidate={"host_id": "machine-1", "site_id": "site-a"},
-        clauses=[
-            SettlementPublicationClause(
-                mechanism=CONTACT_MECHANISM,
-                asset="introduction",
-                mechanism_input={"profile": "default"},
-            )
-        ],
-    )
-    assert publication.settlement_options == ()
+    # A disabled contact section publishes no new option: configuration rules
+    # it out, so a candidate naming only it is refused.
+    with pytest.raises(NoSettlementOption) as refused:
+        await restarted.settlement_composition.publication_payload(
+            candidate={"host_id": "machine-1", "site_id": "site-a"},
+            clauses=[
+                SettlementPublicationClause(
+                    mechanism=CONTACT_MECHANISM,
+                    asset="introduction",
+                    mechanism_input={"profile": "default"},
+                )
+            ],
+        )
+    assert refused.value.mechanisms == (CONTACT_MECHANISM,)
+    assert refused.value.ruled_out_by_configuration is True
     app = _app(restarted)
     with serving(app) as base_url:
         buyer = _introductions(base_url)

@@ -32,7 +32,7 @@ dependencies = [
     "arkhai-kit-capability-admissibility>=0.1.0",
     "arkhai-bare-metal>=0.10.0",
     "arkhai-bare-metal-storefront==0.22.0",
-    "arkhai-vms>=0.6.0",
+    "arkhai-vms>=0.7.0",
     "arkhai-vms-listings[pools,overrides]>=0.7.0",
     "arkhai-vms-negotiation>=0.5.0",
     "arkhai-vms-settlement>=0.3.0",

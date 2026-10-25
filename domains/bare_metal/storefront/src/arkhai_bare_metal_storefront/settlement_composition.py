@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from core_storefront.publication_runner import PublicationPayload
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
 from market_core import SettlementStageTable
 from market_core.schemas import SettlementOption
 from .alkahest_lifecycle import alkahest_servicing
@@ -219,6 +219,10 @@ class BareMetalStorefrontSettlementComposition:
         the configured section, the seller wallet, and that chain's address
         book, and only while Alkahest is ready: an unready mechanism's clauses
         publish no escrow to release.
+
+        ``clauses`` are the candidate's admissible clauses. When none of them
+        builds an option, the candidate is refused with ``NoSettlementOption``,
+        naming their mechanisms and those whose readiness is unknown.
         """
 
         readiness = await self.readiness(clauses=clauses)
@@ -259,6 +263,27 @@ class BareMetalStorefrontSettlementComposition:
                 SettlementOption.model_validate(item).model_dump(mode="json")
                 for item in built_options
             )
+
+        if not accepted_escrows and not settlement_options:
+            mechanisms = tuple(dict.fromkeys(clause.mechanism for clause in clauses))
+            # A ready mechanism that built nothing, as contact exchange does
+            # for an origin with no contact, is ruled out like a misconfigured one.
+            unknown = tuple(
+                mechanism
+                for mechanism in mechanisms
+                if mechanism in readiness_by_mechanism
+                and readiness_by_mechanism[mechanism].unknown
+            )
+            detail = (
+                f"pool {candidate.get('pool_id')!r} publishes no settlement option: "
+                + (
+                    f"readiness unknown for {', '.join(unknown)}"
+                    if unknown
+                    else "configuration rules out "
+                    + (", ".join(mechanisms) or "every mechanism")
+                )
+            )
+            raise NoSettlementOption(detail, mechanisms=mechanisms, unknown=unknown)
 
         option_ids = [item["option_id"] for item in settlement_options]
         if len(option_ids) != len(set(option_ids)):

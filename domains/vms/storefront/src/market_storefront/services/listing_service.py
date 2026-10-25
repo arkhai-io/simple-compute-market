@@ -12,7 +12,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from functools import partial
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -29,6 +29,7 @@ from core_storefront.models.listing_models import (
     ReclaimRequest,
     RefundRequest,
 )
+from core_storefront.publication_runner import NoSettlementOption
 from core_storefront.stage_log import stage_event
 from arkhai_vms_listings.models import Listing
 from arkhai_vms_listings.resources import parse_resource_from_dict
@@ -471,6 +472,31 @@ class ListingService:
             "publish a distinct resource or pool, or close the listing that "
             "holds this one."
         )
+
+    def admissible_mechanisms(
+        self, mechanisms: Sequence[str], *, backing: CapacityBacking
+    ) -> tuple[str, ...]:
+        """Those of ``mechanisms`` a listing of ``backing`` could publish.
+
+        Decided as the listing's own terms are kept, by each seller stage's
+        declaration of whether it delivers through VM capacity, so a mechanism
+        is classified -- ruled out by configuration, or unknown -- only where
+        the listing could publish it. A mechanism this storefront composes no
+        stage for is one it could never publish.
+        """
+        composition = self._settlement_composition_provider()
+        composed = tuple(
+            mechanism for mechanism in mechanisms if mechanism in composition.seller_stages
+        )
+        kept, _ = backing.admissible_settlement(
+            composed,
+            mechanism=str,
+            fulfils_through_capacity=lambda mechanism: (
+                composition.seller_stages[mechanism].fulfils_through_capacity
+            ),
+        )
+        return tuple(kept)
+
     @staticmethod
     def _admissible_settlement_terms(
         *,
@@ -481,6 +507,8 @@ class ListingService:
         demands: list[dict[str, Any]],
         composition: Any,
         source: str,
+        readiness: Sequence[MechanismReadiness] = (),
+        escrows_supplied: bool = False,
     ) -> tuple[
         list[dict[str, Any]],
         list[dict[str, Any]],
@@ -492,8 +520,12 @@ class ListingService:
         Each seller stage declares whether settling through it delivers through
         VM capacity. Where nothing admits the listing against capacity, such a
         stage would take a buyer's funds and then reach a reservation that
-        cannot be made, so its options are dropped, with a notice naming them;
-        if nothing remains the listing is refused.
+        cannot be made, so its options are dropped, with a notice naming them.
+
+        If nothing remains the listing is refused with ``NoSettlementOption``,
+        naming the mechanisms it could have published -- its admissible
+        clauses', and Alkahest's where the request supplied escrows its
+        backing admits -- and those whose ``readiness`` is unknown.
         """
         def fulfils_through_capacity(mechanism: str) -> bool:
             stage = composition.seller_stages.get(mechanism)
@@ -516,12 +548,14 @@ class ListingService:
         )
         dropped = list(dropped_options)
         # Accepted escrows and their demands are the Alkahest publication form.
-        if accepted_escrows:
-            _, escrow_dropped = backing.admissible_settlement(
+        escrow_mechanisms: tuple[str, ...] = ()
+        if accepted_escrows or escrows_supplied:
+            escrow_kept, escrow_dropped = backing.admissible_settlement(
                 ("alkahest.v1",),
                 mechanism=str,
                 fulfils_through_capacity=fulfils_through_capacity,
             )
+            escrow_mechanisms = tuple(escrow_kept)
             if escrow_dropped:
                 accepted_escrows, demands = [], []
                 dropped.extend(m for m in escrow_dropped if m not in dropped)
@@ -534,9 +568,24 @@ class ListingService:
                 dropped,
             )
         if not kept_options and not accepted_escrows:
-            raise ValueError(
+            mechanisms = tuple(
+                dict.fromkeys(
+                    [*(_clause_mechanism(clause) for clause in kept_clauses),
+                     *escrow_mechanisms]
+                )
+            )
+            # A ready mechanism that built nothing, as contact exchange does
+            # for an origin with no contact, is ruled out like a misconfigured one.
+            statuses = {status.mechanism: status for status in readiness}
+            raise NoSettlementOption(
                 f"{backing.label} source {source} has no settlement option it may "
-                f"publish (dropped: {', '.join(dropped) or 'none'})"
+                f"publish (dropped: {', '.join(dropped) or 'none'})",
+                mechanisms=mechanisms,
+                unknown=tuple(
+                    mechanism
+                    for mechanism in mechanisms
+                    if mechanism in statuses and statuses[mechanism].unknown
+                ),
             )
         return accepted_escrows, list(kept_options), tuple(kept_clauses), demands
 
@@ -648,6 +697,8 @@ class ListingService:
             demands=demands,
             composition=composition,
             source=f"{capacity_source['site_id']}/{source_id}",
+            readiness=readiness,
+            escrows_supplied=bool(request.accepted_escrows),
         )
         listing_resource.capacity_backing = backing.label
 
@@ -800,6 +851,8 @@ class ListingService:
             option_resources,
             clauses=persisted_clauses or None,
         )
+        if not accepted_escrows and not settlement_options:
+            raise RuntimeError("no enabled settlement mechanism is ready")
         await self._db.update_listing(
             listing_id=listing_id,
             accepted_escrows=accepted_escrows,

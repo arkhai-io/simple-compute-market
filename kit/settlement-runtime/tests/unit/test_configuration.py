@@ -22,6 +22,7 @@ from market_settlement_runtime import (
     SettlementConfigurationRegistry,
     SettlementPublicationClause,
     compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
 )
 from market_settlement_runtime.configuration import _secret_values
 from market_settlement_runtime.ports import ConditionalEscrowClient
@@ -396,6 +397,48 @@ def test_the_safe_projection_carries_each_blockers_kind() -> None:
     ]
 
 
+def _readiness(*kinds: str, ready: bool = False) -> MechanismReadiness:
+    return MechanismReadiness(
+        mechanism="demo.pay.v1",
+        configured=True,
+        enabled=True,
+        ready=ready,
+        blockers=tuple(
+            ReadinessBlocker(code=f"demo.{kind}", message=kind, kind=kind)  # type: ignore[arg-type]
+            for kind in kinds
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("kinds", "ready", "unknown"),
+    [
+        (("reachability",), False, True),
+        (("reachability", "reachability"), False, True),
+        (("configuration",), False, False),
+        (("configuration", "reachability"), False, False),
+        ((), False, False),
+        ((), True, False),
+    ],
+    ids=[
+        "unreached",
+        "unreached-twice",
+        "misconfigured",
+        "both-kinds",
+        "unready-without-blockers",
+        "ready",
+    ],
+)
+def test_readiness_is_unknown_only_when_every_blocker_is_reachability(
+    kinds, ready, unknown
+) -> None:
+    readiness = _readiness(*kinds, ready=ready)
+
+    assert readiness.unknown is unknown
+    # A derived reading, not a field: the public projection is unchanged.
+    assert "unknown" not in readiness.safe_projection()
+
+
 def test_public_fingerprint_is_source_free_and_secret_free() -> None:
     registry = SettlementConfigurationRegistry([_registration()])
     secret = "top-secret-request-value"
@@ -499,6 +542,144 @@ profile = "premium"
         )
         == clause
     )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "mechanism=demo asset=usd rate=2.50/hour",
+        {"mechanism": "demo", "asset": "usd"},
+        {"mechanism": "demo.pay.v1", "asset": "usd"},
+        {"mechanism": "demo.pay.v1", "asset": "usd", "mechanism_input": {}},
+        {
+            "mechanism": "demo.pay.v1",
+            "asset": "usd",
+            "mechanism_input": {"profile": "premium"},
+        },
+        "mechanism=demo asset=usd demo.profile=premium",
+        SettlementPublicationClause(mechanism="demo.pay.v1", asset="usd"),
+    ],
+    ids=[
+        "dsl-by-config-key",
+        "mapping-by-config-key",
+        "mapping",
+        "mapping-empty-input",
+        "mapping-with-input",
+        "dsl-with-input",
+        "clause",
+    ],
+)
+def test_a_readable_clause_parses_whether_or_not_its_mechanism_is_enabled(value) -> None:
+    """The clause is read as compilation reads it, its mechanism named
+    canonically, but a disabled section, which compilation refuses, does not
+    stop it being read."""
+    registry = SettlementConfigurationRegistry([_registration()])
+    config = registry.resolve(
+        {"priority": [], "demo": {"enabled": False}}, role="seller"
+    )
+
+    clause = parse_settlement_publication_clause(value, registry=registry, role="seller")
+
+    assert (clause.mechanism, clause.asset) == ("demo.pay.v1", "usd")
+    with pytest.raises(SettlementConfigurationError, match="disabled for publication"):
+        compile_settlement_publication_clause(
+            value, registry=registry, config=config, role="seller"
+        )
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            "mechanism=demo asset=usd rate=2/hour profile=premium",
+            "unknown settlement publication field 'profile'",
+        ),
+        ("mechanism=demo asset=usd rate=2.5", "rate must use"),
+        ("mechanism=demo asset=usd demo.typo=premium", "invalid publication input"),
+        (
+            {"mechanism": "demo", "asset": "usd", "unknown": True},
+            "Extra inputs",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "rate": 2.5, "per": "hour"},
+            "binary floating-point",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": {"typo": "x"}},
+            "invalid publication input",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": ["profile"]},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": []},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": None},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": 0},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": False},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "mechanism_input": ""},
+            "mechanism_input must be a mapping",
+        ),
+        (
+            {"mechanism": "demo", "asset": "usd", "public": {"condition": "x"}},
+            "metadata is unsupported",
+        ),
+    ],
+    ids=[
+        "dsl-unqualified-field",
+        "dsl-rate-without-unit",
+        "dsl-unknown-input",
+        "mapping-unknown-field",
+        "mapping-binary-rate",
+        "mapping-unknown-input",
+        "mapping-input-not-a-mapping",
+        "mapping-input-empty-list",
+        "mapping-input-null",
+        "mapping-input-zero",
+        "mapping-input-false",
+        "mapping-input-empty-text",
+        "mapping-public-metadata",
+    ],
+)
+def test_a_malformed_clause_is_refused_whether_or_not_its_mechanism_is_enabled(
+    value, message
+) -> None:
+    """A clause naming a disabled mechanism is still read in full, so one that
+    cannot be read is a malformed clause, never one its configuration rules
+    out; compilation refuses it for what is wrong with it."""
+    registry = SettlementConfigurationRegistry([_registration()])
+    disabled = registry.resolve({"priority": [], "demo": {"enabled": False}}, role="seller")
+
+    with pytest.raises(SettlementConfigurationError, match=message):
+        parse_settlement_publication_clause(value, registry=registry, role="seller")
+    with pytest.raises(SettlementConfigurationError, match=message):
+        compile_settlement_publication_clause(
+            value, registry=registry, config=disabled, role="seller"
+        )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["asset=usd rate=2/hour", {"asset": "usd"}, {"mechanism": "other.pay.v1"}, 7],
+    ids=["dsl-without-mechanism", "mapping-without-mechanism", "uninstalled", "not-a-clause"],
+)
+def test_a_clause_naming_no_installed_mechanism_is_refused(value) -> None:
+    registry = SettlementConfigurationRegistry([_registration()])
+
+    with pytest.raises(SettlementConfigurationError):
+        parse_settlement_publication_clause(value, registry=registry, role="seller")
 
 
 @pytest.mark.parametrize(

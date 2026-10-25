@@ -114,6 +114,21 @@ class MechanismReadiness(BaseModel):
             raise ValueError("a ready mechanism cannot have blockers")
         return self
 
+    @property
+    def unknown(self) -> bool:
+        """Whether this readiness could not be determined.
+
+        True when the mechanism is unready and every blocker it reports is a
+        reachability blocker: a dependency it needs could not be reached. Any
+        configuration blocker rules the mechanism out instead, whatever else it
+        reports, since reaching the dependency would not clear it.
+        """
+        return (
+            not self.ready
+            and bool(self.blockers)
+            and all(blocker.kind == "reachability" for blocker in self.blockers)
+        )
+
     def safe_projection(self) -> dict[str, Any]:
         """Return the complete public status representation."""
         return self.model_dump(mode="json")

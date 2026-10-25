@@ -100,6 +100,9 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
     def reopen_existing(*args):
         return {"status": "published", "args": args}
 
+    def close_candidate_listing(*args) -> None:
+        return None
+
     adapter = vm_publication_adapter(
         open_keys=open_keys,
         close_stale=close_stale,
@@ -107,6 +110,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
         listing_resource=listing_resource,
         record_published=record_published,
         reopen_existing=reopen_existing,
+        close_candidate_listing=close_candidate_listing,
     )
 
     assert adapter.name == "vms"
@@ -129,6 +133,7 @@ def test_vm_publication_adapter_fills_core_publication_source_slots() -> None:
         "host-a",
     }
     assert adapter.reopen_error_label == "reopen derived listing"
+    assert adapter.close_candidate_listing is close_candidate_listing
 
 
 def test_vm_listing_resource_for_listing_builds_domain_payload() -> None:

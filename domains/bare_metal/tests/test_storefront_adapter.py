@@ -17,6 +17,7 @@ def _source(**overrides):
         "available_candidates": MagicMock(return_value=[]),
         "record_published": MagicMock(return_value=None),
         "reopen_existing": MagicMock(return_value=None),
+        "close_candidate_listing": MagicMock(return_value=None),
     }
     callbacks.update(overrides)
     return bare_metal_publication_adapter(**callbacks), callbacks
@@ -32,6 +33,7 @@ def test_every_database_callback_is_the_storefronts_own():
         "available_candidates",
         "record_published",
         "reopen_existing",
+        "close_candidate_listing",
     ):
         assert getattr(source, name) is callbacks[name]
 

@@ -232,8 +232,8 @@ class VmSettlementComposition:
             settlement_options.extend(
                 dict(item) for item in envelope.get("settlement_options", ())
             )
-        if not accepted_escrows and not settlement_options:
-            raise RuntimeError("no enabled settlement mechanism is ready")
+        # Nothing published is returned as such, with the readiness that
+        # explains it: whether that refuses a listing, and how, is the caller's.
         return accepted_escrows, settlement_options, readiness
 
 

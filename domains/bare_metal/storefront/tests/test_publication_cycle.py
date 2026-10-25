@@ -36,12 +36,14 @@ from arkhai_bare_metal.fixtures.publication_view import (
     DEFAULT_GPU_MODEL,
     build_bare_metal_publication_view,
 )
-from core_storefront.publication_runner import PublicationPayload
+from core_storefront.publication_runner import NoSettlementOption, PublicationPayload
+from market_alkahest import AlkahestChainProbe, ProbedChain
 from market_alkahest.alkahest import get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
 from market_capacity_publication import (
     BoundListing,
     PublicationBinding,
+    SiteDerivationLog,
     SiteProjectionState,
 )
 from market_identity import TrustedIdentitySet, create_signer
@@ -63,8 +65,12 @@ from arkhai_bare_metal_storefront.publication_composition import (
 from arkhai_bare_metal_storefront.publication_service import build_publication_runtime
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
 from arkhai_bare_metal_storefront.server import build_bare_metal_storefront_registry
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
-from settlement_compositions import alkahest_composition
+from settlement_compositions import ALKAHEST_SECTION, alkahest_composition
 
 REGISTRY_URL = "https://registry.example"
 STOREFRONT_URL = "https://seller.example"
@@ -273,11 +279,11 @@ class Storefront:
         self.projections = projections_over(sites, wakes=self.wakes)
         self.registries = RecordingRegistries()
         self.terms = Terms()
+        # The storefront's one site-derivation log, which status serves.
+        self.derivation = SiteDerivationLog()
         # The configured [pricing].default_max_duration_seconds; a pool resolves
         # its lease bound from its override first, then from this.
         self.default_max_duration: int | None = 3600
-        # The configured [pricing].settlements, which a pool's override replaces.
-        self.clauses: tuple[Any, ...] = tuple(CONFIGURED_CLAUSES)
 
     async def run(self, *, dry_run: bool = False, poll: bool = True) -> dict[str, Any]:
         """Poll every site, as the lane steps ``site-projections``, then run a cycle.
@@ -299,11 +305,15 @@ class Storefront:
             storefront_url=STOREFRONT_URL,
             seller_principal=SELLER,
             build_payload=self.terms,
-            publication_clauses=self.clauses,
             default_max_duration_seconds=self.default_max_duration,
             enter_stage=self.stages.append,
+            derivation=self.derivation,
         )
         return await cycle.run(dry_run=dry_run)
+
+    def refusals(self, site: str = "site-a") -> list[dict[str, Any]]:
+        """The site's refusals, as its derivation log holds them for status."""
+        return self.derivation.latest().get(site, {}).get("refusals", [])
 
     def listings(self) -> dict[tuple[str, str | None, str], tuple[str, str, str | None]]:
         """``(site, pool, resource) -> (listing_id, status, closed_by)``."""
@@ -846,7 +856,18 @@ async def test_a_changed_identity_closes_and_is_not_reopened(db):
 
     assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
     assert storefront.registries.sent == []
-    assert {"action": "refuse", "listing_id": listing_id, "reason": "identity_changed", "fields": ["host_id"]} in report["actions"]
+    refusal = {
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
+        "listing_id": listing_id,
+        "reason": "identity_changed",
+        "fields": ["host_id"],
+    }
+    assert {"action": "refuse", **refusal} in report["actions"]
+    # Named by its site, the refusal reaches the site's derivation status serves.
+    refusal.pop("site_id")
+    assert storefront.refusals() == [refusal]
 
 
 async def test_a_pool_recreated_with_the_opposite_backing_closes_and_is_not_reopened(db):
@@ -875,10 +896,16 @@ async def test_a_pool_recreated_with_the_opposite_backing_closes_and_is_not_reop
     assert storefront.listing("site-a", "pool-1", "r1")[1] == "closed"
     assert {
         "action": "refuse",
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
         "listing_id": listing_id,
         "reason": "backing_changed",
         "fields": ["capacity_backing"],
     } in report["actions"]
+    assert [(item["reason"], item["pool_id"]) for item in storefront.refusals()] == [
+        ("backing_changed", "pool-1")
+    ]
 
 
 async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(db):
@@ -1386,22 +1413,21 @@ ALKAHEST_ADDRESS_BOOK = str(anvil_address_book_path())
 
 
 #: The storefront's configured ``[pricing].settlements``: one Alkahest clause on
-#: the anvil chain. A cycle holds a pool resolving no clause; ``Terms`` builds
-#: each payload without reading them.
-CONFIGURED_CLAUSES = compile_publication_clauses(
-    [
-        {
-            "mechanism": "alkahest.v1",
-            "asset": DEAL_TOKEN,
-            "rate": "1",
-            "per": "hour",
-            "mechanism_input": {
-                "chain": "anvil",
-                "escrow_kind": "erc20_escrow_obligation_default",
-            },
-        }
-    ]
+#: the anvil chain, which the production payload builder reads; ``Terms``
+#: builds each payload without reading them.
+CONFIGURED_CLAUSES_RAW = (
+    {
+        "mechanism": "alkahest.v1",
+        "asset": DEAL_TOKEN,
+        "rate": "1",
+        "per": "hour",
+        "mechanism_input": {
+            "chain": "anvil",
+            "escrow_kind": "erc20_escrow_obligation_default",
+        },
+    },
 )
+CONFIGURED_CLAUSES = compile_publication_clauses(list(CONFIGURED_CLAUSES_RAW))
 
 
 def alkahest_publication(tmp_path, monkeypatch, signer):
@@ -1428,11 +1454,18 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
         ),
         encoding="utf-8",
     )
-    composition = alkahest_composition(
+    return anvil_alkahest(signer), CONFIGURED_CLAUSES
+
+
+def anvil_alkahest(signer, *, section=None, chain_probe=None):
+    """Alkahest settlement on the anvil chain, its section changed by
+    ``section`` and its readiness reading ``chain_probe`` where one is given.
+    The token metadata ``alkahest_publication`` caches must be in place."""
+    return alkahest_composition(
         signer,
         wallet=SELLER_WALLET,
         chain_clients={"anvil": object()},
-        section={"address_config_path": None},
+        section={"address_config_path": None, **(section or {})},
         chains={
             "anvil": {
                 "rpc_url": "http://anvil.test",
@@ -1440,8 +1473,8 @@ def alkahest_publication(tmp_path, monkeypatch, signer):
                 "alkahest_address_config_path": ALKAHEST_ADDRESS_BOOK,
             }
         },
+        chain_probe=chain_probe,
     )
-    return composition, CONFIGURED_CLAUSES
 
 
 #: The release condition a listing on the anvil chain advertises by default.
@@ -1457,7 +1490,31 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
 ):
     signer = create_signer("ed25519", b"\x21" * 32)
     composition, clauses = alkahest_publication(tmp_path, monkeypatch, signer)
-    runtime = BareMetalStorefrontRuntime(
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(db, signer, composition, clauses)
+    )
+
+    await storefront.run()
+
+    body = storefront.registries.sent[0][3]
+    assert [escrow["chain_name"] for escrow in body["accepted_escrows"]] == ["anvil"]
+    assert body["demands"] == [RECIPIENT_CONDITION]
+
+
+def _settling_runtime(db, signer, composition, clauses=CONFIGURED_CLAUSES, *, sites=()):
+    """A runtime whose payload builder publishes ``clauses`` through
+    ``composition``, configured with ``sites``, each bound to a peer and an
+    authority URL its tests never call."""
+    return BareMetalStorefrontRuntime(
+        site_bindings=tuple(
+            BareMetalSiteBinding(
+                site_id=site_id,
+                service_peer=f"{site_id}-peer",
+                authority_url=f"http://{site_id}.test",
+            )
+            for site_id in sites
+        ),
         db=db,
         domain=get_market_domain_contract(),
         seller_principal=signer.identity,
@@ -1469,11 +1526,445 @@ async def test_an_alkahest_listing_advertises_the_recipient_arbiter_paying_the_s
         publication_clauses=clauses,
         default_max_duration_seconds=3600,
     )
+
+
+# -- candidates with no settlement option ----------------------------------
+
+#: An oracle-gated section naming no oracle: Alkahest is unready for a
+#: configuration blocker, whatever its chain answers.
+NO_ORACLE = {"oracle_gated": True, "trusted_oracle_addresses": []}
+
+
+def unprobed_chain() -> AlkahestChainProbe:
+    """A probe of the anvil chain that has not yet run, so Alkahest reads as
+    unready for reachability: its readiness is unknown."""
+
+    def never_called(*_args: Any) -> Any:
+        raise AssertionError("the probe is never stepped")
+
+    return AlkahestChainProbe(
+        [ProbedChain(name="anvil", rpc_url="http://anvil.test", chain_id=DEAL_CHAIN_ID)],
+        json_rpc=never_called,
+        required_addresses=lambda _chain: {},
+    )
+
+
+async def _published_alkahest_listing(db, tmp_path, monkeypatch):
+    """A storefront that has published one Alkahest listing, and its signer."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    composition, _ = alkahest_publication(tmp_path, monkeypatch, signer)
     storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
-    storefront.terms = publication_payload_builder(runtime)
-
+    storefront.terms = publication_payload_builder(_settling_runtime(db, signer, composition))
     await storefront.run()
+    return storefront, signer, composition
 
-    body = storefront.registries.sent[0][3]
-    assert [escrow["chain_name"] for escrow in body["accepted_escrows"]] == ["anvil"]
-    assert body["demands"] == [RECIPIENT_CONDITION]
+
+def _stored_terms(db: SQLiteClient, listing_id: str) -> tuple[Any, ...]:
+    """A listing's stored settlement terms, as its record holds them."""
+    with sqlite3.connect(db.db_path) as conn:
+        return conn.execute(
+            "SELECT accepted_escrows, settlement_options, demands, max_duration_seconds "
+            "FROM listings WHERE listing_id = ?",
+            (listing_id,),
+        ).fetchone()
+
+
+def _no_option_entry(item: dict[str, Any]) -> dict[str, Any]:
+    return {key: item[key] for key in ("site_id", "pool_id", "physical_resource_id",
+                                       "reason", "mechanisms")}
+
+
+async def test_a_listing_whose_only_mechanism_is_configured_away_closes_and_reopens(
+    db, tmp_path, monkeypatch
+):
+    storefront, signer, ready = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(db, signer, anvil_alkahest(signer, section=NO_ORACLE))
+    )
+    unready = await storefront.run()
+    closed = storefront.listing("site-a", "pool-1", "r1")
+    sent_on_close = storefront.registries.operations()
+    storefront.terms = publication_payload_builder(_settling_runtime(db, signer, ready))
+    restored = await storefront.run()
+
+    assert closes(unready) == {listing_id: "no_settlement_option"}
+    assert closed == (listing_id, "closed", "reconciliation")
+    assert sent_on_close == [("closed", listing_id)]
+    (refusal,) = actions(unready, "refuse")
+    assert _no_option_entry(refusal) == {
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
+        "reason": "no_settlement_option",
+        "mechanisms": ["alkahest.v1"],
+    }
+    assert actions(unready, "hold") == []
+    assert [item["listing_id"] for item in actions(restored, "reopen")] == [listing_id]
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+
+
+async def test_a_listing_whose_only_mechanisms_chain_is_unprobed_is_held(
+    db, tmp_path, monkeypatch
+):
+    storefront, signer, _ = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    published_terms = _stored_terms(db, listing_id)
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(db, signer, anvil_alkahest(signer, chain_probe=unprobed_chain()))
+    )
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert _stored_terms(db, listing_id) == published_terms
+    assert json.loads(published_terms[0])
+    assert storefront.registries.operations() == []
+    assert closes(report) == {} and actions(report, "refuse") == []
+    (hold,) = actions(report, "hold")
+    assert _no_option_entry(hold) == {
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
+        "reason": "settlement_mechanism_unknown",
+        "mechanisms": ["alkahest.v1"],
+    }
+
+
+async def test_an_unknown_mechanism_with_no_open_listing_is_refused_not_held(
+    db, tmp_path, monkeypatch
+):
+    """A candidate with no listing has nothing to hold, so an unknown mechanism
+    is recorded as its refusal."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(db, signer, anvil_alkahest(signer, chain_probe=unprobed_chain()))
+    )
+
+    report = await storefront.run()
+
+    assert storefront.listings() == {}
+    assert actions(report, "hold") == []
+    (refusal,) = actions(report, "refuse")
+    assert (refusal["reason"], refusal["mechanisms"]) == (
+        "settlement_mechanism_unknown",
+        ["alkahest.v1"],
+    )
+
+
+async def test_a_listing_whose_mechanism_is_disabled_closes_as_vms_does(
+    db, tmp_path, monkeypatch
+):
+    """A disabled section is a configuration blocker: its mechanism is ruled
+    out, so the listing whose only clause names it closes."""
+    storefront, signer, _ = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    disabled = alkahest_composition(
+        signer,
+        wallet=SELLER_WALLET,
+        chain_clients={"anvil": object()},
+        enabled=False,
+        section={"address_config_path": None},
+    )
+    storefront.terms = publication_payload_builder(_settling_runtime(db, signer, disabled))
+
+    report = await storefront.run()
+
+    assert closes(report) == {listing_id: "no_settlement_option"}
+    (refusal,) = actions(report, "refuse")
+    assert refusal["mechanisms"] == ["alkahest.v1"]
+
+
+@pytest.mark.parametrize(
+    "mechanism_input",
+    [
+        {
+            "chain": "anvil",
+            "escrow_kind": "erc20_escrow_obligation_default",
+            "unknown": True,
+        },
+        {"chain": "anvil"},
+    ],
+    ids=["unknown-field", "incomplete"],
+)
+async def test_an_override_clause_that_cannot_be_read_never_closes_its_listing(
+    db, tmp_path, monkeypatch, mechanism_input
+):
+    """A stored override's clause naming Alkahest, whose section is disabled,
+    with input Alkahest cannot read, is a defect: the candidate is refused as
+    `payload_unbuildable` under its site, and its open listing keeps its
+    identity and terms, publishing nothing, where a readable clause naming the
+    disabled mechanism would close it."""
+    storefront, signer, _ = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    published_terms = _stored_terms(db, listing_id)
+    await _override(
+        db,
+        settlements=[{**CONFIGURED_CLAUSES_RAW[0], "mechanism_input": mechanism_input}],
+    )
+    disabled = alkahest_composition(
+        signer,
+        wallet=SELLER_WALLET,
+        chain_clients={"anvil": object()},
+        enabled=False,
+        section={"address_config_path": None},
+    )
+    storefront.terms = publication_payload_builder(_settling_runtime(db, signer, disabled))
+
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert _stored_terms(db, listing_id) == published_terms
+    assert storefront.registries.operations() == []
+    assert closes(report) == {} and actions(report, "hold") == []
+    (refusal,) = actions(report, "refuse")
+    assert {key: refusal[key] for key in ("site_id", "pool_id", "physical_resource_id", "reason")} == {
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
+        "reason": "payload_unbuildable",
+    }
+    assert "invalid publication input for 'alkahest.v1'" in refusal["error"]
+    assert [item["reason"] for item in storefront.refusals()] == ["payload_unbuildable"]
+
+    # The same override, its clause readable, is the configuration ruling
+    # Alkahest out: the listing closes.
+    await _override(db, settlements=list(CONFIGURED_CLAUSES_RAW))
+    readable = await storefront.run()
+
+    assert closes(readable) == {listing_id: "no_settlement_option"}
+
+
+async def test_a_mechanism_ruled_out_and_unreachable_at_once_closes_its_listing(
+    db, tmp_path, monkeypatch
+):
+    """A configuration blocker rules a mechanism out whatever its chain answers."""
+    storefront, signer, _ = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(
+            db,
+            signer,
+            anvil_alkahest(signer, section=NO_ORACLE, chain_probe=unprobed_chain()),
+        )
+    )
+
+    report = await storefront.run()
+
+    assert closes(report) == {listing_id: "no_settlement_option"}
+    assert storefront.listing("site-a", "pool-1", "r1")[1:] == ("closed", "reconciliation")
+
+
+async def test_a_preview_reports_the_close_and_applies_none(db, tmp_path, monkeypatch):
+    storefront, signer, _ = await _published_alkahest_listing(db, tmp_path, monkeypatch)
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    storefront.terms = publication_payload_builder(
+        _settling_runtime(db, signer, anvil_alkahest(signer, section=NO_ORACLE))
+    )
+
+    report = await storefront.run(dry_run=True)
+
+    assert closes(report) == {listing_id: "no_settlement_option"}
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert storefront.registries.operations() == []
+
+
+#: Contact exchange configured only for another origin, so a candidate from
+#: ``site-a`` builds no contact option.
+CONTACT_ELSEWHERE = {
+    "enabled": True,
+    "origins": {"site-b": {"contact_payload": {"email": "sales@seller.invalid"}}},
+    "profiles": {"default": {"channel": "email", "terms": "Introduction."}},
+}
+CONTACT_CLAUSE = {
+    "mechanism": "contact-exchange.v1",
+    "asset": "introduction",
+    "mechanism_input": {"profile": "default"},
+}
+
+
+def _alkahest_and_contact(signer, *, chain_probe=None):
+    """Alkahest on the anvil chain beside contact exchange configured only for
+    ``site-b``; Alkahest's readiness reads ``chain_probe`` where one is given."""
+    return BareMetalStorefrontSettlementComposition.from_raw_config(
+        {
+            "schema_version": 1,
+            "priority": ["alkahest.v1", "contact-exchange.v1"],
+            "alkahest": {**ALKAHEST_SECTION, "address_config_path": None},
+            "contact": CONTACT_ELSEWHERE,
+        },
+        resources={
+            "marketplace_signer": signer,
+            "claimant_principal": signer.identity,
+            "wallet": SELLER_WALLET,
+            "clients": {"anvil": object()},
+            "chains": {
+                "anvil": {
+                    "rpc_url": "http://anvil.test",
+                    "chain_id": DEAL_CHAIN_ID,
+                    "alkahest_address_config_path": ALKAHEST_ADDRESS_BOOK,
+                }
+            },
+            **({"chain_probe": chain_probe} if chain_probe is not None else {}),
+        },
+    )
+
+
+def _unbacked_candidate(**changes: Any) -> dict[str, Any]:
+    return {
+        "site_id": "site-a",
+        "pool_id": "pool-u",
+        "physical_resource_id": "r1",
+        "listing_resource": {"capacity_backing": "unbacked"},
+        **changes,
+    }
+
+
+async def test_the_builder_rules_out_an_unbacked_candidate_whatever_an_inadmissible_mechanism_answers(
+    db, tmp_path, monkeypatch
+):
+    """The payload builder alone: an unbacked candidate may publish only
+    contact exchange, which its origin's configuration rules out, so it is
+    refused for configuration while Alkahest, which unbacked bare metal cannot
+    publish, is unknown. This shows the refusal's classification, not a
+    cycle closing a listing."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    build = publication_payload_builder(
+        _settling_runtime(
+            db,
+            signer,
+            _alkahest_and_contact(signer, chain_probe=unprobed_chain()),
+            compile_publication_clauses([*CONFIGURED_CLAUSES_RAW, CONTACT_CLAUSE]),
+            sites=("site-a", "site-b"),
+        )
+    )
+
+    with pytest.raises(NoSettlementOption) as refused:
+        await build(_unbacked_candidate())
+
+    assert refused.value.mechanisms == ("contact-exchange.v1",)
+    assert refused.value.ruled_out_by_configuration is True
+
+
+CONTACT_ONLY = compile_publication_clauses([CONTACT_CLAUSE])
+ALKAHEST_AND_CONTACT = compile_publication_clauses([*CONFIGURED_CLAUSES_RAW, CONTACT_CLAUSE])
+
+
+def _contact_terms(db, signer, clauses, *, chain_probe=None):
+    """The payload builder publishing ``clauses`` through Alkahest beside a
+    contact exchange that names a contact for ``site-b`` only."""
+    return publication_payload_builder(
+        _settling_runtime(
+            db,
+            signer,
+            _alkahest_and_contact(signer, chain_probe=chain_probe),
+            clauses,
+            sites=("site-a", "site-b"),
+        )
+    )
+
+
+def _contact_storefront(db, signer, clauses):
+    """A storefront over one backed pool on ``site-a`` publishing ``clauses``."""
+    storefront = Storefront(db, {"site-a": Site(pool("pool-1", member("r1", "pool-1")))})
+    storefront.terms = _contact_terms(db, signer, clauses)
+    return storefront
+
+
+async def test_a_contact_only_candidate_whose_origin_has_no_contact_yields_no_listing(
+    db, tmp_path, monkeypatch, caplog
+):
+    """Spec scenario "An unbacked candidate's origin has no contact", on a
+    backed candidate, since one whose only clause is contact exchange is
+    refused the same way whatever its backing; and the refusal, standing for
+    two cycles, is logged once, when the site derivation's log records it
+    appearing, and not warned as a failed candidate in either cycle."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = _contact_storefront(db, signer, CONTACT_ONLY)
+
+    with caplog.at_level(logging.WARNING):
+        first = await storefront.run()
+        second = await storefront.run()
+
+    assert storefront.listings() == {}
+    assert storefront.registries.operations() == []
+    for report in (first, second):
+        (refusal,) = actions(report, "refuse")
+        assert _no_option_entry(refusal) == {
+            "site_id": "site-a",
+            "pool_id": "pool-1",
+            "physical_resource_id": "r1",
+            "reason": "no_settlement_option",
+            "mechanisms": ["contact-exchange.v1"],
+        }
+    assert not [
+        record for record in caplog.records if "bare-metal candidate" in record.getMessage()
+    ]
+    logged = [
+        record
+        for record in caplog.records
+        if "refusals" in record.getMessage() and "no_settlement_option" in record.getMessage()
+    ]
+    assert len(logged) == 1
+    assert [item["reason"] for item in storefront.refusals()] == ["no_settlement_option"]
+
+
+async def test_an_unreached_mechanism_beside_one_ruled_out_holds_the_listing(
+    db, tmp_path, monkeypatch
+):
+    """Spec scenario "An unreachable mechanism beside one ruled out by
+    configuration": a listing published with only its Alkahest option, beside
+    contact exchange that gives its origin no contact, is held once Alkahest's
+    chain is unreached, because the offer it published is one the storefront
+    would make again."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = _contact_storefront(db, signer, ALKAHEST_AND_CONTACT)
+    await storefront.run()
+    listing_id, status, _ = storefront.listing("site-a", "pool-1", "r1")
+    published = storefront.registries.sent[0][3]
+
+    storefront.terms = _contact_terms(
+        db, signer, ALKAHEST_AND_CONTACT, chain_probe=unprobed_chain()
+    )
+    report = await storefront.run()
+
+    assert status == "open"
+    assert published["accepted_escrows"]
+    assert "contact-exchange.v1" not in {
+        option["mechanism"] for option in published["settlement_options"]
+    }
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert closes(report) == {} and storefront.registries.operations() == []
+    (hold,) = actions(report, "hold")
+    assert (hold["reason"], hold["mechanisms"]) == (
+        "settlement_mechanism_unknown",
+        ["alkahest.v1"],
+    )
+
+
+async def test_an_override_naming_only_a_capacity_mechanism_leaves_no_admissible_clause(
+    db, tmp_path, monkeypatch
+):
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    build = publication_payload_builder(
+        _settling_runtime(
+            db,
+            signer,
+            _alkahest_and_contact(signer, chain_probe=unprobed_chain()),
+            compile_publication_clauses([CONTACT_CLAUSE]),
+            sites=("site-a", "site-b"),
+        )
+    )
+
+    with pytest.raises(NoSettlementOption, match="no settlement option") as refused:
+        await build(_unbacked_candidate(override_clauses=list(CONFIGURED_CLAUSES_RAW)))
+
+    assert refused.value.mechanisms == ()
+    assert refused.value.ruled_out_by_configuration is True

@@ -133,3 +133,24 @@ chain's last result and when it was taken.
 - **WHEN** a storefront's loops are held after a probe and its chain later stops answering
 - **THEN** readiness keeps reporting the held result, with the time it was taken, until
   the `alkahest-chain-probe` loop is stepped or resumed
+
+## MODIFIED Requirements
+
+### Requirement: Priority orders choices but never changes accepted settlement
+
+Storefront publication MUST emit options in configured priority order for every enabled and ready registration with a valid publication clause and a supported seller-stage entry. Buyer compatibility/selection MUST intersect registration compatibility with supported buyer-stage entries and MAY use priority as policy input. Accepted Terms MUST pin one exact option; configuration, readiness or priority changes MUST NOT switch an accepted or in-flight mechanism.
+
+#### Scenario: One of two enabled mechanisms is unready
+
+- **WHEN** one supported mechanism preflight fails and the other is ready
+- **THEN** publication suppresses only the unready mechanism, reports its blocker and advertises the ready mechanism
+
+#### Scenario: No enabled mechanism is ready
+
+- **WHEN** every enabled mechanism fails preflight
+- **THEN** publication derives no option and refuses the candidate, as storefront publication's "A compute candidate with no settlement option yields no listing" requires, without replacing existing accepted Terms or starting a settlement
+
+#### Scenario: Registration lacks a domain stage
+
+- **WHEN** an installed registration has no supporting entry for the publishing or selecting role
+- **THEN** no fresh option for that role is published or selected, even if its configuration and preflight are valid

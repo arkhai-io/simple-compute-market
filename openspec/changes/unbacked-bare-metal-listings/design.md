@@ -1088,9 +1088,10 @@ Spec deltas this change carries:
   sells one whole unit", "Bare-metal opening rechecks its listing against its source" (on
   its held-projection text), "Complete bare-metal seller lifecycle" (an unpinned opening is
   refused; an unusable Alkahest section is unready), "An Alkahest listing advertises its
-  release conditions" (an undeliverable model is unready), and "Publication derives all
+  release conditions" (an undeliverable model is unready), "Publication derives all
   ready settlement options" (no ready mechanism refuses the candidate rather than failing
-  publication).
+  publication), and "A storefront that cannot publish refuses to start" (a pool resolving
+  no settlement clause is refused, and its open listing closed, rather than held).
 - `physical-provisioning`: modify "A bare-metal publication view is built from its capacity
   declaration" and "Domains contribute their inventory views"; add "A failure after
   authentication is answered signed".
@@ -1103,7 +1104,8 @@ Spec deltas this change carries:
 - `settlement-servicing`: add "Settlement verifies against the accepted plan".
 - `settlement-configuration`: add "An Alkahest section that cannot settle makes Alkahest
   unready", "Readiness blockers state their kind", and "Alkahest probes its chains apart
-  from readiness".
+  from readiness"; modify "Priority orders choices but never changes accepted settlement"
+  (with no ready mechanism the candidate is refused, rather than publication failing).
 - `buyer-orchestration`: add "A buyer funds only what it derives" and "Two domains may not
   register one root command".
 - `deployment-state`: add "A deployment does not wait on a service's dependencies" and

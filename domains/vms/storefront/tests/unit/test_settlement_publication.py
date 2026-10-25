@@ -216,15 +216,24 @@ async def test_one_unready_mechanism_does_not_hide_ready_peer(
 
 
 @pytest.mark.asyncio
-async def test_publication_fails_safely_when_none_are_ready():
+async def test_publication_with_none_ready_publishes_nothing_and_says_why():
+    """Nothing is built, and the readiness that explains it is returned for the
+    caller to refuse the listing by."""
     composition, _calls = _composition(
         priority=("example.payment.v1", "alkahest.v1"),
         example_ready=False,
         alkahest_ready=False,
     )
 
-    with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):
-        await VmSettlementComposition.publication_artifacts(composition, {})
+    accepted, options, readiness = await VmSettlementComposition.publication_artifacts(
+        composition, {}
+    )
+
+    assert (accepted, options) == ([], [])
+    assert {status.mechanism: status.ready for status in readiness} == {
+        "example.payment.v1": False,
+        "alkahest.v1": False,
+    }
 
 
 @pytest.mark.asyncio

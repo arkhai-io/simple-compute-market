@@ -781,27 +781,58 @@ async def test_status_reports_a_held_pools_reason_from_the_latest_cycle_only(
     }
 
 
-async def test_status_reports_a_pool_resolving_no_settlement_clause_held(
-    tmp_path, monkeypatch
-) -> None:
-    """A pool whose override states no clauses, with none configured, is held
-    at compose with its own reason, and its listing is neither published nor
-    refused later in the cycle. Spec "A storefront that cannot publish refuses
-    to start": a pool that resolves no clauses from any tier is held and
-    reported per site."""
-    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
-    runtime = _derivation_runtime(tmp_path, monkeypatch, sites, publication_clauses=())
+async def _publication_cycle(runtime: BareMetalStorefrontRuntime):
+    """One publication cycle of a storefront started on ``runtime``, the
+    listing it then serves, and its status."""
     app = _app(runtime)
-
     async with app.router.lifespan_context(app):
         async with _admin_client(app) as admin:
             report = await admin.admin_run_lifecycle_cycle("publication")
+            listings = await admin.list_listings(status="closed")
+            open_listings = await admin.list_listings(status="open")
             status = await admin.get_system_status()
+    return report, {
+        "open": [listing.listing_id for listing in open_listings.listings],
+        "closed": [listing.listing_id for listing in listings.listings],
+    }, status
 
-    (hold,) = status.publication_derivation["site-a"]["holds"]
-    assert hold == {"pool_id": "pool-1", "reason": "pool_settlement_clauses_missing"}
-    assert report["counts"].get("publish") is None
-    assert report["counts"].get("refuse") is None
+
+async def test_a_listing_whose_pool_resolves_no_clause_closes_and_reopens_with_one(
+    tmp_path, monkeypatch
+) -> None:
+    """A storefront restarted with no clause configured refuses the candidate,
+    records the refusal under its site, and closes its open listing as
+    `no_settlement_option`; restarted with the clause again, the same listing
+    reopens. Spec "A compute candidate with no settlement option yields no
+    listing", "An open listing loses its last option to configuration"."""
+    sites = {"site-a": Site(pool("pool-1", member("r1", "pool-1")))}
+    runtime = _derivation_runtime(tmp_path, monkeypatch, sites)
+
+    first, published, _ = await _publication_cycle(runtime)
+    (listing_id,) = published["open"]
+    unconfigured, after_close, status = await _publication_cycle(
+        dataclasses.replace(runtime, publication_clauses=())
+    )
+    reconfigured, after_reopen, _ = await _publication_cycle(
+        dataclasses.replace(runtime)
+    )
+
+    assert first["counts"]["publish"] == 1
+    assert {
+        (item["listing_id"], item["reason"])
+        for item in unconfigured["actions"]
+        if item["action"] == "close"
+    } == {(listing_id, "no_settlement_option")}
+    assert after_close == {"open": [], "closed": [listing_id]}
+    (refusal,) = status.publication_derivation["site-a"]["refusals"]
+    assert refusal["reason"] == "no_settlement_option"
+    assert (refusal["pool_id"], refusal["physical_resource_id"]) == ("pool-1", "r1")
+    assert refusal["mechanisms"] == []
+    assert status.publication_derivation["site-a"]["holds"] == []
+    assert [
+        item["listing_id"] for item in reconfigured["actions"] if item["action"] == "reopen"
+    ] == [listing_id]
+    assert after_reopen == {"open": [listing_id], "closed": []}
 
 
 async def test_a_cycle_failing_in_compose_leaves_the_last_derivation_in_status(

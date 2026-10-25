@@ -165,7 +165,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-vms"
-version = "0.6.1"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "arkhai-compute" },
@@ -191,7 +191,7 @@ dev = [
 requires-dist = [
     { name = "arkhai-compute", specifier = ">=0.1.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
-    { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.11.0" },
+    { name = "arkhai-core-storefront", marker = "extra == 'storefront'", specifier = ">=0.16.0" },
     { name = "arkhai-kit-capability-admissibility", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-pricing", specifier = ">=0.1.0" },
     { name = "arkhai-kit-capability-shape", specifier = ">=0.2.0" },
@@ -201,7 +201,7 @@ provides-extras = ["storefront"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "arkhai-core-storefront", specifier = ">=0.11.0" },
+    { name = "arkhai-core-storefront", specifier = ">=0.16.0" },
     { name = "pytest", specifier = ">=8.0" },
 ]
 

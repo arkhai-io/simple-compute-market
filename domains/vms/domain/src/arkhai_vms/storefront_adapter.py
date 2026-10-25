@@ -33,6 +33,7 @@ ReopenExistingCallback = Callable[
     ],
     dict[str, Any] | None,
 ]
+CloseCandidateListingCallback = Callable[[str, str, dict[str, Any], str], None]
 
 
 def vm_candidate_skip_keys(candidate: dict[str, Any]) -> set[str]:
@@ -100,6 +101,7 @@ def vm_publication_adapter(
     listing_resource: OfferResourceCallback,
     record_published: RecordPublishedCallback,
     reopen_existing: ReopenExistingCallback,
+    close_candidate_listing: CloseCandidateListingCallback,
 ) -> PublicationSource:
     """Build the VM publication source for a concrete storefront."""
     return PublicationSource(
@@ -111,5 +113,6 @@ def vm_publication_adapter(
         listing_resource=listing_resource,
         record_published=record_published,
         reopen_existing=reopen_existing,
+        close_candidate_listing=close_candidate_listing,
         reopen_error_label="reopen derived listing",
     )

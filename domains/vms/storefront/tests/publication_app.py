@@ -109,6 +109,8 @@ _PUBLISHERS = TrustedIdentitySet(identities=(TEST_MARKETPLACE_SIGNER.identity,))
 #: The storefront's configured seller wallet; a development value, never used
 #: on a public network.
 SELLER_WALLET = "0x" + "33" * 20
+#: The token and escrow contract the harness's Alkahest options name;
+#: development values, never used on a public network.
 _TOKEN = "0x" + "22" * 20
 _ESCROW_ADDRESS = "0x" + "11" * 20
 
@@ -203,6 +205,9 @@ class SettlementCompositionDouble:
     #: While one is set, publication suppresses Alkahest's clauses as the real
     #: composition does: no accepted escrow, no option, and Alkahest unready.
     alkahest_blocker: ReadinessBlocker | None = None
+    #: Several blockers Alkahest readiness reports together, as
+    #: ``alkahest_blocker`` reports one.
+    alkahest_blockers: tuple[ReadinessBlocker, ...] = ()
 
     def __init__(self, mechanism_fulfillment: Mapping[str, bool]) -> None:
         self.configuration_registry = build_storefront_settlement_registry()
@@ -277,14 +282,17 @@ class SettlementCompositionDouble:
 
     async def publication_artifacts(self, resources, clauses=None):
         options = await self._registry_options(resources, clauses)
-        if self.alkahest_blocker is not None:
+        blockers = self.alkahest_blockers or (
+            (self.alkahest_blocker,) if self.alkahest_blocker is not None else ()
+        )
+        if blockers:
             return [], options, (
                 MechanismReadiness(
                     mechanism="alkahest.v1",
                     configured=True,
                     enabled=True,
                     ready=False,
-                    blockers=(self.alkahest_blocker,),
+                    blockers=blockers,
                 ),
             )
         accepted = [

@@ -5,7 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from core_storefront.publication_runner import NoSettlementOption
 from market_resource_pools_contracts.backing import BACKED, UNBACKED
+from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
 
 from market_storefront.domain_runtime import build_vm_seller_stages
 from market_storefront.services.listing_service import ListingService
@@ -20,16 +22,48 @@ def _composition():
     return SimpleNamespace(seller_stages=build_vm_seller_stages())
 
 
-def _terms(backing, *, accepted_escrows, settlement_options, demands=()):
+def _terms(
+    backing,
+    *,
+    accepted_escrows,
+    settlement_options,
+    demands=(),
+    clauses=(),
+    readiness=(),
+    escrows_supplied=False,
+):
     return ListingService._admissible_settlement_terms(
         backing=backing,
         accepted_escrows=list(accepted_escrows),
         settlement_options=list(settlement_options),
-        clauses=(),
+        clauses=tuple(clauses),
         demands=list(demands),
         composition=_composition(),
         source="site-a/broker-a",
+        readiness=tuple(readiness),
+        escrows_supplied=escrows_supplied,
     )
+
+
+def _clause(mechanism):
+    return {"mechanism": mechanism}
+
+
+def _unready(mechanism, *kinds):
+    return MechanismReadiness(
+        mechanism=mechanism,
+        configured=True,
+        enabled=True,
+        ready=False,
+        blockers=tuple(
+            ReadinessBlocker(code=f"{kind}.blocker", message="unready", kind=kind)
+            for kind in kinds
+        ),
+    )
+
+
+def _ready(mechanism):
+    return MechanismReadiness(mechanism=mechanism, configured=True, enabled=True, ready=True)
 
 
 def test_every_vm_seller_stage_declares_whether_it_fulfils_through_capacity():
@@ -72,13 +106,84 @@ def test_an_unbacked_listing_drops_capacity_fulfilled_options():
 
 
 def test_an_unbacked_listing_left_with_no_option_is_refused():
-    with pytest.raises(ValueError, match="no settlement option"):
+    with pytest.raises(NoSettlementOption, match="no settlement option") as refused:
         _terms(
             UNBACKED,
             accepted_escrows=[{"chain_name": "anvil"}],
             settlement_options=[_option("arkhai.payments.v1")],
             demands=[{"arbiter": "x"}],
+            clauses=[_clause("arkhai.payments.v1")],
         )
+
+    # Nothing it could publish remains, so configuration rules every mechanism out.
+    assert refused.value.mechanisms == ()
+    assert refused.value.ruled_out_by_configuration is True
+
+
+def test_a_mechanism_with_only_reachability_blockers_is_unknown():
+    with pytest.raises(NoSettlementOption) as refused:
+        _terms(
+            BACKED,
+            accepted_escrows=[],
+            settlement_options=[],
+            clauses=[_clause("alkahest.v1"), _clause("contact-exchange.v1")],
+            readiness=[
+                _unready("alkahest.v1", "reachability"),
+                _ready("contact-exchange.v1"),
+            ],
+        )
+
+    assert refused.value.mechanisms == ("alkahest.v1", "contact-exchange.v1")
+    assert refused.value.unknown == ("alkahest.v1",)
+    assert refused.value.ruled_out_by_configuration is False
+
+
+def test_a_configuration_blocker_rules_a_mechanism_out_whatever_else_it_reports():
+    with pytest.raises(NoSettlementOption) as refused:
+        _terms(
+            BACKED,
+            accepted_escrows=[],
+            settlement_options=[],
+            clauses=[_clause("alkahest.v1")],
+            readiness=[_unready("alkahest.v1", "configuration", "reachability")],
+        )
+
+    assert refused.value.unknown == ()
+    assert refused.value.ruled_out_by_configuration is True
+
+
+def test_an_unknown_mechanism_the_listing_could_never_publish_holds_nothing():
+    """Unbacked VM listings cannot publish Alkahest, so its unreachable chain
+    says nothing about the offer; contact exchange building nothing rules the
+    listing's only admissible mechanism out."""
+    with pytest.raises(NoSettlementOption) as refused:
+        _terms(
+            UNBACKED,
+            accepted_escrows=[],
+            settlement_options=[],
+            clauses=[_clause("alkahest.v1"), _clause("contact-exchange.v1")],
+            readiness=[
+                _unready("alkahest.v1", "reachability"),
+                _ready("contact-exchange.v1"),
+            ],
+        )
+
+    assert refused.value.mechanisms == ("contact-exchange.v1",)
+    assert refused.value.ruled_out_by_configuration is True
+
+
+def test_supplied_escrows_count_alkahest_among_the_mechanisms():
+    with pytest.raises(NoSettlementOption) as refused:
+        _terms(
+            BACKED,
+            accepted_escrows=[],
+            settlement_options=[],
+            readiness=[_unready("alkahest.v1", "reachability")],
+            escrows_supplied=True,
+        )
+
+    assert refused.value.mechanisms == ("alkahest.v1",)
+    assert refused.value.unknown == ("alkahest.v1",)
 
 
 def test_an_unbacked_listing_keeps_its_escrow_free_option():
