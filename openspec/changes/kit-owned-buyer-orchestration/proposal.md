@@ -42,6 +42,10 @@ None.
 
 ### Modified Capabilities
 
+- `buyer-orchestration`: the orchestration, negotiation client, run log, deal
+  recovery, settlement policy, configuration resolution, and command helpers it
+  specifies are owned by the buyer orchestration kit, which the buyer role
+  composes.
 - `market-composition`: the buyer role is a composition over a buyer
   orchestration kit; buyer-side libraries depend on the kit, never on the role.
 
@@ -66,7 +70,8 @@ None.
 ## Permanent documentation impact
 
 - [x] `docs/development/ARCHITECTURE.md` — the kit areas and the buyer role's layer.
-- [x] Existing subsystem specification — `openspec/specs/market-composition/spec.md`.
+- [x] Existing subsystem specification — `openspec/specs/buyer-orchestration/spec.md`
+  and its `architecture.md`; `openspec/specs/market-composition/spec.md`.
 - [ ] New subsystem specification
 
 ### Knowledge to promote
@@ -74,6 +79,9 @@ None.
 - Buyer orchestration is a kit the buyer role composes; buyer-side libraries
   depend on the kit — `docs/development/ARCHITECTURE.md`,
   `openspec/specs/market-composition/spec.md`.
+- Which package owns each buyer-orchestration responsibility the kit takes
+  over — `openspec/specs/buyer-orchestration/spec.md`,
+  `openspec/specs/buyer-orchestration/architecture.md`.
 
 ## Dependencies and Related Changes
 
