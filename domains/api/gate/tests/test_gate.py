@@ -9,8 +9,10 @@ cached verification answering only for the secret that earned it.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
+import pytest
 
 from arkhai_api_gate.client import ConsumeResult, TokensClient, VerifyResult
 from arkhai_api_gate.config import GateConfig, PurchasePointer
@@ -232,9 +234,10 @@ async def _hold_old_secret(gate: TokenGate, client: HeldVerificationClient) -> a
     return old
 
 
-async def test_a_late_answer_for_an_older_secret_does_not_replace_a_newer_one():
+@pytest.mark.parametrize("clock", [time.monotonic, lambda: 100.0], ids=["monotonic", "frozen"])
+async def test_a_late_answer_for_an_older_secret_does_not_replace_a_newer_one(clock):
     client = HeldVerificationClient("ak_k.old", "ak_k.new")
-    gate = TokenGate(_cfg(), client)
+    gate = TokenGate(_cfg(), client, clock=clock)
 
     old = await _hold_old_secret(gate, client)
     assert (await gate.authorize("Bearer ak_k.new")).allowed
@@ -247,9 +250,10 @@ async def test_a_late_answer_for_an_older_secret_does_not_replace_a_newer_one():
     assert client.verified == ["ak_k.old", "ak_k.new", "ak_k.old"]
 
 
-async def test_a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret():
+@pytest.mark.parametrize("clock", [time.monotonic, lambda: 100.0], ids=["monotonic", "frozen"])
+async def test_a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret(clock):
     client = HeldVerificationClient("ak_k.old", "ak_k.new")
-    gate = TokenGate(_cfg(), client)
+    gate = TokenGate(_cfg(), client, clock=clock)
 
     assert (await gate.authorize("Bearer ak_k.new")).allowed
     old = await _hold_old_secret(gate, client)

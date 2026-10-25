@@ -2852,6 +2852,19 @@ and domains Makefiles, `docs/development/RELEASING.md`.
       charging against the newer entry, which a refused charge already
       handles. The TypeScript and Rust gates take the same fix in the
       follow-up security PR.
+      **Ordering by ticket (2026-10-25).** A further review showed the
+      start-time comparison could tie: a monotonic clock may return one value
+      to two reads, and on a tie a delayed older "valid" answer was installed
+      over a newer refusal. Verifications are now ordered by a ticket the
+      gate draws from a strictly increasing counter when each starts, before
+      the authority is called; an entry keeps the highest ticket it has seen
+      (`verified_ticket`), and the clock serves only expiry. `TokenGate`
+      takes an optional `clock`, so a test can freeze it. Unit: both
+      completion-order tests run under the real clock and a frozen one; with
+      every ticket made equal in a scratch run, all four fail. Gate 26,
+      sample app 3, service 43 passed. The TypeScript and Rust gates take
+      the same change in the follow-up security PR, which also has every
+      conformance runner assert the secret each verification sends.
 
 ## 10. Buying and the buying-side mechanism distributions
 
