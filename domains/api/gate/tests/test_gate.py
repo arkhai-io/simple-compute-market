@@ -1,8 +1,9 @@
-"""Batched-flush behavior and the ASGI binding.
+"""Batched-flush behavior, the ASGI binding, and the verify cache's tie to the secret.
 
 The synchronous decision table is pinned by the conformance session;
-these cover the two things outside it: the optimistic batched charge
-path (timing-dependent, so impl-local) and the ASGI adapter end to end.
+these cover what is outside it: the optimistic batched charge path
+(timing-dependent, so impl-local), the ASGI adapter end to end, and a
+cached verification answering only for the secret that earned it.
 """
 
 from __future__ import annotations
@@ -149,3 +150,57 @@ async def test_asgi_missing_key_is_401():
         assert r.status_code == 401
         assert r.json()["error"] == "missing_api_key"
     await http.aclose()
+
+
+class SecretCheckingClient:
+    """An authority that accepts only the secrets it was given, recording what it was asked."""
+
+    def __init__(self, *accepted: str) -> None:
+        self.accepted = set(accepted)
+        self.verified: list[str] = []
+        self.consumed = 0
+
+    async def verify(self, *, key_id: str, secret: str) -> VerifyResult:
+        self.verified.append(secret)
+        if secret in self.accepted:
+            return VerifyResult(valid=True, status="active", balance=10)
+        return VerifyResult(valid=False, status=None, balance=0)
+
+    async def consume(self, *, key_id, amount, idempotency_key=None) -> ConsumeResult:
+        self.consumed += 1
+        return ConsumeResult(ok=True, balance=10 - self.consumed, consumed=amount)
+
+
+async def test_a_cached_key_does_not_admit_a_different_secret():
+    client = SecretCheckingClient("ak_victim.real")
+    gate = TokenGate(_cfg(), client)
+
+    assert (await gate.authorize("Bearer ak_victim.real")).allowed
+    forged = await gate.authorize("Bearer ak_victim.forged")
+
+    assert (forged.allowed, forged.status, forged.body) == (False, 401, {"error": "invalid_api_key"})
+    assert client.verified == ["ak_victim.real", "ak_victim.forged"]
+    assert client.consumed == 1
+
+
+async def test_a_refused_secret_leaves_the_cached_verification_in_place():
+    client = SecretCheckingClient("ak_victim.real")
+    gate = TokenGate(_cfg(), client)
+
+    await gate.authorize("Bearer ak_victim.real")
+    await gate.authorize("Bearer ak_victim.forged")
+
+    assert (await gate.authorize("Bearer ak_victim.real")).allowed
+    assert client.verified == ["ak_victim.real", "ak_victim.forged"]
+
+
+async def test_a_rotated_secret_the_authority_accepts_replaces_the_cached_one():
+    client = SecretCheckingClient("ak_k.first", "ak_k.rotated")
+    gate = TokenGate(_cfg(), client)
+
+    await gate.authorize("Bearer ak_k.first")
+    assert (await gate.authorize("Bearer ak_k.rotated")).allowed
+    assert (await gate.authorize("Bearer ak_k.rotated")).allowed
+    await gate.authorize("Bearer ak_k.first")
+
+    assert client.verified == ["ak_k.first", "ak_k.rotated", "ak_k.first"]

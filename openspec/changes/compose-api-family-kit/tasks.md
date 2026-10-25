@@ -2802,6 +2802,31 @@ and domains Makefiles, `docs/development/RELEASING.md`.
       and `arkhai-kit-identity` declared in the gate's dev group (relocked).
       Declined: asserting every defaulted outcome field is present, which
       the authority does not send.
+      **Security fix (2026-10-25).** An external report found that the
+      gate cached a successful verification by key id alone, which is the
+      public part of the bearer secret, so for the cache's lifetime a forged
+      secret with a cached key id was authorized and charged without the
+      authority seeing it. The middleware had the same defect; the TypeScript
+      and Rust middlewares still do. `_KeyState` now keeps a SHA-256
+      fingerprint of the verified secret, and a cache hit needs a
+      constant-time match (`hmac.compare_digest`); any other secret goes to
+      the authority, a refused one returns without touching the cached
+      state, and an accepted one (a rotated secret) replaces the
+      fingerprint. Balance estimate and exhaustion stay per key id. The
+      owner kept the TypeScript and Rust fixes, with a conformance step
+      pinning them, out of this PR for a focused security PR immediately
+      after it; `sign-multi-language-credits-middleware` keeps outbound
+      signing. Unit (`test_gate.py`, three cases, each failing on the old
+      cache): a forged secret is denied 401 `invalid_api_key` after the
+      authority is asked and nothing is charged; a refused forgery leaves the
+      cached verification in place; an accepted rotated secret replaces the
+      cached one. Gate 22, sample app 3, service 43 passed; the conformance
+      trace, which uses one secret per key, replays unchanged. On the clean
+      copy `make check-packaging` and `make check-comment-hygiene` pass. A
+      fresh-context check found no remaining bypass through the batched
+      path, the exhausted short-circuit, expiry, or the two lock sections,
+      and no regression; its one nit, this test module's docstring, is
+      fixed.
 
 ## 10. Buying and the buying-side mechanism distributions
 

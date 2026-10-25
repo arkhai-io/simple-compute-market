@@ -15,6 +15,8 @@ fixtures pin (``domains/apicredits/middleware/conformance``).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -55,8 +57,13 @@ class _KeyState:
     verify: VerifyResult
     verify_expires: float
     estimated_balance: int
+    secret_fingerprint: bytes
     pending: list[dict[str, Any]] = field(default_factory=list)
     exhausted: bool = False
+
+
+def _fingerprint(secret: str) -> bytes:
+    return hashlib.sha256(secret.encode("utf-8")).digest()
 
 
 def parse_bearer(authorization: str | None) -> str | None:
@@ -144,16 +151,32 @@ class TokenGate:
         return await self._charge(key_id, idempotency_key)
 
     async def _verified_state(self, key_id: str, secret: str) -> VerifyResult:
+        # The key id is public, read off any bearer header, so a cached
+        # verification answers only for the exact secret that earned it.
         now = time.monotonic()
+        fingerprint = _fingerprint(secret)
         async with self._lock:
             state = self._states.get(key_id)
-            if state is not None and state.verify_expires > now and state.verify.valid:
+            if (
+                state is not None
+                and state.verify_expires > now
+                and state.verify.valid
+                and hmac.compare_digest(state.secret_fingerprint, fingerprint)
+            ):
                 return state.verify
 
         verify = await self._client.verify(key_id=key_id, secret=secret)
 
         async with self._lock:
             existing = self._states.get(key_id)
+            if (
+                existing is not None
+                and not verify.valid
+                and not hmac.compare_digest(existing.secret_fingerprint, fingerprint)
+            ):
+                # A refused secret other than the cached one says nothing
+                # about the cached credential, so it must not evict it.
+                return verify
             estimated = verify.balance
             if existing is not None:
                 # Keep the running estimate (it may be ahead of the
@@ -162,6 +185,7 @@ class TokenGate:
                     if existing.pending else verify.balance
                 existing.verify = verify
                 existing.verify_expires = now + self._cfg.verify_ttl_seconds
+                existing.secret_fingerprint = fingerprint
                 existing.estimated_balance = estimated
                 if verify.valid:
                     existing.exhausted = False
@@ -170,6 +194,7 @@ class TokenGate:
                     verify=verify,
                     verify_expires=now + self._cfg.verify_ttl_seconds,
                     estimated_balance=estimated,
+                    secret_fingerprint=fingerprint,
                 )
         return verify
 
