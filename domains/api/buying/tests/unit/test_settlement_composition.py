@@ -186,4 +186,3 @@ def test_two_stages_cannot_contribute_one_commands_option():
 
 def test_the_chain_configuration_merges_every_stages():
     assert _composition(Stage("a.v1"), Stage("b.v1")).chain_config_paths() == {"a.v1": None, "b.v1": None}
-

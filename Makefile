@@ -114,7 +114,7 @@ dist-core: ## Build arkhai-core wheel into .dist/
 	@ls $(DIST_DIR)/arkhai_core-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-core produced a platform-specific wheel — must build inside Docker" && exit 1)
 
-dist-arkhai-core-buyer: ## Build arkhai-core-buyer wheel into .dist/
+dist-arkhai-core-buyer: dist-registry-client ## Build arkhai-core-buyer wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd core/buyer && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_core_buyer-*-none-any.whl > /dev/null 2>&1 || \

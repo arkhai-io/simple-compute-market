@@ -107,4 +107,3 @@ def test_a_negotiation_records_the_token_options_and_the_selected_chain():
     selected = SimpleNamespace(option=SimpleNamespace(params={"accepted_escrow": {"chain_name": "anvil"}}))
     assert stage.negotiation_run_fields(options, selected) == {**options, "chain_name": "anvil"}
     assert stage.negotiation_run_fields(options, None)["chain_name"] is None
-
