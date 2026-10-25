@@ -66,6 +66,7 @@ signed = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-api-contracts" },
+    { name = "arkhai-kit-identity" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -80,6 +81,7 @@ provides-extras = ["signed"]
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-api-contracts", specifier = ">=0.4.0" },
+    { name = "arkhai-kit-identity" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
 ]

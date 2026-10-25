@@ -78,3 +78,18 @@ def test_the_response_is_bound_to_its_label_and_carries_the_secret():
     with pytest.raises(ValidationError):
         models.issuance_response_model(INFERENCE).model_validate(wire)
     assert models.issuance_response_model(API_CREDITS) is models.issuance_response_model(API_CREDITS)
+
+
+@pytest.mark.parametrize(
+    ("model", "body"),
+    [
+        (models.ConsumeOutcome, {"ok": True, "balance": 1, "unexpected": 1}),
+        (models.ConsumeOutcome, {"ok": True}),
+        (models.VerifyResponse, {"valid": True, "status": "active", "balance": 1, "unexpected": 1}),
+        (models.ConsumeRefusal, {"error": "insufficient_credits", "balance": 0, "unexpected": 1}),
+    ],
+    ids=["outcome with an unknown field", "outcome missing a field", "verify with an unknown field", "refusal with an unknown field"],
+)
+def test_a_gate_facing_response_refuses_a_body_it_does_not_declare(model, body):
+    with pytest.raises(ValidationError):
+        model.model_validate(body)

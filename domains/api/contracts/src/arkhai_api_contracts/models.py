@@ -95,6 +95,8 @@ class ConsumeBatchResponse(BaseModel):
 class ConsumeOutcome(BaseModel):
     """One consumption's outcome: an accepted charge, a duplicate of one, or a refusal's reason."""
 
+    model_config = ConfigDict(extra="forbid")
+
     ok: bool
     balance: int
     consumed: int = 0
@@ -105,6 +107,8 @@ class ConsumeOutcome(BaseModel):
 class ConsumeRefusal(BaseModel):
     """The body of a refused consume; ``error`` is one of `CONSUME_REFUSALS`."""
 
+    model_config = ConfigDict(extra="forbid")
+
     error: str
     balance: int
 
@@ -114,6 +118,8 @@ class VerifyRequest(BaseModel):
 
 
 class VerifyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     valid: bool
     status: str | None
     balance: int

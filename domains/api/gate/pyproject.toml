@@ -25,6 +25,8 @@ dev = [
   # The parity test holds the gate's local spelling of the routes it calls
   # equal to the contracts' declarations; the gate itself never imports them.
   "arkhai-api-contracts>=0.4.0",
+  # The signing tests build responses with the identity kit directly.
+  "arkhai-kit-identity",
 ]
 
 [build-system]

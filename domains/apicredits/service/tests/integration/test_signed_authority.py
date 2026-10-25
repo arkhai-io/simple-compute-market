@@ -30,6 +30,8 @@ from typing import Any, Iterator
 import httpx
 import pytest
 import pytest_asyncio
+from arkhai_api_contracts.models import ConsumeOutcome, ConsumeRefusal, VerifyResponse
+from arkhai_api_contracts.refusals import CONSUME_REFUSALS
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -424,21 +426,27 @@ def _seller_client(signed_app):
     )
 
 
-def _gated_client(signed_app):
+def _gated_client(signed_app, *, answered: list | None = None):
     # `arkhai-api-gate[signed]` is a declared dev dependency of
     # this service precisely so its boundary can be tested against the real
-    # client rather than a hand-built envelope.
+    # client rather than a hand-built envelope. `answered`, when given,
+    # collects each response's path, status, and body as the authority sent it.
     from arkhai_api_gate.client import TokensClient
     from arkhai_api_gate.signing import (
         AuthoritySigning,
         build_trusted_authorities,
     )
 
+    async def record(response: httpx.Response) -> None:
+        await response.aread()
+        answered.append((response.request.url.path, response.status_code, response.json()))
+
     return TokensClient(
         service_url="http://credits-service",
         http=httpx.AsyncClient(
             transport=httpx.ASGITransport(app=signed_app),
             base_url="http://credits-service",
+            event_hooks={"response": [record]} if answered is not None else {},
         ),
         signing=AuthoritySigning(
             authority_label="credits-service",
@@ -547,6 +555,45 @@ async def test_the_canonical_clients_transact_against_this_service(signed_app):
         key_id=issued.key_id, amount=2, idempotency_key="i-1"
     )
     assert again.balance == 3, again
+
+
+@pytest.mark.asyncio
+async def test_the_authority_answers_the_gate_in_the_declared_shapes(signed_app):
+    """Every body the gate parses is one the contracts declare, read off the real authority.
+
+    The gate parses leniently, so a renamed field would reach it as a default
+    rather than an error; validating what this service actually sends against
+    `arkhai_api_contracts`, which the gate's own parity test holds the gate to,
+    closes the loop from both sides.
+    """
+    await _seed_quota(signed_app)
+    issued = await _seller_client(signed_app).submit_issuance(_issuance_request("neg-shapes", quantity=3))
+    answered: list = []
+    gated = _gated_client(signed_app, answered=answered)
+
+    assert (await gated.verify(key_id=issued.key_id, secret=issued.secret)).valid
+    assert (await gated.consume(key_id=issued.key_id, amount=1, idempotency_key="s-1")).ok
+    assert (await gated.consume(key_id=issued.key_id, amount=1, idempotency_key="s-1")).duplicate
+    await gated.consume_batch(
+        [
+            {"key_id": issued.key_id, "amount": 1, "idempotency_key": "s-2"},
+            {"key_id": "ak_missing", "amount": 1, "idempotency_key": "s-3"},
+        ]
+    )
+    assert not (await gated.consume(key_id=issued.key_id, amount=5)).ok
+
+    (verify, accepted, duplicate, batch, refused) = answered
+    assert verify[0].endswith("/verify") and verify[1] == 200
+    assert VerifyResponse.model_validate(verify[2]) == VerifyResponse(valid=True, status="active", balance=3)
+    for path, status, body in (accepted, duplicate):
+        assert path.endswith("/consume") and status == 200
+        assert ConsumeOutcome.model_validate(body).ok
+    assert ConsumeOutcome.model_validate(duplicate[2]).duplicate
+    assert batch[0].endswith("/consume-batch") and batch[1] == 200
+    outcomes = [ConsumeOutcome.model_validate(item) for item in batch[2]["results"]]
+    assert [o.ok for o in outcomes] == [True, False] and outcomes[1].reason in CONSUME_REFUSALS
+    assert refused[1] == 402
+    assert ConsumeRefusal.model_validate(refused[2]).error in CONSUME_REFUSALS
 
 
 @pytest.mark.asyncio

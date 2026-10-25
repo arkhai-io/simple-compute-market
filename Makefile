@@ -145,7 +145,7 @@ dist-bare-metal-storefront: dist-core dist-arkhai-core-storefront dist-kits ## B
 dist-api: dist-identity ## Build arkhai-api, the api-family vocabulary, into .dist/
 	cd domains && $(MAKE) dist-api DIST_DIR=$(DIST_DIR)
 
-dist-api-contracts: dist-identity ## Build arkhai-api-contracts wheel into .dist/ (domains/Makefile builds arkhai-api first)
+dist-api-contracts: dist-identity dist-core ## Build arkhai-api-contracts wheel into .dist/ (domains/Makefile builds arkhai-api first)
 	cd domains && $(MAKE) dist-api-contracts DIST_DIR=$(DIST_DIR)
 
 dist-api-client: dist-identity ## Build arkhai-api-client wheel into .dist/ (domains/Makefile builds the vocabulary and contracts first)

@@ -87,9 +87,11 @@ class _Authority:
             answer = models.VerifyResponse(valid=True, status="active", balance=9)
         elif name == "consume-batch":
             self.sent["consume-batch"] = body
-            answer = models.ConsumeBatchResponse(
-                results=[models.ConsumeOutcome(ok=True, consumed=1, balance=7).model_dump()]
-            )
+            items = [
+                models.ConsumeOutcome(ok=True, consumed=1, balance=7).model_dump(),
+                models.ConsumeOutcome(ok=False, balance=0, reason=refusals.KEY_REVOKED).model_dump(),
+            ]
+            answer = models.ConsumeBatchResponse(results=items)
         else:
             self.sent["consume"] = body
             if body["amount"] > 5:
@@ -119,7 +121,12 @@ async def test_requests_are_the_declared_bodies_and_responses_parse_from_the_dec
         )
         assert (await gate.authorize("Bearer ak_y.s")).allowed
         await gate.flush()
-        batched = await tokens.consume_batch([{"key_id": "ak_x", "amount": 1, "idempotency_key": "idem-3"}])
+        batched = await tokens.consume_batch(
+            [
+                {"key_id": "ak_x", "amount": 1, "idempotency_key": "idem-3"},
+                {"key_id": "ak_z", "amount": 1, "idempotency_key": "idem-4"},
+            ]
+        )
 
     for name, _operation, _path, _resource in GATE_ROUTES:
         assert authority.methods[name] == route(_operation)["method"], f"[{name}] method sent"
@@ -139,7 +146,10 @@ async def test_requests_are_the_declared_bodies_and_responses_parse_from_the_dec
     assert verified == client.VerifyResult(valid=True, status="active", balance=9)
     assert consumed == client.ConsumeResult(ok=True, balance=8, consumed=1, duplicate=True)
     assert refused == client.ConsumeResult(ok=False, balance=2, reason=refusals.INSUFFICIENT_CREDITS)
-    assert batched == [client.ConsumeResult(ok=True, balance=7, consumed=1)]
+    assert batched == [
+        client.ConsumeResult(ok=True, balance=7, consumed=1),
+        client.ConsumeResult(ok=False, balance=0, reason=refusals.KEY_REVOKED),
+    ]
 
 
 def test_the_runtime_dependencies_are_httpx_alone():

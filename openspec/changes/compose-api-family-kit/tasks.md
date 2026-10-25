@@ -2754,6 +2754,54 @@ and domains Makefiles, `docs/development/RELEASING.md`.
       the authority import the contracts' reasons (outside the section's
       files; left as the handoff above), and splitting the gate's tests into
       `unit/`, since 9.2 and 9.3 place them in `tests/`.
+      **Review round (2026-10-25).** An external review of `6853025d1` raised
+      five findings; the owner accepted a fix for each and waived validation
+      of this round, since the end-to-end pipeline cannot dispatch on the
+      fork. The review record was not kept.
+      - *F1: `make test-api-gate` failed from an empty wheelhouse.* The gate's
+        tests install `arkhai-api-contracts`, which needs `arkhai-core`, and
+        nothing built it. Root `dist-api-contracts` now builds `dist-core`, as
+        the Makefile's rule (a wheel's own internal dependencies) asks, so
+        `dist-api-client` and `dist-api-authority` gain it too. From an empty
+        `.dist`, `make test-api-gate` passes.
+      - *F2: a malformed batch item passed contract validation.*
+        `VerifyResponse`, `ConsumeOutcome`, and `ConsumeRefusal` forbid
+        unknown fields; no route mounts them, so the recorded OpenAPI document
+        is unchanged, and `ConsumeBatchResponse.results` stays untyped for the
+        same reason. `contracts`' `test_models.py` refuses an unknown field on
+        each and a missing one on an outcome; the parity test's batch carries
+        a refusal item. The gate's lenient parsing is unchanged.
+      - *F3: the sample app's tests bypassed its configuration path.*
+        `create_app()` runs with no overrides under the compose file's
+        variables and mounted credential files: the configuration it reads
+        (URL, label, admin key from its file, purchase pointer, signing
+        identity) is asserted and `/health` serves; an unusable credential
+        stops the app before it serves.
+      - *F4: no test showed the label reaching a signing failure.*
+        `tests/test_signing.py`: a trusted response verifies, and a response
+        with no authentication and one signed by an untrusted key each fail
+        with a message naming the deployment's label.
+      - *F5: response parity was checked only against fake bodies.* The
+        service's `test_the_authority_answers_the_gate_in_the_declared_shapes`
+        reads, through the gate's real client and a response hook, the real
+        authority's verify, consume, duplicate, batch, and 402 bodies and
+        validates each against the declared models, verify's `status`
+        included. An omitted defaulted field (`duplicate`, `reason`) still
+        passes, since the authority omits them on an ordinary consume.
+      Evidence: gate 19 passed (unit; `make test-api-gate` from an empty
+      `.dist`), `contracts` 43 (unit), sample app 3 (application
+      integration), service 43 (application integration, baselines
+      unchanged). On the copy without the stale checkout `make
+      check-packaging` and `make check-comment-hygiene` pass, and `make -k
+      test` fails only as 1.7 to 8.8 record. Fresh-context check: the five
+      fixes hold; accepted besides, the malformed-item cases moved from the
+      gate's parity test to `contracts`' tests, a loop that could not fail
+      removed, the service test's imports moved to module level, the core
+      prerequisite moved from `test-api-gate` to `dist-api-contracts`, the
+      sample app's helper given the two purchase URLs and its test renamed,
+      and `arkhai-kit-identity` declared in the gate's dev group (relocked).
+      Declined: asserting every defaulted outcome field is present, which
+      the authority does not send.
 
 ## 10. Buying and the buying-side mechanism distributions
 
