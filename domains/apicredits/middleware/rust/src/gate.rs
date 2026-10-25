@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 
 use crate::client::{ConsumeItem, TokensApi, VerifyResult, INSUFFICIENT_CREDITS, KEY_NOT_FOUND, KEY_REVOKED};
@@ -63,8 +64,18 @@ struct KeyState {
     verify: VerifyResult,
     verify_expires: Instant,
     estimated_balance: i64,
+    secret_fingerprint: [u8; 32],
     pending: Vec<ConsumeItem>,
     exhausted: bool,
+}
+
+fn fingerprint(secret: &str) -> [u8; 32] {
+    Sha256::digest(secret.as_bytes()).into()
+}
+
+/// Constant-time equality of two fingerprints.
+fn same_fingerprint(a: &[u8; 32], b: &[u8; 32]) -> bool {
+    a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 /// Extract the bearer secret from an `Authorization` header. Accepts
@@ -186,11 +197,17 @@ impl<C: TokensApi + 'static> TokenGate<C> {
     }
 
     async fn verified_state(&self, key_id: &str, secret: &str) -> VerifyResult {
+        // The key id is public, read off any bearer header, so a cached
+        // verification answers only for the exact secret that earned it.
         let now = Instant::now();
+        let secret_fingerprint = fingerprint(secret);
         {
             let states = self.states.lock().unwrap();
             if let Some(state) = states.get(key_id) {
-                if state.verify_expires > now && state.verify.valid {
+                if state.verify_expires > now
+                    && state.verify.valid
+                    && same_fingerprint(&state.secret_fingerprint, &secret_fingerprint)
+                {
                     return state.verify.clone();
                 }
             }
@@ -201,6 +218,11 @@ impl<C: TokensApi + 'static> TokenGate<C> {
         let ttl = Duration::from_secs_f64(self.cfg.verify_ttl_seconds);
         let mut states = self.states.lock().unwrap();
         match states.get_mut(key_id) {
+            // A refused secret other than the cached one says nothing about
+            // the cached credential, so it must not evict it.
+            Some(existing)
+                if !verify.valid
+                    && !same_fingerprint(&existing.secret_fingerprint, &secret_fingerprint) => {}
             Some(existing) => {
                 // Keep the running estimate (it may be ahead of the
                 // verify-reported balance because of un-flushed charges).
@@ -212,6 +234,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                 existing.verify = verify.clone();
                 existing.verify_expires = now + ttl;
                 existing.estimated_balance = estimated;
+                existing.secret_fingerprint = secret_fingerprint;
                 if verify.valid {
                     existing.exhausted = false;
                 }
@@ -223,6 +246,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                         verify: verify.clone(),
                         verify_expires: now + ttl,
                         estimated_balance: verify.balance,
+                        secret_fingerprint,
                         pending: Vec::new(),
                         exhausted: false,
                     },

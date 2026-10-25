@@ -44,10 +44,23 @@ export interface GateDecision {
 
 interface KeyState {
   verify: VerifyResult;
-  verifyExpires: number; // monotonic ms
+  verifyExpires: number; // monotonic seconds
   estimatedBalance: number;
+  secretFingerprint: Uint8Array;
   pending: ConsumeItem[];
   exhausted: boolean;
+}
+
+async function fingerprint(secret: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)));
+}
+
+/** Constant-time equality of two fingerprints. */
+function sameFingerprint(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
 }
 
 /** Monotonic clock in seconds (mirrors Python's `time.monotonic()`). */
@@ -147,15 +160,28 @@ export class TokenGate {
   }
 
   private async verifiedState(keyId: string, secret: string): Promise<VerifyResult> {
+    // The key id is public, read off any bearer header, so a cached
+    // verification answers only for the exact secret that earned it.
     const now = nowSeconds();
+    const secretFingerprint = await fingerprint(secret);
     const cached = this.states.get(keyId);
-    if (cached && cached.verifyExpires > now && cached.verify.valid) {
+    if (
+      cached &&
+      cached.verifyExpires > now &&
+      cached.verify.valid &&
+      sameFingerprint(cached.secretFingerprint, secretFingerprint)
+    ) {
       return cached.verify;
     }
 
     const verify = await this.client.verify(keyId, secret);
 
     const existing = this.states.get(keyId);
+    if (existing && !verify.valid && !sameFingerprint(existing.secretFingerprint, secretFingerprint)) {
+      // A refused secret other than the cached one says nothing about the
+      // cached credential, so it must not evict it.
+      return verify;
+    }
     if (existing) {
       // Keep the running estimate (it may be ahead of the verify-reported
       // balance because of un-flushed charges).
@@ -165,12 +191,14 @@ export class TokenGate {
       existing.verify = verify;
       existing.verifyExpires = now + this.cfg.verifyTtlSeconds;
       existing.estimatedBalance = estimated;
+      existing.secretFingerprint = secretFingerprint;
       if (verify.valid) existing.exhausted = false;
     } else {
       this.states.set(keyId, {
         verify,
         verifyExpires: now + this.cfg.verifyTtlSeconds,
         estimatedBalance: verify.balance,
+        secretFingerprint,
         pending: [],
         exhausted: false,
       });

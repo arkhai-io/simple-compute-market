@@ -25,8 +25,10 @@ checks:
   credit problem).
 - `verify_calls` / `consume_calls` — how many calls to the tokens
   service this single step triggered. These pin the two stateful
-  behaviors: a repeated key skips `verify` (the short-TTL cache), and a
-  key already known-exhausted denies with **zero** consume calls.
+  behaviors: a repeat of a verified secret skips `verify` (the short-TTL
+  cache), while another secret under the same key id is verified and, if
+  refused, leaves the cached one in place; and a key already
+  known-exhausted denies with **zero** consume calls.
 
 ## The scripted service
 
