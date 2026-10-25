@@ -248,8 +248,6 @@ def register(
             ))
             if is_enabled:
                 enabled.append(sessions[mechanism])
-        if not enabled:
-            raise typer.BadParameter("no buyer settlement mechanism is enabled")
         if from_run:
             if not is_negotiation_complete(from_run, signer=signer):
                 typer.secho(
@@ -268,6 +266,10 @@ def register(
                 console=console,
             )
             return
+        # A resumed run completes under its accepted mechanism whatever is
+        # enabled now; enablement gates only the selection of a fresh deal.
+        if not enabled:
+            raise typer.BadParameter("no buyer settlement mechanism is enabled")
         if quantity is None or quantity < 1:
             typer.secho(
                 f"Fresh `{command} buy` runs require --quantity >= 1 (how many credits to buy).",

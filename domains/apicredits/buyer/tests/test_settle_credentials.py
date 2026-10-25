@@ -348,3 +348,36 @@ def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
         e for e in read_run("run-tok-3") if e.get("event") == "escrow_release_condition_missing"
     ]
     assert reason in missing["error"]
+
+
+def test_buy_from_resumes_an_accepted_run_with_no_mechanism_enabled(
+    agreed_run,
+    fake_chain_config,
+    monkeypatch,
+):
+    """Enablement gates only a fresh deal; a run accepted under Alkahest completes after it is disabled."""
+    from typer.testing import CliRunner
+
+    import arkhai_api_buying.buy as buy
+    import arkhai_api_buying.settlement_composition as settlement_composition
+    from arkhai_apicredits_buyer.cli import app
+
+    monkeypatch.setattr(buy, "resolve_recovery_buyer_identity", lambda _run: _IDENTITY)
+    monkeypatch.setattr(
+        settlement_composition,
+        "load_user_config",
+        lambda: {"Settlement": {"schema_version": 1, "priority": [], "alkahest": {"enabled": False}}},
+    )
+    monkeypatch.setattr(alkahest_stage, "submit_settlement_request", lambda **_kw: {"status": "queued"})
+    monkeypatch.setattr(
+        alkahest_stage,
+        "wait_for_settlement",
+        lambda **_kw: {"status": "ready", "fulfillment_uid": "0x" + "ff" * 32},
+    )
+
+    result = CliRunner().invoke(app, ["credits", "buy", "--from", agreed_run, "--yes"])
+
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert any(
+        e.get("event") == "run_ended" and e.get("status") == "ready" for e in read_run(agreed_run)
+    )

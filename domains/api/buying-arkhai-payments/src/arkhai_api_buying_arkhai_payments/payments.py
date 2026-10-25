@@ -84,6 +84,20 @@ def payment_selection_for_listing(
     )
 
 
+def serviceable_payments_config(settlement_config: SettlementConfig) -> Any:
+    """The payments section an accepted payment completes under.
+
+    Enablement gates only the selection of new deals: a payment accepted while
+    the section was enabled still completes after it is disabled, so only an
+    absent section is refused. See openspec/specs/settlement-configuration/spec.md,
+    "Recovery follows the accepted settlement option".
+    """
+    config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
+    if config is None:
+        raise ValueError("buyer Arkhai payments is not configured")
+    return config
+
+
 def settle_payment(
     *,
     seller_url: str,
@@ -160,9 +174,7 @@ def settle_payment(
             "accepted Agreement settlement params differ from the buyer selection"
         )
 
-    config = settlement_config.mechanism_config(ARKHAI_PAYMENTS_CONFIG_KEY)
-    if config is None or not getattr(config, "enabled", False):
-        raise ValueError("buyer Arkhai payments is not enabled")
+    config = serviceable_payments_config(settlement_config)
     # The kit re-derives the mandate under this buyer's policy, checks the
     # seller's transaction ID, attaches only under the buyer's own
     # attach_agreement, and verifies every receipt. Acceptance already bound
@@ -312,6 +324,7 @@ __all__ = [
     "configured_payer_account",
     "payment_selection_for_listing",
     "settle_negotiation",
+    "serviceable_payments_config",
     "settle_payment",
     "validate_payer_account",
 ]

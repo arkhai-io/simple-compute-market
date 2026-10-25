@@ -8,6 +8,7 @@ from market_arkhai_payments import ARKHAI_PAYMENTS_CONFIG_KEY, ARKHAI_PAYMENTS_M
 from arkhai_api_buying_arkhai_payments.payments import (
     configured_payer_account,
     payment_selection_for_listing,
+    serviceable_payments_config,
 )
 
 
@@ -52,3 +53,13 @@ def test_the_payer_account_is_read_from_its_section() -> None:
     ) == account
     with pytest.raises(ValueError, match=r"\[example\] must be a table"):
         configured_payer_account("example", lambda: {"example": "not a table"})
+
+
+def test_an_accepted_payment_completes_under_a_disabled_section_but_not_an_absent_one() -> None:
+    disabled = SimpleNamespace(enabled=False)
+    sections = {ARKHAI_PAYMENTS_CONFIG_KEY: disabled}
+    config = SimpleNamespace(mechanism_config=lambda key: sections.get(key))
+    assert serviceable_payments_config(config) is disabled
+    sections.clear()
+    with pytest.raises(ValueError, match="not configured"):
+        serviceable_payments_config(config)
