@@ -172,6 +172,15 @@ test("fetch adapter returns 401 on a missing key", async () => {
   assert.equal(ok.status, 200);
 });
 
+/** Fails rather than hangs when a gate never reaches the held verification. */
+function within<T>(promise: Promise<T>, ms = 5000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`not settled within ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 const CLOCKS: [string, (() => number) | undefined][] = [
   ["monotonic", undefined],
   ["frozen", () => 100],
@@ -217,10 +226,10 @@ for (const [clockName, clock] of CLOCKS) test(`a late answer for an older secret
   const gate = new TokenGate(cfg(), client, { clock });
 
   const old = gate.authorize("Bearer ak_k.old");
-  await client.started;
+  await within(client.started);
   assert.ok((await gate.authorize("Bearer ak_k.new")).allowed);
   client.release();
-  assert.ok((await old).allowed);
+  assert.ok((await within(old)).allowed);
 
   const again = await gate.authorize("Bearer ak_k.old");
 
@@ -235,10 +244,10 @@ for (const [clockName, clock] of CLOCKS) test(`a late answer does not outlast a 
 
   assert.ok((await gate.authorize("Bearer ak_k.new")).allowed);
   const old = gate.authorize("Bearer ak_k.old");
-  await client.started;
+  await within(client.started);
   assert.equal((await gate.authorize("Bearer ak_k.old")).allowed, false);
   client.release();
-  await old;
+  await within(old);
 
   const again = await gate.authorize("Bearer ak_k.old");
 

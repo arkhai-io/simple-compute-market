@@ -26,7 +26,7 @@ pub struct ScriptState {
     cursor: HashMap<(String, String), usize>,
     pub verify_calls: HashMap<String, usize>,
     pub consume_calls: HashMap<String, usize>,
-    pub verified_secrets: Vec<String>,
+    pub verified_secrets: Vec<Option<String>>,
 }
 
 impl ScriptState {
@@ -60,8 +60,12 @@ async fn verify_handler(
 ) -> (StatusCode, Json<Value>) {
     let mut s = state.lock().unwrap();
     *s.verify_calls.entry(key_id.clone()).or_insert(0) += 1;
-    let secret = request["secret"].as_str().expect("verify sends a secret");
-    s.verified_secrets.push(secret.to_string());
+    s.verified_secrets.push(
+        request
+            .get("secret")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    );
     let script = s.verify.clone();
     let body = s.next("verify", &key_id, &script);
     (StatusCode::OK, Json(body))

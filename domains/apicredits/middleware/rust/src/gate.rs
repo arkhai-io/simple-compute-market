@@ -597,20 +597,30 @@ mod tests {
         ))
     }
 
+    /// Fails rather than hangs when a gate never reaches the held verification.
+    async fn within<F: std::future::Future>(future: F) -> F::Output {
+        tokio::time::timeout(Duration::from_secs(5), future)
+            .await
+            .expect("not settled within 5 s")
+    }
+
     async fn hold_old_secret(
         gate: &Arc<TokenGate<HeldVerificationClient>>,
     ) -> tokio::task::JoinHandle<GateDecision> {
         let held = gate.clone();
         let old = tokio::spawn(async move { held.authorize(Some("Bearer ak_k.old"), None).await });
-        gate.client.started.notified().await;
+        within(gate.client.started.notified()).await;
         old
     }
 
     #[tokio::test]
-    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one() {
-        for clock in [Instant::now as fn() -> Instant, frozen] {
-            a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(clock).await;
-        }
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_monotonic_clock() {
+        a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(Instant::now).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_frozen_clock() {
+        a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(frozen).await;
     }
 
     async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(
@@ -621,7 +631,7 @@ mod tests {
         let old = hold_old_secret(&gate).await;
         assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
         gate.client.release.notify_one();
-        assert!(old.await.unwrap().allowed);
+        assert!(within(old).await.unwrap().allowed);
 
         let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
 
@@ -634,10 +644,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret() {
-        for clock in [Instant::now as fn() -> Instant, frozen] {
-            a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(clock).await;
-        }
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_monotonic_clock() {
+        a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(Instant::now).await;
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_frozen_clock() {
+        a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(frozen).await;
     }
 
     async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(
@@ -649,7 +662,7 @@ mod tests {
         let old = hold_old_secret(&gate).await;
         assert!(!gate.authorize(Some("Bearer ak_k.old"), None).await.allowed);
         gate.client.release.notify_one();
-        old.await.unwrap();
+        within(old).await.unwrap();
 
         let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
 

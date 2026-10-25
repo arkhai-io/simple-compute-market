@@ -53,7 +53,7 @@ class _ScriptedService:
         if path.endswith("/verify"):
             key_id = parts[-2]
             self.verify_calls[key_id] += 1
-            self.verified_secrets.append(json.loads(request.content)["secret"])
+            self.verified_secrets.append(_sent_secret(request))
             body = self._next("verify", key_id, self._verify)
             return httpx.Response(200, json=body)
         if path.endswith("/consume"):
@@ -62,6 +62,15 @@ class _ScriptedService:
             entry = self._next("consume", key_id, self._consume)
             return httpx.Response(entry.get("status", 200), json=entry.get("body", {}))
         raise AssertionError(f"unexpected request to {path}")
+
+
+def _sent_secret(request: httpx.Request) -> str | None:
+    """The verify body's secret, or None when it carries none, so the step fails rather than the harness."""
+    try:
+        body = json.loads(request.content)
+    except ValueError:
+        return None
+    return body.get("secret") if isinstance(body, dict) else None
 
 
 def _config_from(fixture: dict[str, Any]) -> GateConfig:

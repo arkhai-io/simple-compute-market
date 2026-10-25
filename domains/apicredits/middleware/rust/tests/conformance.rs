@@ -106,11 +106,11 @@ async fn recorded_session_matches() {
             step["consume_calls"].as_u64().unwrap() as usize,
             "[{name}] consume calls"
         );
-        let want: Vec<&str> = step["verified_secrets"]
+        let want: Vec<Option<String>> = step["verified_secrets"]
             .as_array()
             .expect("verified_secrets")
             .iter()
-            .map(|s| s.as_str().unwrap())
+            .map(|s| s.as_str().map(str::to_string))
             .collect();
         assert_eq!(
             state.lock().unwrap().verified_secrets[before_s..],

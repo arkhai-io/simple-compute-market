@@ -21,10 +21,20 @@ interface ServiceScript {
   consume?: Record<string, ConsumeEntry[]>;
 }
 
+/** The verify body's secret, or null when it carries none, so the step fails rather than the harness. */
+function sentSecret(raw: string): string | null {
+  try {
+    const body = JSON.parse(raw) as { secret?: unknown };
+    return typeof body?.secret === "string" ? body.secret : null;
+  } catch {
+    return null;
+  }
+}
+
 export class ScriptedService {
   readonly verifyCalls = new Map<string, number>();
   readonly consumeCalls = new Map<string, number>();
-  readonly verifiedSecrets: string[] = [];
+  readonly verifiedSecrets: (string | null)[] = [];
   private readonly cursor = new Map<string, number>();
   private readonly verify: Record<string, Record<string, unknown>[]>;
   private readonly consume: Record<string, ConsumeEntry[]>;
@@ -60,7 +70,7 @@ export class ScriptedService {
     if (path.endsWith("/verify")) {
       const keyId = parts[parts.length - 2];
       this.bump(this.verifyCalls, keyId);
-      this.verifiedSecrets.push((JSON.parse(raw) as { secret: string }).secret);
+      this.verifiedSecrets.push(sentSecret(raw));
       return { status: 200, body: this.next("verify", keyId, this.verify) };
     }
     if (path.endsWith("/consume")) {
