@@ -2872,8 +2872,18 @@ Delivers `domains/api/buying` (`arkhai_api_buying`), `domains/api/buying-alkahes
 and `domains/api/buying-arkhai-payments`, and leaves the API-credits buyer
 plugin as its registrations (D2, D5, D7, D12; `api-family` scenario "A buyer
 plugin is installed"). Touches the three new projects and every module under
-`domains/apicredits/buyer/src/arkhai_apicredits_buyer/`, and
-`arkhai_apicredits/negotiation/buyer_policies.py`.
+`domains/apicredits/buyer/src/arkhai_apicredits_buyer/`,
+`arkhai_apicredits/negotiation/buyer_policies.py`, and (amended 2026-10-25)
+`docs/development/ARCHITECTURE.toml`.
+
+**Amended 2026-10-25, before the section was committed.** Implementing it,
+`make check-architecture` reported three `layer` findings: each buying library
+depends on `arkhai-core-buyer`, which 10.1 lists and which is a composition,
+while D2 and D14 recorded only `selling`'s edge into the core storefront. The
+owner decided that a new proposal-only change, `kit-owned-buyer-orchestration`,
+owns three temporary exception rows for the edges and retires them by moving
+the buyer role's reusable orchestration into a kit; D2, D14, 10.5, 11.7, and
+the promotion record carry the decision.
 
 - [ ] 10.1 `domains/api/buying/` (`arkhai-api-buying` 0.1.0; dependencies
       `arkhai-api`, `arkhai-api-contracts`, `arkhai-api-client`, `arkhai-core`,
@@ -2896,6 +2906,15 @@ plugin is installed"). Touches the three new projects and every module under
       the kit, the three deselected `test_plugin_export.py` cases included or
       their deselection carried with its reason. A packaging test that a buyer
       environment installs no selling or authority distribution. (D12, D13.)
+- [ ] 10.5 `docs/development/ARCHITECTURE.toml` gains three `layer` exception
+      rows, `arkhai-api-buying`, `arkhai-api-buying-alkahest`, and
+      `arkhai-api-buying-arkhai-payments` on `arkhai-core-buyer`, each owned by
+      `kit-owned-buyer-orchestration` and giving the modules it imports;
+      `make check-architecture` reports nothing for them, and
+      `make check-architecture-change CHANGE=compose-api-family-kit` stays
+      clean, since this change introduces the rows and owns none. (D2, D14.)
+      Amended 2026-10-25 by the owner's decision on the stop recorded below;
+      run before 10.4, whose `make check-packaging` it makes pass.
 - [ ] 10.4 Verification: `make test-api-buying`, `make test-api-buying-alkahest`,
       `make test-api-buying-arkhai-payments` (unit, library integration),
       `make -C domains/apicredits test-buyer` (application integration through
@@ -2928,7 +2947,10 @@ change to implementation.
 - [ ] 11.7 **Packaging.** `make check-packaging`, then
       `make check-architecture-change CHANGE=compose-api-family-kit`: the change
       owns no override or exception row (the domain library's row was removed
-      in 8.3), and every `domains/api` project classifies from its path.
+      in 8.3; the four library-on-role exception rows it introduced are owned by
+      `kit-owned-storefront-auth-and-persistence` and
+      `kit-owned-buyer-orchestration`), and every `domains/api` project
+      classifies from its path.
 - [ ] 11.8 **End-to-end pipeline.** Record the lane run, its result, and that
       `e2e_credits_deal`, `e2e_credits_payment_deal`, and
       `e2e_credits_service_rollback` exercised this change, from validation's
@@ -2962,6 +2984,7 @@ change to implementation.
 | D4 — plain-data route declarations adapted by the authority | `openspec/specs/api-family/spec.md` |
 | D3 — the negotiation and delivery carriers live in `contracts`, so a buyer installs no selling machinery | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
+| D2 — the three buying libraries' dependency on the buyer role, temporary exception rows owned by `kit-owned-buyer-orchestration` | `docs/development/ARCHITECTURE.toml` (exception rows); `docs/development/ARCHITECTURE.md#family-kits` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — `selling`'s configuration refusals name the key the composing storefront passes (`RoundSettings.floor_key`, `read_capacity_sites`'s `sites_key`; API credits: `[pricing].default_min_price`, `[capacity.sites]`); the pricing refusals reach the wire from a continuation, 404 `{"detail": <message>}` | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |

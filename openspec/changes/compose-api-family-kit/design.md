@@ -135,6 +135,20 @@ every module that touches the core storefront in each domain's storefront,
 would leave the binding, persistence, and route services domain-local, which
 D7 and D11 exist to prevent.
 
+The buying side has the same shape. `buying`, `buying-alkahest`, and
+`buying-arkhai-payments` build on the buyer role's orchestration, negotiation
+client, run log, configuration resolution, and settlement policy, and the
+buyer role, `arkhai-core-buyer`, is a composition, so each depends upward on
+it. The three edges are recorded as temporary `layer` exception rows owned by
+`kit-owned-buyer-orchestration`, which moves that machinery below the
+composition boundary into a kit, migrates the three libraries, and deletes the
+rows. The alternative, keeping the flows in each domain's buyer plugin, would
+leave them domain-local, which D7 exists to prevent; moving the buyer role's
+machinery here would change every domain's buyer, outside this change's
+boundary. No existing change retires the edges:
+`align-package-paths-with-layers` only moves the role's path, and
+`buyers-use-the-storefront-client` only replaces its storefront call helpers.
+
 `selling` and `buying` are named for the side of the market each serves. They
 cannot carry their roles' names: `storefront`, `buyer`, `service`, and `app`
 are the role words the check reads as "executable", and these are libraries.
@@ -575,9 +589,13 @@ identities stay compatible. No database reset
 is required, and the service's in-process migration chain is unchanged.
 `ARCHITECTURE.toml` gains the family row and the `family` attribute on the
 API-credits row, loses the domain library's override row, and needs no override
-row for any new project, because every path reads as intended. It gains one
-exception row, for `selling`'s dependency on the core storefront (D2), owned by
-`kit-owned-storefront-auth-and-persistence`, so this change owns none. The
+row for any new project, because every path reads as intended. It gains four
+exception rows, each a `layer` row naming a library's dependency on a role
+composition (D2): `arkhai-api-selling` on `arkhai-core-storefront`, owned by
+`kit-owned-storefront-auth-and-persistence`; and `arkhai-api-buying`,
+`arkhai-api-buying-alkahest`, and `arkhai-api-buying-arkhai-payments` on
+`arkhai-core-buyer`, temporary and owned by `kit-owned-buyer-orchestration`. This
+change introduces the rows and owns none of them. The
 inference row gains its attribute when that domain's campaign composes the kit.
 
 ## Risks / Trade-offs
