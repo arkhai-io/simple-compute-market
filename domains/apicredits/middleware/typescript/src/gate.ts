@@ -47,6 +47,7 @@ interface KeyState {
   verifyExpires: number; // monotonic seconds
   estimatedBalance: number;
   secretFingerprint: Uint8Array;
+  verifiedAt: number; // monotonic seconds when its verification started
   pending: ConsumeItem[];
   exhausted: boolean;
 }
@@ -162,8 +163,8 @@ export class TokenGate {
   private async verifiedState(keyId: string, secret: string): Promise<VerifyResult> {
     // The key id is public, read off any bearer header, so a cached
     // verification answers only for the exact secret that earned it.
-    const now = nowSeconds();
     const secretFingerprint = await fingerprint(secret);
+    const now = nowSeconds();
     const cached = this.states.get(keyId);
     if (
       cached &&
@@ -177,9 +178,16 @@ export class TokenGate {
     const verify = await this.client.verify(keyId, secret);
 
     const existing = this.states.get(keyId);
+    if (existing && existing.verifiedAt > now) {
+      // A verification that started after this one has already answered;
+      // an older answer must not replace what it knew.
+      return verify;
+    }
     if (existing && !verify.valid && !sameFingerprint(existing.secretFingerprint, secretFingerprint)) {
       // A refused secret other than the cached one says nothing about the
-      // cached credential, so it must not evict it.
+      // cached credential, so it must not evict it; but an older answer for
+      // this secret must not be cached over it.
+      existing.verifiedAt = Math.max(existing.verifiedAt, now);
       return verify;
     }
     if (existing) {
@@ -192,6 +200,7 @@ export class TokenGate {
       existing.verifyExpires = now + this.cfg.verifyTtlSeconds;
       existing.estimatedBalance = estimated;
       existing.secretFingerprint = secretFingerprint;
+      existing.verifiedAt = now;
       if (verify.valid) existing.exhausted = false;
     } else {
       this.states.set(keyId, {
@@ -199,6 +208,7 @@ export class TokenGate {
         verifyExpires: now + this.cfg.verifyTtlSeconds,
         estimatedBalance: verify.balance,
         secretFingerprint,
+        verifiedAt: now,
         pending: [],
         exhausted: false,
       });

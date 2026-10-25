@@ -65,6 +65,7 @@ struct KeyState {
     verify_expires: Instant,
     estimated_balance: i64,
     secret_fingerprint: [u8; 32],
+    verified_at: Instant,
     pending: Vec<ConsumeItem>,
     exhausted: bool,
 }
@@ -218,11 +219,18 @@ impl<C: TokensApi + 'static> TokenGate<C> {
         let ttl = Duration::from_secs_f64(self.cfg.verify_ttl_seconds);
         let mut states = self.states.lock().unwrap();
         match states.get_mut(key_id) {
+            // A verification that started after this one has already
+            // answered; an older answer must not replace what it knew.
+            Some(existing) if existing.verified_at > now => {}
             // A refused secret other than the cached one says nothing about
-            // the cached credential, so it must not evict it.
+            // the cached credential, so it must not evict it; but an older
+            // answer for this secret must not be cached over it.
             Some(existing)
                 if !verify.valid
-                    && !same_fingerprint(&existing.secret_fingerprint, &secret_fingerprint) => {}
+                    && !same_fingerprint(&existing.secret_fingerprint, &secret_fingerprint) =>
+            {
+                existing.verified_at = existing.verified_at.max(now);
+            }
             Some(existing) => {
                 // Keep the running estimate (it may be ahead of the
                 // verify-reported balance because of un-flushed charges).
@@ -235,6 +243,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                 existing.verify_expires = now + ttl;
                 existing.estimated_balance = estimated;
                 existing.secret_fingerprint = secret_fingerprint;
+                existing.verified_at = now;
                 if verify.valid {
                     existing.exhausted = false;
                 }
@@ -247,6 +256,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                         verify_expires: now + ttl,
                         estimated_balance: verify.balance,
                         secret_fingerprint,
+                        verified_at: now,
                         pending: Vec::new(),
                         exhausted: false,
                     },
@@ -510,5 +520,110 @@ mod tests {
         assert!(d.allowed);
         assert_eq!(gate.client.consume_calls.lock().unwrap().len(), 1);
         assert!(gate.client.batch_calls.lock().unwrap().is_empty());
+    }
+
+    /// Holds the first verification of one secret, answering it valid,
+    /// until the test releases it.
+    struct HeldVerificationClient {
+        held: String,
+        holding: StdMutex<bool>,
+        accepted: String,
+        verified: StdMutex<Vec<String>>,
+        started: tokio::sync::Notify,
+        release: tokio::sync::Notify,
+    }
+
+    impl TokensApi for HeldVerificationClient {
+        async fn verify(&self, _key_id: &str, secret: &str) -> VerifyResult {
+            self.verified.lock().unwrap().push(secret.to_string());
+            let held =
+                secret == self.held && !std::mem::replace(&mut *self.holding.lock().unwrap(), true);
+            if held {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            let valid = held || secret == self.accepted;
+            VerifyResult {
+                valid,
+                status: valid.then(|| "active".to_string()),
+                balance: if valid { 10 } else { 0 },
+            }
+        }
+
+        async fn consume(&self, _key_id: &str, amount: i64, _idem: Option<&str>) -> ConsumeResult {
+            ConsumeResult {
+                ok: true,
+                balance: 9,
+                consumed: amount,
+                duplicate: false,
+                reason: None,
+            }
+        }
+
+        async fn consume_batch(&self, _items: &[ConsumeItem]) -> Vec<ConsumeResult> {
+            Vec::new()
+        }
+    }
+
+    fn held_gate() -> Arc<TokenGate<HeldVerificationClient>> {
+        Arc::new(TokenGate::new(
+            cfg(0.0, 0),
+            HeldVerificationClient {
+                held: "ak_k.old".to_string(),
+                holding: StdMutex::new(false),
+                accepted: "ak_k.new".to_string(),
+                verified: StdMutex::new(Vec::new()),
+                started: tokio::sync::Notify::new(),
+                release: tokio::sync::Notify::new(),
+            },
+        ))
+    }
+
+    async fn hold_old_secret(
+        gate: &Arc<TokenGate<HeldVerificationClient>>,
+    ) -> tokio::task::JoinHandle<GateDecision> {
+        let held = gate.clone();
+        let old = tokio::spawn(async move { held.authorize(Some("Bearer ak_k.old"), None).await });
+        gate.client.started.notified().await;
+        old
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one() {
+        let gate = held_gate();
+
+        let old = hold_old_secret(&gate).await;
+        assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
+        gate.client.release.notify_one();
+        assert!(old.await.unwrap().allowed);
+
+        let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
+
+        assert!(!again.allowed);
+        assert_eq!(again.status, 401);
+        assert_eq!(
+            *gate.client.verified.lock().unwrap(),
+            ["ak_k.old", "ak_k.new", "ak_k.old"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret() {
+        let gate = held_gate();
+
+        assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
+        let old = hold_old_secret(&gate).await;
+        assert!(!gate.authorize(Some("Bearer ak_k.old"), None).await.allowed);
+        gate.client.release.notify_one();
+        old.await.unwrap();
+
+        let again = gate.authorize(Some("Bearer ak_k.old"), None).await;
+
+        assert!(!again.allowed);
+        assert_eq!(again.status, 401);
+        assert_eq!(
+            *gate.client.verified.lock().unwrap(),
+            ["ak_k.new", "ak_k.old", "ak_k.old", "ak_k.old"]
+        );
     }
 }
