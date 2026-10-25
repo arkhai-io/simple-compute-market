@@ -58,6 +58,7 @@ class _KeyState:
     verify_expires: float
     estimated_balance: int
     secret_fingerprint: bytes
+    verified_at: float
     pending: list[dict[str, Any]] = field(default_factory=list)
     exhausted: bool = False
 
@@ -169,13 +170,19 @@ class TokenGate:
 
         async with self._lock:
             existing = self._states.get(key_id)
+            if existing is not None and existing.verified_at > now:
+                # A verification that started after this one has already
+                # answered; an older answer must not replace what it knew.
+                return verify
             if (
                 existing is not None
                 and not verify.valid
                 and not hmac.compare_digest(existing.secret_fingerprint, fingerprint)
             ):
                 # A refused secret other than the cached one says nothing
-                # about the cached credential, so it must not evict it.
+                # about the cached credential, so it must not evict it; but
+                # an older answer for this secret must not be cached over it.
+                existing.verified_at = max(existing.verified_at, now)
                 return verify
             estimated = verify.balance
             if existing is not None:
@@ -186,6 +193,7 @@ class TokenGate:
                 existing.verify = verify
                 existing.verify_expires = now + self._cfg.verify_ttl_seconds
                 existing.secret_fingerprint = fingerprint
+                existing.verified_at = now
                 existing.estimated_balance = estimated
                 if verify.valid:
                     existing.exhausted = False
@@ -195,6 +203,7 @@ class TokenGate:
                     verify_expires=now + self._cfg.verify_ttl_seconds,
                     estimated_balance=estimated,
                     secret_fingerprint=fingerprint,
+                    verified_at=now,
                 )
         return verify
 

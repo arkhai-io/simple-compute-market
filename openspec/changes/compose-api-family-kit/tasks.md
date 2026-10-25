@@ -2827,6 +2827,31 @@ and domains Makefiles, `docs/development/RELEASING.md`.
       path, the exhausted short-circuit, expiry, or the two lock sections,
       and no regression; its one nit, this test module's docstring, is
       fixed.
+      **Ordering fix (2026-10-25).** A further report showed that a
+      verification's answer was installed whenever it arrived, so a
+      delayed answer for an older secret could replace a newer one — a
+      rotated or revoked secret cached again until its entry expired, the
+      newer verification's knowledge lost. Each entry now records when its
+      verification started (`verified_at`), and an answer is installed only
+      if its verification started later than the cached one's; an older
+      answer still decides its own request, which was in flight when the
+      authority gave it. The restored window never outlived the old answer's
+      own TTL, since expiry counts from the verification's start, so this is
+      ordering within the cache's staleness bound rather than a bypass. A
+      refused secret other than the cached one leaves the entry in place but
+      advances its `verified_at`, so an older answer for that secret is not
+      cached over the newer refusal. Unit (`test_gate.py`, each failing
+      without its guard): an old secret's verification is held while a new
+      secret is verified and cached, then released, and the old secret
+      presented again is re-verified and refused; and with the new secret
+      cached, the old secret's held verification is overtaken by its own
+      refusal, then released, and the old secret is again re-verified and
+      refused. Gate 24, sample app 3, service 43 passed. A fresh-context
+      check found the refusal-path gap now fixed; it accepted a strict
+      start-time comparison on equal timestamps, and an uncached older answer
+      charging against the newer entry, which a refused charge already
+      handles. The TypeScript and Rust gates take the same fix in the
+      follow-up security PR.
 
 ## 10. Buying and the buying-side mechanism distributions
 

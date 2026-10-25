@@ -8,6 +8,8 @@ cached verification answering only for the secret that earned it.
 
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 
 from arkhai_api_gate.client import ConsumeResult, TokensClient, VerifyResult
@@ -204,3 +206,58 @@ async def test_a_rotated_secret_the_authority_accepts_replaces_the_cached_one():
     await gate.authorize("Bearer ak_k.first")
 
     assert client.verified == ["ak_k.first", "ak_k.rotated", "ak_k.first"]
+
+
+class HeldVerificationClient(SecretCheckingClient):
+    """Holds the first verification of one secret, answering it valid, until the test releases it."""
+
+    def __init__(self, held: str, *accepted: str) -> None:
+        super().__init__(*accepted)
+        self.held = held
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def verify(self, *, key_id: str, secret: str) -> VerifyResult:
+        if secret != self.held or self.started.is_set():
+            return await super().verify(key_id=key_id, secret=secret)
+        self.verified.append(secret)
+        self.started.set()
+        await self.release.wait()
+        return VerifyResult(valid=True, status="active", balance=10)
+
+
+async def _hold_old_secret(gate: TokenGate, client: HeldVerificationClient) -> asyncio.Future:
+    old = asyncio.ensure_future(gate.authorize("Bearer ak_k.old"))
+    await asyncio.wait_for(client.started.wait(), timeout=5)
+    return old
+
+
+async def test_a_late_answer_for_an_older_secret_does_not_replace_a_newer_one():
+    client = HeldVerificationClient("ak_k.old", "ak_k.new")
+    gate = TokenGate(_cfg(), client)
+
+    old = await _hold_old_secret(gate, client)
+    assert (await gate.authorize("Bearer ak_k.new")).allowed
+    client.release.set()
+    assert (await asyncio.wait_for(old, timeout=5)).allowed
+
+    again = await gate.authorize("Bearer ak_k.old")
+
+    assert (again.allowed, again.status) == (False, 401)
+    assert client.verified == ["ak_k.old", "ak_k.new", "ak_k.old"]
+
+
+async def test_a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret():
+    client = HeldVerificationClient("ak_k.old", "ak_k.new")
+    gate = TokenGate(_cfg(), client)
+
+    assert (await gate.authorize("Bearer ak_k.new")).allowed
+    old = await _hold_old_secret(gate, client)
+    assert not (await gate.authorize("Bearer ak_k.old")).allowed
+    client.release.set()
+    await asyncio.wait_for(old, timeout=5)
+
+    again = await gate.authorize("Bearer ak_k.old")
+
+    assert (again.allowed, again.status) == (False, 401)
+    assert client.verified == ["ak_k.new", "ak_k.old", "ak_k.old", "ak_k.old"]
