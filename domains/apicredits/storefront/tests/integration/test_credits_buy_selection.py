@@ -20,13 +20,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from arkhai_apicredits_buyer import (
-    buy_cli,
-    common,
-    payments,
-    settlement_composition,
-    settlement_stages,
-)
+from arkhai_api_buying import buy as buy_cli
+from arkhai_api_buying import settlement_composition
+from arkhai_api_buying_arkhai_payments import payments
+from arkhai_api_buying_arkhai_payments import stage as settlement_stages
 from arkhai_apicredits_buyer.cli import app as buyer_app
 from core_buyer import BuyResult, orchestration
 from core_buyer.buyer_config import ResolvedBuyerIdentity
@@ -155,7 +152,7 @@ def buyer(storefront, monkeypatch, tmp_path):
         "resolve_registry_api_keys": lambda: {},
     }
     for name, seam in seams.items():
-        monkeypatch.setattr(common, name, seam)
+        monkeypatch.setattr(buy_cli, name, seam)
     monkeypatch.setattr(
         buy_cli, "query_registry_for_matches_multi", lambda *_a, **_kw: [dict(listing)]
     )
@@ -182,7 +179,7 @@ def buyer(storefront, monkeypatch, tmp_path):
             agreed_amount=negotiation.outcome.agreed_amount,
         )
 
-    monkeypatch.setattr(settlement_stages, "settle_api_credit_negotiation", settle)
+    monkeypatch.setattr(settlement_stages, "settle_negotiation", settle)
     return SimpleNamespace(settled=settled)
 
 

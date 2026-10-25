@@ -23,7 +23,9 @@ import pytest
 from apicredits_storefront.domain_runtime import get_market_domain_contract
 from apicredits_storefront.server import build_api_credit_negotiation_runtime
 from apicredits_storefront.container import SELLER_STAGES
-from arkhai_apicredits_buyer import negotiate_cli, payments, settlement_composition
+from arkhai_api_buying import negotiate as negotiate_cli
+from arkhai_api_buying import settlement_composition
+from arkhai_api_buying_arkhai_payments import payments
 from arkhai_apicredits_buyer.cli import app as buyer_app
 from core_buyer import orchestration
 from core_buyer.buyer_config import ResolvedBuyerIdentity

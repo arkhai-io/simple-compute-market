@@ -62,11 +62,12 @@ def test_domain_wheel_owns_shared_concepts(wheels: dict[str, Path]) -> None:
             "arkhai_apicredits/settlement/issuance_evidence.py",
             "arkhai_apicredits/listings/reconciler.py",
             "arkhai_apicredits/negotiation/policies.py",
+            "arkhai_apicredits/negotiation/buyer_policies.py",
             "arkhai_apicredits/settlement/payments.py",
         }
     )
     assert _requirements(wheels["domain"]).keys().isdisjoint(
-        {"arkhai-kit-alkahest", "arkhai-kit-arkhai-payments"}
+        {"arkhai-kit-alkahest", "arkhai-kit-arkhai-payments", "arkhai-kit-policy"}
     )
 
 
@@ -83,7 +84,9 @@ def test_role_wheels_do_not_duplicate_shared_concepts(
 
     assert shared_files.isdisjoint(buyer_files)
     assert shared_files.isdisjoint(storefront_files)
-    assert "arkhai_apicredits_buyer/cli.py" in buyer_files
+    assert {
+        name for name in buyer_files if name.startswith("arkhai_apicredits_buyer/")
+    } == {"arkhai_apicredits_buyer/__init__.py", "arkhai_apicredits_buyer/cli.py"}
     assert "apicredits_storefront/domain_runtime.py" in storefront_files
 
 
@@ -105,7 +108,9 @@ def test_role_wheels_require_shared_domain_and_versioned_core(
             "arkhai-apicredits-domain",
             "arkhai-core",
             "arkhai-core-buyer",
-            "arkhai-kit-arkhai-payments",
+            "arkhai-api-buying",
+            "arkhai-api-buying-alkahest",
+            "arkhai-api-buying-arkhai-payments",
         },
         "storefront": {
             "arkhai-api-selling",

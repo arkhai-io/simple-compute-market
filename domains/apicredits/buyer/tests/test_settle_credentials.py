@@ -1,9 +1,9 @@
 """`market credits settle --from` delivers issued credentials to the run-log.
 
-Drives ``run_settle_from_log`` off a synthetic run-log with an agreed
-negotiation and an already-created escrow (stage 3 skipped), with the
-settle submit/poll HTTP patched at the credits module seam. The
-once-only secret must land durably in the run-log
+Drives ``run_settle_from_log`` through the plugin's composition off a
+synthetic run-log with an agreed negotiation and an already-created escrow
+(stage 3 skipped), with the settle submit/poll HTTP patched at the Alkahest
+stage's seam. The once-only secret must land durably in the run-log
 (``credentials_delivered``) — that file is the buyer's only copy.
 """
 
@@ -18,7 +18,10 @@ from types import SimpleNamespace
 import pytest
 import typer
 
-import arkhai_apicredits_buyer.settle_cli as settle_cli
+import arkhai_api_buying.stages as stages
+import arkhai_api_buying_alkahest.stage as alkahest_stage
+from arkhai_api_buying.settle import run_settle_from_log
+from arkhai_apicredits_buyer.cli import SETTLEMENT
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
 from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
@@ -130,7 +133,7 @@ def agreed_run(tmp_path, monkeypatch):
 
 @pytest.fixture
 def fake_chain_config(monkeypatch):
-    import arkhai_apicredits_buyer.common as common
+    import arkhai_api_buying.common as common
 
     chain = SimpleNamespace(
         name="anvil",
@@ -138,9 +141,9 @@ def fake_chain_config(monkeypatch):
         chain_id=31337,
         alkahest_address_config_path=None,
     )
-    monkeypatch.setattr(common, "chain_by_name", lambda name: chain)
+    monkeypatch.setattr(alkahest_stage, "chain_by_name", lambda name: chain)
     monkeypatch.setattr(
-        common,
+        alkahest_stage,
         "resolve_buyer_wallet",
         lambda **_kw: ("0x" + "cc" * 20, "0x" + "11" * 32),
     )
@@ -163,7 +166,7 @@ def fake_chain_config(monkeypatch):
     monkeypatch.setattr(common, "resolve_registry_api_keys", lambda: {})
     monkeypatch.setattr(common, "resolve_discovery_timeout", lambda: 5.0)
     monkeypatch.setattr(
-        settle_cli,
+        stages,
         "make_publisher_trust_resolver",
         lambda **_kwargs: lambda: trust,
     )
@@ -181,9 +184,9 @@ def test_settle_writes_credentials_delivered_event(
         submitted.update(kw)
         return {"status": "queued"}
 
-    monkeypatch.setattr(settle_cli, "submit_settlement_request", fake_submit)
+    monkeypatch.setattr(alkahest_stage, "submit_settlement_request", fake_submit)
     monkeypatch.setattr(
-        settle_cli,
+        alkahest_stage,
         "wait_for_settlement",
         lambda **kw: {
             "status": "ready",
@@ -192,13 +195,11 @@ def test_settle_writes_credentials_delivered_event(
         },
     )
 
-    final = settle_cli.run_settle_from_log(
+    final = run_settle_from_log(
+        SETTLEMENT,
         run_id=agreed_run,
-        escrow_uid=None,
         identity=_IDENTITY,
-        evm_address=None,
-        evm_private_key=None,
-        chain_name=None,
+        options={},
         poll_interval=0.01,
         settlement_timeout=5.0,
     )
@@ -258,13 +259,11 @@ def test_settle_without_agreed_proposal_refuses(
     )
 
     with pytest.raises(typer.Exit):
-        settle_cli.run_settle_from_log(
+        run_settle_from_log(
+            SETTLEMENT,
             run_id="run-tok-2",
-            escrow_uid=None,
             identity=_IDENTITY,
-            evm_address=None,
-            evm_private_key=None,
-            chain_name=None,
+            options={},
             poll_interval=0.01,
             settlement_timeout=5.0,
         )
@@ -332,16 +331,14 @@ def test_settle_creates_no_escrow_from_an_accepted_proposal_alone(
 
         return refuse
 
-    monkeypatch.setattr(settle_cli, "make_create_escrow_fn", _no_escrow)
+    monkeypatch.setattr(alkahest_stage, "make_create_escrow_fn", _no_escrow)
 
     with pytest.raises(typer.Exit) as refused:
-        settle_cli.run_settle_from_log(
+        run_settle_from_log(
+            SETTLEMENT,
             run_id="run-tok-3",
-            escrow_uid=None,
             identity=_IDENTITY,
-            evm_address=None,
-            evm_private_key=None,
-            chain_name=None,
+            options={},
             poll_interval=0.01,
             settlement_timeout=5.0,
         )

@@ -63,6 +63,9 @@ jobs:
           - { name: api-selling,            dir: domains/api/selling, predist: true }
           - { name: api-selling-alkahest,   dir: domains/api/selling-alkahest, predist: true }
           - { name: api-selling-arkhai-payments, dir: domains/api/selling-arkhai-payments, predist: true }
+          - { name: api-buying,             dir: domains/api/buying, predist: true }
+          - { name: api-buying-alkahest,    dir: domains/api/buying-alkahest, predist: true }
+          - { name: api-buying-arkhai-payments, dir: domains/api/buying-arkhai-payments, predist: true }
           - { name: api-gate,               dir: domains/api/gate, predist: true }
           - { name: vms-domain,             dir: domains/vms/domain, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
@@ -79,7 +82,10 @@ jobs:
           - { name: vms-storefront,         dir: domains/vms/storefront, predist: true, pytest_args: "--deselect tests/integration/test_alkahest.py::test_rust --deselect tests/integration/test_alkahest.py::test_python" }
           - { name: compute-provisioning-service, dir: provisioning/compute/service, predist: true }
           - { name: apicredits-domain,       dir: domains/apicredits, predist: true }
-          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_listing_surface_uses_typed_resource_query" }
+          # Deselected for the reason given at vms-buyer: these assert option
+          # flags in `typer --help` output, which comes back empty under
+          # headless pytest capture in CI.
+          - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_uses_typed_resource_query" }
           - { name: apicredits-storefront,   dir: domains/apicredits/storefront, predist: true }
           - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }
           - { name: apicredits-sample-app,   dir: domains/apicredits/sample-app, predist: true }

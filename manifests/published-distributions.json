@@ -162,6 +162,21 @@
       "dist": "arkhai-api-selling-arkhai-payments"
     },
     {
+      "key": "api-buying",
+      "path": "domains/api/buying",
+      "dist": "arkhai-api-buying"
+    },
+    {
+      "key": "api-buying-alkahest",
+      "path": "domains/api/buying-alkahest",
+      "dist": "arkhai-api-buying-alkahest"
+    },
+    {
+      "key": "api-buying-arkhai-payments",
+      "path": "domains/api/buying-arkhai-payments",
+      "dist": "arkhai-api-buying-arkhai-payments"
+    },
+    {
       "key": "api-gate",
       "path": "domains/api/gate",
       "dist": "arkhai-api-gate"

@@ -17,7 +17,11 @@ from market_core.schemas import Agreement, RateValue, SettlementOption, derive_s
 from market_identity import Ed25519Signer, ResponseEnvelope, TrustedIdentitySet, canonical_body_hash, sign_response
 from typer.testing import CliRunner
 
-from arkhai_apicredits_buyer import common, negotiate_cli, payments, settlement_composition, settlement_stages
+from arkhai_api_buying import common, settlement_composition
+from arkhai_api_buying import negotiate as negotiate_cli
+from arkhai_api_buying_alkahest import chains
+from arkhai_api_buying_alkahest import stage as settlement_stages
+from arkhai_api_buying_arkhai_payments import payments
 from arkhai_apicredits_buyer.cli import app
 from test_negotiation_flow import _MockResponse, _request_header
 
@@ -96,7 +100,7 @@ def surface(monkeypatch, tmp_path):
         }
         monkeypatch.setattr(common, "fetch_listing_dict", lambda *a, **kw: dict(listing))
         monkeypatch.setattr("core_buyer.orchestration.fetch_listing_dict", lambda *a, **kw: dict(listing))
-        monkeypatch.setattr("arkhai_apicredits_buyer.negotiate_cli.fetch_listing_dict", lambda *a, **kw: dict(listing))
+        monkeypatch.setattr("arkhai_api_buying.negotiate.fetch_listing_dict", lambda *a, **kw: dict(listing))
         state.option = option
         return state
 
@@ -221,7 +225,7 @@ def test_payment_cli_resume_uses_recorded_selection_without_fresh_admission(surf
 def test_alkahest_cli_keeps_explicit_scaling_and_derived_base_units(surface, monkeypatch, prices, amount):
     state = surface.configure("alkahest.v1")
     chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
-    monkeypatch.setattr(common, "buyer_chains", lambda: {"anvil": chain})
+    monkeypatch.setattr(chains, "buyer_chains", lambda: {"anvil": chain})
     monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda **kw: ("0x" + "11" * 20, None))
     _transport(monkeypatch, state, ["exit"])
     result = _fresh(*prices)
@@ -240,3 +244,20 @@ def test_selected_alkahest_refuses_missing_wallet_before_seller_request(surface,
     assert result.exit_code == 2, (result.output, result.exception)
     assert "Missing EVM address" in result.output
     assert state.requests == []
+
+
+def test_an_evm_key_given_as_a_stage_option_never_reaches_the_run_log(surface, monkeypatch):
+    state = surface.configure("alkahest.v1")
+    chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
+    monkeypatch.setattr(chains, "buyer_chains", lambda: {"anvil": chain})
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda **kw: ("0x" + "11" * 20, kw["override_pk"]))
+    # A deterministic development key for this test only; never used on any network.
+    key = "0x" + "77" * 32
+    _transport(monkeypatch, state, ["exit"])
+    result = _fresh("--evm-private-key", key, "--token-decimals", "2", "--initial-price", "2", "--max-price", "3")
+    assert result.exit_code == 4, (result.output, result.exception)
+    events = read_run(_run_id(result), signer=_BUYER)
+    assert key not in json.dumps(events)
+    started = events[0]
+    assert started["token_decimals"] == 2 and started["chain_name"] == "anvil"
+    assert "evm_private_key" not in started["policy_params"]

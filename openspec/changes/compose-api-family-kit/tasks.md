@@ -2885,7 +2885,7 @@ owns three temporary exception rows for the edges and retires them by moving
 the buyer role's reusable orchestration into a kit; D2, D14, 10.5, 11.7, and
 the promotion record carry the decision.
 
-- [ ] 10.1 `domains/api/buying/` (`arkhai-api-buying` 0.1.0; dependencies
+- [x] 10.1 `domains/api/buying/` (`arkhai-api-buying` 0.1.0; dependencies
       `arkhai-api`, `arkhai-api-contracts`, `arkhai-api-client`, `arkhai-core`,
       `arkhai-core-buyer`, `arkhai-kit-identity`, `arkhai-kit-config`,
       `arkhai-kit-policy`, `arkhai-kit-settlement-runtime`; no mechanism kit):
@@ -2895,31 +2895,159 @@ the promotion record carry the decision.
       schema identity and rendering taken from the bundle; the buyer guards
       from `buyer_policies.py`; `settlement_composition.py` over injected
       entries. (D7.)
-- [ ] 10.2 `domains/api/buying-alkahest/` (dependencies `arkhai-api-buying`,
+      *Done 2026-10-25.* `arkhai-api-buying` 0.1.0 declares what its source
+      imports: `arkhai-api`, `arkhai-core`, `arkhai-core-buyer`,
+      `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`,
+      `arkhai-kit-settlement-runtime`, `rich`, `typer`. Amended at
+      implementation: it imports neither `arkhai-api-contracts` nor
+      `arkhai-api-client`, since a buyer never calls the authority and decodes a
+      delivery through its domain's market contract, so it declares neither; D2
+      and the `api-family` delta now say so. `contributions.py`:
+      `BuyingContributions` (schema identity, the purchase-terms binding, the
+      command name and help, the `noun` output and refusals use, an example
+      resource query) and `ListingRendering` (resource reader, summary column,
+      extra columns, show rows). The bundle's filters are the registry schema's
+      filter spec, which types every resource query, so it names the schema and
+      carries no filter vocabulary (D7, amended). `buy.py`, `negotiate.py`
+      (with the former `buyer_client`), `settle.py`, `listing.py`, `deal.py`,
+      and `common.py` (with the former `cli_helpers` and `render_credentials`)
+      moved with `git mv`; `commands.py` assembles the group and the settlement
+      readiness command the plugin's `cli.py` held. `guards.py` is
+      `buyer_policies.py` (`BUYER_GUARDS`, `answer_key_challenge`).
+      `settlement_composition.py`: `BuyerSettlementComposition` over the stage
+      table the plugin passes, which refuses an entry keyed by another stage's
+      mechanism, two stages contributing one command's option, and two escrow
+      codecs. `stages.py` is the stage protocol and what the flows hand a
+      stage: every mechanism step, a `BuySession` per buy, `SettlementResume`
+      (the steps every resume shares), and `StageOption`s each command adds to
+      its own and passes only to the stages, never to policy parameters or the
+      run log. The buyer-side chain helpers moved to `buying-alkahest`. Unit
+      (21): composition dispatch and refusals, priority-ordered proposals,
+      option joining and splitting, chain configuration, the command group
+      over a neutral bundle, the shared resume ending, selection capping,
+      unit price, key disposition, and the packaging test that the library's
+      lock holds no mechanism kit, selling, or authority distribution. The
+      library owns no persistence, so it has no library-integration suite; its
+      flows run as application integration through the plugin (10.3).
+- [x] 10.2 `domains/api/buying-alkahest/` (dependencies `arkhai-api-buying`,
       `arkhai-kit-alkahest`): the buyer Alkahest stage, escrow selection, and
       the escrow client helpers; `domains/api/buying-arkhai-payments/`
       (dependencies `arkhai-api-buying`, `arkhai-kit-arkhai-payments`): the
       buyer payments stage and payer selection. (D5.)
-- [ ] 10.3 The API-credits buyer plugin keeps `cli.py`'s registration under
+      *Done.* `arkhai-api-buying-alkahest` 0.1.0 (`alkahest-py`,
+      `arkhai-api-buying`, `arkhai-core-buyer`, `arkhai-kit-alkahest`,
+      `arkhai-kit-config`, `arkhai-kit-identity`, `arkhai-kit-policy`, `rich`,
+      `typer`): `stage.py` (`AlkahestBuyerStage`, its `--evm-address`,
+      `--evm-private-key`, `--chain`, `--token-contract`, `--token-decimals`, and
+      `--escrow-uid` options, its buy session, its resume, the accepted-escrows
+      listing row), `escrow_selection.py`, `escrow_client.py` (with
+      `AlkahestEscrowCodec`), and `chains.py`. The wallet and chains it reads
+      are constructor arguments defaulting to the buyer's configuration.
+      `alkahest_py` stays imported at escrow creation, as before.
+      `arkhai-api-buying-arkhai-payments` 0.1.0 (`arkhai-api-buying`,
+      `arkhai-core`, `arkhai-core-buyer`, `arkhai-kit-arkhai-payments`,
+      `arkhai-kit-config`, `arkhai-kit-settlement-runtime`, `rich`, `typer`):
+      `stage.py` (`PaymentBuyerStage(payer_section, load_config=...)`, its buy
+      session, its resume) and `payments.py` (payer selection, mandate approval,
+      the seller settle trigger). Unit: Alkahest 12 (the session's availability,
+      missing settings, price scaling, run-log fields, refusal to settle
+      unavailable; its options per command; negotiation run-log fields; the
+      listing row; packaging: no payments or selling distribution); payments 7
+      (payer selection, the configured section, the session's read only while
+      enabled, acceptance checks; packaging: no escrow or selling distribution).
+- [x] 10.3 The API-credits buyer plugin keeps `cli.py`'s registration under
       `market.buyer_domains`, fills `BuyingContributions`, composes its two
       entries, and deletes every moved module; its existing tests pass against
       the kit, the three deselected `test_plugin_export.py` cases included or
       their deselection carried with its reason. A packaging test that a buyer
       environment installs no selling or authority distribution. (D12, D13.)
-- [ ] 10.5 `docs/development/ARCHITECTURE.toml` gains three `layer` exception
+      *Done.* The plugin (0.6.0) is `cli.py`: `CONTRIBUTIONS`, the API-credit
+      rendering, and `SETTLEMENT` over the two stages keyed by their own
+      mechanism; every other module is deleted. It declares the three buying
+      libraries, the domain library, `arkhai-core`, `arkhai-core-buyer`, and
+      `typer`. The domain library (0.12.0) loses `buyer_policies.py` and
+      `arkhai-kit-policy`. The existing tests run against the kit through the
+      plugin's composition, their seams repointed; the selection, unit-price,
+      key-disposition, escrow-row, and payer-selection tests moved to the
+      library that owns the code. The deselection of the two
+      `test_plugin_export.py` help-text cases is carried, with the vms-buyer
+      row's reason; a third deselect named a test that no longer exists and is
+      dropped. `tests/test_packaging.py` reads the plugin's lock: the three
+      buying libraries and no selling library, authority, core storefront,
+      storefront or capacity-publication kit, or SQLAlchemy. A new case shows an
+      `--evm-private-key` passed to `negotiate` reaches neither the run log nor
+      its policy parameters. Application integration through the buyer CLI 26.
+      The storefront's buyer-driving integration tests declare and patch the
+      kit modules. Observable changes, in no baseline: the stage flags follow
+      each command's own options in `--help`; `--expiration`'s help and the buy
+      command's help name no mechanism ("Buy credits end-to-end as a pure
+      client."); a `run_started` event lists the stage fields last (same keys
+      and values); the payments resume no longer builds an unused trust
+      resolver.
+- [x] 10.5 `docs/development/ARCHITECTURE.toml` gains three `layer` exception
       rows, `arkhai-api-buying`, `arkhai-api-buying-alkahest`, and
       `arkhai-api-buying-arkhai-payments` on `arkhai-core-buyer`, each owned by
       `kit-owned-buyer-orchestration` and giving the modules it imports;
       `make check-architecture` reports nothing for them, and
       `make check-architecture-change CHANGE=compose-api-family-kit` stays
       clean, since this change introduces the rows and owns none. (D2, D14.)
-      Amended 2026-10-25 by the owner's decision on the stop recorded below;
-      run before 10.4, whose `make check-packaging` it makes pass.
-- [ ] 10.4 Verification: `make test-api-buying`, `make test-api-buying-alkahest`,
+      Amended 2026-10-25 by the owner's decision recorded under this
+      section's heading; run before 10.4, whose `make check-packaging` it
+      makes pass.
+      *Done.* The three rows list the buyer-role modules each library imports;
+      `make check-architecture` holds every rule, and
+      `make check-architecture-change CHANGE=compose-api-family-kit` reports
+      that the change owns no row.
+- [x] 10.4 Verification: `make test-api-buying`, `make test-api-buying-alkahest`,
       `make test-api-buying-arkhai-payments` (unit, library integration),
       `make -C domains/apicredits test-buyer` (application integration through
       the buyer CLI), `make test`, `make check-packaging`. End-to-end:
       `e2e_credits_deal`, `e2e_credits_payment_deal`.
+      *Done 2026-10-25.* `make test-api-buying` 21, `-alkahest` 12,
+      `-arkhai-payments` 7 (unit), each with `require-wheels` passing;
+      `make -C domains/apicredits test-buyer` 26 (application integration
+      through the CLI); storefront 174 (unit, application integration;
+      baselines unchanged); domain library 16. On a copy of the tracked and new
+      files without the other session's stale checkout: `make check-packaging`
+      passes (uv setup, locks, Python version, layout, all four architecture
+      parts); comment hygiene passes; `make check-change` reports only the two
+      `api-family` documents closeout creates; `make -k test` fails only as 1.7
+      to 9.5 record (the three IaC relay-teardown tests, the VM storefront's
+      two Alkahest toolchain tests, GNU make's `--eval` case) and on
+      `test_a_credential_helper_that_does_not_answer_is_named`, which fails the
+      same way on this section's base. Locks written with the local uv 0.10.9.
+      Helm is not installed, so the render checks are unrun. End-to-end, owed
+      to validation: `e2e_credits_deal` and `e2e_credits_payment_deal` drive
+      `market credits buy` from `e2e-tests`, which installs the plugin, so both
+      run the buying libraries (the payment deal a blocked skip with no
+      payments target); no scenario was added.
+      **Handoff.** A buyer stage is an entry of the plugin's table keyed by
+      its own `mechanism_id`; a flag a mechanism needs is a `StageOption` on its
+      stage, not a parameter of a command. `kit-owned-buyer-orchestration`
+      owns the three rows; until it lands, a new import of the buyer role from
+      a buying library belongs in its row's reason.
+      **Fresh-context checks.** Two. The first found no regression in
+      messages, exit codes, run-log events, or prompt and read order; accepted
+      and fixed: the CLI flags and chain helpers that kept Alkahest in the
+      neutral library (now stage options and `buying-alkahest`'s `chains.py`),
+      `payer_section` in the bundle (now the payments stage's), the table key
+      unchecked against the stage, a duplicated decoder and import, the
+      plugin's unused dev dependency, the rows' reasons, and a guard comment
+      describing a plan; recorded, the dependency deviation and the filters
+      reading. Declined: moving `market_alkahest.alkahest` back into a function,
+      since importing the kit's package already loads it; and "credits" wording,
+      the family's purchase vocabulary (D3). The second found the
+      `RELEASING.md` row missing `arkhai-kit-config` (fixed; it failed
+      `test_publish_matrix`) and the section's design unrecorded (now in D7 and
+      the promotion record); accepted besides: the stages take their
+      configuration readers as constructor arguments so the libraries' tests
+      inject rather than patch, the orchestration test that patched module
+      imports is dropped (the plugin's settle test covers that dispatch over a
+      real run log), an option named like a command parameter is refused by
+      name, the protocol says run-log fields carry no credential, the
+      proposal names the package root it moves, and fixture comments. Declined:
+      `tests/fixtures/` for the neutral bundle, kept at `tests/bundles.py` as
+      the selling libraries keep theirs.
 
 ## 11. Closeout
 
@@ -2985,6 +3113,7 @@ change to implementation.
 | D3 — the negotiation and delivery carriers live in `contracts`, so a buyer installs no selling machinery | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D2 — `selling`'s dependency on the core storefront, an exception row owned by `kit-owned-storefront-auth-and-persistence` | `docs/development/ARCHITECTURE.toml` (exception row); `docs/development/ARCHITECTURE.md#family-kits` |
 | D2 — the three buying libraries' dependency on the buyer role, temporary exception rows owned by `kit-owned-buyer-orchestration` | `docs/development/ARCHITECTURE.toml` (exception rows); `docs/development/ARCHITECTURE.md#family-kits` |
+| D2, D7 — `buying` depends on the vocabulary alone among the family's packages; the buyer stage table supplies every mechanism step, buy session, command-line option, and chain configuration, and at most one stage the escrow codec; the bundle's filters are the registry schema's | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — the projection's split, the accepted listing recorded with the negotiation and issued from, the bundle's naming fields | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — negotiation, publication, and lifecycle read the bundle: guard names from the kind, the listing schema and projection, family refusal codes, injected escrow handling, paged reconciliation, binding at opening | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |
 | D7 — `selling`'s configuration refusals name the key the composing storefront passes (`RoundSettings.floor_key`, `read_capacity_sites`'s `sites_key`; API credits: `[pricing].default_min_price`, `[capacity.sites]`); the pricing refusals reach the wire from a continuation, 404 `{"detail": <message>}` | `openspec/specs/api-family/spec.md`; `openspec/specs/api-family/architecture.md` |

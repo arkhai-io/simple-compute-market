@@ -41,7 +41,8 @@ dependencies the other sides do not need, one library for the bearer gate, and
 one library per settlement mechanism and market side carrying that mechanism's
 name. Dependencies among them MUST be acyclic: a side-and-mechanism library
 depends on its side's library and its mechanism kit; the side libraries depend
-on `contracts` and the vocabulary, and only `selling` and `buying` on `client`;
+on the vocabulary and, where they use them, on `contracts`, and only `selling`
+and `buying` may depend on `client`;
 `client` depends on `contracts`; the gate depends on no family distribution.
 
 #### Scenario: A buyer plugin is installed

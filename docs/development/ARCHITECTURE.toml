@@ -251,6 +251,30 @@ since = 2026-10-23
 reason = "The selling library imports from the storefront role its domain registry types (listing bindings, registrations, and the registry its accepted-listing records are keyed under), the system status models, the aggregate capacity client, the placement policies, the stage-event log, the marketplace request authentication and response signing it binds for a storefront, the SQLite market-state client and migrations its persistence extends, the listing, negotiation, settlement, and system wire models its route services answer with, and the negotiation service's error; where each lands is for the owning change to settle. Otherwise it writes through the repository its caller passes."
 
 [[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buying library imports the buyer role's package root and its buyer_config, cli, deal_helpers, negotiation_client, orchestration, orchestrator, policy_surface, registry_config, run_log, and settlement modules, which move to a buyer orchestration kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying-alkahest"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buyer-side Alkahest library imports the buyer role's buyer_config, negotiation_client, orchestration, and run_log modules, which move to a buyer orchestration kit."
+
+[[exceptions]]
+rule = "layer"
+project = "arkhai-api-buying-arkhai-payments"
+target = "arkhai-core-buyer"
+owner = "kit-owned-buyer-orchestration"
+since = 2026-10-25
+reason = "The buyer-side payments library imports the buyer role's buyer_config, orchestration, and orchestrator modules, which move to a buyer orchestration kit."
+
+[[exceptions]]
 rule = "scope"
 project = "arkhai-vms-storefront"
 target = "arkhai-bare-metal"

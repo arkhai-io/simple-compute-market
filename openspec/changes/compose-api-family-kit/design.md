@@ -117,8 +117,9 @@ one of them.
 Dependencies among them point one way and are acyclic, as the family-kit
 section requires: `contracts` → vocabulary; `client` → `contracts`;
 `authority` → vocabulary and `contracts`, never `client`, so "the server never
-depends on its own client"; `selling` and `buying` → vocabulary, `contracts`,
-and `client`; each `selling-<mechanism>` → `selling` and its mechanism kit;
+depends on its own client"; `selling` → vocabulary, `contracts`, and `client`;
+`buying` → vocabulary, and no further family package, since a buyer never calls
+the authority and decodes a delivery through its domain's market contract; each `selling-<mechanism>` → `selling` and its mechanism kit;
 each `buying-<mechanism>` → `buying` and its mechanism kit; `gate` → nothing
 in the family. Nothing under `domains/api/` imports `arkhai_apicredits`, a later
 sibling domain's package, or any role executable. The existing API-credits service
@@ -431,6 +432,24 @@ the wire from a continuation round, which the negotiate route serves 404 as
 `{"detail": <message>}`; at opening the runtime answers any missing floor as
 `offer_unfulfillable: no_floor_price` before the message is served. No
 baseline records them, and no other body changes.
+
+`buying` reads its bundle and the plugin's stage table the same way. The
+bundle names the registry schema whose filter spec types the buyer's resource
+queries, with an example query for the commands' help; the buyer's filters are
+that spec's, so the bundle carries no filter vocabulary of its own. Every step
+that differs by mechanism is a method of the stage the selected or accepted
+option names: selection and negotiation pricing, the acceptance check, a
+deal's enrichment, the rows describing a listing's settlement terms, a buy
+session opened for each buy (resources resolved once registries are known,
+the settings missing when unavailable, explicit price scaling, the proposal,
+run-log fields, the settle call), resumption from a run-log, the command-line
+options it reads, and the per-chain configuration the negotiation guards read.
+A command's options are the union of its stages' and reach only the stages, so
+no option value enters policy parameters, and run-log fields carry no
+credential. At most one stage supplies the escrow codec core's negotiation
+client carries. A mechanism's configuration is its stage's: the payments stage
+is given the table holding the payer account, and the Alkahest stage resolves
+the buyer's wallet and chains, each injectable.
 
 Every field a domain may omit is optional in the bundle, so API credits
 supplies no placeholder. Each caller — both storefronts, each service root,

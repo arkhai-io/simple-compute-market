@@ -1,96 +1,81 @@
 """API-credit market-domain contribution for the core ``market`` buyer CLI."""
 
 from __future__ import annotations
-import asyncio
-import json
 
+from collections.abc import Mapping
 from dataclasses import replace
+from typing import Any
 
 import typer
-
+from arkhai_api_buying.commands import command_group
+from arkhai_api_buying.contributions import BuyingContributions, ListingRendering
+from arkhai_api_buying.listing import shorten
+from arkhai_api_buying.settlement_composition import BuyerSettlementComposition
+from arkhai_api_buying_alkahest.stage import AlkahestBuyerStage
+from arkhai_api_buying_arkhai_payments.stage import PaymentBuyerStage
+from arkhai_apicredits.domain_runtime import market_domain
+from arkhai_apicredits.listings import coerce_resource_dict
+from arkhai_apicredits.negotiation import ApiCreditsProvisionTerms, make_api_credits_provision_terms
 from core_buyer.cli import build_app
 from core_buyer.policy_surface import configured_buyer_policy
-from arkhai_apicredits.domain_runtime import market_domain
-from arkhai_apicredits.negotiation import make_api_credits_provision_terms
 from market_core import (
     BUYER_IDENTITY_INJECTION_CONTRACT,
     DomainCapability,
     ImmutableBuyerCapability,
     MarketDomainContract,
-)
-
-from . import buy_cli as buy_module
-from . import negotiate_cli as negotiate_module
-from . import settle_cli as settle_module
-from .listing_cli import listing_app
-from .settlement_composition import (
-    buyer_settlement_readiness,
-    buyer_settlement_registry,
+    SettlementStageTable,
 )
 
 
-def _settlement_status(
-    as_json: bool = typer.Option(False, "--json", help="Emit sanitized JSON."),
-) -> None:
-    config, statuses = asyncio.run(buyer_settlement_readiness())
-    if as_json:
-        typer.echo(
-            json.dumps(
-                {
-                    "schema_version": config.schema_version,
-                    "priority": list(config.priority),
-                    "mechanisms": [status.safe_projection() for status in statuses],
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-        )
-    else:
-        for status in statuses:
-            state = (
-                "ready"
-                if status.ready
-                else "disabled"
-                if not status.enabled
-                else "unready"
-            )
-            typer.echo(f"{status.mechanism}: {state}")
-            for blocker in status.blockers:
-                typer.echo(f"  {blocker.code}: {blocker.message}")
-    if not any(status.ready for status in statuses):
-        raise typer.Exit(1)
+def _summary(resource: Mapping[str, Any]) -> str:
+    if not resource:
+        return "-"
+    parts = [str(resource.get("service_name") or "-")]
+    if resource.get("description"):
+        parts.append(shorten(str(resource["description"]), 48))
+    return " — ".join(parts)
 
 
-credits_app = typer.Typer(no_args_is_help=True)
-credits_app.add_typer(
-    listing_app,
-    name="listing",
-    help="Browse API-credit listings (list/show).",
+def _details(resource: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    rows = [("Service", str(resource.get("service_name") or "-"))]
+    if resource.get("description"):
+        rows.append(("Description", str(resource["description"])))
+    rows.append(("OpenAPI URL", str(resource.get("openapi_url") or "-")))
+    rows.append(("Base URL", str(resource.get("base_url") or "-")))
+    return tuple(rows)
+
+
+#: The registry's filter-spec.yaml declares the same schema id.
+CONTRIBUTIONS = BuyingContributions(
+    schema_id="api_credits",
+    provision_terms=ApiCreditsProvisionTerms,
+    command="credits",
+    command_help="API-credit market: discover, buy, top up keys.",
+    noun="API-credit",
+    resource_query_example="service_name=weather token in [0xabc,0xdef]",
+    rendering=ListingRendering(
+        resource=coerce_resource_dict,
+        summary_header="Service",
+        summary=_summary,
+        columns=(("OpenAPI", lambda resource: str(resource.get("openapi_url") or "-")),),
+        details=_details,
+    ),
 )
-buy_module.register(credits_app)
-negotiate_module.register(credits_app)
-settle_module.register(credits_app)
-settlement_app = typer.Typer(
-    no_args_is_help=True,
-    help="Shared settlement profile and readiness commands.",
+
+SETTLEMENT = BuyerSettlementComposition(
+    CONTRIBUTIONS,
+    SettlementStageTable(
+        (stage.mechanism_id, stage)
+        for stage in (AlkahestBuyerStage(), PaymentBuyerStage(payer_section="apicredits"))
+    ),
 )
-settlement_app.command("status")(_settlement_status)
-for registration in buyer_settlement_registry().registrations:
-    if registration.command_group is not None:
-        settlement_app.add_typer(
-            registration.command_group,
-            name=registration.config_key,
-        )
-credits_app.add_typer(settlement_app, name="settlement")
+
+credits_app = command_group(SETTLEMENT)
 
 
 def register(app: typer.Typer) -> None:
     """Register the API-credits schema's buyer commands on the core app."""
-    app.add_typer(
-        credits_app,
-        name="credits",
-        help="API-credit market: discover, buy, top up keys.",
-    )
+    app.add_typer(credits_app, name=CONTRIBUTIONS.command, help=CONTRIBUTIONS.command_help)
 
 
 def _buyer_market_domain() -> MarketDomainContract:

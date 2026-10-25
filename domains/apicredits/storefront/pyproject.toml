@@ -44,7 +44,10 @@ dev = [
     # The production `market credits negotiate` and `market credits buy`
     # commands, which the negotiation integration tests drive against the
     # served storefront. Test-only; production code never imports it.
-    "arkhai-apicredits-buyer>=0.5.0",
+    "arkhai-apicredits-buyer>=0.6.0",
+    # The buying library's modules those tests drive the commands through. Test-only.
+    "arkhai-api-buying>=0.1.0",
+    "arkhai-api-buying-arkhai-payments>=0.1.0",
     # Buyer orchestration and identity types the same tests drive and stand in
     # for directly: run results and the run log, the publisher-trust refresh,
     # the resolved buyer identity, and registry authorities. Test-only.
