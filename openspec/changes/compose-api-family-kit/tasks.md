@@ -3048,6 +3048,60 @@ the promotion record carry the decision.
       proposal names the package root it moves, and fixture comments. Declined:
       `tests/fixtures/` for the neutral bundle, kept at `tests/bundles.py` as
       the selling libraries keep theirs.
+      **Review round (2026-10-25).** An external review of the plan amendment
+      (`644d5e44b`) and this section (`fb8518855`), triaged with the owner:
+      - *Plan, Medium, accepted:* `kit-owned-buyer-orchestration` moves
+        responsibilities `buyer-orchestration` specifies, so its proposal names
+        that capability and its `spec.md` and `architecture.md` as promotion
+        destinations.
+      - *High, accepted, inherited:* `buy --from` refused before loading the
+        accepted Agreement when no mechanism was enabled, and a payment's
+        settle refused a disabled payments section, so an accepted deal could
+        strand after its mechanism was disabled, against
+        `settlement-configuration`'s "Recovery follows the accepted settlement
+        option". Enablement now gates only a fresh buy; a payment completes
+        under any configured section (`serviceable_payments_config`) and an
+        absent one is refused by name. Application integration: `buy --from`
+        completes an Alkahest run with nothing enabled (failing on the old
+        gate); unit: the payments section's gate.
+      - *Medium, accepted:* `make test-api-buying` failed from an empty
+        wheelhouse, since `arkhai-core-buyer` pins
+        `arkhai-core-registry-client` and `dist-arkhai-core-buyer` did not
+        build it; it now does, for every consumer of the core buyer.
+      - *Nit, accepted:* two trailing blank lines.
+      - *High, deferred by the owner, inherited:* the buyer appends the whole
+        `tenant_credentials`, the bearer secret included, to its run log
+        (`credentials_delivered`, from `SettlementResume.finish` and the buy
+        command), against `buyer-orchestration`'s "Buyer evidence is separate
+        from private delivery". No buyer has a private credential store, the
+        run log is the buyer's only durable copy of the once-issued secret, and
+        both API-credit scenarios read it back, so the fix is a storage design,
+        not a relocation. Owner: `keep-buyer-credentials-private`, stacked
+        directly on this section and taken first: a private store behind an
+        abstraction (a `0600` XDG-state implementation first, keyring
+        optional), a run-log record of a non-secret reference, delivery status,
+        and key ID, a retrieval command, the outcome when settlement succeeds
+        and the private write fails, the compatibility of existing
+        `credentials_delivered` events, and secrets kept out of logs,
+        exceptions, and output. Validation: `e2e_credits_deal` and
+        `e2e_credits_payment_deal` retrieve the key through the new command and
+        find no secret in the run log, beside the store's unit and the CLI's
+        application-integration tests.
+      - *Medium, deferred by the owner, inherited:* the Alkahest stage's
+        options keep `--evm-private-key`, `--evm-address`, `--chain`,
+        `--token-contract`, `--token-decimals`, and `--escrow-uid` on the
+        normal buy, negotiate, and settle commands, against
+        `buyer-orchestration`'s "Buyer mechanism utilities are namespaced", and
+        a private key on the command line reaches shell history and process
+        inspection. Removing them changes a documented interface. Owner:
+        `derive-buyer-settlement-inputs`, stacked on the credentials change:
+        where chain, token, decimals, address, and escrow identity derive from,
+        a wallet provider that never takes a secret on the command line,
+        non-interactive selection among several chains, whether non-secret
+        overrides such as `--chain` take a deprecation window, and the
+        migration of `test_credits_deal_buyer_cli.py` and the vLLM cookbook.
+        Validation: `e2e_credits_deal` buys without the flags, beside
+        application-integration tests of each derivation.
 
 ## 11. Closeout
 
