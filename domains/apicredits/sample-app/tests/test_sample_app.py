@@ -1,4 +1,4 @@
-"""The sample app is gated by the middleware end to end.
+"""The sample app is gated by the family gate end to end.
 
 Drives the real FastAPI app with a MockTransport-scripted credits
 service behind the gate, so the wiring — middleware order, excluded
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import httpx
 
-from apicredits_middleware import GateConfig, PurchasePointer, TokenGate, TokensClient
-from apicredits_sample_app.app import create_app
+from arkhai_api_gate import GateConfig, PurchasePointer, TokenGate, TokensClient
+from apicredits_sample_app.app import AUTHORITY_LABEL, create_app
 
 
 def _scripted_gate(balance: int) -> tuple[TokenGate, httpx.AsyncClient]:
@@ -29,6 +29,7 @@ def _scripted_gate(balance: int) -> tuple[TokenGate, httpx.AsyncClient]:
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     config = GateConfig(
         service_url="http://svc",
+        authority_label=AUTHORITY_LABEL,
         purchase=PurchasePointer(service_name="weather", listing_id="lst-1"),
     )
     gate = TokenGate(config, TokensClient(service_url=config.service_url, http=http))
@@ -37,7 +38,7 @@ def _scripted_gate(balance: int) -> tuple[TokenGate, httpx.AsyncClient]:
 
 async def test_health_open_metered_endpoint_gated_and_drains_to_402():
     gate, http = _scripted_gate(balance=2)
-    app = create_app(GateConfig(service_url="http://svc"), gate=gate)
+    app = create_app(GateConfig(service_url="http://svc", authority_label=AUTHORITY_LABEL), gate=gate)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://app",

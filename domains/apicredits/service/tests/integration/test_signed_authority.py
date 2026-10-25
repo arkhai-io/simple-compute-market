@@ -425,11 +425,11 @@ def _seller_client(signed_app):
 
 
 def _gated_client(signed_app):
-    # `arkhai-apicredits-middleware[signed]` is a declared dev dependency of
+    # `arkhai-api-gate[signed]` is a declared dev dependency of
     # this service precisely so its boundary can be tested against the real
     # client rather than a hand-built envelope.
-    from apicredits_middleware.client import TokensClient
-    from apicredits_middleware.signing import (
+    from arkhai_api_gate.client import TokensClient
+    from arkhai_api_gate.signing import (
         AuthoritySigning,
         build_trusted_authorities,
     )
@@ -441,6 +441,7 @@ def _gated_client(signed_app):
             base_url="http://credits-service",
         ),
         signing=AuthoritySigning(
+            authority_label="credits-service",
             signer=GATED_SIGNER,
             expected_authorities=build_trusted_authorities(
                 [

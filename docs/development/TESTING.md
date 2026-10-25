@@ -834,8 +834,9 @@ assertions of the same behavior. Keeping the trace in data, not in each
 language's test code, is what makes "identical behavior across
 languages" a checkable claim rather than an assumption.
 
-**Current example:** the API-credits gating middleware's Python
-(reference implementation), TypeScript, and Rust ports all replay
+**Current example:** the api family's bearer gate — the Python
+`arkhai-api-gate` (reference implementation) and the API-credits
+TypeScript and Rust middlewares — all replay
 `domains/apicredits/middleware/conformance/session.json` — one recorded
 session of requests against the gate, with each step asserting the
 allow/deny decision, the deny body's machine-readable error code,
@@ -844,7 +845,7 @@ stateful collaborators the step is meant to exercise (cache-hit
 skipping, zero-calls-on-known-exhaustion). See
 `domains/apicredits/middleware/conformance/README.md` for what each step
 field asserts, and the runners at
-`domains/apicredits/middleware/python/tests/conformance_runner.py`,
+`domains/api/gate/tests/conformance_runner.py`,
 `domains/apicredits/middleware/typescript/test/conformanceRunner.ts`,
 and `domains/apicredits/middleware/rust/tests/conformance.rs`.
 

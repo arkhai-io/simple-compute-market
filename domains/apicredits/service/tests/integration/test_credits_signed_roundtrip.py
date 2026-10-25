@@ -24,8 +24,8 @@ from fastapi.responses import JSONResponse
 from market_identity import Identity, TrustedIdentitySet, create_signer
 from market_site.auth import SiteAuthMiddleware
 from arkhai_api_authority import site_route_contracts
-from apicredits_middleware.client import TokensClient
-from apicredits_middleware.signing import (
+from arkhai_api_gate.client import TokensClient
+from arkhai_api_gate.signing import (
     AuthoritySigning,
     build_signer,
     build_trusted_authorities,
@@ -111,6 +111,7 @@ def gated_app_client(signers):
     )
 
     signing = AuthoritySigning(
+        authority_label="credits-service",
         signer=build_signer(_seed("api-credits-gated-app")),
         expected_authorities=build_trusted_authorities(
             [
@@ -183,6 +184,7 @@ async def test_an_untrusted_gated_app_is_refused(signers):
     )
 
     signing = AuthoritySigning(
+        authority_label="credits-service",
         signer=build_signer(_seed("api-credits-gated-app")),
         expected_authorities=build_trusted_authorities(
             [

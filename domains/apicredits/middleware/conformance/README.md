@@ -2,8 +2,9 @@
 
 `session.json` is the shared behavioral contract for the API-credits
 gating middleware. All three implementations reproduce this recorded
-session exactly: Python (`../python`, the reference, which also gates
-the e2e sample service), TypeScript (`../typescript`), and Rust
+session exactly: Python (the api family's gate, `domains/api/gate`, the
+reference, which also gates the e2e sample service), TypeScript
+(`../typescript`), and Rust
 (`../rust`). Keeping the trace in data (not in each language's test
 code) is what makes "identical behavior across three languages" a
 checkable claim rather than a hope.
@@ -52,7 +53,7 @@ synchronous consume and the call trace is deterministic.
 
 The reference harnesses (identical structure in each language):
 
-- Python — `python/tests/conformance_runner.py`
+- Python — `domains/api/gate/tests/conformance_runner.py`
 - TypeScript — `typescript/test/conformanceRunner.ts`
 - Rust — `rust/tests/conformance.rs` (+ `rust/tests/common/mod.rs`)
 
@@ -69,7 +70,7 @@ against a signed marketplace identity v2 envelope and signs every
 response, including refusals. It accepts signed requests **or** the legacy
 `X-Admin-Key` shared secret, never both, chosen by its own configuration.
 
-- **Python** signs (`apicredits_middleware.signing`), gated behind the
+- **Python** signs (`arkhai_api_gate.signing`), gated behind the
   `signed` extra. It works against either service configuration.
 - **TypeScript** and **Rust** send the shared secret only. They work
   against a service that has not enabled signed authentication, and are

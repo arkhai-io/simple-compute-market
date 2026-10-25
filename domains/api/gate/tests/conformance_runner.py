@@ -16,11 +16,13 @@ from typing import Any
 
 import httpx
 
-from apicredits_middleware.client import TokensClient
-from apicredits_middleware.config import GateConfig, PurchasePointer
-from apicredits_middleware.gate import TokenGate
+from arkhai_api_gate.client import TokensClient
+from arkhai_api_gate.config import GateConfig, PurchasePointer
+from arkhai_api_gate.gate import TokenGate
 
-CONFORMANCE_DIR = Path(__file__).resolve().parents[2] / "conformance"
+CONFORMANCE_DIR = (
+    Path(__file__).resolve().parents[3] / "apicredits" / "middleware" / "conformance"
+)
 
 
 def load_session(name: str = "session.json") -> dict[str, Any]:
@@ -65,6 +67,7 @@ def _config_from(fixture: dict[str, Any]) -> GateConfig:
     p = cfg.get("purchase", {})
     return GateConfig(
         service_url="http://credits-service",
+        authority_label="credits-service",
         admin_key="conformance-admin-key",
         amount_per_request=cfg.get("amount_per_request", 1),
         verify_ttl_seconds=cfg.get("verify_ttl_seconds", 30),

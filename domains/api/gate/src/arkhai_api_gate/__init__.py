@@ -1,15 +1,15 @@
-"""API-credits gating middleware (Python).
+"""The api family's bearer gate (Python).
 
-A seller-side component that gates a downstream HTTP app on prepaid API
-credits: it extracts the bearer key, verifies it against the credits
-service (short-TTL cache), meters each request by consuming credits
+A seller-side component that gates a downstream HTTP app on prepaid
+credits: it extracts the bearer key, verifies it against the family
+authority (short-TTL cache), meters each request by consuming credits
 (synchronously near exhaustion, optionally batched above a low-balance
 threshold), and maps a drained key to a 402 whose body points at the
-listing to buy more (the re-purchase loop). All verification and
-accounting authority stays in the service.
+listing to buy more (the re-purchase loop). The authority alone
+verifies keys and keeps the accounts.
 
 The behavioral contract — status codes and machine-readable bodies —
-is shared with the TypeScript and Rust middlewares and pinned by the
+is shared with the TypeScript and Rust gates and pinned by the
 conformance fixtures under ``domains/apicredits/middleware/conformance``.
 """
 

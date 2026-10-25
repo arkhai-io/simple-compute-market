@@ -34,14 +34,14 @@ wheels = [
 ]
 
 [[package]]
-name = "arkhai-apicredits-middleware"
-version = "0.1.1"
+name = "arkhai-api-gate"
+version = "0.1.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_middleware-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_api_gate-0.1.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -51,10 +51,10 @@ signed = [
 
 [[package]]
 name = "arkhai-apicredits-sample-app"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arkhai-apicredits-middleware", extra = ["signed"] },
+    { name = "arkhai-api-gate", extra = ["signed"] },
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -75,7 +75,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-apicredits-middleware", extras = ["signed"] },
+    { name = "arkhai-api-gate", extras = ["signed"] },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },

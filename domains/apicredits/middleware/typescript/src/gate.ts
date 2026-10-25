@@ -11,7 +11,7 @@
  * Decision vocabulary (status + machine-readable body) is identical
  * across languages — it is the behavioral contract the conformance
  * fixtures pin (`../conformance`). This is a direct port of the Python
- * `apicredits_middleware.gate`.
+ * `arkhai_api_gate.gate`.
  *
  * Concurrency: JavaScript is single-threaded, so a synchronous
  * read-modify-write of the state map is already atomic. The Python lock

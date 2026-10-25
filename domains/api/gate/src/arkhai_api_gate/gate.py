@@ -9,7 +9,7 @@ back into an HTTP response.
 
 Decision vocabulary (status + machine-readable body) is identical
 across languages — it is the behavioral contract the conformance
-fixtures pin (``../conformance``).
+fixtures pin (``domains/apicredits/middleware/conformance``).
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def parse_bearer(authorization: str | None) -> str | None:
 
 
 def key_id_from_secret(secret: str) -> str | None:
-    """The service issues secrets as ``<key_id>.<random>``."""
+    """The authority issues secrets as ``<key_id>.<random>``."""
     key_id = secret.split(".", 1)[0]
     return key_id or None
 
@@ -188,7 +188,7 @@ class TokenGate:
             go_sync = (not batching) or estimated_after <= self._cfg.low_balance_threshold
             if not go_sync:
                 # Optimistic batched charge: let the request through now,
-                # settle it with the service on the next flush.
+                # settle it with the authority on the next flush.
                 state.pending.append({
                     "key_id": key_id, "amount": amount, "idempotency_key": idem,
                 })
@@ -231,7 +231,7 @@ class TokenGate:
                 continue
 
     async def flush(self) -> None:
-        """Settle all accumulated batched charges with the service."""
+        """Settle all accumulated batched charges with the authority."""
         async with self._lock:
             items: list[dict[str, Any]] = []
             owners: list[str] = []

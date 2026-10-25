@@ -63,6 +63,7 @@ jobs:
           - { name: api-selling,            dir: domains/api/selling, predist: true }
           - { name: api-selling-alkahest,   dir: domains/api/selling-alkahest, predist: true }
           - { name: api-selling-arkhai-payments, dir: domains/api/selling-arkhai-payments, predist: true }
+          - { name: api-gate,               dir: domains/api/gate, predist: true }
           - { name: vms-domain,             dir: domains/vms/domain, predist: true }
           - { name: bare-metal,            dir: domains/bare_metal, predist: true }
           - { name: bare-metal-storefront, dir: domains/bare_metal/storefront, predist: true }
@@ -81,7 +82,6 @@ jobs:
           - { name: apicredits-buyer,        dir: domains/apicredits/buyer, predist: true, pytest_args: "--deselect tests/test_plugin_export.py::test_buy_surface_has_quantity_key_and_scalar_price_flags --deselect tests/test_plugin_export.py::test_listing_surface_is_token_rendering_not_generic_fallback --deselect tests/test_plugin_export.py::test_listing_surface_uses_typed_resource_query" }
           - { name: apicredits-storefront,   dir: domains/apicredits/storefront, predist: true }
           - { name: apicredits-service,      dir: domains/apicredits/service, predist: true }
-          - { name: apicredits-middleware,   dir: domains/apicredits/middleware/python }
           - { name: apicredits-sample-app,   dir: domains/apicredits/sample-app, predist: true }
     steps:
       - uses: actions/checkout@v4

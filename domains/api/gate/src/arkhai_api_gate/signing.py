@@ -1,6 +1,6 @@
-"""Marketplace identity v2 mapping for this middleware's outbound calls.
+"""Marketplace identity v2 mapping for the gate's outbound calls.
 
-The credits service authenticates every non-health route against a signed
+The authority authenticates every non-health route against a signed
 request envelope and signs every response, including refusals. A gated
 application calls it in the ``service`` role: it may spend and check
 credits, but not mint grants or revoke keys.
@@ -15,18 +15,16 @@ applications, so it must not acquire a dependency on a marketplace
 storefront client to make an HTTP call. ``market_identity`` is a
 different matter: it is the identity contract itself, is transport
 neutral, and is the smallest thing that can produce a signature the
-service will accept.
+authority will accept.
 
 ``market_identity`` is an optional dependency
-(``arkhai-apicredits-middleware[signed]``). Unsigned deployments keep the
+(``arkhai-api-gate[signed]``). Unsigned deployments keep the
 httpx-only dependency set, so the import is deferred to the point of use
 and a missing install is reported as configuration rather than as an
 ``ImportError`` from inside a request.
 
 Header names are repeated here rather than imported for the same
-packaging reason. They are protocol constants, fixed by the wire format,
-and this is the seventh place in the repository that spells them; see
-`3ax`-series cleanup notes.
+packaging reason. They are protocol constants, fixed by the wire format.
 """
 
 from __future__ import annotations
@@ -45,7 +43,7 @@ REQUEST_ID_HEADER = "X-Market-Request-ID"
 TIMESTAMP_HEADER = "X-Market-Timestamp"
 SIGNATURE_HEADER = "X-Market-Signature"
 
-#: The role this middleware presents. Narrower than the storefront's
+#: The role the gate presents. Narrower than the storefront's
 #: ``seller`` on purpose: a compromised gated app must not be able to mint
 #: grants or revoke keys, which one shared admin secret could not express.
 GATED_APP_ROLE = "service"
@@ -58,8 +56,8 @@ AUTHORITY_RESPONSE_ROLE = "service"
 DEFAULT_MAX_RESPONSE_SKEW = 300
 
 _INSTALL_HINT = (
-    "signed authentication to the credits service requires the 'signed' "
-    "extra: pip install 'arkhai-apicredits-middleware[signed]'"
+    "signed authentication to the authority requires the 'signed' "
+    "extra: pip install 'arkhai-api-gate[signed]'"
 )
 
 
@@ -72,8 +70,8 @@ class ResponseAuthenticationError(RuntimeError):
 
     Raised rather than returned because the gate's callers already treat an
     unusable answer as a denial. Letting this surface as a distinct type
-    keeps "the service refused us" separable from "something answered for
-    the service" in an operator's logs.
+    keeps "the authority refused us" separable from "something answered for
+    the authority" in an operator's logs.
     """
 
 
@@ -103,11 +101,12 @@ class SignedCall:
 
 
 class AuthoritySigning:
-    """Signs requests to one credits authority and verifies its responses.
+    """Signs requests to one authority and verifies its responses.
 
     Constructed from already-resolved values rather than from environment
     or settings, so the same object serves a deployment reading a mounted
-    credential and a test passing a generated one.
+    credential and a test passing a generated one. ``authority_label``
+    names the authority in a verification failure's message.
     """
 
     def __init__(
@@ -115,6 +114,7 @@ class AuthoritySigning:
         *,
         signer: Any,
         expected_authorities: Any,
+        authority_label: str,
         max_response_skew: int = DEFAULT_MAX_RESPONSE_SKEW,
     ) -> None:
         identity = _identity_module()
@@ -134,10 +134,11 @@ class AuthoritySigning:
         self._signer = signer
         self._expected_authorities = expected_authorities
         self._max_response_skew = max_response_skew
+        self._authority_label = authority_label
 
     @property
     def principal_identifier(self) -> str:
-        """The public identifier this middleware signs as, for logging."""
+        """The public identifier the gate signs as, for logging."""
         return str(self._signer.identity.identifier)
 
     def sign(
@@ -152,7 +153,7 @@ class AuthoritySigning:
 
         The body hash is taken over RFC 8785 canonical JSON, so those exact
         bytes must be transmitted. Serializing once here and sending
-        ``content=`` is what keeps the hash the service recomputes equal to
+        ``content=`` is what keeps the hash the authority recomputes equal to
         the one that was signed -- an httpx ``json=`` re-serialization is
         not guaranteed to agree.
         """
@@ -242,7 +243,7 @@ class AuthoritySigning:
             raise
         except (KeyError, TypeError, ValueError) as exc:
             raise ResponseAuthenticationError(
-                f"HTTP {status}: missing or malformed credits-service "
+                f"HTTP {status}: missing or malformed {self._authority_label} "
                 "response authentication"
             ) from exc
 
@@ -260,7 +261,7 @@ class AuthoritySigning:
         )
         if not result.verified:
             raise ResponseAuthenticationError(
-                f"HTTP {status}: credits-service response authentication "
+                f"HTTP {status}: {self._authority_label} response authentication "
                 f"failed: {result.code.value}"
             )
 

@@ -34,7 +34,7 @@ dev = [
     # builds the envelope the way the server expects cannot see the two
     # sides disagreeing, which is exactly how the query-canonicalization
     # defect survived. Neither package is a runtime dependency.
-    "arkhai-apicredits-middleware[signed]",
+    "arkhai-api-gate[signed]",
     "arkhai-api-client>=0.1.0",
     # The capacity half of this service's own boundary. Credits are backed by
     # declared capacity, so the canonical-client test has to register a quota

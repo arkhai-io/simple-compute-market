@@ -19,7 +19,7 @@ comment line inside one of those files would become part of the credential and
 fail the signer construction. The fixture statement `AGENTS.md` requires
 therefore lives here, and in the shell-format `*.env` files where a comment is
 syntactically allowed. `api-credits-admin-key` is bare for the same reason:
-`apicredits_middleware/config.py` reads it with `read_text().strip()` and
+`arkhai_api_gate/config.py` reads it with `read_text().strip()` and
 compares the whole value.
 
 So the rule for this directory is: if a file is consumed as a single opaque

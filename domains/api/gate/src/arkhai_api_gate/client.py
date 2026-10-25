@@ -1,10 +1,10 @@
-"""Async client for the credits service's middleware-facing surface.
+"""Async client for the authority's gate-facing surface.
 
 Thin wrapper over ``verify`` / ``consume`` / ``consume-batch``. All
-verification and accounting authority lives in the service; this only
+verification and accounting authority lives in the authority; this only
 shapes requests and classifies responses into the small result vocab
 the gate dispatches on. ``httpx`` is injectable so tests drive it with
-a ``MockTransport`` instead of a live service.
+a ``MockTransport`` instead of a live authority.
 """
 
 from __future__ import annotations
@@ -21,29 +21,29 @@ from .signing import (
 )
 
 
-# Service reason vocabulary (mirrors services.keys_service constants).
+# The authority's consume refusal reasons.
 KEY_NOT_FOUND = "key_not_found"
 KEY_REVOKED = "key_revoked"
 INSUFFICIENT_CREDITS = "insufficient_credits"
 
 #: Denial reported when the authority answered but could not be established
 #: as the authority. Distinct from `insufficient_credits`: the key may be
-#: perfectly good and something on the path is answering for the service.
+#: perfectly good and something on the path is answering for the authority.
 UNAUTHENTICATED_SERVICE = "unauthenticated_service"
 
-#: The signed identity of each operation this client performs, keyed by the
-#: client method that performs it.
+#: The path and signed operation of each route this client calls.
 #:
-#: These must agree exactly with `CREDITS_ROUTE_CONTRACTS` in the credits
-#: service (`domains/apicredits/service/src/apicredits_service/middleware/route_contracts.py`):
-#: the service recomputes the operation and resource from the matched route
-#: and verifies the signature over *its* values, so a disagreement here is
-#: not a loose end -- it is a signature that cannot verify. The batch route
-#: signs the empty resource because it names no single key; its contract
-#: declares no `path_resource`.
-#:
-#: `test_route_contract_parity.py` asserts this table against the service's,
-#: so a route change on either side fails a test rather than a deployment.
+#: A second spelling of part of `arkhai_api_contracts`' route declarations,
+#: kept local so the gate depends on httpx alone. The authority recomputes
+#: the operation and resource from the matched route and verifies the
+#: signature over *its* values, so a disagreement here is not a loose end --
+#: it is a signature that cannot verify. The batch route signs the empty
+#: resource because it names no single key; its declaration names no
+#: `path_resource`. `tests/test_contract_parity.py` holds this spelling, the
+#: fields, and the refusal reasons equal to the declarations.
+VERIFY_PATH = "/api/v1/keys/{key_id}/verify"
+CONSUME_PATH = "/api/v1/keys/{key_id}/consume"
+CONSUME_BATCH_PATH = "/api/v1/keys/consume-batch"
 VERIFY_OPERATION = "credits_key_verify"
 CONSUME_OPERATION = "credits_key_consume"
 CONSUME_BATCH_OPERATION = "credits_key_consume_batch"
@@ -71,19 +71,19 @@ class ConsumeResult:
 
 
 class TokensClient:
-    """Calls the credits service for one gated app.
+    """Calls the authority for one gated app.
 
     Pass ``http`` (an ``httpx.AsyncClient``) to reuse a pooled
     connection across requests; tests pass one backed by a
     ``MockTransport``. When omitted, a client is created per call —
     convenient but unpooled.
 
-    ``signing`` selects how the service is authenticated to. With it, each
+    ``signing`` selects how the authority is authenticated to. With it, each
     request carries a marketplace identity v2 envelope signed in the
     ``service`` role and every response — refusals included — is verified
     as the authority's. Without it, the legacy ``X-Admin-Key`` shared
     secret is sent, which is all the TypeScript and Rust siblings can
-    currently do. Both are supported because the service accepts exactly
+    currently do. Both are supported because the authority accepts exactly
     one of them at a time, chosen by its own configuration.
     """
 
@@ -112,7 +112,7 @@ class TokensClient:
     ) -> httpx.Response:
         """POST ``body`` to ``path``, signed when this client is configured to.
 
-        ``operation`` is required for a signed call and is the service's own
+        ``operation`` is required for a signed call and is the authority's own
         name for the route, not a label chosen here.
         """
         url = self._base + path
@@ -141,7 +141,7 @@ class TokensClient:
     async def verify(self, *, key_id: str, secret: str) -> VerifyResult:
         try:
             resp = await self._post(
-                f"/api/v1/keys/{key_id}/verify",
+                VERIFY_PATH.format(key_id=key_id),
                 {"secret": secret},
                 operation=VERIFY_OPERATION,
                 resource=key_id,
@@ -169,7 +169,7 @@ class TokensClient:
             body["idempotency_key"] = idempotency_key
         try:
             resp = await self._post(
-                f"/api/v1/keys/{key_id}/consume",
+                CONSUME_PATH.format(key_id=key_id),
                 body,
                 operation=CONSUME_OPERATION,
                 resource=key_id,
@@ -201,7 +201,7 @@ class TokensClient:
     ) -> list[ConsumeResult]:
         try:
             resp = await self._post(
-                "/api/v1/keys/consume-batch",
+                CONSUME_BATCH_PATH,
                 {"items": items},
                 operation=CONSUME_BATCH_OPERATION,
                 resource=BATCH_RESOURCE,
@@ -243,7 +243,7 @@ def _response_body(response: httpx.Response) -> Any:
     """The body exactly as the signature covers it.
 
     An empty body is ``None`` here and becomes ``EMPTY_BODY`` in the
-    envelope, matching how the service hashes a bodyless response. A
+    envelope, matching how the authority hashes a bodyless response. A
     non-JSON body is passed through as text so a malformed answer fails
     verification rather than raising while being read.
     """

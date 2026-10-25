@@ -129,8 +129,8 @@ def _seller_client(app):
 
 
 def _gated_client(app):
-    from apicredits_middleware.client import TokensClient
-    from apicredits_middleware.signing import AuthoritySigning, build_trusted_authorities
+    from arkhai_api_gate.client import TokensClient
+    from arkhai_api_gate.signing import AuthoritySigning, build_trusted_authorities
 
     return TokensClient(
         service_url="http://credits-service",
@@ -138,6 +138,7 @@ def _gated_client(app):
             transport=httpx.ASGITransport(app=app), base_url="http://credits-service"
         ),
         signing=AuthoritySigning(
+            authority_label="credits-service",
             signer=GATED_SIGNER,
             expected_authorities=build_trusted_authorities(
                 [AUTHORITY.identity.model_dump(mode="json")]

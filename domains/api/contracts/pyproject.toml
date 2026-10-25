@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-api-contracts"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "The api family's wire models and negotiation carriers and its authority's route declarations, without the authority."
 requires-python = ">=3.12,<3.14"

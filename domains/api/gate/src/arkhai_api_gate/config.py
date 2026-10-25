@@ -1,7 +1,7 @@
 """Gate configuration.
 
-A middleware is a seller-side component: it holds the operator's
-``admin_api_key`` and talks to the credits service the same way the
+The gate is a seller-side component: it holds the operator's
+``admin_api_key`` and talks to the authority the same way the
 storefront does. The ``purchase`` pointer is the only buyer-facing
 data — it rides the 402/403 body so a client whose credits ran out
 knows where to buy more (the re-purchase loop).
@@ -21,8 +21,8 @@ class PurchasePointer:
     """Where a client buys more credits, embedded in exhaustion bodies.
 
     All fields optional — a seller fills what it wants to expose. The
-    registry + listing let a buyer's ``market credits buy`` re-discover
-    the offering; ``service_name`` is human sugar.
+    registry + listing let a buyer re-discover the offering;
+    ``service_name`` is human sugar.
     """
 
     service_name: str | None = None
@@ -39,9 +39,13 @@ class PurchasePointer:
         return out
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class GateConfig:
     """Everything the gate needs, independent of the web framework.
+
+    ``authority_label`` is how the gate names its authority in a signing
+    diagnostic; the deployment passes it, so the family package names no
+    domain.
 
     ``amount_per_request`` is charged per gated request (a flat
     one-token-per-call meter in v1; richer per-route metering is a
@@ -55,6 +59,7 @@ class GateConfig:
     """
 
     service_url: str
+    authority_label: str
     admin_key: str = ""
     identity_credential: str = ""
     identity_scheme: str = "ed25519"
@@ -72,11 +77,11 @@ class GateConfig:
     def signing_enabled(self) -> bool:
         """Whether a signing credential was configured.
 
-        Presence of the credential is the switch, mirroring the service's
-        own `signed_authentication_enabled()`. The two must be flipped
-        together: the service accepts signed requests or the shared secret,
-        never both, so a middleware signing at a service that is not, or
-        the reverse, is refused at every route.
+        Presence of the credential is the switch, as it is for the
+        authority's service root. The two must be flipped
+        together: the authority accepts signed requests or the shared
+        secret, never both, so a gate signing at an authority that is not,
+        or the reverse, is refused at every route.
         """
         return bool(self.identity_credential)
 
@@ -103,11 +108,15 @@ class GateConfig:
                 self.authority_principals
             ),
             max_response_skew=self.max_response_skew,
+            authority_label=self.authority_label,
         )
 
     @classmethod
-    def from_env(cls, prefix: str = "APICREDITS_MIDDLEWARE_") -> "GateConfig":
+    def from_env(cls, prefix: str, *, authority_label: str) -> "GateConfig":
         """Build from ``<PREFIX>*`` environment variables.
+
+        The prefix is the deployment's: each domain's gated apps read their
+        own, so the family package spells none.
 
         Recognised: ``SERVICE_URL``, exactly one of ``ADMIN_KEY`` or
         ``ADMIN_KEY_FILE``, exactly one of ``IDENTITY_CREDENTIAL`` or
@@ -175,6 +184,7 @@ class GateConfig:
 
         return cls(
             service_url=_get("SERVICE_URL", "http://localhost:8082").rstrip("/"),
+            authority_label=authority_label,
             admin_key=_secret("ADMIN_KEY"),
             identity_credential=_secret("IDENTITY_CREDENTIAL"),
             identity_scheme=_get("IDENTITY_SCHEME", "ed25519"),

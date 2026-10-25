@@ -1,4 +1,4 @@
-"""The Python middleware reproduces the shared conformance session."""
+"""The Python gate reproduces the shared conformance session."""
 
 from __future__ import annotations
 

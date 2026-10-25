@@ -23,6 +23,8 @@ __all__ = [
     "ConsumeBatchItem",
     "ConsumeBatchRequest",
     "ConsumeBatchResponse",
+    "ConsumeOutcome",
+    "ConsumeRefusal",
     "ConsumeRequest",
     "GrantListResponse",
     "IssuanceLabel",
@@ -33,6 +35,7 @@ __all__ = [
     "KeyListResponse",
     "UsageListResponse",
     "VerifyRequest",
+    "VerifyResponse",
     "issuance_request_model",
     "issuance_response_model",
     "issuance_result_model",
@@ -89,8 +92,31 @@ class ConsumeBatchResponse(BaseModel):
     results: list[dict[str, Any]]
 
 
+class ConsumeOutcome(BaseModel):
+    """One consumption's outcome: an accepted charge, a duplicate of one, or a refusal's reason."""
+
+    ok: bool
+    balance: int
+    consumed: int = 0
+    duplicate: bool = False
+    reason: str | None = None
+
+
+class ConsumeRefusal(BaseModel):
+    """The body of a refused consume; ``error`` is one of `CONSUME_REFUSALS`."""
+
+    error: str
+    balance: int
+
+
 class VerifyRequest(BaseModel):
     secret: str = Field(min_length=1)
+
+
+class VerifyResponse(BaseModel):
+    valid: bool
+    status: str | None
+    balance: int
 
 
 class AdjustRequest(BaseModel):

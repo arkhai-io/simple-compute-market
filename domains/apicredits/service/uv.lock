@@ -77,7 +77,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-contracts"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
@@ -86,18 +86,18 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "arkhai_api_contracts-0.3.0-py3-none-any.whl" },
+    { path = "arkhai_api_contracts-0.4.0-py3-none-any.whl" },
 ]
 
 [[package]]
-name = "arkhai-apicredits-middleware"
-version = "0.1.1"
+name = "arkhai-api-gate"
+version = "0.1.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "httpx" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_middleware-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_api_gate-0.1.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -127,7 +127,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "arkhai-api-client" },
-    { name = "arkhai-apicredits-middleware", extra = ["signed"] },
+    { name = "arkhai-api-gate", extra = ["signed"] },
     { name = "arkhai-kit-site-client" },
     { name = "httpx" },
     { name = "pytest" },
@@ -153,7 +153,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "arkhai-api-client", specifier = ">=0.1.0" },
-    { name = "arkhai-apicredits-middleware", extras = ["signed"] },
+    { name = "arkhai-api-gate", extras = ["signed"] },
     { name = "arkhai-kit-site-client" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },

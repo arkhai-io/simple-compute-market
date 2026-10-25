@@ -162,6 +162,11 @@
       "dist": "arkhai-api-selling-arkhai-payments"
     },
     {
+      "key": "api-gate",
+      "path": "domains/api/gate",
+      "dist": "arkhai-api-gate"
+    },
+    {
       "key": "compute",
       "path": "domains/compute",
       "dist": "arkhai-compute"
@@ -273,11 +278,6 @@
       "path": "domains/apicredits/buyer",
       "dist": "arkhai-apicredits-buyer",
       "wheel_only": true
-    },
-    {
-      "key": "apicredits-middleware",
-      "path": "domains/apicredits/middleware/python",
-      "dist": "arkhai-apicredits-middleware"
     },
     {
       "key": "apicredits-storefront",

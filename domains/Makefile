@@ -1,20 +1,20 @@
 # Every uv command in this Makefile uses the repository's declared Python version.
 export UV_PYTHON := $(or $(shell cat ../.python-version 2>/dev/null),$(error ../.python-version not found))
 
-.PHONY: dist dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
+.PHONY: dist dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-api-gate dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer \
 	dist-bare-metal-storefront dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
-	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
+	dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer test-provisioning-iac test-provisioning-adapter test-storefront \
-	test-bare-metal test-compute test-api test-api-client test-api-authority test-api-selling test-api-selling-alkahest test-api-selling-arkhai-payments test-vms-domain test-vms-buyer test-apicredits test-apicredits-middleware
+	test-bare-metal test-compute test-api test-api-client test-api-authority test-api-selling test-api-selling-alkahest test-api-selling-arkhai-payments test-api-gate test-vms-domain test-vms-buyer test-apicredits
 
 DIST_DIR ?= $(abspath ../.dist)
 
 
-dist: dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
+dist: dist-compute dist-api dist-api-contracts dist-api-client dist-api-authority dist-api-selling dist-api-selling-alkahest dist-api-selling-arkhai-payments dist-api-gate dist-vms dist-vms-listings dist-vms-negotiation dist-vms-settlement dist-bare-metal dist-bare-metal-buyer dist-bare-metal-storefront \
 	dist-storefront dist-provisioning-operator-client dist-provisioning-adapters \
 	dist-apicredits-domain dist-apicredits-service dist-apicredits-storefront \
-	dist-apicredits-middleware dist-apicredits-sample-app dist-apicredits-buyer \
+	dist-apicredits-sample-app dist-apicredits-buyer \
 	dist-buyer ## Build every domains-scoped wheel
 
 # ---------------------------------------------------------------------------
@@ -77,6 +77,12 @@ dist-api-selling-arkhai-payments: dist-api-selling ## Build arkhai-api-selling-a
 	cd api/selling-arkhai-payments && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_api_selling_arkhai_payments-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-api-selling-arkhai-payments produced a platform-specific wheel -- must build inside Docker" && exit 1)
+
+dist-api-gate: ## Build arkhai-api-gate wheel into .dist/
+	-mkdir -p $(DIST_DIR)
+	cd api/gate && uv build --wheel --out-dir $(DIST_DIR)
+	@ls $(DIST_DIR)/arkhai_api_gate-*-none-any.whl > /dev/null 2>&1 || \
+		(echo "ERROR: arkhai-api-gate produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
 dist-vms: dist-compute ## Build arkhai-vms wheel into .dist/
 	-mkdir -p $(DIST_DIR)
@@ -156,13 +162,7 @@ dist-apicredits-storefront: dist-apicredits-domain dist-api-selling dist-api-sel
 	@ls $(DIST_DIR)/arkhai_apicredits_storefront-*-none-any.whl > /dev/null 2>&1 || \
 		(echo "ERROR: arkhai-apicredits-storefront produced a platform-specific wheel -- must build inside Docker" && exit 1)
 
-dist-apicredits-middleware: ## Build arkhai-apicredits-middleware wheel into .dist/
-	-mkdir -p $(DIST_DIR)
-	cd apicredits/middleware/python && uv build --wheel --out-dir $(DIST_DIR)
-	@ls $(DIST_DIR)/arkhai_apicredits_middleware-*-none-any.whl > /dev/null 2>&1 || \
-		(echo "ERROR: arkhai-apicredits-middleware produced a platform-specific wheel -- must build inside Docker" && exit 1)
-
-dist-apicredits-sample-app: ## Build arkhai-apicredits-sample-app wheel into .dist/
+dist-apicredits-sample-app: dist-api-gate ## Build arkhai-apicredits-sample-app wheel into .dist/
 	-mkdir -p $(DIST_DIR)
 	cd apicredits/sample-app && uv build --wheel --out-dir $(DIST_DIR)
 	@ls $(DIST_DIR)/arkhai_apicredits_sample_app-*-none-any.whl > /dev/null 2>&1 || \
@@ -204,7 +204,7 @@ test-bare-metal: ## Bare-metal domain, storefront, buyer, and provisioning adapt
 test-compute: ## Compute-family vocabulary package tests
 	cd compute && $(MAKE) test
 
-test-api: ## api-family vocabulary, contracts, client, authority, and selling-side tests
+test-api: ## api-family vocabulary, contracts, client, authority, selling-side, and gate tests
 	cd api && $(MAKE) test
 	cd api/contracts && $(MAKE) test
 	cd api/client && $(MAKE) test
@@ -212,6 +212,7 @@ test-api: ## api-family vocabulary, contracts, client, authority, and selling-si
 	cd api/selling && $(MAKE) test
 	cd api/selling-alkahest && $(MAKE) test
 	cd api/selling-arkhai-payments && $(MAKE) test
+	cd api/gate && $(MAKE) test
 
 test-api-client: ## api-family client tests
 	cd api/client && $(MAKE) test
@@ -228,6 +229,9 @@ test-api-selling-alkahest: ## api-family selling-side Alkahest tests
 test-api-selling-arkhai-payments: ## api-family selling-side Arkhai payments tests
 	cd api/selling-arkhai-payments && $(MAKE) test
 
+test-api-gate: ## api-family gate tests: unit, the conformance replay, and the contract parity
+	cd api/gate && $(MAKE) test
+
 test-vms-domain: ## VM market-domain package tests
 	cd vms/domain && $(MAKE) test
 
@@ -236,10 +240,6 @@ test-vms-buyer: ## Buyer CLI tests
 
 test-apicredits: ## Full apicredits domain test suite
 	cd apicredits && $(MAKE) test
-
-# Compatibility alias for the cross-language middleware parity suite.
-test-apicredits-middleware:
-	cd apicredits && $(MAKE) test-middleware
 
 
 test-provisioning-adapter: ## VM provisioning adapter tests against built wheels

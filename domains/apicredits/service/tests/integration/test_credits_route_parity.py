@@ -11,7 +11,7 @@ every call to that route. Three tables therefore have to stay identical:
   `arkhai_api_contracts.routes` (the declarations the storefront's family
   client binds every `seller` request from; the authority's own tests hold
   the adaptation to the declarations),
-- `apicredits_middleware.client` (the gated app, `service` role).
+- `arkhai_api_gate.client` (the gated app, `service` role).
 
 Lives in the service's own suite because the service composes the table the
 gated app signs against, and because the comparison needs `fastapi` and
@@ -31,20 +31,20 @@ def contracts():
 
 
 @pytest.fixture(scope="module")
-def middleware_client():
-    from apicredits_middleware import client
+def gate_client():
+    from arkhai_api_gate import client
 
     return client
 
 
-def test_middleware_operations_exist_in_the_service_table(
-    contracts, middleware_client
+def test_gate_operations_exist_in_the_service_table(
+    contracts, gate_client
 ):
     """The gated app's three operations are spelled the service's way."""
     for operation in (
-        middleware_client.VERIFY_OPERATION,
-        middleware_client.CONSUME_OPERATION,
-        middleware_client.CONSUME_BATCH_OPERATION,
+        gate_client.VERIFY_OPERATION,
+        gate_client.CONSUME_OPERATION,
+        gate_client.CONSUME_BATCH_OPERATION,
     ):
         assert operation in contracts, (
             f"{operation!r} is not a declared credits route operation; "
@@ -52,8 +52,8 @@ def test_middleware_operations_exist_in_the_service_table(
         )
 
 
-def test_middleware_operations_are_admitted_for_the_service_role(
-    contracts, middleware_client
+def test_gate_operations_are_admitted_for_the_service_role(
+    contracts, gate_client
 ):
     """The gated app signs as `service`, so each route must admit it.
 
@@ -62,23 +62,23 @@ def test_middleware_operations_are_admitted_for_the_service_role(
     signature.
     """
     for operation in (
-        middleware_client.VERIFY_OPERATION,
-        middleware_client.CONSUME_OPERATION,
-        middleware_client.CONSUME_BATCH_OPERATION,
+        gate_client.VERIFY_OPERATION,
+        gate_client.CONSUME_OPERATION,
+        gate_client.CONSUME_BATCH_OPERATION,
     ):
         contract = contracts[operation]
-        assert middleware_client.GATED_APP_ROLE in contract.allowed_roles, (
+        assert gate_client.GATED_APP_ROLE in contract.allowed_roles, (
             f"{operation!r} does not admit "
-            f"{middleware_client.GATED_APP_ROLE!r}: "
+            f"{gate_client.GATED_APP_ROLE!r}: "
             f"{sorted(contract.allowed_roles)}"
         )
 
 
-def test_keyed_middleware_routes_sign_the_path_key(contracts, middleware_client):
+def test_keyed_gate_routes_sign_the_path_key(contracts, gate_client):
     """`consume` and `verify` sign `key_id`, taken from the path."""
     for operation in (
-        middleware_client.VERIFY_OPERATION,
-        middleware_client.CONSUME_OPERATION,
+        gate_client.VERIFY_OPERATION,
+        gate_client.CONSUME_OPERATION,
     ):
         assert contracts[operation].path_resource == "key_id", (
             f"{operation!r} no longer derives its resource from the "
@@ -86,20 +86,20 @@ def test_keyed_middleware_routes_sign_the_path_key(contracts, middleware_client)
         )
 
 
-def test_batch_route_signs_the_empty_resource(contracts, middleware_client):
+def test_batch_route_signs_the_empty_resource(contracts, gate_client):
     """The batch route names no single key, so the client signs "".
 
     Asserted against the contract declaring no resource of its own: if the
     service ever gave this route a resource, the client's empty string
     would stop verifying.
     """
-    contract = contracts[middleware_client.CONSUME_BATCH_OPERATION]
+    contract = contracts[gate_client.CONSUME_BATCH_OPERATION]
     assert getattr(contract, "path_resource", None) is None
     assert getattr(contract, "body_resource", None) is None
-    assert middleware_client.BATCH_RESOURCE == ""
+    assert gate_client.BATCH_RESOURCE == ""
 
 
-def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):
+def test_the_two_clients_do_not_claim_each_others_roles(gate_client):
     """The role split is the point of having two identities.
 
     A compromised gated app must not be able to mint grants or revoke
@@ -108,4 +108,4 @@ def test_the_two_clients_do_not_claim_each_others_roles(middleware_client):
     """
     from arkhai_api_contracts.routes import SELLER_ROLE
 
-    assert middleware_client.GATED_APP_ROLE != SELLER_ROLE
+    assert gate_client.GATED_APP_ROLE != SELLER_ROLE

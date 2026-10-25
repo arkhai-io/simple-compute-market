@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from apicredits_middleware import GateConfig, TokenGate, TokenGateMiddleware
+from arkhai_api_gate import GateConfig, TokenGate, TokenGateMiddleware
+
+ENV_PREFIX = "APICREDITS_MIDDLEWARE_"
+AUTHORITY_LABEL = "credits-service"
 
 
 def create_app(
@@ -25,7 +28,7 @@ def create_app(
     the gate. Tests pass a pre-built ``gate`` wired to a scripted credits
     service so they exercise the real app without a live service.
     """
-    config = config or GateConfig.from_env()
+    config = config or GateConfig.from_env(ENV_PREFIX, authority_label=AUTHORITY_LABEL)
     app = FastAPI(title="apicredits-sample-app")
 
     @app.get("/health")

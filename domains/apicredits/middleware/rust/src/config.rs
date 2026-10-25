@@ -6,7 +6,7 @@
 //! data — it rides the 402/403 body so a client whose credits ran out
 //! knows where to buy more (the re-purchase loop).
 //!
-//! Mirrors the Python reference (`apicredits_middleware.config`); the
+//! Mirrors the Python reference (`arkhai_api_gate.config`); the
 //! behavioral contract is pinned by `../conformance/session.json`.
 
 use std::env;

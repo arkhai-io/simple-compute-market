@@ -10,7 +10,7 @@
 //! Decision vocabulary (status + machine-readable body) is identical
 //! across languages — it is the behavioral contract the conformance
 //! fixtures pin (`../conformance`). Direct port of the Python
-//! `apicredits_middleware.gate`.
+//! `arkhai_api_gate.gate`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

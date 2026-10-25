@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import httpx
 
-from apicredits_middleware.client import ConsumeResult, TokensClient, VerifyResult
-from apicredits_middleware.config import GateConfig, PurchasePointer
-from apicredits_middleware.gate import TokenGate
-from apicredits_middleware.asgi import TokenGateMiddleware
+from arkhai_api_gate.client import ConsumeResult, TokensClient, VerifyResult
+from arkhai_api_gate.config import GateConfig, PurchasePointer
+from arkhai_api_gate.gate import TokenGate
+from arkhai_api_gate.asgi import TokenGateMiddleware
 
 
 class FakeClient:
@@ -46,7 +46,7 @@ class FakeClient:
 
 def _cfg(**kw) -> GateConfig:
     base = dict(
-        service_url="http://svc", amount_per_request=1,
+        service_url="http://svc", authority_label="test-authority", amount_per_request=1,
         flush_interval_seconds=0.0, low_balance_threshold=0,
         purchase=PurchasePointer(listing_id="lst-1"),
     )

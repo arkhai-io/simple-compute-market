@@ -55,7 +55,7 @@ project:
 - `credits-service`: the seller-operated key, credit, quota, and
   fulfillment service used by the storefront and gateway.
 - `vllm-gateway`: an OpenAI-compatible reverse proxy protected by
-  `arkhai-apicredits-middleware`.
+  `arkhai-api-gate`.
 - `vllm`: the upstream model server.
 - `buyer`: an optional tool container for validating the purchase and
   API-call path from the buyer role.
@@ -194,6 +194,11 @@ vllm-gateway:
     APICREDITS_MIDDLEWARE_PURCHASE_STOREFRONT_URL: http://credits-storefront:8000
     APICREDITS_MIDDLEWARE_PURCHASE_REGISTRY_URL: http://api-credits-registry:8080
 ```
+
+The gateway reads these with
+`GateConfig.from_env("APICREDITS_MIDDLEWARE_", authority_label="credits-service")`:
+the gate names no prefix of its own, so the gateway passes the one its
+environment uses.
 
 For a GPU host, replace the `vllm` service with the CUDA image and an
 NVIDIA device reservation:
