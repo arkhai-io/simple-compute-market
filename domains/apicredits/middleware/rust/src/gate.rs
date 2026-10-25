@@ -65,7 +65,7 @@ struct KeyState {
     verify_expires: Instant,
     estimated_balance: i64,
     secret_fingerprint: [u8; 32],
-    verified_at: Instant,
+    verified_ticket: u64,
     pending: Vec<ConsumeItem>,
     exhausted: bool,
 }
@@ -113,16 +113,27 @@ pub struct TokenGate<C> {
     client: C,
     states: Mutex<HashMap<String, KeyState>>,
     idem_counter: AtomicU64,
+    // Orders verifications by when they start; a clock cannot, since two
+    // reads may return the same instant.
+    tickets: AtomicU64,
+    clock: fn() -> Instant,
     flush_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: TokensApi + 'static> TokenGate<C> {
     pub fn new(cfg: GateConfig, client: C) -> Self {
+        Self::with_clock(cfg, client, Instant::now)
+    }
+
+    /// A gate reading time from `clock`, which serves only verify expiry.
+    pub fn with_clock(cfg: GateConfig, client: C, clock: fn() -> Instant) -> Self {
         Self {
             cfg,
             client,
             states: Mutex::new(HashMap::new()),
             idem_counter: AtomicU64::new(0),
+            tickets: AtomicU64::new(1),
+            clock,
             flush_handle: Mutex::new(None),
         }
     }
@@ -200,7 +211,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
     async fn verified_state(&self, key_id: &str, secret: &str) -> VerifyResult {
         // The key id is public, read off any bearer header, so a cached
         // verification answers only for the exact secret that earned it.
-        let now = Instant::now();
+        let now = (self.clock)();
         let secret_fingerprint = fingerprint(secret);
         {
             let states = self.states.lock().unwrap();
@@ -214,6 +225,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
             }
         }
 
+        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed);
         let verify = self.client.verify(key_id, secret).await;
 
         let ttl = Duration::from_secs_f64(self.cfg.verify_ttl_seconds);
@@ -221,7 +233,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
         match states.get_mut(key_id) {
             // A verification that started after this one has already
             // answered; an older answer must not replace what it knew.
-            Some(existing) if existing.verified_at > now => {}
+            Some(existing) if existing.verified_ticket > ticket => {}
             // A refused secret other than the cached one says nothing about
             // the cached credential, so it must not evict it; but an older
             // answer for this secret must not be cached over it.
@@ -229,7 +241,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                 if !verify.valid
                     && !same_fingerprint(&existing.secret_fingerprint, &secret_fingerprint) =>
             {
-                existing.verified_at = existing.verified_at.max(now);
+                existing.verified_ticket = existing.verified_ticket.max(ticket);
             }
             Some(existing) => {
                 // Keep the running estimate (it may be ahead of the
@@ -243,7 +255,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                 existing.verify_expires = now + ttl;
                 existing.estimated_balance = estimated;
                 existing.secret_fingerprint = secret_fingerprint;
-                existing.verified_at = now;
+                existing.verified_ticket = ticket;
                 if verify.valid {
                     existing.exhausted = false;
                 }
@@ -256,7 +268,7 @@ impl<C: TokensApi + 'static> TokenGate<C> {
                         verify_expires: now + ttl,
                         estimated_balance: verify.balance,
                         secret_fingerprint,
-                        verified_at: now,
+                        verified_ticket: ticket,
                         pending: Vec::new(),
                         exhausted: false,
                     },
@@ -565,8 +577,13 @@ mod tests {
         }
     }
 
-    fn held_gate() -> Arc<TokenGate<HeldVerificationClient>> {
-        Arc::new(TokenGate::new(
+    fn frozen() -> Instant {
+        static FROZEN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *FROZEN.get_or_init(Instant::now)
+    }
+
+    fn held_gate(clock: fn() -> Instant) -> Arc<TokenGate<HeldVerificationClient>> {
+        Arc::new(TokenGate::with_clock(
             cfg(0.0, 0),
             HeldVerificationClient {
                 held: "ak_k.old".to_string(),
@@ -576,6 +593,7 @@ mod tests {
                 started: tokio::sync::Notify::new(),
                 release: tokio::sync::Notify::new(),
             },
+            clock,
         ))
     }
 
@@ -590,7 +608,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one() {
-        let gate = held_gate();
+        for clock in [Instant::now as fn() -> Instant, frozen] {
+            a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(clock).await;
+        }
+    }
+
+    async fn a_late_answer_for_an_older_secret_does_not_replace_a_newer_one_under(
+        clock: fn() -> Instant,
+    ) {
+        let gate = held_gate(clock);
 
         let old = hold_old_secret(&gate).await;
         assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
@@ -609,7 +635,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret() {
-        let gate = held_gate();
+        for clock in [Instant::now as fn() -> Instant, frozen] {
+            a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(clock).await;
+        }
+    }
+
+    async fn a_late_answer_does_not_outlast_a_newer_refusal_of_the_same_secret_under(
+        clock: fn() -> Instant,
+    ) {
+        let gate = held_gate(clock);
 
         assert!(gate.authorize(Some("Bearer ak_k.new"), None).await.allowed);
         let old = hold_old_secret(&gate).await;

@@ -47,7 +47,7 @@ interface KeyState {
   verifyExpires: number; // monotonic seconds
   estimatedBalance: number;
   secretFingerprint: Uint8Array;
-  verifiedAt: number; // monotonic seconds when its verification started
+  verifiedTicket: number;
   pending: ConsumeItem[];
   exhausted: boolean;
 }
@@ -105,10 +105,15 @@ export class TokenGate {
   private readonly client: TokensApi;
   private readonly states = new Map<string, KeyState>();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly clock: () => number;
+  // Orders verifications by when they start; a clock cannot, since two
+  // reads may return the same value.
+  private lastTicket = 0;
 
-  constructor(cfg: GateConfig, client: TokensApi) {
+  constructor(cfg: GateConfig, client: TokensApi, options: { clock?: () => number } = {}) {
     this.cfg = cfg;
     this.client = client;
+    this.clock = options.clock ?? nowSeconds;
   }
 
   // -- lifecycle ----------------------------------------------------
@@ -164,7 +169,7 @@ export class TokenGate {
     // The key id is public, read off any bearer header, so a cached
     // verification answers only for the exact secret that earned it.
     const secretFingerprint = await fingerprint(secret);
-    const now = nowSeconds();
+    const now = this.clock();
     const cached = this.states.get(keyId);
     if (
       cached &&
@@ -175,10 +180,11 @@ export class TokenGate {
       return cached.verify;
     }
 
+    const ticket = ++this.lastTicket;
     const verify = await this.client.verify(keyId, secret);
 
     const existing = this.states.get(keyId);
-    if (existing && existing.verifiedAt > now) {
+    if (existing && existing.verifiedTicket > ticket) {
       // A verification that started after this one has already answered;
       // an older answer must not replace what it knew.
       return verify;
@@ -187,7 +193,7 @@ export class TokenGate {
       // A refused secret other than the cached one says nothing about the
       // cached credential, so it must not evict it; but an older answer for
       // this secret must not be cached over it.
-      existing.verifiedAt = Math.max(existing.verifiedAt, now);
+      existing.verifiedTicket = Math.max(existing.verifiedTicket, ticket);
       return verify;
     }
     if (existing) {
@@ -200,7 +206,7 @@ export class TokenGate {
       existing.verifyExpires = now + this.cfg.verifyTtlSeconds;
       existing.estimatedBalance = estimated;
       existing.secretFingerprint = secretFingerprint;
-      existing.verifiedAt = now;
+      existing.verifiedTicket = ticket;
       if (verify.valid) existing.exhausted = false;
     } else {
       this.states.set(keyId, {
@@ -208,7 +214,7 @@ export class TokenGate {
         verifyExpires: now + this.cfg.verifyTtlSeconds,
         estimatedBalance: verify.balance,
         secretFingerprint,
-        verifiedAt: now,
+        verifiedTicket: ticket,
         pending: [],
         exhausted: false,
       });

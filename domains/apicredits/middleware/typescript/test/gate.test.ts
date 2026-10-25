@@ -172,6 +172,11 @@ test("fetch adapter returns 401 on a missing key", async () => {
   assert.equal(ok.status, 200);
 });
 
+const CLOCKS: [string, (() => number) | undefined][] = [
+  ["monotonic", undefined],
+  ["frozen", () => 100],
+];
+
 /** Holds the first verification of one secret, answering it valid, until the test releases it. */
 class HeldVerificationClient extends FakeClient {
   verified: string[] = [];
@@ -207,9 +212,9 @@ class HeldVerificationClient extends FakeClient {
   }
 }
 
-test("a late answer for an older secret does not replace a newer one", async () => {
+for (const [clockName, clock] of CLOCKS) test(`a late answer for an older secret does not replace a newer one (${clockName} clock)`, async () => {
   const client = new HeldVerificationClient("ak_k.old", "ak_k.new");
-  const gate = new TokenGate(cfg(), client);
+  const gate = new TokenGate(cfg(), client, { clock });
 
   const old = gate.authorize("Bearer ak_k.old");
   await client.started;
@@ -224,9 +229,9 @@ test("a late answer for an older secret does not replace a newer one", async () 
   assert.deepEqual(client.verified, ["ak_k.old", "ak_k.new", "ak_k.old"]);
 });
 
-test("a late answer does not outlast a newer refusal of the same secret", async () => {
+for (const [clockName, clock] of CLOCKS) test(`a late answer does not outlast a newer refusal of the same secret (${clockName} clock)`, async () => {
   const client = new HeldVerificationClient("ak_k.old", "ak_k.new");
-  const gate = new TokenGate(cfg(), client);
+  const gate = new TokenGate(cfg(), client, { clock });
 
   assert.ok((await gate.authorize("Bearer ak_k.new")).allowed);
   const old = gate.authorize("Bearer ak_k.old");
