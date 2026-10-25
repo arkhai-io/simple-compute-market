@@ -2511,6 +2511,59 @@ and `RELEASING.md`.
       journal-unreachable and post-publication record-failure branches stay
       untested, each a log-and-continue of a call the published and parked
       tests exercise.
+      **Review round (2026-10-25).** An external review of `2bdc0b05b` raised
+      four findings, triaged with the owner:
+      - *F1, accepted: a crash after parking lost the buyer's credential.* The
+        park committed before the credential was saved, and a restarted
+        attempt finds a parked deal and issues nothing. The stage now keeps
+        the latest issued credential (`keep_credential`, through
+        `persist_delivery`, its fulfillment identity left unset until an
+        operator resolves the deal) before every park commits — a fresh
+        unknown outcome, a recorded submission with no reference after a
+        restart, and an operation already parked — and defers without
+        parking when it cannot keep it. A first fix that saved the
+        credential before submitting was withdrawn after the fresh-context
+        check: a restart after submitting re-issued and rotated the secret
+        while the row kept the dead one, and the secret was readable while
+        the attestation was in flight and on a rolled-back deal. Library
+        integration (`test_delivery.py`): a process stopped right after the
+        park commits keeps the credential, with one issuance; the
+        stop-after-submission restart keeps the live, rotated secret; no
+        credential is readable in flight or on a rejected deal.
+      - *F2, accepted: a journal it could not read failed the deal for good.*
+        The parked check now defers on a read error. Library integration: an
+        unreadable journal defers, issues nothing, and leaves progress
+        `provisioning` through `persist_settlement_outcome`. The recorded-
+        reference branch's `complete_fulfillment` is wrapped as the
+        publication's already was.
+      - *F3, accepted as option A: the stages read an untyped composition.*
+        Both stages and the payment service type it as `selling`'s
+        `SellingSettlementComposition` and say which collaborators they read
+        from it; a delivery with none is refused. Options B (a typed bundle
+        per library) and C (one constructor argument per collaborator) were
+        declined: the collaborators exist only once the lifespan runs, so
+        either would duplicate the composition behind providers.
+      - *F4, declined by the owner: 8.8 is checked without end-to-end
+        results.* The plan's header gives the lanes to validation, as for
+        1.7 to 7.5.
+      Evidence: `make test-api-selling-alkahest` 32 passed (unit, library
+      integration); `make test-api-selling-arkhai-payments` 9 (unit); `make -C
+      domains/apicredits/storefront test` 174 (unit, application
+      integration; baselines unchanged). On a copy without the stale
+      checkout `make check-packaging` passes, and `make -k test` fails only as
+      1.7 to 7.5 record (the IaC relay-teardown tests, the VM Alkahest
+      toolchain pair, GNU make's `--eval`) and on one release-tooling case,
+      `test_a_credential_helper_that_does_not_answer_is_named`, whose 0.2 s
+      helper timeout passed twice and failed once on rerun of the same tree.
+      Two fresh-context checks: the
+      first found the withdrawn fix's defect and two exposures, fixed above;
+      the second found F1 and F2 closed, and one residual, the parked
+      reservation branch keeping no credential, now closed too. Left: a
+      crash between keeping and parking can leave the row with a secret the
+      next issuance rotates, until that re-drive keeps the new one; and other
+      transient reads before issuance (evidence, thread, progress, the hold)
+      still fail a deal, which predate this change and are outside the
+      accepted fixes.
 
 ## 9. The gate
 

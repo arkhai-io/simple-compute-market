@@ -17,6 +17,7 @@ from arkhai_api_selling.contributions import SellingContributions
 from arkhai_api_selling.issuance import SettlementRefusal, SettleResult
 from arkhai_api_selling.lifecycle import ContributedLoop
 from arkhai_api_selling.quota_listing import listing_binding
+from arkhai_api_selling.settlement_composition import SellingSettlementComposition
 from market_arkhai_payments import (
     ARKHAI_PAYMENTS_CONFIG_KEY,
     ARKHAI_PAYMENTS_MECHANISM,
@@ -46,7 +47,8 @@ class ArkhaiPaymentsSellerStage:
 
     ``capacity`` and ``hold_ttl_seconds`` place the acceptance's quota hold;
     ``composition`` and ``sqlite_client`` are the storefront lifespan's
-    settlement composition and persistence, which reconciliation reads.
+    settlement composition, the selling library's ``SellingSettlementComposition``,
+    whose ``servicing`` holds the kit's payment stage, and its persistence.
     """
 
     mechanism = ARKHAI_PAYMENTS_MECHANISM
@@ -62,7 +64,7 @@ class ArkhaiPaymentsSellerStage:
         fulfils_through_capacity: bool,
         capacity: QuotaCapacity,
         hold_ttl_seconds: Callable[[], float],
-        composition: Callable[[], Any | None],
+        composition: Callable[[], SellingSettlementComposition | None],
         sqlite_client: Callable[[], Any | None],
         reconciliation_interval: Callable[[], float],
         stage_event: StageEventFn,
@@ -97,7 +99,7 @@ class ArkhaiPaymentsSellerStage:
     def validate_configuration(self, settlement_config: Any) -> None:
         pass
 
-    def service(self, db: Any, composition: Any) -> PaymentSettlementService | None:
+    def service(self, db: Any, composition: SellingSettlementComposition | None) -> PaymentSettlementService | None:
         """The deal-scoped payment settlement service, or None when payments is not serviced."""
         servicing = (composition.servicing if composition is not None else {}).get(self.mechanism)
         if servicing is None:
@@ -152,7 +154,7 @@ class ArkhaiPaymentsSellerStage:
         except ValueError as exc:
             raise OfferUnfulfillableError("payments_payer_account_invalid") from exc
 
-    def agreement_artifacts(self, agreement: Mapping[str, Any], composition: Any) -> dict[str, Any]:
+    def agreement_artifacts(self, agreement: Mapping[str, Any], composition: SellingSettlementComposition) -> dict[str, Any]:
         servicing = composition.servicing.get(self.mechanism)
         if servicing is None:
             raise ValueError("Arkhai payments is not enabled")
@@ -231,13 +233,13 @@ class ArkhaiPaymentsSellerStage:
             hold_expires_at=held.get("hold_expires_at"),
         )
 
-    def _required_service(self, db: Any, composition: Any) -> PaymentSettlementService:
+    def _required_service(self, db: Any, composition: SellingSettlementComposition | None) -> PaymentSettlementService:
         service = self.service(db, composition)
         if service is None:
             raise SettlementRefusal(503, "Arkhai payments is not enabled")
         return service
 
-    async def settle(self, *, db: Any, composition: Any, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult:
+    async def settle(self, *, db: Any, composition: SellingSettlementComposition, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult:
         if reference != body.negotiation_id:
             raise SettlementRefusal(400, "payments settlement is keyed by negotiation ID")
         return await self._required_service(db, composition).settle(
@@ -246,17 +248,17 @@ class ArkhaiPaymentsSellerStage:
             seller_principal=signer.identity,
         )
 
-    async def status(self, *, db: Any, composition: Any, body: Any, signer: Any, **_context: Any) -> SettleResult | None:
+    async def status(self, *, db: Any, composition: SellingSettlementComposition, body: Any, signer: Any, **_context: Any) -> SettleResult | None:
         return await self._required_service(db, composition).status(
             body.negotiation_id,
             buyer_principal=body.buyer_principal,
             seller_principal=signer.identity,
         )
 
-    async def refund(self, *, db: Any, composition: Any, negotiation_id: str) -> SettleResult:
+    async def refund(self, *, db: Any, composition: SellingSettlementComposition, negotiation_id: str) -> SettleResult:
         return await self._required_service(db, composition).refund(negotiation_id)
 
-    async def refund_before_delivery(self, *, db: Any, composition: Any, negotiation_id: str) -> dict[str, Any]:
+    async def refund_before_delivery(self, *, db: Any, composition: SellingSettlementComposition, negotiation_id: str) -> dict[str, Any]:
         service = self.service(db, composition)
         if service is None:
             return {"action": "refund", "status": "skipped", "reason": "payments_unavailable"}

@@ -9,6 +9,7 @@ reference, waits for an operator with the delivered credential kept privately.
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from types import SimpleNamespace
 
 import httpx
@@ -18,6 +19,7 @@ from arkhai_api_client import AuthorityError
 from arkhai_api_selling.evidence_store import IssuanceEvidenceRepository, IssuanceEvidenceService
 from arkhai_api_selling.issuance import fulfill_from_hold, project_progress
 from arkhai_api_selling.persistence import StorefrontSQLiteClient
+from arkhai_api_selling.settlement_composition import persist_settlement_outcome
 from market_alkahest import RECIPIENT_RELEASE
 from market_identity import TrustedIdentitySet
 from market_settlement_runtime import (
@@ -270,6 +272,9 @@ async def test_a_process_stopped_after_submitting_never_submits_again(tmp_path):
     assert (await h.obligation_record()).mechanism_state[MANUAL_REASON_KEY] == OUTCOME_UNKNOWN
     progress = await h.db.load_issuance_progress(reference=ESCROW_UID)
     assert progress["status"] == "provisioning"
+    # The restart's issuance rotated the secret; the kept credential is the live one.
+    projected = await project_progress(EXAMPLE, h.db, progress, owner=BUYER)
+    assert projected["tenant_credentials"]["secret"] == f"ak_new.s3cret-{len(h.authority.requests)}"
 
 
 @pytest.mark.parametrize("chain_error", ["execution reverted", "insufficient funds for gas"])
@@ -284,6 +289,28 @@ async def test_a_rejected_attestation_withdraws_its_submission_and_compensates_t
     operation = await h.fulfill_operation()
     assert "submission" not in (operation["receipt"] or {})
     assert operation["state"] != "manual_required"
+    await persist_settlement_outcome(h.db, h.prepared(), outcome)
+    progress = await h.db.load_issuance_progress(reference=ESCROW_UID)
+    projected = await project_progress(EXAMPLE, h.db, progress, owner=BUYER)
+    assert "tenant_credentials" not in projected
+
+
+async def test_no_credential_is_readable_while_the_attestation_is_in_flight(tmp_path):
+    h = Harness(tmp_path, Authority())
+    await h.accept()
+    seen = []
+
+    class Observing(Chain):
+        async def _submit(self, data, anchor):
+            progress = await h.db.load_issuance_progress(reference=ESCROW_UID)
+            seen.append(await project_progress(EXAMPLE, h.db, progress, owner=BUYER))
+            return await super()._submit(data, anchor)
+
+    chain = Observing()
+    chain.string_obligation = SimpleNamespace(do_obligation=chain._submit)
+
+    assert (await h.deliver(chain)).status == "fulfilled"
+    assert "tenant_credentials" not in seen[0]
 
 
 async def test_a_recorded_reference_completes_without_publishing_again(tmp_path):
@@ -317,3 +344,52 @@ async def test_an_attestation_another_attempt_holds_is_deferred(tmp_path):
 
     assert outcome.status == "deferred" and chain.submissions == []
     assert h.authority.rollbacks == []
+
+
+class StopsAfterParking:
+    """The journal, with the process stopping the moment a park commits."""
+
+    def __init__(self, runtime: SettlementRuntime) -> None:
+        self._runtime = runtime
+
+    def __getattr__(self, name):
+        return getattr(self._runtime, name)
+
+    async def park_fulfillment(self, *args, **kwargs):
+        await self._runtime.park_fulfillment(*args, **kwargs)
+        raise asyncio.CancelledError()
+
+
+async def test_a_process_stopped_right_after_parking_keeps_the_buyers_credential(tmp_path):
+    h = Harness(tmp_path, Authority())
+    await h.accept()
+    h.composition.runtime = StopsAfterParking(h.runtime)
+
+    with pytest.raises(asyncio.CancelledError):
+        await h.deliver(Chain(RuntimeError("rpc down")))
+
+    h.composition.runtime = h.runtime
+    outcome = await h.deliver(Chain(), stage=h.stage())
+
+    assert outcome.status == "deferred"
+    assert len(h.authority.requests) == 1
+    progress = await h.db.load_issuance_progress(reference=ESCROW_UID)
+    projected = await project_progress(EXAMPLE, h.db, progress, owner=BUYER)
+    assert projected["tenant_credentials"]["secret"] == "ak_new.s3cret-1"
+
+
+class UnreadableJournal:
+    async def load_settlement_operation(self, *_args):
+        raise sqlite3.OperationalError("database is locked")
+
+
+async def test_a_journal_that_cannot_be_read_defers_the_deal_and_fails_nothing(tmp_path):
+    h = Harness(tmp_path, Authority())
+    await h.accept()
+    h.composition.repository = UnreadableJournal()
+
+    outcome = await h.deliver(Chain())
+    await persist_settlement_outcome(h.db, h.prepared(), outcome)
+
+    assert outcome.status == "deferred" and h.authority.requests == []
+    assert (await h.db.load_issuance_progress(reference=ESCROW_UID))["status"] == "provisioning"

@@ -30,6 +30,7 @@ from arkhai_api_selling.issuance import (
 )
 from arkhai_api_selling.quota_listing import accepted_listing_resource
 from arkhai_api_selling.route_services import checked_refund_payload, checked_settle_payload
+from arkhai_api_selling.settlement_composition import SellingSettlementComposition
 from market_arkhai_payments import (
     MandatePolicyError,
     NothingToReverse,
@@ -64,7 +65,7 @@ class PaymentSettlementService:
     """
 
     def __init__(
-        self, *, db: Any, composition: Any, stage: PaymentSellerStage, mechanism: str
+        self, *, db: Any, composition: SellingSettlementComposition, stage: PaymentSellerStage, mechanism: str
     ) -> None:
         self.db = db
         self.composition = composition

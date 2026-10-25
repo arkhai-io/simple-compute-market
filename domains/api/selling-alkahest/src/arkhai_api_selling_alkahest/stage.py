@@ -30,6 +30,7 @@ from arkhai_api_selling.issuance import (
     settlement_evidence,
 )
 from arkhai_api_selling.quota_listing import accepted_listing
+from arkhai_api_selling.settlement_composition import SellingSettlementComposition
 from market_alkahest import (
     ALKAHEST_CONFIG_KEY,
     ALKAHEST_MECHANISM_ID,
@@ -85,7 +86,7 @@ class AlkahestFulfillmentInput:
     listing_id: str | None
     negotiation_id: str
     sqlite_client: Any = None
-    composition: Any = None
+    composition: SellingSettlementComposition | None = None
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,11 @@ class AlkahestSellerStage:
     ``chains`` and ``seller_wallet`` read the storefront's chain configuration
     and wallet; ``composition`` and ``sqlite_client`` its lifespan's settlement
     composition and persistence; ``backfill_escrows`` the storefront's identity
-    backfill for escrows that predate their obligation records.
+    backfill for escrows that predate their obligation records. Every other
+    collaborator — the delivery callable, the credits client, the evidence
+    service, the settlement runtime and its repository, the local principal,
+    the mechanism resources, and the settlement configuration — is read from
+    the composition, the selling library's ``SellingSettlementComposition``.
     """
 
     mechanism = ALKAHEST_MECHANISM_ID
@@ -124,7 +129,7 @@ class AlkahestSellerStage:
         release_models: frozenset[str],
         chains: Callable[[], Mapping[str, Any]],
         seller_wallet: Callable[[], str],
-        composition: Callable[[], Any | None],
+        composition: Callable[[], SellingSettlementComposition | None],
         sqlite_client: Callable[[], Any | None],
         backfill_escrows: BackfillFn,
         stage_event: StageEventFn,
@@ -170,7 +175,7 @@ class AlkahestSellerStage:
             require_deliverable_release_model(section, self.release_models)
 
     def release_conditions(
-        self, composition: Any, accepted_escrows: list[Mapping[str, Any]]
+        self, composition: SellingSettlementComposition, accepted_escrows: list[Mapping[str, Any]]
     ) -> list[dict[str, Any]]:
         return release_conditions(
             composition.settlement_config,
@@ -212,7 +217,7 @@ class AlkahestSellerStage:
         if selection.expiration_unix is None:
             raise OfferUnfulfillableError("settlement_expiration_required")
 
-    def agreement_artifacts(self, agreement: Mapping[str, Any], composition: Any) -> dict[str, Any]:
+    def agreement_artifacts(self, agreement: Mapping[str, Any], composition: SellingSettlementComposition) -> dict[str, Any]:
         return {}
 
     def readiness_resources(self, clauses: Any, resources: Mapping[str, Any]) -> dict[str, Any]:
@@ -391,7 +396,7 @@ class AlkahestSellerStage:
             ),
         )
 
-    async def _start(self, *, db: Any, composition: Any, coordinator: Any, reference: str, body: Any) -> dict[str, Any] | None:
+    async def _start(self, *, db: Any, composition: SellingSettlementComposition, coordinator: Any, reference: str, body: Any) -> dict[str, Any] | None:
         if not body.chain_name:
             raise ValueError("chain_name is required for Alkahest")
         client = composition.mechanism_resources["get_client"](body.chain_name)
@@ -403,7 +408,7 @@ class AlkahestSellerStage:
         )
         return await db.load_issuance_progress(reference=reference)
 
-    async def settle(self, *, db: Any, composition: Any, coordinator: Any, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult:
+    async def settle(self, *, db: Any, composition: SellingSettlementComposition, coordinator: Any, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult:
         row = await self._start(db=db, composition=composition, coordinator=coordinator, reference=reference, body=body)
         if row is None:
             raise SettlementRefusal(409, "settlement progress is unavailable")
@@ -411,7 +416,7 @@ class AlkahestSellerStage:
             self._contributions, db, row, buyer=body.buyer_principal, seller=signer.identity
         )
 
-    async def status(self, *, db: Any, composition: Any, coordinator: Any, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult | None:
+    async def status(self, *, db: Any, composition: SellingSettlementComposition, coordinator: Any, reference: str, body: Any, signer: Any, **_context: Any) -> SettleResult | None:
         row = await db.load_issuance_progress(reference=reference)
         if row is None:
             return None
@@ -433,10 +438,10 @@ class AlkahestSellerStage:
             self._contributions, db, row, buyer=body.buyer_principal, seller=signer.identity
         )
 
-    async def refund(self, *, db: Any, composition: Any, negotiation_id: str) -> SettleResult:
+    async def refund(self, *, db: Any, composition: SellingSettlementComposition, negotiation_id: str) -> SettleResult:
         raise SettlementRefusal(409, "this settlement mechanism refunds through its own path")
 
-    async def refund_before_delivery(self, *, db: Any, composition: Any, negotiation_id: str) -> dict[str, Any]:
+    async def refund_before_delivery(self, *, db: Any, composition: SellingSettlementComposition, negotiation_id: str) -> dict[str, Any]:
         return {"action": "refund", "status": "skipped", "reason": "refund_not_supported"}
 
     async def deliver_prepared(self, prepared: Any, *, mechanism_client: Any) -> FulfillmentOutcome:
@@ -468,7 +473,13 @@ class AlkahestSellerStage:
                     public_result={"connection_details": progress["public_result"].get("connection_details")},
                 )
             composition = params.composition
-            if await self._parked(composition, evidence):
+            if composition is None:
+                raise ValueError("settlement composition is unavailable")
+            try:
+                parked = await self._parked(composition, evidence)
+            except Exception as exc:
+                return FulfillmentOutcome(status="deferred", reason=f"Attestation journal is unavailable: {exc}")
+            if parked:
                 # Issuing again would rotate the credential the buyer holds.
                 return FulfillmentOutcome(
                     status="deferred", reason="the attestation waits for an operator"
@@ -478,20 +489,28 @@ class AlkahestSellerStage:
                     evidence=evidence, retry_uncertain=self.retry_uncertain, db=db,
                     credits_client=composition.credits_client,
                 )
+                issued = result
+
+                async def keep_credential() -> None:
+                    # The latest issued credential, kept before a park makes
+                    # the deal wait, since a waiting deal is never issued again.
+                    # Its fulfillment identity is the attestation's, recorded
+                    # once an operator resolves it.
+                    await persist_delivery(
+                        self._contributions, db, evidence,
+                        {**issued, "status": "pending", "fulfillment_uid": None},
+                        public_ref=prepared.mechanism_ref,
+                    )
+
                 result = await self.continue_delivery(
                     result, evidence=evidence, client=mechanism_client, composition=composition,
+                    keep_credential=keep_credential,
                 )
             except Exception as exc:
                 return FulfillmentOutcome(status="failed", reason=f"issuance_error: {exc}")
             if result.get("status") == "pending":
                 return FulfillmentOutcome(status="deferred", reason=result.get("message"))
             if result.get("status") == "parked":
-                # The fulfillment identity is the attestation's, recorded once it is resolved.
-                await persist_delivery(
-                    self._contributions, db, evidence,
-                    {**result, "status": "pending", "fulfillment_uid": None},
-                    public_ref=prepared.mechanism_ref,
-                )
                 return FulfillmentOutcome(status="deferred", reason=result.get("message"))
             if result.get("status") != "fulfilled":
                 return FulfillmentOutcome(status="failed", reason=result.get("message") or "credit issuance failed")
@@ -508,15 +527,21 @@ class AlkahestSellerStage:
             )
 
     async def continue_delivery(
-        self, result: dict[str, Any], *, evidence: SettlementEvidence, client: Any, composition: Any
+        self,
+        result: dict[str, Any],
+        *,
+        evidence: SettlementEvidence,
+        client: Any,
+        composition: SellingSettlementComposition,
+        keep_credential: Callable[[], Awaitable[None]],
     ) -> dict[str, Any]:
         """Attest an issued grant on chain, once.
 
         Returns the result fulfilled with the attestation's UID; ``pending``
         while the journal or another attempt holds the attestation; ``parked``
-        when its outcome is unknown, for an operator, the grant standing; and
-        an error, with the grant rolled back, only when nothing reached the
-        chain.
+        when its outcome is unknown, for an operator, the grant standing and
+        ``keep_credential`` having stored it before the park commits; and an
+        error, with the grant rolled back, only when nothing reached the chain.
         """
         if result.get("status") != "fulfilled":
             return result
@@ -548,6 +573,10 @@ class AlkahestSellerStage:
             }
 
         async def park(reason: str) -> dict[str, Any]:
+            try:
+                await keep_credential()
+            except Exception as exc:
+                return {"status": "pending", "message": f"The credential could not be kept: {exc}"}
             self._stage_event("settlement", "attestation_outcome_unknown", settlement_ref=evidence.settlement_ref,
                               key_id=issuance.key_id, reason=reason)
             try:
@@ -568,12 +597,20 @@ class AlkahestSellerStage:
         if reserved.status == "succeeded":
             return attested(str(receipt["fulfillment_ref"]))
         if reserved.status == "manual_required":
+            try:
+                await keep_credential()
+            except Exception:
+                logger.exception("could not keep the credential of %s", evidence.settlement_ref)
             return parked("the attestation waits for an operator")
         if receipt.get(FULFILLMENT_REFERENCE_KEY):
             # Published before the attempt stopped: complete with what the
             # chain already holds, and never publish again.
             reference = str(receipt[FULFILLMENT_REFERENCE_KEY])
-            await runtime.complete_fulfillment(obligation_ref, reference, **journal)
+            try:
+                await runtime.complete_fulfillment(obligation_ref, reference, **journal)
+            except Exception:
+                # The coordinator binds the reference this returns.
+                logger.exception("could not complete the attestation of %s", evidence.settlement_ref)
             return attested(reference)
         if FULFILLMENT_SUBMISSION_KEY in receipt:
             return await park("an earlier submission's outcome is unknown")
@@ -623,7 +660,7 @@ class AlkahestSellerStage:
         return await roll_back(f"attestation {attestation.outcome} ({attestation.reason})")
 
     @staticmethod
-    async def _parked(composition: Any, evidence: SettlementEvidence) -> bool:
+    async def _parked(composition: SellingSettlementComposition, evidence: SettlementEvidence) -> bool:
         operation = await composition.repository.load_settlement_operation(
             evidence.evidence["source"]["obligation_ref"], "fulfill"
         )
