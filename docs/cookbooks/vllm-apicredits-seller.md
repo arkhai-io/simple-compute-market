@@ -265,7 +265,7 @@ configured `[chains.<name>]` entry the listing accepts and signs with the
 market credits buy \
   --quantity 3 \
   --new-key \
-  --service-name vllm-chat \
+  --resource 'service_name="vllm-chat"' \
   --max-matches 5 \
   --max-rounds 10 \
   --poll-interval 1.0 \

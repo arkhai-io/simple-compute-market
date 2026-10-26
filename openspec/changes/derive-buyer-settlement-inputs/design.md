@@ -107,6 +107,16 @@ Alkahest proposals use tokens of different decimals, one display price has no
 single base-unit value, so `buy` refuses, naming them. A token whose decimals
 cannot be read refuses with the token and chain.
 
+One explicit price pair constrains every negotiation in a `buy`, and each
+mechanism prices in its own units: Alkahest in the selected token's base units,
+payments in the payment asset's. So when explicit prices are given and the
+selected listings settle through more than one mechanism, `buy` refuses, naming
+the mechanisms, before any negotiation. Rejected (on review): per-mechanism
+explicit-price constraints — `core_buyer`'s `BuyConstraints` carries one pair
+for the run, and giving each match its own needs a change to the core buyer
+role (deferred, below). The defect predates this
+change; the original `buy` scaled the same pair through every session.
+
 Rejected: keeping `--token-contract` as a listing filter — it is a token flag,
 which the requirement forbids; the buyer's settlement policy is where a token
 preference belongs.
@@ -142,7 +152,7 @@ library tests drop the options and inject the wallet and chains instead.
 |---|---|---|
 | `arkhai-api-buying` | 0.3.0 | `BuySession.scale_explicit_prices` takes the selected matches |
 | `arkhai-api-buying-alkahest` | 0.2.0 | options removed; per-listing chain; floor `arkhai-api-buying>=0.3.0` |
-| `arkhai-api-buying-arkhai-payments` | 0.1.1 | the new session signature; floor `arkhai-api-buying>=0.3.0` |
+| `arkhai-api-buying-arkhai-payments` | 0.1.2 | the new session signature; floor `arkhai-api-buying>=0.3.0` |
 | `arkhai-apicredits-buyer` | 0.8.0 | floors on the above; tests |
 
 ## Risks / Trade-offs
@@ -152,12 +162,18 @@ library tests drop the options and inject the wallet and chains instead.
   exists. It can run interactively, or keep only the chains it settles on.
 - `buy` may prompt once per listing rather than once per run when several
   listings accept several configured chains.
+- The mixed-mechanism refusal comes after selection, since the mechanisms
+  are known only then, so an interactive buyer may answer selection prompts
+  before it.
 - Under `--yes`, the first ambiguous listing ends the whole `buy`, before any
   later listing or lower-priority mechanism is tried; the refusal names it.
 
 ## Deferred
 
 - A buyer configuration setting naming a default settlement chain (D3).
+- Per-mechanism explicit-price constraints in one `buy` (D4), which need the
+  core buyer role's constraints to carry a pair per match; no change owns
+  them yet.
 
 ## Open Questions
 

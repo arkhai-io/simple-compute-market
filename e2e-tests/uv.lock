@@ -181,7 +181,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-buying-arkhai-payments"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-api-buying" },
@@ -194,7 +194,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_api_buying_arkhai_payments-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_api_buying_arkhai_payments-0.1.2-py3-none-any.whl" },
 ]
 
 [[package]]

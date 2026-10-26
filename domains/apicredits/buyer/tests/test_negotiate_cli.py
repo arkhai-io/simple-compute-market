@@ -320,6 +320,44 @@ def test_buy_scales_explicit_prices_by_the_selected_listings_token(surface, monk
     assert [match["listing_id"] for match in seen["matches"]] == ["credits-1"]
 
 
+def test_buy_refuses_explicit_prices_across_mechanisms_of_different_units(surface, monkeypatch):
+    surface.configure("arkhai.payments.v1")
+    payment_listing = {**common.fetch_listing_dict(), "listing_id": "credits-2"}
+    surface.configure("alkahest.v1")
+    escrow_listing = common.fetch_listing_dict()
+    chain = ChainConfig(name="anvil", rpc_url="http://rpc", chain_id=31337)
+    monkeypatch.setattr(settlement_stages, "buyer_chains", lambda: {"anvil": chain})
+    # A deterministic development key for this test only; never used on any network.
+    monkeypatch.setattr(settlement_stages, "resolve_buyer_wallet", lambda: ("0x" + "11" * 20, "0x" + "77" * 32))
+    monkeypatch.setattr(
+        settlement_stages, "resolve_token", lambda token, **_kw: SimpleNamespace(decimals=2),
+    )
+    for name in (
+        "resolve_fresh_buyer_identity", "resolve_indexer_urls", "resolve_registry_authorities",
+        "resolve_registry_api_keys", "resolve_indexer_urls_for_schema", "resolve_negotiation_config",
+    ):
+        monkeypatch.setattr(buy_cli, name, getattr(common, name))
+    monkeypatch.setattr(buy_cli, "resolve_discovery_timeout", lambda **_kw: 1.0)
+    monkeypatch.setattr(
+        buy_cli, "query_registry_for_matches_multi",
+        lambda *a, **kw: [dict(payment_listing), dict(escrow_listing)],
+    )
+    monkeypatch.setattr(buy_cli, "load_buyer_chain", lambda *a, **kw: None)
+
+    def run_buy(**_kw):
+        raise AssertionError("a buy across units was negotiated")
+
+    monkeypatch.setattr(buy_cli, "run_buy", run_buy)
+
+    result = CliRunner().invoke(app, [
+        "credits", "buy", "--quantity", "4", "--initial-price", "2", "--max-price", "3", "--yes",
+    ])
+
+    assert result.exit_code == 2, (result.output, result.exception)
+    output = " ".join(result.output.split())
+    assert "alkahest.v1" in output and "arkhai.payments.v1" in output
+
+
 @pytest.mark.parametrize("command", ["buy", "negotiate", "settle"])
 @pytest.mark.parametrize(
     "flag",

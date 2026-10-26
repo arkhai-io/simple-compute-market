@@ -70,7 +70,7 @@ and `docs/cookbooks/vllm-apicredits-seller.md`.
       `make check-change CHANGE=derive-buyer-settlement-inputs`, and
       `make -k test`. One fresh-context compliance check of the diff.
       *Done.* `arkhai-api-buying` 0.3.0, `arkhai-api-buying-alkahest` 0.2.0,
-      `arkhai-api-buying-arkhai-payments` 0.1.1, `arkhai-apicredits-buyer`
+      `arkhai-api-buying-arkhai-payments` 0.1.1 (0.1.2 after the rebase, R1), `arkhai-apicredits-buyer`
       0.8.0; six projects relocked. Suites: `test-api-buying` 40,
       `-alkahest` 18, `-arkhai-payments` 8, `test-buyer` 54, storefront 174,
       all passing. On a clean copy after the compliance fixes,
@@ -84,6 +84,31 @@ and `docs/cookbooks/vllm-apicredits-seller.md`.
       check found no blocking defect; its coverage and consistency findings
       are fixed, and its note that one ambiguous listing ends a `--yes` buy
       is in design "Risks".
+
+### Review round 1
+
+The owner approved fixing the external review's findings. The section was
+rebased onto `keep-buyer-credentials-private`'s review round, which took
+`arkhai-api-buying-arkhai-payments` 0.1.1, so this change's bump is 0.1.2.
+
+- [x] R1.1 **Explicit prices across mechanisms.** `buy` refuses explicit prices
+      when the selected listings settle through more than one mechanism
+      (`refuse_mixed_explicit_units`, D4); per-mechanism constraints were
+      rejected because the core buyer's constraints carry one pair. Test:
+      `test_buy_refuses_explicit_prices_across_mechanisms_of_different_units`,
+      which reaches `run_buy` with (200, 300) for a payments listing on the
+      reviewed commit.
+- [x] R1.2 **Cookbook command.** `--service-name vllm-chat` became
+      `--resource 'service_name="vllm-chat"'`. Both `market` commands the
+      cookbook shows were parsed by the built plugin app: neither is refused
+      as an unknown option, and the old form is.
+- [x] R1.3 **Checks.** Suites: buying 59, Alkahest 18, payments 9, plugin 60,
+      storefront 174. On a clean copy `check-packaging` and
+      `check-comment-hygiene` pass; `check-change` reports only the two
+      promotion-destination citations. A fresh-context check of the round and
+      the rebase found no defect; its two notes (the deferred per-mechanism
+      constraints had no recorded owner, and the refusal follows selection
+      prompts) are in design "Deferred" and "Risks".
 
 ## 2. Closeout
 
