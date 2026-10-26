@@ -2548,7 +2548,11 @@ only.
         merged into this branch instead (PR #306, seq 177). D9, D4's account of
         the capacity file's merge conflict (moot, as no figure was written), and
         10.6's "the pilot's row left as it is" should be read against that at
-        closeout (10.3, 10.4).
+        closeout (10.3, 10.4). Settled in pre-closeout review 152's triage
+        (152 F1): D9 and D4 record the merge into this branch, the proposal's
+        Dependencies and Impact say this branch carries the pilot's code, the
+        pilot's index row says it merged here, and 10.6 no longer leaves that
+        row as it was.
       - The workspace's copy of the pilot's log lacks P-seq 97 until the pilot's
         clone is removed, which runs the copy first; removal waits for this
         change's merge into `dev`.
@@ -2580,9 +2584,9 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
 - [ ] 10.5 Roadmap currency: no goal in `docs/development/ROADMAP.md` covers
       contributor workflow; record that, or update it.
 - [ ] 10.6 Campaign index currency: this change's row `in closeout`, under
-      independent active changes; `helm-e2e-pipeline-parity`'s `Depends on` and the
-      pilot's row are left as they are (archive cleanup releases dependents). `make
-      check-change-index`.
+      independent active changes; `helm-e2e-pipeline-parity`'s `Depends on` is left
+      as it is (archive cleanup releases dependents), and the pilot's row already
+      says it merged into this branch (152 F1). `make check-change-index`.
 - [ ] 10.7 Packaging: `make check-packaging`, `make check-architecture-change
       CHANGE=parallel-change-workflows`, and `make check-agent-skills`.
 - [ ] 10.8 End-to-end pipeline: record a passing run on the closeout commit and the

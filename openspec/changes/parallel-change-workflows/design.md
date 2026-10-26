@@ -349,14 +349,13 @@ owner's notes, which are triaged beside it).
   a metrics source. Rejected: requiring a measured figure, with `metrics-server`
   installed on the development cluster before the pilot's cleanup (a cluster-wide
   component for an advisory check). Where a metrics source measured both, the
-  pilot's archive cleanup (D9) writes the first figure, on the pilot's branch, which
-  this branch never merges, and this change's archive cleanup writes its own here
-  (83 F2); on the development cluster today neither writes one, and nothing
-  conflicts. When both have, the file conflicts
-  when the pilot's pull request merges after this one's, beside the index rows, and
-  the merge keeps the measurement with the later recorded time — this change's,
-  since round 4 follows the pilot's archive cleanup (37 F3); any later conflict over
-  the file is resolved the same way. The figure is advisory and expected to be
+  pilot's archive cleanup (D9) writes the first figure, on the pilot's branch, and
+  this change's archive cleanup writes its own here (83 F2); on the development
+  cluster neither wrote one, and the pilot merged into this branch (PR #306) with
+  nothing to conflict (152 F1). Had both written one, the file would have conflicted
+  at that merge, beside the index rows, and the merge keeps the measurement with the
+  later recorded time (37 F3); any later conflict over the file is resolved the same
+  way. The figure is advisory and expected to be
   overwritten often: no branch's measurement is of the merged code, branches differ
   little, and the figure creeps up as the code grows. Rejected: keeping the incoming
   branch's figure (merge order, not anything the file records); keeping the larger
@@ -547,7 +546,9 @@ chart change makes the Helm part real evidence; and it stays clear of Goal 7's
 open work (`unbacked-bare-metal-listings`), meeting it at most in compute
 provisioning's startup. Its feature branch is created from this change's branch,
 not from `dev`, so its clone inherits the tooling without a merge to `dev`; its
-pull request merges after this one.
+pull request merges after this one. On the owner's word at the pilot's archive
+cleanup, it was instead merged into this change's branch as PR #306, so it reaches
+`dev` with this change (152 F1).
 
 A branch created once holds only the tooling of its moment, so this change's branch
 is merged into the pilot's for the tooling of later rounds (17 F2). On the owner's

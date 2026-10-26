@@ -112,7 +112,8 @@ earlier run of the same ref, not of another branch.
   this change needs move here from it.
 - Pilot: `seed-default-pool-at-runtime`, on a branch created from this change's
   branch, into which this change's branch is merged for later rounds' tooling,
-  merging after it.
+  and which merged into this change's branch (PR #306), so it reaches `dev` with
+  this change.
 - Unrelated to `isolate-end-to-end-lane-stacks`: no workflow step runs the local
   compose lanes.
 
@@ -128,7 +129,9 @@ earlier run of the same ref, not of another branch.
 - `scripts/fetch-e2e-logs.py`, for a dispatched CI workflow's named jobs.
 - `helm/validation-capacity.toml`, new.
 - `.agents/skills/change-*` and `.claude/change-steps.toml`.
-- The `change-workflow` specification. No service code changes.
+- The `change-workflow` specification. This change's own work changes no service
+  code; the branch also carries `seed-default-pool-at-runtime`'s, merged into it as
+  PR #306 and accepted and validated under that archived change.
 
 ## Permanent documentation impact
 
