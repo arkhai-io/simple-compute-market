@@ -159,7 +159,6 @@ def test_credits_full_deal(
         # goes through the typed resource query, the same surface the
         # VM buyer filters on.
         "--resource", 'service_name="weather-api"',
-        "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
         "--poll-interval", "1.0",
@@ -232,7 +231,6 @@ def test_credits_full_deal(
         # goes through the typed resource query, the same surface the
         # VM buyer filters on.
         "--resource", 'service_name="weather-api"',
-        "--chain", "anvil",
         "--max-matches", "5",
         "--max-rounds", "10",
         "--poll-interval", "1.0",

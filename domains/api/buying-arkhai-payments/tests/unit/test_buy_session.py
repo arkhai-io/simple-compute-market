@@ -36,7 +36,7 @@ def test_an_enabled_session_reads_the_configured_section():
     session.prepare()
     assert session.available and reads == ["read"]
     assert session.missing() == ()
-    assert session.scale_explicit_prices(2, 3) == (2, 3)
+    assert session.scale_explicit_prices(2, 3, []) == (2, 3)
     assert session.run_fields() == {} and session.header_rows() == ()
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -31,6 +31,7 @@ from market_alkahest import ALKAHEST_MECHANISM_ID, create_alkahest_registration
 from market_alkahest.plans import escrow_terms_from_settlement_plan
 from market_alkahest.proposals import escrow_proposal_from_accepted_entry
 from market_alkahest.schemas import (
+    EscrowProposal,
     EscrowTerms,
     accepted_recipient_address,
     accepted_token_address,
@@ -43,6 +44,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from arkhai_api_buying_alkahest.chains import (
+    accepted_chain_names,
     buyer_chains,
     chain_by_name,
     select_chain_for_listing,
@@ -57,42 +59,6 @@ from arkhai_api_buying_alkahest.escrow_client import (
     resumed_proposal_refusal,
 )
 from arkhai_api_buying_alkahest.escrow_selection import select_escrow_entry
-
-
-def _option(command: str, name: str, flags: tuple[str, ...], annotation: Any, help: str) -> StageOption:
-    return StageOption(command=command, name=name, flags=flags, annotation=annotation, help=help)
-
-
-OPTIONS: tuple[StageOption, ...] = (
-    _option("buy", "token_contract", ("--token-contract",), Optional[str],
-            "Optional filter: only consider listings whose accepted escrow uses this ERC-20. Required when passing explicit --initial-price/--max-price (decimals scaling)."),
-    _option("buy", "token_decimals", ("--token-decimals",), Optional[int],
-            "ERC-20 token decimals override. When omitted, decimals are resolved on chain via the token contract's decimals() view."),
-    _option("buy", "chain_name", ("--chain",), Optional[str],
-            "Pick which configured [chains.<name>] entry to operate on. Required when --yes is set and the buyer has more than one chain configured; otherwise the buyer prompts."),
-    _option("buy", "evm_address", ("--evm-address",), Optional[str],
-            "EVM address required for the selected Alkahest effect."),
-    _option("buy", "evm_private_key", ("--evm-private-key",), Optional[str],
-            "EVM private key required only to create the Alkahest escrow."),
-    _option("negotiate", "evm_address", ("--evm-address",), Optional[str],
-            "EVM address used only for chain selection and balance checks."),
-    _option("negotiate", "evm_private_key", ("--evm-private-key",), Optional[str],
-            "Optional EVM key used only to derive the chain address."),
-    _option("negotiate", "token_contract", ("--token-contract",), Optional[str],
-            "Optional ERC-20 accepted-escrow filter. Omit to use the token/escrow shape selected from the listing."),
-    _option("negotiate", "token_decimals", ("--token-decimals",), Optional[float],
-            "ERC-20 token decimals override for scaling price flags. Only needed when decimals cannot be resolved on chain."),
-    _option("negotiate", "chain_name", ("--chain",), Optional[str],
-            "Which [chains.<name>] entry to negotiate against. When omitted the buyer prompts; required when --yes is set and the listing accepts more than one chain you have configured."),
-    _option("settle", "escrow_uid", ("--escrow-uid", "-u"), Optional[str],
-            "Skip escrow.create when the on-chain escrow already exists. If absent, the run-log is checked for an `escrow_created` event."),
-    _option("settle", "evm_address", ("--evm-address",), Optional[str],
-            "EVM address required for the Alkahest settlement effect."),
-    _option("settle", "evm_private_key", ("--evm-private-key",), Optional[str],
-            "EVM private key required only for Alkahest escrow creation."),
-    _option("settle", "chain_name", ("--chain",), Optional[str],
-            "Override which configured [chains.<name>] entry to settle on. When omitted, reads chain_name from the accepted proposal or escrow_created event."),
-)
 
 
 def format_accepted_escrows(raw: Any) -> str:
@@ -196,47 +162,52 @@ def _refuse_without_release_condition(log: RunLog, reason: str) -> None:
     raise typer.Exit(3)
 
 
+def _proposal_chain(proposal: Any) -> Optional[str]:
+    chain = proposal.get("chain_name") if isinstance(proposal, Mapping) else getattr(proposal, "chain_name", None)
+    return chain if isinstance(chain, str) and chain else None
+
+
+def token_decimals(chain: Any, token: Optional[str]) -> int:
+    """The ERC-20 ``token``'s decimals read on ``chain``; refuses a native-token escrow or an unreadable token."""
+    if not token:
+        typer.secho(
+            f"Explicit prices need an ERC-20 token to scale, but a selected escrow on chain "
+            f"{chain.name!r} settles in the native token; omit --initial-price/--max-price.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
+    try:
+        return resolve_token(token, rpc_url=chain.rpc_url, chain_id=chain.chain_id).decimals
+    except (TokenResolutionError, RuntimeError) as exc:
+        typer.secho(
+            f"Could not read the decimals of token {token} on chain {chain.name!r}; check "
+            f"the chain's rpc_url. ({exc})",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2) from exc
+
+
 class AlkahestBuySession:
-    """The Alkahest part of one buy: the wallet and chain it settles on, and its escrow adapters."""
+    """The Alkahest part of one buy: the configured wallet and chains, a chain per listing, and its escrow adapters."""
 
     def __init__(self, stage: AlkahestBuyerStage, request: BuyRequest) -> None:
         self._stage = stage
         self._request = request
         self._address: str | None = None
         self._private_key: str | None = None
-        self._chain: Any = None
-        self._build_escrow_terms: Any = None
-        self._create_escrow: Any = None
+        self._chains: dict[str, Any] = {}
 
     @property
     def available(self) -> bool:
-        return self._chain is not None
+        return bool(self._address and self._private_key and self._chains)
 
     def prepare(self) -> None:
         if not self._request.enabled:
             return
-        options = self._request.options
-        self._address, self._private_key = self._stage.wallet(
-            override_addr=options.get("evm_address"), override_pk=options.get("evm_private_key")
-        )
-        chains = self._stage.chains()
-        if not (self._address and self._private_key and chains):
-            return
-        chain = select_chain_for_listing(
-            listing=None, override=options.get("chain_name"), yes=self._request.assume_yes,
-            chains=chains,
-        )
-        address_config = chain.alkahest_address_config_path or None
-        self._build_escrow_terms = make_buyer_payment_escrow_terms_fn(
-            chain_name=chain.name, addr_config_path=address_config
-        )
-        self._create_escrow = make_create_escrow_fn(
-            private_key=self._private_key,
-            rpc_url=chain.rpc_url,
-            chain_name=chain.name,
-            addr_config_path=address_config,
-        )
-        self._chain = chain
+        self._address, self._private_key = self._stage.wallet()
+        self._chains = self._stage.chains()
 
     def missing(self) -> tuple[tuple[str, str], ...]:
         missing = []
@@ -248,48 +219,48 @@ class AlkahestBuySession:
             missing.append(("chain configuration", "chains.<name>"))
         return tuple(missing)
 
-    def scale_explicit_prices(self, initial: Any, maximum: Any) -> tuple[Any, Any]:
-        if not self.available:
+    def scale_explicit_prices(
+        self, initial: Any, maximum: Any, matches: Iterable[Mapping[str, Any]],
+    ) -> tuple[Any, Any]:
+        tokens = {
+            (proposal.chain_name, accepted_token_address(proposal))
+            for proposal in (match.get("_selected_buyer_proposal") for match in matches)
+            if isinstance(proposal, EscrowProposal)
+        }
+        if not self.available or not tokens:
             return initial, maximum
-        token = self._request.options.get("token_contract")
-        if not token:
+        decimals = {token_decimals(self._chains[chain_name], token) for chain_name, token in tokens}
+        if len(decimals) != 1:
             typer.secho(
-                "--initial-price and --max-price require --token-contract when settling with Alkahest.",
+                "--initial-price and --max-price are in display units, but the selected "
+                f"listings settle in tokens of different decimals ({sorted(tokens)}); "
+                "buy from one token's listings at a time.",
                 err=True,
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        decimals = self._request.options.get("token_decimals")
-        if decimals is None:
-            try:
-                decimals = resolve_token(
-                    token, rpc_url=self._chain.rpc_url, chain_id=self._chain.chain_id
-                ).decimals
-            except (TokenResolutionError, RuntimeError) as exc:
-                typer.secho(
-                    f"Could not resolve token {token} on chain {self._chain.name!r} — pass --token-decimals or check the chain's rpc_url. ({exc})",
-                    err=True,
-                    fg=typer.colors.RED,
-                )
-                raise typer.Exit(2)
+        (scale,) = decimals
         try:
             return (
-                display_to_base_units(initial, decimals, field="--initial-price"),
-                display_to_base_units(maximum, decimals, field="--max-price"),
+                display_to_base_units(initial, scale, field="--initial-price"),
+                display_to_base_units(maximum, scale, field="--max-price"),
             )
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
 
     def propose(self, listing: Mapping[str, Any], *, expiration_unix: int) -> Any | None:
-        if not self.available:
+        if not self.available or not accepted_chain_names(dict(listing)) & set(self._chains):
             return None
+        chain = select_chain_for_listing(
+            dict(listing), yes=self._request.assume_yes, chains=self._chains,
+        )
         policy = self._request.policy
         entry = select_escrow_entry(
             listing,
-            chain_name=self._chain.name,
-            token_contract_filter=self._request.options.get("token_contract"),
+            chain_name=chain.name,
+            token_contract_filter=None,
             assume_yes=self._request.assume_yes,
-            rpc_url=self._chain.rpc_url,
+            rpc_url=chain.rpc_url,
             buyer_address=self._address,
             console=self._request.console,
             compatible=policy.compatible,
@@ -302,10 +273,7 @@ class AlkahestBuySession:
         )
 
     def run_fields(self) -> Mapping[str, Any]:
-        return {
-            "buyer_evm_address": self._address,
-            "chain_name": self._chain.name if self._chain is not None else None,
-        }
+        return {"buyer_evm_address": self._address}
 
     def header_rows(self) -> tuple[tuple[str, str], ...]:
         return (("EVM chain wallet", self._address),) if self._address else ()
@@ -314,6 +282,10 @@ class AlkahestBuySession:
         self._stage.validate_acceptance(negotiation.outcome)
         if not self.available:
             raise ValueError("Alkahest settlement resources are unavailable")
+        chain = self._chains.get(_proposal_chain(negotiation.outcome.accepted_escrow_proposal) or "")
+        if chain is None:
+            raise ValueError("the accepted Alkahest escrow names no configured chain")
+        address_config = chain.alkahest_address_config_path or None
         confirm = None
         if run.interactive:
             console = self._request.console
@@ -327,8 +299,15 @@ class AlkahestBuySession:
             config=run.config,
             unit_count=float(run.quantity),
             duration_seconds=0,
-            build_escrow_terms=self._build_escrow_terms,
-            create_escrow=self._create_escrow,
+            build_escrow_terms=make_buyer_payment_escrow_terms_fn(
+                chain_name=chain.name, addr_config_path=address_config
+            ),
+            create_escrow=make_create_escrow_fn(
+                private_key=self._private_key,
+                rpc_url=chain.rpc_url,
+                chain_name=chain.name,
+                addr_config_path=address_config,
+            ),
             settlement_recipient=accepted_proposal_recipient,
             build_settlement_payload=make_alkahest_settlement_payload_fn(
                 buyer_evm_address=self._address
@@ -348,20 +327,20 @@ class AlkahestBuyerStage:
 
     mechanism_id = ALKAHEST_MECHANISM_ID
     escrow_codec = AlkahestEscrowCodec()
-    options = OPTIONS
+    options: tuple[StageOption, ...] = ()
     registration = staticmethod(create_alkahest_registration)
 
     def __init__(
         self,
         *,
-        wallet: Callable[..., tuple[str | None, str | None]] | None = None,
+        wallet: Callable[[], tuple[str | None, str | None]] | None = None,
         chains: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._wallet = wallet
         self._chains = chains
 
-    def wallet(self, **overrides: Any) -> tuple[str | None, str | None]:
-        return (self._wallet or resolve_buyer_wallet)(**overrides)
+    def wallet(self) -> tuple[str | None, str | None]:
+        return (self._wallet or resolve_buyer_wallet)()
 
     def chains(self) -> dict[str, Any]:
         return (self._chains or buyer_chains)()
@@ -379,8 +358,6 @@ class AlkahestBuyerStage:
 
     def negotiation_run_fields(self, options: StageOptions, selected: Any | None) -> Mapping[str, Any]:
         return {
-            "token_contract": options.get("token_contract"),
-            "token_decimals": options.get("token_decimals"),
             "chain_name": self.accepted_entry(selected).get("chain_name") if selected else None,
         }
 
@@ -388,14 +365,11 @@ class AlkahestBuyerStage:
         self, selected: Any, *, listing: Any, settlement_policy: Any, policy: Any,
         options: StageOptions, assume_yes: bool, console: Any,
     ) -> Any:
-        token_contract = options.get("token_contract")
-        address, _key = resolve_buyer_wallet(
-            override_addr=options.get("evm_address"), override_pk=options.get("evm_private_key"),
-        )
+        address, _key = self.wallet()
         if not address:
             raise ValueError(
                 "Missing EVM address required to select and inspect the Alkahest "
-                "escrow. Pass --evm-address or configure wallet.address."
+                "escrow. Configure wallet.address or wallet.private_key."
             )
         candidates = [
             option for _registration, option in settlement_policy.compatible_options(
@@ -406,21 +380,18 @@ class AlkahestBuyerStage:
         constrained["accepted_escrows"] = [self.accepted_entry(
             replace(selected, option=option),
         ) for option in candidates]
-        chain = select_chain_for_listing(constrained, override=options.get("chain_name"), yes=assume_yes)
+        chain = select_chain_for_listing(constrained, yes=assume_yes, chains=self.chains())
         entry = select_escrow_entry(
-            constrained, chain_name=chain.name, token_contract_filter=token_contract,
+            constrained, chain_name=chain.name, token_contract_filter=None,
             assume_yes=assume_yes, rpc_url=chain.rpc_url, buyer_address=address,
             console=console, compatible=policy.compatible,
             preference=policy.prefer_settlement,
         )
         if entry is None:
-            message = (
+            raise ValueError(
                 f"Listing {listing.get('listing_id')!r} has no accepted_escrows entry "
-                f"on chain {chain.name!r}"
+                f"on chain {chain.name!r}."
             )
-            if token_contract:
-                message += f" with token {token_contract}"
-            raise ValueError(message + ".")
         option = next(option for option in candidates if option.params["accepted_escrow"] == entry)
         return replace(selected, option=option, selection=selected.selection.model_copy(
             update={"option_id": option.option_id},
@@ -436,32 +407,19 @@ class AlkahestBuyerStage:
         self, selected: Any, *, initial_price: Any, max_price: Any,
         initial_explicit: bool, max_explicit: bool, options: StageOptions,
     ) -> tuple[Any, Any]:
-        token_decimals = options.get("token_decimals")
-        if initial_explicit or max_explicit:
-            decimals = int(token_decimals) if token_decimals is not None else None
-            if decimals is None:
-                entry = self.accepted_entry(selected)
-                token = accepted_token_address(entry)
-                chain = chain_by_name(entry["chain_name"])
-                if token and token.startswith("0x"):
-                    try:
-                        decimals = resolve_token(
-                            token, rpc_url=chain.rpc_url, chain_id=chain.chain_id,
-                        ).decimals
-                    except (TokenResolutionError, RuntimeError):
-                        decimals = None
-            if decimals is None:
-                raise ValueError(
-                    "Could not resolve token decimals to scale prices. "
-                    "Pass --token-decimals or ensure the listing's accepted "
-                    "chain is configured in [chains.<name>]."
-                )
-            if initial_explicit and initial_price is not None:
-                initial_price = display_to_base_units(
-                    initial_price, decimals, field="--initial-price"
-                )
-            if max_explicit and max_price is not None:
-                max_price = display_to_base_units(max_price, decimals, field="--max-price")
+        if not (initial_explicit or max_explicit):
+            return initial_price, max_price
+        entry = self.accepted_entry(selected)
+        chain = self.chains().get(entry.get("chain_name") or "")
+        if chain is None:
+            raise ValueError(
+                f"The selected escrow's chain {entry.get('chain_name')!r} is not in [chains.<name>]."
+            )
+        decimals = token_decimals(chain, accepted_token_address(entry))
+        if initial_explicit and initial_price is not None:
+            initial_price = display_to_base_units(initial_price, decimals, field="--initial-price")
+        if max_explicit and max_price is not None:
+            max_price = display_to_base_units(max_price, decimals, field="--max-price")
         return initial_price, max_price
 
     def proposal(self, listing: Any, selected: Any) -> Any:
@@ -499,16 +457,14 @@ class AlkahestBuyerStage:
     def resume(self, resume: SettlementResume) -> dict[str, Any]:
         """Create the accepted escrow unless it exists, then submit it to the seller and poll."""
         deal = resume.deal
-        options = resume.options
         signer = resume.identity.signer
         chain_cfg_name = (
-            options.get("chain_name")
-            or _accepted_proposal_chain(deal)
+            _accepted_proposal_chain(deal)
             or _chain_name_from_run_log(resume.run_id, signer=signer)
         )
         if not chain_cfg_name:
             typer.secho(
-                "Could not determine the chain from the run-log or deal context. Pass --chain to specify which configured chain to settle on.",
+                "Could not determine the chain from the run-log's accepted escrow. Re-run negotiation so the accepted proposal is captured.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -521,12 +477,10 @@ class AlkahestBuyerStage:
                 fg=typer.colors.RED,
             )
             raise typer.Exit(2)
-        resolved_evm_address, resolved_evm_private_key = resolve_buyer_wallet(
-            override_addr=options.get("evm_address"), override_pk=options.get("evm_private_key")
-        )
+        resolved_evm_address, resolved_evm_private_key = self.wallet()
         if not resolved_evm_address or not resolved_evm_private_key:
             typer.secho(
-                "Missing explicit EVM settlement credentials: wallet.address and wallet.private_key are required for Alkahest.",
+                "Missing EVM settlement credentials: configure wallet.private_key (and wallet.address, if it differs) for Alkahest.",
                 err=True,
                 fg=typer.colors.RED,
             )
@@ -540,7 +494,7 @@ class AlkahestBuyerStage:
         )
         log = resume.open_log()
         resolve_seller_principals = resume.seller_principals(log, resume.buy_config())
-        resolved_uid = options.get("escrow_uid") or deal.escrow_uid
+        resolved_uid = deal.escrow_uid
         resume.show_header(
             *((("Escrow UID", resolved_uid + " (skip create)"),) if resolved_uid else ())
         )

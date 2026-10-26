@@ -126,7 +126,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-buying"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -140,12 +140,12 @@ dependencies = [
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_api_buying-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_api_buying-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-api-buying-alkahest"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "alkahest-py", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -159,7 +159,7 @@ dependencies = [
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_api_buying_alkahest-0.1.1-py3-none-any.whl" },
+    { path = "arkhai_api_buying_alkahest-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -269,7 +269,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-apicredits-buyer"
-version = "0.7.0"
+version = "0.8.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api-buying", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -281,7 +281,7 @@ dependencies = [
     { name = "typer", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
 wheels = [
-    { path = "arkhai_apicredits_buyer-0.7.0-py3-none-any.whl" },
+    { path = "arkhai_apicredits_buyer-0.8.0-py3-none-any.whl" },
 ]
 
 [[package]]

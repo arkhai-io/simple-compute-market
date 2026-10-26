@@ -77,7 +77,8 @@ own precedence rules.
 ### D3. The chain comes from the listing and the configured chains
 
 The chain is chosen per listing from the configured chains its accepted escrows
-name, in the buyer's configuration order: one candidate is taken; several prompt
+name, in the buyer's configuration order; a listing that names none of them is
+skipped by `buy` and refused by `negotiate`, which was asked for that listing: one candidate is taken; several prompt
 interactively; under `--yes`, several refuse, naming the listing and the
 candidates. `buy` now selects per listing in its proposal step rather than once
 before discovery, and builds the escrow adapters from the accepted proposal's
@@ -151,6 +152,8 @@ library tests drop the options and inject the wallet and chains instead.
   exists. It can run interactively, or keep only the chains it settles on.
 - `buy` may prompt once per listing rather than once per run when several
   listings accept several configured chains.
+- Under `--yes`, the first ambiguous listing ends the whole `buy`, before any
+  later listing or lower-priority mechanism is tried; the refusal names it.
 
 ## Deferred
 

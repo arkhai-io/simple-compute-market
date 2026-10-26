@@ -150,11 +150,17 @@ def fake_chain_config(monkeypatch):
         chain_id=31337,
         alkahest_address_config_path=None,
     )
-    monkeypatch.setattr(alkahest_stage, "chain_by_name", lambda name: chain)
+    chain.requested = []
+
+    def chain_by_name(name):
+        chain.requested.append(name)
+        return chain
+
+    monkeypatch.setattr(alkahest_stage, "chain_by_name", chain_by_name)
     monkeypatch.setattr(
         alkahest_stage,
         "resolve_buyer_wallet",
-        lambda **_kw: ("0x" + "cc" * 20, "0x" + "11" * 32),
+        lambda: ("0x" + "cc" * 20, "0x" + "11" * 32),
     )
     trust = TrustedIdentitySet(identities=(_SELLER_SIGNER.identity,))
     monkeypatch.setattr(
@@ -216,6 +222,10 @@ def test_settle_keeps_the_secret_in_the_private_store(
     assert final["status"] == "ready"
     # Credit deals carry no SSH key; the wire field defaults to "".
     assert "ssh_public_key" not in submitted
+    # Chain, wallet, and escrow come from the accepted run and configuration.
+    assert fake_chain_config.requested == ["anvil"]
+    assert submitted["escrow_uid"] == "0x" + "ee" * 32
+    assert submitted["payload"]["buyer_evm_address"] == "0x" + "cc" * 20
 
     events = read_run(agreed_run)
     (delivered,) = [e for e in events if e.get("event") == "credentials_delivered"]

@@ -11,14 +11,24 @@ def buyer_chains() -> dict[str, "ChainConfig"]:
     return chains_from_config()
 
 
+def accepted_chain_names(listing: dict | None) -> set[str]:
+    """The chains a listing's accepted escrows name."""
+    names: set[str] = set()
+    for entry in (listing or {}).get("accepted_escrows") or []:
+        if isinstance(entry, dict):
+            name = entry.get("chain_name")
+            if isinstance(name, str) and name:
+                names.add(name)
+    return names
+
+
 def select_chain_for_listing(
     listing: dict | None,
     *,
-    override: str | None = None,
     yes: bool = False,
     chains: dict[str, "ChainConfig"] | None = None,
 ) -> "ChainConfig":
-    """Select a configured chain the listing accepts, from ``chains`` or else the buyer's configuration."""
+    """The configured chain a listing's accepted escrows name; several prompt, or refuse under ``yes``."""
     chains = buyer_chains() if chains is None else chains
     if not chains:
         typer.secho(
@@ -29,52 +39,24 @@ def select_chain_for_listing(
         )
         raise typer.Exit(2)
 
-    listing_chain_names: set[str] = set()
-    if listing is not None:
-        for entry in listing.get("accepted_escrows") or []:
-            if isinstance(entry, dict):
-                name = entry.get("chain_name")
-                if isinstance(name, str) and name:
-                    listing_chain_names.add(name)
-
-    if listing_chain_names:
-        candidates = [name for name in chains if name in listing_chain_names]
-        if not candidates:
-            typer.secho(
-                f"None of the buyer's configured chains ({sorted(chains)}) match "
-                f"the listing's accepted chains ({sorted(listing_chain_names)}).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-    else:
-        candidates = list(chains)
-
-    if override:
-        if override not in chains:
-            typer.secho(
-                f"--chain {override!r} is not in [chains.<name>] config. "
-                f"Available: {sorted(chains)}.",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        if listing_chain_names and override not in listing_chain_names:
-            typer.secho(
-                f"--chain {override!r} is not accepted by this listing "
-                f"({sorted(listing_chain_names)}).",
-                err=True,
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(2)
-        return chains[override]
+    listing_id = (listing or {}).get("listing_id")
+    listing_chain_names = accepted_chain_names(listing)
+    candidates = [name for name in chains if name in listing_chain_names]
+    if not candidates:
+        typer.secho(
+            f"Listing {listing_id!r} accepts chains {sorted(listing_chain_names)}, none of "
+            f"which is among the buyer's configured chains ({sorted(chains)}).",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(2)
 
     if len(candidates) == 1:
         return chains[candidates[0]]
     if yes:
         typer.secho(
-            f"Multiple matching chains ({candidates}); pass --chain to pick one "
-            "when running with --yes.",
+            f"Listing {listing_id!r} accepts several configured chains ({candidates}); run without "
+            "--yes to pick one, or configure only the chains you settle on.",
             err=True,
             fg=typer.colors.RED,
         )

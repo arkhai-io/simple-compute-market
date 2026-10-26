@@ -332,11 +332,6 @@ def register(
                     fg=typer.colors.RED,
                 )
             raise typer.Exit(2)
-        if explicit_prices:
-            for session in sessions.values():
-                initial_price, max_price = session.scale_explicit_prices(
-                    initial_price, max_price
-                )
         try:
             matches = query_registry_for_matches_multi(
                 reg_urls,
@@ -373,7 +368,12 @@ def register(
             limit=max_matches,
         )
 
-        if not explicit_prices:
+        if explicit_prices:
+            for session in sessions.values():
+                initial_price, max_price = session.scale_explicit_prices(
+                    initial_price, max_price, matches
+                )
+        else:
             initial_price, max_price = resolve_prices_from_matches(
                 matches=matches,
                 console=console,

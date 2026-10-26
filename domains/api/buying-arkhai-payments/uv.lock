@@ -47,7 +47,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-buying"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
@@ -61,7 +61,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_api_buying-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_api_buying-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
@@ -86,7 +86,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arkhai-api-buying", specifier = ">=0.2.0" },
+    { name = "arkhai-api-buying", specifier = ">=0.3.0" },
     { name = "arkhai-core", specifier = ">=0.4.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },

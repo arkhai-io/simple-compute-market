@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from typing import Any
 
@@ -71,7 +71,9 @@ class PaymentBuySession:
     def missing(self) -> tuple[tuple[str, str], ...]:
         return ()
 
-    def scale_explicit_prices(self, initial: Any, maximum: Any) -> tuple[Any, Any]:
+    def scale_explicit_prices(
+        self, initial: Any, maximum: Any, matches: Iterable[Mapping[str, Any]],
+    ) -> tuple[Any, Any]:
         return initial, maximum
 
     def propose(self, listing: Mapping[str, Any], *, expiration_unix: int) -> Any | None:

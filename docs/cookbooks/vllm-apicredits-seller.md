@@ -257,14 +257,15 @@ alkahest_address_config_path = "/config/alkahest_anvil_addresses.json"
 urls = ["http://api-credits-registry:8080"]
 ```
 
-Run the purchase from a buyer environment:
+Run the purchase from a buyer environment. The buyer settles on the
+configured `[chains.<name>]` entry the listing accepts and signs with the
+`[wallet]` key above; neither is passed on the command line:
 
 ```bash
 market credits buy \
   --quantity 3 \
   --new-key \
   --service-name vllm-chat \
-  --chain anvil \
   --max-matches 5 \
   --max-rounds 10 \
   --poll-interval 1.0 \

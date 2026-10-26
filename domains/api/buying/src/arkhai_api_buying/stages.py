@@ -6,7 +6,7 @@ by mechanism is a method of the stage the accepted or selected option names.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -95,7 +95,10 @@ class BuySession(Protocol):
     def missing(self) -> tuple[tuple[str, str], ...]:
         """The unset settings, as ``(name, configuration key)``, that leave it unavailable."""
 
-    def scale_explicit_prices(self, initial: Any, maximum: Any) -> tuple[Any, Any]: ...
+    def scale_explicit_prices(
+        self, initial: Any, maximum: Any, matches: Iterable[Mapping[str, Any]],
+    ) -> tuple[Any, Any]:
+        """Display-unit prices in base units, scaled from what this stage proposed for ``matches``."""
 
     def propose(self, listing: Mapping[str, Any], *, expiration_unix: int) -> Any | None: ...
 
