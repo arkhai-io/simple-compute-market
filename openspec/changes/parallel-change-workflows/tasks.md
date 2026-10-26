@@ -2541,7 +2541,9 @@ only.
         closeout and no task holds it. It was put to the owner beside 9.3, with
         a synthetic base (a return to design or planning), its own change after
         this one (recommended), or merges only between rounds; the owner's answer
-        named 9.3's option alone, so it is still open.
+        named 9.3's option alone, so it is still open. Settled in round 4's
+        triage (145 F1): deferred to `round-view-without-merges`, proposed from
+        `dev` after this change merges; 10.9's "Current limits" names it.
       - D9 says the pilot's pull request merges after this change's; it was
         merged into this branch instead (PR #306, seq 177). D9, D4's account of
         the capacity file's merge conflict (moot, as no figure was written), and
@@ -2637,8 +2639,10 @@ Per `openspec/README.md#plan-closeout-requirements`, in its order.
         128 R2); "Current limits" rewritten (one orchestrating
         session per change; the container per change, as 9.3 decided, with the
         triggers that reopen it, open question 1; an unattended step's reads
-        reaching any file the owner can read, Risks; side work chosen to stay
-        clear of the critical-path goal's files, D9).
+        reaching any file the owner can read, Risks; the round view showing a
+        merge made inside a round among the round's own changes, until a
+        synthetic base lands in its own change, open question 2, 145 F1; side
+        work chosen to stay clear of the critical-path goal's files, D9).
       - `docs/agents/change-workflow.md` — already written in sections 4, 8, 8A,
         and 8B;
         "Skills" gains `make change-clone`, `make change-clone-remove`, `make

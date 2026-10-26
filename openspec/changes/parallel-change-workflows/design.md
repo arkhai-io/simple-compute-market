@@ -1104,8 +1104,25 @@ pre-closeout review.
    listing beside the view the paths a merge brought. The owner leans to the
    synthetic base: a merge from `dev` often carries an urgent fix, as that render
    fix was, which a round must build on rather than ignore and then rediscover or
-   duplicate, so holding merges to round boundaries would delay it. Decided in a
-   later round, before this change's closeout.
+   duplicate, so holding merges to round boundaries would delay it.
+
+   **Decided in round 4's triage (145 F1): deferred to its own change,
+   `round-view-without-merges`, proposed on its own branch from `dev` once this
+   change merges, not here.** The pilot met the case again — eleven of the 118
+   files in its round view came from merges inside the round — so the view stays
+   as D2 builds it, and "Current limits" says it mixes in merges until that change
+   lands. The owner's leaning to the synthetic base carries into that change's
+   proposal. Its design is more than a fix: `scripts/round_view.py` holds the
+   view's base to be an ancestor of the round's head where `done` carries the
+   owner's commits onto the head, where it refuses a branch that has left the
+   base's line, and where a refresh resets over new commits, and a synthetic base
+   is off that line; and it must say what the view shows when the round's base
+   and the merged `dev` commits do not merge cleanly without the round's own
+   resolution. Rejected: building the synthetic base here (a return to design and
+   planning, and a further round, for a change ready for its pre-closeout review);
+   merging `dev` only between rounds (delays the urgent fixes the owner merges
+   for); listing a merge's paths beside the view as a stopgap (labels the files
+   without separating them, and adds a code round before closeout).
 
 ## Pilot
 
