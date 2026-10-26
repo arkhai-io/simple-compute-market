@@ -37,8 +37,8 @@ def run_settle_from_log(
 
     Reusable by the group's `settle` and `buy --from`. The accepted
     mechanism's stage completes its settlement step, submits to the seller,
-    polls until terminal, and appends any issued credentials to the same
-    run-log.
+    polls until terminal, and keeps any issued credential in the
+    composition's private store.
 
     Returns the final settle-status body. Raises ``typer.Exit`` on fatal
     errors.
@@ -62,6 +62,7 @@ def run_settle_from_log(
         poll_interval=poll_interval,
         settlement_timeout=settlement_timeout,
         console=console or Console(),
+        credential_store=settlement.credential_store,
     ))
 
 
@@ -97,9 +98,9 @@ def register(
 
         Reads the buyer run-log for `<run_id>`, completes the accepted
         mechanism's settlement step if it is not already done, asks the
-        seller to settle, and polls until terminal. The issued credentials
-        land in the same run-log (``credentials_delivered``) — the seller
-        returns the secret exactly once.
+        seller to settle, and polls until terminal. The issued key is shown
+        once and kept in the buyer's private credential store; the run-log
+        records only its non-secret fields (``credentials_delivered``).
 
         Requires the run-log to contain an `agreed` negotiation outcome.
         """

@@ -354,6 +354,17 @@ class BuyerCli:
             _run_id=resolved_run_id,
         )
 
+    def credentials(self, command: str, run_id: str) -> dict[str, Any]:
+        """The key ``run_id`` delivered, read through ``market <command> credentials show``."""
+        shown = self.run(
+            [command, "credentials", "show", "--from", run_id, "--json"], timeout=60.0,
+        )
+        if shown.returncode != 0:
+            raise AssertionError(
+                f"market {command} credentials show exited {shown.returncode}: {shown.stderr()}"
+            )
+        return json.loads(shown.stdout())
+
 
 def _toml_quote(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'

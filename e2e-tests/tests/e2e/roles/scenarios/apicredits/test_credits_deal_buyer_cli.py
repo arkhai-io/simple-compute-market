@@ -190,9 +190,8 @@ def test_credits_full_deal(
         settlement_id=str(lifecycle[-1]["escrow_uid"]),
     )
 
-    creds = buy.wait_for_event(
-        "credentials_delivered", timeout=10.0,
-    )["credentials"]
+    buy.wait_for_event("credentials_delivered", timeout=10.0)
+    creds = credits_buyer_cli.credentials("credits", buy.run_id)
     secret = creds["secret"]
     base_url = creds["base_url"]
     key_id = creds["key_id"]

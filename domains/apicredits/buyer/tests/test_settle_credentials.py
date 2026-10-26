@@ -1,29 +1,35 @@
-"""`market credits settle --from` delivers issued credentials to the run-log.
+"""`market credits settle --from` keeps an issued key private, and `credentials show` reads it.
 
-Drives ``run_settle_from_log`` through the plugin's composition off a
-synthetic run-log with an agreed negotiation and an already-created escrow
-(stage 3 skipped), with the settle submit/poll HTTP patched at the Alkahest
-stage's seam. The once-only secret must land durably in the run-log
-(``credentials_delivered``) — that file is the buyer's only copy.
+Drives settlement through the plugin's composition off a synthetic run-log
+with an agreed negotiation and an already-created escrow, with the settle
+submit/poll HTTP patched at the Alkahest stage's seam. The secret is kept in
+the buyer's private credential store; the run-log records only the key's
+non-secret fields and the store's reference.
 """
 
 from __future__ import annotations
 
-import json
 import base64
-from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
+import json
+import logging
+import stat
 import uuid
 from types import SimpleNamespace
 
 import pytest
 import typer
+from typer.testing import CliRunner
 
+import arkhai_api_buying.buy as buy
+import arkhai_api_buying.commands as commands
+import arkhai_api_buying.settlement_composition as settlement_composition
 import arkhai_api_buying.stages as stages
 import arkhai_api_buying_alkahest.stage as alkahest_stage
 from arkhai_api_buying.settle import run_settle_from_log
-from arkhai_apicredits_buyer.cli import SETTLEMENT
+from arkhai_apicredits_buyer.cli import SETTLEMENT, app
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.run_log import read_run
+from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
 
@@ -46,9 +52,11 @@ _IDENTITY = ResolvedBuyerIdentity(
     source="recovery",
 )
 
+# A canary secret for these tests only; it is not a real key.
+_SECRET = "sk_canary_never_logged"
 _CREDENTIALS = {
     "key_id": "ak_test_1",
-    "secret": "sk_live_once_only",
+    "secret": _SECRET,
     "base_url": "http://api.example:8080",
     "balance": 100,
 }
@@ -173,9 +181,10 @@ def fake_chain_config(monkeypatch):
     return chain
 
 
-def test_settle_writes_credentials_delivered_event(
+def test_settle_keeps_the_secret_in_the_private_store(
     agreed_run,
     fake_chain_config,
+    tmp_path,
     monkeypatch,
 ):
     submitted: dict = {}
@@ -208,17 +217,166 @@ def test_settle_writes_credentials_delivered_event(
     assert "ssh_public_key" not in submitted
 
     events = read_run(agreed_run)
-    delivered = [e for e in events if e.get("event") == "credentials_delivered"]
-    assert len(delivered) == 1
-    assert delivered[0]["credentials"] == _CREDENTIALS
+    (delivered,) = [e for e in events if e.get("event") == "credentials_delivered"]
+    assert delivered["key_id"] == "ak_test_1"
+    assert delivered["base_url"] == _CREDENTIALS["base_url"]
+    assert delivered["delivery_ref"] == f"file:{agreed_run}"
     serialized_events = json.dumps(events)
+    assert _SECRET not in serialized_events
     assert "11" * 32 not in serialized_events
     assert "signer" not in serialized_events
     assert "private_key" not in serialized_events
-    # Terminal status recorded too.
     assert any(
         e.get("event") == "run_ended" and e.get("status") == "ready" for e in events
     )
+    stored = tmp_path / "arkhai" / "buy-credentials" / f"{agreed_run}.json"
+    assert stat.S_IMODE(stored.stat().st_mode) == 0o600
+    assert json.loads(stored.read_text())["credentials"] == _CREDENTIALS
+
+
+@pytest.fixture
+def secret_everywhere(agreed_run, fake_chain_config, monkeypatch):
+    """A seller whose submit response, polls, and terminal status all carry the canary secret."""
+    ready = {
+        "status": "ready",
+        "fulfillment_uid": "0x" + "ff" * 32,
+        "tenant_credentials": dict(_CREDENTIALS),
+    }
+    monkeypatch.setattr(
+        alkahest_stage, "submit_settlement_request", lambda **_kw: dict(ready),
+    )
+
+    def fake_wait(*, on_poll, **_kw):
+        on_poll(1, {"status": "provisioning"})
+        on_poll(2, dict(ready))
+        return dict(ready)
+
+    monkeypatch.setattr(alkahest_stage, "wait_for_settlement", fake_wait)
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity", lambda _run: _IDENTITY)
+    return agreed_run
+
+
+def _settle(run_id: str):
+    return CliRunner().invoke(app, ["credits", "settle", "--from", run_id])
+
+
+def test_the_secret_reaches_only_the_store_and_the_panel(secret_everywhere, tmp_path, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    result = _settle(secret_everywhere)
+
+    assert result.exit_code == 0, (result.output, result.exception)
+    run_log = (tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl").read_text()
+    assert "settle_status" in run_log and "settle_terminal" in run_log
+    assert _SECRET not in run_log
+    assert _SECRET not in caplog.text
+    before, _, rest = result.output.partition("API key issued")
+    panel, hint, after = rest.partition("Read it again")
+    assert hint
+    assert _SECRET not in before
+    assert panel.count(_SECRET) == 1
+    assert _SECRET not in after
+    assert (tmp_path / "arkhai" / "buy-credentials" / f"{secret_everywhere}.json").exists()
+
+
+def test_a_failed_private_write_shows_the_key_once_and_exits_8(secret_everywhere, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (tmp_path / "arkhai" / "buy-credentials").symlink_to(elsewhere)
+
+    result = _settle(secret_everywhere)
+
+    assert result.exit_code == 8, (result.output, result.exception)
+    assert result.output.count(_SECRET) == 1
+    assert "NOT SAVED" in result.output
+    events = read_run(secret_everywhere)
+    (unsaved,) = [e for e in events if e.get("event") == "credentials_unsaved"]
+    assert unsaved["error"] == "CredentialStoreError"
+    assert not [e for e in events if e.get("event") == "credentials_delivered"]
+    assert _SECRET not in json.dumps(events)
+    assert list(elsewhere.iterdir()) == []
+
+
+def _show(run_id: str, *extra: str):
+    return CliRunner().invoke(app, ["credits", "credentials", "show", "--from", run_id, *extra])
+
+
+def test_credentials_show_reads_the_stored_key(secret_everywhere):
+    assert _settle(secret_everywhere).exit_code == 0
+
+    shown = _show(secret_everywhere)
+    as_json = _show(secret_everywhere, "--json")
+
+    assert shown.exit_code == 0, (shown.output, shown.exception)
+    assert _SECRET in shown.output and "ak_test_1" in shown.output
+    assert as_json.exit_code == 0, (as_json.output, as_json.exception)
+    assert json.loads(as_json.output) == {
+        "run_id": secret_everywhere,
+        "key_id": "ak_test_1",
+        "secret": _SECRET,
+        "base_url": _CREDENTIALS["base_url"],
+        "balance": 100,
+        "source": "store",
+    }
+
+
+def test_credentials_show_reads_a_run_recorded_before_private_storage(
+    secret_everywhere, tmp_path,
+):
+    path = tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl"
+    with path.open("a") as stream:
+        stream.write(json.dumps(_run_event(
+            secret_everywhere, "credentials_delivered", credentials=dict(_CREDENTIALS),
+        )) + "\n")
+    before = path.read_text()
+
+    shown = _show(secret_everywhere)
+    as_json = _show(secret_everywhere, "--json")
+
+    assert shown.exit_code == 0, (shown.output, shown.exception)
+    assert "held in the run log" in " ".join(shown.output.split())
+    assert json.loads(as_json.output)["source"] == "run_log"
+    assert json.loads(as_json.output)["secret"] == _SECRET
+    assert path.read_text() == before
+
+
+def test_credentials_show_refuses_a_run_with_no_delivery(secret_everywhere):
+    shown = _show(secret_everywhere)
+
+    assert shown.exit_code == 1
+    assert "records no delivered credential" in shown.output
+
+
+def test_credentials_show_refuses_an_unknown_run(secret_everywhere, monkeypatch):
+    def unknown(_run):
+        raise commands.RunLogError("run log is empty")
+
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity", unknown)
+
+    shown = _show("no-such-run")
+
+    assert shown.exit_code == 1
+    assert "cannot be read" in shown.output
+
+
+@pytest.mark.parametrize(
+    ("reference", "message"),
+    [("keyring:run-tok-1", "is not held by the file store"), ("file:run-tok-1", "holds no key")],
+    ids=["another scheme", "a removed record"],
+)
+def test_credentials_show_refuses_a_reference_the_store_cannot_answer(
+    secret_everywhere, tmp_path, reference, message,
+):
+    path = tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl"
+    with path.open("a") as stream:
+        stream.write(json.dumps(_run_event(
+            secret_everywhere, "credentials_delivered", key_id="ak_test_1", delivery_ref=reference,
+        )) + "\n")
+
+    shown = _show(secret_everywhere)
+
+    assert shown.exit_code == 1
+    assert message in " ".join(shown.output.split())
 
 
 def test_settle_without_agreed_proposal_refuses(
@@ -356,12 +514,6 @@ def test_buy_from_resumes_an_accepted_run_with_no_mechanism_enabled(
     monkeypatch,
 ):
     """Enablement gates only a fresh deal; a run accepted under Alkahest completes after it is disabled."""
-    from typer.testing import CliRunner
-
-    import arkhai_api_buying.buy as buy
-    import arkhai_api_buying.settlement_composition as settlement_composition
-    from arkhai_apicredits_buyer.cli import app
-
     monkeypatch.setattr(buy, "resolve_recovery_buyer_identity", lambda _run: _IDENTITY)
     monkeypatch.setattr(
         settlement_composition,

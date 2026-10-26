@@ -273,10 +273,16 @@ market credits buy \
   --yes
 ```
 
+The successful settlement output shows the issued bearer secret once and
+keeps it in the buyer's private credential store; the run log records only
+the key ID and the store's reference. Read it again by run ID:
 
+```bash
+market credits credentials show --from <run-id> --json
+```
 
-The successful settlement output includes the issued bearer secret. Use
-it from the buyer environment when calling the gated vLLM endpoint:
+Use the secret from the buyer environment when calling the gated vLLM
+endpoint:
 
 ```bash
 curl -s http://vllm-gateway:8080/v1/chat/completions \

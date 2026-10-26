@@ -53,6 +53,7 @@ from arkhai_api_buying.common import (
     resolve_registry_authorities,
     validate_model,
 )
+from arkhai_api_buying.credentials import DeliveryRunLog
 from arkhai_api_buying.settlement_composition import BuyerSettlementComposition
 
 
@@ -470,7 +471,7 @@ def register(
             stage_run_fields.update(stage.negotiation_run_fields(
                 options, selected_settlement if stage is selected_stage else None,
             ))
-        run_log = RunLog.start(
+        run_log = DeliveryRunLog.of(RunLog.start(
             profile_id=identity.profile_id,
             principal=identity.principal,
             command=f"{contributions.command_path} negotiate",
@@ -490,7 +491,7 @@ def register(
             key_id=resolved_key_id,
             resumed_from=from_run,
             **stage_run_fields,
-        )
+        ))
         resolve_seller_principals = make_publisher_trust_resolver(
             config=BuyConfig.from_resolved_identity(
                 identity=identity,

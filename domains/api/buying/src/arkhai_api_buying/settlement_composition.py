@@ -20,6 +20,7 @@ from market_settlement_runtime import (
 
 from arkhai_api_buying.common import resolve_fresh_buyer_identity
 from arkhai_api_buying.contributions import BuyingContributions
+from arkhai_api_buying.credentials import CredentialStore, FileCredentialStore
 from arkhai_api_buying.stages import BuyerStage, BuySession, EscrowCodec, StageOption, StageOptions
 
 
@@ -37,18 +38,24 @@ class _NoEscrow:
 
 
 class BuyerSettlementComposition:
-    """One plugin's stage table and the selection, acceptance, and readiness read through it."""
+    """One plugin's stage table, the selection, acceptance, and readiness read through it.
+
+    ``credential_store`` keeps the keys its runs deliver.
+    """
 
     def __init__(
         self,
         contributions: BuyingContributions,
         stages: SettlementStageTable[BuyerStage],
+        *,
+        credential_store: CredentialStore | None = None,
     ) -> None:
         for mechanism, stage in stages.items():
             if stage.mechanism_id != mechanism:
                 raise ValueError(f"stage table entry {mechanism!r} holds the {stage.mechanism_id!r} stage")
         self.contributions = contributions
         self.stages = stages
+        self.credential_store: CredentialStore = credential_store or FileCredentialStore()
         self._options: dict[str, dict[str, StageOption]] = {}
         for stage in stages.values():
             for option in stage.options:

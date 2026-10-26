@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 import typer
+from arkhai_api_buying.credentials import public_fields
 from arkhai_api_buying.listing import shorten
 from arkhai_api_buying.stages import (
     BuyRequest,
@@ -618,7 +619,7 @@ class AlkahestBuyerStage:
             typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(5) from exc
         log.event("settle_submitted", body=submit_body)
-        console.print(f"[dim]submitted[/dim]  initial body={submit_body}")
+        console.print(f"[dim]submitted[/dim]  initial body={public_fields(submit_body)}")
 
         def _on_poll(attempt: int, body: dict) -> None:
             log.event("settle_status", attempt=attempt, body=body)

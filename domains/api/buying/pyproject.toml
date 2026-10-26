@@ -1,6 +1,6 @@
 [project]
 name = "arkhai-api-buying"
-version = "0.1.0"
+version = "0.2.0"
 license = "MIT"
 description = "The api family's buying library: the buyer's listing, buy, negotiate, and settle commands, the negotiation guards, and the settlement composition over each domain's contribution bundle and stage table."
 requires-python = ">=3.12,<3.14"

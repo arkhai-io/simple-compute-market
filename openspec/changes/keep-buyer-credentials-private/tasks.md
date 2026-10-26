@@ -15,34 +15,64 @@ Touches `domains/api/buying/src/arkhai_api_buying/` (`credentials.py` new;
 their tests, `domains/apicredits/buyer/tests/`, `e2e-tests/tests/e2e/roles/buyer_cli.py`,
 both API-credit scenarios, and `docs/cookbooks/vllm-apicredits-seller.md`.
 
-- [ ] 1.1 Add `arkhai_api_buying.credentials`: the `CredentialStore` protocol,
+- [x] 1.1 Add `arkhai_api_buying.credentials`: the `CredentialStore` protocol,
       `FileCredentialStore` under `runs_dir().parent / "buy-credentials"`
       (`0700` directory, `0600` file, atomic write, symlink and run-ID refusal),
       `public_fields`, and `DeliveryRunLog` (D1, D2; `buyer-orchestration` "A
       buyer's private credential store"). Unit tests with a temporary
       `XDG_STATE_HOME`: modes, atomic replace, symlinked directory and file
       refused, unsafe run ID refused, nested `tenant_credentials` scrubbed.
-- [ ] 1.2 Give `BuyerSettlementComposition` a `credential_store`; record
+      *Done.* `credentials.py` holds the store, `public_fields`, and
+      `DeliveryRunLog`; the store directory is `buy-credentials` beside
+      `buy-runs` (D1). Reads also refuse a symlinked directory and turn an
+      unreadable record into a path-only `CredentialStoreError`.
+      `domains/api/buying/tests/unit/test_credentials.py`: modes, a
+      second save, a loose directory tightened, symlinked directory (write
+      and read) and file refused, unsafe run IDs, missing record and foreign
+      scheme, a failed `os.replace` keeping the old record and no temporary,
+      unreadable records, nested scrubbing, and a real `RunLog` file free of
+      the secret.
+- [x] 1.2 Give `BuyerSettlementComposition` a `credential_store`; record
       delivery through one helper used by `SettlementResume.finish` and `buy`:
       `credentials_delivered` with `key_id`, `base_url`, `balance`,
       `delivery_ref`, or `credentials_unsaved` with the error class, panel, and
       exit 8 (D2, D4). Wrap `buy`'s and `SettlementResume.open_log`'s logs in
       `DeliveryRunLog`; print the Alkahest submit response through
       `public_fields`. Update `test_settle.py` and `test_settle_credentials.py`.
-- [ ] 1.3 Add `credentials show --from <run-id> [--json]` to the command group,
+      *Done.* `record_delivery` and `end_run` in `credentials.py`; `finish`
+      and `buy` use both. The run's end and `credentials_unsaved` tolerate a
+      run-log write failure when the key went unsaved, so the panel still
+      shows (D4). `negotiate` wraps its log too. `test_settle.py`: stored
+      reference, unsaved key with exit 8, and a key reaching neither store
+      nor log still shown once.
+- [x] 1.3 Add `credentials show --from <run-id> [--json]` to the command group,
       with the legacy run-log fallback (D3, D5; `buyer-orchestration` "A buyer
       retrieves a delivered credential by run"). Application-integration tests
       in `domains/apicredits/buyer/tests/` through the plugin's app: stored
       key, `--json`, legacy run, no delivery.
-- [ ] 1.4 Canary test: `credits settle --from` with the secret in the submit
+      *Done.* `commands.py` `_credentials_app`. Plugin tests in
+      `test_settle_credentials.py` through `arkhai_apicredits_buyer.cli.app`:
+      stored key (panel and `--json`), legacy run left unchanged, no
+      delivery, unknown run, a foreign-scheme reference, and a removed
+      record — each refusal exits 1.
+- [x] 1.4 Canary test: `credits settle --from` with the secret in the submit
       response, a poll body, and the terminal status; it appears only in the
       store and the panel, not in the run log, captured logging, or other output
       (D6). Failed-write test: a symlinked store directory gives
       `credentials_unsaved`, the panel, and exit 8.
-- [ ] 1.5 `BuyerCli.credentials`; migrate `e2e_credits_deal` and
+      *Done.* `test_the_secret_reaches_only_the_store_and_the_panel` and
+      `test_a_failed_private_write_shows_the_key_once_and_exits_8`. The fresh
+      `buy` path is covered at unit level (`record_delivery`, `DeliveryRunLog`)
+      rather than end to end through `run_buy`; its wiring is the same two
+      calls. The submit, poll, and terminal bodies, which the proposal did not
+      name, are in the canary; D2 records them.
+- [x] 1.5 `BuyerCli.credentials`; migrate `e2e_credits_deal` and
       `e2e_credits_payment_deal` to it (D7). Add retrieval to the cookbook's
       buyer section.
-- [ ] 1.6 Versions (design "Versions"), wheels, relocks of the buying
+      *Done.* Both scenarios still wait on `credentials_delivered` and read
+      the key through `BuyerCli.credentials`; the payment re-drive reads the
+      event's top-level `key_id`. Not run locally; validation runs them.
+- [x] 1.6 Versions (design "Versions"), wheels, relocks of the buying
       libraries, `domains/apicredits/buyer`, `domains/apicredits/storefront`,
       and `e2e-tests`. Run `make test-api-buying`, `-alkahest`,
       `-arkhai-payments`, `make -C domains/apicredits test-buyer`,
@@ -50,6 +80,20 @@ both API-credit scenarios, and `docs/cookbooks/vllm-apicredits-seller.md`.
       `make check-packaging`, `make check-comment-hygiene`,
       `make check-change CHANGE=keep-buyer-credentials-private`, and
       `make -k test`. One fresh-context compliance check of the diff.
+      *Done.* `arkhai-api-buying` 0.2.0, `arkhai-api-buying-alkahest` 0.1.1,
+      `arkhai-apicredits-buyer` 0.7.0, with floors on `arkhai-api-buying>=0.2.0`;
+      six projects relocked. Suites: `test-api-buying` 40, `-alkahest` 12,
+      `-arkhai-payments` 8, `test-buyer` 35, storefront 174, all passing. On
+      a clean copy, `check-packaging` and `check-comment-hygiene` pass;
+      `check-change` reports only the citations of
+      `openspec/specs/api-family/spec.md` and `architecture.md`, the promotion
+      destinations that exist once `compose-api-family-kit` archives.
+      `make -k test` fails only where the tree is known to: the three IaC
+      relay-teardown tests, the VM storefront's two Alkahest toolchain tests,
+      and release tooling's GNU make `--eval` case. It ran before the
+      compliance fixes, which the focused suites above cover. The
+      fresh-context compliance check's fixes are in D1, D2, and D4; its
+      Typer-locals finding is deferred (design "Deferred").
 
 ## 2. Closeout
 

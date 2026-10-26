@@ -151,7 +151,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-api-buying"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "../../../.dist" }
 dependencies = [
     { name = "arkhai-api" },
@@ -165,12 +165,12 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { path = "arkhai_api_buying-0.1.0-py3-none-any.whl" },
+    { path = "arkhai_api_buying-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]
 name = "arkhai-api-buying-alkahest"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "alkahest-py" },
@@ -192,7 +192,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alkahest-py", specifier = "==1.1.2" },
-    { name = "arkhai-api-buying", specifier = ">=0.1.0" },
+    { name = "arkhai-api-buying", specifier = ">=0.2.0" },
     { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.8.0" },
     { name = "arkhai-kit-config", specifier = ">=0.4.0" },

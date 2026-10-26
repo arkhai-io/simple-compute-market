@@ -53,6 +53,7 @@ from arkhai_api_buying.common import (
     resolve_registry_api_keys,
     resolve_registry_authorities,
 )
+from arkhai_api_buying.credentials import DeliveryRunLog, end_run, record_delivery
 from arkhai_api_buying.negotiate import load_buyer_chain
 from arkhai_api_buying.settle import run_settle_from_log
 from arkhai_api_buying.settlement_composition import BuyerSettlementComposition
@@ -201,8 +202,8 @@ def register(
 
         No buyer agent is started or consulted; every step is either a
         signed HTTP call to a seller, a registry query, or the selected
-        mechanism's own settlement call. The issued credentials are shown once and saved
-        to the run-log.
+        mechanism's own settlement call. The issued key is shown once and kept
+        in the buyer's private credential store.
 
         When ``--from <run_id>`` is supplied, resumes the saved deal: it
         finishes negotiation if needed, then follows the selected
@@ -397,7 +398,7 @@ def register(
         run_fields: dict[str, Any] = {}
         for session in sessions.values():
             run_fields.update(session.run_fields())
-        run_log = RunLog.start(
+        run_log = DeliveryRunLog.of(RunLog.start(
             profile_id=identity.profile_id,
             principal=identity.principal,
             command=f"{command} buy",
@@ -412,7 +413,7 @@ def register(
             max_matches=max_matches,
             max_rounds=max_rounds,
             **run_fields,
-        )
+        ))
         header = Table.grid(padding=(0, 2))
         header.add_column(style="bold")
         header.add_column()
@@ -518,14 +519,12 @@ def register(
             run_log.end("error", error=str(exc))
             typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
-        credentials = (
-            result.tenant_credentials
-            if isinstance(result.tenant_credentials, dict)
-            else None
+        delivery = record_delivery(
+            run_log, result.tenant_credentials, settlement.credential_store
         )
-        if credentials:
-            run_log.event("credentials_delivered", credentials=credentials)
-        run_log.end(
+        end_run(
+            run_log,
+            delivery,
             result.status,
             seller_url=result.seller_url,
             negotiation_id=result.negotiation_id,
@@ -558,8 +557,10 @@ def register(
             "no_matches": "yellow",
         }.get(result.status, "white")
         console.print(Panel(tbl, title="Buy complete", border_style=border))
-        if credentials:
-            render_credentials(console, credentials)
+        if delivery is not None:
+            render_credentials(
+                console, delivery, run_id=run_log.run_id, command_path=command
+            )
         if result.status != "ready":
             raise typer.Exit(4)
 

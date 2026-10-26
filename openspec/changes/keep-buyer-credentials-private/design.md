@@ -64,6 +64,13 @@ re-tightened to `0700`; the file is written `0600` through a temporary file,
 that is a symlink is refused, and reads open with `O_NOFOLLOW`. A run ID that is
 not a plain file name is refused before any path is built.
 
+The symlink check and the `chmod` that follows are not one atomic step. The
+directory sits under the buyer's own state root, which another user cannot
+write, so the window admits no attacker the `0700` mode does not already
+exclude; a descriptor-based `O_NOFOLLOW` walk was judged not worth its weight.
+An unreadable record — not JSON, the wrong shape, a failed read — is refused
+with a message naming the path, never its content.
+
 `BuyerSettlementComposition` holds the store (`credential_store`, defaulting to
 `FileCredentialStore()`), so the buy, settle, and retrieval paths share one
 injection point.
@@ -83,8 +90,8 @@ reference (`file:<run_id>`). It never carries `secret`.
 
 Every event the buying library writes passes through `DeliveryRunLog`, a
 `RunLog` whose `event` replaces any `tenant_credentials` mapping, at any depth,
-with the same mapping without `secret`. `buy` wraps the log it starts and
-`SettlementResume.open_log` the log it opens, so the poll and terminal bodies of
+with the same mapping without `secret`. `buy` and `negotiate` wrap the logs they
+start and `SettlementResume.open_log` the log it opens, so the poll and terminal bodies of
 both stages are scrubbed where they are written, not at each call site. The
 Alkahest stage prints the submit response through the same projection.
 
@@ -124,6 +131,10 @@ its settlement status; prints a message telling the buyer to copy the key now;
 and exits 8, a code no other buyer exit uses (2 arguments, 3–6 failures,
 7 settlement not ready). An unready status still exits 7 when the write
 succeeded.
+
+A disk that refuses the store may refuse the run log as well, so a failure to
+write `credentials_unsaved` or the run's end does not stop the panel: the key is
+shown and the command exits 8 regardless.
 
 Rejected: failing before display — the seller's re-serving is not a promise, so
 the panel may be the only copy. Rejected: falling back to the run log — that is
@@ -178,6 +189,13 @@ Validation runs them; they are not run on the implementing machine.
 - A legacy-run migration command (D5).
 - `secret` in `core_buyer`'s refused run-log fields (D2), owned by a core buyer
   change, since it reaches the VM buyer.
+- Typer's pretty tracebacks print frame locals by default, and the core buyer
+  app (`core_buyer.cli.build_app`) does not turn that off, so an unexpected
+  exception raised while a frame holds the delivered mapping could print the
+  secret. The buying library catches the failures it anticipates (store and
+  run-log writes, unreadable records, unknown runs); setting
+  `pretty_exceptions_show_locals=False` belongs to the core buyer app, which
+  every domain's buyer shares, and is left to a core buyer change.
 
 ## Open Questions
 

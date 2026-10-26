@@ -29,6 +29,8 @@ from core_buyer.registry_config import (  # noqa: F401 — re-exports
     resolve_registry_authorities,
 )
 
+from arkhai_api_buying.credentials import UNSAVED_EXIT, Delivery
+
 
 def make_run_publisher_principals_refresh(
     run_id: str,
@@ -157,12 +159,11 @@ def resolve_prices_from_matches(
     )
 
 
-def render_credentials(console: Console, credentials: dict) -> None:
-    """Show the issued key once — the secret is never returned again.
-
-    The same credentials are appended to the run-log
-    (``credentials_delivered``), which is the buyer's durable copy.
-    """
+def render_credentials(
+    console: Console, delivery: Delivery, *, run_id: str, command_path: str,
+) -> None:
+    """Show the issued key once, then exit if its secret could not be saved privately."""
+    credentials = delivery.credentials
     table = Table.grid(padding=(0, 2))
     table.add_column(style="bold")
     table.add_column()
@@ -174,13 +175,23 @@ def render_credentials(console: Console, credentials: dict) -> None:
     ):
         if credentials.get(key) is not None:
             table.add_row(label, str(credentials[key]))
-    console.print(
-        Panel(
-            table,
-            title="API key issued — shown once; saved to the run-log",
-            border_style="green",
+    if delivery.unsaved:
+        title, border = "API key issued — NOT SAVED; copy it now", "red"
+    elif delivery.reference:
+        title, border = "API key issued — shown once; saved privately", "green"
+    else:
+        title, border = "API key delivered — no secret returned", "green"
+    console.print(Panel(table, title=title, border_style=border))
+    if delivery.reference:
+        console.print(f"[dim]Read it again with `{command_path} credentials show --from {run_id}`.[/dim]")
+    if delivery.unsaved:
+        typer.secho(
+            "The issued key could not be saved to the private credential store. "
+            "Copy the secret above now; the run log does not hold it.",
+            err=True,
+            fg=typer.colors.RED,
         )
-    )
+        raise typer.Exit(UNSAVED_EXIT)
 
 
 def validate_model(model_type, value):
