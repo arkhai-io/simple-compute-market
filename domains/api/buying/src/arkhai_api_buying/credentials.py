@@ -6,6 +6,7 @@ See openspec/specs/buyer-orchestration/spec.md#requirement-buyer-evidence-is-sep
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import os
 import re
@@ -73,7 +74,9 @@ class FileCredentialStore:
     following links and checked before it is used, so swapping a component for
     a link between the check and the write cannot redirect it. Directories
     above the store must be the user's or root's and closed to others' writes
-    (or sticky); the store's own directories must be the user's.
+    (or sticky); the store's own directories must be the user's and closed to
+    others' writes, and the last is held at ``0700``. Saves hold an exclusive
+    lock on the store directory.
     """
 
     scheme = "file"
@@ -148,6 +151,12 @@ class FileCredentialStore:
         assert directory is not None
         temporary = f".{name}.{secrets.token_hex(8)}.tmp"
         try:
+            # Saves into the store are serialized, so the sweep below can only
+            # remove the temporaries of a writer that has died, never a live one.
+            try:
+                fcntl.flock(directory, fcntl.LOCK_EX)
+            except OSError:
+                raise CredentialStoreError(f"{self.directory} cannot be locked") from None
             try:
                 existing = os.stat(name, dir_fd=directory, follow_symlinks=False)
             except FileNotFoundError:

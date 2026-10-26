@@ -77,7 +77,12 @@ which is conservative. The file is written `0600` through a
 temporary file, `fsync`, and a rename within the directory, then the directory
 is `fsync`ed; a failure of that last `fsync` leaves the record in place under
 its name and counts as saved. Each save sweeps the temporaries an interrupted
-save of the same run left. On read, a file that is a link, is not the user's, or is open to
+save of the same run left. Saves take an exclusive `flock` on the store
+directory's own descriptor before creating their temporary file and hold it
+through the sweep, so concurrent saves of one run are serialized and the sweep
+can only remove the temporaries of a writer that has died. Rejected (on
+review): sweeping without a lock — a concurrent writer's live temporary was
+removed before its rename, and its valid delivery was reported unsaved. On read, a file that is a link, is not the user's, or is open to
 group or others is refused, as is a record that is not JSON or has the wrong
 shape; refusals name the path, never the content. A run ID that is not a plain
 file name is refused before any path is built.

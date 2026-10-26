@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import threading
 import uuid
 
 import pytest
@@ -337,3 +338,39 @@ def test_a_directory_that_cannot_be_opened_is_a_store_refusal(state, monkeypatch
 
     with pytest.raises(CredentialStoreError, match="cannot be opened"):
         FileCredentialStore().load("file:run-1")
+
+
+def test_concurrent_saves_of_one_run_never_remove_each_others_temporary(state, monkeypatch):
+    store = FileCredentialStore()
+    store.save("same-run", _CREDENTIALS)
+    real_replace = os.replace
+    paused, resume = threading.Event(), threading.Event()
+    errors = []
+
+    def replace(src, dst, **kwargs):
+        if threading.current_thread().name == "second":
+            paused.set()
+            resume.wait(5)
+        return real_replace(src, dst, **kwargs)
+
+    monkeypatch.setattr(os, "replace", replace)
+
+    def save(secret):
+        try:
+            store.save("same-run", {**_CREDENTIALS, "secret": secret})
+        except Exception as exc:
+            errors.append((threading.current_thread().name, type(exc).__name__))
+
+    second = threading.Thread(target=save, args=("B",), name="second")
+    first = threading.Thread(target=save, args=("A",), name="first")
+    second.start()
+    assert paused.wait(5)
+    first.start()
+    first.join(0.5)
+    resume.set()
+    second.join(5)
+    first.join(5)
+
+    assert errors == []
+    assert store.load("file:same-run")["secret"] in {"A", "B"}
+    assert sorted(p.name for p in state.iterdir()) == ["same-run.json"]

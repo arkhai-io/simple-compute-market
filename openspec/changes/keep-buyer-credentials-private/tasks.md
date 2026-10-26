@@ -210,6 +210,21 @@ The owner's review of round 2 found two defects in the torn-record fallback.
       storefront 174. The clean-copy checks are recorded in the PR's round-3
       section.
 
+### Review round 4
+
+- [x] R4.1 **Concurrent saves removed each other's temporary.** Each save
+      swept every `.<run>.json.*.tmp`, including a live writer's, which then
+      failed its rename and reported an unsaved key. Saves now hold an
+      exclusive `flock` on the store directory from before the temporary is
+      created until after the sweep (D1). Test:
+      `test_concurrent_saves_of_one_run_never_remove_each_others_temporary`
+      pauses one writer before its rename and runs the other; on `10abf23c8`
+      the paused writer fails with `FileNotFoundError`, and now both succeed
+      and one record remains.
+- [x] R4.2 **Checks.** Suites: buying 67, Alkahest 12, payments 9, plugin 44,
+      storefront 174. The clean-copy checks are recorded in the PR's round-4
+      section.
+
 ## 2. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
