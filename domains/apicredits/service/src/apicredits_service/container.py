@@ -45,9 +45,8 @@ def init() -> None:
     engine = create_db_engine(authority_config.database_url, settings.is_sqlite)
     bootstrap(engine)
     resolved_session_factory = create_session_factory(engine)
-    # No eligibility invariant: quota resources carry no host. The ledger's
-    # domain-neutral unit claim key and mirror dimension (`units`) apply: a
-    # quota is counted in units and has no other alias.
+    # No eligibility invariant: quota resources carry no host, and a quota is
+    # counted in the ledger's neutral `units`.
     resolved_capacity_ledger_service = CapacityLedgerService(
         session_factory=resolved_session_factory,
     )

@@ -31,16 +31,11 @@ INSUFFICIENT_CREDITS = "insufficient_credits"
 #: perfectly good and something on the path is answering for the authority.
 UNAUTHENTICATED_SERVICE = "unauthenticated_service"
 
-#: The path and signed operation of each route this client calls.
-#:
-#: A second spelling of part of `arkhai_api_contracts`' route declarations,
-#: kept local so the gate depends on httpx alone. The authority recomputes
-#: the operation and resource from the matched route and verifies the
-#: signature over *its* values, so a disagreement here is not a loose end --
-#: it is a signature that cannot verify. The batch route signs the empty
-#: resource because it names no single key; its declaration names no
-#: `path_resource`. `tests/test_contract_parity.py` holds this spelling, the
-#: fields, and the refusal reasons equal to the declarations.
+#: The path and signed operation of each route this client calls, spelled
+#: locally so the gate depends on httpx alone. The authority signs over its
+#: own declarations, so any drift fails verification;
+#: `tests/test_contract_parity.py` holds them equal. The batch route names no
+#: single key, so it signs the empty resource.
 VERIFY_PATH = "/api/v1/keys/{key_id}/verify"
 CONSUME_PATH = "/api/v1/keys/{key_id}/consume"
 CONSUME_BATCH_PATH = "/api/v1/keys/consume-batch"

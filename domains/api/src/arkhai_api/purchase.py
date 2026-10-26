@@ -80,9 +80,7 @@ def provision_terms_model(kind: str) -> type[ProvisionTerms]:
     )
 
 
-# Wire-received provision terms arrive as the core opaque carrier or a plain
-# dict; these read the purchase payload from any carrier with a ``payload``
-# attribute or key.
+# Received terms are the core carrier or a plain dict; both expose ``payload``.
 
 
 def provision_payload(terms: Any) -> dict[str, Any]:

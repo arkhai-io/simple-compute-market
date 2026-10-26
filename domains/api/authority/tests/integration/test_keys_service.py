@@ -449,9 +449,7 @@ def test_usage_log_pages_by_event_id(service):
     assert [e["idempotency_key"] for e in page] == ["r2", "r3"]
 
 
-# ---------------------------------------------------------------------------
-# The profile replaces every offering-mode literal
-# ---------------------------------------------------------------------------
+# The profile replaces every offering-mode literal.
 
 
 def _issue_under(config, service, negotiation_id, *, capacity_reservation_id=None):

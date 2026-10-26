@@ -492,10 +492,8 @@ class AlkahestSellerStage:
                 issued = result
 
                 async def keep_credential() -> None:
-                    # The latest issued credential, kept before a park makes
-                    # the deal wait, since a waiting deal is never issued again.
-                    # Its fulfillment identity is the attestation's, recorded
-                    # once an operator resolves it.
+                    # Kept before a park, since a waiting deal is never issued
+                    # again; its fulfillment identity is recorded on resolution.
                     await persist_delivery(
                         self._contributions, db, evidence,
                         {**issued, "status": "pending", "fulfillment_uid": None},

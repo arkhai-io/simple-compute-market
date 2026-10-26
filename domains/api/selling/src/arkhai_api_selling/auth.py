@@ -290,10 +290,8 @@ class StorefrontAuth:
                 body = raw_body.decode("utf-8")
         authenticated = context.authenticated
         if authenticated is None:
-            # Refused while authenticating: nothing was reserved and nothing was
-            # dispatched, so there is no outcome to record. The caller's own
-            # request identity is still bindable, and a caller that sent none has
-            # nothing to compare a signature against.
+            # Refused before reserving, so no outcome is recorded; only the
+            # caller's own request identity, if any, is bound.
             request_id = request.headers.get("X-Market-Request-ID") or None
             if request_id is None:
                 return Response(

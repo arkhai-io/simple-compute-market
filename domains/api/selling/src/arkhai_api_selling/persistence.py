@@ -202,10 +202,8 @@ class StorefrontSQLiteClient(CoreSQLiteClient):
                 raise RuntimeError(
                     f"incompatible {noun} settlement schema; explicitly reset the database"
                 )
-        # Every capacity effect, reconciliation, and recheck reads a listing's
-        # durable binding, and a listing created before bindings were recorded
-        # has none to read. There is no record to derive one from, so such a
-        # database is refused rather than adopted.
+        # A listing without a durable binding cannot be derived one, and every
+        # capacity path reads it, so such a database is refused.
         unbound = cur.execute(
             """
             SELECT l.listing_id FROM listings l

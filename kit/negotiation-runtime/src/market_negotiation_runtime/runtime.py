@@ -298,9 +298,8 @@ class NegotiationDomainHooks:
     storefront_is_paused: Callable[[], bool]
     stage_event: StageEventHook
     persist_opening: PersistOpeningHook | None = None
-    # When set, the opening is one write: the runtime hands it the thread, the
-    # opening message, and the opening record, and makes none of those writes
-    # itself; ``persist_opening`` is then the hook's to call or fold in.
+    # When set, the runtime makes none of the opening writes itself, and
+    # ``persist_opening`` is the hook's to call or fold in.
     open_negotiation: OpenNegotiationHook | None = None
     place_hold: PlaceHoldHook | None = None
     persist_artifacts: PersistArtifactsHook | None = None
