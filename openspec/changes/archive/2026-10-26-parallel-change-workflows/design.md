@@ -900,7 +900,9 @@ owner's word: the cadence is the owner's, and a growing session is the degradati
 reach an earlier session, nor one whose branch moved since); recording the round
 with both sections in one session (decided before the first session runs, so it
 cannot extend a session after its size is seen); continuing by default within a
-round (sessions grow with no one choosing it).
+round (sessions grow with no one choosing it). An interactive `make implement`
+ignores `SESSION_ID` rather than refusing it: there the owner resumes a session
+with `claude --resume` themselves.
 
 ### 109 R1 / 111 R1 — A run's earlier outcomes are kept beside its last
 
@@ -933,6 +935,19 @@ merely numbered after its review, since in a clone the first pass's answer can l
 after the review it is read beside. A repeat pass with no fix has nothing to read. Rejected: asking no notes on a repeat pass
 (cheaper, but the commits a repeat round exists for are the ones the owner would
 not see); counting the first pass's notes for both (the owner read none of the fix).
+
+### 127 O1 — Locks are written by uv 0.12 or newer
+
+The pilot's locks, written by uv 0.11.17, were rewritten by the next `uv sync` on
+0.12.19, and `make check-locks` had passed them: `uv lock --check` asks only whether
+a lock satisfies its project, not which uv wrote it. On the owner's direction, `make
+check-uv-version` refuses a uv older than 0.12 before `make lock` builds or relocks
+anything, and validation runs it first; CI's `tests.yml` and `e2e.yml` install uv
+0.12.19. No lock was rewritten: the fix commit's CI run showed whether one needed it.
+Rejected, by the owner: a root `uv.toml` pin or `required-version`, with every uv
+install moved and the locks relocked (wider than the defect). It is packaging, not
+this change's subsystem, so its permanent home is
+`docs/development/BUILD_AND_PACKAGING.md`.
 
 ### The implementation cadence
 
@@ -1125,8 +1140,100 @@ pre-closeout review.
    for); listing a merge's paths beside the view as a stopgap (labels the files
    without separating them, and adds a code round before closeout).
 
+## Known gaps
+
+Found during implementation (8B.9's handoff), raised by no review, and decided by
+none; the first two describe the system and are recorded in the companion
+architecture's "Current limits":
+
+- A triage that returns the change to an earlier phase writes no `## Next`, since
+  neither `Advance` nor `Another round` fits, so its file reads as a triage in
+  progress, and once the change is back in design or planning the computation may
+  name that triage again. D20 does not say what `## Next` records on a return.
+- The merge check (D20.3) runs in whichever checkout computes, before the clone
+  lookup, so an unrelated merge in progress in the owner's workspace makes the
+  workspace's computation name the owner rather than the change's clone.
+- No test runs a merge-mode implementation prompt, or the routing after it.
+
+## Declined at the fresh-context compliance checks
+
+What a section's fresh-context compliance check raised and the section declined,
+with the reason:
+
+- **Section 4.** The step table's comments and the breadth of the `git pull
+  --ff-only workspace *` rule, which also matches a trailing option: the table is
+  the orchestrator's file, edited on the owner's word. Implementation's pull
+  allowance, which D8 grants and no skill uses.
+- **Section 5.** The executable bit of `helm/scripts/port-forward.sh`: a step
+  cannot change a file's mode, and setting it in the index alone would leave the
+  worktree differing from the commit, which validation refuses, so
+  `helm/Makefile` runs it with `bash`.
+- **Section 6.** Passing `--context` on every `kubectl` and `helm` call of the Helm
+  part, which the part never did and which concerns a context changed mid-run
+  rather than the namespace. `resume` bringing up a second release a person
+  installed in the change's namespace, which the preflight would count once:
+  validation installs only the one release there. The sampler's real 15-second
+  period: production needs a timer, and the test waits on a condition. The
+  scenario pod's render test staying under `helm/tests/`, since it needs the
+  umbrella's `test-config` and the local values. A `default` run's
+  `topology-secrets` rewriting the bare-metal release's Secrets: they are the same
+  development values that target always writes there.
+- **Section 7.** A `round-view-closed` prerequisite on `make validate-parallel`:
+  each clone's own `make validate-helm` refuses an open view there, and the check
+  moves nothing in the checkout it runs from. Tolerance for clock skew between the
+  host and the API server: objects are made minutes into a run, and a skew that
+  large would show as a failed read, not a pass.
+- **Section 8.** Calling the history tests anything but repository level, the term
+  sections 1–3 use. The `Contract:` lines naming the delta's requirement, which the
+  archive promotes. Reading an earlier attempt's summary when the latest attempt of
+  the commit crashed: the latest is still that commit's measurement. The small
+  duplication of the record-commit pattern and of `workspace_of`'s Git calls, each
+  module keeping its own reads.
+- **Section 8A.** Classing a job's failing steps beside its failing tests: a
+  `tests.yml` job stops at its first failing step, so its failing tests are its
+  failures.
+- **Section 8B.** Refusing `SESSION_ID` on an interactive `make implement` (112 O1).
+
 ## Pilot
 
 `seed-default-pool-at-runtime`, worked in its own clone from a branch created from
 this change's branch, alongside this change from this change's first round through
 the pilot's archive cleanup (D9).
+
+## Design promotion record
+
+The change-workflow requirements below are written into
+`openspec/specs/change-workflow/spec.md` by the archive, from this change's delta;
+the rest by hand at closeout. Paths are from the repository root; `arch` is
+`openspec/specs/change-workflow/architecture.md`.
+
+| Accepted decision | Permanent location |
+|---|---|
+| D1 — a change in its own sibling clone; why a clone rather than branch switching, worktrees, nested worktrees, or a container | `openspec/specs/change-workflow/spec.md#requirement-each-change-is-worked-in-its-own-clone`; `arch#a-change-is-worked-in-its-own-clone`; `docs/agents/change-workflow.md#a-change-in-its-own-clone`; `AGENTS.md#change-workflow` |
+| D2 — the round view in the owner's workspace, by the branch's name; refusals; commits made during the view carried by path kind; tooling refuses rather than risk the owner's work | `spec.md#requirement-triage-of-an-implementation-round`; `arch#an-implementation-round-is-triaged-together-in-a-fresh-session`; `docs/agents/change-workflow.md#a-change-in-its-own-clone` ("Reading a round") |
+| D3 — validation and review beside the reading; why reading no longer gates validation | `spec.md#requirement-triage-of-an-implementation-round`; `arch#an-implementation-round-is-triaged-together-in-a-fresh-session` |
+| D4 — the change's namespace, per-change fixed tags, upgrade from zero, scenario pod, scale-to-zero, the advisory capacity figure and its merge rule, teardown | `spec.md#requirement-each-helm-validation-is-isolated-in-its-changes-namespace`; `arch#validation-observes-a-committed-slice`; `docs/development/DEPLOYMENT_AND_CONFIG.md#validation-namespaces`; `docs/development/TESTING.md#4-system-integration-tests-end-to-end` |
+| D5 — dissolved | none: nothing left to serialize |
+| D6 — the orchestrating session creates the clone and branch; the branch at its furthest point, tracking `origin`; bootstrap states; a change under way not cloned; clone removal | `spec.md#requirement-each-change-is-worked-in-its-own-clone`; `arch#a-change-is-worked-in-its-own-clone`, `arch#history-lives-in-the-owners-workspace`; `docs/agents/change-workflow.md#a-change-in-its-own-clone` |
+| D7 — every shared resource per change, shared safely, or checked | `arch#a-change-is-worked-in-its-own-clone` |
+| D8 — each step commits and pushes its own work; the orchestrating session maintains the workflow; documents after a pre-closeout triage need no revalidation | `spec.md#requirement-unattended-runs-are-held-to-their-steps-permissions`, `spec.md#requirement-an-orchestrating-session-advances-one-change`, `spec.md#requirement-the-next-step-is-computed-from-the-files`; `arch#pushing-is-guarded-never-repaired`, `arch#the-orchestrator-relays-and-routes`; `docs/agents/change-workflow.md#orchestrating-a-change` |
+| D9 — the pilot and its merges; side work clear of the critical-path goal's files | change history (section 9); the principle in `arch#current-limits` |
+| D10 — one change, taking the Helm items it needs | change history |
+| D11 — history in the owner's workspace; `find_change.py --records` | `spec.md#requirement-each-change-is-worked-in-its-own-clone`; `arch#history-lives-in-the-owners-workspace`; `docs/agents/change-workflow.md#a-change-in-its-own-clone` ("History and removal"); `AGENTS.md#change-workflow` |
+| D14 — evidence only a push produces, owed by validation | `spec.md#requirement-implementation-sections-and-sessions`; `arch#sections-are-slices-sessions-are-the-owners`; `docs/agents/change-workflow.md#reviews` |
+| D15–D17 — the fixed dispatch list; owed jobs judged, other failures compared by test ID and exception type with a `dev` run the branch contains; every validation dispatches what its complete sections owe | `spec.md#requirement-validation-observes-a-committed-slice`; `arch#validation-observes-a-committed-slice`; `docs/agents/change-workflow.md#skills` |
+| D18 — implementation corrects a verification demanding push-only evidence; closeout records the owed observations | `spec.md#requirement-implementation-sections-and-sessions`; `arch#sections-are-slices-sessions-are-the-owners`; `docs/agents/change-workflow.md#reviews` |
+| D19 — a grant reaches a fresh run through `ALLOW` | `spec.md#requirement-unattended-runs-are-held-to-their-steps-permissions`; `arch#restrictions-bind-unattended-runs-only`; `docs/agents/change-workflow.md#orchestrating-a-change` ("Granting a rule for one run") |
+| D20, D20.1–D20.3 — commit rules, partial work only on a return, the branch as the guard, merges of `dev`, the conflict tiers, the merge hand-off | `spec.md#requirement-unattended-runs-are-held-to-their-steps-permissions`, `spec.md#requirement-an-orchestrating-session-advances-one-change`, `spec.md#requirement-implementation-sections-and-sessions`; `arch#pushing-is-guarded-never-repaired`, `arch#the-orchestrator-relays-and-routes`; `docs/agents/change-workflow.md#orchestrating-a-change` ("Commits", "Merging `dev`") |
+| D21 and the implementation cadence | change history: this change's own rounds |
+| 112 O1 — an implementation session continued by its id, on the owner's word | `spec.md#requirement-implementation-sections-and-sessions`; `arch#sections-are-slices-sessions-are-the-owners`; `docs/agents/change-workflow.md#orchestrating-a-change` ("Continuing an implementation session") |
+| 109 R1 / 111 R1 — a run's earlier outcomes kept beside its last | `spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`; `arch#steps-run-headless-and-resume-with-the-owners-answers`; `docs/agents/change-workflow.md#orchestrating-a-change` ("A run's earlier outcomes") |
+| 127 O2 / 128 R5 — a repeat round's fix is read by the owner | `spec.md#requirement-triage-of-an-implementation-round`; `arch#an-implementation-round-is-triaged-together-in-a-fresh-session`; `docs/agents/change-workflow.md#reviews` |
+| 127 O1 — locks written by uv 0.12 or newer | `docs/development/BUILD_AND_PACKAGING.md#locks` |
+| Open question 1 — the container per change kept open with its triggers | `arch#current-limits` |
+| Open question 2 — the round view mixing merges into a round, deferred to its own change | `arch#current-limits` (the limit; the change is proposed from `dev` after this one merges) |
+| Risks — an unattended step's reads reaching any file the owner can read; two releases exhausting a node | `arch#current-limits` |
+| Known gaps — a returning triage's missing `## Next`; the merge check in the computing checkout | `arch#current-limits` |
+| Roadmap currency | no goal in `docs/development/ROADMAP.md` covers contributor workflow; no edit |
+| Campaign index currency | this change's row in `openspec/changes/README.md`, `in closeout` then linking the archive; no campaign graph names it |
+| Capability index and repository architecture | no edit to `openspec/specs/README.md` or `docs/development/ARCHITECTURE.md`: no new capability or companion, and the workflow is contributor process |

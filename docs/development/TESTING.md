@@ -346,6 +346,22 @@ before the next, because every stack names its chain container `anvil` and
 publishes fixed host ports. A lane provides its own configuration, so a
 scenario that finds a lane setting missing fails rather than skipping.
 
+Pre-review validation also runs the scenarios the default Helm charts can serve
+(`HELM_SCENARIOS` in `scripts/validate_slice.py`) against a Helm release, in the
+change's own namespace ("Validation namespaces" in
+`docs/development/DEPLOYMENT_AND_CONFIG.md`). They run as a pod inside that
+namespace, the e2e-tests chart's `<release>-e2e-tests-e2e-scenarios` Helm test
+hook, rendered when `scenarios.markers` is set: it runs the change's own
+`e2e-tests` image with the release's `test-config` ConfigMap under the `helm`
+profile, the deal test pod's environment and mounts, and reaches every service by
+its in-cluster name, as a lane's scenarios do on their compose network, so no local
+port is involved. Validation runs it alone (`helm test --filter name=<pod>`) and
+counts it as passed only on the pod's own exit status of 0, since `helm test`
+passes when its filter matches no test. A scenario on that list reads only what the
+`e2e-tests` image copies — `src`, `tests`, `config`, `conftest.py`, and
+`settings.toml` — never a file from the checkout. Every other pipeline scenario is
+reported as not run against Helm.
+
 A mock-provisioned deal proves the services compose into a working deal, not
 that a real resource was delivered. Bare metal's release-qualified deal
 (`e2e_bare_metal_deal`) needs a real whole host to grant and revoke access on,
@@ -755,7 +771,9 @@ passing render is not deployment evidence, just as it is not deal evidence.
   mechanism. `test-render.sh` sets it when the VM storefront environment exists
   (`make init-storefront`). `helm/charts/bare-metal-storefront/tests/test_render.py`
   does the same through `BARE_METAL_STOREFRONT_PYTHON`, which `test-render.sh` sets
-  when `domains/bare_metal/storefront/.venv` exists: bare metal's loader, startup
+  when `domains/bare_metal/storefront/.venv` exists (`make
+  init-bare-metal-storefront`; both targets build the wheelhouse first, and `make
+  init` runs both): bare metal's loader, startup
   refusal, clause compilation, and site binding over the example's rendered
   document, and the refusal over the defaults'. That shows a rendered configuration
   is publishable, not that the storefront starts on it, since the runtime also needs

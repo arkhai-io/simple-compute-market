@@ -564,10 +564,12 @@ Deploy to a local development cluster with `make -C helm deploy-local`, never wi
 `make -C helm deploy` or the root `make deploy`, whether a person or an agent is
 deploying. A local cluster is redeployed with whatever code is checked out, and a
 retained volume keeps the state that code wrote — a database another branch
-migrated — for the next deployment to start from. Pre-review validation refuses
-to deploy over a release volume that carries the annotation and stops to ask, so a
-local deploy without the overlay costs the next validation a decision.
-`make -C helm deploy` is for a deployment whose state must survive reinstalling.
+migrated — for the next deployment to start from. Pre-review validation run in
+`default` refuses to deploy over a release volume that carries the annotation and
+stops to ask, so a local deploy without the overlay costs the next validation a
+decision; a change's validation runs in its own namespace instead and deletes its
+volumes itself ("Validation namespaces", below). `make -C helm deploy` is for a
+deployment whose state must survive reinstalling.
 
 ### Release topology
 
@@ -598,7 +600,9 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
 1's provisioning SSH and runtime Secrets and reads three of its own.
 
 - `make helm-topology-secrets` creates or replaces, idempotently, every Secret both
-  releases read, deriving each key with `cast` from Foundry's default development
+  releases read, in its namespace, which it creates when absent (`make -C helm
+  topology-secrets CHANGE=<change>` for a change's validation namespace),
+  deriving each key with `cast` from Foundry's default development
   mnemonic at `helm/Makefile`'s `DEV_ACCOUNT_*` indices (development values only);
   provisioning's SSH key is the committed mock placeholder,
   `PROVISIONING_SSH_KEY_FILE`. `helm/scripts/topology-secrets.sh` says what each
@@ -622,6 +626,69 @@ value (Anvil accounts 8 and 9) never for a public network. Release 2 reuses rele
 An end-to-end scenario that needs release 2 states `make helm-topology-up` on its
 Makefile target and in its suite module's docstring; the Helm validation scenarios
 need release 1 alone.
+
+### Validation namespaces
+
+A change's pre-review validation deploys release 1 into a namespace of the change's
+own, so several changes are validated side by side on one development cluster
+without uninstalling each other's release (the `change-workflow` contract,
+`openspec/specs/change-workflow/spec.md`, "Each Helm validation is isolated in its
+change's namespace").
+
+- **The namespace.** `validate-<change>`, cut to 63 characters with the first eight
+  hex digits of the full name's SHA-256 appended when longer
+  (`scripts/change_namespace.py`). Every `helm/Makefile` target that takes
+  `NAMESPACE=` also takes `CHANGE=`, deriving the namespace the same way; giving
+  both is refused. Release names do not change with the namespace, so the in-cluster
+  Service names `local-values.yaml` states resolve in every one, and the two-release
+  topology fits in it.
+- **Image tags.** Every build target appends `IMAGE_SUFFIX`, empty by default:
+  `make build-dev IMAGE_SUFFIX=-<change>` builds `arkhai:storefront-<change>` and its
+  siblings, and the deploy names them through a values overlay naming every `arkhai`
+  image `helm/values.yaml` sets (`change_namespace.py <change> --image-overlay
+  <path>`); a render test holds the overlay to every image the chart renders, so an
+  image added later cannot deploy under its bare tag. Compose, the pipeline lanes,
+  and your own deployments keep bare tags. A namespace alone would not isolate
+  images, since every image is pulled `IfNotPresent` from the one Docker daemon the
+  cluster reads. The tag is fixed per change, never per commit: commit-suffixed tags
+  caused repeated image-not-found failures deploying Helm, and a rebuilt image under
+  a fixed tag rolls out by restarting pods. A suffixed build writes no commit tag; a
+  bare build still writes `arkhai:<tag>-<sha>`, which `make push-images` reads.
+- **Upgraded from zero over deleted volumes.** Each validation of the change scales
+  the release's workloads to zero if a crashed run left any up, deletes its pods,
+  its volume claims, and the deal test's `arkhai-buyer-profiles`, and waits until
+  they are gone; creates the namespace's Secrets with `topology-secrets`; and runs
+  `helm upgrade --install` with `local-values.yaml` and the change's image overlay,
+  then restores each workload's replica count and waits for its rollout. Every pod
+  starts new, on the images just built, against empty volumes. An upgrade the chart
+  refuses (`field is immutable`) falls back to uninstalling and installing.
+- **Scaled to zero afterwards.** Once the scenarios have run, validation keeps
+  every pod's log and the namespace's events, then scales the namespace's
+  Deployments and StatefulSets to zero, keeping objects and volumes, so resident
+  memory does not grow with the active changes. `make -C helm resume CHANGE=<change>`
+  scales them back to the replica counts the installed release states, rendering
+  nothing from the checkout.
+- **Manual access.** `make -C helm forward CHANGE=<change>` forwards that
+  namespace's services on the usual ports (8545, 8080, 8001, 8081) for running e2e
+  targets by hand. The ports are the same for every namespace, so one namespace is
+  forwarded at a time: a port another checkout already forwards fails to bind, and
+  `forward` names it and stops. Validation itself forwards nothing.
+- **Capacity.** The node's memory is the one resource the namespaces share.
+  `helm/validation-capacity.toml` records the memory one release needs, when, and
+  from which change's validation it was measured; before deploying, validation
+  compares that figure, times the releases that would then be running, with the
+  node's allocatable memory, and stops for a deployment that would not fit. The
+  check is an estimate that reserves nothing. The figure is measured through the
+  cluster's metrics API and written at archive cleanup (`make record-capacity`)
+  only when the change's latest validation measured one; on a cluster with no
+  metrics source none is recorded, and the check warns that it was skipped. Where
+  two branches' figures conflict at a merge, keep the one whose `measured_at` is
+  later.
+- **Teardown.** Archive cleanup runs `make -C helm teardown CHANGE=<change>`,
+  which deletes the change's namespace in `HELM_CONTEXT` (`docker-desktop` by
+  default), with every release, volume, and Secret in it, and removes each image the
+  change's validation build tagged. It takes `CHANGE=` only, so it never deletes
+  `default`.
 
 ### Combined compute-family storefront
 

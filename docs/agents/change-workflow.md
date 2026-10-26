@@ -63,6 +63,15 @@ same job in the latest completed `dev` run of the workflow whose commit the bran
 contains: `inherited` when that run fails it the same way, `new`, or
 `uncomparable`.
 
+A change's Helm part runs in its own namespace, `validate-<change>`, on images
+tagged for the change (`docs/development/DEPLOYMENT_AND_CONFIG.md`, "Validation
+namespaces"). `make validate-parallel CLONES="<clone> <clone>"` checks that
+isolation on the development cluster: it runs two clones' Helm parts at the same
+moment and reports whether each kept to its own namespace, tags, and scenario pod,
+and left the other's release, volumes, and pods untouched, under
+`.snapshot/parallel-validation/<time>/`. It deploys two changes' releases, so it is
+a check of the tooling run by hand, not part of any change's validation.
+
 The order is the one the phases give: design and its review until the design
 review's triage advances the change; planning; then, per implementation round,
 implementation, its review beside validation of the same commit, and one triage of
