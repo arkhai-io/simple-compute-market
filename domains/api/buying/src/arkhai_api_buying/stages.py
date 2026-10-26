@@ -28,6 +28,7 @@ from arkhai_api_buying.credentials import (
     CredentialStore,
     DeliveryRunLog,
     end_run,
+    public_text,
     record_delivery,
 )
 
@@ -170,7 +171,7 @@ class SettlementResume:
     console: Console
     credential_store: CredentialStore
 
-    def open_log(self) -> RunLog:
+    def open_log(self) -> DeliveryRunLog:
         log = DeliveryRunLog.of(open_run_log(
             self.run_id, signer=self.identity.signer, profile_id=self.identity.profile_id,
         ))
@@ -222,7 +223,7 @@ class SettlementResume:
 
     def finish(
         self,
-        log: RunLog,
+        log: DeliveryRunLog,
         final: dict[str, Any],
         *,
         reference: tuple[str, str],
@@ -231,7 +232,7 @@ class SettlementResume:
     ) -> dict[str, Any]:
         """Keep any issued credential privately, record the terminal status, show both, and exit unless ready."""
         delivery = record_delivery(log, final.get("tenant_credentials"), self.credential_store)
-        end_run(
+        delivery = end_run(
             log,
             delivery,
             final.get("status") or "unknown",
@@ -246,7 +247,7 @@ class SettlementResume:
         if final.get("fulfillment_uid"):
             result.add_row("Fulfillment UID", str(final["fulfillment_uid"]))
         if final.get("reason"):
-            result.add_row("Reason", str(final["reason"]))
+            result.add_row("Reason", public_text(str(final["reason"]), log.secrets))
         border = "green" if final.get("status") == "ready" else unready_border
         self.console.print(Panel(result, title="Settlement complete", border_style=border))
         if delivery is not None:

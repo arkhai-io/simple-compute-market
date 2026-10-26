@@ -28,7 +28,8 @@ import arkhai_api_buying_alkahest.stage as alkahest_stage
 from arkhai_api_buying.settle import run_settle_from_log
 from arkhai_apicredits_buyer.cli import SETTLEMENT, app
 from core_buyer.buyer_config import ResolvedBuyerIdentity
-from core_buyer.run_log import read_run
+from core_buyer.negotiation_client import AuthenticatedHTTPError
+from core_buyer.run_log import RunLog, read_run
 from market_core.schemas import Agreement, SettlementOption, derive_settlement_option_id
 from market_identity import REQUEST_PROTOCOL, Eip191Signer, TrustedIdentitySet
 
@@ -297,6 +298,89 @@ def test_a_failed_private_write_shows_the_key_once_and_exits_8(secret_everywhere
     assert list(elsewhere.iterdir()) == []
 
 
+def test_a_seller_error_carrying_the_secret_reaches_neither_log_nor_output(
+    agreed_run, fake_chain_config, tmp_path, monkeypatch, caplog,
+):
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity", lambda _run: _IDENTITY)
+    body = {"status": "ready", "tenant_credentials": dict(_CREDENTIALS)}
+
+    def refused(**_kw):
+        raise AuthenticatedHTTPError(
+            f"POST http://seller:8002/api/v1/settle -> authenticated HTTP 409: {json.dumps(body)}",
+            status_code=409, body=body,
+        )
+
+    monkeypatch.setattr(alkahest_stage, "submit_settlement_request", refused)
+
+    result = _settle(agreed_run)
+
+    assert result.exit_code == 5, (result.output, result.exception)
+    run_log = (tmp_path / "arkhai" / "buy-runs" / f"{agreed_run}.jsonl").read_text()
+    assert "settle_submit_failed" in run_log
+    assert _SECRET not in run_log
+    assert _SECRET not in result.output
+    assert _SECRET not in caplog.text
+    assert "authenticated HTTP 409" in result.output
+
+def test_a_status_poll_error_carrying_the_secret_reaches_neither_log_nor_output(
+    agreed_run, fake_chain_config, tmp_path, monkeypatch, caplog,
+):
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity", lambda _run: _IDENTITY)
+    body = {"status": "ready", "tenant_credentials": dict(_CREDENTIALS)}
+
+    def refused(**_kw):
+        raise AuthenticatedHTTPError(
+            f"GET http://seller:8002/api/v1/settle/x/status -> authenticated HTTP 409: {json.dumps(body)}",
+            status_code=409, body=body,
+        )
+
+    monkeypatch.setattr(alkahest_stage, "submit_settlement_request", lambda **_kw: {"status": "queued"})
+    monkeypatch.setattr(alkahest_stage, "wait_for_settlement", refused)
+
+    result = _settle(agreed_run)
+
+    assert result.exit_code == 5, (result.output, result.exception)
+    run_log = (tmp_path / "arkhai" / "buy-runs" / f"{agreed_run}.jsonl").read_text()
+    assert "settle_status_failed" in run_log and '"status":"error"' in run_log
+    assert _SECRET not in run_log + result.output + caplog.text
+
+
+def test_a_run_log_refusing_the_polled_body_still_saves_and_shows_the_key(
+    secret_everywhere, tmp_path, monkeypatch,
+):
+    real = RunLog.event
+
+    def refuse_bodies(self, event, **fields):
+        if "tenant_credentials" in json.dumps(fields):
+            raise OSError("disk full")
+        real(self, event, **fields)
+
+    monkeypatch.setattr(RunLog, "event", refuse_bodies)
+
+    result = _settle(secret_everywhere)
+
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert result.output.count(_SECRET) == 1
+    assert (tmp_path / "arkhai" / "buy-credentials" / f"{secret_everywhere}.json").exists()
+
+
+def test_credentials_show_prefers_the_stored_key_to_a_legacy_copy(secret_everywhere, tmp_path):
+    path = tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl"
+    with path.open("a") as stream:
+        stream.write(json.dumps(_run_event(
+            secret_everywhere, "credentials_delivered",
+            credentials={**_CREDENTIALS, "secret": "sk_legacy_copy"},
+        )) + "\n")
+    SETTLEMENT.credential_store.save(secret_everywhere, _CREDENTIALS)
+
+    as_json = _show(secret_everywhere, "--json")
+
+    assert json.loads(as_json.output)["secret"] == _SECRET
+    assert json.loads(as_json.output)["source"] == "store"
+
+
 def _show(run_id: str, *extra: str):
     return CliRunner().invoke(app, ["credits", "credentials", "show", "--from", run_id, *extra])
 
@@ -339,6 +423,15 @@ def test_credentials_show_reads_a_run_recorded_before_private_storage(
     assert json.loads(as_json.output)["secret"] == _SECRET
     assert path.read_text() == before
 
+
+def test_credentials_show_finds_a_saved_key_its_run_log_never_recorded(secret_everywhere):
+    SETTLEMENT.credential_store.save(secret_everywhere, _CREDENTIALS)
+
+    as_json = _show(secret_everywhere, "--json")
+
+    assert as_json.exit_code == 0, (as_json.output, as_json.exception)
+    assert json.loads(as_json.output)["secret"] == _SECRET
+    assert json.loads(as_json.output)["source"] == "store"
 
 def test_credentials_show_refuses_a_run_with_no_delivery(secret_everywhere):
     shown = _show(secret_everywhere)

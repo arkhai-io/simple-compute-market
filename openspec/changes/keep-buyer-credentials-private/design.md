@@ -53,23 +53,38 @@ store.
 
 ### D1. A `CredentialStore` protocol with one file implementation
 
-`arkhai_api_buying.credentials` defines `CredentialStore` — a `scheme`, `save(run_id,
-credentials) -> reference`, and `load(reference)` — and `FileCredentialStore`: one
-JSON file per run at `$XDG_STATE_HOME/arkhai/buy-credentials/<run_id>.json`. The
-root is `core_buyer.run_log.runs_dir()`'s parent, so the store follows the run
-log's XDG resolution without restating it, and the directory sits beside
-`buy-runs` and names the same role. The directory is created `0700` and
-re-tightened to `0700`; the file is written `0600` through a temporary file,
-`fsync`, and `os.replace`, then the directory is `fsync`ed. A directory or file
-that is a symlink is refused, and reads open with `O_NOFOLLOW`. A run ID that is
-not a plain file name is refused before any path is built.
+`arkhai_api_buying.credentials` defines `CredentialStore` — a `scheme`,
+`reference(run_id)`, `location(reference)`, `save(run_id, credentials) ->
+reference`, and `load(reference)` — and `FileCredentialStore`: one JSON file per
+run at `$XDG_STATE_HOME/arkhai/buy-credentials/<run_id>.json`. The root is
+`core_buyer.run_log.runs_dir()`'s parent, so the store follows the run log's XDG
+resolution without restating it, and the directory sits beside `buy-runs` and
+names the same role.
 
-The symlink check and the `chmod` that follows are not one atomic step. The
-directory sits under the buyer's own state root, which another user cannot
-write, so the window admits no attacker the `0700` mode does not already
-exclude; a descriptor-based `O_NOFOLLOW` walk was judged not worth its weight.
-An unreadable record — not JSON, the wrong shape, a failed read — is refused
-with a message naming the path, never its content.
+Every directory from `/` down is opened relative to its parent with
+`O_DIRECTORY | O_NOFOLLOW`, and the file is created, replaced, and read through
+that directory's descriptor (`dir_fd`), so a component swapped for a link after
+any check cannot redirect the write. The XDG state root is resolved once. Each
+directory above the store must be the user's or root's and closed to others'
+writes unless sticky, and is created `0700` when missing; the store's own
+directories (`arkhai`, `buy-credentials`) must be the user's and closed to
+others' writes — a group-writable one is refused, not changed, since `arkhai`
+also holds the run logs — and `buy-credentials` is held at `0700`. A directory
+that cannot be opened or created is a store refusal naming it. `/` itself is
+not checked; the walk checks from its first child down. A directory the user
+owns that its group can write is refused even if the group is the user's own,
+which is conservative. The file is written `0600` through a
+temporary file, `fsync`, and a rename within the directory, then the directory
+is `fsync`ed; a failure of that last `fsync` leaves the record in place under
+its name and counts as saved. Each save sweeps the temporaries an interrupted
+save of the same run left. On read, a file that is a link, is not the user's, or is open to
+group or others is refused, as is a record that is not JSON or has the wrong
+shape; refusals name the path, never the content. A run ID that is not a plain
+file name is refused before any path is built.
+
+Rejected (on review): path-based checks followed by path-based `mkdir`,
+`chmod`, `mkstemp`, and `replace` — a reproduced race swapped the directory for
+a link between the check and the write.
 
 `BuyerSettlementComposition` holds the store (`credential_store`, defaulting to
 `FileCredentialStore()`), so the buy, settle, and retrieval paths share one
@@ -94,6 +109,24 @@ with the same mapping without `secret`. `buy` and `negotiate` wrap the logs they
 start and `SettlementResume.open_log` the log it opens, so the poll and terminal bodies of
 both stages are scrubbed where they are written, not at each call site. The
 Alkahest stage prints the submit response through the same projection.
+
+A secret can also travel inside text: `core_buyer` quotes an authenticated
+non-success response's body into `AuthenticatedHTTPError`'s message, and the
+mechanism stages logged and printed `str(exc)`. The buying layer holds the
+boundary for text too, without changing `core_buyer`: `error_text(exc)` reduces
+an `AuthenticatedHTTPError` to its method, URL, and status, never its body, and
+any other error to its text with each quoted `secret` value redacted;
+`DeliveryRunLog` redacts every string it writes the same way, and also removes
+each secret it has seen delivered in a structured body. Every error the buy and
+settle paths log or print goes through `error_text`, and `buy` prints the
+result's reason, and `settle` the seller's reason, through the same redaction.
+The text redaction is a backstop, not the boundary: it recognises a quoted
+`secret` key, not an escaped or differently named one, so the error paths that
+could carry a body reduce it away rather than rely on redaction.
+
+A body that carries the key may also fail to be appended. `DeliveryRunLog`
+treats that one append as best-effort, so the flow still reaches the save and
+the panel; any other failing append raises as before.
 
 The field is `delivery_ref`, not `credential_ref`: `core_buyer`'s run log
 refuses `credential_reference` as an identity-credential locator, and a
@@ -136,6 +169,11 @@ A disk that refuses the store may refuse the run log as well, so a failure to
 write `credentials_unsaved` or the run's end does not stop the panel: the key is
 shown and the command exits 8 regardless.
 
+The reverse — the key saved, then the run log refusing `credentials_delivered`
+or the run's end — shows the panel and the file's path and exits 9. The key is
+not orphaned: `credentials show` looks it up by run ID (the store's
+`reference(run_id)`) when the run log records no reference.
+
 Rejected: failing before display — the seller's re-serving is not a promise, so
 the panel may be the only copy. Rejected: falling back to the run log — that is
 the defect.
@@ -174,7 +212,8 @@ Validation runs them; they are not run on the implementing machine.
 |---|---|---|
 | `arkhai-api-buying` | 0.2.0 | new module, command, and run-log contract |
 | `arkhai-api-buying-alkahest` | 0.1.1 | submit-response projection; floor on `arkhai-api-buying>=0.2.0` |
-| `arkhai-apicredits-buyer` | 0.7.0 | floor on `arkhai-api-buying>=0.2.0`; tests |
+| `arkhai-api-buying-arkhai-payments` | 0.1.1 | its errors pass through `error_text`; floor on `arkhai-api-buying>=0.2.0` |
+| `arkhai-apicredits-buyer` | 0.7.0 | floors on the above; tests |
 
 ## Risks / Trade-offs
 

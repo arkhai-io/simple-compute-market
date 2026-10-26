@@ -53,7 +53,13 @@ from arkhai_api_buying.common import (
     resolve_registry_api_keys,
     resolve_registry_authorities,
 )
-from arkhai_api_buying.credentials import DeliveryRunLog, end_run, record_delivery
+from arkhai_api_buying.credentials import (
+    DeliveryRunLog,
+    end_run,
+    error_text,
+    public_text,
+    record_delivery,
+)
 from arkhai_api_buying.negotiate import load_buyer_chain
 from arkhai_api_buying.settle import run_settle_from_log
 from arkhai_api_buying.settlement_composition import BuyerSettlementComposition
@@ -516,13 +522,14 @@ def register(
                 on_event=_observe,
             )
         except RuntimeError as exc:
-            run_log.end("error", error=str(exc))
-            typer.secho(f"Buy failed: {exc}", err=True, fg=typer.colors.RED)
+            reason = error_text(exc, run_log.secrets)
+            run_log.end("error", error=reason)
+            typer.secho(f"Buy failed: {reason}", err=True, fg=typer.colors.RED)
             raise typer.Exit(3)
         delivery = record_delivery(
             run_log, result.tenant_credentials, settlement.credential_store
         )
-        end_run(
+        delivery = end_run(
             run_log,
             delivery,
             result.status,
@@ -548,7 +555,7 @@ def register(
             ("Reason", result.reason),
         ):
             if val:
-                tbl.add_row(label, str(val))
+                tbl.add_row(label, public_text(str(val), run_log.secrets))
         border = {
             "ready": "green",
             "failed": "red",

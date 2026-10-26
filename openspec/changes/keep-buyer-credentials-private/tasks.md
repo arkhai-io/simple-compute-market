@@ -95,6 +95,72 @@ both API-credit scenarios, and `docs/cookbooks/vllm-apicredits-seller.md`.
       fresh-context compliance check's fixes are in D1, D2, and D4; its
       Typer-locals finding is deferred (design "Deferred").
 
+### Review round 1
+
+The owner approved fixing the external review's findings. Each fix has a test
+that fails on the section's commit `d5f855569`.
+
+- [x] R1.1 **Secrets in error text.** `error_text` and `public_text` in
+      `credentials.py`; `DeliveryRunLog` redacts strings and the secrets it
+      has seen delivered; the payments stage, `payments.settle_negotiation`,
+      the Alkahest resume's failure paths, and `buy` log and print through
+      them (D2). `core_buyer` is unchanged. Tests:
+      `test_error_text_never_quotes_a_seller_error_body`,
+      `test_public_text_redacts_a_quoted_secret`,
+      `test_the_delivery_run_log_redacts_secrets_inside_strings`, the
+      payments library's
+      `test_a_seller_error_body_never_reaches_the_settlement_events_or_reason`,
+      and the plugin's
+      `test_a_seller_error_carrying_the_secret_reaches_neither_log_nor_output`.
+- [x] R1.2 **Check-then-use race.** A descriptor-relative walk, create,
+      replace, and read; ancestors checked for ownership and others' writes;
+      missing directories created `0700` (D1). Tests:
+      `test_a_link_swapped_in_after_any_check_cannot_redirect_the_write`,
+      `test_missing_directories_are_created_private`,
+      `test_a_directory_others_can_write_is_refused`.
+- [x] R1.3 **Orphaned credential.** `record_delivery` and `end_run` keep the
+      panel and name the file when the run log refuses the append, exiting 9;
+      `credentials show` finds the key by run ID (D4). Tests:
+      `test_a_saved_key_whose_run_log_refuses_the_append_is_shown_with_its_location`,
+      `test_credentials_show_finds_a_saved_key_its_run_log_never_recorded`.
+- [x] R1.4 **Unsafe record permissions.** `load` refuses a file not owned by
+      the user or open to group or others (D1). Test:
+      `test_a_record_others_can_read_is_refused` (0644, 0640, 0604).
+- [x] R1.5 **Versions and evidence.** `arkhai-api-buying-arkhai-payments`
+      0.1.1, since it now imports `error_text`; the plugin's floor follows.
+      The store and run-log probes (R1.2–R1.4) and the finish probe (R1.3)
+      were run against `d5f855569`'s code and fail there; they pass now.
+      Suites: buying 53, Alkahest 12, payments 9, plugin 37. The clean-copy
+      checks and the fresh-context check are recorded in R1.6 and R1.7.
+- [x] R1.6 **Fresh-context check of the fixes.** It found eleven items; ten
+      are fixed and one is recorded:
+      - an Alkahest status-poll error escaped uncaught with its body
+        (`settle_status_failed`, exit 5;
+        `test_a_status_poll_error_carrying_the_secret_reaches_neither_log_nor_output`);
+      - `settle` printed the seller's reason unredacted
+        (`test_a_seller_reason_is_printed_without_a_known_secret`);
+      - a run log refusing a body that carries the key stopped the flow before
+        the save (`DeliveryRunLog` best-effort for such bodies;
+        `test_a_body_carrying_the_key_does_not_stop_the_flow_when_the_log_refuses_it`,
+        `test_a_run_log_refusing_the_polled_body_still_saves_and_shows_the_key`);
+      - walk errors other than refusals became tracebacks
+        (`test_a_directory_that_cannot_be_opened_is_a_store_refusal`);
+      - a failed directory `fsync` after the rename reported a saved key as
+        unsaved (`test_a_failed_directory_sync_after_the_rename_still_counts_as_saved`);
+      - interrupted saves left temporaries
+        (`test_a_save_sweeps_temporaries_an_interrupted_save_left`);
+      - a legacy copy won over a newer stored key
+        (`test_credentials_show_prefers_the_stored_key_to_a_legacy_copy`);
+      - `arkhai` was silently tightened, now refused when others can write
+        (`test_a_group_writable_arkhai_directory_is_refused`);
+      - this record's references and the plugin tests' blank lines.
+      The text-redaction pattern's narrowness is recorded in D2 rather than
+      widened: the body-carrying paths no longer depend on it.
+- [x] R1.7 **Checks.** Suites: buying 59, Alkahest 12, payments 9, plugin 40,
+      storefront 174, all passing. On a clean copy, `check-packaging` and
+      `check-comment-hygiene` pass and `check-change` reports only the two
+      promotion-destination citations, as before.
+
 ## 2. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.
@@ -133,7 +199,7 @@ change to implementation.
 | D1 — a private buyer credential store behind a scheme-naming interface; the file store's modes, atomic write, and refusals | `openspec/specs/buyer-orchestration/spec.md` ("A buyer's private credential store"); `openspec/specs/api-family/architecture.md` (the file store's location and injection point) |
 | D2 — `credentials_delivered` without the secret; every recorded status body scrubbed | `openspec/specs/buyer-orchestration/spec.md` ("Buyer evidence is separate from private delivery"); `openspec/specs/api-family/spec.md` ("The buying library keeps a delivered credential private") |
 | D3, D5 — retrieval by run, the legacy fallback, no rewrite | `openspec/specs/buyer-orchestration/spec.md` ("A buyer retrieves a delivered credential by run") |
-| D4 — a failed write shows the key once, records `credentials_unsaved`, exits 8 | `openspec/specs/buyer-orchestration/spec.md` ("A failed private write does not lose a delivered credential") |
+| D4 — a failed write shows the key once, records `credentials_unsaved`, exits 8; a saved key the run log cannot record is shown with its path, exits 9, and is found by run ID | `openspec/specs/buyer-orchestration/spec.md` ("A failed private write does not lose a delivered credential") |
 | D6 — the secret reaches only the panel | `openspec/specs/api-family/spec.md` ("The buying library keeps a delivered credential private") |
 | D7 — scenarios retrieve through the command | Test code only (`e2e-tests/tests/e2e/roles/buyer_cli.py`) |
 | Deferred — keyring store, legacy migration, `secret` in the core role's refused fields | `design.md` "Deferred" (no permanent home until a change takes them) |

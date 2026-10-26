@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 import typer
-from arkhai_api_buying.credentials import public_fields
+from arkhai_api_buying.credentials import error_text, public_fields
 from arkhai_api_buying.listing import shorten
 from arkhai_api_buying.stages import (
     BuyRequest,
@@ -578,10 +578,11 @@ class AlkahestBuyerStage:
             try:
                 uids = create_escrow(escrow_terms_list)
             except Exception as exc:
-                log.event("escrow_create_failed", error=str(exc))
-                log.end("error", error=f"escrow_create: {exc}")
+                reason = error_text(exc, log.secrets)
+                log.event("escrow_create_failed", error=reason)
+                log.end("error", error=f"escrow_create: {reason}")
                 typer.secho(
-                    f"escrow.create failed on-chain: {exc}", err=True, fg=typer.colors.RED
+                    f"escrow.create failed on-chain: {reason}", err=True, fg=typer.colors.RED
                 )
                 raise typer.Exit(4) from exc
             if not uids:
@@ -614,12 +615,13 @@ class AlkahestBuyerStage:
                 resolve_seller_principals=resolve_seller_principals,
             )
         except RuntimeError as exc:
-            log.event("settle_submit_failed", error=str(exc))
-            log.end("error", error=f"settle_submit: {exc}")
-            typer.secho(f"/settle submit failed: {exc}", err=True, fg=typer.colors.RED)
+            reason = error_text(exc, log.secrets)
+            log.event("settle_submit_failed", error=reason)
+            log.end("error", error=f"settle_submit: {reason}")
+            typer.secho(f"/settle submit failed: {reason}", err=True, fg=typer.colors.RED)
             raise typer.Exit(5) from exc
         log.event("settle_submitted", body=submit_body)
-        console.print(f"[dim]submitted[/dim]  initial body={public_fields(submit_body)}")
+        console.print(f"[dim]submitted[/dim]  initial body={public_fields(submit_body, log.secrets)}")
 
         def _on_poll(attempt: int, body: dict) -> None:
             log.event("settle_status", attempt=attempt, body=body)
@@ -636,12 +638,19 @@ class AlkahestBuyerStage:
                 resolve_seller_principals=resolve_seller_principals,
             )
         except TimeoutError as exc:
-            log.event("settle_terminal", status="timeout", error=str(exc))
-            log.end("timeout", escrow_uid=resolved_uid, error=str(exc))
+            reason = error_text(exc, log.secrets)
+            log.event("settle_terminal", status="timeout", error=reason)
+            log.end("timeout", escrow_uid=resolved_uid, error=reason)
             typer.secho(
-                f"settlement polling timed out: {exc}", err=True, fg=typer.colors.YELLOW
+                f"settlement polling timed out: {reason}", err=True, fg=typer.colors.YELLOW
             )
             raise typer.Exit(6) from exc
+        except RuntimeError as exc:
+            reason = error_text(exc, log.secrets)
+            log.event("settle_status_failed", error=reason)
+            log.end("error", escrow_uid=resolved_uid, error=f"settle_status: {reason}")
+            typer.secho(f"/settle status failed: {reason}", err=True, fg=typer.colors.RED)
+            raise typer.Exit(5) from exc
         log.event("settle_terminal", body=final)
         return resume.finish(
             log,

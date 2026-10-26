@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from arkhai_api_buying.credentials import error_text
 from core_buyer.buyer_config import ResolvedBuyerIdentity
 from core_buyer.orchestration import (
     make_publisher_trust_resolver,
@@ -278,7 +279,7 @@ def settle_negotiation(
             confirm_payment=confirm_payment,
         )
     except PaymentApprovalDeclined as exc:
-        on_event("payment_approval_declined", {"error": str(exc)})
+        on_event("payment_approval_declined", {"error": error_text(exc)})
         return BuyResult(
             status="exited",
             negotiation_id=outcome.negotiation_id,
@@ -286,12 +287,12 @@ def settle_negotiation(
             or match.get("seller")
             or match.get("seller_url"),
             agreed_amount=outcome.agreed_amount,
-            reason=str(exc),
+            reason=error_text(exc),
             rounds=outcome.rounds,
             attempts=negotiation.attempts,
         )
     except Exception as exc:
-        on_event("settlement_failed", {"error": str(exc)})
+        on_event("settlement_failed", {"error": error_text(exc)})
         return BuyResult(
             status="failed",
             negotiation_id=outcome.negotiation_id,
@@ -299,7 +300,7 @@ def settle_negotiation(
             or match.get("seller")
             or match.get("seller_url"),
             agreed_amount=outcome.agreed_amount,
-            reason=str(exc),
+            reason=error_text(exc),
             rounds=outcome.rounds,
             attempts=negotiation.attempts,
         )

@@ -2,7 +2,7 @@
 
 ### Requirement: Buyer evidence is separate from private delivery
 
-Buyer settlement progress MUST retain its recorded opaque settlement reference, exact accepted Agreement bytes and domain settlement data for recovery. Delivery results and credentials MUST remain in the domain's authenticated result handling and MUST NOT be substituted for accepted settlement state or persisted as public run evidence. A buyer that receives a bearer credential MUST keep its secret in a private buyer credential store and MUST record in the run log only the credential's non-secret fields and the store's reference; no run-log event, including a recorded seller status body, MAY carry the secret. Seller delivery authorization remains the storefront's verified SettlementEvidence, not buyer-local progress.
+Buyer settlement progress MUST retain its recorded opaque settlement reference, exact accepted Agreement bytes and domain settlement data for recovery. Delivery results and credentials MUST remain in the domain's authenticated result handling and MUST NOT be substituted for accepted settlement state or persisted as public run evidence. A buyer that receives a bearer credential MUST keep its secret in a private buyer credential store and MUST record in the run log only the credential's non-secret fields and the store's reference; no run-log event, including a recorded seller status body or an error's text, MAY carry the secret, and no error the buyer prints MAY quote a seller's response body. Seller delivery authorization remains the storefront's verified SettlementEvidence, not buyer-local progress.
 
 #### Scenario: Buyer retrieves a delivered API key
 
@@ -19,11 +19,16 @@ Buyer settlement progress MUST retain its recorded opaque settlement reference, 
 - **WHEN** a polled or terminal seller status recorded in the run log carries the delivered credential
 - **THEN** the recorded body holds the credential without its secret
 
+#### Scenario: A seller's error response carries the secret
+
+- **WHEN** the seller answers a settlement call with an authenticated error whose body carries the delivered credential
+- **THEN** the run log and the command's output name the call and its status and carry neither the body nor the secret
+
 ## ADDED Requirements
 
 ### Requirement: A buyer's private credential store
 
-The buyer's private credential store MUST keep one record per run in a directory only the buyer's user can open (`0700`) and a file only it can read (`0600`), written atomically, and MUST refuse a directory or file that is a symbolic link and a run identifier that is not a plain file name. The store MUST sit behind an interface that names its scheme in the reference it returns, so another store can replace it without changing the run log's shape.
+The buyer's private credential store MUST keep one record per run in a directory only the buyer's user can open (`0700`) and a file only it can read (`0600`), written atomically. It MUST open every directory it traverses or creates without following links and write and read through those descriptors, so no component swapped for a link redirects it; MUST refuse a directory above it that another user can write, a store directory or file that is not the user's, a record readable or writable by group or others, and a run identifier that is not a plain file name; and MUST create missing directories `0700`. The store MUST sit behind an interface that names its scheme in the reference it returns, so another store can replace it without changing the run log's shape.
 
 #### Scenario: The store is written
 
@@ -34,6 +39,11 @@ The buyer's private credential store MUST keep one record per run in a directory
 
 - **WHEN** the store's directory is a symbolic link
 - **THEN** the store refuses to write and nothing is written through the link
+
+#### Scenario: A record is readable by others
+
+- **WHEN** the run's credential file is readable by group or others
+- **THEN** the store refuses to read it
 
 ### Requirement: A buyer retrieves a delivered credential by run
 
@@ -51,7 +61,12 @@ The buyer MUST provide a command that reads a run's delivered credential through
 
 ### Requirement: A failed private write does not lose a delivered credential
 
-When settlement delivers a secret and the private store cannot save it, the buyer MUST show the credential to the buyer once, MUST record `credentials_unsaved` with the non-secret fields and the error's class and no secret, and MUST exit with a status distinct from every other buyer failure, telling the buyer to copy the credential now.
+When settlement delivers a secret and the private store cannot save it, the buyer MUST show the credential to the buyer once, MUST record `credentials_unsaved` with the non-secret fields and the error's class and no secret, and MUST exit with a status distinct from every other buyer failure, telling the buyer to copy the credential now. When the store saves it and the run log cannot record the delivery, the buyer MUST still show it once, name where it is saved, and exit with a status distinct from every other, and the retrieval command MUST find it by run.
+
+#### Scenario: The run log cannot record a saved key
+
+- **WHEN** the key is saved and the run log refuses the `credentials_delivered` append
+- **THEN** the key is shown once with the path it is saved at, and `credentials show --from <run>` still prints it
 
 #### Scenario: The store cannot be written
 

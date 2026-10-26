@@ -29,7 +29,7 @@ from core_buyer.registry_config import (  # noqa: F401 — re-exports
     resolve_registry_authorities,
 )
 
-from arkhai_api_buying.credentials import UNSAVED_EXIT, Delivery
+from arkhai_api_buying.credentials import UNRECORDED_EXIT, UNSAVED_EXIT, Delivery
 
 
 def make_run_publisher_principals_refresh(
@@ -183,7 +183,17 @@ def render_credentials(
         title, border = "API key delivered — no secret returned", "green"
     console.print(Panel(table, title=title, border_style=border))
     if delivery.reference:
-        console.print(f"[dim]Read it again with `{command_path} credentials show --from {run_id}`.[/dim]")
+        console.print(
+            f"[dim]Saved to {delivery.location}. Read it again with "
+            f"`{command_path} credentials show --from {run_id}`.[/dim]"
+        )
+    if delivery.unrecorded:
+        typer.secho(
+            f"The run log could not record this delivery; the key is saved at {delivery.location}.",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(UNRECORDED_EXIT)
     if delivery.unsaved:
         typer.secho(
             "The issued key could not be saved to the private credential store. "

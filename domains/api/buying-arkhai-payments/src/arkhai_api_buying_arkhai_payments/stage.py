@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any
 
 import typer
+from arkhai_api_buying.credentials import error_text
 from arkhai_api_buying.stages import BuyRequest, BuyRun, SettlementResume
 from market_arkhai_payments import ARKHAI_PAYMENTS_MECHANISM, create_arkhai_payments_registration
 from rich.console import Console
@@ -204,10 +205,11 @@ class PaymentBuyerStage:
                 on_event=lambda event, body: log.event(event, **body),
             )
         except Exception as exc:
-            log.event("settlement_failed", error=str(exc))
-            log.end("error", error=str(exc))
+            reason = error_text(exc, log.secrets)
+            log.event("settlement_failed", error=reason)
+            log.end("error", error=reason)
             typer.secho(
-                f"Payment settlement failed: {exc}", err=True, fg=typer.colors.RED
+                f"Payment settlement failed: {reason}", err=True, fg=typer.colors.RED
             )
             raise typer.Exit(5) from exc
         return resume.finish(

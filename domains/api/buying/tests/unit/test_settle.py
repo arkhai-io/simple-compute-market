@@ -16,6 +16,7 @@ from tests.bundles import CONTRIBUTIONS
 
 class Log:
     run_id = "run-1"
+    secrets: frozenset[str] = frozenset({"s1"})
 
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
@@ -33,9 +34,15 @@ class Store:
     def __init__(self) -> None:
         self.saved: dict[str, dict[str, Any]] = {}
 
+    def reference(self, run_id: str) -> str:
+        return f"memory:{run_id}"
+
+    def location(self, reference: str) -> str:
+        return "memory://" + reference.partition(":")[2]
+
     def save(self, run_id: str, credentials: Any) -> str:
         self.saved[run_id] = dict(credentials)
-        return f"memory:{run_id}"
+        return self.reference(run_id)
 
     def load(self, reference: str) -> dict[str, Any] | None:
         return self.saved.get(reference.partition(":")[2])
@@ -118,3 +125,34 @@ def test_a_key_that_reaches_neither_store_nor_log_is_still_shown_once():
 
     assert exited.value.exit_code == 8
     assert resume.console.file.getvalue().count("s1") == 1
+
+
+def test_a_saved_key_whose_run_log_refuses_the_append_is_shown_with_its_location():
+    class FullLog(Log):
+        def event(self, event: str, **fields: Any) -> None:
+            raise OSError("disk full")
+
+    store = Store()
+    resume = _resume(store)
+    final = {"status": "ready", "tenant_credentials": {"key_id": "k1", "secret": "s1"}}
+
+    with pytest.raises(typer.Exit) as exited:
+        resume.finish(FullLog(), final, reference=("Ref", "r1"), end_fields={}, unready_border="red")
+
+    assert exited.value.exit_code == 9
+    output = resume.console.file.getvalue()
+    assert output.count("s1") == 1
+    assert "memory://run-1" in output
+    assert store.saved == {"run-1": {"key_id": "k1", "secret": "s1"}}
+
+
+def test_a_seller_reason_is_printed_without_a_known_secret():
+    resume = _resume()
+
+    with pytest.raises(typer.Exit):
+        resume.finish(
+            Log(), {"status": "failed", "reason": "key s1 was revoked"},
+            reference=("Ref", "r1"), end_fields={}, unready_border="red",
+        )
+
+    assert "s1" not in resume.console.file.getvalue()

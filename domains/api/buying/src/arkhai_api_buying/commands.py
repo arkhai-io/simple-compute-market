@@ -78,22 +78,30 @@ def _delivered_credential(
         events = read_run(run_id, signer=identity.signer)
     except (RunLogError, RuntimeError, ValueError) as exc:
         _refuse(f"Run {run_id!r} cannot be read: {exc}")
+    store = settlement.credential_store
     delivered = [event for event in events if event.get("event") == "credentials_delivered"]
-    if not delivered:
-        _refuse(f"Run {run_id!r} records no delivered credential.")
-    event = delivered[-1]
-    reference = event.get("delivery_ref")
-    if reference:
+    event = delivered[-1] if delivered else {}
+
+    def load(reference: str) -> dict[str, Any] | None:
         try:
-            credentials = settlement.credential_store.load(str(reference))
+            return store.load(reference)
         except CredentialStoreError as exc:
             _refuse(f"Run {run_id!r}'s credential cannot be read: {exc}")
+
+    if event.get("delivery_ref"):
+        credentials = load(str(event["delivery_ref"]))
         if credentials is None:
             _refuse(f"The private credential store holds no key for run {run_id!r}.")
+        return credentials, "store"
+    # A key saved while its run log refused the append is found by run id.
+    credentials = load(store.reference(run_id))
+    if credentials is not None:
         return credentials, "store"
     legacy = event.get("credentials")
     if isinstance(legacy, dict) and legacy.get("secret"):
         return dict(legacy), "run_log"
+    if not delivered:
+        _refuse(f"Run {run_id!r} records no delivered credential.")
     _refuse(f"Run {run_id!r}'s delivery returned no secret.")
 
 

@@ -8,6 +8,7 @@ import stat
 import uuid
 
 import pytest
+from core_buyer.negotiation_client import AuthenticatedHTTPError
 from core_buyer.run_log import RunLog
 from market_identity import Eip191Signer
 
@@ -15,7 +16,9 @@ from arkhai_api_buying.credentials import (
     CredentialStoreError,
     DeliveryRunLog,
     FileCredentialStore,
+    error_text,
     public_fields,
+    public_text,
 )
 
 # Deterministic development key; never use it on a public network.
@@ -127,7 +130,7 @@ def test_a_failed_replace_keeps_the_old_record_and_leaves_no_temporary(state, mo
     store = FileCredentialStore()
     store.save("run-1", _CREDENTIALS)
 
-    def refuse(*_args):
+    def refuse(*_args, **_kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr(os, "replace", refuse)
@@ -156,4 +159,150 @@ def test_a_symlinked_directory_is_refused_on_read(state, tmp_path):
     state.symlink_to(elsewhere)
 
     with pytest.raises(CredentialStoreError, match="symbolic link"):
+        FileCredentialStore().load("file:run-1")
+
+
+def test_a_link_swapped_in_after_any_check_cannot_redirect_the_write(state, tmp_path, monkeypatch):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    state.parent.mkdir(parents=True)
+    state.symlink_to(elsewhere)
+    # The attacker wins every race a path check could lose.
+    monkeypatch.setattr(type(state), "is_symlink", lambda self: False)
+
+    with pytest.raises(CredentialStoreError):
+        FileCredentialStore().save("run-1", _CREDENTIALS)
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_missing_directories_are_created_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+
+    FileCredentialStore().save("run-1", _CREDENTIALS)
+
+    for directory in (tmp_path / "state", tmp_path / "state" / "arkhai", tmp_path / "state" / "arkhai" / "buy-credentials"):
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+
+
+def test_a_directory_others_can_write_is_refused(tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    os.chmod(shared, 0o777)
+    monkeypatch.setenv("XDG_STATE_HOME", str(shared / "state"))
+
+    with pytest.raises(CredentialStoreError, match="writable by another user"):
+        FileCredentialStore().save("run-1", _CREDENTIALS)
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o640, 0o604])
+def test_a_record_others_can_read_is_refused(state, mode):
+    store = FileCredentialStore()
+    store.save("run-1", _CREDENTIALS)
+    os.chmod(state / "run-1.json", mode)
+
+    with pytest.raises(CredentialStoreError, match="not private"):
+        store.load("file:run-1")
+
+
+def test_the_store_names_where_a_reference_lives(state):
+    store = FileCredentialStore()
+    assert store.reference("run-1") == "file:run-1"
+    assert store.location("file:run-1") == str(state / "run-1.json")
+
+
+def test_error_text_never_quotes_a_seller_error_body():
+    body = {"status": "ready", "tenant_credentials": dict(_CREDENTIALS)}
+    exc = AuthenticatedHTTPError(
+        f"GET http://seller/api/v1/settle/x/status -> authenticated HTTP 409: {json.dumps(body)}",
+        status_code=409, body=body,
+    )
+
+    text = error_text(exc)
+
+    assert "sk_canary" not in text
+    assert text == "GET http://seller/api/v1/settle/x/status -> authenticated HTTP 409"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'refused: {"tenant_credentials": {"secret": "sk_canary", "key_id": "ak_1"}}',
+        "refused: {'secret': 'sk_canary'}",
+        'truncated: {"secret": "sk_can',
+    ],
+)
+def test_public_text_redacts_a_quoted_secret(text):
+    assert "sk_can" not in public_text(text)
+
+
+def test_the_delivery_run_log_redacts_secrets_inside_strings(state):
+    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
+
+    log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
+    log.event("settlement_failed", error="seller said sk_canary was already issued")
+    log.event("settle_submit_failed", error='{"secret": "sk_other"}')
+
+    text = log.path.read_text()
+    assert "sk_canary" not in text and "sk_other" not in text
+
+
+def test_a_body_carrying_the_key_does_not_stop_the_flow_when_the_log_refuses_it(state, monkeypatch):
+    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
+
+    def full(self, event, **fields):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(RunLog, "event", full)
+    log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
+    with pytest.raises(OSError):
+        log.event("settle_submitted", body={"status": "queued"})
+
+
+def test_a_group_writable_arkhai_directory_is_refused(state):
+    state.parent.mkdir(parents=True)
+    os.chmod(state.parent, 0o775)
+
+    with pytest.raises(CredentialStoreError, match="writable by another user"):
+        FileCredentialStore().save("run-1", _CREDENTIALS)
+    assert stat.S_IMODE(state.parent.stat().st_mode) == 0o775
+
+
+def test_a_save_sweeps_temporaries_an_interrupted_save_left(state):
+    store = FileCredentialStore()
+    store.save("run-1", _CREDENTIALS)
+    (state / ".run-1.json.abcdef.tmp").write_text("{}")
+
+    store.save("run-1", _CREDENTIALS)
+
+    assert sorted(p.name for p in state.iterdir()) == ["run-1.json"]
+
+
+def test_a_failed_directory_sync_after_the_rename_still_counts_as_saved(state, monkeypatch):
+    store = FileCredentialStore()
+    real = os.fsync
+
+    def fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("fsync failed")
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+
+    assert store.save("run-1", _CREDENTIALS) == "file:run-1"
+    monkeypatch.setattr(os, "fsync", real)
+    assert store.load("file:run-1") == _CREDENTIALS
+
+
+def test_a_directory_that_cannot_be_opened_is_a_store_refusal(state, monkeypatch):
+    FileCredentialStore().save("run-1", _CREDENTIALS)
+    real = os.open
+
+    def refuse(path, flags, *args, **kwargs):
+        if path == "buy-credentials":
+            raise PermissionError(13, "Permission denied")
+        return real(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refuse)
+
+    with pytest.raises(CredentialStoreError, match="cannot be opened"):
         FileCredentialStore().load("file:run-1")
