@@ -9,11 +9,11 @@ The negotiation protocol MUST consist of discovery, negotiation, and the selecte
 - **WHEN** a buyer approves a hosted mandate and sends nothing to the seller
 - **THEN** the deal is committed but unstarted, and the buyer has broken no protocol step
 
-### Requirement: Each option names its adjudication regime
+### Requirement: Each option names its dispute mechanism
 
-A clause MUST be decided by the regime its option names. A buyer MUST refuse an option whose regime is not in the closed vocabulary its client ships. A regime MUST be chosen by choosing among options; a buyer MUST NOT edit seller-owned option parameters.
+A clause MUST be decided by the dispute mechanism its option names. A buyer MUST refuse an option whose dispute mechanism is not in the closed vocabulary its client ships, or does not declare the option's payment mechanism. A dispute mechanism MUST be chosen by choosing among options; a buyer MUST NOT edit seller-owned option parameters.
 
-#### Scenario: A seller offers two regimes
+#### Scenario: A seller offers two dispute mechanisms
 
-- **WHEN** a listing carries two otherwise equal options whose clauses name different regimes
-- **THEN** the buyer chooses its regime by selecting one option, and each has its own option ID
+- **WHEN** a listing carries two otherwise equal options whose clauses name different dispute mechanisms
+- **THEN** the buyer chooses its dispute mechanism by selecting one option, and each has its own option ID

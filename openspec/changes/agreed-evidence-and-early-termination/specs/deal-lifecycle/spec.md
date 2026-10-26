@@ -2,7 +2,7 @@
 
 ### Requirement: Payment events are per part
 
-A payment event MUST be read from the payment authority the committed agreement names, and MUST record what happened to one part of the deal. It MUST carry `negotiation_id`, `commitment_ref`, `part`, `kind`, `actor`, `at`, `amount` where it moves money, `cause`, the `case_ref` of the case whose outcome caused it if any, `sequence`, and the authority's record reference. The lifecycle layer MUST treat the commitment reference as opaque.
+A payment event MUST be read from the payment authority the committed agreement names, and MUST record what happened to one part of the deal. It MUST carry `negotiation_id`, `commitment_ref`, `part`, `kind`, `actor`, `at`, `amount` where it moves money, `cause`, the `case_ref` of the case that caused it if any, the `extension_ref` an `extend` opened or a `lift` ended, `sequence`, and the authority's record reference. The lifecycle layer MUST treat the commitment reference as opaque.
 
 #### Scenario: A reverse is recorded
 
@@ -11,21 +11,34 @@ A payment event MUST be read from the payment authority the committed agreement 
 
 ### Requirement: Arbitration is per agreement and separate from payment
 
-A case MUST be filed about an agreement, not a part, at the intake of the regime its `adjudication` names. Arbitration events (filed, ruled, closed) MUST carry the case reference and be read from that regime's record, whose sequence is per agreement across its cases. A transaction MAY have any number of cases. The payment adapter MUST NOT file or decide cases. A party's arbitration adapter MUST only file and read; only the regime's dispute authority MAY apply a case's outcome. Lifecycle events within the deal's terms, such as an entitled stop, MUST be applied by the party directly at the payment authority.
+A case MUST be filed about an agreement, not a part, at the intake of the dispute mechanism its `adjudication.dispute` names. Dispute events (filed, appended, ruled, closed) MUST carry the case reference and be read from that dispute mechanism's record, whose sequence is per agreement across its cases and whose entries the dispute authority signs. A transaction MAY have any number of cases. The payment adapter MUST NOT file or decide cases.
 
 #### Scenario: Two cases on one deal
 
 - **WHEN** a buyer files a case, it is ruled, and later files a second case on the same deal
 - **THEN** both cases are recorded against the agreement, each with its own outcome
 
+### Requirement: Only the dispute authority acts on a case
+
+A party's dispute adapter MUST only file, append and read. Only the dispute authority MAY send a case's `extend` and `lift` or apply its outcome. Lifecycle events within the deal's terms, such as an entitled stop, MUST be applied by the party directly at the payment authority.
+
+#### Scenario: A filed case requests a reverse
+
+- **WHEN** a buyer files a case requesting a partial reverse
+- **THEN** the buyer's dispute adapter sends nothing to the payment authority, and any reverse is recorded with the dispute authority as actor
+
 ### Requirement: An outcome is a list of per-part effects
 
-A ruling or concession's outcome MUST be a list of consequences, each a payment effect on one part (reverse an amount of a payment part, award an amount of a bond, stop a `rate` part at a *T* no later than now) or a delivery end at *T*. An effect the deal's mechanism cannot perform, such as a partial reverse on an all-or-nothing escrow, MUST NOT be part of an outcome. The dispute authority MUST apply each payment effect at the payment authority with its own authority and the case reference, and MUST record each effect with a stable ID and an applied state, so a partly applied outcome resumes without repeating an effect. The storefront MUST send an outcome's delivery end, read through `watch`, to end service. An outcome without a delivery end MUST leave the term running.
+A ruling's outcome MUST be a list of consequences, each a payment effect on one part (reverse an amount of a payment part, award an amount of a bond, stop a `rate` part at a *T* no later than now) or a delivery end at *T*. An effect the deal's mechanism cannot perform MUST NOT be part of an outcome. The storefront MUST send an outcome's delivery end, read through `watch`, to end service. An outcome without a delivery end MUST leave the term running.
 
 #### Scenario: A ruling discounts a deal
 
 - **WHEN** a ruling reverses a quarter of a hosted deal's held `once` payment and has no delivery end
 - **THEN** the payment authority records one partial `reverse` by the dispute authority with the case reference, and the lease is unchanged
+
+### Requirement: Outcome effects are applied once
+
+The dispute authority MUST apply each payment effect at the payment authority with its own authority and the case reference, and MUST record each effect with a stable ID and an applied state, so a partly applied outcome resumes without repeating an effect.
 
 #### Scenario: Application is interrupted
 
@@ -62,7 +75,7 @@ A mechanism adapter MUST translate each deal-level command into the events of th
 
 ### Requirement: Lifecycle terms are part of the selected option
 
-A settlement option MAY carry `adjudication` (`version`, `regime`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
+A settlement option MAY carry `adjudication` (`version`, `dispute`, `dispute_window_seconds`, `case_hold_max_seconds`), `early_termination` (`version`, `entitlements` keyed by `payer` or `payee` with `notice_seconds` and `settles_through`, `exposure_seconds`, `max_term_seconds`), and `bond` (`version`, `amount`, reserved until a mechanism can hold a seller-funded stake) in its `params`. The shared codec MUST decode them, so they are part of the Agreement bytes and the option ID.
 
 #### Scenario: A term changes the option ID
 
@@ -85,12 +98,17 @@ An option builder MUST emit `adjudication` on every option whose mechanism has a
 
 ### Requirement: Malformed terms are refused
 
-An unknown `version`, `regime`, initiator key, or `settles_through` value MUST make a builder refuse to emit the option and a buyer refuse to select it. Empty `entitlements`, and `early_termination` on an option with no stoppable part, MUST be refused at publication.
+An unknown `version`, `dispute`, initiator key, or `settles_through` value, or a `dispute` whose kit does not declare the option's payment mechanism, MUST make a builder refuse to emit the option and a buyer refuse to select it. Empty `entitlements`, and `early_termination` on an option with no stoppable part, MUST be refused at publication.
 
-#### Scenario: A buyer meets an unknown regime
+#### Scenario: A buyer meets an unknown dispute mechanism
 
-- **WHEN** a listing's option names a `regime` the buyer client does not recognize
-- **THEN** the buyer does not select that option and reports the unrecognized regime
+- **WHEN** a listing's option names a `dispute` the buyer client does not recognize
+- **THEN** the buyer does not select that option and reports the unrecognized dispute mechanism
+
+#### Scenario: A dispute mechanism does not serve the payment mechanism
+
+- **WHEN** a seller configures an option whose `dispute` kit does not declare the option's payment mechanism
+- **THEN** publication refuses the option, naming the pair
 
 ### Requirement: Term values agree with the Agreement and the seller's budget
 
@@ -108,54 +126,117 @@ An unknown `version`, `regime`, initiator key, or `settles_through` value MUST m
 
 ### Requirement: Entitlements are the stop authorities
 
-An adapter MUST make each initiator with an entitlement a `stop` authority of the stoppable parts, and the regime's dispute authority a `stop` authority of every stoppable part, and nobody else. The dispute authority MUST use its stop only to apply outcomes. An option without `early_termination` MUST have no stop authorities. A builder MUST refuse a term its mechanism cannot realize, such as `bond` on a mechanism that cannot hold a seller-funded stake.
+An adapter MUST make each initiator with an entitlement a `stop` authority of the stoppable parts, and the dispute authority a `stop` authority of every stoppable part, and nobody else. The dispute authority MUST use its stop only to apply outcomes. An option without `early_termination` MUST have no stop authorities. A builder MUST refuse a term its mechanism cannot realize, such as `bond` on a mechanism that cannot hold a seller-funded stake.
 
 #### Scenario: An on-demand option is derived
 
 - **WHEN** an option's `early_termination` has a `payer` entitlement only
 - **THEN** the payer and the dispute authority are the only stop authorities, and the payee is not one
 
-### Requirement: A concession is a dispute filed against oneself
+### Requirement: Holds last through the dispute window
 
-A concession MUST be a `dispute` filed by the party its requested outcome is against, not a command or event of its own. The dispute authority MUST rule for it without an adjudicator, applying its effects as it applies a ruling's; the seller MUST NOT apply them. Its delivery end, if any, MUST be no later than now. The default concession for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full.
-
-#### Scenario: A concession names a future end
-
-- **WHEN** a seller files a concession with a delivery end later than now
-- **THEN** the arbitration adapter rejects it before contacting any authority
-
-#### Scenario: A seller concedes after hardware failure
-
-- **WHEN** a seller makes the default concession on a hosted `once` deal halfway through its term
-- **THEN** the dispute authority records the concession and applies a `reverse` of half the payment with the case reference in its payload, and the storefront reads the delivery end through `watch` and ends delivery now
-
-### Requirement: A timely case keeps the deal's money held
-
-`adjudication.dispute_window_seconds` MUST bound filing: each payment adapter MUST derive holds lasting until the lease end plus the window. A case MUST be timely when it reaches the dispute authority before the money it concerns has paid out. On accepting a timely case, the dispute authority MUST `extend` each part with held money, and MUST `lift` each once no case on the deal is open and its outcomes are applied. An extension MUST NOT exceed `case_hold_max_seconds` past each amount's normal payout; `null` MUST mean until resolved, and then the dispute authority MUST be an `extend` authority. An outcome MUST act only on money still held. The window MUST NOT be shorter than the regime's minimum.
+`adjudication.dispute_window_seconds` MUST bound filing: each payment adapter MUST derive holds lasting no less than the Agreement's term end, `start_utc + duration_seconds`, plus the window. The window MUST NOT be shorter than the dispute mechanism's minimum.
 
 #### Scenario: A once deal's hold is derived
 
-- **WHEN** a hosted mandate is derived for a deal whose lease ends at 13:00 with a one-day window
-- **THEN** its `once` hold ends at 13:00 the next day
+- **WHEN** a hosted mandate is derived for a deal whose term ends at 13:00 with a one-day window
+- **THEN** its `once` hold ends no earlier than 13:00 the next day, later by however long approval is delayed
+
+### Requirement: A case is in time when its extension is accepted
+
+A case MUST be in time if and only if the payment authority accepts the dispute authority's `extend` for it. The dispute authority MUST send `extend` on every part with held money at filing, with no human step, before acknowledging the case, keyed by case and part. A `dispute` MUST be `accepted` only once every extension is recorded, and `rejected` with "hold already paid out" when the payment authority refuses; otherwise it is `pending` or `unknown` until the case is read.
 
 #### Scenario: A case is filed at the last moment
 
 - **WHEN** a buyer files a case one minute before a `once` hold pays out, and mediation rules a week later with `case_hold_max_seconds` null
-- **THEN** the dispute authority's `extend` kept the money held, its partial `reverse` is applied, and `lift` pays the remainder to the seller
+- **THEN** filing returns `accepted` with the extension recorded, the ruling's partial `reverse` is applied, and `lift` pays the remainder to the seller
 
-#### Scenario: A case is filed after payout
+#### Scenario: Payout wins against the extension
 
-- **WHEN** a buyer files a case after the `once` hold has paid out
-- **THEN** the payments service refuses `extend`, and the case can move no money at the payment authority
+- **WHEN** a case reaches the intake at 12:59:59.9, the hold pays out at 13:00:00, and the `extend` reaches the payment authority at 13:00:00.1
+- **THEN** the payment authority refuses the `extend`, filing returns `rejected` with "hold already paid out", and the case is recorded as late
+
+#### Scenario: The intake restarts before extending
+
+- **WHEN** the intake records a case and restarts before its `extend` is acknowledged
+- **THEN** it resends `extend` with the same idempotency key, the payment authority returns the one extension it recorded, and filing is `accepted` only then
+
+### Requirement: A late case moves no paid-out money
+
+A late case MAY be recorded and ruled, and its outcome MAY end delivery. An outcome MUST act only on money still held.
+
+#### Scenario: A late case ends delivery
+
+- **WHEN** a buyer files a case after the `once` hold has paid out, and it is ruled with a delivery end
+- **THEN** filing returned `rejected`, the storefront ends delivery through end service, and no payment effect is applied
+
+### Requirement: Each case owns its hold extensions
+
+`extend {part, until?}` MUST open an extension and return its `ref`, and `lift {ref}` MUST end that extension only. A held amount MUST NOT pay out while an extension on its part without `until` is open, nor before the latest `until` among the open ones. The dispute authority MUST lift a case's extensions only after its outcome is applied.
+
+#### Scenario: Two cases overlap
+
+- **WHEN** case A and case B on one deal each hold its `once` part, and A closes and its `lift` arrives after B's `extend`
+- **THEN** the part stays held until B's extension is lifted
+
+### Requirement: Case holds are capped by terms
+
+A held amount MUST pay out no later than its normal date plus the part's maximum extension, taken from `case_hold_max_seconds`. With `null`, an extension without `until` MUST last until it is lifted.
 
 #### Scenario: A bounded case hold expires
 
 - **WHEN** a case stays open longer than `case_hold_max_seconds` past the hold's normal end
 - **THEN** the held money pays out at the cap without a `lift`
 
+### Requirement: Only the dispute authority extends and lifts
+
+Every mandate MUST authorize `extend` and `lift` for the dispute authority only.
+
+#### Scenario: A party tries to extend
+
+- **WHEN** a payer sends `extend` on a hosted deal's part
+- **THEN** the payment authority refuses it, since the mandate lists only the dispute authority
+
+### Requirement: Any party may append to a case
+
+A dispute adapter MUST offer `append {case_ref, items}` on an open case to either party, repeatedly. The dispute record MUST show each appended item under the actor that sent it. A case surfaced through the seller's `watch` MUST be the seller's cue to append its evidence.
+
+#### Scenario: The seller answers a buyer's case
+
+- **WHEN** a buyer's case on a hosted deal appears in the seller's `watch`
+- **THEN** the seller appends the buyer's signed accepting request and its received peer messages from its evidence store, and the dispute record shows them under the seller
+
+#### Scenario: The claimant adds evidence
+
+- **WHEN** a buyer appends a second evidence item to its open case
+- **THEN** the record shows both submissions under the buyer, in order
+
+### Requirement: Arkhai mediation rules only payee self-penalties mechanically
+
+A party's request against itself MUST be an ordinary `dispute`, with no kind of its own. `optimistic.arkhai` MUST rule a dispute with no adjudicator only when it is filed by the payee, every requested effect is a reverse, bond award or stop, and any delivery end is no later than now. A dispute filed by the payer MUST NOT be ruled mechanically.
+
+#### Scenario: A seller's hardware fails
+
+- **WHEN** a seller files its standard exceptional-end request on a hosted `once` deal halfway through its term
+- **THEN** the dispute authority rules it mechanically and applies a `reverse` of half the payment with the case reference in its payload, and the storefront reads the delivery end through `watch` and ends delivery now
+
+#### Scenario: A buyer asks for a stop it is not entitled to
+
+- **WHEN** a buyer files a dispute requesting only that a rate part stop now
+- **THEN** the dispute goes to a person and nothing is applied until it is ruled
+
+### Requirement: A seller's exceptional end is a standard request
+
+The seller's standard request for an exceptional end MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full. The `optimistic.arkhai` dispute adapter MUST reject a payee self-penalty request with a later delivery end before contacting the intake.
+
+#### Scenario: A seller's request names a future end
+
+- **WHEN** a seller files its standard exceptional-end request with a delivery end later than now
+- **THEN** the dispute adapter rejects it before contacting any authority
+
 ### Requirement: Lifecycle commands have defined outcomes
 
-`submit` MUST take a command `{negotiation_id, kind, operation_key, at, payload}`, never an event. Its outcome MUST be `accepted` with the authority records, `rejected` with the reason, `pending`, or `unknown`. An `unknown` outcome MUST be resolved by `read`. Each part event's idempotency key MUST derive from the operation key; a retry with the same key and different content MUST be rejected locally.
+`submit` MUST take a command `{negotiation_id, kind, operation_key, at, payload}`, never an event. Its outcome MUST be `accepted` with the authority records, `rejected` with the reason, `pending`, or `unknown`; a `dispute` is `accepted` only once its money is held. An `unknown` outcome MUST be resolved by `read`. Each part event's idempotency key MUST derive from the operation key; a retry with the same key and different content MUST be rejected locally.
 
 #### Scenario: A reverse's response is lost
 
@@ -169,7 +250,7 @@ A concession MUST be a `dispute` filed by the party its requested outcome is aga
 
 ### Requirement: The buyer half hides the mechanism
 
-The buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state and authority events, or `rejected` when the deal's mechanism has no adapter.
+The buyer half MUST offer `submit` and `read(negotiation_id)` without the caller branching on mechanism. `read` MUST return the deal's lifecycle state, each part's open extensions, its authority events and its cases, or `rejected` when the deal's mechanism has no adapter.
 
 #### Scenario: A buyer reads a deal with no lifecycle adapter
 
@@ -178,7 +259,7 @@ The buyer half MUST offer `submit` and `read(negotiation_id)` without the caller
 
 ### Requirement: The seller half lists deals
 
-The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token. Each deal MUST carry its negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state (unstarted, running, ending, ended, repair required), and current deadline.
+The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST return bounded pages with a continuation token. Each deal MUST carry its negotiation ID, commitment reference, domain, mechanism, entitlements, lifecycle state (unstarted, running, ending, ended, repair required), current deadline, and whether any part has an open extension. A deal with only `once` parts MUST be running from its verified commitment until delivery ends.
 
 #### Scenario: A seller lists its deals
 
@@ -187,16 +268,25 @@ The seller half MUST offer `submit`, `read`, `list`, and `watch`. `list` MUST re
 
 ### Requirement: Adapters resolve per mechanism and arbiter
 
-Adapters MUST resolve through the domain's role table by negotiation ID and the Agreement's mechanism, not through the conditional-escrow port. Within a mechanism they MUST resolve by arbiter, and by oracle or oracle schema for oracle-backed arbiters.
+Payment adapters MUST resolve through the domain's role table by negotiation ID and the Agreement's mechanism, not through the conditional-escrow port. Within a mechanism they MUST resolve by arbiter, and by oracle or oracle schema for oracle-backed arbiters.
 
 #### Scenario: A mechanism has no adapter for a command
 
 - **WHEN** a party submits a kind the deal's adapter does not support
 - **THEN** the outcome is `rejected` with a reason naming the unsupported kind, and no authority is contacted
 
+### Requirement: Dispute adapters resolve by dispute mechanism
+
+Dispute adapters MUST resolve through a dispute adapter table the domain composition fills, keyed by `adjudication.dispute`. The lifecycle kits MUST receive both adapter tables injected and MUST NOT import a payment or dispute kit. An unknown dispute mechanism, or one whose kit does not declare the deal's payment mechanism, MUST be `rejected` before any request.
+
+#### Scenario: A deal names a dispute mechanism with no adapter
+
+- **WHEN** a party files a dispute on a deal whose `adjudication.dispute` has no entry in the dispute adapter table
+- **THEN** the outcome is `rejected`, naming the dispute mechanism, and no intake is contacted
+
 ### Requirement: Watch replays from a durable cursor per record
 
-`watch(negotiation_id)` MUST yield the current state first, then each later payment event, arbitration event, and deadline change, in sequence order within each record and with no order across records. It MUST keep one durable cursor per record per deal: the payment authority's per-transaction sequence and the arbitration record's per-agreement sequence. A cursor MUST advance only after end service journals the event's effect, or at once for an event with no physical effect. A restart MUST resume each record from its cursor and MUST surface cases filed while the storefront was down.
+`watch(negotiation_id)` MUST yield the current state, then each later event and deadline change, ordered within each record only. It MUST keep one durable cursor per record per deal: the payment authority's transaction sequence and the dispute record's agreement sequence. A cursor MUST advance after end service journals the event's effect, or at once for an event with no physical effect. A restart MUST resume each record from its cursor, surfacing cases filed while the storefront was down.
 
 #### Scenario: The storefront restarts mid-deal
 
@@ -206,11 +296,16 @@ Adapters MUST resolve through the domain's role table by negotiation ID and the 
 #### Scenario: A delivery-only ruling arrives during a restart
 
 - **WHEN** a ruling with a delivery end and no payment effect is recorded while the storefront is down
-- **THEN** after restart `watch` yields it from the arbitration cursor, end service ends delivery, and the payment cursor is unchanged
+- **THEN** after restart `watch` yields it from the dispute cursor, end service ends delivery, and the payment cursor is unchanged
 
 #### Scenario: A discount needs no physical effect
 
 - **WHEN** `watch` yields a ruling whose only effect is a partial reverse
+- **THEN** both cursors advance without an end-service request
+
+#### Scenario: A case's extension is observed
+
+- **WHEN** `watch` yields a filed case, an append to it, and its `extend`
 - **THEN** both cursors advance without an end-service request
 
 ### Requirement: Lifecycle routes are authenticated per role
@@ -225,11 +320,11 @@ The storefront MUST expose the seller half's `submit`, `read`, and `list` throug
 #### Scenario: The admin interrupt route ends a hosted deal
 
 - **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
-- **THEN** the route files the default concession through the seller half, the dispute authority applies it, and the lease changes only through end service
+- **THEN** the route files the seller's standard exceptional-end request through the seller half, the dispute authority applies it, and the lease changes only through end service
 
 ### Requirement: End service keeps the earliest final request
 
-End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from arbitration outcomes with a delivery end, and from local delivery decisions: bare-metal buyer teardown, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
+End service MUST take final requests, "end delivery at *T*" with actor, cause, and source, from authority stops through `watch`, from dispute outcomes with a delivery end, and from local delivery decisions: bare-metal buyer teardown, terminal settlement, and the further local sources of mechanisms built on this interface. Repeated final requests for one deal MUST keep the earliest *T*. A local decision MUST NOT move money.
 
 #### Scenario: A buyer tears down bare metal
 
@@ -247,7 +342,7 @@ When *T* is now or past, end service MUST terminate the lease; otherwise it MUST
 
 ### Requirement: Evidence is keyed by negotiation
 
-A party MUST keep evidence as exact bytes in a store separate from replay state, keyed by negotiation ID. The commitment reference MUST be recorded once known, and a superseded commitment MUST be kept and marked superseded. The buyer's store MUST be the buyer-side lifecycle kit's, beside the buyer profile; the storefront's MUST be the servicing kit's.
+A party MUST keep evidence as exact bytes in a store separate from replay state, keyed by negotiation ID. The commitment reference MUST be recorded once known, and a superseded commitment MUST be kept and marked superseded. The buyer's store MUST be the buyer-side lifecycle kit's, under a root the buyer composition passes beside the buyer profile, and the kit MUST NOT depend on core buyer; the storefront's MUST be the servicing kit's.
 
 #### Scenario: Replay state is pruned
 
@@ -265,7 +360,7 @@ The buyer MUST keep the seller's signed acceptance with its proof headers and ex
 
 ### Requirement: Evidence outlives the deal and its cases
 
-Records MUST be kept while the deal, its physical recovery, or any case on it is open, and for the Agreement's `dispute_window_seconds` after the last of these closes. An accepted negotiation never committed MUST be kept for the same window after its acceptance expires.
+Records MUST be kept until the Agreement's `dispute_window_seconds` after the latest of the deal's delivery end and physical recovery, the last payout of every part as the party observes it through `read` or `watch`, and the close of every case on the deal. An accepted negotiation never committed MUST be kept for the same window after its acceptance expires.
 
 #### Scenario: A long deal passes the window
 
@@ -276,6 +371,11 @@ Records MUST be kept while the deal, its physical recovery, or any case on it is
 
 - **WHEN** a case on an ended deal remains unresolved past the window
 - **THEN** its evidence records are kept until the window after its resolution
+
+#### Scenario: A ruling ends a deal early and a case follows
+
+- **WHEN** a ruling ends a hosted `once` deal mid-term, and the buyer files a case contesting its amount while the remaining payment is still held
+- **THEN** both parties still hold their commitment envelopes and authority records, since the last payout has not happened
 
 ### Requirement: A dispute is one case payload
 

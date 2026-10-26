@@ -1,0 +1,10 @@
+## MODIFIED Requirements
+
+### Requirement: Domain payment persistence is role-owned
+
+Storefront databases MUST persist exact Agreement bytes and opaque settlement data in `negotiation_threads`; domain receipt and fulfillment or grant progress MUST stay under that storefront's ordered migrations. The payments service owns transaction, ledger, hold-release, hold-extension, and fee state; the agreement's dispute authority owns case and outcome state. VM and bare metal MUST keep selected-site authority bindings independent of payment trust. API credits MUST keep its registry, credits authority, gated application, storefront, and buyer roles separate.
+
+#### Scenario: Seller restarts after payment approval
+
+- **WHEN** the storefront reloads an accepted payment negotiation
+- **THEN** it retrieves the same mandate and transaction ID from its negotiation state and resumes domain progress without migrating a Stripe profile, credential, or operation ID

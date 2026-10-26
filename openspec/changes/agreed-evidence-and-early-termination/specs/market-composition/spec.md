@@ -22,3 +22,17 @@ Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe t
 
 - **WHEN** a storefront watches a hosted deal
 - **THEN** it stores the payment authority's event sequence and the arbitration record's sequence as its cursors and stores no balance or settled amount of its own
+
+### Requirement: Arkhai payments authority remains external
+
+`kit/arkhai-payments` MUST consume the payments service's published HTTP and JSON Schema contract, vendored with its conformance vectors and identified by content hash rather than by source location, and generate its Python wire models from it, rather than importing the service implementation or copying a TypeScript contract. The payments service MUST remain the authority for its ledger, account credentials, fees, hold release and hold extensions, and payment-provider operations. Cases and their outcomes MUST belong to the agreement's dispute authority, which acts at the payments service only through its own authorities.
+
+#### Scenario: Payments service owns the ledger
+
+- **WHEN** a marketplace domain composes `arkhai.payments.v1`
+- **THEN** it uses the external payments API and signed receipt as authority and keeps no local ledger, payment-provider integration, or settlement daemon
+
+#### Scenario: A case is filed on a hosted deal
+
+- **WHEN** a buyer files a case on an `arkhai.payments.v1` deal
+- **THEN** it files at the intake of the agreement's dispute mechanism, and the payments service records only the dispute authority's `extend`, `lift` and outcome effects
