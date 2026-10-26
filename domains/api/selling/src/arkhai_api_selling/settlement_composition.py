@@ -323,7 +323,7 @@ async def persist_settlement_outcome(
     prepared: Any,
     outcome: Any,
 ) -> None:
-    """Project generic completion into the unchanged settle-status row."""
+    """Project generic completion into the settle-status row."""
     if outcome.status == "fulfilled":
         await sqlite_client.update_escrow(
             escrow_uid=prepared.mechanism_ref,

@@ -287,7 +287,7 @@ collaborators, installs the site kit's authentication over the adapted
 declarations, mounts the authority's routers and any routes the domain
 contributes, and passes the library its issuance label and one validated,
 immutable capacity profile — offering mode, seeded pool provider, identity, and
-label, deliverable and advertisable modes, backing, and capacity resource type.
+label, deliverable and advertisable modes, and backing.
 The authority library MUST read every such value from the profile and MUST name
 no domain's value itself. Deployments of different domains MUST NOT share a
 database or key namespace.

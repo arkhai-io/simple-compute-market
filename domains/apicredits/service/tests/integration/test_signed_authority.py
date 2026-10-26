@@ -30,8 +30,13 @@ from typing import Any, Iterator
 import httpx
 import pytest
 import pytest_asyncio
+from arkhai_api.issuance import KeyDisposition, fulfillment_id, issuance_request
+from arkhai_api_client import AuthorityClient, AuthorityError
 from arkhai_api_contracts.models import ConsumeOutcome, ConsumeRefusal, VerifyResponse
 from arkhai_api_contracts.refusals import CONSUME_REFUSALS
+# The gate is a dev dependency so this boundary is tested against its real client.
+from arkhai_api_gate.client import TokensClient
+from arkhai_api_gate.signing import AuthoritySigning, build_trusted_authorities
 from market_identity import (
     EMPTY_BODY,
     Ed25519Signer,
@@ -413,7 +418,6 @@ def test_a_deployment_without_an_identity_keeps_the_shared_secret_gate(
 
 def _seller_client(signed_app):
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api_client import AuthorityClient
 
     return AuthorityClient(
         "http://credits-service",
@@ -427,16 +431,7 @@ def _seller_client(signed_app):
 
 
 def _gated_client(signed_app, *, answered: list | None = None):
-    # `arkhai-api-gate[signed]` is a declared dev dependency of
-    # this service precisely so its boundary can be tested against the real
-    # client rather than a hand-built envelope. `answered`, when given,
-    # collects each response's path, status, and body as the authority sent it.
-    from arkhai_api_gate.client import TokensClient
-    from arkhai_api_gate.signing import (
-        AuthoritySigning,
-        build_trusted_authorities,
-    )
-
+    # `answered`, when given, collects each response's path, status, and body as the authority sent it.
     async def record(response: httpx.Response) -> None:
         await response.aread()
         answered.append((response.request.url.path, response.status_code, response.json()))
@@ -505,7 +500,6 @@ def _issuance_request(negotiation_id: str, quantity: int = 5):
     literal never becomes a second source of truth for what the request says.
     """
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api.issuance import KeyDisposition, issuance_request
 
     return issuance_request(
         ISSUANCE_LABEL,
@@ -636,7 +630,6 @@ async def test_the_seller_client_reads_back_what_it_issued(signed_app):
     assert key["balance"] == 7
 
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api.issuance import fulfillment_id
 
     grant = await seller.get_issuance(fulfillment_id(ISSUANCE_LABEL, "neg-2"))
     assert grant is not None
@@ -655,10 +648,7 @@ def _credit_request(
     resource_id: str = "svc-quota",
 ):
     """An issuance for an eip191 buyer, new key or a top-up of an existing one."""
-    from market_identity import Identity
-
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (
         KeyDisposition(mode="existing", key_id=existing_key)
@@ -684,8 +674,6 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
     to exhaustion, a second deal tops the same key up, a stranger cannot top
     it up, and the key's detail carries its ownership claim but no secret.
     """
-    from arkhai_api_client import AuthorityError
-
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller, gated = _seller_client(signed_app), _gated_client(signed_app)
 
@@ -758,8 +746,6 @@ async def test_a_deal_issues_spends_tops_up_and_guards_its_key(signed_app):
 
 @pytest.mark.asyncio
 async def test_issuance_onto_a_revoked_key_is_refused_as_served(signed_app):
-    from arkhai_api_client import AuthorityError
-
     await _seed_quota(signed_app, resource_id="svc-quota", units=1000)
     seller = _seller_client(signed_app)
     issued = await seller.submit_issuance(_credit_request("neg-revoked-1", 2))

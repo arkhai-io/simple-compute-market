@@ -21,9 +21,9 @@ _KEY_PREFIX = re.compile(r"^[a-z][a-z0-9]*$")
 class CapacityProfile:
     """The one offering mode and seeded pool a deployment of the authority serves.
 
-    The authority reads every mode, provider, pool, backing, and resource-type
-    value from here and names none itself, so two domains' deployments differ
-    only in the profile their roots pass.
+    The authority reads every mode, provider, pool, and backing value from here
+    and names none itself, so two domains' deployments differ only in the
+    profile their roots pass.
     """
 
     offering_mode: str
@@ -33,13 +33,12 @@ class CapacityProfile:
     deliverable_modes: frozenset[str]
     advertisable_modes: frozenset[str]
     backing: CapacityBacking
-    resource_type: str
 
     def __post_init__(self) -> None:
         for name in ("offering_mode", "pool_provider"):
             if not _MODE.fullmatch(getattr(self, name)):
                 raise ValueError(f"{name} must be lowercase words joined by underscores")
-        for name in ("pool_id", "pool_label", "resource_type"):
+        for name in ("pool_id", "pool_label"):
             if not str(getattr(self, name)).strip():
                 raise ValueError(f"{name} must not be empty")
         for name in ("deliverable_modes", "advertisable_modes"):

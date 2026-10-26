@@ -288,10 +288,12 @@ same shape to the authority.
 The root passes the authority kit two things beside its signer, trusted
 principals, database, and key namespace. The issuance label. And one validated,
 immutable **capacity profile** carrying the offering mode, the seeded pool's
-provider, identity, and label, its deliverable and advertisable modes, its
-backing, and the capacity resource type — the values the service hard-codes as
-`api_credits` today in its pool seed and its reservation check. The kit reads
-every such value from the profile and names none itself.
+provider, identity, and label, its deliverable and advertisable modes, and its
+backing — the values the service hard-codes as `api_credits` today in its pool
+seed and its reservation check. The kit reads every such value from the profile
+and names none itself. The profile carries no capacity resource type: the
+ledger does not filter reservations by type, and a resource's type is what its
+registration states (pre-closeout review 08 F3).
 
 **Rejected:** one family service at `domains/api/service` deployed per domain.
 A family composition root may not import a domain, so a domain's contributions

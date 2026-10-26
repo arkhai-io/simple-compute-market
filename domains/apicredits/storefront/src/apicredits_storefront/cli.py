@@ -184,6 +184,7 @@ def listings_cmd(
     limit: int = typer.Option(50, "--limit"),
 ) -> None:
     """List the storefront's local listings."""
+    # Imported only once ``--config`` has run, as in ``publish``.
     from apicredits_storefront.utils.config import (
         BASE_URL_OVERRIDE,
         resolve_identity_config,

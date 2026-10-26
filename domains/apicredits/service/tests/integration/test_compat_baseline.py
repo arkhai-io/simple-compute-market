@@ -13,6 +13,10 @@ from typing import Any
 
 import httpx
 import pytest
+from arkhai_api.issuance import KeyDisposition, issuance_request
+from arkhai_api_client import AuthorityClient
+from arkhai_api_gate.client import TokensClient
+from arkhai_api_gate.signing import AuthoritySigning, build_trusted_authorities
 from market_identity import EMPTY_BODY, Identity, TrustedIdentitySet
 from starlette.routing import Route
 
@@ -117,7 +121,6 @@ def _recorded(response: httpx.Response) -> dict[str, Any]:
 
 def _seller_client(app):
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api_client import AuthorityClient
 
     return AuthorityClient(
         "http://credits-service",
@@ -129,9 +132,6 @@ def _seller_client(app):
 
 
 def _gated_client(app):
-    from arkhai_api_gate.client import TokensClient
-    from arkhai_api_gate.signing import AuthoritySigning, build_trusted_authorities
-
     return TokensClient(
         service_url="http://credits-service",
         http=httpx.AsyncClient(
@@ -160,7 +160,6 @@ def _capacity_admin(app):
 
 def _issuance(negotiation_id: str, quantity: int, *, owner=BUYER, existing_key=None):
     from apicredits_service.config import ISSUANCE_LABEL
-    from arkhai_api.issuance import KeyDisposition, issuance_request
 
     key = (
         KeyDisposition(mode="existing", key_id=existing_key)

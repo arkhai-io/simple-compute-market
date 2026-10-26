@@ -13,7 +13,6 @@ PROFILE = CapacityProfile(
     deliverable_modes=frozenset({"example"}),
     advertisable_modes=frozenset({"example"}),
     backing=BACKED,
-    resource_type="example.units",
 )
 CONFIG = AuthorityConfig(
     label=LABEL, profile=PROFILE, database_url="sqlite:///:memory:", distribution="example-service",
@@ -30,7 +29,6 @@ def config_for(offering_mode: str) -> AuthorityConfig:
         deliverable_modes=frozenset({offering_mode}),
         advertisable_modes=frozenset({offering_mode}),
         backing=BACKED,
-        resource_type="example.units",
     )
     return AuthorityConfig(
         label=IssuanceLabel(offering_mode.replace("_", "-")), profile=profile,

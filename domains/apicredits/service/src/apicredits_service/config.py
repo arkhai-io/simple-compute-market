@@ -144,7 +144,6 @@ CAPACITY_PROFILE = CapacityProfile(
     deliverable_modes=frozenset({"api_credits"}),
     advertisable_modes=frozenset({"api_credits"}),
     backing=BACKED,
-    resource_type="api.credits",
 )
 
 authority_config = AuthorityConfig(

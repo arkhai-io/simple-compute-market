@@ -19,7 +19,6 @@ def _profile(**overrides) -> CapacityProfile:
         deliverable_modes=frozenset({"example", "other"}),
         advertisable_modes=frozenset({"example"}),
         backing=BACKED,
-        resource_type="example.units",
     )
     values.update(overrides)
     return CapacityProfile(**values)
@@ -41,7 +40,6 @@ def test_the_profile_states_the_pools_declarations_in_the_resolvers_spelling():
         ("pool_provider", "", "underscores"),
         ("pool_id", " ", "empty"),
         ("pool_label", "", "empty"),
-        ("resource_type", "", "empty"),
         ("deliverable_modes", frozenset(), "at least one"),
         ("advertisable_modes", frozenset({"bad mode"}), "at least one"),
         ("deliverable_modes", frozenset({"other"}), "include offering_mode"),

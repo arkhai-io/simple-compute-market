@@ -14,6 +14,9 @@ from typing import Any
 
 import httpx
 import pytest
+from arkhai_api.issuance import KeyDisposition, issuance_request
+from arkhai_api_client import AuthorityClient
+from arkhai_apicredits.label import API_CREDITS_LABEL
 from market_identity import Identity
 
 from tests.e2e.roles.scenarios.apicredits.conftest import lane_setting
@@ -180,9 +183,6 @@ class Service:
         )
 
     def client(self):
-        from arkhai_api_client import AuthorityClient
-        from arkhai_apicredits.label import API_CREDITS_LABEL
-
         return AuthorityClient(self.url, self._admin_key, label=API_CREDITS_LABEL)
 
     def route_surface(self) -> dict[str, list[str]]:
@@ -230,9 +230,6 @@ def probes(engine, images, lane) -> Iterator[Probes]:
 
 
 def _issuance(negotiation_id: str, quantity: int, *, existing_key: str | None = None):
-    from arkhai_api.issuance import KeyDisposition, issuance_request
-    from arkhai_apicredits.label import API_CREDITS_LABEL
-
     return issuance_request(
         API_CREDITS_LABEL,
         negotiation_id=negotiation_id,

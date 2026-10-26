@@ -72,7 +72,7 @@ without the ledger.
   service stays, with its distribution, image, entry point, and version response
   unchanged, and shrinks to a composition root that passes the kit its label
   and one immutable capacity profile — offering mode, pool declarations,
-  backing, resource type — in place of the `api_credits` values the service
+  backing — in place of the `api_credits` values the service
   hard-codes today. The inference service root is the stack change's, and
   mounts metering's routes when they come.
 - **The gate relocates under its own name.** `arkhai-api-gate` is the bearer

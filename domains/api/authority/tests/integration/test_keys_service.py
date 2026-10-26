@@ -83,7 +83,7 @@ def _composed(config=CONFIG) -> tuple[CapacityLedgerService, KeysService, object
     ledger.register_resource(
         resource_id="svc-quota",
         total_units=1000,
-        resource_type=config.profile.resource_type,
+        resource_type="example.units",
         pool_id=config.profile.pool_id,
     )
     return (

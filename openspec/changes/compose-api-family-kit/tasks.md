@@ -3102,6 +3102,31 @@ the promotion record carry the decision.
         migration of `test_credits_deal_buyer_cli.py` and the vLLM cookbook.
         Validation: `e2e_credits_deal` buys without the flags, beside
         application-integration tests of each derivation.
+      **Pre-closeout review round (2026-10-26).** Review 08, triaged with the
+      owner; the code fixes:
+      - *08 F3:* `CapacityProfile` drops `resource_type`, which nothing read
+        and which disagreed with the type the storefront registers; the
+        `api-family` delta's profile list and D6 say the profile carries no
+        resource type. Unit: the profile's validation; integration: the
+        authority's keys service and the API-credits service suites.
+      - *08 F7:* `quota_listing.accepted_listing` and the settle-status
+        projection's docstrings state the current invariant.
+      - *08 F8:* the family-library imports of `test_signed_authority.py`,
+        `test_compat_baseline.py`, and the upgrade/rollback scenario are
+        module-level. Of the local imports the change touched, those kept
+        local, each for a reason: the storefront
+        CLI's settings-resolving modules, imported once `--config` has run
+        (`cli.py`, now stated at each); the service tests' `apicredits_service`
+        modules, imported fresh per signed app; the scenario's `docker`, which
+        fails by name when absent.
+      Evidence: unit and integration `make test` for `domains/api/authority`
+      (69 passed), `domains/api/selling` (211), `domains/apicredits/service`
+      (43), `domains/apicredits/storefront` (174); the scenario module
+      collects; `make check-packaging` and `make check-comment-hygiene` pass;
+      `make check-change` fails only on the `api-family` spec and companion
+      closeout writes. A fresh-context compliance check found an orphaned
+      comment and a redundant `Identity` import in `test_signed_authority.py`,
+      both fixed; `make test` runs in the fix commit's local validation.
 
 ## 11. Closeout
 

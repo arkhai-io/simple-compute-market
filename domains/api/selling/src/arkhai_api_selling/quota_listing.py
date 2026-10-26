@@ -146,8 +146,8 @@ async def accepted_listing(
 ) -> dict[str, Any]:
     """The listing the buyer accepted, as the domain's listing schema reads it.
 
-    An unbound thread was accepted before acceptances were recorded and reads
-    the stored listing. A bound thread must name ``listing_id`` and carry its
+    A thread with no binding has no acceptance record and reads the stored
+    listing. A bound thread must name ``listing_id`` and carry its
     record; otherwise it is refused.
     """
     try:
