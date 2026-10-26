@@ -41,7 +41,7 @@ class CredentialStore(Protocol):
     def load(self, reference: str) -> dict[str, Any] | None: ...
 
 
-def _checked_run_id(run_id: str) -> str:
+def checked_run_id(run_id: str) -> str:
     if not _RUN_ID.fullmatch(run_id):
         raise CredentialStoreError(f"run id {run_id!r} is not a plain file name")
     return run_id
@@ -129,13 +129,13 @@ class FileCredentialStore:
                 os.close(fd)
 
     def reference(self, run_id: str) -> str:
-        return f"{self.scheme}:{_checked_run_id(run_id)}"
+        return f"{self.scheme}:{checked_run_id(run_id)}"
 
     def _run_id(self, reference: str) -> str:
         scheme, _, run_id = reference.partition(":")
         if scheme != self.scheme:
             raise CredentialStoreError(f"reference {reference!r} is not held by the {self.scheme} store")
-        return _checked_run_id(run_id)
+        return checked_run_id(run_id)
 
     def location(self, reference: str) -> str:
         return str(self.directory / f"{self._run_id(reference)}.json")

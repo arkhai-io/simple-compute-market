@@ -161,6 +161,27 @@ that fails on the section's commit `d5f855569`.
       `check-comment-hygiene` pass and `check-change` reports only the two
       promotion-destination citations, as before.
 
+### Review round 2
+
+The owner approved fixing the one remaining finding.
+
+- [x] R2.1 **A torn delivery record hid a saved key.** A partial
+      `credentials_delivered` line made `credentials show` refuse the run
+      before its by-run-ID lookup. It now drops only a torn last record and
+      validates the rest with core's own recovery resolution and `read_run`
+      over a private copy (D4); `core_buyer` is unchanged. Tests:
+      `test_credentials_show_recovers_a_key_whose_delivery_record_was_torn`
+      (fails on `1541f5a3c`: exit 1, malformed run-log JSON),
+      `test_credentials_show_still_refuses_a_torn_record_before_the_last`
+      (the refusal it guards was already there; it fails on `1541f5a3c` only
+      because it patches the new resolver), and the unit cases
+      `test_only_a_torn_final_record_is_dropped` and
+      `test_a_working_copy_never_holds_a_legacy_secret`.
+- [x] R2.2 **Checks.** Suites: buying 64, Alkahest 12, payments 9, plugin 42,
+      storefront 174. On a clean copy `check-packaging` and
+      `check-comment-hygiene` pass; `check-change` reports only the two
+      promotion-destination citations.
+
 ## 2. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.

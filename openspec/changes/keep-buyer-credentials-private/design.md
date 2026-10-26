@@ -174,6 +174,18 @@ or the run's end — shows the panel and the file's path and exits 9. The key is
 not orphaned: `credentials show` looks it up by run ID (the store's
 `reference(run_id)`) when the run log records no reference.
 
+A failing disk can also tear that append, leaving a partial last line that
+the core reader refuses. `credentials show` then drops exactly that record —
+a last line with no newline, or a last line that does not parse — and runs the
+core recovery-identity resolution and `read_run` unchanged over a private
+`0600` copy of the rest, from which any legacy secret is removed, so ownership
+is still checked and a malformed record anywhere else is still refused. No
+other command tolerates a torn record. Rejected: a `tolerate_torn_tail` option
+on `core_buyer.run_log`'s readers and recovery resolver — the buying layer can
+reuse the core reader through its `directory` and `run_logs_directory`
+parameters, so the core buyer role, which `kit-owned-buyer-orchestration`
+owns, is unchanged.
+
 Rejected: failing before display — the seller's re-serving is not a promise, so
 the panel may be the only copy. Rejected: falling back to the run log — that is
 the defect.

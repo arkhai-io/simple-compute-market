@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any, NoReturn
 
 import typer
-from core_buyer.run_log import RunLogError, read_run
+from core_buyer.run_log import RunLogError, read_run, runs_dir
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
 from arkhai_api_buying import buy, common, negotiate, settle
-from arkhai_api_buying.credentials import CredentialStoreError
+from arkhai_api_buying.credentials import CredentialStoreError, checked_run_id
 from arkhai_api_buying.listing import listing_app
 from arkhai_api_buying.settlement_composition import BuyerSettlementComposition
 
@@ -69,13 +72,71 @@ def _refuse(message: str) -> NoReturn:
     raise typer.Exit(1)
 
 
+def _without_torn_tail(data: bytes) -> bytes | None:
+    """``data`` without its last record when that record is torn, else ``None``.
+
+    A torn record is a last line with no terminating newline, or a last line
+    that does not parse. Only the last is ever dropped, so a malformed record
+    anywhere else is still refused by the reader.
+    """
+    if not data.endswith(b"\n"):
+        return data[: data.rfind(b"\n") + 1]
+    body = data.rstrip(b"\n")
+    head, _, last = body.rpartition(b"\n")
+    try:
+        json.loads(last)
+    except ValueError:
+        return head + b"\n" if head else b""
+    return None
+
+
+def _scrubbed(prefix: bytes) -> bytes:
+    """``prefix`` with any legacy run-log secret removed, so a working copy never holds it."""
+    lines = []
+    for line in prefix.splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            record = None
+        credentials = record.get("credentials") if isinstance(record, dict) else None
+        if isinstance(credentials, dict) and "secret" in credentials:
+            record["credentials"] = {k: v for k, v in credentials.items() if k != "secret"}
+            line = json.dumps(record, separators=(",", ":")).encode()
+        lines.append(line)
+    return b"".join(line + b"\n" for line in lines)
+
+
+def _read_delivery_run(run_id: str) -> list[dict[str, Any]]:
+    """The run's events, read by its recovery identity, tolerating one torn final record.
+
+    A key can be saved and its ``credentials_delivered`` append torn by a
+    failing disk. The torn record is dropped and the rest is still validated
+    by the core reader, against a private copy, with its ownership checked.
+    """
+    try:
+        identity = common.resolve_recovery_buyer_identity(run_id)
+        return read_run(run_id, signer=identity.signer)
+    except RunLogError:
+        path = runs_dir() / f"{checked_run_id(run_id)}.jsonl"
+        data = path.read_bytes() if path.is_file() else b""
+        prefix = _without_torn_tail(data)
+        if not prefix:
+            raise
+    with tempfile.TemporaryDirectory() as directory:
+        copy = Path(directory) / path.name
+        copy.write_bytes(_scrubbed(prefix))
+        os.chmod(copy, 0o600)
+        identity = common.resolve_recovery_buyer_identity_in(run_id, Path(directory))
+        read_run(run_id, signer=identity.signer, directory=Path(directory))
+    return [json.loads(line) for line in prefix.splitlines() if line.strip()]
+
+
 def _delivered_credential(
     settlement: BuyerSettlementComposition, run_id: str,
 ) -> tuple[dict[str, Any], str]:
     """A run's last delivered credential and where it was read: ``store`` or, for older runs, ``run_log``."""
     try:
-        identity = common.resolve_recovery_buyer_identity(run_id)
-        events = read_run(run_id, signer=identity.signer)
+        events = _read_delivery_run(run_id)
     except (RunLogError, RuntimeError, ValueError) as exc:
         _refuse(f"Run {run_id!r} cannot be read: {exc}")
     store = settlement.credential_store

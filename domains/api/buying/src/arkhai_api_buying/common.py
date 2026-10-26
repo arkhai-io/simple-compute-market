@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Optional
 
 import typer
+from core_buyer.buyer_config import BuyerProfileResolver, ResolvedBuyerIdentity
 from core_buyer.orchestrator import fetch_listing_dict
 from core_buyer.policy_surface import configured_buyer_policy
+from core_buyer.profile_service import BuyerProfileService
 from core_buyer.run_log import read_run
 from market_identity import Signer, TrustedIdentitySet
 from rich.console import Console
@@ -108,6 +111,11 @@ def make_run_publisher_principals_refresh(
             ) from exc
 
     return refresh
+
+
+def resolve_recovery_buyer_identity_in(run_id: str, directory: Path) -> ResolvedBuyerIdentity:
+    """The run's recorded profile and principal, read from the run log in ``directory``."""
+    return BuyerProfileResolver(BuyerProfileService(run_logs_directory=directory)).recovery(run_id)
 
 
 def resolve_key_disposition(

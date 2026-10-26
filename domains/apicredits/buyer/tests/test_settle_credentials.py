@@ -433,6 +433,46 @@ def test_credentials_show_finds_a_saved_key_its_run_log_never_recorded(secret_ev
     assert json.loads(as_json.output)["secret"] == _SECRET
     assert json.loads(as_json.output)["source"] == "store"
 
+def _tear_the_delivery_append(monkeypatch):
+    real = RunLog.event
+
+    def torn(self, event, **fields):
+        if event != "credentials_delivered":
+            return real(self, event, **fields)
+        with self.path.open("a") as stream:
+            stream.write('{"ts":"2025-01-01T00:00:00Z","run_id":')
+        raise OSError("fsync failed")
+
+    monkeypatch.setattr(RunLog, "event", torn)
+
+
+def test_credentials_show_recovers_a_key_whose_delivery_record_was_torn(secret_everywhere, monkeypatch):
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity_in", lambda _run, _dir: _IDENTITY)
+    with monkeypatch.context() as patch:
+        _tear_the_delivery_append(patch)
+        settled = _settle(secret_everywhere)
+    assert settled.exit_code == 9, (settled.output, settled.exception)
+
+    as_json = _show(secret_everywhere, "--json")
+
+    assert as_json.exit_code == 0, (as_json.output, as_json.exception)
+    assert json.loads(as_json.output)["secret"] == _SECRET
+
+
+def test_credentials_show_still_refuses_a_torn_record_before_the_last(secret_everywhere, tmp_path, monkeypatch):
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity_in", lambda _run, _dir: _IDENTITY)
+    SETTLEMENT.credential_store.save(secret_everywhere, _CREDENTIALS)
+    path = tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl"
+    lines = path.read_text().splitlines()
+    lines.insert(1, '{"ts":"2025-01-01T00:00:00Z","run_id":')
+    path.write_text("\n".join(lines) + "\n" + '{"torn":')
+
+    shown = _show(secret_everywhere)
+
+    assert shown.exit_code == 1
+    assert "cannot be read" in shown.output
+
+
 def test_credentials_show_refuses_a_run_with_no_delivery(secret_everywhere):
     shown = _show(secret_everywhere)
 
