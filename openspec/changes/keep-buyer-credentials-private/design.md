@@ -174,17 +174,32 @@ or the run's end — shows the panel and the file's path and exits 9. The key is
 not orphaned: `credentials show` looks it up by run ID (the store's
 `reference(run_id)`) when the run log records no reference.
 
-A failing disk can also tear that append, leaving a partial last line that
-the core reader refuses. `credentials show` then drops exactly that record —
-a last line with no newline, or a last line that does not parse — and runs the
-core recovery-identity resolution and `read_run` unchanged over a private
-`0600` copy of the rest, from which any legacy secret is removed, so ownership
-is still checked and a malformed record anywhere else is still refused. No
-other command tolerates a torn record. Rejected: a `tolerate_torn_tail` option
-on `core_buyer.run_log`'s readers and recovery resolver — the buying layer can
-reuse the core reader through its `directory` and `run_logs_directory`
-parameters, so the core buyer role, which `kit-owned-buyer-orchestration`
-owns, is unchanged.
+A failing disk can also tear that append, leaving an unterminated fragment
+at the end of the file. Two rules keep that shape recoverable and nothing
+else:
+
+- Once an append fails, `DeliveryRunLog` writes nothing more to that run log,
+  because a later append would complete the fragment into a newline-terminated
+  malformed record. If a key has been seen, later events are dropped so the
+  flow still reaches the save and the panel, and the delivery reports the log
+  as unrecorded (exit 9); otherwise each later event raises.
+- `credentials show`, when the strict read fails, drops only an unterminated
+  final fragment — a file that does not end in a newline — and runs the core
+  recovery-identity resolution and `read_run` unchanged over a private `0600`
+  copy of the rest, from which any legacy secret is removed, so ownership is
+  still checked. A newline-terminated record that does not parse is
+  corruption, not an interrupted append, and is refused like any malformed
+  record. An incomplete run-log migration blocks the read before any copy is
+  made, since the copy carries no migration manifest. No other command
+  tolerates a torn record.
+
+Rejected: a `tolerate_torn_tail` option on `core_buyer.run_log`'s readers and
+recovery resolver — the buying layer reuses the core reader through its
+`directory` and `run_logs_directory` parameters, so the core buyer role, which
+`kit-owned-buyer-orchestration` owns, is unchanged. Rejected (on review):
+dropping a newline-terminated malformed last line too, and retrying on every
+`RunLogError` — the first skipped corruption, the second bypassed the
+migration lock.
 
 Rejected: failing before display — the seller's re-serving is not a promise, so
 the panel may be the only copy. Rejected: falling back to the run log — that is

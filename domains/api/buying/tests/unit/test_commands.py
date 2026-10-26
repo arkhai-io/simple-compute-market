@@ -34,13 +34,13 @@ def test_the_group_carries_every_command_and_names_the_bundles_noun(monkeypatch,
     ("data", "kept"),
     [
         (b'{"a":1}\n{"b":', b'{"a":1}\n'),
-        (b'{"a":1}\n{"b":\n', b'{"a":1}\n'),
+        (b'{"a":1}\n{"b":\n', None),
         (b'{"a":1}\n{"b":2}\n', None),
-        (b'{"b":', b""),
+        (b'{"b":', None),
     ],
-    ids=["no newline", "unparseable last line", "intact", "nothing before it"],
+    ids=["unterminated fragment", "terminated but malformed", "intact", "no complete record"],
 )
-def test_only_a_torn_final_record_is_dropped(data, kept):
+def test_only_an_unterminated_final_fragment_is_dropped(data, kept):
     assert commands._without_torn_tail(data) == kept
 
 

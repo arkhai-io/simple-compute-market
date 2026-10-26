@@ -182,6 +182,34 @@ The owner approved fixing the one remaining finding.
       `check-comment-hygiene` pass; `check-change` reports only the two
       promotion-destination citations.
 
+### Review round 3
+
+The owner's review of round 2 found two defects in the torn-record fallback.
+
+- [x] R3.1 **The migration lock was bypassable.** The fallback retried on any
+      `RunLogError`, including `RunLogMigrationIncomplete`, and its working
+      copy has no manifest. It now re-raises that error and checks
+      `assert_migration_resolved` on the real directory before copying. Test:
+      `test_credentials_show_honours_an_incomplete_migration_after_a_torn_append`
+      (recovers the key on `fd1408b00`).
+- [x] R3.2 **A completed malformed record was treated as torn.** Only an
+      unterminated final fragment is dropped now. Test:
+      `test_credentials_show_refuses_a_malformed_final_record_that_was_completed`
+      (recovers on `fd1408b00`); the unit cases became
+      `test_only_an_unterminated_final_fragment_is_dropped`.
+- [x] R3.3 **Keeping a tear unterminated.** Narrowing the rule exposed that a
+      later append (the run's end) completed the fragment into a malformed
+      line, which the torn-record test showed. `DeliveryRunLog` now writes
+      nothing after a failed append, dropping events once a key is seen and
+      raising otherwise; a delivery after a failed append exits 9 (D4). Tests:
+      `test_a_log_that_refused_an_append_writes_nothing_more`,
+      `test_a_delivery_after_a_refused_append_is_reported_unrecorded`;
+      `test_a_run_log_refusing_the_polled_body_still_saves_and_shows_the_key`
+      now expects exit 9 and recovers the key through `credentials show`.
+- [x] R3.4 **Checks.** Suites: buying 66, Alkahest 12, payments 9, plugin 44,
+      storefront 174. The clean-copy checks are recorded in the PR's round-3
+      section.
+
 ## 2. Closeout
 
 The eleven parts of `openspec/README.md#plan-closeout-requirements`, in order.

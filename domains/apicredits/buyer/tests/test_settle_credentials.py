@@ -361,9 +361,10 @@ def test_a_run_log_refusing_the_polled_body_still_saves_and_shows_the_key(
 
     result = _settle(secret_everywhere)
 
-    assert result.exit_code == 0, (result.output, result.exception)
+    assert result.exit_code == 9, (result.output, result.exception)
     assert result.output.count(_SECRET) == 1
     assert (tmp_path / "arkhai" / "buy-credentials" / f"{secret_everywhere}.json").exists()
+    assert json.loads(_show(secret_everywhere, "--json").output)["secret"] == _SECRET
 
 
 def test_credentials_show_prefers_the_stored_key_to_a_legacy_copy(secret_everywhere, tmp_path):
@@ -471,6 +472,37 @@ def test_credentials_show_still_refuses_a_torn_record_before_the_last(secret_eve
 
     assert shown.exit_code == 1
     assert "cannot be read" in shown.output
+
+
+def test_credentials_show_refuses_a_malformed_final_record_that_was_completed(
+    secret_everywhere, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity_in", lambda _run, _dir: _IDENTITY)
+    SETTLEMENT.credential_store.save(secret_everywhere, _CREDENTIALS)
+    path = tmp_path / "arkhai" / "buy-runs" / f"{secret_everywhere}.jsonl"
+    with path.open("a") as stream:
+        stream.write('{"ts":"2025-01-01T00:00:00Z","run_id":\n')
+
+    shown = _show(secret_everywhere)
+
+    assert shown.exit_code == 1
+    assert "cannot be read" in shown.output
+
+
+def test_credentials_show_honours_an_incomplete_migration_after_a_torn_append(
+    secret_everywhere, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(commands.common, "resolve_recovery_buyer_identity_in", lambda _run, _dir: _IDENTITY)
+    with monkeypatch.context() as patch:
+        _tear_the_delivery_append(patch)
+        assert _settle(secret_everywhere).exit_code == 9
+    (tmp_path / "arkhai" / "buy-runs" / ".profile-migration-v3.json").write_text("{}")
+
+    shown = _show(secret_everywhere)
+
+    assert shown.exit_code == 1
+    assert "migration is incomplete" in " ".join(shown.output.split())
+    assert _SECRET not in shown.output
 
 
 def test_credentials_show_refuses_a_run_with_no_delivery(secret_everywhere):

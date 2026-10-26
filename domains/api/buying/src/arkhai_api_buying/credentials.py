@@ -288,6 +288,7 @@ class DeliveryRunLog(RunLog):
     def __init__(self, run_id: str, path: Path, identity: RunIdentity) -> None:
         super().__init__(run_id, path, identity)
         self.secrets: set[str] = set()
+        self.failed = False
 
     @classmethod
     def of(cls, log: RunLog) -> DeliveryRunLog:
@@ -304,9 +305,17 @@ class DeliveryRunLog(RunLog):
     def event(self, event: str, **fields: Any) -> None:
         delivered = delivered_secrets(fields)
         self.secrets |= delivered
+        # After a failed append the file may end in a fragment; appending more
+        # would complete it into a malformed record no reader may skip. Once a
+        # key has been seen the flow continues to the panel without writing.
+        if self.failed:
+            if self.secrets:
+                return
+            raise RunLogError("the run log refused an earlier append")
         try:
             super().event(event, **public_fields(fields, self.secrets))
         except (RunLogError, OSError):
+            self.failed = True
             # A body carrying the key must not stop the flow before the key is
             # saved and shown; the delivery's own record reports a failing log.
             if not delivered:
@@ -360,11 +369,13 @@ def record_delivery(
         log.event("credentials_delivered", **fields, delivery_ref=reference)
     except (RunLogError, OSError):
         return Delivery(credentials, reference, location, unrecorded=True)
-    return Delivery(credentials, reference, location)
+    return Delivery(credentials, reference, location, unrecorded=getattr(log, "failed", False))
 
 
 def end_run(log: RunLog, delivery: Delivery | None, status: str, **fields: Any) -> Delivery | None:
     """End the run; a run that delivered a secret still reaches the panel if its log cannot be written."""
+    if delivery is not None and delivery.unrecorded:
+        return delivery
     try:
         log.end(status, **fields)
     except (RunLogError, OSError):

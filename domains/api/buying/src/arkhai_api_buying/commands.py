@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 import typer
-from core_buyer.run_log import RunLogError, read_run, runs_dir
+from core_buyer.run_log import (
+    RunLogError,
+    RunLogMigrationIncomplete,
+    assert_migration_resolved,
+    read_run,
+    runs_dir,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -73,21 +79,14 @@ def _refuse(message: str) -> NoReturn:
 
 
 def _without_torn_tail(data: bytes) -> bytes | None:
-    """``data`` without its last record when that record is torn, else ``None``.
+    """``data`` without an unterminated final fragment, else ``None``.
 
-    A torn record is a last line with no terminating newline, or a last line
-    that does not parse. Only the last is ever dropped, so a malformed record
-    anywhere else is still refused by the reader.
+    Only an append interrupted before its newline is torn: a newline-terminated
+    record that does not parse is corruption and stays for the reader to refuse.
     """
-    if not data.endswith(b"\n"):
-        return data[: data.rfind(b"\n") + 1]
-    body = data.rstrip(b"\n")
-    head, _, last = body.rpartition(b"\n")
-    try:
-        json.loads(last)
-    except ValueError:
-        return head + b"\n" if head else b""
-    return None
+    if data.endswith(b"\n") or b"\n" not in data:
+        return None
+    return data[: data.rfind(b"\n") + 1]
 
 
 def _scrubbed(prefix: bytes) -> bytes:
@@ -107,17 +106,23 @@ def _scrubbed(prefix: bytes) -> bytes:
 
 
 def _read_delivery_run(run_id: str) -> list[dict[str, Any]]:
-    """The run's events, read by its recovery identity, tolerating one torn final record.
+    """The run's events, read by its recovery identity, tolerating one torn final append.
 
     A key can be saved and its ``credentials_delivered`` append torn by a
-    failing disk. The torn record is dropped and the rest is still validated
-    by the core reader, against a private copy, with its ownership checked.
+    failing disk before its newline. That fragment is dropped and the rest is
+    still validated by the core reader, against a private copy, with its
+    ownership checked; an incomplete migration still blocks the read.
     """
     try:
         identity = common.resolve_recovery_buyer_identity(run_id)
         return read_run(run_id, signer=identity.signer)
+    except RunLogMigrationIncomplete:
+        raise
     except RunLogError:
-        path = runs_dir() / f"{checked_run_id(run_id)}.jsonl"
+        root = runs_dir()
+        # The working copy has no migration manifest, so the lock is checked here.
+        assert_migration_resolved(root)
+        path = root / f"{checked_run_id(run_id)}.jsonl"
         data = path.read_bytes() if path.is_file() else b""
         prefix = _without_torn_tail(data)
         if not prefix:

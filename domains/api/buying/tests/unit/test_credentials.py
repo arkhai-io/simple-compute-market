@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 from core_buyer.negotiation_client import AuthenticatedHTTPError
-from core_buyer.run_log import RunLog
+from core_buyer.run_log import RunLog, RunLogError
 from market_identity import Eip191Signer
 
 from arkhai_api_buying.credentials import (
@@ -19,6 +19,7 @@ from arkhai_api_buying.credentials import (
     error_text,
     public_fields,
     public_text,
+    record_delivery,
 )
 
 # Deterministic development key; never use it on a public network.
@@ -254,8 +255,38 @@ def test_a_body_carrying_the_key_does_not_stop_the_flow_when_the_log_refuses_it(
 
     monkeypatch.setattr(RunLog, "event", full)
     log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
+    log.event("settle_submitted", body={"status": "queued"})
+
+    assert log.failed
+
+
+def test_a_log_that_refused_an_append_writes_nothing_more(state, monkeypatch):
+    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
+    real = RunLog.event
+    calls = []
+
+    def once(self, event, **fields):
+        calls.append(event)
+        if len(calls) == 1:
+            raise OSError("fsync failed")
+        real(self, event, **fields)
+
+    monkeypatch.setattr(RunLog, "event", once)
     with pytest.raises(OSError):
         log.event("settle_submitted", body={"status": "queued"})
+    with pytest.raises(RunLogError, match="refused an earlier append"):
+        log.event("settle_status", body={"status": "provisioning"})
+    assert calls == ["settle_submitted"]
+
+
+def test_a_delivery_after_a_refused_append_is_reported_unrecorded(state, monkeypatch):
+    log = DeliveryRunLog.of(RunLog.start(profile_id=uuid.uuid4(), principal=_SIGNER.identity))
+    monkeypatch.setattr(RunLog, "event", lambda self, event, **fields: (_ for _ in ()).throw(OSError("full")))
+    log.event("settle_status", body={"tenant_credentials": dict(_CREDENTIALS)})
+
+    delivery = record_delivery(log, dict(_CREDENTIALS), FileCredentialStore())
+
+    assert delivery.unrecorded and delivery.reference == f"file:{log.run_id}"
 
 
 def test_a_group_writable_arkhai_directory_is_refused(state):
