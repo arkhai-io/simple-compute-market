@@ -9,6 +9,10 @@ from datetime import datetime, timedelta
 
 from arkhai_bare_metal_storefront.domain_runtime import get_market_domain_contract
 from arkhai_bare_metal_storefront.runtime import BareMetalStorefrontRuntime
+from arkhai_bare_metal_storefront.settlement_composition import (
+    BareMetalStorefrontSettlementComposition,
+)
+from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.server import (
     build_bare_metal_storefront_app,
     build_bare_metal_storefront_registry,
@@ -24,6 +28,7 @@ from storefront_client import StorefrontClient, StorefrontClientError
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from market_alkahest.alkahest import encode_recipient_demand, get_recipient_arbiter
 from market_alkahest.dev_chain import anvil_address_book_path
+from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_core.schemas import (
     RateValue,
     SettlementOption,
@@ -38,6 +43,7 @@ from market_identity import (
     sign_request,
     verify_response,
 )
+from market_resource_pools_contracts.backing import UNBACKED
 
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from settlement_compositions import alkahest_composition
@@ -1260,4 +1266,278 @@ async def test_an_exact_alkahest_selection_is_refused_with_nothing_accepted(
     assert "settlement_selection_requires_plan" in str(refused.value)
     assert threads.count == 0
     _nothing_accepted(runtime)
+
+
+# -- unbacked listings ---------------------------------------------------------
+
+#: An unbacked listing as publication records it: its hardware and region, and
+#: no host, physical host, or access methods, since nothing delivers a machine.
+_UNBACKED_LISTING = {
+    "capacity_backing": "unbacked",
+    **LISTING_HARDWARE,
+    "kind": "bare_metal.v2",
+}
+
+
+def _unbacked_source(**changes) -> SourceSite:
+    """The seeded unbacked listing's site, its pool declaring itself unbacked."""
+    return SourceSite(listing_source_projection(backing=UNBACKED, **changes))
+
+
+async def _insert_unbacked_listing(
+    runtime: BareMetalStorefrontRuntime,
+    *,
+    accepted_escrows: list[dict] | None = None,
+    demands: list[dict] | None = None,
+    settlement_options: list[dict] | None = None,
+) -> None:
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="listing-1",
+        status="open",
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-a",
+        physical_resource_id="resource-1",
+        listing=dict(_UNBACKED_LISTING),
+        accepted_escrows=accepted_escrows or [],
+        demands=demands,
+        settlement_options=settlement_options,
+    )
+
+
+@pytest.mark.parametrize("available", [True, False], ids=["free", "reported-taken"])
+async def test_a_bargaining_round_on_an_unbacked_listing_is_refused_for_access(
+    tmp_path, available
+) -> None:
+    """The listing is seeded with an escrow, which publication never gives an
+    unbacked listing, so that a bargaining opening passes pricing and reaches
+    seller policy. The listing names no access method, so the SSH access the
+    buyer asks for is not listed: the opening is refused for that, not for
+    availability, which an unbacked listing is never judged against, and the
+    recheck reads the held projection without calling the site."""
+    site = _unbacked_source(available=available)
+    runtime = replace(_runtime(str(tmp_path / "storefront.db")), **_sourced(site))
+    await _insert_unbacked_listing(
+        runtime,
+        accepted_escrows=[
+            {
+                "chain_name": "anvil",
+                "escrow_address": ESCROW,
+                "literal_fields": {"token": TOKEN},
+                "rates": [{"field": "amount", "per": "hour", "value": "100"}],
+            },
+        ],
+        demands=AUTHORIZED,
+    )
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        loaded = site.calls
+        async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await _negotiate(buyer)
+        opening_calls = site.calls - loaded
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+
+    assert refused.value.status_code == 409
+    assert "bare_metal_access_method_not_listed" in str(refused.value)
+    assert "no_matching_inventory" not in str(refused.value)
+    assert threads.count == 0
+    assert opening_calls == 0
+
+
+def _contact_option() -> dict:
+    params = {
+        "profile": "default",
+        "channel": "email",
+        "terms": "Introduction.",
+        "claimant_principal": SELLER_SIGNER.identity.model_dump(mode="json"),
+    }
+    return {
+        "option_id": derive_settlement_option_id(
+            mechanism=CONTACT_MECHANISM, asset="introduction", rates=[], params=params
+        ),
+        "mechanism": CONTACT_MECHANISM,
+        "asset": "introduction",
+        "rates": [],
+        "params": params,
+    }
+
+
+def _contact_runtime(path: str, site: SourceSite) -> BareMetalStorefrontRuntime:
+    """A storefront settling by introduction alone, with a contact for its one
+    site; the address is a reserved example domain, never a real mailbox."""
+    domain = get_market_domain_contract()
+    return BareMetalStorefrontRuntime(
+        db=SQLiteClient(path, domain=domain),
+        domain=domain,
+        seller_principal=SELLER_SIGNER.identity,
+        admin_principals=TrustedIdentitySet(identities=(ADMIN_SIGNER.identity,)),
+        storefront_url="http://seller:8000",
+        site_bindings=(
+            BareMetalSiteBinding(
+                site_id="site-a", service_peer="site-a-peer", authority_url="http://site-a"
+            ),
+        ),
+        **_sourced(site),
+        marketplace_signer=SELLER_SIGNER,
+        settlement_composition=BareMetalStorefrontSettlementComposition.from_raw_config(
+            {
+                "priority": [CONTACT_MECHANISM],
+                "contact": {
+                    "enabled": True,
+                    "contact_payload": {"email": "sales@seller.invalid"},
+                    "profiles": {"default": {"channel": "email", "terms": "Introduction."}},
+                },
+            }
+        ),
+    )
+
+
+async def _open_contact(app, option: dict) -> dict | StorefrontClientError:
+    """An exact selection of the seeded listing's introduction option, as a
+    buyer requesting an introduction opens: the accept reply, or the refusal."""
+    async with _typed(app, BUYER_SIGNER, "buyer") as buyer:
+        try:
+            return await buyer.negotiate_new(
+                listing_id="listing-1",
+                initial_amount=None,
+                provision_terms={
+                    "kind": "bare_metal.v2",
+                    "version": 1,
+                    "payload": {"duration_seconds": 3600, "access_method": "none"},
+                },
+                proposal_fields={},
+                settlement_selection={
+                    "mechanism": CONTACT_MECHANISM,
+                    "option_id": option["option_id"],
+                    "expiration_unix": int(time.time()) + 3600,
+                },
+                selection_only=True,
+                buyer_agent_url="https://buyer.example",
+            )
+        except StorefrontClientError as exc:
+            return exc
+
+
+async def _select_contact(site: SourceSite, tmp_path):
+    """Open on the seeded unbacked contact listing with an exact selection of
+    its introduction option.
+
+    Returns the accept reply or the refusal, the thread count, the calls the
+    opening made to the site, and the runtime.
+    """
+    runtime = _contact_runtime(str(tmp_path / "storefront.db"), site)
+    option = _contact_option()
+    await _insert_unbacked_listing(runtime, settlement_options=[option])
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        loaded = site.calls
+        outcome = await _open_contact(app, option)
+        opening_calls = site.calls - loaded
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            threads = await admin.list_negotiations("listing-1")
+    return outcome, threads.count, opening_calls, runtime
+
+
+@pytest.mark.parametrize("available", [True, False], ids=["free", "reported-taken"])
+async def test_an_unbacked_listing_is_accepted_by_introduction_reserving_nothing(
+    tmp_path, available
+) -> None:
+    """Spec scenarios "An unbacked bare-metal listing is accepted" and "An
+    unbacked listing's resource reads as unavailable": the recheck matches the
+    held declaration with no availability read and no site call, and nothing
+    is reserved."""
+    site = _unbacked_source(available=available)
+
+    outcome, threads, opening_calls, runtime = await _select_contact(site, tmp_path)
+
+    assert isinstance(outcome, dict), outcome
+    assert outcome["action"] == "accept"
+    assert threads == 1
+    assert opening_calls == 0
+    assert runtime.capacity_client.reservation_sites == {}
+
+
+@pytest.mark.parametrize(
+    ("site", "status", "reason"),
+    [
+        pytest.param(
+            _unbacked_source(pool_id="pool-b"), 409, "no_matching_declaration",
+            id="resource moved to another pool",
+        ),
+        pytest.param(
+            _unbacked_source(capacity={"units": 1, "gpu_count": 4, "ram_gb": 2048}),
+            409, "no_matching_declaration", id="fewer GPUs declared",
+        ),
+        pytest.param(
+            _unbacked_source(region="eu-central"), 409, "no_matching_declaration",
+            id="region moved",
+        ),
+        pytest.param(
+            SourceSite(error=ConnectionError("site unreachable")), 503,
+            "listing_source_unverifiable", id="site not held",
+        ),
+    ],
+)
+async def test_an_unbacked_listing_is_refused_only_by_its_declaration(
+    tmp_path, site, status, reason
+) -> None:
+    """Spec scenario "An unbacked listing's resource moves to another pool",
+    and the declared-match and retryable refusals an unbacked listing shares
+    with a backed one."""
+    outcome, threads, opening_calls, _ = await _select_contact(site, tmp_path)
+
+    assert isinstance(outcome, StorefrontClientError), outcome
+    assert outcome.status_code == status
+    assert reason in str(outcome)
+    assert threads == 0
+    assert opening_calls == 0
+
+
+async def test_an_unbacked_listing_whose_site_is_unconfirmed_is_refused_as_retryable(
+    tmp_path,
+) -> None:
+    """Spec scenario "An unbacked listing's site is stale", and an expired
+    confirmation: the held generation still declares the listing's source, yet
+    an unbacked listing, like a backed one, is confirmed only by a generation
+    polled within the window. Each refusal calls no site and records nothing."""
+    site = _unbacked_source()
+    now: list[datetime] = []
+    runtime = replace(
+        _contact_runtime(str(tmp_path / "storefront.db"), site),
+        source_confirmation_seconds=60,
+        source_confirmation_clock=lambda: now[0],
+    )
+    option = _contact_option()
+    await _insert_unbacked_listing(runtime, settlement_options=[option])
+    app = _app(runtime)
+
+    async with app.router.lifespan_context(app):
+        async with _typed(app, ADMIN_SIGNER, "admin") as admin:
+            loaded = _confirmed_at(await admin.get_system_status())
+            now.append(loaded + timedelta(seconds=61))
+            calls = site.calls
+            expired = await _open_contact(app, option)
+            expired_calls = site.calls - calls
+
+            # The site's next poll fails: the held generation is now stale.
+            site.error = ConnectionError("site unreachable")
+            await admin.admin_run_lifecycle_cycle("site-projections")
+            now[0] = loaded + timedelta(seconds=1)
+            calls = site.calls
+            stale = await _open_contact(app, option)
+            stale_calls = site.calls - calls
+            threads = await admin.list_negotiations("listing-1")
+
+    for refused in (expired, stale):
+        assert isinstance(refused, StorefrontClientError), refused
+        assert refused.status_code == 503
+        assert "listing_source_unverifiable" in str(refused)
+    assert expired_calls == stale_calls == 0
+    assert threads.count == 0
 

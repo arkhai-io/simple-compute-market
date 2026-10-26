@@ -50,7 +50,10 @@ malformed view, refusing the site's generation as it refuses any malformed view.
 pool whose declarations do not resolve is held, and its views' terms are not judged.
 The storefront MUST report each resource the site projects with a
 `publication_view_problems` entry for the bare-metal view as a
-`publication_view_unbuildable` report in that site's derivation.
+`publication_view_unbuildable` report in that site's derivation. Such a declaration
+is unreadable, not withdrawn: an open listing of the resource MUST be held, neither
+closed nor refreshed, unless the declaration is disabled or its pool no longer admits
+bare metal, which still closes it as a withdrawn source.
 
 #### Scenario: An unbacked declaration names a host
 
@@ -78,6 +81,15 @@ The storefront MUST report each resource the site projects with a
   bare-metal view
 - **THEN** no listing is derived from it, and the site's derivation reports
   `publication_view_unbuildable` with the problem
+
+#### Scenario: An open listing's resource loses its view
+
+- **WHEN** the site projects the Physical Resource behind an open bare-metal listing with
+  a `publication_view_problems` entry for the bare-metal view, its declaration enabled
+  and its pool still admitting bare metal
+- **THEN** the listing keeps its identity and its last-published terms, nothing is sent to
+  a registry, and the site's derivation reports `publication_view_unbuildable`
+- **AND** once the site builds the view again, the listing is reconciled as usual
 
 ### Requirement: A compute candidate with no settlement option yields no listing
 

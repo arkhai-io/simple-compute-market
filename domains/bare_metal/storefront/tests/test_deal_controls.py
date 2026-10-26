@@ -29,6 +29,7 @@ from test_http_settlement import (
     _ProvisioningClient,
 )
 
+from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from held_loops import held_loop_controller
 from site_trust import seeded_sites
 from source_sites import SourceSite, source_projections
@@ -143,6 +144,62 @@ async def test_evaluate_previews_the_reservation_settlement_would_make(tmp_path)
     assert preview["required_attributes"]["resource_id"] == "resource-1"
     assert preview["required_attributes"]["dimensions"] == {"units": 1}
     assert capacity.reserve_calls == []
+
+
+def _durable_rows(db_path: str) -> dict[str, list[str]]:
+    """Every table's rows but the request-replay reservations, which record the
+    administrator's own signed request rather than anything the route did."""
+    with sqlite3.connect(db_path) as conn:
+        tables = [
+            name
+            for (name,) in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name != 'auth_replay_reservations'"
+            )
+        ]
+        return {
+            table: sorted(repr(row) for row in conn.execute(f'SELECT * FROM "{table}"'))
+            for table in tables
+        }
+
+
+async def test_evaluate_refuses_a_listing_no_authority_stands_behind_and_writes_nothing(
+    tmp_path,
+) -> None:
+    """An unbacked listing is one no fulfillment can start for, so the preview
+    answers that settlement would submit nothing, naming why, reserving nothing
+    and writing nothing; the backed listing beside it still previews its
+    reservation. The loops are held, so no cycle writes during the preview."""
+    runtime, _negotiation_id, capacity = await _runtime(tmp_path)
+    runtime = replace(runtime, loop_controller_factory=held_loop_controller)
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="listing-unbacked",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-u",
+        physical_resource_id="resource-u",
+        listing={"capacity_backing": "unbacked", **LISTING_HARDWARE, "kind": "bare_metal.v2"},
+        accepted_escrows=[],
+    )
+    app = _app(runtime)
+    async with app.router.lifespan_context(app):
+        async with _client(app, ADMIN_SIGNER, "admin") as admin:
+            before = _durable_rows(runtime.db.db_path)
+            refused = await admin.evaluate_settle(ESCROW_UID, listing_id="listing-unbacked")
+            after = _durable_rows(runtime.db.db_path)
+            backed = await admin.evaluate_settle(ESCROW_UID, listing_id="listing-1")
+
+    assert refused["would_submit"] is False
+    assert "requires capacity-backed supply" in refused["reason"]
+    assert refused["host_id"] is None
+    assert after == before
+    assert capacity.reserve_calls == []
+    assert backed["would_submit"] is True
+    assert backed["required_attributes"]["resource_id"] == "resource-1"
 
 
 async def test_wait_returns_once_the_settled_lease_is_active(tmp_path) -> None:

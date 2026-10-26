@@ -372,8 +372,9 @@ class BareMetalPublicationCycle:
         self._classifications[site_id] = classification
         for item in classification.of(HELD):
             # A pool held whole is reported once, with its reasons, above; a
-            # machine in it is reported too only for its own declaration.
-            if item.pool_id in held_pools and not item.problems:
+            # machine in it is reported too only for its own declaration. One
+            # the site built no view for is reported as unbuildable below.
+            if item.view_unbuildable or (item.pool_id in held_pools and not item.problems):
                 continue
             self.report.record(
                 "hold",
@@ -382,6 +383,18 @@ class BareMetalPublicationCycle:
                 physical_resource_id=item.physical_resource_id,
                 reason="declaration_unresolvable" if item.problems else "pool_unresolvable",
                 **({"problems": list(item.problems)} if item.problems else {}),
+            )
+        for unbuildable in generation.view_problems:
+            # The site built no view for this resource, so it yields no
+            # listing and an open one is held; the reasons are its
+            # declaration's, named for the seller.
+            self.report.record(
+                "report",
+                site_id=site_id,
+                pool_id=unbuildable.pool_id,
+                physical_resource_id=unbuildable.physical_resource_id,
+                reason="publication_view_unbuildable",
+                problems=list(unbuildable.problems),
             )
         for item in classification.resources:
             if item.publication_capabilities_ignored:
@@ -466,10 +479,6 @@ class BareMetalPublicationCycle:
         # the listings it already published stay as they are.
         for pool_id in sorted(reading.regionless):
             hold(pool_id, "pool_region_missing")
-        for pool_id in reading.unbacked:
-            self.report.record(
-                "refuse", site_id=site_id, pool_id=pool_id, reason="pool_unbacked"
-            )
         for pool_id, problems in sorted(reading.unreadable_overrides.items()):
             override = site_overrides.get(pool_id)
             hold(

@@ -25,7 +25,7 @@ from market_resource_pools import (
     read_site_declarations,
     resolve_asking_rates,
 )
-from market_resource_pools_contracts.backing import BACKED, CapacityBacking
+from market_resource_pools_contracts.backing import CapacityBacking
 from market_resource_pools_contracts.hints import raw_listing_shapes, raw_region
 
 
@@ -72,8 +72,7 @@ class SitePoolReading:
     ``admission`` maps every named pool to how it admits bare metal, and
     ``backings`` each pool whose declarations resolved to its backing delegate.
     ``unresolvable`` names the problems of each pool whose declarations do not
-    resolve; ``unbacked`` the admitted-in-all-else pools that declare no
-    capacity backing; ``regionless`` the admitted pools stating no region;
+    resolve; ``regionless`` the admitted pools stating no region;
     ``listing_shapes_stated`` the pools stating shapes for bare metal, which
     are not read. ``regions`` holds each pool's region, if any.
     ``asking_rates`` holds each pool's resolved rates; an admitted pool whose
@@ -84,7 +83,6 @@ class SitePoolReading:
     regions: Mapping[str, str | None]
     backings: Mapping[str, CapacityBacking] = field(default_factory=dict)
     unresolvable: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    unbacked: tuple[str, ...] = ()
     regionless: tuple[str, ...] = ()
     listing_shapes_stated: tuple[str, ...] = ()
     asking_rates: Mapping[str, AskingRateResolution] = field(default_factory=dict)
@@ -107,9 +105,9 @@ def read_site_pools(
 ) -> SitePoolReading:
     """Read each projected pool's bare-metal admission and region.
 
-    A pool is admitted when it is enabled, advertises bare metal, and is
-    capacity-backed; every bare-metal listing is backed, so one derived from an
-    unbacked pool would publish a backing its pool contradicts. A pool whose
+    A pool is admitted when it is enabled and advertises bare metal, whatever
+    its backing: what differs between backed and unbacked supply is its backing
+    delegate's to decide, which ``backings`` carries. A pool whose
     declarations do not resolve is held. The region is recorded for every pool;
     classification holds an admitted pool that has none.
     ``override_asking_rates`` maps a pool to the storefront override's rate
@@ -126,19 +124,11 @@ def read_site_pools(
             raise ValueError("resource-pool entry must be a mapping")
     declarations = read_site_declarations(pools)
     admission: dict[str, str] = {}
-    unbacked: list[str] = []
     for pool_id in declarations.unresolvable:
         admission[pool_id] = POOL_HELD
     for pool_id, pool in declarations.resolved.items():
         if not pool.enabled or not pool.advertises(BARE_METAL_OFFERING_MODE):
             admission[pool_id] = POOL_NOT_ADMITTED
-        elif pool.backing is not BACKED:
-            # Bare metal derives listings only from backed supply. No backing
-            # delegate operation expresses this refusal: bare metal composes
-            # contact exchange, which settlement admissibility alone would let
-            # an unbacked listing publish.
-            admission[pool_id] = POOL_NOT_ADMITTED
-            unbacked.append(pool_id)
         else:
             admission[pool_id] = POOL_ADMITTED
     regions: dict[str, str | None] = {}
@@ -174,7 +164,6 @@ def read_site_pools(
             pool_id: pool.backing for pool_id, pool in declarations.resolved.items()
         },
         unresolvable=dict(declarations.unresolvable),
-        unbacked=tuple(sorted(unbacked)),
         regionless=tuple(
             sorted(
                 pool_id

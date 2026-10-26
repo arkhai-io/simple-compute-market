@@ -193,7 +193,9 @@ def bare_metal_admission_refusal(
         and requested.duration_seconds > listing.max_duration_seconds
     ):
         return "bare_metal_duration_above_listing_max"
-    if requested.access_method not in listing.access_methods:
+    # An unbacked listing carries no access methods, since nothing delivers a
+    # machine behind it, so no access a buyer asks for is listed.
+    if requested.access_method not in (listing.access_methods or ()):
         return "bare_metal_access_method_not_listed"
     if requested.access_method != SSH_ACCESS_METHOD:
         return "bare_metal_access_method_unsupported"

@@ -18,6 +18,7 @@ from core_storefront.stage_log import stage_event
 from market_capacity_publication import CapacityAdminRouteService, CapacityEffects
 from market_core.schemas import EscrowProposal
 from market_identity import Identity
+from market_resource_pools_contracts.backing import CapacityNotAdmittedError
 from market_settlement_runtime import SettlementAdminRouteService
 
 from .claims import ClaimAttributesMissing, whole_machine_claim
@@ -93,10 +94,17 @@ def settlement_admin_routes(
         return {"valid": True}
 
     async def preview(escrow_uid: str, request: Mapping[str, Any]) -> dict[str, Any]:
-        context = await _listing_context(runtime, str(request["listing_id"]))
+        listing_id = str(request["listing_id"])
+        context = await _listing_context(runtime, listing_id)
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
         try:
+            # The preview answers as settlement would: no fulfillment starts for
+            # a listing no admission authority stands behind.
+            binding.backing.require_admission("a bare-metal fulfillment")
             claim = whole_machine_claim(context)
-        except ClaimAttributesMissing as exc:
+        except (CapacityNotAdmittedError, ClaimAttributesMissing) as exc:
             return {"would_submit": False, "reason": str(exc)}
         claim["resource_id"] = str(context["physical_resource_id"])
         return {

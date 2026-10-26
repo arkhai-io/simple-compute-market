@@ -155,6 +155,13 @@ no host or no access methods, a missing or invalid `allocation_mode`, a missing
 such cases; the existing no-host rule is one of them. The bare-metal storefront reports
 each as a `publication_view_unbuildable` entry in its site derivation (decision 10).
 
+Settled in implementation (Section 19, decided with the maintainer): such a declaration
+is unreadable, not withdrawn, so an open listing of its resource is held, neither closed
+nor refreshed, as `ARCHITECTURE.md`'s rule for holding or closing a listing requires; a
+disabled declaration or a pool that no longer admits bare metal still closes it as a
+withdrawn source. Closing it, the behaviour when the resource simply had no view, was
+rejected: it would turn every declaration fault into a delisting.
+
 Rejected: refusing a malformed attribute when the declaration is written. Its
 backing-dependent rules need a site read of pool state, which `ARCHITECTURE.md` forbids
 while the site's edge into the pool authority stands, so a write-time check would be

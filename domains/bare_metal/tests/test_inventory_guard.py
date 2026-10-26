@@ -16,6 +16,7 @@ from arkhai_bare_metal import (
     SOURCE_MISMATCH,
     SOURCE_UNAVAILABLE,
     BareMetalResourceProjection,
+    BareMetalViewProblems,
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
     recheck_bare_metal_listing_source,
@@ -118,9 +119,63 @@ def test_a_source_that_no_longer_offers_the_resource_is_absent(generation, kwarg
     assert _check(generation, **kwargs).outcome == SOURCE_ABSENT
 
 
+def test_a_resource_the_site_built_no_view_for_is_a_declared_mismatch_naming_why():
+    """The listing's declaration no longer yields a view, so the recheck refuses
+    it as no longer matching, naming the site's problem."""
+    generation = TrustedBareMetalProjection(
+        site_id="site-a",
+        revision=1,
+        digest="d1",
+        view_problems=[
+            BareMetalViewProblems(
+                pool_id="pool-1",
+                physical_resource_id="r1",
+                enabled=True,
+                problems=("access_methods: required",),
+            )
+        ],
+    )
+
+    check = _check(generation)
+
+    assert check.outcome == SOURCE_MISMATCH
+    assert "builds no bare-metal view" in check.reason
+    assert "access_methods: required" in check.reason
+
+
 def test_unbacked_supply_matches_on_its_declaration_with_no_availability_read():
     """An unbacked view states no availability, and none is asked of it."""
     generation = _generation(backing=UNBACKED)
 
     assert generation.resources[0].view.available is None
     assert _check(generation, backing=UNBACKED).outcome == SOURCE_MATCHES
+
+
+def test_an_unbacked_machine_reported_taken_still_matches():
+    """Spec scenario "An unbacked listing's resource reads as unavailable": the
+    site carries no availability for unbacked supply, whatever its ledger
+    says, so the recheck has nothing to refuse it for."""
+    generation = _generation(backing=UNBACKED, available=False)
+
+    assert _check(generation, backing=UNBACKED).outcome == SOURCE_MATCHES
+
+
+@pytest.mark.parametrize(
+    ("changes", "kwargs", "outcome"),
+    [
+        pytest.param(
+            {"capacity": {"units": 1, "gpu_count": 4, "ram_gb": 2048}}, {},
+            SOURCE_MISMATCH, id="fewer GPUs declared",
+        ),
+        pytest.param({}, {"published_region": "eu-central"}, SOURCE_MISMATCH,
+                     id="region moved"),
+        pytest.param({"enabled": False}, {}, SOURCE_ABSENT, id="declaration disabled"),
+        # Spec scenario "An unbacked listing's resource moves to another pool":
+        # found by its bound pool, it is no longer projected there.
+        pytest.param({"pool_id": "pool-2"}, {}, SOURCE_ABSENT, id="moved to another pool"),
+    ],
+)
+def test_an_unbacked_listing_is_refused_only_by_its_declaration(changes, kwargs, outcome):
+    generation = _generation(backing=UNBACKED, **changes)
+
+    assert _check(generation, backing=UNBACKED, **kwargs).outcome == outcome

@@ -232,10 +232,15 @@ class SQLiteClient(CoreSQLiteClient):
             "site_id": site_id,
             "pool_id": pool_id,
             "physical_resource_id": physical_resource_id,
-            "host_id": normalized.host_id,
-            "physical_host_id": normalized.physical_host_id,
             "shape_digest": shape_digest,
         }
+        # Host identity is recorded only where the listing carries it: an
+        # unbacked listing names no host, and its source is its Physical
+        # Resource alone.
+        for name in ("host_id", "physical_host_id"):
+            value = getattr(normalized, name)
+            if value is not None:
+                source_envelope[name] = value
         binding = StorefrontListingBinding.from_source_envelope(
             listing_id=listing_id,
             site_id=site_id,

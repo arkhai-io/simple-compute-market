@@ -417,27 +417,221 @@ async def test_an_unresolvable_pools_listing_is_neither_closed_nor_refreshed(db)
     )
 
 
-async def test_an_unbacked_pool_yields_no_listing_and_is_reported(db):
+def unbacked_pool(*members: dict[str, Any], pool_id: str = "pool-u", **declarations: Any):
+    """An unbacked pool advertising bare metal, delivering nothing."""
+    return pool(pool_id, *members, capacity_backing="unbacked", **declarations)
+
+
+def unbacked_member(resource_id: str, pool_id: str = "pool-u", **changes: Any):
+    """A member of an unbacked pool whose declaration names a host, as the site
+    projects it: its view carries no delivery term."""
+    return member(resource_id, pool_id, backing=UNBACKED, **changes)
+
+
+def _binding_backing(db: SQLiteClient, listing_id: str) -> tuple[str, dict[str, Any]]:
+    """A listing's recorded backing and source envelope."""
+    with sqlite3.connect(db.db_path) as conn:
+        backing, envelope = conn.execute(
+            "SELECT capacity_backing, source_envelope_json FROM storefront_listing_bindings "
+            "WHERE listing_id = ?",
+            (listing_id,),
+        ).fetchone()
+    return backing, json.loads(envelope)
+
+
+async def test_an_unbacked_pool_publishes_an_unbacked_listing_with_no_delivery_terms(db):
+    """Spec scenarios "An unbacked pool advertises bare metal" and "An unbacked
+    declaration names a host": the listing is bound and published unbacked, and
+    neither it nor its binding carries a host or access methods."""
+    storefront = Storefront(db, {"site-a": Site(unbacked_pool(unbacked_member("r1")))})
+
+    report = await storefront.run()
+
+    listing_id, status, _ = storefront.listing("site-a", "pool-u", "r1")
+    assert status == "open"
+    assert storefront.registries.operations() == [("publish", listing_id)]
+    published = storefront.registries.sent[0][3]["listing_resource"]
+    assert published["capacity_backing"] == "unbacked"
+    for term in ("host_id", "physical_host_id", "access_methods", "available"):
+        assert term not in published
+    backing, envelope = _binding_backing(db, listing_id)
+    assert backing == "unbacked"
+    assert "host_id" not in envelope and "physical_host_id" not in envelope
+    assert actions(report, "refuse") == []
+
+
+async def test_an_unbacked_listing_is_never_judged_against_availability(db):
+    """Spec scenario "An unbacked resource's capacity is consumed": a site
+    ledger reporting the machine taken builds no availability into an unbacked
+    view, so the listing stays open."""
+    site = Site(unbacked_pool(unbacked_member("r1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-u", "r1")[0]
+
+    site.serve(unbacked_pool(unbacked_member("r1", available=False)))
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-u", "r1") == (listing_id, "open", None)
+    assert closes(report) == {}
+
+
+@pytest.mark.parametrize(
+    "withdrawn",
+    [{"enabled": False}, {"advertisable_modes": ("vm",)}],
+    ids=["pool-disabled", "stops-advertising"],
+)
+async def test_a_withdrawn_unbacked_pools_listing_closes_on_the_next_cycle(db, withdrawn):
+    """Source reconciliation is the only reconciliation an unbacked listing gets,
+    and the publication loop runs it without an operator."""
+    site = Site(unbacked_pool(unbacked_member("r1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-u", "r1")[0]
+
+    site.serve(unbacked_pool(unbacked_member("r1"), **withdrawn))
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-u", "r1")[1:] == ("closed", "reconciliation")
+    assert closes(report) == {listing_id: "source_gone"}
+
+
+async def test_a_resource_the_site_built_no_view_for_is_reported_and_derives_nothing(db):
+    """Spec scenario "The site cannot build a resource's view"."""
+    unbuildable = build_projected_resource(
+        "r2",
+        capacity=dict(DEFAULT_CAPACITY),
+        attributes={"gpu_model": DEFAULT_GPU_MODEL},
+        publication_view_problems={"bare_metal.v2": ["host_id: required for backed supply"]},
+    )
     storefront = Storefront(
-        db,
-        {
-            "site-a": Site(
-                pool(
-                    "pool-u",
-                    member("r1", "pool-u", backing=UNBACKED),
-                    capacity_backing="unbacked",
-                )
-            )
-        },
+        db, {"site-a": Site(pool("pool-1", member("r1", "pool-1"), unbuildable))}
     )
 
     report = await storefront.run()
 
-    assert storefront.listings() == {}
+    assert set(storefront.listings()) == {("site-a", "pool-1", "r1")}
+    entry = {
+        "action": "report",
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r2",
+        "reason": "publication_view_unbuildable",
+        "problems": ["host_id: required for backed supply"],
+    }
+    assert entry in report["actions"]
+    assert [
+        item["physical_resource_id"]
+        for item in storefront.derivation.latest()["site-a"]["reports"]
+        if item["reason"] == "publication_view_unbuildable"
+    ] == ["r2"]
+
+
+def unbuildable(resource_id: str, *, enabled: bool = True) -> dict[str, Any]:
+    """A member whose declaration the site can build no bare-metal view from,
+    projected with its problem in place of the view."""
+    return build_projected_resource(
+        resource_id,
+        capacity=dict(DEFAULT_CAPACITY),
+        attributes={"gpu_model": DEFAULT_GPU_MODEL},
+        enabled=enabled,
+        publication_view_problems={"bare_metal.v2": ["access_methods: required"]},
+    )
+
+
+async def test_an_open_listing_whose_view_the_site_can_no_longer_build_is_held(db):
+    """A declaration the site cannot build a view from is unreadable, not
+    withdrawn: the listing keeps its identity and its last terms, nothing is
+    sent to a registry, and the site's derivation reports why. A changed
+    configured term shows the listing is not refreshed either."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+    published = storefront.stored(listing_id)
+
+    site.serve(pool("pool-1", unbuildable("r1")))
+    storefront.terms.max_duration_seconds = 7200
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+    assert storefront.stored(listing_id) == published
     assert storefront.registries.operations() == []
-    assert actions(report, "refuse") == [
-        {"action": "refuse", "site_id": "site-a", "pool_id": "pool-u", "reason": "pool_unbacked"}
-    ]
+    assert closes(report) == {}
+    assert actions(report, "refresh") == [] and actions(report, "publish") == []
+    assert {
+        "action": "report",
+        "site_id": "site-a",
+        "pool_id": "pool-1",
+        "physical_resource_id": "r1",
+        "reason": "publication_view_unbuildable",
+        "problems": ["access_methods: required"],
+    } in report["actions"]
+
+    # Once the site can build the view again, the listing is reconciled as usual.
+    site.serve(pool("pool-1", member("r1", "pool-1")))
+    recovered = await storefront.run()
+
+    assert [item["listing_id"] for item in actions(recovered, "refresh")] == [listing_id]
+    assert storefront.listing("site-a", "pool-1", "r1") == (listing_id, "open", None)
+
+
+@pytest.mark.parametrize(
+    "withdrawn",
+    [
+        pytest.param(lambda: pool("pool-1", unbuildable("r1", enabled=False)),
+                     id="declaration-disabled"),
+        pytest.param(
+            lambda: pool("pool-1", unbuildable("r1"), advertisable_modes=("vm",)),
+            id="pool-stops-advertising",
+        ),
+        pytest.param(lambda: pool("pool-1"), id="resource-removed"),
+    ],
+)
+async def test_a_withdrawn_source_still_closes_whatever_its_view(db, withdrawn):
+    """Holding an unbuildable view never keeps a withdrawn source open."""
+    site = Site(pool("pool-1", member("r1", "pool-1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
+
+    site.serve(withdrawn())
+    report = await storefront.run()
+
+    assert closes(report) == {listing_id: "source_gone"}
+    assert storefront.listing("site-a", "pool-1", "r1")[1:] == ("closed", "reconciliation")
+    assert storefront.registries.operations() == [("closed", listing_id)]
+
+
+@pytest.mark.parametrize(
+    ("policy_tags", "reason"),
+    [
+        pytest.param(lambda: {"region": None}, "pool_region_missing", id="region-missing"),
+        pytest.param(
+            lambda: {"asking_rates": {"bare_metal": [_rate("12.50", period="month")]}},
+            "asking_rates_unreadable",
+            id="asking-rate-unreadable",
+        ),
+    ],
+)
+async def test_an_unbacked_pools_hold_keeps_its_listing_open(db, policy_tags, reason):
+    """The region and asking-rate holds apply to an unbacked pool exactly as to
+    a backed one: the listing keeps its identity and terms, and nothing is sent."""
+    site = Site(unbacked_pool(unbacked_member("r1")))
+    storefront = Storefront(db, {"site-a": site})
+    await storefront.run()
+    listing_id = storefront.listing("site-a", "pool-u", "r1")[0]
+    published = storefront.stored(listing_id)
+
+    site.serve(unbacked_pool(unbacked_member("r1"), policy_tags=policy_tags()))
+    report = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-u", "r1") == (listing_id, "open", None)
+    assert storefront.stored(listing_id) == published
+    assert storefront.registries.operations() == []
+    assert closes(report) == {}
+    (hold,) = actions(report, "hold")
+    assert (hold["site_id"], hold["pool_id"], hold["reason"]) == ("site-a", "pool-u", reason)
 
 
 # -- resources -------------------------------------------------------------
@@ -871,21 +1065,15 @@ async def test_a_changed_identity_closes_and_is_not_reopened(db):
 
 
 async def test_a_pool_recreated_with_the_opposite_backing_closes_and_is_not_reopened(db):
+    """Spec scenario "A pool is re-created with the opposite backing": the
+    resource keeps its shape, so its candidate falls under the open listing's
+    derivation key, and the backing comparison closes it first."""
     site = Site(pool("pool-1", member("r1", "pool-1")))
     storefront = Storefront(db, {"site-a": site})
     await storefront.run()
     listing_id = storefront.listing("site-a", "pool-1", "r1")[0]
-    # The listing was bound when its pool declared the opposite backing. Pool
-    # reading refuses an unbacked bare-metal pool, so the durable record is
-    # written directly, past the immutability trigger that forbids changing it.
-    with sqlite3.connect(db.db_path) as conn:
-        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
-        conn.execute(
-            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
-            "WHERE listing_id=?",
-            (listing_id,),
-        )
 
+    site.serve(unbacked_pool(unbacked_member("r1", "pool-1"), pool_id="pool-1"))
     report = await storefront.run()
 
     assert storefront.listing("site-a", "pool-1", "r1")[1:] == ("closed", "reconciliation")
@@ -917,13 +1105,8 @@ async def test_a_source_check_finds_the_backing_changed_as_a_declared_mismatch(d
         db, storefront.projections, confirmation_window_seconds=60
     )
     assert (await check(listing_id)).outcome == "matches"
-    with sqlite3.connect(db.db_path) as conn:
-        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
-        conn.execute(
-            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
-            "WHERE listing_id=?",
-            (listing_id,),
-        )
+    site.serve(unbacked_pool(unbacked_member("r1", "pool-1"), pool_id="pool-1"))
+    await storefront.projections.poll_once()
 
     verdict = await check(listing_id)
 
@@ -1786,15 +1969,16 @@ CONTACT_CLAUSE = {
 }
 
 
-def _alkahest_and_contact(signer, *, chain_probe=None):
-    """Alkahest on the anvil chain beside contact exchange configured only for
-    ``site-b``; Alkahest's readiness reads ``chain_probe`` where one is given."""
+def _alkahest_and_contact(signer, *, chain_probe=None, contact=CONTACT_ELSEWHERE):
+    """Alkahest on the anvil chain beside contact exchange configured by
+    ``contact``, by default only for ``site-b``; Alkahest's readiness reads
+    ``chain_probe`` where one is given."""
     return BareMetalStorefrontSettlementComposition.from_raw_config(
         {
             "schema_version": 1,
             "priority": ["alkahest.v1", "contact-exchange.v1"],
             "alkahest": {**ALKAHEST_SECTION, "address_config_path": None},
-            "contact": CONTACT_ELSEWHERE,
+            "contact": contact,
         },
         resources={
             "marketplace_signer": signer,
@@ -1968,3 +2152,164 @@ async def test_an_override_naming_only_a_capacity_mechanism_leaves_no_admissible
 
     assert refused.value.mechanisms == ()
     assert refused.value.ruled_out_by_configuration is True
+
+
+# -- unbacked candidates with no settlement option, through the cycle -----------
+
+#: Contact exchange giving ``site-a`` its contact. The address is a reserved
+#: example domain, never a real mailbox.
+CONTACT_HERE = {
+    "enabled": True,
+    "origins": {"site-a": {"contact_payload": {"email": "sales@seller.invalid"}}},
+    "profiles": {"default": {"channel": "email", "terms": "Introduction."}},
+}
+
+
+def _unbacked_storefront(db, signer, *, contact):
+    """A storefront over one unbacked pool on ``site-a``, publishing Alkahest
+    and contact-exchange clauses by default, Alkahest's chain never probed and
+    contact exchange configured by ``contact``."""
+    storefront = Storefront(db, {"site-a": Site(unbacked_pool(unbacked_member("r1")))})
+    storefront.terms = _unbacked_terms(db, signer, contact=contact)
+    return storefront
+
+
+def _unbacked_terms(db, signer, *, contact):
+    return publication_payload_builder(
+        _settling_runtime(
+            db,
+            signer,
+            _alkahest_and_contact(signer, chain_probe=unprobed_chain(), contact=contact),
+            ALKAHEST_AND_CONTACT,
+            sites=("site-a", "site-b"),
+        )
+    )
+
+
+async def _override_unbacked_pool(db: SQLiteClient, settlements: list[dict[str, Any]]):
+    """Store the unbacked pool's override through the real store, returning the
+    record as stored."""
+    return await SQLitePoolOverrideStore(db.db_path).replace(
+        PoolOverrideRecord(
+            site_id="site-a",
+            pool_id="pool-u",
+            offering_mode="bare_metal",
+            settlements=settlements,
+        )
+    )
+
+
+def _mechanisms(body: dict[str, Any]) -> list[str]:
+    return [option["mechanism"] for option in body.get("settlement_options") or []]
+
+
+async def test_an_override_leaving_no_admissible_clause_closes_the_unbacked_listing(
+    db, tmp_path, monkeypatch
+):
+    """Spec scenario "A pool override leaves no admissible clause", through the
+    stored override, the payload builder, and the cycle. Alkahest's chain is
+    never probed, so its readiness stays unknown throughout: a mechanism the
+    unbacked candidate cannot publish holds nothing."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = _unbacked_storefront(db, signer, contact=CONTACT_HERE)
+
+    await storefront.run()
+    listing_id, status, _ = storefront.listing("site-a", "pool-u", "r1")
+    published = storefront.registries.sent[0][3]
+
+    assert status == "open"
+    assert published["listing_resource"]["capacity_backing"] == "unbacked"
+    assert _mechanisms(published) == ["contact-exchange.v1"]
+    assert not published.get("accepted_escrows")
+
+    stored = await _override_unbacked_pool(db, list(CONFIGURED_CLAUSES_RAW))
+    assert [clause["mechanism"] for clause in stored["settlements"]] == ["alkahest.v1"]
+    closing = await storefront.run()
+
+    assert storefront.listing("site-a", "pool-u", "r1") == (
+        listing_id,
+        "closed",
+        "reconciliation",
+    )
+    assert closes(closing) == {listing_id: "no_settlement_option"}
+    assert storefront.registries.operations() == [("closed", listing_id)]
+    assert actions(closing, "publish") == [] and actions(closing, "hold") == []
+    (refusal,) = actions(closing, "refuse")
+    assert _no_option_entry(refusal) == {
+        "site_id": "site-a",
+        "pool_id": "pool-u",
+        "physical_resource_id": "r1",
+        "reason": "no_settlement_option",
+        "mechanisms": [],
+    }
+    assert [item["reason"] for item in storefront.refusals()] == ["no_settlement_option"]
+
+    await _override_unbacked_pool(db, [CONTACT_CLAUSE])
+    reopening = await storefront.run()
+
+    assert [item["listing_id"] for item in actions(reopening, "reopen")] == [listing_id]
+    assert storefront.listing("site-a", "pool-u", "r1") == (listing_id, "open", None)
+    assert actions(reopening, "refuse") == []
+    assert storefront.refusals() == []
+
+
+async def test_an_unbacked_candidate_whose_origin_has_no_contact_yields_no_listing(
+    db, tmp_path, monkeypatch
+):
+    """Spec scenario "An unbacked candidate's origin has no contact": contact
+    exchange, its only admissible mechanism, names a contact for another site
+    alone, while Alkahest, which it cannot publish, is unknown."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = _unbacked_storefront(db, signer, contact=CONTACT_ELSEWHERE)
+
+    report = await storefront.run()
+
+    assert storefront.listings() == {}
+    assert storefront.registries.operations() == []
+    assert actions(report, "hold") == []
+    (refusal,) = actions(report, "refuse")
+    assert _no_option_entry(refusal) == {
+        "site_id": "site-a",
+        "pool_id": "pool-u",
+        "physical_resource_id": "r1",
+        "reason": "no_settlement_option",
+        "mechanisms": ["contact-exchange.v1"],
+    }
+    assert [item["reason"] for item in storefront.refusals()] == ["no_settlement_option"]
+
+
+async def test_an_unbacked_listing_whose_origin_loses_its_contact_closes(
+    db, tmp_path, monkeypatch
+):
+    """Spec scenario "An unreachable mechanism the candidate could never
+    publish": the open unbacked contact listing closes once its origin has no
+    contact, although Alkahest's chain is unreached, since unbacked bare metal
+    could never publish Alkahest."""
+    signer = create_signer("ed25519", b"\x21" * 32)
+    alkahest_publication(tmp_path, monkeypatch, signer)
+    storefront = _unbacked_storefront(db, signer, contact=CONTACT_HERE)
+    await storefront.run()
+    listing_id, status, _ = storefront.listing("site-a", "pool-u", "r1")
+
+    storefront.terms = _unbacked_terms(db, signer, contact=CONTACT_ELSEWHERE)
+    report = await storefront.run()
+
+    assert status == "open"
+    assert closes(report) == {listing_id: "no_settlement_option"}
+    assert storefront.listing("site-a", "pool-u", "r1") == (
+        listing_id,
+        "closed",
+        "reconciliation",
+    )
+    assert storefront.registries.operations() == [("closed", listing_id)]
+    assert actions(report, "hold") == [] and actions(report, "publish") == []
+    (refusal,) = actions(report, "refuse")
+    assert _no_option_entry(refusal) == {
+        "site_id": "site-a",
+        "pool_id": "pool-u",
+        "physical_resource_id": "r1",
+        "reason": "no_settlement_option",
+        "mechanisms": ["contact-exchange.v1"],
+    }

@@ -277,6 +277,56 @@ def test_a_pool_absent_from_its_backings_is_carried_unchecked():
     assert resource.view.host_id is None
 
 
+def _unbuildable(problems, *, physical_resource_id="resource-2", view=None):
+    """A resource the site built no bare-metal view for, naming why."""
+    resource = _resource(physical_resource_id=physical_resource_id, views={})
+    if view is not None:
+        resource["publication_views"] = {"bare_metal.v2": view}
+    resource["publication_view_problems"] = {"bare_metal.v2": problems}
+    return resource
+
+
+def test_a_resource_the_site_built_no_view_for_is_named_with_its_problems():
+    generation = _parse(
+        _projection(_pool("pool-1", _resource(), _unbuildable(["host_id: required"])))
+    )
+
+    assert [item.physical_resource_id for item in generation.resources] == ["resource-1"]
+    (unbuildable,) = generation.view_problems
+    assert (
+        unbuildable.pool_id,
+        unbuildable.physical_resource_id,
+        unbuildable.enabled,
+        unbuildable.problems,
+    ) == ("pool-1", "resource-2", True, ("host_id: required",))
+
+
+def test_another_views_problem_is_not_bare_metals():
+    resource = _resource()
+    resource["publication_view_problems"] = {"vm.v1": ["not a VM"]}
+
+    assert _parse(_projection(_pool("pool-1", resource))).view_problems == []
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [
+        pytest.param(
+            _unbuildable(["host_id: required"], view=build_bare_metal_publication_view(
+                "resource-2"
+            )),
+            id="view-and-problem",
+        ),
+        pytest.param(_unbuildable("host_id: required"), id="problems-not-a-list"),
+        pytest.param(_unbuildable([]), id="no-problem-named"),
+        pytest.param(_unbuildable(["  "]), id="blank-problem"),
+    ],
+)
+def test_a_malformed_view_problem_refuses_the_generation(resource):
+    with pytest.raises(ValueError):
+        _parse(_projection(_pool("pool-1", resource)))
+
+
 def test_a_projection_without_a_generation_identity_is_refused():
     with pytest.raises(ValidationError):
         _parse({"resource_pools": []})

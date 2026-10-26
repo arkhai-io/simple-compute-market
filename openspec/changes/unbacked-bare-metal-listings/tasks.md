@@ -3621,16 +3621,36 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
 `registry-discovery` "Compute listings publish their capacity backing"). Touches
 `arkhai_bare_metal` and the bare-metal storefront.
 
-- [ ] 19.1 Delete `SitePoolReading.unbacked`, `read_site_pools`'s unbacked branch, and
+- [x] 19.1 Delete `SitePoolReading.unbacked`, `read_site_pools`'s unbacked branch, and
       `_report_pools`' `pool_unbacked` report (`src/site_reading.py`, `src/publication.py`)
       (D11).
-- [ ] 19.2 `arkhai_bare_metal/storefront_publication.py`: an unbacked candidate's dictionary,
+      Done: a pool is admitted when it is enabled and advertises bare metal, whatever its
+      backing. **Beyond the 19.x tasks, owed here by Sections 15 and 16's notes and
+      required by the `storefront-publication` delta:** a resource the site projects
+      with `publication_view_problems` for `bare_metal.v2` is reported as
+      `publication_view_unbuildable` naming its site, pool, Physical Resource, and
+      problems. The domain carrier keeps such resources in the generation's new
+      `view_problems` (`BareMetalViewProblems`, exported, with the declaration's own
+      `enabled`), a public addition to `arkhai-bare-metal`; a resource carrying both the
+      view and a problem for it, or problems that are not a non-empty list of text,
+      refuses the generation. **Decided with the maintainer after review:** an open
+      listing of such a resource is held, not closed (design decision 4's Section 19
+      paragraph; the delta scenario "An open listing's resource loses its view"); a
+      disabled declaration or a pool no longer admitting bare metal still closes it.
+      Classification places these resources as held or withdrawn, and the opening
+      recheck refuses a held one as a declared mismatch naming the site's problem.
+- [x] 19.2 `arkhai_bare_metal/storefront_publication.py`: an unbacked candidate's dictionary,
       source envelope, and comparison sets carry no host fields; availability is never
       read for it, so an enabled, shaped resource is a candidate and a disabled one is
       withdrawn; the region, asking-rate, and override holds apply unchanged (D2, D3).
-- [ ] 19.3 `src/sqlite_client.py` `upsert_bare_metal_listing`: the source envelope omits
+      Done: the candidate names `host_id` and `physical_host_id` only where its listing
+      carries them. The comparison sets needed no change: an identity field the stored
+      listing does not publish is no commitment. Availability was already read only
+      through the delegate's `judge`.
+- [x] 19.3 `src/sqlite_client.py` `upsert_bare_metal_listing`: the source envelope omits
       absent host fields (D2).
-- [ ] 19.4 The remaining readers of the delivery terms: `src/negotiation.py`'s admission
+      Done; the envelope is canonicalized when bound, so a backed listing's is unchanged.
+- [x] 19.4 The remaining readers of the delivery terms: `src/negotiation.py`'s admission
       refusal reads absent `access_methods` as no access method listed, so a bargaining
       round against an unbacked listing is refused with
       `bare_metal_access_method_not_listed` rather than raising; confirm each other reader
@@ -3638,11 +3658,30 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
       `settlement_service.py`, `load_bare_metal_fulfillment_context`) is reached only
       through a stage that fulfils through capacity or after Section 20's refusal, and
       record any that is not as a defect to fix here (D5).
-- [ ] 19.5 Recheck: `arkhai_bare_metal/inventory_guard.py` is unchanged; tests confirm an
+      Done. The readers, read from the code:
+      - `negotiation_runtime.py` `_accepted_terms`: an exact selection builds terms only
+        for a stage that fulfils through capacity; a bargaining acceptance builds them in
+        `persist_artifacts`, which an unbacked listing no longer reaches, since every
+        bargaining round against it is refused at the admission check.
+      - `settlement_service.py`'s physical-terms check: Alkahest verification only, a
+        stage unbacked publication never offers.
+      - `fulfillment_service.py` and `load_bare_metal_fulfillment_context`: reached by
+        servicing through capacity stages, and by the fulfillment routes, which today load
+        the context before resolving the stage; for an unbacked introduction deal it names
+        no host. Section 20's route order (20.3) closes that path; it is open until then.
+      - `deal_controls.py`: the administrator's reservation passes the kit's
+        `CapacityEffects`, whose guard refuses an unbacked listing before any site call.
+        **Defect fixed here:** the settlement preview answered `would_submit: true`, with
+        no host, for an unbacked listing; it now asks the binding's delegate first and
+        answers `would_submit: false` naming the refusal.
+- [x] 19.5 Recheck: `arkhai_bare_metal/inventory_guard.py` is unchanged; tests confirm an
       unbacked listing is refused only by its declaration (shape, region, Physical
       Resource, or its resource now in another pool, as `declared_mismatch`), and a site
       not held or unconfirmed refuses openings as retryable for either backing (D8).
-- [ ] 19.6 Tests: unit `domains/bare_metal/tests/test_storefront_publication.py` and
+      Done, with one **correction:** `inventory_guard.py` gains one branch, the reason
+      it gives for a resource the site built no view for (19.1's hold); its rules are
+      otherwise unchanged. Evidence in 19.6.
+- [x] 19.6 Tests: unit `domains/bare_metal/tests/test_storefront_publication.py` and
       `test_inventory_guard.py` (the moved-pool case); library
       `tests/test_publication_cycle.py` — `test_an_unbacked_pool_yields_no_listing_and_is_reported`
       replaced by publication of an unbacked listing with `capacity_backing: unbacked`, no
@@ -3674,11 +3713,91 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
       `no_settlement_option` while Alkahest's chain is unreached ("An unreachable
       mechanism the candidate could never publish"). Section 19 is not complete
       without all three passing (D7).
+      Done; each test below passed by name before qualification.
+      - The three carried cycle tests, in `tests/test_publication_cycle.py`, each over an
+        unbacked pool through the production payload builder, settlement composition,
+        publication cycle, database, and held projection state, with the site and the
+        registry doubled; Alkahest's chain is never probed. As the file's docstring says,
+        this is cycle orchestration, not integration evidence under `TESTING.md`.
+        - `test_an_override_leaving_no_admissible_clause_closes_the_unbacked_listing`:
+          through `SQLitePoolOverrideStore`; the open contact listing, the stored
+          Alkahest-only override, the same listing closed as `no_settlement_option` with
+          only the close sent and a refusal naming site, pool, Physical Resource, and no
+          mechanism, and the same ID reopened once the contact clause is stored.
+        - `test_an_unbacked_candidate_whose_origin_has_no_contact_yields_no_listing`.
+        - `test_an_unbacked_listing_whose_origin_loses_its_contact_closes`: the same
+          listing closed, only the close sent, and the refusal naming site, pool,
+          Physical Resource, and contact exchange (those assertions added after review).
+      - Cycle, the same level: an unbacked listing published with `capacity_backing:
+        unbacked` and no delivery term in the listing or its binding's envelope (through
+        a payload double, so it publishes no settlement option; the admissible-options
+        claim is the first carried test's); never judged against availability; closing
+        when its pool is disabled or stops advertising; held for a missing region and for
+        an unreadable asking rate; the unbuildable view reported, and an open listing of
+        it held, keeping its identity and stored terms, while a disabled declaration, a
+        pool that stops advertising, and a removed resource still close (written failing
+        before the hold was implemented). The two opposite-backing tests now recreate the
+        pool unbacked rather than rewriting the binding.
+      - Application integration through `StorefrontClient` (`tests/test_http_negotiation.py`):
+        - a bargaining round against an unbacked listing refused
+          `bare_metal_access_method_not_listed`, the site reporting the machine free or
+          taken. The listing is seeded with an escrow, which publication never gives an
+          unbacked listing, so the round reaches seller policy;
+        - an exact contact-exchange selection accepted with no site call, the site
+          reporting the machine free or taken;
+        - refused as a declared mismatch when the resource moves pool, shrinks, or changes
+          region, and as retryable when the site is not held, when its confirmation has
+          expired, and when its latest poll failed.
+      - Application integration through `StorefrontClient.evaluate_settle`
+        (`tests/test_deal_controls.py`): an unbacked listing's preview answers
+        `would_submit: false` with the refusal, reserving nothing and changing no table
+        but the request's own replay record; the backed listing beside it previews its
+        reservation (added after review).
+      - Unit (`domains/bare_metal/tests`): candidates and envelopes without host fields,
+        a disabled unbacked declaration withdrawn, view problems parsed and refused when
+        malformed, the unbuildable resource held or withdrawn, and the unbacked recheck
+        cases (machine reported taken, moved pool, shrunk shape, moved region, disabled).
+        Unit (`tests/test_negotiation.py`): the admission refusal of an unbacked listing.
+      - Registry, application integration through the canonical client
+        (`core/registry/tests/integration/test_capacity_backing_filter.py`): a backed and
+        an unbacked bare-metal listing each found by the exact filter for its backing
+        alone.
 - [ ] 19.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
+      Left unchecked. This section changes no version and no lock, though
+      `arkhai-bare-metal` gains the public `BareMetalViewProblems`. Whether the packages'
+      current versions meet `docs/development/RELEASING.md`'s rule against the target
+      branch is unverifiable here: the comparison was out of this section's scope.
 - [ ] 19.8 **Verify.** `make test-bare-metal`; `make test-core` if the registry test
       changes; `make test`; `make check-packaging`. End-to-end:
       `e2e_bare_metal_unbacked_introduction` (Section 22), and `e2e_bare_metal_publication`
       for backed supply unchanged.
+      The corrective candidate passed the full `make test` and `make check-packaging`
+      (both exit 0). `make check-change` exited 2 solely on the missing citation of
+      `e2e-tests/tests/e2e/roles/helpers/introduction_stages.py`, which 22.1 creates;
+      the narrow sequencing exception is not a passing check. These receipts predate
+      this validation-note correction; production and test sources are unchanged.
+      Review remains incomplete and its findings await assessment; this checkpoint is
+      not acceptance. This item and 19.7 remain unchecked.
+      End-to-end: unrun here; `e2e_bare_metal_publication` exercises backed supply, and
+      `e2e_bare_metal_unbacked_introduction` arrives with Section 22.
+
+Section 19 notes (handoff):
+
+- **Owed to Section 20:** the fulfillment routes load the fulfillment context before
+  resolving the accepted stage (19.4); 20.3's route order is what keeps an unbacked
+  introduction deal from reaching it.
+- **For closeout (23.9):** `openspec/specs/storefront-publication/architecture.md`'s
+  "Reconciliation" section says every bare-metal listing is capacity-backed and an
+  unbacked pool yields none; both stop being true here.
+- **Section 18's carried bare-metal cases** are the three 19.6 tests above; 18.5 and 18.7
+  stay unchecked until Section 18's own requirements are met.
+- **A VM integration test once observed a registry health check reporting `timeout`
+  where `unreachable` was expected.** It passed in the next full run. Its cause is
+  unproven and it is not waived.
+- **Session:** a scoped pytest run must name the wheel directory by absolute path when
+  given `uv --directory`, which resolves a relative `--find-links` against the caller's
+  directory; and a storefront environment needs `make reinit` after `make dist`, since a
+  rebuilt wheel keeps its version.
 
 ## 20. A deal settled by introduction has no settlement or fulfillment, in both domains
 

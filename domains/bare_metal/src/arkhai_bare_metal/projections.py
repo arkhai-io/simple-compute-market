@@ -127,11 +127,36 @@ class TrustedBareMetalResource(BaseModel):
         return self.view.physical_resource_id
 
 
+class BareMetalViewProblems(BaseModel):
+    """Why the site built no bare-metal view for one projected resource.
+
+    The site projects such a resource without the view and names each problem,
+    so a storefront derives nothing from it and can say why. ``enabled`` is the
+    declaration's own enablement, which still tells a withdrawn declaration
+    from one the site cannot read.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pool_id: str = Field(min_length=1)
+    physical_resource_id: str = Field(min_length=1)
+    enabled: bool
+    problems: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_problems(self) -> "BareMetalViewProblems":
+        if any(not problem.strip() for problem in self.problems):
+            raise ValueError("a bare-metal view problem must be non-empty text")
+        return self
+
+
 class TrustedBareMetalProjection(BaseModel):
     """One configured site's accepted resource-pool projection generation.
 
     A site whose projection could not be fetched, or whose generation was
     refused, has no value of this type: it is unknown, not empty.
+    ``view_problems`` names each resource the site could build no bare-metal
+    view for, which yields no listing.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -140,6 +165,7 @@ class TrustedBareMetalProjection(BaseModel):
     revision: int = Field(ge=0)
     digest: str = Field(min_length=1)
     resources: list[TrustedBareMetalResource] = Field(default_factory=list)
+    view_problems: list[BareMetalViewProblems] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_generation(self) -> "TrustedBareMetalProjection":

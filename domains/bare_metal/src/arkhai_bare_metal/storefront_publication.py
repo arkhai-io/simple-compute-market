@@ -10,9 +10,9 @@ class, and a storefront builds its reconciliation from those disjoint classes:
   is not wholly available (leased, say): its listing closes for availability
   and reopens when free;
 - **held** — its pool's declarations do not resolve, its pool states no
-  region, or its own declaration does not read as a shape: its listing is
-  neither closed nor refreshed, since an unknown declaration is not a
-  withdrawn one;
+  region, its own declaration does not read as a shape, or the site could build
+  no bare-metal view from it: its listing is neither closed nor refreshed,
+  since an unknown declaration is not a withdrawn one;
 - **withdrawn** — anything else, a disabled declaration or a pool that does
   not admit bare metal: its listing closes as a withdrawn source.
 
@@ -55,9 +55,10 @@ WITHDRAWN = "withdrawn"
 class ClassifiedBareMetalResource:
     """One Physical Resource's class, with the source identity it carries.
 
-    ``shape_digest`` is ``None`` exactly when the resource's declaration does
-    not read as a shape, in which case ``problems`` names why and the resource
-    is held.
+    ``shape_digest`` is ``None`` when the resource's declaration does not read
+    as a shape, in which case ``problems`` names why and the resource is held.
+    ``view_unbuildable`` marks a resource the site built no bare-metal view
+    for, whose ``problems`` are the site's.
     """
 
     classification: str
@@ -67,6 +68,7 @@ class ClassifiedBareMetalResource:
     shape_digest: str | None = None
     problems: tuple[str, ...] = ()
     publication_capabilities_ignored: bool = False
+    view_unbuildable: bool = False
 
 
 @dataclass(frozen=True)
@@ -192,19 +194,38 @@ def classify_bare_metal_resources(
         rate = ((pool_asking_rates or {}).get(resource.pool_id) or {}).get(digest)
         if rate is not None:
             listing = listing.model_copy(update={"asking_rate": BareMetalAskingRate(**rate)})
-        candidates.append(
-            {
-                "site_id": generation.site_id,
-                "pool_id": resource.pool_id,
-                "physical_resource_id": resource.physical_resource_id,
-                "shape_digest": digest,
-                "projection_revision": generation.revision,
-                "projection_digest": generation.digest,
-                "host_id": listing.host_id,
-                "physical_host_id": listing.physical_host_id,
-                "listing_resource": listing.model_dump(mode="json", exclude_none=True),
-                "listing": listing,
-            }
+        candidate: dict[str, Any] = {
+            "site_id": generation.site_id,
+            "pool_id": resource.pool_id,
+            "physical_resource_id": resource.physical_resource_id,
+            "shape_digest": digest,
+            "projection_revision": generation.revision,
+            "projection_digest": generation.digest,
+            "listing_resource": listing.model_dump(mode="json", exclude_none=True),
+            "listing": listing,
+        }
+        # Host identity is a delivery term the listing carries only where its
+        # backing delegate passed it through; an unbacked candidate has none.
+        for name in ("host_id", "physical_host_id"):
+            value = getattr(listing, name)
+            if value is not None:
+                candidate[name] = value
+        candidates.append(candidate)
+    for unbuildable in generation.view_problems:
+        # A declaration the site cannot build a view from is unreadable, not
+        # withdrawn, so its listing is held; a disabled declaration or a pool
+        # that no longer admits bare metal is still a withdrawal.
+        admission = pool_admission.get(unbuildable.pool_id, POOL_NOT_ADMITTED)
+        withdrawn = admission == POOL_NOT_ADMITTED or not unbuildable.enabled
+        classified.append(
+            ClassifiedBareMetalResource(
+                classification=WITHDRAWN if withdrawn else HELD,
+                site_id=generation.site_id,
+                pool_id=unbuildable.pool_id,
+                physical_resource_id=unbuildable.physical_resource_id,
+                problems=unbuildable.problems,
+                view_unbuildable=True,
+            )
         )
     return BareMetalSiteClassification(
         site_id=generation.site_id,

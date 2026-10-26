@@ -20,6 +20,7 @@ from .publication import (
 )
 from .projections import (
     BareMetalResourceProjection,
+    BareMetalViewProblems,
     TrustedBareMetalProjection,
     TrustedBareMetalResource,
 )
@@ -156,6 +157,7 @@ __all__ = [
     "BareMetalReceipt",
     "BareMetalResourceProjection",
     "BareMetalShapeError",
+    "BareMetalViewProblems",
     "ListingSourceCheck",
     "BareMetalTerms",
     "TrustedBareMetalProjection",

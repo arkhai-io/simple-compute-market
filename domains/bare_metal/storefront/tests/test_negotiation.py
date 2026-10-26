@@ -133,6 +133,28 @@ async def test_policy_rejects_invalid_physical_request(
 
 
 @pytest.mark.asyncio
+async def test_policy_refuses_access_to_an_unbacked_listing_rather_than_raising() -> None:
+    """An unbacked listing carries no host and no access methods, so a round
+    asking for SSH access to it is refused as access the listing does not list."""
+    listing = _listing()
+    for term in ("host_id", "physical_host_id", "access_methods"):
+        del listing["listing_resource"][term]
+    listing["listing_resource"]["capacity_backing"] = "unbacked"
+
+    result = await default_seller_round_hook()(
+        listing=listing,
+        message=_message(),
+        history=_history(),
+        seller_reference_amount=100,
+        listing_source=MATCHES,
+    )
+
+    assert result.decision.action == "reject"
+    assert result.decision.reason == "bare_metal_access_method_not_listed"
+    assert "bare_metal_terms" not in result.intermediate
+
+
+@pytest.mark.asyncio
 async def test_policy_applies_shared_listed_price_after_domain_guards() -> None:
     accepted = {
         "chain_name": "base",
