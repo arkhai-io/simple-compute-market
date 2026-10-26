@@ -159,7 +159,11 @@ Application, persistence, publication, negotiation, settlement, fulfillment,
 recovery, result, and teardown layers receive that same registry. Every listing
 binding freezes its selected contribution identity, contract version, Resource
 Pool offering mode, trusted site, and Physical Resource; negotiation copies the
-immutable binding before storing a domain artifact. Durable bindings resolve
+immutable binding before storing a domain artifact. Core stores a negotiation's
+domain artifacts by slot (`listing`, `message`, `terms`, `materialization`,
+`receipt`, `result`); the `listing` slot holds the listing as the buyer accepted
+it, which a domain issues from rather than from the listing's current row, so a
+later republication cannot change what an accepted negotiation delivers. Durable bindings resolve
 only to their pre-registered exact objects, and schema-opaque payloads are
 validated only by the selected contract. A one-domain storefront uses these
 same carriers with one explicit registration, never a separate executable or
@@ -284,6 +288,20 @@ lifecycle, while API credits composes the same kit mechanisms at its own
 non-physical storefront boundary. No topology gains a default domain, global
 selector, or no-op fulfillment implementation.
 
+## The negotiation runtime's opening unit of work
+
+The kit negotiation runtime
+(`kit/negotiation-runtime/src/market_negotiation_runtime/runtime.py`) writes an
+opening before it records the seller's decision. A domain that supplies the
+`open_negotiation` hook receives one `OpeningWrite` — the thread, the opening
+message, and the domain's own opening record — and commits it through the core
+client's `open_negotiation`, which writes the thread, the message, the listing's
+binding, and the domain's opening state on one connection in one transaction,
+so a failure in any write leaves none of them. API credits composes it, writing
+its purchase terms as the domain state, so no continuation finds a bound thread
+without the terms it validates against. Without the hook, the runtime creates
+the thread, saves the message, and runs `persist_opening` as separate writes.
+
 ## Agreement-based payment composition
 
 Core defines shared-reader carriers: public settlement options, accepted Agreements, role tables and settlement evidence. Mechanism status, refunds and provisioning translation stay in the supporting domain/kit composition. `make_settle_hook` looks up `Agreement.settlement.mechanism` in the injected buyer table and passes the exact negotiation to its domain-owned invoker. Missing entries fail before effects. `make_escrow_settle_hook` is an explicit helper for an applicable entry, never a default.
@@ -311,6 +329,11 @@ site authority, provider, and the selected-site POOLS-7 lifecycle. The shipped
 bare-metal contribution and its exact hooks do not by themselves prove live
 hardware access or revocation. A no-op hook, synthetic result, or common-shell
 success cannot stand in for that proof.
+
+VM and bare metal supply no `open_negotiation` hook, so their openings commit
+the bound thread, the opening message, and the domain's opening state as
+separate writes: a failed domain write can leave a bound thread with no domain
+state behind it. No change owns closing that gap yet.
 
 
 ## Related contracts

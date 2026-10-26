@@ -101,9 +101,10 @@ wheelhouse must have a `reinit` target.
 rewriting the lock to match, and installs a wheel it finds there whatever its version,
 so it must run after every internal wheel the lock names is built at the version the
 lock records. `scripts/uv_project.py require-wheels --project <project>` refuses, naming
-each package and locked version without such a wheel, when one is not; a targeted root
-test target that builds only its own wheel set, such as `make test-api-selling`, runs it
-before the project's tests.
+each package and locked version without such a wheel, when one is not. A targeted root
+test target, such as `make test-api-selling`, builds every internal wheel its project
+installs rather than the whole wheelhouse, then runs it before the project's tests, so a
+wheel the target's build left out stops the run instead of being resolved elsewhere.
 
 ## Locks
 
@@ -152,6 +153,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 A project one level deep can use `/app` itself with the wheelhouse at `/.dist`, which
 keeps an editable install of the project valid in the runtime stage; `e2e-tests` does.
+
+`build-apicredits-service-prekit` builds `arkhai:apicredits-service-prekit`, the
+previous API-credits service release that the end-to-end upgrade/rollback scenario runs
+beside the current image. It checks out the pinned `APICREDITS_SERVICE_PREKIT_COMMIT` as
+a detached worktree under `.worktrees/`, builds that commit's own wheelhouse and service
+image there, and removes the worktree whether or not the build succeeds; `.gitignore`
+and `.dockerignore` exclude `.worktrees/`, so it never enters a commit or a build
+context. The scenario starts both images through the engine socket that
+`BUYER_MACHINE_DOCKER_SOCKET` mounts into the test container (see
+[`e2e-tests/README.md`](../../e2e-tests/README.md)).
 
 ## Checks
 

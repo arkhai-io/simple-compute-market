@@ -241,6 +241,35 @@ already gone is not a failure.
 This is mock grant/reclaim evidence, not SSH qualification. The canonical
 Alkahest mock-deal scenario remains selected unchanged.
 
+### API-credit service upgrade and rollback
+
+`make test-e2e-apicredits` runs marker `e2e_credits_service_rollback` last,
+over the database the lane's deal scenarios wrote. It needs two service images:
+the current `arkhai:apicredits-service` and the previous release,
+`arkhai:apicredits-service-prekit`, which the root target
+`build-apicredits-service-prekit` builds (and `build-e2e-apicredits` depends
+on). That target checks out the pinned commit `APICREDITS_SERVICE_PREKIT_COMMIT`
+in a temporary worktree under `.worktrees/`, which git and the Docker build
+context ignore, builds that commit's wheelhouse and service image there, and
+removes the worktree.
+
+The scenario starts its probe services itself, so the test container needs the
+Docker engine: `BUYER_MACHINE_DOCKER_SOCKET` names the socket
+`test-buyer-machine` mounts at `/var/run/docker.sock`, and is empty (no mount)
+unless set. The lane target sets it to `/var/run/docker.sock`; to rerun the
+scenario against a ready lane, pass it yourself:
+
+```sh
+make test-buyer-machine \
+  NETWORK=simple-market-apicredits_default \
+  BUYER_MODULE=e2e_credits_service_rollback \
+  BUYER_MACHINE_DOCKER_SOCKET=/var/run/docker.sock
+```
+
+The images, lane network, and service volume are the `api_credits` keys in
+`config/config-docker.yml`. A missing image or an unreachable engine fails the
+scenario rather than skipping it.
+
 ## CI/CD
 
 The GitHub Actions workflow at `.github/workflows/e2e.yml` can be triggered:

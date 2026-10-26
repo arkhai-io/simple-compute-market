@@ -183,6 +183,19 @@ place a cycle runs and records each cycle's outcome, which every storefront's
 system status reports; a loop registers as a timer loop or as a fan-out, such as
 the per-site capacity-event poller aggregate the capacity kit owns.
 
+The API-access machinery is the `api` family's: a vocabulary at `domains/api`
+and ten kit distributions beneath it, split only where a rule forces it, into
+which API credits contributes one typed bundle per side and its service root
+passes a capacity profile. Its storefront composes the family's selling
+library, its service root the family's authority, its buyer plugin the buying
+libraries, and third-party applications the family's bearer gate; API credits
+keeps its listing schema, kind bindings, and bundle values, with its wire,
+digests, schema, configuration, and service identity held to recorded
+baselines. A second API-selling domain composes the same kit. The kit's
+composability is scoped to prepaid bearer access, and its selling and buying
+libraries still depend on the core storefront and the buyer role under owned
+exception rows.
+
 Beneath the extracted runtimes each storefront still duplicates its shell — a
 route set over the same core models, executable assembly, and health — its
 seller listing lifecycle and restart-safe fulfillment convergence,
@@ -215,7 +228,9 @@ The domain layer's own structure is better than the duplication suggests. All th
 | Every storefront reimplements the seller listing lifecycle and restart-safe fulfillment convergence | [`kit-owned-listing-and-fulfillment-lifecycles`](../../openspec/changes/kit-owned-listing-and-fulfillment-lifecycles/) |
 | ~~VM keeps its own per-site projection cache~~ — closed: per-site projection state is kit-owned, one injected instance per storefront process holding both families for every site, and VM and bare metal both publish on a loop over it | [`share-site-projection-state`](../../openspec/changes/archive/2026-10-19-share-site-projection-state/) |
 | Every storefront carries its own authentication middleware and a persistence client whose boundary with core's is unstated | [`kit-owned-storefront-auth-and-persistence`](../../openspec/changes/kit-owned-storefront-auth-and-persistence/) |
-| API credits carries the whole API-access machinery — issuance, the key authority, the gate, the storefront's issuance composition, the buyer flows — as its own code, so a second API-selling domain can only copy it | [`compose-api-family-kit`](../../openspec/changes/compose-api-family-kit/) |
+| ~~API credits carries the whole API-access machinery — issuance, the key authority, the gate, the storefront's issuance composition, the buyer flows — as its own code, so a second API-selling domain can only copy it~~ — closed: the machinery is the `api` family's kit, which API credits composes and a sibling domain composes the same way | [`compose-api-family-kit`](../../openspec/changes/archive/2026-10-26-compose-api-family-kit/) |
+| The api family's buying libraries depend on the buyer role, a composition, rather than on a kit | [`kit-owned-buyer-orchestration`](../../openspec/changes/kit-owned-buyer-orchestration/) |
+| VM and bare metal commit a negotiation's opening thread, message, and binding in separate writes, where API credits commits them in one transaction through the negotiation runtime's opening hook | — (unowned; see the change index) |
 | ~~API credits has no end-to-end lane of its own: its scenario rides the VM lane~~ — closed: each market domain runs in its own pipeline lane, building and composing only its own stack, and the API-credit lane routes its deal's discovery across a compute registry of its own | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/archive/2026-10-09-bare-metal-mock-provisioned-deal/) |
 | ~~No bare-metal deal runs in the pipeline: the only complete-deal scenario needs a real host~~ — closed: the bare-metal lane runs a mock-provisioned whole-host deal on the compute deal stages VM's lane runs, from publication through settlement, on-chain evidence publication, lease expiry and release, and a second deal | [`bare-metal-mock-provisioned-deal`](../../openspec/changes/archive/2026-10-09-bare-metal-mock-provisioned-deal/) |
 

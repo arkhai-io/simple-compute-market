@@ -13,9 +13,9 @@ refusal status codes and error bodies, digests, database schema and migration
 history, environment prefixes and settings keys, and its service's distribution
 name, image, entry point, and version response — MUST be unchanged by that
 composition, each held to a recorded baseline. The retirement of the
-`arkhai-apicredits-middleware` distribution is a package and import break, not a
-behaviour change, and every repository consumer of it MUST migrate to the gate
-library in the same change.
+`arkhai-apicredits-middleware` Python distribution is a package and import
+break, not a behaviour change, and every repository consumer of it MUST import
+the gate library instead.
 
 #### Scenario: A grant issued before the kit is read after it
 
@@ -49,8 +49,10 @@ library in the same change.
 
 #### Scenario: A middleware consumer is sought
 
-- **WHEN** the repository is searched for `apicredits_middleware` or
-  `arkhai-apicredits-middleware`
+- **WHEN** the repository is searched for the `apicredits_middleware` Python
+  package or the `arkhai-apicredits-middleware` Python distribution
 - **THEN** no consumer remains; the sample app, the service's integration
-  tests, the conformance runner, the READMEs, the cookbook, the workflows, and
-  the Makefiles name the gate library
+  tests, the Python conformance runner, the READMEs, the cookbook, the
+  workflows, and the Makefiles name the gate library, while the TypeScript and
+  Rust gates under `domains/apicredits/middleware/` keep their own package
+  names

@@ -349,6 +349,38 @@ carrying the same code under another name.
 - **THEN** every step's decision, error code, purchase pointer, and
   collaborator call counts match the trace
 
+### Requirement: A gate's cached verification answers only for the secret that earned it
+
+Every bearer gate — the Python reference and the TypeScript and Rust gates that
+replay the same conformance trace — MAY cache a verification, and a cached
+verification MUST authorize only the exact secret that earned it, compared by a
+fingerprint of the secret rather than by the key identifier, which any bearer
+header carries. A secret the gate has not cached MUST be verified with the
+authority. A refusal of a secret other than the cached one MUST NOT evict the
+cached credential. Verifications MUST install in the order they started, by a
+ticket the gate issues, so an answer from a verification that started earlier
+never replaces one that started later.
+
+#### Scenario: A second secret presents a cached key identifier
+
+- **WHEN** a request carries a key identifier the gate has cached with a
+  different secret
+- **THEN** the gate verifies the presented secret with the authority, and a
+  refusal leaves the cached credential in place
+
+#### Scenario: Two verifications of one secret overlap
+
+- **WHEN** a verification that started earlier answers after one that started
+  later
+- **THEN** the gate keeps the later verification's answer
+
+#### Scenario: Every gate replays the trace
+
+- **WHEN** the Python, TypeScript, and Rust conformance runners replay the
+  recorded session
+- **THEN** each asserts the secret every verification sends, and each gate's
+  own tests hold its verifications to ticket order
+
 ### Requirement: Route services are kit-owned and bindings are composition-owned
 
 Each route the selling or authority library serves MUST have a framework-free
@@ -362,7 +394,8 @@ and its error to a response.
 
 - **WHEN** the API-credits storefront mounts its negotiate route
 - **THEN** the controller delegates every decision to the selling library's
-  route service, and the same service serves the inference storefront's binding
+  route service, and the same service would serve any other domain's binding
+  unchanged
 
 ### Requirement: A storefront's authentication verifies what was sent and records every outcome
 

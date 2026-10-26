@@ -124,7 +124,9 @@ without the ledger.
   consumption rule beyond relocating it.
 - No ledger-free access distribution; deferred in `design.md` with its trigger.
 - No TypeScript or Rust gate changes beyond what relocating the Python reference
-  requires; their conformance fixture stays where it is and stays green.
+  requires, and the verify-cache fixes the owner directed onto this change's
+  branch (see `design.md` D10); their conformance fixture stays where it is and
+  stays green.
 
 ## Dependencies and Related Changes
 
