@@ -458,9 +458,8 @@ def test_reserve_idempotency_finds_a_committed_reservation_too(
 
 
 def test_reserve_without_escrow_uid_is_never_idempotent(seeded: CapacityLedgerService):
-    """No escrow_uid means no idempotency key -- every call reserves
-    fresh, matching pre-existing behavior for callers that don't supply
-    one."""
+    """No escrow_uid means no idempotency key -- every call from a caller
+    that supplies none reserves fresh."""
     first = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={})
     second = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={})
     assert first["capacity_reservation_id"] != second["capacity_reservation_id"]
@@ -855,8 +854,7 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
 def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
     """host_id is matched through executor_ref's JSON payload
     (func.json_extract) and vm_target through executor_target -- neither
-    is a dedicated column. Previously untested -- this is new coverage,
-    not just a migration of an existing test."""
+    is a dedicated column."""
     reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xm"})
     seeded.commit(
         capacity_reservation_id=reserved["capacity_reservation_id"],

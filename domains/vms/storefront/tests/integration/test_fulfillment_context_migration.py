@@ -1,4 +1,5 @@
-"""Stored fulfillment requests lose the guest name, so a replay still matches.
+"""Stored fulfillment requests lose the guest name and connectivity, so a replay
+still matches.
 
 Restart convergence replays an escrow's stored request verbatim, and
 provisioning accepts a repeat only when it equals its own stored copy, which the
@@ -10,7 +11,10 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from market_storefront.utils.migrations import _migrate_fulfillment_context_names_no_guest
+from market_storefront.utils.migrations import (
+    _migrate_fulfillment_context_carries_no_connectivity,
+    _migrate_fulfillment_context_names_no_guest,
+)
 
 
 def _context(request_payload: dict, *, kind: str = "vm.storefront.fulfillment-context") -> dict:
@@ -96,3 +100,44 @@ def test_a_database_without_contexts_is_left_alone():
     conn.execute("CREATE TABLE escrows (escrow_uid TEXT PRIMARY KEY)")
 
     _migrate_fulfillment_context_names_no_guest(conn)
+    _migrate_fulfillment_context_carries_no_connectivity(conn)
+
+
+# A request built while the storefront still filled ``connectivity`` from its
+# own relay settings. Every value here is an illustrative placeholder from a
+# documentation range, never a real relay or credential.
+_WITH_CONNECTIVITY = _context({
+    "ssh_pubkey": "ssh-ed25519 AAAA",
+    "connectivity": {
+        "frp_server_addr": "203.0.113.9",
+        "frp_domain": "relay.example.test",
+        "frp_dashboard_password": "placeholder-password",
+    },
+})
+_OTHER_KIND_WITH_CONNECTIVITY = _context({"connectivity": {"a": 1}}, kind="another.context")
+
+
+def test_every_escrow_s_stored_request_loses_connectivity_and_nothing_else():
+    conn = _database()
+    for escrow_uid, status in (("relay-pending", "pending"), ("relay-ready", "ready")):
+        conn.execute(
+            "INSERT INTO escrows VALUES (?, ?, ?)",
+            (escrow_uid, status, json.dumps(_WITH_CONNECTIVITY)),
+        )
+    conn.execute(
+        "INSERT INTO escrows VALUES (?, ?, ?)",
+        ("other-relay", "pending", json.dumps(_OTHER_KIND_WITH_CONNECTIVITY)),
+    )
+
+    _migrate_fulfillment_context_carries_no_connectivity(conn)
+    first = {
+        uid: _stored(conn, uid)
+        for uid in ("relay-pending", "relay-ready", "named-pending", "other-relay")
+    }
+    _migrate_fulfillment_context_carries_no_connectivity(conn)
+
+    assert first["relay-pending"] == _CURRENT
+    assert first["relay-ready"] == _CURRENT
+    assert first["named-pending"] == _NAMED
+    assert first["other-relay"] == _OTHER_KIND_WITH_CONNECTIVITY
+    assert {uid: _stored(conn, uid) for uid in first} == first

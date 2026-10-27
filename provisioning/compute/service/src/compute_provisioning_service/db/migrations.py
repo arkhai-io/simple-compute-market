@@ -19,12 +19,16 @@ from sqlalchemy import Engine, MetaData, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.schema import CreateTable
 
+from market_fulfillment.backfill import LegacyBackfillValidationError
+from market_fulfillment.db import Base as FulfillmentBase
+from market_resource_pools.db import Base as PoolsBase
 from market_resource_pools_contracts.backing import legacy_producer_backing
 from market_resource_pools_contracts.hints import (
     ADVERTISABLE_MODES_POLICY_TAG,
     CAPACITY_BACKING_POLICY_TAG,
     declared_deliverable_modes,
 )
+from market_site.db import Base as SiteBase
 from market_site.db import CapacityBucket
 
 from compute_provisioning_service.db.models import (
@@ -36,6 +40,10 @@ from compute_provisioning_service.db.models import (
 # evolves them.
 from vm_provisioning_adapter.db import AnsiblePoolConfig
 from vm_provisioning_adapter.db import Base as VmBase
+from vm_provisioning_adapter.legacy_backfill import (
+    LegacyVmLeaseCandidate,
+    compile_legacy_vm_fulfillment_backfill,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -573,8 +581,6 @@ def _migrate_legacy_vm_leases_to_fulfillment(engine: Engine) -> None:
     # the same meaning as NULL: no teardown provider operation is known.
     _add_column_if_missing(engine, "vm_leases", "vm_remove_job_id", "VARCHAR")
 
-    from market_fulfillment.db import Base as FulfillmentBase
-
     FulfillmentBase.metadata.create_all(engine)
     # The backfill's drafts name their host in ``resource_host_id``, which an
     # existing settlement table may not have yet; later migrations expect it.
@@ -660,12 +666,6 @@ def _apply_legacy_vm_lease_backfill(connection) -> None:
     Takes an open connection rather than an engine: the caller owns the
     transaction boundary this enumeration and write run inside.
     """
-    from market_fulfillment.backfill import LegacyBackfillValidationError
-    from vm_provisioning_adapter.legacy_backfill import (
-        LegacyVmLeaseCandidate,
-        compile_legacy_vm_fulfillment_backfill,
-    )
-
     # The retired ``vm_leases`` table names its host ``vm_host``. The host
     # registry's key column is ``host_id`` in a database created from current
     # models and ``name`` in one still on the earlier schema; this backfill
@@ -959,8 +959,6 @@ def _migrate_resource_pools_and_hosts_pool_id(engine: Engine) -> None:
     know, so it is refused with :class:`SchemaDriftError` before any column is
     added.
     """
-    from market_resource_pools.db import Base as PoolsBase
-
     _refuse_hosts_without_default_pool(engine)
 
     PoolsBase.metadata.tables["resource_pools"].create(bind=engine, checkfirst=True)
@@ -1001,11 +999,10 @@ def _refuse_hosts_without_default_pool(engine: Engine) -> None:
 def _migrate_capacity_reservations_settlement_resource_id(engine: Engine) -> None:
     """Add ``capacity_reservations.settlement_resource_id``.
 
-    Purely additive (nullable, no backfill needed): existing rows predate
-    scheduling ever running against them in this codebase (no production
-    caller exists yet, so
-    NULL ("scheduling hasn't run for this row") is the correct value for
-    every pre-existing row, not just a safe default.
+    Purely additive (nullable, no backfill needed): nothing scheduled a
+    reservation before this column existed, so NULL ("scheduling hasn't run
+    for this row") is the correct value for every row it finds, not just a
+    safe default.
     """
     _add_column_if_missing(
         engine, "capacity_reservations", "settlement_resource_id", "VARCHAR",
@@ -1084,8 +1081,6 @@ def _migrate_capacity_buckets_and_current_debits(engine: Engine) -> None:
     accounting row. Existing reservation/resource links are converted into
     current debit rows before repositories begin using the new model.
     """
-    from market_site.db import Base as SiteBase
-
     SiteBase.metadata.tables["capacity_buckets"].create(bind=engine, checkfirst=True)
     SiteBase.metadata.tables["capacity_reservation_debits"].create(
         bind=engine, checkfirst=True
@@ -3216,6 +3211,31 @@ def _migrate_vm_fulfillment_request_names_no_guest(engine: Engine) -> None:
     not touched, and an accepted request is never prepared again. A rerun
     changes nothing.
     """
+    _remove_vm_fulfillment_request_fields(engine, frozenset({"vm_target"}))
+
+
+def _migrate_vm_fulfillment_request_carries_no_connectivity(engine: Engine) -> None:
+    """Remove ``connectivity`` from every stored VM fulfillment request.
+
+    VM's fulfillment request declares no ``connectivity``: the relay a host
+    dials is the one its pool references, and the buyer's address and port come
+    back in the fulfillment result. A request that carries it is refused, so a
+    stored one could never be prepared again, and the storefront's stored copies
+    are rewritten the same way by its own migration so a replay still matches,
+    as for the guest name. A stored copy may also hold a relay dashboard
+    credential that nothing reads.
+
+    Prepared operations and metadata are not touched, as for the guest name.
+    """
+    _remove_vm_fulfillment_request_fields(engine, frozenset({"connectivity"}))
+
+
+def _remove_vm_fulfillment_request_fields(engine: Engine, fields: frozenset[str]) -> None:
+    """Drop ``fields`` from every stored VM fulfillment request's payload.
+
+    Requests of another kind, and requests carrying none of ``fields``, are left
+    as they are, so a rerun changes nothing.
+    """
     if not _table_exists(engine, "settlement_records"):
         return
     with engine.begin() as connection:
@@ -3233,12 +3253,12 @@ def _migrate_vm_fulfillment_request_names_no_guest(engine: Engine) -> None:
             if (
                 envelope.get("kind") != "vm.fulfillment.request"
                 or not isinstance(payload, dict)
-                or "vm_target" not in payload
+                or fields.isdisjoint(payload)
             ):
                 continue
             rewritten = {
                 **envelope,
-                "payload": {key: value for key, value in payload.items() if key != "vm_target"},
+                "payload": {key: value for key, value in payload.items() if key not in fields},
             }
             connection.execute(
                 text(
@@ -3523,4 +3543,8 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_vm_pool_playbook_optional,
     ),
     Migration("20261023_002_hosts_pool_optional", _migrate_hosts_pool_optional),
+    Migration(
+        "20261027_001_vm_fulfillment_request_carries_no_connectivity",
+        _migrate_vm_fulfillment_request_carries_no_connectivity,
+    ),
 )

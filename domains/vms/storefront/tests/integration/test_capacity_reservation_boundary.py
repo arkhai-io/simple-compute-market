@@ -212,8 +212,8 @@ class TestOpaqueReservationBoundary:
         assert committed["state"] == "leased"
 
     async def test_commit_without_capacity_reservation_id_still_rejected(self, site_app):
-        """capacity_reservation_id remains genuinely required -- only
-        resource_id became optional. Confirms the fix didn't overcorrect."""
+        """capacity_reservation_id is required even though resource_id is
+        optional."""
         app, _ = site_app
         client = _client(app)
 

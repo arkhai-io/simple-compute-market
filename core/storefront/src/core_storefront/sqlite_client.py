@@ -919,11 +919,11 @@ class SQLiteClient:
                   connection_details TEXT,
                   tenant_credentials TEXT,
                   reason TEXT,
-                  -- Durable physical-fulfillment identity, so a caller can
-                  -- resume checking progress after a storefront restart
-                  -- without redispatching. Distinct from fulfillment_uid
-                  -- above (the on-chain settlement-claim identity) --
-                  -- see ARCHITECTURE.md's "Shared vocabulary and identities".
+                  -- A physical fulfillment's identity, distinct from
+                  -- fulfillment_uid above (the on-chain settlement-claim
+                  -- identity) -- see ARCHITECTURE.md's "Shared vocabulary and
+                  -- identities". VM restart convergence reads the identity
+                  -- from its delivery record, not from these columns.
                   capacity_reservation_id TEXT,
                   settlement_resource_id TEXT,
                   fulfillment_id TEXT,
@@ -3229,9 +3229,7 @@ class SQLiteClient:
         """Patch an escrows row. Any None field is skipped.
 
         ``capacity_reservation_id``/``settlement_resource_id``/``fulfillment_id``
-        are the durable physical-fulfillment identity -- persisted so a
-        caller can resume checking fulfillment progress by escrow after a
-        storefront restart, without redispatching. Distinct from
+        are a physical fulfillment's identity. Distinct from
         ``fulfillment_uid`` (the on-chain settlement-claim identity); both
         may legitimately be set on the same row.
         """

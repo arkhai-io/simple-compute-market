@@ -16,10 +16,10 @@ _REQUIRED_COMPUTE_KEYS = (
     "gpu_model",
 )
 
-# Every VM listing today is GPU compute -- ComputeGpuResourceAdapter is the
+# Every VM listing is GPU compute -- ComputeGpuResourceAdapter is the
 # only resource adapter this domain registers (domains/vms/listings/src/arkhai_vms_listings/resources.py),
-# so this is a domain constant, not something the order schema needs to
-# carry yet. Must match what capacity registration actually advertises
+# so this is a domain constant rather than a field the order schema
+# carries. Must match what capacity registration actually advertises
 # (kit/site's CapacityBucket.resource_type for VM resources), or the
 # claim's resource_type constraint would reject every resource that
 # exists.

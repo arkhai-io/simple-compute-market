@@ -71,7 +71,15 @@ from compute_provisioning.release import (
     FulfillmentReleaseStatusPort,
     FulfillmentServiceTeardownPort,
 )
-from market_fulfillment import SettlementRepository
+from market_fulfillment import (
+    FulfillmentOrchestrator,
+    PhysicalSettlementScheduler,
+    SettlementRepository,
+    SqlAlchemyFulfillmentUnitOfWork,
+)
+from market_fulfillment.db import Base as FulfillmentBase
+from market_resource_pools.db import Base as PoolsBase
+from market_site.db import Base as SiteBase
 from vm_provisioning_operator import VmOperatorClient
 from bare_metal_provisioning_adapter.codec import BareMetalAnsibleCodec
 from bare_metal_provisioning_adapter.services.bare_metal_fulfillment_plan import (
@@ -459,7 +467,6 @@ ok: [kvm1] => {
 
 def _initialize_test_database(engine, *, default_pool: bool = True):
     # resource_pools must exist before VM's ansible_pool_configs FK resolves.
-    from market_resource_pools.db import Base as PoolsBase
     PoolsBase.metadata.create_all(bind=engine)
     # VM's relay and pool-configuration tables ride VM's own metadata.
     VmBase.metadata.create_all(bind=engine)
@@ -469,11 +476,9 @@ def _initialize_test_database(engine, *, default_pool: bool = True):
     JobsBase.metadata.create_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Site-ledger tables ride market_site's own metadata.
-    from market_site.db import Base as SiteBase
     SiteBase.metadata.create_all(bind=engine)
     # Durable fulfillment tables (settlement_records, provisioned_resources,
     # scheduling_cursors) ride market_fulfillment's own metadata.
-    from market_fulfillment.db import Base as FulfillmentBase
     FulfillmentBase.metadata.create_all(bind=engine)
     # Migration creates no pool. The suite's tests place hosts and declare
     # capacity in a pool named "default", so the harness stores one, serving
@@ -720,7 +725,6 @@ async def client_and_queue(
 
     connectivity_probes = {"ssh": probe_ssh}
 
-    from market_fulfillment import PhysicalSettlementScheduler
     physical_settlement_scheduler = PhysicalSettlementScheduler(
         pool_service=resource_pool_service,
         capacity_ledger=capacity_ledger_service,
@@ -736,12 +740,6 @@ async def client_and_queue(
 
     from market_site.authority import LedgerSiteAuthority
     site_authority = LedgerSiteAuthority(capacity_ledger_service)
-
-
-    from market_fulfillment import (
-        FulfillmentOrchestrator,
-        SqlAlchemyFulfillmentUnitOfWork,
-    )
 
     # Fresh queue per test — caller can inject on_job_started via fixture params
     job_queue = AsyncJobQueue(max_concurrent=2)

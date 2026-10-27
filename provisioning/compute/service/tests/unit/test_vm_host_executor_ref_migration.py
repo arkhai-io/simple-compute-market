@@ -19,7 +19,9 @@ from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
+    _drop_columns_via_table_rebuild,
     _migrate_capacity_reservations_vm_host_to_executor_ref,
+    _validate_sql_identifier,
 )
 
 def _sqlite_memory_engine():
@@ -262,10 +264,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
         )
 
     def test_rebuild_refuses_a_table_with_triggers_or_views(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _sqlite_memory_engine()
         with engine.begin() as connection:
             connection.execute(text(
@@ -364,10 +362,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
         assert "vm_host" not in row
 
     def test_refuses_to_drop_every_column(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _sqlite_memory_engine()
         with engine.begin() as connection:
             connection.execute(text(
@@ -377,10 +371,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             _drop_columns_via_table_rebuild(engine, "only_one_column", ["junk"])
 
     def test_rejects_an_unsafe_table_name(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _bootstrap_engine_with_legacy_vm_host_column()
         with pytest.raises(ValueError, match="Not a safe SQL identifier"):
             _drop_columns_via_table_rebuild(
@@ -388,10 +378,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             )
 
     def test_rejects_an_unsafe_column_name(self):
-        from compute_provisioning_service.db.migrations import (
-            _drop_columns_via_table_rebuild,
-        )
-
         engine = _bootstrap_engine_with_legacy_vm_host_column()
         with pytest.raises(ValueError, match="Not a safe SQL identifier"):
             _drop_columns_via_table_rebuild(
@@ -399,10 +385,6 @@ class TestTableRebuildPreservesIndexesAndConstraints:
             )
 
     def test_validator_accepts_ordinary_identifiers_and_rejects_others(self):
-        from compute_provisioning_service.db.migrations import (
-            _validate_sql_identifier,
-        )
-
         assert _validate_sql_identifier("capacity_reservations") == "capacity_reservations"
         assert _validate_sql_identifier("_leading_underscore") == "_leading_underscore"
         for unsafe in (

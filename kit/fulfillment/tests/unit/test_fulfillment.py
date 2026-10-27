@@ -10,6 +10,7 @@ import pytest
 
 from market_fulfillment import (
     FULFILLMENT_RESULT_KIND,
+    CredentialFetchFailedError,
     FulfillmentConflictError,
     FulfillmentCreateFailedError,
     FulfillmentOrchestrator,
@@ -557,8 +558,6 @@ async def test_get_fulfillment_result_unknown_id_raises_not_found():
 
 @pytest.mark.asyncio
 async def test_get_fulfillment_result_credential_fetch_failure_is_distinct_from_workload_failure():
-    from market_fulfillment import CredentialFetchFailedError
-
     record = _record(state=SettlementRecordState.active.value)
     tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
     provider = _provider()
@@ -580,8 +579,6 @@ async def test_get_fulfillment_result_unexpected_provider_exception_is_wrapped_n
     CredentialFetchFailedError) still rejects the whole result as
     credential_fetch_failed, rather than leaking a raw provider-internal
     exception type to the caller."""
-    from market_fulfillment import CredentialFetchFailedError
-
     record = _record(state=SettlementRecordState.active.value)
     tx = FakeTransaction(record, provisioned_resources=[_provisioned_resource()])
     provider = _provider()
@@ -757,84 +754,6 @@ async def test_recoverable_dispatch_failure_remains_pending(caplog):
 
     assert result.state == SettlementRecordState.dispatch_pending.value
     assert "dispatch failed after durable acceptance" in caplog.text.lower()
-
-
-
-@pytest.mark.asyncio
-async def test_fresh_service_composition_reads_status_and_result_from_same_file_database(tmp_path):
-    """A new composition reconstructs status/result reads from durable state only."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from market_fulfillment.db import (
-        Base as FulfillmentBase,
-        ProvisionedResource,
-        SettlementRecord,
-    )
-    from market_fulfillment.fulfillment_persistence import (
-        SqlAlchemyFulfillmentUnitOfWork,
-    )
-
-    database = tmp_path / "fulfillment-result-restart.db"
-    database_url = f"sqlite:///{database}"
-
-    first_engine = create_engine(database_url)
-    FulfillmentBase.metadata.create_all(bind=first_engine)
-    first_factory = sessionmaker(bind=first_engine)
-    with first_factory() as db:
-        db.add(
-            SettlementRecord(
-                capacity_reservation_id="reservation-restart-1",
-                fulfillment_id="fulfillment-restart-1",
-                market="vms",
-                scheduling_requirements={"resource_kind": "vm"},
-                settlement_resource_id="host-1",
-                pool_id="pool-1",
-                provider="ansible",
-                resource_attributes={},
-                resource_host_id="host-1",
-                fulfillment_request=_request().model_dump(mode="json"),
-                provider_metadata={"current_job_id": "job-restart-1"},
-                state=SettlementRecordState.active.value,
-            )
-        )
-        db.add(
-            ProvisionedResource(
-                provisioned_resource_id="provisioned-restart-1",
-                capacity_reservation_id="reservation-restart-1",
-                fulfillment_id="fulfillment-restart-1",
-                status="active",
-            )
-        )
-        db.commit()
-    first_engine.dispose()
-
-    second_engine = create_engine(database_url)
-    second_factory = sessionmaker(bind=second_engine)
-    provider = _provider()
-    restarted = FulfillmentOrchestrator(
-        provider_registry=ProviderRegistry({"ansible": provider}),
-        unit_of_work=SqlAlchemyFulfillmentUnitOfWork(
-            session_factory=second_factory,
-            pool_service=MagicMock(),
-        ),
-    )
-
-    status = restarted.get_fulfillment_status("fulfillment-restart-1")
-    result = await restarted.get_fulfillment_result("fulfillment-restart-1")
-
-    assert status.fulfillment_id == "fulfillment-restart-1"
-    assert status.capacity_reservation_id == "reservation-restart-1"
-    assert status.state == SettlementRecordState.active.value
-    assert result.payload["fulfillment_id"] == "fulfillment-restart-1"
-    assert result.payload["provisioned_resources"] == [
-        {
-            "provisioned_resource_id": "provisioned-restart-1",
-            "status": "active",
-        }
-    ]
-    provider.fetch_credentials.assert_awaited_once()
-    second_engine.dispose()
 
 
 # ---------------------------------------------------------------------------

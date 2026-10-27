@@ -1209,6 +1209,21 @@ only the transport is:**
   push design, just triggered by the storefront's request instead of a
   background worker's schedule. This preserves "raw credentials MUST NOT
   be persisted" without needing an outbox at all.
+  *Corrected 2026-10-27 (implementation review 07 F1):* "never at rest"
+  holds for the fulfillment aggregate, its provider metadata, and any
+  result row, not for the provisioning service as a whole. The job
+  authority persists the `CredentialEnvelope`s a create job's executor
+  reports (`credentials` table, plain JSON), as the permanent
+  `physical-provisioning` requirement "Compute provisioning owns the job
+  and host authorities" requires, and `JobFulfillmentProvider.fetch_credentials`
+  answers each result query by reading its create job's from there; the
+  create job generates them on the host, and nothing can read them back
+  from it. "Never rotated" above is also not quite true: an operator's VM
+  password reset runs as its own job and stores new credentials against
+  it, which the fulfillment result does not read. The delta requirement is
+  restated as "Credentials stay with the job authority and are read on
+  demand", and the unencrypted store and the reset gap are recorded as
+  current limits in `openspec/specs/physical-provisioning/architecture.md`.
 - **`credential_generation` is dropped from this section's scope, not
   carried forward.** (Revised 2026-07-25.) The original rationale assumed
   a rotation source to detect staleness against. There isn't one: VM
@@ -1329,6 +1344,8 @@ unless it is durable and commercially meaningful.
 ## Design promotion record
 
 This record maps accepted durable decisions to current-state documentation. It is change history; the destination documents contain the normative present-tense contract.
+
+The per-section records below were written as each section landed, and some of their anchors have since been renamed or removed by later archived changes. "Closeout design-promotion record" at the end of this document is the complete record as archived, with every destination checked against the permanent documents.
 
 | Accepted decision | Permanent location |
 |---|---|
@@ -3015,9 +3032,9 @@ dependency note) belongs to the plan phase, not this document.
 | `schedule_resource`/`begin_fulfillment`/`get_fulfillment_status`/`get_fulfillment_result` as generic `ComputeProvisioningClient` methods, not split into a separate client/class | `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance` |
 | Sibling aggregator (`AggregateFulfillmentClient`) pattern and shared `reservation_sites` cache, not an extension of `AggregateCapacityClient`/`RemoteCapacityClient` | `core_storefront/aggregation.py` and `market_storefront/services/capacity_client.py` docstrings — no dedicated subsystem spec exists for storefront-side capacity aggregation at all (checked); recorded as code-owned rationale, not promoted into a new spec file for this one mechanism |
 | `fulfillment_id`/`fulfillment_uid` disambiguation | `docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities" |
-| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects |
-| Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring |
-| Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/add-buyer-vm-connectivity-terms/proposal.md`; registered in `openspec/changes/README.md` |
+| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects. **Correction (2026-10-27, task 12.5):** superseded since. `fulfillment_results.py` and `VmConnectionInfo` no longer exist; the relay comes from the pool's referenced relay, and the plan never reads `VmConnectivitySettings`, whose docstring now says so. Not promoted at closeout. **Further correction (2026-10-27, pre-closeout review 17 F1):** `VmConnectivitySettings` is deleted and a request carrying `connectivity` is refused; see "Pre-closeout review 17 F1" below. |
+| Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring. **Correction (2026-10-27, task 12.5):** that docstring no longer states the precedence; closeout's 13.9 re-checks where it lives now. |
+| Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/archive/2026-09-25-add-buyer-vm-connectivity-terms/proposal.md` (archived) |
 | `register_lease` removal sequencing (Section 10 task 10.5, not 9.2/9.6) | Noted on both `tasks.md`'s 9.2 and 10.5 entries |
 | `capacity_reservation_id`/`settlement_resource_id`/`fulfillment_id` persisted on the shared `escrows` table, a prerequisite for future restart recovery — **not itself restart recovery**; nothing yet reads these values back to resume an in-progress fulfillment after a crash (see the Section 9 status note below) | `core_storefront/sqlite_client.py` schema/docstrings; no subsystem spec covers storefront-side escrow persistence as its own capability, so this is recorded as code-owned schema documentation, matching the existing `fulfillment_uid`/`provisioning_job_id` precedent on the same table |
 
@@ -3066,6 +3083,9 @@ status/result as the fulfillment-cutover shape; `VmConnectivitySettings`/
 `VmConnectionInfo` as separate request/result-side models; the three-tier
 VM sizing precedence; `register_lease` removal sequenced with Section 10;
 `fulfillment_id` kept bare (not renamed) alongside `fulfillment_uid`.
+*Corrected 2026-10-27 (pre-closeout review 17 F1):* the request-side
+connectivity model no longer stands; a VM request carrying `connectivity` is
+refused.
 
 **Implemented and verified:** the HTTP schedule endpoint and shared client
 contracts; the storefront cutover itself (`_do_provision`); durable
@@ -3555,7 +3575,7 @@ The permanent physical-provisioning documentation must state this invariant:
 Capacity remains held while either state machine lacks confirmed teardown
 success, including while fulfillment is retryable after `teardown_failed`.
 
-### Static analysis of `e2e-tests/.../vms/test_full_deal.py`
+### Static analysis of `e2e-tests/tests/e2e/roles/scenarios/vms/test_full_deal.py`
 
 The current phases 10 and 11 are not compatible with the Section 10 cutover.
 They were written for the old direct-Ansible release path and still encode that
@@ -4539,6 +4559,36 @@ Permanent promotion is complete as of 2026-08-01 — see `tasks.md`'s "Section
 11 design promotion record" for the destinations and what was deliberately
 not promoted.
 
+## Pre-closeout review 17 F1: a VM request carries no connectivity (2026-10-27)
+
+Task 9.2 gave the VM fulfillment request a `connectivity` field, filled from
+storefront-configured FRP settings. Later relay work stopped the storefront
+sending it and wrote the permanent rule that a request cannot select a relay,
+but left the field declared: `VmConnectivitySettings` accepted `relay_addr`,
+`relay_port`, `relay_token`, and `vm_remote_port`, ignored unknown keys, and
+the plan never read it, while the fulfillment kit stored the request as
+received. A caller-supplied token therefore stayed at rest in
+`settlement_records.fulfillment_request`, and requests stored while the
+storefront still sent FRP settings may hold a dashboard password.
+
+The owner chose to refuse the field (alternative A) over stripping it before
+persistence (which needs a normalization hook in the generic kit), a
+specification-only restatement, or deferral:
+
+- `VmFulfillmentRequirements` no longer declares `connectivity`, and its
+  `extra="forbid"` refuses a request that carries it at preparation, inside
+  the acceptance transaction, so nothing is stored.
+- Paired migrations remove `connectivity` from stored VM requests: the
+  provisioning service's `20261027_001_vm_fulfillment_request_carries_no_connectivity`
+  and the VM storefront's `20261027_001_fulfillment_context_carries_no_connectivity`,
+  sharing field-removal helpers with the guest-name pair. Prepared operations
+  and provider metadata are not touched, as for the guest name.
+
+Promoted through this change's deltas: the MODIFIED `physical-provisioning`
+requirement "Ansible fulfillment adapter" (the refusal and its scenario) and
+the MODIFIED `vm-storefront-fulfillment` requirement "The storefront does not
+select buyer access infrastructure" (the request carries no `connectivity`).
+
 ## Task 11.2 alternatives: where the exact claim matcher lives (2026-07-30)
 
 The coarse `most_available` fix (task 11.2's original scope) ignores
@@ -4740,3 +4790,331 @@ lived in (the real adapter import, the real backfill INSERT). This is why
 `tasks.md`'s validation notes for this and adjacent sections distinguish "runs
 against a real composition" from "passes with the boundary mocked" as different
 strength claims, not interchangeable ones.
+
+## Rationale moved from task notes at closeout (2026-10-27)
+
+Closeout shortened `tasks.md`'s completed-task notes. What follows is the
+reasoning and debugging record those notes carried that this document did not
+already hold, kept here by task ID.
+
+### 4.2.3 — the scheduler's `attributes.get("pool_id")` fallback
+
+The fallback was not removed as its own step. The rewritten candidate
+enumeration (4.2.1) reads `CapacityBucket.pool_id` through
+`ResourceFeasibilityView.pool_id`, which itself falls back to `resource_id`
+when the column is `None`, so the scheduler-level attribute fallback had
+nowhere left to live and disappeared with the rewrite. The rewritten test
+helpers (4.2.4) pass a real `pool_id=`; the one remaining attributes-only test
+(`test_attribute_view_prefers_real_pool_id_over_attributes_json`) tests the
+view's fallback itself.
+
+### 4.5.2 — the abandonment hook is a constructor dependency
+
+The hook was wired once, as a `CapacityLedgerService` constructor parameter,
+rather than as a per-call `on_supersede` argument on `resize_reservation`. The
+"always call it" resolution (item 4) means all three reclaiming paths — TTL
+lapse, release, resize — invoke the same hook, and one piece of wiring keeps
+them consistent; a per-call parameter would have let `resize_reservation` be
+supplied a different hook from the other two. (The hook later became the
+release guard; see `openspec/specs/site-capacity/spec.md`'s "Reservation
+supersede and the release guard".)
+
+### 4.6 — abandonment reaches lease lifecycle by trace, not by test
+
+The hook-invocation unit tests cover `_expire_stale_holds` and `release()`.
+That `LeaseLifecycleService` never bypasses `release()` (it reaches it through
+`LedgerSiteAuthority`) was established by tracing the code path (item 4), not
+by an integration test against a live `LeaseLifecycleService`.
+
+### 4.7.2 — the persisted stale cursor
+
+The stale-cursor case was at first covered only structurally, by
+`DeterministicRoundRobinPolicy._next_after` and
+`test_disabling_pool_does_not_depend_on_existing_assignment`; no test pinned it
+against a persisted cursor. The gap was recorded rather than claimed, and 4.12
+closed it.
+
+### 4.11.5 — why the concurrency claim is serialization, not overlap
+
+An early draft of the interleaved `resource_kind` test tried to force two
+transactions to hold their cursors at once, with a barrier after `load_cursor`,
+and deadlocked: SQLite admits one active writer, so the second `BEGIN
+IMMEDIATE` waits for the first to commit. That is the evidence for describing
+the guarantee as independent-session serialization, never as overlapping row
+locks or a multi-replica proof.
+
+### 4.15.3 — the storefront suites that could not run then
+
+`make test-storefront` and `make test-vms-buyer` failed in that environment
+because the `[rl]` extra's `torch` dependency resolves against an index outside
+its network allowlist, a limitation `domains/vms/storefront/Makefile` already
+documents. Every suite this section's code could affect (`kit/*`,
+`provisioning/compute/service`) ran and passed. Later sections ran the
+storefront suites in full.
+
+### Section 4 closing statement — unrelated hygiene fixes
+
+The Section 4 closing pass also fixed ten pre-existing comment-hygiene
+violations outside Section 4's own code (one production comment and nine test
+docstrings naming change IDs or task numbers).
+
+### 9.0 — validation without a wheel build
+
+9.0's suites ran against source, with no wheel build in that environment.
+Eight provisioning unit failures came from an unbuilt `storefront_client`
+wheel, and most VM storefront unit modules could not collect for want of
+sibling packages; three `test_remote_capacity_client.py` failures were traced
+by import isolation to a missing `market_storefront.utils.sqlite_client`
+dependency. None reproduced once the wheel path worked (8.15 and later).
+
+### 9.2 — gaps found while building the fulfillment request
+
+Building the request the cutover sends surfaced four parity gaps the design
+review had not caught (the "Section 9 implementation confirmation" above
+records the decisions; this records how they were found):
+
+- **Connectivity.** `VmFulfillmentRequirements` had no field for the FRP
+  relay settings the legacy path passed per call, so `VmConnectivitySettings`
+  was added as forwarded metadata. Buyer-negotiated terms went to
+  `add-buyer-vm-connectivity-terms`. The relay later became a provisioning
+  resource, and pre-closeout review 17 F1 deleted the field (see "Pre-closeout
+  review 17 F1" above).
+- **Sizing units.** The legacy path sent no `vm_ram`, `vm_vcpus`, or
+  `vm_disk_size`, relying on inventory defaults, while the new model required
+  them. Traced against the Ansible role: `vm_ram` is MB (`virt-install
+  --ram`), `vm_vcpus` a count, `vm_disk_size` a `qemu-img` size string such as
+  `"80G"`. The fields became optional with the three-tier precedence, meant
+  as the first step toward negotiation-sourced shape.
+- **Credential and connection fields.** `fetch_credentials` dropped
+  `ssh_key_path_host`/`key_type`, and the result had none of the legacy
+  connection metadata, though `AnsibleJob.result` already held it. The owner
+  chose in discussion to extend the models rather than first check whether any
+  reader used those keys, since checking would have cost about as much. Review
+  then folded the six metadata fields into one result-side `VmConnectionInfo`,
+  kept apart from the request-side model because the two run in opposite
+  directions. Both models were later removed (`bare-metal-mock-provisioned-deal`
+  replaced VM's result envelope with the family's delivery).
+- **Verifying without `alkahest_py`.** The compiled `alkahest_py` was not
+  installed in that environment; the existing `test_fulfillment_service.py`
+  failed to collect on it before any change. The new
+  `test_fulfillment_provisioning.py` was verified with only that module
+  stubbed. Its fixtures also fixed a mock SQLite client whose missing
+  `update_escrow` had been swallowed by `_do_provision`'s defensive `except`.
+
+The `reinit` gap was found the same way the fix-loop bugs were: the first fix
+added `arkhai-kit-fulfillment` and checked it with `make -n`, but a real
+`make test` failed with `ImportError: cannot import name
+'resource_satisfies_requirement' from 'market_site'`, because the venv's older
+`market_site` was never told to refresh. A `PYTHONPATH`-based sandbox could not
+have caught a reinstall gap. The root `Makefile` also gained `dist-kits` as a
+prerequisite of `dist-compute-provisioning` and `dist-storefront`.
+
+### 9.3 — what was persisted, and what was left to 9.4/9.5
+
+The three identifiers went onto the shared `escrows` table, beside the
+`fulfillment_uid`/`provisioning_job_id` precedent, written as soon as each was
+known. `provisioning_job_id` stopped being written, since the new path has no
+ephemeral executor job; whether buyers needed `fulfillment_id` in its place was
+left to 9.4/9.5 and then added to the three settlement responses. The three
+`serialize_settlement_job` tests could not run in that environment
+(`arkhai_vms` was not available); the changed function was run standalone and
+the tests were disclosed as unrun. Later work moved VM's identity to its
+delivery record, and no production code now writes the three `escrows` columns
+(12.5).
+
+### 9.7 — two test-authoring bugs
+
+Writing the end-to-end `_do_provision` tests found two bugs in the tests, not
+in production: `_compute_listing()`'s `listing_id` is the gpu-count-suffixed
+`"listing-1x"`, so lookups by `"listing-1"` silently returned nothing; and
+`update_escrow` is `UPDATE`-only, so each test had to `insert_escrow` first, as
+the real negotiation flow does.
+
+### 10.3 — the `"direct-release"` sentinel regression
+
+`LeaseLifecycleService._process_releasing_reservation` honoured the
+`"direct-release"` sentinel only when `self._release_jobs is None`. That held
+for every deployment before the kind-routed dispatcher, and never holds once a
+dispatcher is always configured, so wiring 10.3 in silently broke bare metal's
+"nothing to poll, already done" shortcut. An integration test caught it; the
+check now depends on `job_id == "direct-release"` alone, which is why the
+sentinel is recorded as per-executor rather than a global switch.
+
+### 10.4 — verifying the composition cycle
+
+Before running the suite, the container was smoke-imported
+(`init_resources()`, then resolving `lease_lifecycle_service` and
+`fulfillment_service`) to catch a dependency cycle that would not appear as an
+edit-time error. Four integration tests that registered a lease without a
+fulfillment aggregate were fixed, since release now resolves a `fulfillment_id`.
+10.9 later replaced the lazy module-global accessor with a composition-bound
+port.
+
+### 10.6 — which lease surface the storefront calls
+
+`terminate_vm_lease` calls `ComputeProvisioningClient.terminate_lease`
+(`POST /api/v1/contract/leases/{capacity_reservation_id}/terminate`), the
+client the storefront already used for registration, not the VM-branded
+`/leases/...` surface the design first cited. Both reached the same
+`LeaseLifecycleService.terminate_lease`. (`bare-metal-mock-provisioned-deal`
+later replaced both with one family lease surface.)
+
+### 10.7 — `executor_ref` was never sent
+
+Tracing `ComputeProvisioningClient.register_lease` through
+`compute_contract_controller` to `ExecutorLeaseRegistration` showed
+`executor_ref` was only ever built by the VM-branded `leases_controller`, which
+the storefront does not call, so there was no write to remove.
+`test_contract_register_lease_never_sends_executor_ref_and_it_self_heals`
+records that, and the `LeaseState` defect found beside it is the "Addendum"
+under "Section 10 design review" above.
+
+### 10.8 — the teardown path's recovery was shared but unasserted
+
+`test_fulfillment_convergence.py` exercised the claim, lease, and resume
+machinery only through `dispatch_pending_creates`. The teardown passes shared
+it, but nothing asserted that, so
+`test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restart` and
+`test_worker_death_leaves_a_reclaimable_teardown_row_not_a_stuck_one` were
+added against `teardown_dispatch_pending`. `terminate_lease`'s test was also
+tightened to assert the aggregate reaches `teardown_dispatch_pending`, since
+reservation and fulfillment had become two state machines.
+
+### 10.14 — the e2e teardown rewrite already existed
+
+`refactor-e2e-fulfillment-lifecycle`'s audit found `test_full_deal.py` and
+`test_full_deal_buyer_cli.py` stages 10a–11b already implemented this task's
+sequence. Stage 08b asserted on `provisioning_job_id`, which the durable path
+never sets, so it failed and hid every later stage. That change fixed 08b;
+E2E run 38741626285 on `dev` (2026-10-15) passed stages 08b–11b, and the
+owner's earlier deferral of this task was struck through rather than deleted.
+
+### 11.17 — the API-credit storefront image imported raw source
+
+`domains/apicredits/storefront/Dockerfile`'s runtime stage ran `COPY domains/
+./domains/` with `PYTHONPATH=/app`, so `domains.apicredits.*` resolved from a
+raw source copy rather than the installed `arkhai-apicredits-domain` wheel; its
+comment claimed the concept modules were not shipped in the wheel. Before the
+line was removed, the wheel's force-include list and a repository grep showed
+it held every module the storefront imports and that nothing read those files
+by path. With no Docker daemon available, the check was to build every
+transitive wheel, install them into a clean venv beside only the storefront's
+own `src/`, and import each referenced module; that became
+`test_storefront_domain_imports_resolve_without_a_raw_source_copy`. The
+editable-source test is scoped to the API-credit domain because
+`remove-relative-uv-sources` owns the repository-wide check. Both Dockerfile
+stages also refresh `arkhai-apicredits-domain` and `arkhai-kit-site-client`,
+changed without a version bump. No real `docker build` was run then.
+
+## Closeout design-promotion record (2026-10-27)
+
+The complete record as archived. It supersedes the per-section records above
+where they differ: those were written as each section landed, and later archived
+changes have since renamed or removed some of the headings they cite. Every
+destination below was checked against the permanent documents at closeout.
+Delta requirements are cited by the heading the archive writes.
+
+### This change's delta specifications
+
+| Accepted decision | Permanent location |
+|---|---|
+| Cross-domain contracts use `capacity_reservation_id`; identifiers are opaque and globally unique, ownership explicit by `site_id` | `openspec/specs/site-capacity/spec.md#requirement-unambiguous-capacity-reservation-identity` (delta) |
+| Scheduling may be smaller than the reservation, never larger, by the shared feasibility predicate | `openspec/specs/site-capacity/spec.md#requirement-scheduling-requirements-remain-within-reserved-capacity` (delta) |
+| `CapacityReservation` keeps host identity, pool membership, reservable capacity, and settlement assignment separate | `openspec/specs/site-capacity/spec.md#requirement-capacity-schema-separation` (delta; restated from "Broad capacity schema cleanup" in task 12.4) |
+| One durable aggregate per `capacity_reservation_id`; `begin_fulfillment` idempotent by it | `openspec/specs/physical-provisioning/spec.md#requirement-durable-capacity-reservation-settlement-identity` (delta) |
+| Scheduling and beginning fulfillment are separate operations; begin resolves the durable assignment | `openspec/specs/physical-provisioning/spec.md#requirement-separate-scheduling-and-fulfillment-acceptance` (delta); `openspec/specs/fulfillment/architecture.md#scheduling-boundary` |
+| Reassignment and settlement-record writes commit in one transaction; a changed requirement supersedes | `openspec/specs/physical-provisioning/spec.md#requirement-atomic-scheduling-persistence` (delta) |
+| `fulfillment_id` addresses the whole fulfillment; outputs carry `provisioned_resource_id` | `openspec/specs/physical-provisioning/spec.md#requirement-fulfillment-and-provisioned-resource-identities` (delta) |
+| Provider input is prepared, versioned, and frozen before dispatch-pending commits | `openspec/specs/physical-provisioning/spec.md#requirement-versioned-prepared-provider-operations` (delta) |
+| Create and teardown commands deduplicate by deterministic contract keys | `openspec/specs/physical-provisioning/spec.md#requirement-deterministic-provider-command-idempotency` (delta) |
+| Provisioning owns convergence after acceptance; claims are safe under concurrent attempts through SQLite's single writer, not a distributed protocol | `openspec/specs/physical-provisioning/spec.md#requirement-provisioning-owned-lifecycle-convergence` (delta; wording reconciled at closeout with Section 6 item 1) |
+| Status and result are pulled from durable state; nothing is pushed | `openspec/specs/physical-provisioning/spec.md#requirement-durable-fulfillment-status-and-result-queries` (delta) |
+| Credentials stay with the job authority and are read on demand for an `active` fulfillment | `openspec/specs/physical-provisioning/spec.md#requirement-credentials-stay-with-the-job-authority-and-are-read-on-demand` (delta) |
+| Abandonment and capacity release commit together | `openspec/specs/physical-provisioning/spec.md#requirement-atomic-abandonment-and-release` (delta) |
+| Existing active VM leases backfill into the aggregate or the migration fails | `openspec/specs/physical-provisioning/spec.md#requirement-active-fulfillment-migration` (delta) |
+| The VM adapter executes against the scheduled resource, snapshots its inputs, takes shape from committed dimensions with pool defaults, and refuses a request carrying `connectivity` | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-fulfillment-adapter` (MODIFIED delta) |
+| The VM storefront sends no `connectivity` and holds no relay configuration | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-the-storefront-does-not-select-buyer-access-infrastructure` (MODIFIED delta) |
+
+### Sections 1–4: package, identities, capacity, persistence, scheduling
+
+| Accepted decision | Permanent location |
+|---|---|
+| Kit layers run foundation → authority → fulfillment; lower authority kits never import fulfillment, including under `TYPE_CHECKING` | `docs/development/ARCHITECTURE.md#package-and-dependency-layers`; `openspec/specs/fulfillment/spec.md#requirement-dependency-boundary`; `openspec/specs/fulfillment/architecture.md#capability-position` |
+| Scheduling, provider contracts, and the fulfillment orchestrator live in `kit/fulfillment` | `openspec/specs/fulfillment/spec.md#ownership` |
+| Lifecycle identifiers are opaque UUIDv7 strings | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-identities`; `docs/development/ARCHITECTURE.md#identifiers` |
+| Commercial agreement identity stays out of the physical settlement request | `openspec/specs/fulfillment/spec.md#requirement-physical-settlement-request` |
+| Multidimensional fit treats a missing dimension as zero | `openspec/specs/fulfillment/spec.md#requirement-multidimensional-eligibility` |
+| Scheduling selects before execution; a provider never substitutes placement | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment` |
+| Durable payloads use immutable versioned envelopes | `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes` |
+| Internal dependencies install as wheels from the wheelhouse; aggregate kit tests cover every kit | `openspec/specs/deployment-state/spec.md#requirement-internal-distributions-are-consumed-as-wheels-from-the-repository-wheelhouse`; `openspec/specs/deployment-state/spec.md#requirement-aggregate-kit-tests-cover-every-kit` (the section the Section 2 record cites was folded into these requirements by a later change) |
+| Capacity accounting is private to the site; inventory and grouped capacity are separate projections | `openspec/specs/site-capacity/spec.md#requirement-capacity-accounting-is-private-to-the-site-authority`; `openspec/specs/site-capacity/spec.md#requirement-physical-inventory-and-grouped-capacity-are-separate-projections`; the "Storefront projection families" paragraph of `openspec/specs/site-capacity/spec.md` |
+| Storefronts cache projections, poll independent identities, and keep stale complete generations | `openspec/specs/storefront-publication/spec.md#requirement-projection-backed-listing-candidate-derivation` (the requirement the Section 2 record cites was replaced by this one in a later change) |
+| One `SettlementRecord` per reservation; two separate equivalence checks; no persisted `SettlementResult`; claim fields on the row; immutable scheduled market; SQLite writer contract; restricted lifecycle updates; canonical models from callers | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md#durable-persistence-and-recovery` |
+| Session-accepting ledger entry points let fulfillment compose one transaction | `openspec/specs/site-capacity/spec.md#relationship-to-fulfillment-scheduling` |
+| `schedule_resource` is one atomic transaction; the round-robin cursor is durable per `resource_kind`; the policy stays pure | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment` |
+| Database-concurrency tests use independent sessions and explicit barriers at a semantic boundary | `docs/development/ARCHITECTURE.md#deterministic-database-concurrency-tests` |
+| Resize supersedes in one transaction | `openspec/specs/site-capacity/architecture.md#resize-as-one-transaction-not-two-calls-in-either-order` |
+| Every capacity-reclaiming path consults the site's abandonment hook | Superseded by `bare-metal-mock-provisioned-deal`: the hook became a release guard. Current: `openspec/specs/site-capacity/spec.md#requirement-reservation-supersede-and-the-release-guard`; `docs/development/ARCHITECTURE.md#release` |
+
+### Sections 5–8: acceptance, recovery, cutover, pull results
+
+| Accepted decision | Permanent location |
+|---|---|
+| Acceptance freezes provider input in one transaction, dispatches after commit, and acknowledges in a second; preparation is pure and receives the acceptance session | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement`; `docs/development/ARCHITECTURE.md#durable-fulfillment-acceptance` |
+| Dry run mirrors acceptance without side effects | `openspec/specs/fulfillment/spec.md#requirement-fulfillment-validation` |
+| `resource` names the full `SettlementResource`; bare identities use `settlement_resource_id` | `docs/development/ARCHITECTURE.md#shared-vocabulary-and-identities` |
+| One fulfillment convergence worker: claim, release the transaction, call the provider, apply only while owning the claim; no attempt ceiling; one diagnostics event per cycle; `teardown_failed` requeue | `openspec/specs/fulfillment/spec.md#fulfillment-convergence-worker`; `docs/development/ARCHITECTURE.md#recovery-workers` |
+| Provisioned-resource identities resolve only after confirmed create success; teardown updates existing rows | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` |
+| Legacy-lease cutover: state mapping, no speculative create, idempotent rerun, conflict rejection | `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover` |
+| Whole-population validation and one atomic write; a pure domain-owned compiler | `openspec/specs/fulfillment/architecture.md#atomic-legacy-lease-cutover`; `docs/development/ARCHITECTURE.md#atomic-workload-lifecycle-cutovers` |
+| Persisted VM leases resolve through provider contracts | `openspec/specs/physical-provisioning/spec.md#requirement-persisted-vm-leases-use-provider-contracts` (renamed from the heading the Section 7 record cites) |
+| A provider job identifier is the correlation recovery must not replace | `openspec/specs/physical-provisioning/architecture.md#provider-operation-correlation` (renamed from the heading the Section 7 record cites) |
+| `fetch_credentials` contract; `active`-only credential reads; `fulfillment.result.v1`; `credential_fetch_failed` | `openspec/specs/fulfillment/spec.md#requirement-provider-contract`; `openspec/specs/fulfillment/spec.md#requirement-fulfillment-status-and-result-queries`; `openspec/specs/fulfillment/spec.md#requirement-versioned-envelopes`; `openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy`; `openspec/specs/fulfillment/architecture.md#fulfillment-result-ownership`; `docs/development/ARCHITECTURE.md#fulfillment-status-and-results` |
+| No `credential_generation` field | Carried by the scenarios of `openspec/specs/fulfillment/spec.md#requirement-fulfillment-status-and-result-queries`, which promise no equality between reads; the field name itself is not stated |
+| The job record is the credential store | `openspec/specs/physical-provisioning/architecture.md#durable-jobs-transient-workers` |
+| VM result payload and credential fields | Superseded by `bare-metal-mock-provisioned-deal`. Current: `openspec/specs/physical-provisioning/spec.md#requirement-delivery-says-how-to-reach-what-was-provisioned` |
+
+### Sections 9–11: storefront cutover, teardown, schema removal
+
+| Accepted decision | Permanent location |
+|---|---|
+| `POST /fulfillment/schedule` and the four generic client methods | `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`; `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance` |
+| `fulfillment_uid` is distinct from `fulfillment_id` | `docs/development/ARCHITECTURE.md#identifiers` |
+| Accepted-deal delivery priority; full settlement convergence ownership; shared foreground and restart convergence; direct resumption; aggregate routing; ambiguous on-chain safety | `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-accepted-deal-delivery-priority`; `#requirement-full-settlement-convergence-ownership`; `#requirement-foreground-and-restart-convergence`; `#requirement-physical-fulfillment-resumption`; `#requirement-aggregate-site-routing`; `#requirement-ambiguous-on-chain-submission-safety` |
+| Versioned fulfillment context | Superseded by `bare-metal-mock-provisioned-deal` (provisioning names the guest). Current: `openspec/specs/vm-storefront-fulfillment/spec.md#requirement-the-fulfillment-context-records-the-exact-request-naming-no-guest` |
+| VM sizing precedence: committed dimension, then pool default, then unset | `openspec/specs/physical-provisioning/spec.md#requirement-ansible-fulfillment-adapter`; `openspec/specs/physical-provisioning/spec.md#requirement-provisioning-shape-comes-from-committed-capacity` |
+| `VmConnectivitySettings` and `VmConnectionInfo` as request-side and result-side models | Not promoted: both are gone, and a request carrying `connectivity` is refused ("Pre-closeout review 17 F1" above) |
+| `begin_fulfillment_teardown` is the whole-fulfillment teardown entrypoint, idempotent across tearing-down states, over HTTP and the client | `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/spec.md#requirement-fulfillment-teardown-is-available-through-the-provisioning-client`; `docs/development/ARCHITECTURE.md#release` |
+| Lease release delegates to fulfillment teardown through a composition-root-bound port; lease release and teardown keep separate retry ownership | `openspec/specs/physical-provisioning/spec.md#requirement-lease-release-delegates-to-durable-fulfillment-teardown`; `openspec/specs/physical-provisioning/spec.md#requirement-lease-release-and-fulfillment-teardown-have-separate-retry-ownership`; `openspec/specs/physical-provisioning/architecture.md#proof-driven-release` |
+| Early termination reuses lease termination | `openspec/specs/physical-provisioning/spec.md#requirement-explicit-early-lease-termination` |
+| The VM-branded lease surface, per-offering-mode release executors and dispatchers, and `offering_mode` on lease registration ("Lease registration tolerates omitted identity hints") | Superseded by `bare-metal-mock-provisioned-deal`. Current: `openspec/specs/physical-provisioning/spec.md#requirement-leases-have-one-family-surface-that-records-and-releases`; `#requirement-a-leases-executor-identity-and-evidence-are-fixed-once-recorded`; `#requirement-an-undelivered-lease-is-released-by-what-its-fulfillment-proves`; `docs/development/ARCHITECTURE.md#release` |
+| Domain-injected exact `ClaimMatcher` composes with the core aggregator | `openspec/specs/site-capacity/architecture.md#projected-feasibility-matching`; `openspec/specs/market-composition/architecture.md#composition-from-above-and-below` |
+| API-credit clients composed and reused; typed capacity-administration client | `openspec/specs/api-credits/architecture.md#implementation-composition`; `docs/development/ARCHITECTURE.md#site-authority` |
+| API-credit service migrates in-process at startup | `openspec/specs/deployment-state/spec.md#requirement-service-owned-migration-history` |
+| API-credit packages resolve internal dependencies from wheels | `docs/development/ARCHITECTURE.md#build-packaging-and-initialization` |
+
+### Recorded as code-owned or not promoted
+
+- The sibling `AggregateFulfillmentClient` and shared `reservation_sites` cache, and
+  the identity columns on `escrows`: code docstrings, since no capability owns
+  storefront-side aggregation or escrow persistence. No production code writes the
+  `escrows` identity columns (12.5); dropping them is a schema decision left open.
+- Claim-lease and job-resubmission backoff namespaces: the service's `config.yml`.
+- `get_pool_in_session`: not promoted as a method. The guarantee it serves, that
+  acceptance reads pool configuration inside its own transaction, is stated in
+  `openspec/specs/fulfillment/architecture.md#fulfillment-acceptance-and-dispatch-acknowledgement`.
+- The existence-only fulfillment ownership check: with one storefront per authority,
+  per-record ownership would be vacuous; the authenticated boundary is
+  `openspec/specs/physical-provisioning/architecture.md#authenticated-service-boundary`.
+- The SQLite table-rebuild helper's foreign-key safety and identifier validation,
+  the shared cutover row-draft types in `kit/fulfillment`, and `LeaseState`
+  completeness: code-level, as their section records state.
+- `deal_ref`: dropped from this change's scope in Section 11.
+
+### Closeout documents
+
+| Part | Disposition |
+|---|---|
+| Roadmap | No goal affected: `docs/development/ROADMAP.md`'s Goal 1 current state already describes the provisioning-owned fulfillment lifecycle, and no gap names this change (13.5) |
+| Campaign index | The row in `openspec/changes/README.md` links the archived directory; the POOLS campaign graph is unchanged (13.6) |
+| `ARCHITECTURE.md` | "Fulfillment status and results" restated as current state, without naming a planned change (13.3) |

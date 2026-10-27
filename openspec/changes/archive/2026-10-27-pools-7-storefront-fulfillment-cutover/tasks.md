@@ -1,6 +1,6 @@
 ## 1. Finalize shared contracts and package skeleton
 
-- [x] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order. **Resolved: `pools-6` pass 1 (the dimensions-map mechanism) is landed and is what this change builds on; pass 2 (real per-dimension `Host` fields) remains open `pools-6` scope (design.md, "Dependency on POOLS-6"). Proceeding against pass-1 wiring is a deliberate, documented decision, not a silent gap.**
+- [x] 1.0 Verify `pools-6-multidimensional-fair-scheduling` has landed and `Host` (or its replacement) carries real memory/disk/vCPU capacity fields before proceeding past task 1. `proposal.md` lists this as a blocking prerequisite for reservation-admission work (tasks 2 and 4) — this task exists so the plan fails loudly rather than silently proceeding without it if implementation ever starts out of the intended POOLS-6-then-POOLS-7 order. **Resolved: built deliberately on `pools-6` pass 1 (the dimensions map); pass 2 (per-dimension `Host` fields) stays `pools-6` scope (design.md, "Dependency on POOLS-6").**
 - [x] 1.1 Create `kit/fulfillment` using repository-standard Python kit packaging, Makefile, tests, typing marker, and distribution/reinit conventions.
 - [x] 1.2 Define globally unique opaque ID value types for `capacity_reservation_id`, `fulfillment_id`, `provisioned_resource_id`, `settlement_resource_id`, and `result_id`; evaluate UUIDv7 against repository conventions and document the selected format. **Resolved: UUIDv7 via the `uuid6` package (design.md, "Final planning decisions").**
 - [x] 1.3 Decide and document whether routing/integrity requires an explicit site-plus-pool composite reference in addition to globally unique `pool_id` and explicit `site_id`. **Resolved: not needed (design.md, "Final planning decisions").**
@@ -44,11 +44,11 @@
 
 - [x] 2.1 Rename `SiteAllocation` and related APIs/models/columns to `CapacityReservation` / `capacity_reservation_id` across `kit/site`, provisioning services, clients, fixtures, and tests. **Done: `kit/site` (canonical), `kit/fulfillment`, `provisioning/compute` (+ service), `domains/bare_metal`, `domains/vms` (storefront + provisioning adapter/client), `core/storefront` (+ client), `domains/apicredits`, and e2e tests. Current-schema migrations rename the live reservation tables and columns while historical migrations retain the schema names they originally created. Unrelated allocation concepts such as `allocation_mode` and storefront-local compute-allocation bookkeeping remain unchanged.**
 - [x] 2.2 Implement the approved breaking separation of host identity, resource-pool membership, reservable capacity, and nullable settlement-resource assignment; retire `SiteResource` and obsolete fields where the final model replaces them. Includes retiring the storefront's host/resource sync push in favor of deriving `site_resource_pools` from the provisioning service's own `Host`/`ResourcePool` tables.
-- [x] 2.3 **Rescoped during code review (2026-07-22):** this is not `kit/site`/`kit/resource-pools` schema work. Provisioning-owned single-site databases must not redundantly store storefront-owned `site_id`. The remaining durability gap is storefront-side connection-to-site identity, currently held only in process-local aggregation state; complete or relocate this task with the durable storefront persistence work in Section 3 / POOLS-8 rather than solving it piecemeal here. **Relocation resolved (2026-08-03, during POOLS-8 Section 2 implementation):** no further work needed. `core_storefront.aggregation.AggregateCapacityClient._reservation_sites` already implements this as a soft, re-derivable cache rather than a ledger — its own docstring states misses (including a process restart) "fall back to asking every site, and the answer is re-learned." POOLS-8 independently confirmed no consumer needs stronger durability, and its own per-site projection load-state work (Section 2) adopted the identical soft-cache-with-retry pattern rather than adding persistence. This durability gap is closed by design, not by new code.
+- [x] 2.3 **Rescoped during code review (2026-07-22):** this is not `kit/site`/`kit/resource-pools` schema work. Provisioning-owned single-site databases must not redundantly store storefront-owned `site_id`. The remaining durability gap is storefront-side connection-to-site identity, currently held only in process-local aggregation state; complete or relocate this task with the durable storefront persistence work in Section 3 / POOLS-8 rather than solving it piecemeal here. **Resolved (2026-08-03): no code needed.** `AggregateCapacityClient._reservation_sites` is a soft, re-derivable cache: a miss, including after restart, asks every site and re-learns the answer. POOLS-8 confirmed no consumer needs stronger durability and used the same pattern for per-site projection load state.
 - [x] 2.4 Extract one shared feasibility predicate used by reservation-time admission and scheduling-time eligibility. **Done: `kit/site` owns the canonical feasibility view and pure predicate; reservation admission and `kit/fulfillment` scheduling consume the same normalized resource facts.**
 - [x] 2.5 Make ledger unit-claim aliases configurable rather than VM-specific, and remove the scheduler's default VM-flavored `resource_kind` fallback. **Done as part of Section 1 task 1.4.**
 - [x] 2.6 Reject scheduling requirements that exceed the capacity reservation in any governed dimension while permitting smaller shapes. **Done in the fulfillment scheduler; dimensions absent from the reservation are not governed by this comparison.**
-- [x] 2.7 Add migration and unit tests for uniqueness, host-granular feasibility, and the shared predicate. **Shared-predicate and reservation-bound tests are present; migration, final-schema, public-contract, persistence-round-trip, and remaining host/resource-model coverage remain open. Storefront site-identity durability is tracked with the rescoped 2.3 work.**
+- [x] 2.7 Add migration and unit tests for uniqueness, host-granular feasibility, and the shared predicate. **Shared-predicate and reservation-bound tests landed here; migration, final-schema, public-contract, and round-trip coverage were completed by 2.14–2.20 and 2.36. Storefront site-identity durability: see 2.3.**
 
 ### Section 2 code-review correction plan
 
@@ -92,14 +92,14 @@
 
 ## 3. Add shared settlement persistence
 
-- [x] 3.1 Define shared SQLAlchemy mappings, on a new `market_fulfillment`-owned declarative `Base` (mounted by the compute provisioning service's `db/models.py` alongside `market_site`'s and `market_resource_pools`' metadata, following the existing re-export pattern), for one settlement/fulfillment aggregate row per `capacity_reservation_id` (primary key), `ProvisionedResource` outputs, and recovery-claim fields. No result-delivery outbox and no separate `SettlementResult` model in v1 — `get_fulfillment_result` (section 8) is a read-time projection over the aggregate and its `ProvisionedResource` rows, not a persisted result object; see `design.md`, "Section 3 settlement persistence design decisions," "No persisted `SettlementResult`." The aggregate carries: `fulfillment_id` (nullable until accepted, unique, generated on first transition past `assigned`); `market`; `scheduling_requirements` and `fulfillment_request` as two separately-persisted, independently-immutable-once-written fields (see 3.4); `resource_id` constraint (if supplied), `settlement_resource_id`/`pool_id`/`provider`/resource attributes once assigned; `prepared_create_operation`/`prepared_teardown_operation` as `VersionedEnvelope`-typed JSON columns (extending the existing `market_fulfillment.envelopes` pattern, not a second versioning mechanism — see design.md); `provider_metadata`/`teardown_provider_metadata`; `state`; recovery-claim columns (`claimed_by`, `claim_expires_at`, attempt counter) directly on this row, not a separate claims table; timestamps. **Done: `kit/fulfillment/src/market_fulfillment/db.py` defines the `settlement_records`/`provisioned_resources` tables on their own `Base`; `compute_provisioning_service/db/models.py` re-exports them and `db/database.py`'s `run_migrations` mounts `FulfillmentBase.metadata.create_all` alongside the pools/service/site Bases.**
-- [x] 3.2 Implement generic SQLAlchemy repositories using caller-supplied sessions so site-capacity and settlement changes can share one transaction. This requires new session-accepting entry points on `CapacityLedgerService` (`kit/site`), not just the new fulfillment-side repository — see `design.md`, "Ledger additions needed for one atomic scheduling transaction": add `lock_reservation(db, capacity_reservation_id)` (new; no existing read takes a row lock), `assign_settlement_resource_in_session(db, ...)` (extract the existing self-managed-session method's already-`db`-parameterized internals as a core, keep the public method as a thin wrapper), and `backing_resource_id_in_session(db, capacity_reservation_id)` (public exposure of the existing private `_backing_resource_id`). These are `kit/site` changes consumed by the Section 4 scheduler, not `kit/fulfillment` changes, and belong in this task's file list for that reason. **Done: `kit/fulfillment/src/market_fulfillment/repository.py` (`SettlementRepository`, caller-supplied `Session` throughout, never commits); `kit/site/src/market_site/ledger.py` gained `lock_reservation`, `assign_settlement_resource_in_session`, and `backing_resource_id_in_session`, with the existing public methods now thin wrappers over the session-scoped cores. Not yet consumed by an actual atomic transaction spanning both packages — that composition is Section 4's `schedule_resource`.**
-- [x] 3.3 Define fulfillment, provider-command, teardown, and abandonment states plus a compact table-driven transition validator. No separate result-delivery state machine in v1 (see 3.1). **Done: `kit/fulfillment/src/market_fulfillment/transitions.py`'s `SettlementRecordState` enum (on `db.py`) and `validate_transition` table-driven validator.**
-- [x] 3.4 Persist two separate canonical request shapes, each with its own equivalence scope, and enforce one fulfillment aggregate per `capacity_reservation_id`: `scheduling_requirements` (the normalized `SettlementRequirement` evaluated by `schedule_resource`) and `fulfillment_request` (the domain-specific payload `begin_fulfillment` accepts, distinct from scheduling requirements — see design.md, "Two separate persisted requirement shapes"). Compare by structural equality on the persisted, canonicalized JSON — no hash/digest fingerprint, unlike Section 2's projection digests, which solve a different problem (cross-process drift detection, not single-aggregate idempotency). **Done: `SettlementRecord.scheduling_requirements` and `SettlementRecord.fulfillment_request` are two separate JSON columns; `SettlementRepository.schedule`/`accept_fulfillment` compare against them independently.**
-- [x] 3.5 Implement equivalent retry return and conflicting retry rejection before provider submission, for both equivalence scopes from 3.4 independently: a `schedule_resource` retry compares `market` + `scheduling_requirements`, with any supplied `resource_id` constraint checked separately for consistency against the stored `settlement_resource_id`; a `begin_fulfillment` retry compares `market` + `fulfillment_request` only, since the resource is loaded from the row rather than supplied by the caller (task 5.5). Note this closes a real gap in the current in-memory scheduler, which only checks `resource_id` consistency on retry and does not compare requirements at all — not a preservation of existing behavior. **Done: `SettlementRepository.schedule` and `SettlementRepository.accept_fulfillment` implement both equivalence scopes end-to-end at the repository layer. Not yet wired to the actual `PhysicalSettlementScheduler.select_resource` or `FulfillmentService.create` call sites, which still use their pre-Section-3 in-memory/partial checks — that rewiring is Section 4 and Section 5 scope respectively.**
-- [x] 3.6 Model one fulfillment to many `ProvisionedResource` rows with aggregate status; leave per-resource teardown unexposed unless a current caller requires it. **Done: `ProvisionedResource` model plus `SettlementRepository.add_provisioned_resource`/`list_provisioned_resources`.**
-- [x] 3.7 Add repository, concurrency, state-transition, and canonicalization tests. **Done: `kit/fulfillment/tests/unit/test_settlement_db.py`, `test_transitions.py`, `test_repository.py` (63 fulfillment-kit tests passing); `kit/site/tests/unit/test_settlement_assignment.py` gained transaction-sharing/rollback/lock coverage (67 site-kit tests passing). Repository tests cover both equivalence scopes, conflict rejection, provisioned-resource attachment, and recovery-claim/reclaim behavior.**
-- [x] 3.8 Promote the aggregate's identity shape (`capacity_reservation_id` as primary key, `fulfillment_id` as a generated column), the two-equivalence-scope idempotency rule, the recovery-claim-on-row-not-separate-table shape, and the "no persisted `SettlementResult`" decision into `openspec/specs/fulfillment/spec.md`; add the design-promotion record entries once implemented. **Done: promoted into `openspec/specs/fulfillment/spec.md` ("Durable settlement persistence" section, Responsibilities/Evidence updates) and `openspec/specs/site-capacity/spec.md` ("Relationship to fulfillment scheduling", Evidence). Design-promotion record entries added below.**
+- [x] 3.1 Define shared SQLAlchemy mappings, on a new `market_fulfillment`-owned declarative `Base` (mounted by the compute provisioning service's `db/models.py` alongside `market_site`'s and `market_resource_pools`' metadata, following the existing re-export pattern), for one settlement/fulfillment aggregate row per `capacity_reservation_id` (primary key), `ProvisionedResource` outputs, and recovery-claim fields. No result-delivery outbox and no separate `SettlementResult` model in v1 — `get_fulfillment_result` (section 8) is a read-time projection over the aggregate and its `ProvisionedResource` rows, not a persisted result object; see `design.md`, "Section 3 settlement persistence design decisions," "No persisted `SettlementResult`." The aggregate carries: `fulfillment_id` (nullable until accepted, unique, generated on first transition past `assigned`); `market`; `scheduling_requirements` and `fulfillment_request` as two separately-persisted, independently-immutable-once-written fields (see 3.4); `resource_id` constraint (if supplied), `settlement_resource_id`/`pool_id`/`provider`/resource attributes once assigned; `prepared_create_operation`/`prepared_teardown_operation` as `VersionedEnvelope`-typed JSON columns (extending the existing `market_fulfillment.envelopes` pattern, not a second versioning mechanism — see design.md); `provider_metadata`/`teardown_provider_metadata`; `state`; recovery-claim columns (`claimed_by`, `claim_expires_at`, attempt counter) directly on this row, not a separate claims table; timestamps. **Done: `market_fulfillment/db.py` (`settlement_records`, `provisioned_resources`), mounted by the provisioning service's database initialization.**
+- [x] 3.2 Implement generic SQLAlchemy repositories using caller-supplied sessions so site-capacity and settlement changes can share one transaction. This requires new session-accepting entry points on `CapacityLedgerService` (`kit/site`), not just the new fulfillment-side repository — see `design.md`, "Ledger additions needed for one atomic scheduling transaction": add `lock_reservation(db, capacity_reservation_id)` (new; no existing read takes a row lock), `assign_settlement_resource_in_session(db, ...)` (extract the existing self-managed-session method's already-`db`-parameterized internals as a core, keep the public method as a thin wrapper), and `backing_resource_id_in_session(db, capacity_reservation_id)` (public exposure of the existing private `_backing_resource_id`). These are `kit/site` changes consumed by the Section 4 scheduler, not `kit/fulfillment` changes, and belong in this task's file list for that reason. **Done: `SettlementRepository` (caller-supplied `Session`, never commits); `kit/site`'s ledger gained the three session-scoped entry points, its public methods wrapping them. Section 4's `schedule_resource` composes them into one transaction.**
+- [x] 3.3 Define fulfillment, provider-command, teardown, and abandonment states plus a compact table-driven transition validator. No separate result-delivery state machine in v1 (see 3.1). **Done: `SettlementRecordState` and the table-driven `validate_transition`.**
+- [x] 3.4 Persist two separate canonical request shapes, each with its own equivalence scope, and enforce one fulfillment aggregate per `capacity_reservation_id`: `scheduling_requirements` (the normalized `SettlementRequirement` evaluated by `schedule_resource`) and `fulfillment_request` (the domain-specific payload `begin_fulfillment` accepts, distinct from scheduling requirements — see design.md, "Two separate persisted requirement shapes"). Compare by structural equality on the persisted, canonicalized JSON — no hash/digest fingerprint, unlike Section 2's projection digests, which solve a different problem (cross-process drift detection, not single-aggregate idempotency). **Done: two JSON columns, compared independently by `schedule` and `accept_fulfillment`.**
+- [x] 3.5 Implement equivalent retry return and conflicting retry rejection before provider submission, for both equivalence scopes from 3.4 independently: a `schedule_resource` retry compares `market` + `scheduling_requirements`, with any supplied `resource_id` constraint checked separately for consistency against the stored `settlement_resource_id`; a `begin_fulfillment` retry compares `market` + `fulfillment_request` only, since the resource is loaded from the row rather than supplied by the caller (task 5.5). Note this closes a real gap in the current in-memory scheduler, which only checks `resource_id` consistency on retry and does not compare requirements at all — not a preservation of existing behavior. **Done at the repository layer (`schedule`, `accept_fulfillment`); Sections 4 and 5 wired the scheduler and fulfillment call sites to it.**
+- [x] 3.6 Model one fulfillment to many `ProvisionedResource` rows with aggregate status; leave per-resource teardown unexposed unless a current caller requires it. **Done: `ProvisionedResource` and its repository methods.**
+- [x] 3.7 Add repository, concurrency, state-transition, and canonicalization tests. **Done: `kit/fulfillment`'s `test_settlement_db.py`, `test_transitions.py`, `test_repository.py` (both equivalence scopes, conflicts, provisioned resources, recovery claims); `kit/site`'s `test_settlement_assignment.py` (shared transaction, rollback, lock).**
+- [x] 3.8 Promote the aggregate's identity shape (`capacity_reservation_id` as primary key, `fulfillment_id` as a generated column), the two-equivalence-scope idempotency rule, the recovery-claim-on-row-not-separate-table shape, and the "no persisted `SettlementResult`" decision into `openspec/specs/fulfillment/spec.md`; add the design-promotion record entries once implemented. **Done: `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and `openspec/specs/site-capacity/spec.md#relationship-to-fulfillment-scheduling`.**
 
 ### Section 3 code-review correction plan
 
@@ -110,7 +110,7 @@
 - [x] 3.13 Document the canonical-input contract: repository callers must provide validated canonical Pydantic models/envelopes before persistence; the repository compares their JSON-compatible structural form and does not canonicalize arbitrary dictionaries. Add focused tests for the canonical model forms the public APIs permit, including omitted-versus-explicit defaults and nested envelope round trips where applicable. Permanent documentation: update `openspec/specs/fulfillment/spec.md#durable-settlement-persistence` and the relevant request/envelope requirements.
 - [x] 3.14 Add service-level schema validation without introducing migration scripts for these new tables. Test that provisioning database initialization mounts the fulfillment metadata, creates only the current tables and constraints, is idempotent on rerun, preserves foreign keys and query-critical indexes, and passes the service's final schema check. SQLite is the supported database for this service; PostgreSQL validation remains out of scope. Permanent documentation: update evidence only; no migration-history commentary belongs in permanent specifications.
 - [x] 3.15 Remove references to active change documents (`design.md`, POOLS-7, or task chronology) from production docstrings/comments and stable test guidance. Replace broader-context references with stable anchors in `openspec/specs/fulfillment/spec.md`, `openspec/specs/site-capacity/spec.md`, or `docs/development/ARCHITECTURE.md` as appropriate. Review every Section 3-touched production file for present-tense intent and invariant wording.
-- [x] 3.16 Correct Section 3 validation claims. Added an independent-session, file-backed SQLite fulfillment-acceptance race test and retained sequential single-worker lease tests as a distinct category. **Verified during the final review pass with a working `.dist`/`uuid6` environment: `test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity` passes as part of the full 151/151 `kit/fulfillment` suite (the earlier session's environment lacked `uuid6`/`.dist` and could only confirm source compilation).**
+- [x] 3.16 Correct Section 3 validation claims. Added an independent-session, file-backed SQLite fulfillment-acceptance race test and retained sequential single-worker lease tests as a distinct category. **`test_concurrent_sqlite_acceptance_returns_one_fulfillment_identity` passes in the full `kit/fulfillment` suite; it was first claimed on source compilation alone and confirmed by a real run in the final review pass.**
 - [x] 3.17 Complete the Section 3 design-promotion record after implementation, mapping immutable market identity, SQLite concurrency guarantees, the narrowed recovery helper, lifecycle-update restrictions, and the canonical-caller contract to their exact permanent documentation locations. The promotion record must describe accepted durable decisions; temporary implementation notes remain in this change only.
 
 ## 4. Implement atomic scheduling
@@ -128,51 +128,51 @@ self-committing calls glued together in the scheduler, the way today's
 
 - [x] 4.1 Replace process-local scheduler assignment and round-robin state with database-backed selection and deterministic persisted fairness state where required.
   - [x] 4.1.1 Add a `SchedulingCursor` model to `kit/fulfillment/src/market_fulfillment/db.py`, table `scheduling_cursors`, primary key `resource_kind`, columns `last_pool_id` (nullable string) and `last_resource_by_pool` (JSON map of pool id to last-selected resource id). One row per `resource_kind`; a buyer negotiates for one `resource_kind` per reservation, so fairness is isolated per `resource_kind` rather than globally or per finer key (design.md, item 2). **Done.**
-  - [x] 4.1.2 Change `SettlementSchedulingPolicy.select` (`kit/fulfillment/src/market_fulfillment/scheduling.py`) to a pure function of explicit inputs: `select(requirement, candidates, cursor) -> tuple[SettlementCandidate, cursor]`. No database or session access in this module or in `round_robin_policy.py` — the protocol must remain unit-testable without a database. **Done: new `SchedulingCursorState` frozen dataclass carries the value; the boundary test `test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies` confirms `scheduling.py`/`round_robin_policy.py` import nothing beyond stdlib and this package's own modules.**
+  - [x] 4.1.2 Change `SettlementSchedulingPolicy.select` (`kit/fulfillment/src/market_fulfillment/scheduling.py`) to a pure function of explicit inputs: `select(requirement, candidates, cursor) -> tuple[SettlementCandidate, cursor]`. No database or session access in this module or in `round_robin_policy.py` — the protocol must remain unit-testable without a database. **Done: `SchedulingCursorState` carries the value; purity held by `test_only_scheduler_and_ids_modules_import_the_two_allowed_kit_dependencies`.**
   - [x] 4.1.3 Rewrite `DeterministicRoundRobinPolicy` (`round_robin_policy.py`) to the new pure signature: read `cursor.last_pool_id`/`cursor.last_resource_by_pool` instead of instance attributes, return the selected candidate plus a new cursor value, and stop mutating `self`. The class becomes stateless and safe to share across concurrent calls. **Done.**
   - [x] 4.1.4 Add `SettlementRepository` methods (`kit/fulfillment/src/market_fulfillment/repository.py`) to read and upsert one cursor row within a caller-supplied session: `get_cursor_in_session(db, resource_kind) -> SchedulingCursor` (creates a zero-value row on first use, so callers never handle "no cursor yet" as a distinct case) and `save_cursor_in_session(db, resource_kind, last_pool_id, last_resource_by_pool)`. **Done.**
-  - [x] 4.1.5 Document the cursor's concurrency contract honestly: `schedule_resource`'s `BEGIN IMMEDIATE` transaction (task 4.3) reserves SQLite's single-writer slot before the cursor row is read, so concurrent `schedule_resource` calls for the same `resource_kind` serialize at the database level. This is the same SQLite single-writer guarantee already documented for fulfillment acceptance in Section 3, not a claim of portable row-lock semantics, and not a reason to add lock-owner/lock-time columns to this table now — that lock/lease shape (mirroring the aggregate's recovery-claim columns) is the fallback only if a future non-SQLite or genuinely multi-writer deployment needs it. **Done in code comments (`repository.py`'s `begin_sqlite_write_transaction`, now public and reused by `scheduler.py`); normative spec promotion is 4.8.1, not yet done.**
+  - [x] 4.1.5 Document the cursor's concurrency contract honestly: `schedule_resource`'s `BEGIN IMMEDIATE` transaction (task 4.3) reserves SQLite's single-writer slot before the cursor row is read, so concurrent `schedule_resource` calls for the same `resource_kind` serialize at the database level. This is the same SQLite single-writer guarantee already documented for fulfillment acceptance in Section 3, not a claim of portable row-lock semantics, and not a reason to add lock-owner/lock-time columns to this table now — that lock/lease shape (mirroring the aggregate's recovery-claim columns) is the fallback only if a future non-SQLite or genuinely multi-writer deployment needs it. **Done: `begin_sqlite_write_transaction`'s documentation; promoted by 4.8.1.**
 
 - [x] 4.2 Add the two new session-scoped read methods `schedule_resource` composes, replacing today's self-committing enumeration:
-  - [x] 4.2.1 `CapacityLedgerService.iter_scheduling_candidates_in_session(db, *, resource_kind, exclude_reservation_id) -> list[ResourceFeasibilityView]` (`kit/site/src/market_site/ledger.py`): every enabled `CapacityBucket` of the given `resource_kind`, built through the existing `_resource_feasibility_view`/`resource_satisfies_requirement` path, with `exclude_reservation_id`'s own current `CapacityReservationDebit` credited back into `available` — replacing the ad hoc credit-back today's `PhysicalSettlementScheduler._eligible_candidates` performs over a dict payload. Generalizes `_find_candidate`'s session-scoped, debit-aware availability computation from "return the first match" to "return every match." **Done, including the same instantaneous-window/physical-host-conflict handling `_resource_payload`/`_find_candidate` already use, so this cannot silently diverge from admission-time or listing-time availability.**
-  - [x] 4.2.2 `ResourcePoolService.list_pools_in_session(db, *, enabled_only=True) -> list[ResourcePool]` (`kit/resource-pools/src/market_resource_pools/service.py`): session-scoped twin of the existing self-managed `list_pools`, so pool enablement can be checked inside the same transaction as reservation locking and settlement-record creation instead of a separate, differently-timed read. **Done; deliberately does not attach `provider_config` (a handler round trip `schedule_resource` doesn't need) or expunge rows, unlike `list_pools`.**
-  - [x] 4.2.3 Remove `PhysicalSettlementScheduler._eligible_candidates`'s `attributes.get("pool_id")` fallback **only after** 4.2.4 lands, not as part of this task — see the verified finding in `design.md` item 5: the fallback is not dead. `kit/fulfillment/tests/unit/test_scheduler.py`'s own resource helpers rely on it exclusively today (they never pass a real `pool_id` column), and `kit/site/tests/unit/test_ledger.py::test_attribute_view_prefers_real_pool_id_over_attributes_json` documents it as an intentionally still-open transitional behavior. Do not fold its removal into the same commit as the candidate-enumeration rewrite for an unrelated reason. **Not removed. The new `iter_scheduling_candidates_in_session` reads `CapacityBucket.pool_id`/`ResourceFeasibilityView.pool_id` directly (which itself falls back to `resource_id` when the column is `None`, per `resource_feasibility_view`'s existing `pool_id or resource_id`), so the scheduler-level `attributes.get("pool_id")` fallback this task originally targeted no longer has anywhere to live in the rewritten `_eligible_candidates` at all — it was structurally dropped as a side effect of 4.2.1/4.2.4, not deliberately removed as its own step. Confirmed the rewritten test helpers (4.2.4) now pass a real `pool_id=` column and all tests still pass.**
-  - [x] 4.2.4 Update `kit/fulfillment/tests/unit/test_scheduler.py`'s `_resource`/`_resource_with_capacity` helpers to pass a real `pool_id=` column argument (matching how production resources are actually registered post-Section-2) instead of `attributes={"pool_id": pool_id}`. Confirm no other test or fixture still registers pool membership through attributes only before 4.2.3's removal is attempted; if one is found, it is new evidence for this design record, not something to silently work around. **Done; both helpers now pass `pool_id=` directly. No other test in `kit/fulfillment`/`kit/site`/`kit/resource-pools` was found relying on attributes-only pool registration for scheduling eligibility (the one remaining attributes-only test, `test_attribute_view_prefers_real_pool_id_over_attributes_json`, is deliberately testing the fallback itself, not incidentally depending on it).**
+  - [x] 4.2.1 `CapacityLedgerService.iter_scheduling_candidates_in_session(db, *, resource_kind, exclude_reservation_id) -> list[ResourceFeasibilityView]` (`kit/site/src/market_site/ledger.py`): every enabled `CapacityBucket` of the given `resource_kind`, built through the existing `_resource_feasibility_view`/`resource_satisfies_requirement` path, with `exclude_reservation_id`'s own current `CapacityReservationDebit` credited back into `available` — replacing the ad hoc credit-back today's `PhysicalSettlementScheduler._eligible_candidates` performs over a dict payload. Generalizes `_find_candidate`'s session-scoped, debit-aware availability computation from "return the first match" to "return every match." **Done, with the same window and host-conflict handling as admission, so the two cannot diverge.**
+  - [x] 4.2.2 `ResourcePoolService.list_pools_in_session(db, *, enabled_only=True) -> list[ResourcePool]` (`kit/resource-pools/src/market_resource_pools/service.py`): session-scoped twin of the existing self-managed `list_pools`, so pool enablement can be checked inside the same transaction as reservation locking and settlement-record creation instead of a separate, differently-timed read. **Done; unlike `list_pools`, attaches no `provider_config` and expunges nothing.**
+  - [x] 4.2.3 Remove `PhysicalSettlementScheduler._eligible_candidates`'s `attributes.get("pool_id")` fallback **only after** 4.2.4 lands, not as part of this task — see the verified finding in `design.md` item 5: the fallback is not dead. `kit/fulfillment/tests/unit/test_scheduler.py`'s own resource helpers rely on it exclusively today (they never pass a real `pool_id` column), and `kit/site/tests/unit/test_ledger.py::test_attribute_view_prefers_real_pool_id_over_attributes_json` documents it as an intentionally still-open transitional behavior. Do not fold its removal into the same commit as the candidate-enumeration rewrite for an unrelated reason. **The fallback went away with the 4.2.1 rewrite rather than as its own step (design.md, "Rationale moved from task notes at closeout", 4.2.3).**
+  - [x] 4.2.4 Update `kit/fulfillment/tests/unit/test_scheduler.py`'s `_resource`/`_resource_with_capacity` helpers to pass a real `pool_id=` column argument (matching how production resources are actually registered post-Section-2) instead of `attributes={"pool_id": pool_id}`. Confirm no other test or fixture still registers pool membership through attributes only before 4.2.3's removal is attempted; if one is found, it is new evidence for this design record, not something to silently work around. **Done; no other kit test relies on attributes-only pool registration.**
 
 - [x] 4.3 Implement `schedule_resource(capacity_reservation_id, market, requirements, resource_id=None)` as one atomic transaction on `PhysicalSettlementScheduler`, replacing `select_resource`'s in-memory implementation:
-  - [x] 4.3.1 Wire `session_factory` into `PhysicalSettlementScheduler.__init__` for real (today's constructor accepts and immediately discards it — `del session_factory`). Open a `BEGIN IMMEDIATE` session (same helper Section 3 introduced for fulfillment acceptance) at the start of `schedule_resource`. **Done; `begin_sqlite_write_transaction` promoted from `repository.py`-private to package-public and reused here.**
-  - [x] 4.3.2 `CapacityLedgerService.lock_reservation(db, capacity_reservation_id)` to lock and validate the reservation (existence, active state, TTL not expired, market/requirements consistency with `deal_ref`), replacing today's separate self-committing `_require_valid_reservation`. **Done; validation logic itself is unchanged, now fed by `reservation_payload_in_session` (new) over the locked row instead of a self-committing `get_reservation` call.**
-  - [x] 4.3.3 Call `SettlementRepository.schedule(...)`'s equivalence check first (existing-row idempotent-retry-or-conflict, unchanged from Section 3) before doing any new selection work, so an equivalent retry short-circuits without touching candidates, cursor, or capacity rebind. **Done via an explicit `self._repository.get(...)` existence check before candidate enumeration.**
+  - [x] 4.3.1 Wire `session_factory` into `PhysicalSettlementScheduler.__init__` for real (today's constructor accepts and immediately discards it — `del session_factory`). Open a `BEGIN IMMEDIATE` session (same helper Section 3 introduced for fulfillment acceptance) at the start of `schedule_resource`. **Done, through the now-public `begin_sqlite_write_transaction`.**
+  - [x] 4.3.2 `CapacityLedgerService.lock_reservation(db, capacity_reservation_id)` to lock and validate the reservation (existence, active state, TTL not expired, market/requirements consistency with `deal_ref`), replacing today's separate self-committing `_require_valid_reservation`. **Done; unchanged validation, read through `reservation_payload_in_session` over the locked row.**
+  - [x] 4.3.3 Call `SettlementRepository.schedule(...)`'s equivalence check first (existing-row idempotent-retry-or-conflict, unchanged from Section 3) before doing any new selection work, so an equivalent retry short-circuits without touching candidates, cursor, or capacity rebind. **Done.**
   - [x] 4.3.4 For a first-time schedule, call `iter_scheduling_candidates_in_session` (4.2.1) and `list_pools_in_session` (4.2.2) inside the same session, intersect on enabled pool membership exactly as today's `_eligible_candidates` does, and build the `SettlementRequirement` via the existing `_requirement` logic (dimensions-exceed-reservation rejection, `resource_kind` resolution) unchanged. **Done.**
   - [x] 4.3.5 If `request.resource_id` is set, verify it is among the eligible candidates (unchanged rule: explicit resource bypasses policy but not eligibility) and skip the cursor entirely — explicit selection must not read or advance it, per the existing spec scenario "Explicit resource is ineligible" and the unstated-but-implied "explicit resource does not consume a fairness turn." **Done and tested (`test_explicit_resource_does_not_advance_or_consume_cursor`).**
   - [x] 4.3.6 Otherwise, load the `resource_kind`'s cursor via `get_cursor_in_session` (4.1.4), call the pure `DeterministicRoundRobinPolicy.select(...)` (4.1.2/4.1.3), and write the returned cursor back via `save_cursor_in_session` in the same transaction. **Done.**
   - [x] 4.3.7 If the selected resource differs from the resource the reservation's own `reserve()` call originally bound (fairness reassignment among equally-eligible resources — see design.md's "`SiteResource` is retired" `Option A` decision), call `assign_settlement_resource_in_session` to atomically rebind capacity before creating the settlement row. **Done.**
   - [x] 4.3.8 Call `SettlementRepository.schedule(...)` to create (or return, on the equivalence path already checked in 4.3.3) the `assigned` settlement row, then commit the whole transaction. **Done.**
-  - [x] 4.3.9 On any exception before commit, ensure the session rolls back in full — no partial cursor advance, no partial capacity rebind, and no orphaned settlement row — proving out the "one commit/rollback boundary" property this task exists for. **Done and tested (`test_failed_schedule_leaves_no_partial_cursor_or_settlement_state`, injecting a failure after the cursor write and confirming a plain scheduler sharing the same database can still schedule the reservation from scratch afterward).**
+  - [x] 4.3.9 On any exception before commit, ensure the session rolls back in full — no partial cursor advance, no partial capacity rebind, and no orphaned settlement row — proving out the "one commit/rollback boundary" property this task exists for. **Done: `test_failed_schedule_leaves_no_partial_cursor_or_settlement_state`.**
 
-- [x] 4.4 Reject unknown reservation/pool/resource identifiers rather than forwarding, reinterpreting, or trying another site — unchanged in substance from the original task, now implemented as part of 4.3.2/4.3.4/4.3.5's checks against the locked reservation and the session-scoped candidate/pool enumerations rather than against the removed self-committing calls. **Done; covered by the existing `test_unknown_reservation_is_rejected`/`test_resource_without_pool_is_not_schedulable`-style tests, now exercised against the rewritten code path.**
+- [x] 4.4 Reject unknown reservation/pool/resource identifiers rather than forwarding, reinterpreting, or trying another site — unchanged in substance from the original task, now implemented as part of 4.3.2/4.3.4/4.3.5's checks against the locked reservation and the session-scoped candidate/pool enumerations rather than against the removed self-committing calls. **Done: `test_unknown_reservation_is_rejected`, `test_resource_without_pool_is_not_schedulable`, and their siblings.**
 
 - [x] 4.5 Add `resize_reservation` to `CapacityLedgerService` (`kit/site/src/market_site/ledger.py`) per `design.md`'s corrected design: one atomic transaction that locks the old reservation, releases it, re-evaluates candidacy for the new shape against a view where the old hold is already released, reserves the new shape, and invokes an optional `on_supersede: SettlementAbandonmentHook | None` hook before commit — never two independently-committed `release()`/`reserve()` calls, and never a direct `market_site → market_fulfillment` import. Ships as a single self-managed-session method with no `_in_session` twin (design.md, item 3 — nothing in this change composes it into a larger transaction; add the twin later only if a real co-transactional caller appears).
   - [x] 4.5.1 Define `SettlementAbandonmentHook` as a `Protocol` in `market_site` (no fulfillment types referenced): `def __call__(self, db: Session, capacity_reservation_id: str) -> None`. **Done.**
-  - [x] 4.5.2 Thread the same hook shape into `CapacityLedgerService.__init__` as an optional constructor parameter, invoked unconditionally (no existence pre-check — design.md, item 4) from three sites: `_expire_stale_holds` (TTL-hold lapse), `release()` (terminal release), and `resize_reservation`'s supersede step. The concrete `market_fulfillment` implementation owns deciding whether there is anything to abandon. **Done. Note: implemented as a constructor-level hook (one hook per `CapacityLedgerService` instance), not a per-call `on_supersede` parameter on `resize_reservation` itself — matches the "always call it" resolution and keeps all three call sites consistent with a single piece of wiring rather than `resize_reservation` needing its own separately-supplied hook.**
+  - [x] 4.5.2 Thread the same hook shape into `CapacityLedgerService.__init__` as an optional constructor parameter, invoked unconditionally (no existence pre-check — design.md, item 4) from three sites: `_expire_stale_holds` (TTL-hold lapse), `release()` (terminal release), and `resize_reservation`'s supersede step. The concrete `market_fulfillment` implementation owns deciding whether there is anything to abandon. **Done, as a constructor dependency rather than a per-call parameter (design.md, "Rationale moved from task notes at closeout", 4.5.2).**
   - [x] 4.5.3 Implement the concrete hook in `market_fulfillment` (repository or a small composition-facing wrapper): look up the `SettlementRecord` for the given `capacity_reservation_id`; if none exists, or it is not in `assigned` state, no-op; otherwise transition it to `abandoned` via `validate_transition`, in the same session the caller passed in. **Done as `SettlementRepository.abandon_if_assigned`.**
-  - [x] 4.5.4 Compose the concrete hook in `compute_provisioning_service/container.py`, passed to `capacity_ledger_service`'s constructor alongside the existing wiring, even though no HTTP caller reaches `resize_reservation` yet (design.md, item 4 — matches the `pools-2`/`pools-3` precedent of shipping ahead of a real caller). **Done; a new `settlement_repository` singleton is composed and its bound `abandon_if_assigned` method is passed as `settlement_abandonment_hook`. Originally verified only by static review and `py_compile`; now confirmed by running the compute-provisioning-service test suite for real, including `test_scheduling_composition.py` resolving this exact wiring through the real container (see 4.7.6/4.13).**
+  - [x] 4.5.4 Compose the concrete hook in `compute_provisioning_service/container.py`, passed to `capacity_ledger_service`'s constructor alongside the existing wiring, even though no HTTP caller reaches `resize_reservation` yet (design.md, item 4 — matches the `pools-2`/`pools-3` precedent of shipping ahead of a real caller). **Done. First verified only by static review; confirmed through the real container by `test_scheduling_composition.py` (4.13).**
 
-- [x] 4.6 Atomically abandon assigned-but-unfulfilled settlements and release/supersede their capacity during lease lifecycle events; add watchdog reconciliation. With 4.5's hook wired into `_expire_stale_holds` and `release()`, the existing `LeaseLifecycleService`/`_expire_stale_holds` sweeps already reach every capacity-reclaiming path (design.md, item 4 — confirmed by inspection that `LeaseLifecycleService` never bypasses `CapacityLedgerService.release()`); this task is validation that the wiring actually fires end-to-end, not new reconciliation machinery. No separate watchdog is added. **Confirmed by the new hook-invocation unit tests in `kit/site/tests/unit/test_ledger.py` (`_expire_stale_holds` and `release()` paths). Not separately verified against a live `LeaseLifecycleService` instance (that service lives in `provisioning/compute` and calls `release()` only indirectly through `LedgerSiteAuthority`) — the code-path trace confirming it never bypasses `release()` is documented in `design.md`, item 4, not re-verified by a new integration test here.**
+- [x] 4.6 Atomically abandon assigned-but-unfulfilled settlements and release/supersede their capacity during lease lifecycle events; add watchdog reconciliation. With 4.5's hook wired into `_expire_stale_holds` and `release()`, the existing `LeaseLifecycleService`/`_expire_stale_holds` sweeps already reach every capacity-reclaiming path (design.md, item 4 — confirmed by inspection that `LeaseLifecycleService` never bypasses `CapacityLedgerService.release()`); this task is validation that the wiring actually fires end-to-end, not new reconciliation machinery. No separate watchdog is added. **Confirmed by `kit/site`'s hook-invocation tests; the lease-lifecycle reach rests on a code trace, not an integration test (design.md, "Rationale moved from task notes at closeout", 4.6).**
 
 - [x] 4.7 Add race, retry, rollback, expiry, supersession, and multi-replica scheduling tests:
-  - [x] 4.7.1 `kit/fulfillment/tests/unit/test_scheduler.py`: equivalent-retry short-circuit before touching candidates/cursor; conflicting retry rejected; explicit-resource path does not read or advance the cursor; full-transaction rollback leaves no partial cursor/rebind/settlement-row state on a mid-transaction failure. **Done: `test_retry_is_idempotent_and_does_not_rerun_policy` (pre-existing, still passing against the rewritten code), `test_conflicting_schedule_retry_is_rejected` (new), `test_explicit_resource_does_not_advance_or_consume_cursor` (new), `test_failed_schedule_leaves_no_partial_cursor_or_settlement_state` (new).**
-  - [x] 4.7.2 New cursor-focused tests: cursor persists across a fresh `PhysicalSettlementScheduler` instance; two `resource_kind`s scheduling concurrently do not perturb each other's cursor. **Done: `test_cursor_persists_across_a_fresh_scheduler_instance`, `test_cursor_is_isolated_per_resource_kind`. The third planned case (a stale cursor naming a no-longer-eligible pool/resource resumes from the first sorted eligible value) is already covered structurally by `DeterministicRoundRobinPolicy._next_after`'s existing behavior and `test_disabling_pool_does_not_depend_on_existing_assignment`, but no new test pins it down specifically against a *persisted* cursor value — left as a small gap, not fabricated as done.**
+  - [x] 4.7.1 `kit/fulfillment/tests/unit/test_scheduler.py`: equivalent-retry short-circuit before touching candidates/cursor; conflicting retry rejected; explicit-resource path does not read or advance the cursor; full-transaction rollback leaves no partial cursor/rebind/settlement-row state on a mid-transaction failure. **Done: `test_retry_is_idempotent_and_does_not_rerun_policy`, `test_conflicting_schedule_retry_is_rejected`, `test_explicit_resource_does_not_advance_or_consume_cursor`, `test_failed_schedule_leaves_no_partial_cursor_or_settlement_state`.**
+  - [x] 4.7.2 New cursor-focused tests: cursor persists across a fresh `PhysicalSettlementScheduler` instance; two `resource_kind`s scheduling concurrently do not perturb each other's cursor. **Done: `test_cursor_persists_across_a_fresh_scheduler_instance`, `test_cursor_is_isolated_per_resource_kind`. The persisted stale-cursor case was left as a recorded gap and closed by 4.12.**
   - [x] 4.7.3 `kit/site/tests/unit/test_ledger.py`: `resize_reservation`'s release-then-reserve availability visibility, full rollback on new-shape unavailability leaving the old reservation untouched, and the hook firing exactly once inside the same transaction on success. **Done: `test_resize_reservation_supersedes_with_a_new_id`, `test_resize_reservation_sees_capacity_the_old_hold_was_consuming`, `test_resize_reservation_rolls_back_fully_when_new_shape_is_unavailable`, `test_resize_reservation_of_unknown_or_unheld_reservation_is_a_no_op`.**
-  - [x] 4.7.4 Hook-invocation tests proving `_expire_stale_holds`, `release()`, and successful `resize_reservation` call the configured hook according to the permanent site-capacity contract. Amend the release coverage so an already-terminal idempotent release still invokes the hook while producing no duplicate capacity mutation or event; retain rollback coverage proving a failed resize does not leak hook-visible settlement changes. **Verified during the final review pass: `kit/site/tests/unit/test_ledger.py::test_release_invokes_the_abandonment_hook_unconditionally`, `test_expired_hold_lapse_invokes_the_abandonment_hook`, `test_resize_reservation_invokes_the_abandonment_hook_for_the_old_reservation`, `test_resize_reservation_rollback_does_not_invoke_the_abandonment_hook`, and `test_no_hook_configured_is_a_silent_no_op` already implement this; the checkbox had drifted from the code. `kit/site` suite: 135/135 passing.**
-  - [x] 4.7.5 `kit/fulfillment/tests/unit/test_repository.py` or a new module: test `SettlementRepository.abandon_if_assigned` directly against real `SettlementRecord` rows. Cover `assigned -> abandoned`, no row, already `abandoned`, post-assignment lifecycle states, repeated invocation, commit persistence, and caller rollback restoring `assigned`. Assert the method never commits the caller-supplied session. **Verified during the final review pass: `kit/fulfillment/tests/unit/test_settlement_repository.py::test_abandon_if_assigned_transitions_only_assigned_rows`, `test_abandon_if_assigned_obeys_caller_rollback`, `test_abandon_if_assigned_preserves_post_assignment_state` already implement this; the checkbox had drifted from the code.**
-  - [x] 4.7.6 Service-level test in `provisioning/compute/service/tests` proving `schedule_resource` end-to-end against the composed container: reservation lock, candidate enumeration, cursor read/write, optional rebind, and settlement-row creation all commit or all roll back together. **Done in the final review pass, alongside 4.13: `provisioning/compute/service/tests/integration/test_scheduling_composition.py` builds the real dependency-injector container and drives `schedule_resource` through it end to end (see 4.13 below for the full account); this task and 4.13 share one evidence trail rather than duplicating it.**
+  - [x] 4.7.4 Hook-invocation tests proving `_expire_stale_holds`, `release()`, and successful `resize_reservation` call the configured hook according to the permanent site-capacity contract. Amend the release coverage so an already-terminal idempotent release still invokes the hook while producing no duplicate capacity mutation or event; retain rollback coverage proving a failed resize does not leak hook-visible settlement changes. **Done: `test_ledger.py`'s `test_release_invokes_the_abandonment_hook_unconditionally`, `test_expired_hold_lapse_invokes_the_abandonment_hook`, `test_resize_reservation_invokes_the_abandonment_hook_for_the_old_reservation`, `test_resize_reservation_rollback_does_not_invoke_the_abandonment_hook`, `test_no_hook_configured_is_a_silent_no_op`. The checkbox had drifted behind the code; confirmed in the final review pass.**
+  - [x] 4.7.5 `kit/fulfillment/tests/unit/test_repository.py` or a new module: test `SettlementRepository.abandon_if_assigned` directly against real `SettlementRecord` rows. Cover `assigned -> abandoned`, no row, already `abandoned`, post-assignment lifecycle states, repeated invocation, commit persistence, and caller rollback restoring `assigned`. Assert the method never commits the caller-supplied session. **Done: `test_settlement_repository.py`'s `test_abandon_if_assigned_transitions_only_assigned_rows`, `test_abandon_if_assigned_obeys_caller_rollback`, `test_abandon_if_assigned_preserves_post_assignment_state`. The checkbox had drifted behind the code.**
+  - [x] 4.7.6 Service-level test in `provisioning/compute/service/tests` proving `schedule_resource` end-to-end against the composed container: reservation lock, candidate enumeration, cursor read/write, optional rebind, and settlement-row creation all commit or all roll back together. **Done with 4.13: `test_scheduling_composition.py`.**
 
 - [x] 4.8 Promote Section 4's accepted decisions into permanent documentation and this change's design-promotion record. **Done.**
-  - [x] 4.8.1 `openspec/specs/fulfillment/spec.md`: add the `resource_kind`-scoped round-robin fairness boundary as a normative statement under "Scheduling and assignment"; document `schedule_resource`'s one-transaction contract; extend the SQLite single-writer concurrency-contract language to cover cursor read/update. **Done: the requirement's prose was rewritten to describe current (not process-local) behavior, including two new scenarios ("Scheduling fails after the cursor is written but before commit" and an updated "Scheduler process restarts" that now asserts durability instead of disclaiming it) and a new Evidence line.**
-  - [x] 4.8.2 `openspec/specs/site-capacity/spec.md`: document `resize_reservation`'s atomic supersede contract and the `SettlementAbandonmentHook` protocol/call sites as current-state ledger behavior. **Done: new `### Requirement: Reservation supersede and settlement abandonment` with three scenarios, plus an extended session-accepting-entry-points sentence (now also naming `iter_scheduling_candidates_in_session`/`reservation_payload_in_session`) and a new Evidence line.**
-  - [x] 4.8.3 Add design-promotion record entries (table at the end of `design.md`) for: resource_kind-scoped cursor durability, `schedule_resource`'s single-transaction contract, `resize_reservation`'s self-managed-session shape, and the unconditional abandonment-hook call sites. **Done: five new rows added to the design-promotion record table.**
-  - [x] 4.8.4 Remove change-document/task-number references from any Section 4 production code comments before considering the section implemented, per `AGENTS.md`'s comment rules. **Reviewed: `grep` across every Section-4-touched production file for `design.md`/`POOLS-7`/`pools-7`/task-number references found none. Comments reference stable rationale (SQLite single-writer guarantees, dependency-boundary reasoning, fairness scoping) in their own words, not the change document.**
+  - [x] 4.8.1 `openspec/specs/fulfillment/spec.md`: add the `resource_kind`-scoped round-robin fairness boundary as a normative statement under "Scheduling and assignment"; document `schedule_resource`'s one-transaction contract; extend the SQLite single-writer concurrency-contract language to cover cursor read/update. **Done: `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`.**
+  - [x] 4.8.2 `openspec/specs/site-capacity/spec.md`: document `resize_reservation`'s atomic supersede contract and the `SettlementAbandonmentHook` protocol/call sites as current-state ledger behavior. **Done, as "Reservation supersede and settlement abandonment", since replaced by "Reservation supersede and the release guard" (`bare-metal-mock-provisioned-deal`).**
+  - [x] 4.8.3 Add design-promotion record entries (table at the end of `design.md`) for: resource_kind-scoped cursor durability, `schedule_resource`'s single-transaction contract, `resize_reservation`'s self-managed-session shape, and the unconditional abandonment-hook call sites. **Done.**
+  - [x] 4.8.4 Remove change-document/task-number references from any Section 4 production code comments before considering the section implemented, per `AGENTS.md`'s comment rules. **Done: no such references in Section 4 production files.**
 
 ### Section 4 code-review correction plan
 
@@ -182,21 +182,21 @@ self-committing calls glued together in the scheduler, the way today's
   - [x] 4.10.1 Define a `SchedulingUnitOfWork`/`SchedulingTransaction` protocol in `kit/fulfillment` whose transaction context owns the SQLite write transaction and exposes only scheduling-safe operations: reservation lock/projection, equivalent-assignment lookup, eligible candidate enumeration, enabled-pool enumeration, cursor load/save, capacity rebind, and settlement assignment creation.
   - [x] 4.10.2 Implement the SQLAlchemy-backed adapter by composing the existing `CapacityLedgerService`, `ResourcePoolService`, and `SettlementRepository` over one caller-owned `Session`. Do not split `SettlementRepository` or the settlement table in this correction pass; repository-view separation is explicitly deferred until the existing DAL becomes materially harder to maintain.
   - [x] 4.10.3 Refactor `PhysicalSettlementScheduler.schedule_resource` to orchestrate policy and validation through this interface. The scheduler must not receive or reach self-committing service methods, and the persistence adapter must not absorb policy selection, request validation, or retry-semantics decisions.
-  - [x] 4.10.4 Preserve the existing one-transaction behavior and error taxonomy. Add focused tests proving an injected transaction implementation can observe cursor persistence and transaction completion without adding production-only test hooks. **Done in the final review pass: `kit/fulfillment/tests/unit/test_scheduler.py::test_independent_sessions_serialize_cursor_updates_deterministically`, `test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer`, and `test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cursors` all inject a `transaction_type=` subclass through `SqlAlchemySchedulingUnitOfWork`'s existing constructor parameter -- no production code changed to add a test seam. `kit/fulfillment` suite: 151/151 passing.**
+  - [x] 4.10.4 Preserve the existing one-transaction behavior and error taxonomy. Add focused tests proving an injected transaction implementation can observe cursor persistence and transaction completion without adding production-only test hooks. **Done: `test_scheduler.py`'s three independent-session tests inject a `transaction_type=` subclass through the unit of work's constructor; no production test seam.**
 
 - [x] 4.11 Add deterministic independent-session SQLite concurrency tests using option A: a test-only implementation/subclass of the narrow scheduling persistence adapter plus explicit `threading.Event` barriers.
   - [x] 4.11.1 Use a file-backed SQLite database, separate engines/connections or independently created sessions, `check_same_thread=False`, and an explicit nonzero busy timeout. Do not use a shared in-memory `StaticPool` database as evidence of independent-session writer behavior.
   - [x] 4.11.2 Commit case: establish transaction A as the first `BEGIN IMMEDIATE` writer, pause it after cursor/assignment mutation but before commit, start transaction B, and prove by barrier ordering that B cannot read/advance the cursor until A commits. Then assert distinct deterministic fairness turns, both assignments, and the final cursor.
-  - [x] 4.11.3 Rollback case: pause transaction A after its writes, force a controlled failure and rollback, then allow B to continue. Assert A leaves no settlement, capacity rebind, or cursor advance; B receives the original first fairness turn; and the database remains usable. **Corrected during the final review pass: this was marked done previously but no such test existed -- only the commit case (4.11.2) did. Added `test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer`, which pauses transaction A inside `schedule_assignment` (the last write before commit), forces a `RuntimeError`, and asserts the settlement row never persists, B receives A's original fairness turn, and the database is still usable afterward.**
-  - [x] 4.11.4 Keep the tests deterministic: explicitly establish which transaction owns the writer slot, synchronize at semantic adapter operations, use bounded waits only to prevent hangs, and never assert correctness from wall-clock timing or an uncontrolled natural race. **Confirmed by inspection of all three concurrency tests in `test_scheduler.py`: each uses `threading.Event` barriers at named adapter operations (`save_cursor`, `schedule_assignment`, `load_cursor`) with bounded `timeout=5` waits, never a sleep or elapsed-time assertion.**
-  - [x] 4.11.5 Add interleaved independent-session coverage proving separate `resource_kind` cursor rows do not perturb one another. Describe this as SQLite independent-session serialization, not portable row locking or process-level multi-replica proof. **Done in the final review pass: `test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cursors` alternates `compute.gpu` and `compute.cpu` scheduling calls (each its own independent-session transaction) and asserts each kind's round-robin turn order and final cursor are unaffected by the other kind's calls interleaved in between. The docstring is explicit that SQLite's single active writer means these transactions serialize rather than truly overlap -- an early draft of this test tried to force literal simultaneous holds via a pause-after-`load_cursor` barrier and deadlocked, which is itself confirmation that "independent-session serialization," not overlapping locks, is the correct and only claim to make here.**
+  - [x] 4.11.3 Rollback case: pause transaction A after its writes, force a controlled failure and rollback, then allow B to continue. Assert A leaves no settlement, capacity rebind, or cursor advance; B receives the original first fairness turn; and the database remains usable. **Correction: marked done before any such test existed. The final review pass added `test_independent_sessions_rollback_leaves_no_partial_state_for_next_writer`.**
+  - [x] 4.11.4 Keep the tests deterministic: explicitly establish which transaction owns the writer slot, synchronize at semantic adapter operations, use bounded waits only to prevent hangs, and never assert correctness from wall-clock timing or an uncontrolled natural race. **Confirmed: barriers at named adapter operations with bounded waits, no sleeps.**
+  - [x] 4.11.5 Add interleaved independent-session coverage proving separate `resource_kind` cursor rows do not perturb one another. Describe this as SQLite independent-session serialization, not portable row locking or process-level multi-replica proof. **Done: `test_interleaved_independent_sessions_do_not_perturb_other_resource_kind_cursors` (design.md, "Rationale moved from task notes at closeout", 4.11.5).**
 
 - [x] 4.12 Add a persisted stale-cursor integration test. Seed `scheduling_cursors` with a deleted or disabled `last_pool_id` and a deleted or ineligible last resource for an otherwise active pool; schedule through a fresh scheduler/unit-of-work instance; assert deterministic recovery from the first sorted eligible pool/resource and durable cursor replacement. Do not require pruning harmless historical map entries in Section 4.
 
 - [x] 4.13 Add the production-composition transaction test in `provisioning/compute/service/tests`.
-  - [x] 4.13.1 Build the real dependency-injector container and verify the scheduler, site ledger, resource-pool service, settlement repository, abandonment hook, and scheduling unit of work resolve to one effective database/session-factory boundary. **Done: `provisioning/compute/service/tests/integration/test_scheduling_composition.py::test_real_container_resolves_scheduling_dependencies_to_one_boundary` instantiates a real `compute_provisioning_service.container.Container`, overrides only `session_factory` (to an isolated in-memory database -- the same seam `app_runtime.py` itself uses), and asserts `resource_pool_service`/`capacity_ledger_service` resolve against that same `session_factory` instance rather than independently constructing their own.**
-  - [x] 4.13.2 Exercise a successful schedule through production wiring and assert reservation locking, candidate enumeration, cursor update, optional rebind, and settlement creation commit together. **Done in the same test: a real `container.physical_settlement_scheduler().schedule_resource(...)` call against a pool/resource/reservation seeded through the container-resolved `resource_pool_service`/`capacity_ledger_service`, asserting the returned resource, the persisted `SettlementRecord`, and the reservation's backing resource all agree.**
-  - [x] 4.13.3 Inject a controlled failure after both site-capacity and fulfillment persistence have mutated and assert all participating tables roll back together. Prefer this behavioral rollback proof over relying only on object-identity assertions. **Done: `test_real_container_composed_schedule_rolls_back_all_participating_tables` first schedules one reservation for real to advance the durable round-robin cursor, so a second reservation's admission-time resource (pool-a) genuinely differs from the scheduler's next pick (pool-b) -- guaranteeing `rebind_capacity` is a real site-capacity write, not a same-resource no-op. A `schedule_assignment` failure injected via the same `transaction_type=` subclass technique as 4.11 is then asserted to leave neither the settlement row nor the capacity rebind visible, and a subsequent retry through the same container-resolved scheduler succeeds and deterministically reselects the same turn -- proving the database and the composed scheduler both remain usable. `provisioning/compute/service` integration suite: 164/164 passing (162 pre-existing + these 2).**
+  - [x] 4.13.1 Build the real dependency-injector container and verify the scheduler, site ledger, resource-pool service, settlement repository, abandonment hook, and scheduling unit of work resolve to one effective database/session-factory boundary. **Done: `test_scheduling_composition.py::test_real_container_resolves_scheduling_dependencies_to_one_boundary`, overriding only `session_factory`.**
+  - [x] 4.13.2 Exercise a successful schedule through production wiring and assert reservation locking, candidate enumeration, cursor update, optional rebind, and settlement creation commit together. **Done in the same test.**
+  - [x] 4.13.3 Inject a controlled failure after both site-capacity and fulfillment persistence have mutated and assert all participating tables roll back together. Prefer this behavioral rollback proof over relying only on object-identity assertions. **Done: `test_real_container_composed_schedule_rolls_back_all_participating_tables`, which first advances the cursor so the rebind is a real site-capacity write.**
 
 - [x] 4.14 Promote the reusable concurrency-test strategy into permanent documentation.
   - [x] 4.14.1 Add a repository-wide testing principle to `docs/development/ARCHITECTURE.md`: database-concurrency tests must use independent sessions/connections, explicit synchronization at semantic transaction boundaries, deterministic ownership ordering, bounded deadlock protection, and final persisted-state assertions rather than uncontrolled races or elapsed-time expectations.
@@ -207,12 +207,12 @@ self-committing calls glued together in the scheduler, the way today's
 - [x] 4.14.5 Repair the compute-service domain import boundary regression exposed during Section 4 validation. Route bare-metal capacity projection through `bare_metal_provisioning_adapter.runtime` rather than importing `arkhai_bare_metal` from the generic service, and retain the existing AST boundary test as validation evidence. This is a validation-driven correction to an existing repository boundary, not a new POOLS-7 subsystem design decision.
 
 - [x] 4.15 Complete Section 4 validation and closure.
-  - [x] 4.15.1 Run focused `kit/site`, `kit/resource-pools`, and `kit/fulfillment` suites using the repository-standard `.dist` dependency path. **Done: `cd kit && make dist && make test` -- `kit/site` 135/135, `kit/site-client` 5/5, `kit/resource-pools` 34/34, `kit/fulfillment` 151/151, all via `uv run --find-links ../../.dist`.**
-  - [x] 4.15.2 Run the `provisioning/compute/service` suite, including the real-container composition and rollback tests. **Done: `make dist && make test-provisioning` -- unit 388/388, integration 164/164 (includes `test_scheduling_composition.py`'s two tests).**
-  - [x] 4.15.3 Run the repository-standard aggregate kit validation and any touched provisioning validation target. Record dependency-bundle or environment failures separately from repository failures and do not mark this task complete based on static review or `py_compile` alone. **Done, with one environment failure recorded rather than hidden: `make test-storefront`/`make test-vms-buyer` fail in this sandbox because the `[rl]` extra's `torch` dependency resolves against `download.pytorch.org`, which is outside this environment's network allowlist -- confirmed pre-existing and unrelated to POOLS-7 by the repository's own comment in `domains/vms/storefront/Makefile` explaining why `make reinit`/`make test` (unlike `make build`) is expected to fail this way on x86_64 outside Docker. All suites this change's own code can affect (`kit/*`, `provisioning/compute/service`) ran and passed.**
-  - [x] 4.15.4 Reconcile tasks 4.7.4–4.7.6 and 4.9–4.15 only after the implementation and required suites pass; then replace this correction-plan status with a truthful Section 4 completion statement. **Done -- see the closing statement below.**
+  - [x] 4.15.1 Run focused `kit/site`, `kit/resource-pools`, and `kit/fulfillment` suites using the repository-standard `.dist` dependency path. **Done: `cd kit && make dist && make test` passed.**
+  - [x] 4.15.2 Run the `provisioning/compute/service` suite, including the real-container composition and rollback tests. **Done: `make test-provisioning` passed.**
+  - [x] 4.15.3 Run the repository-standard aggregate kit validation and any touched provisioning validation target. Record dependency-bundle or environment failures separately from repository failures and do not mark this task complete based on static review or `py_compile` alone. **Done. The VM storefront and buyer suites could not run in that environment, for a documented dependency-index limit (design.md, "Rationale moved from task notes at closeout", 4.15.3); every suite Section 4's code could affect passed.**
+  - [x] 4.15.4 Reconcile tasks 4.7.4–4.7.6 and 4.9–4.15 only after the implementation and required suites pass; then replace this correction-plan status with a truthful Section 4 completion statement. **Done.**
 
-**Section 4 complete (final review pass).** All implementation, design corrections, and the executable-validation and production-composition gaps from the 2026-07-23 correction plan are done and verified by running suites, not by static review: 4.7.4/4.7.5 were already satisfied by existing code (the checkbox state had drifted); 4.7.6 and 4.13 are covered together by the new `provisioning/compute/service/tests/integration/test_scheduling_composition.py`, which resolves scheduling through the real dependency-injector container and proves both a successful commit and a cross-table rollback; 4.10.4 and 4.11.4 are covered by the existing and newly-added `test_scheduler.py` concurrency tests; 4.11.3 was corrected from a false "done" claim to an actual rollback-case test, and 4.11.5's interleaved-resource-kind test was added. `kit/site` 135/135, `kit/site-client` 5/5, `kit/resource-pools` 34/34, `kit/fulfillment` 151/151, `provisioning/compute/service` unit 388/388 + integration 164/164 all pass via the repository-standard `.dist` path. `make check-comment-hygiene` passes repository-wide (this pass also fixed 10 pre-existing violations unrelated to Section 4 -- 1 production comment and 9 test docstrings referencing change IDs/task numbers outside `openspec/` -- not yet recorded in a design-promotion entry). The only unrun suites (`domains/vms/storefront`, `domains/vms/buyer`) are blocked by a pre-existing, documented, POOLS-7-unrelated environment limitation, not a design or implementation gap.
+**Section 4 complete.** Verified by running suites, not static review. Two false or drifted marks were corrected: 4.7.4/4.7.5 were already satisfied, and 4.11.3 had no test until one was added. `make check-comment-hygiene` passed; the pass also fixed ten unrelated violations (design.md, "Rationale moved from task notes at closeout").
 
 ## 5. Implement fulfillment acceptance and provider preparation
 
@@ -236,19 +236,17 @@ self-committing calls glued together in the scheduler, the way today's
 
 - [x] 5.8 Add focused and concurrency tests for: equivalent/conflicting `begin_fulfillment` retries; equivalent retry in `dispatch_pending` redispatching the persisted prepared operation; equivalent retry after provider acknowledgement returning without dispatch; dispatch failure after acceptance returning the accepted view while preserving `dispatch_pending`; acknowledgement write failure and deterministic recovery by executor idempotency key; identical versus conflicting provider-metadata acknowledgement; pool-config mutation after acceptance not changing prepared/dispatched input; duplicate submission races; create/teardown command deduplication; and deterministic independent-session `FulfillmentUnitOfWork` commit/rollback cases using file-backed SQLite and explicit `threading.Event` barriers.
 
-  Most of this list was already covered by 5.10's work (equivalent/conflicting retries, redispatch reuse, acknowledged-retry no-op, dispatch-failure preservation, identical/conflicting acknowledgement, idempotency-key format). The final review pass closed the three items that were not:
+  5.10's tests cover the retry, redispatch, acknowledgement, and idempotency-key cases. The final review pass added the other three:
 
-  - `kit/fulfillment/tests/unit/test_fulfillment.py::test_independent_sessions_serialize_fulfillment_acceptance_deterministically` — the deterministic independent-session concurrency proof this task names explicitly, mirroring `test_scheduler.py`'s equivalent test for `SchedulingUnitOfWork`: two real threads against one file-backed SQLite database, a controlled `threading.Event` barrier holding the writer slot open across `accept()`+`persist_prepared_create()`, proving the second `begin_fulfillment` call's `BEGIN IMMEDIATE` genuinely blocks until the first releases it, rather than asserting on uncontrolled timing.
-  - `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestPoolConfigFrozenAtAcceptance` — mutates a pool's live `provider_config` after acceptance via the real `ResourcePoolService.update_pool` and confirms the already-persisted `prepared_create_operation` is unchanged, proving the frozen-snapshot guarantee `get_pool_in_session` exists to provide actually holds end to end, not just by construction.
-  - `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestAcknowledgementFailureRecovery` — forces the acknowledgement transaction to fail once via a test-only transaction subclass, then retries and confirms the second attempt reuses the exact same underlying Ansible job (one row in `ansible_jobs` for the reservation, same `job_id`) rather than dispatching a duplicate, proving the crash-window recovery story from `design.md`'s "Accepted Section 5 lifecycle clarifications" holds against the real job-dedup mechanism, not just in the abstract.
+  - `test_fulfillment.py::test_independent_sessions_serialize_fulfillment_acceptance_deterministically`: two threads on file-backed SQLite; the second `BEGIN IMMEDIATE` waits for the first.
+  - `test_fulfillment_api.py::TestPoolConfigFrozenAtAcceptance`: a pool edit after acceptance leaves the prepared operation unchanged.
+  - `test_fulfillment_api.py::TestAcknowledgementFailureRecovery`: after a failed acknowledgement, the retry reuses the same Ansible job.
 
 - [x] 5.9 Expose a public side-effect-free dry-run endpoint with the same request signature as `begin_fulfillment(capacity_reservation_id, market, fulfillment_request)`. It must load the same already-scheduled aggregate and selected resource, resolve the same provider, read current pool configuration, and run the same parsing and `prepare_create` validation path, while performing no lifecycle transition, prepared-operation write, provider dispatch, or other durable side effect. Return a provider-neutral validation result rather than the internal prepared envelope. Document that the preview is non-binding because live pool configuration can change before actual acceptance. Teardown dry-run is deferred until the Section 10 teardown endpoint exists. Permanent documentation: `openspec/specs/fulfillment/spec.md#requirement-fulfillment-validation`.
 
 - [x] 5.10 Add integration coverage that reads persisted prepared Ansible create and teardown inputs and verifies `vm_host`, `vm_target`, every VM create field, provider configuration snapshot, exact teardown identity derived from the durable settlement result, and that `deal_ref` is empty in every envelope this path constructs. Also verify that shared orchestration treats provider metadata opaquely and that malformed or contradictory Ansible metadata is rejected by `AnsibleFulfillmentProvider` rather than guessed.
 
-  Added `provisioning/compute/service/tests/integration/test_fulfillment_api.py`, driving `POST /api/v1/fulfillment/{validate,begin}` end to end against a real SQLite-backed `FulfillmentUnitOfWork` and a real `AnsibleJobService` (only `AnsibleService` mocked, per this suite's existing boundary). This was the first real (non-mock/fake) integration coverage this path had; it surfaced and fixed a genuine double-`BEGIN IMMEDIATE` transaction bug plus two test-harness composition gaps -- see `design.md`, "Section 5 task 5.10 — integration coverage found and fixed a real transaction bug" for the full account.
-
-  Teardown coverage in the new test drives `AnsibleFulfillmentProvider.prepare_teardown`/`dispatch_teardown` directly against this fixture's real `job_service`/session rather than through HTTP, since there is intentionally no `/fulfillment/teardown` endpoint yet — dispatching teardown through the orchestrator is Section 10 scope.
+  `test_fulfillment_api.py` drives `/fulfillment/validate` and `/begin` against real SQLite and a real job service (only `AnsibleService` mocked). It found and fixed a double-`BEGIN IMMEDIATE` bug (design.md, "Section 5 task 5.10 — integration coverage found and fixed a real transaction bug"). Teardown was covered through the provider directly; Section 10 added the endpoint.
 
 - [x] 5.11 Correct `SettlementRepository.select_pending_for_single_worker`'s docstring (`kit/fulfillment/src/market_fulfillment/repository.py`) to describe the single-worker-vs-final-recovery-workflow distinction in stable terms with no OpenSpec section/task reference, per `AGENTS.md`'s production-comment rules — not merely renumbered from the stale "Section 7" it currently reads.
 
@@ -323,8 +321,8 @@ self-committing calls glued together in the scheduler, the way today's
 - [x] 7.1 Section 2's migrations (`_migrate_resource_pools_and_hosts_pool_id`, `_migrate_capacity_model_cutover` — `_migrate_site_resources_pool_id`, `_migrate_capacity_buckets_and_current_debits`, `_migrate_retire_site_resources`) already create the default resource pool and migrate every existing host and pool-membership/resource-capacity record. No new host/pool/bucket/debit migration work remains here.
 - [x] 7.2 Add a versioned compute-service migration in `provisioning/compute/service/src/compute_provisioning_service/db/migrations.py` that enumerates nonterminal legacy VM leases and joins them to capacity reservations, hosts/resource-pool membership, pool provider configuration, and existing settlement/provisioned-resource rows. Treat the lease as authoritative for candidate enumeration; unmatched pre-release reservations may be discarded and must not obscure a lease.
 - [x] 7.3 State mapping and provider-preparation extracted into a pure compiler; `_migrate_legacy_vm_leases_to_fulfillment` no longer performs either itself.
-  - [x] 7.3.1 Added `LegacyBackfillValidationError`/`LegacyFulfillmentBackfillDraft`/`LegacyFulfillmentBackfillCompiler` to `kit/fulfillment/src/market_fulfillment/backfill.py` (exported from the package `__init__`), and `compile_legacy_vm_fulfillment_backfill`/`LegacyVmLeaseCandidate` to `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/legacy_backfill.py`. `prepare_historical_vm_teardown` moved from `runtime.py` into this new module (its only call site), which also lightens its import chain since it no longer pulls `runtime.py`'s full service-composition graph. While extracting, found and closed a real gap task 7.7 had missed: a candidate reaching `active`/`tearing_down` state with a live target but no known `create_job_id` would previously reach `AnsibleFulfillmentMetadata.model_validate` (which requires `create_job_id: str`) and fail with an opaque `ProviderConfigInvalidError` from deep in the provider stack rather than a clear migration-level error; the compiler now rejects this explicitly with `LegacyBackfillValidationError`.
-  - [x] 7.3.2 `_migrate_legacy_vm_leases_to_fulfillment` now only opens the connection; the new `_apply_legacy_vm_lease_backfill(connection, ...)` owns enumeration (the SQL join), cross-candidate identity/target dedup, existing-row conflict/equivalence comparison, and the atomic write, calling the compiler once per candidate. Split out specifically so tests can invoke it directly against an open connection without the `apply_schema_migrations` once-per-id gate.
+  - [x] 7.3.1 The kit's `backfill.py` holds the shared draft, error, and compiler types; the VM adapter's `legacy_backfill.py` holds the VM compiler and `prepare_historical_vm_teardown`. The extraction found a gap 7.7 had missed: a live target with no known `create_job_id` failed opaquely deep in the provider stack, and the compiler now rejects it with `LegacyBackfillValidationError`.
+  - [x] 7.3.2 `_apply_legacy_vm_lease_backfill(connection, ...)` owns enumeration, dedup, conflict comparison, and the atomic write, so tests call it directly without the once-per-migration gate.
 - [x] 7.4 Derive one canonical aggregate per candidate: preserve/generate the `capacity_reservation_id` and `fulfillment_id` required by the current schema; resolve `settlement_resource_id`, `pool_id`, provider, and selected-resource attributes from the migrated host; validate `vm_target`/`executor_target`; create a `ProvisionedResource` for active and teardown-related rows; and preserve known create/teardown job identifiers in provider metadata.
 - [x] 7.5 Build `prepared_teardown_operation` through the current VM/Ansible provider contract rather than hand-assembling provider JSON: construct the canonical provider-neutral settlement result, resolve the snapshotted `AnsiblePoolConfig`, call `prepare_teardown`, and persist its `VersionedEnvelope`. Historical create request/prepared-create data may be absent based on lifecycle state; do not add an origin/backfill field or any runtime branch on migration provenance.
 - [x] 7.6 Enforce create replay safety. A historical `provisioning` lease must have a usable known create job and remain `dispatching` so recovery observes it. A known failed job may use normal provider retry behavior later, but migration must never submit or schedule a replacement create operation because the prior job identity was lost or ambiguous.
@@ -332,7 +330,7 @@ self-committing calls glued together in the scheduler, the way today's
 - [x] 7.8 Make the complete backfill atomic: derive and validate every candidate before commit, insert all settlement and provisioned-resource rows in one database transaction, and roll back every Section 7 write on any failure. Ensure the migration is safely rerunnable with no partially migrated population visible.
 - [x] 7.9 Full scenario matrix covered:
   - [x] 7.9.1 `provisioning/compute/service/tests/unit/services/test_legacy_vm_fulfillment_backfill.py` — compiler-level unit tests (no engine): provisioning with tracked create job, active lease, releasing before/with teardown dispatch, failed teardown, missing host/pool/provider, missing pool config, conflicting `vm_target`/`executor_target`, missing create job (provisioning and live-target cases), unsupported status.
-  - [x] 7.9.2 `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py` — DB-level tests calling `_apply_legacy_vm_lease_backfill` directly: terminal/expired skip, unmatched-reservation tolerance, equivalent rerun, whole-migration rollback, and conflicting duplicate covering every field the equivalence check compares — different `create_job_id`, different teardown job ID, missing `prepared_teardown_operation`, missing `ProvisionedResource` row, `ProvisionedResource` row with a different `domain_resource_ref`, and multiple `ProvisionedResource` rows. **Extended (code review):** the original conflict check only compared `state`/`settlement_resource_id`/`pool_id`/`provider`; see `design.md`'s "Third code-review pass" for the fix and the six added scenarios.
+  - [x] 7.9.2 `provisioning/compute/service/tests/unit/test_legacy_vm_lease_migration.py` — DB-level tests calling `_apply_legacy_vm_lease_backfill` directly: terminal/expired skip, unmatched-reservation tolerance, equivalent rerun, whole-migration rollback, and conflicting duplicate covering every field the equivalence check compares — different `create_job_id`, different teardown job ID, missing `prepared_teardown_operation`, missing `ProvisionedResource` row, `ProvisionedResource` row with a different `domain_resource_ref`, and multiple `ProvisionedResource` rows. The last six were added when review found the conflict check compared only four coarse fields (design.md, "Third code-review pass").
   - [x] 7.9.3 Covered by `test_provisioning_without_tracked_create_job_is_rejected` and `test_live_target_without_known_create_job_is_rejected` in 7.9.1 — both assert `LegacyBackfillValidationError`, never a dispatched create.
 - [x] 7.10 `provisioning/compute/service/tests/unit/services/test_fulfillment_convergence_after_legacy_backfill.py` runs `run_migrations` against a populated pre-migration schema producing one backfilled row in each of `dispatching`, `teardown_dispatch_pending`, `tearing_down`, and `teardown_failed`, then drives `FulfillmentConvergenceWatchdog.converge_creates`/`dispatch_pending_teardowns`/`converge_teardowns`/`requeue_teardown_failures` (and a full `run_cycle` loop) against them and asserts each converges to `active`/`torn_down` exactly as a natively-created row would.
 - [x] 7.11 Promote durable design knowledge during implementation:
@@ -344,7 +342,7 @@ self-committing calls glued together in the scheduler, the way today's
 
 ### Section 7 correction pass
 
-- [x] 7.13 Promotion record relocated into `design.md`'s "## Section 7 implementation promotion record", including entries for the compiler extraction and the new create-job-identity validation rule; `tasks.md`'s copy replaced with a reference, matching the Section 6 pattern. **Validation:** `test_legacy_vm_fulfillment_backfill.py`, `test_legacy_vm_lease_migration.py`, and `test_fulfillment_convergence_after_legacy_backfill.py` were run directly (not `py_compile`-checked only); the full reachable `kit/fulfillment`/`provisioning/compute/service` suite passed at 598 tests with no regressions at the time. Code review found and fixed a real gap in the rerun/conflict comparison (it originally checked only four coarse fields, not tracked job identity or the provisioned-resource population) — see `design.md`'s "Third code-review pass".
+- [x] 7.13 Promotion record relocated into `design.md`'s "Section 7 implementation promotion record". **Validation:** the three Section 7 test modules ran, and the `kit/fulfillment` and provisioning service suites passed; review's rerun/conflict gap is fixed (7.9.2).
 - [x] 7.14 Added the missing "Permanent documentation impact" checklist to `proposal.md`.
 - [x] 7.15 Normalize a legacy `vm_leases` table that predates optional teardown-job tracking before enumerating fulfillment candidates. The full migration-replay fixture omits `vm_remove_job_id` and proves the cutover succeeds; the permanent scenario lives in `openspec/specs/fulfillment/spec.md#requirement-existing-lease-continuity-during-fulfillment-cutover`.
 
@@ -399,58 +397,31 @@ today; see that change's `design.md` for the accepted shape. Section 8
 ships against the existing single-tenant trust model and adopts real
 per-caller enforcement once that change lands.
 
-- [x] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state, and no provider/Ansible call of any kind; a read reflects current state on demand from the repository alone. **Done: `FulfillmentOrchestrator.get_fulfillment_status` (`kit/fulfillment/src/market_fulfillment/fulfillment.py`) via `read_transaction()` and the new `FulfillmentTransaction.get_by_fulfillment_id`; `GET /fulfillment/{fulfillment_id}/status` (`fulfillment_controller.py`).**
-- [x] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract as a `fulfillment.result.v1` versioned envelope (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details) without persisting credentials. Non-`active` states return the envelope with empty/null credential and provisioned-resource-output fields rather than an error — the aggregate's current state and failure detail are still meaningful before or after `active`. **Done: `FulfillmentOrchestrator.get_fulfillment_result`; envelope shape in `kit/fulfillment/src/market_fulfillment/results.py`; `GET /fulfillment/{fulfillment_id}/result`. The outer envelope carries an optional versioned `domain_result` (not a generic `FulfillmentCredential` type as first drafted) — see 8.9 and design.md's "Section 8 review corrections accepted for planning" for why.**
-- [x] 8.3 Add `FulfillmentProvider.fetch_credentials(...)` (new abstract method, alongside `resolve_provisioned_resources`; async, since it performs provider I/O). `get_fulfillment_result` calls it directly and unconditionally when, and only when, the aggregate is `active` — no claim, no lease, no generation-advancement side effect, since there is nothing durable being coordinated or mutated. Transmit credentials only in that response over the authenticated channel and do not persist them afterward. **Done: shipped signature is `fetch_credentials(provider_metadata, provisioned_resources) -> VersionedEnvelope[Any]` (`kit/fulfillment/src/market_fulfillment/provider.py`) -- not the generic `Credential`/`CredentialSet` dataclass first drafted; the provider-neutral envelope instead carries a nested, adapter-owned domain payload (`VmFulfillmentCredential` for VM), see 8.9 and `openspec/specs/fulfillment/spec.md#requirement-provider-contract`. `AnsibleFulfillmentProvider.fetch_credentials` decodes `current_job_id` and calls the existing in-process `AnsibleJobService.get_credentials(job_id)` (a local DB read within the same adapter service, not a second HTTP hop). `get_fulfillment_result` is `async def`; the read transaction closes before the provider call, matching the convergence worker's own no-open-transaction-during-provider-I/O rule.**
-- [x] 8.4 Add a `credential_fetch_failed` category to the stable error taxonomy (`openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy`) for a live credential-fetch failure on an `active` fulfillment, distinct from create/status/teardown failure categories, so the storefront can retry the read rather than treat it as a workload failure. **Done: `CredentialFetchFailedError` (`kit/fulfillment/src/market_fulfillment/provider.py`), raised by `AnsibleFulfillmentProvider.fetch_credentials` on invalid metadata or an unresolvable job; mapped to HTTP 503 `credential_fetch_failed` in `fulfillment_controller.py`, distinct from the existing 404/409/422/500 mappings.**
-- [x] 8.5 Add an existence-only check rejecting a query for an unknown `fulfillment_id`/`capacity_reservation_id` (i.e., not present in this provisioning service's own database). This is not a per-caller ownership check — `StorefrontAuthMiddleware` admits exactly one trusted caller today, so there is no second caller identity to distinguish. Structure the check so `service-identity-signing`'s later `owner_principal` comparison can replace it without reshaping the endpoint. **Done as a direct consequence of 8.1/8.2's implementation, not separate work: both orchestrator methods raise the existing `SettlementEntityNotFoundError` for an unmatched `fulfillment_id`, and both controller routes map it to 404 `fulfillment_not_found`, matching `/fulfillment/begin`'s existing error-mapping convention. Nothing about this shape needs to change when `service-identity-signing` adds a real ownership comparison alongside it.**
-- [x] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches `active` (empty credentials/outputs, no provider call attempted), repeated queries returning consistent state, a live credential-fetch failure surfacing `credential_fetch_failed` while the aggregate state is unaffected, and query for an unknown identifier. **Done**, with one item narrowed rather than fabricated. `kit/fulfillment/tests/unit/test_fulfillment.py`/`test_results.py`: no-provider-call status/result reads; failure detail surfaced by status; every non-`active` state producing empty outputs/credentials with no provider call (parametrized across all nine lifecycle states); `active`-state provisioned-resource *and* live-credential projection (real `fetch_credentials` call asserted via `AsyncMock`); `CredentialFetchFailedError` propagation on an `active` fulfillment leaving aggregate state unchanged; unknown-identifier rejection for both endpoints; envelope shape/round-trip. `provisioning/compute/service/tests/integration/test_fulfillment_api.py::TestStatusAndResultQueries` (new, 5 tests): real HTTP round trip through a real SQLite-backed repository and a real `AnsibleFulfillmentProvider.fetch_credentials` call against a `Credential` row the job pipeline's own mocked-Ansible success path wrote -- not a hand-inserted fake -- covering `dispatching`-state status, a non-`active` result's empty outputs/credentials, an `active` result's real provisioned-resource and credential population, and unknown-identifier 404s for both endpoints. **Narrowed:** "query after process restart" is covered at the unit level (a fresh `FakeUnitOfWork`/`FakeTransaction` per test proves the read path carries no in-memory state) but not as a literal process-restart integration test; the existing `test_fulfillment_api.py` suite has no precedent for actual process restart (its "restart" coverage, e.g. task 4.7.2's cursor test, is all fresh-instance-against-the-same-database, which this suite's new tests already match). "Repeated queries returning consistent state" is covered implicitly by every test performing exactly one read with no observed side effect, not by a dedicated repeat-then-compare test.
-- [x] 8.7 Record `replace-polling-with-authenticated-push` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer and `fulfillment.result.v1` envelope (not needing to be redesigned) is visible to whoever picks it up. Also record `service-identity-signing` as the follow-on that upgrades 8.5's existence check to real per-caller ownership enforcement. **Done:** both dependency edges were already recorded in `openspec/changes/README.md`'s POOLS campaign map during the discuss phase; confirmed accurate against the now-implemented `fulfillment.result.v1` envelope.
-- [x] 8.8 Promote this section's accepted decisions — the provider-neutral `fetch_credentials` contract, `active`-only credential fetch gating, the `fulfillment.result.v1` envelope shape, the `credential_fetch_failed` error category, and the credential-resolution boundary — into `openspec/specs/fulfillment/spec.md` and `architecture.md`, and complete this section's design-promotion record. **Done in `spec.md`:** "Fulfillment status and result queries" documents the live `fetch_credentials` call, its no-transaction-open timing, and the `credential_fetch_failed` category; "Provider contract" lists `fetch_credentials` and its stateless-read rationale; "Stable error taxonomy" lists the new category. The shipped credential-resolution boundary is many-to-many via `provisioned_resource_id` (not the one-`ProvisionedResource`-per-credential shape first drafted; see 8.9), recorded in `openspec/specs/fulfillment/spec.md` and `openspec/specs/physical-provisioning/spec.md#requirement-vm-fulfillment-result-payload`. `architecture.md` was not touched — nothing promoted here needed conceptual-model/trade-off prose beyond what the normative `spec.md` text states.
+- [x] 8.1 Implement `get_fulfillment_status(fulfillment_id)`, reading directly from the durable fulfillment aggregate (section 3) — no separate outbox or delivery-acknowledgement state, and no provider/Ansible call of any kind; a read reflects current state on demand from the repository alone. **Done: `FulfillmentOrchestrator.get_fulfillment_status`; `GET /fulfillment/{fulfillment_id}/status`.**
+- [x] 8.2 Implement `get_fulfillment_result(fulfillment_id)`, returning the normalized result contract as a `fulfillment.result.v1` versioned envelope (`fulfillment_id`, `capacity_reservation_id`, aggregate state, provisioned-resource outputs, failure details) without persisting credentials. Non-`active` states return the envelope with empty/null credential and provisioned-resource-output fields rather than an error — the aggregate's current state and failure detail are still meaningful before or after `active`. **Done: `get_fulfillment_result` (`results.py`); `GET /fulfillment/{fulfillment_id}/result`. As shipped after 8.9, the envelope carries an optional versioned `domain_result`.**
+- [x] 8.3 Add `FulfillmentProvider.fetch_credentials(...)` (new abstract method, alongside `resolve_provisioned_resources`; async, since it performs provider I/O). `get_fulfillment_result` calls it directly and unconditionally when, and only when, the aggregate is `active` — no claim, no lease, no generation-advancement side effect, since there is nothing durable being coordinated or mutated. Transmit credentials only in that response over the authenticated channel and do not persist them afterward. **Done: `fetch_credentials(provider_metadata, provisioned_resources) -> VersionedEnvelope[Any]`, the adapter owning the nested payload (8.9). The read transaction closes before the provider call (design.md, "Section 8 implementation confirmation").**
+- [x] 8.4 Add a `credential_fetch_failed` category to the stable error taxonomy (`openspec/specs/fulfillment/spec.md#requirement-stable-error-taxonomy`) for a live credential-fetch failure on an `active` fulfillment, distinct from create/status/teardown failure categories, so the storefront can retry the read rather than treat it as a workload failure. **Done: `CredentialFetchFailedError`, mapped to HTTP 503 `credential_fetch_failed`.**
+- [x] 8.5 Add an existence-only check rejecting a query for an unknown `fulfillment_id`/`capacity_reservation_id` (i.e., not present in this provisioning service's own database). This is not a per-caller ownership check — `StorefrontAuthMiddleware` admits exactly one trusted caller today, so there is no second caller identity to distinguish. Structure the check so `service-identity-signing`'s later `owner_principal` comparison can replace it without reshaping the endpoint. **Done through 8.1/8.2: an unknown identifier is 404 `fulfillment_not_found`. Per design.md's Section 8 record (amended 2026-08-06), no successor now adds a per-record ownership check.**
+- [x] 8.6 Add tests for: query after process restart, query for a fulfillment that never reaches `active` (empty credentials/outputs, no provider call attempted), repeated queries returning consistent state, a live credential-fetch failure surfacing `credential_fetch_failed` while the aggregate state is unaffected, and query for an unknown identifier. **Done.** `kit/fulfillment`'s `test_fulfillment.py`/`test_results.py` cover no-provider-call reads, every non-`active` state's empty result, the `active` projection with a live fetch, `CredentialFetchFailedError` leaving state unchanged, unknown identifiers, and the envelope. `test_fulfillment_api.py::TestStatusAndResultQueries` covers the same over HTTP against credentials the job pipeline wrote. Narrowed at the time: restart was a fresh instance against the same database, not a process restart, and repeated reads had no dedicated test; 8.13 added both.
+- [x] 8.7 Record `replace-polling-with-authenticated-push` as a named follow-on in this change's implementation notes/README so its dependency on this section's durable persistence layer and `fulfillment.result.v1` envelope (not needing to be redesigned) is visible to whoever picks it up. Also record `service-identity-signing` as the follow-on that upgrades 8.5's existence check to real per-caller ownership enforcement. **Done:** both edges are in `openspec/changes/README.md`.
+- [x] 8.8 Promote this section's accepted decisions — the provider-neutral `fetch_credentials` contract, `active`-only credential fetch gating, the `fulfillment.result.v1` envelope shape, the `credential_fetch_failed` error category, and the credential-resolution boundary — into `openspec/specs/fulfillment/spec.md` and `architecture.md`, and complete this section's design-promotion record. **Done:** `openspec/specs/fulfillment/spec.md`'s "Fulfillment status and result queries", "Provider contract", and "Stable error taxonomy". The VM payload went to physical-provisioning's "VM fulfillment result payload", since replaced by "Delivery says how to reach what was provisioned" (`bare-metal-mock-provisioned-deal`).
 
-**Validation:** `kit/fulfillment` (151 tests), `kit/site` (135), and `kit/resource-pools` (34) run clean via the repository-standard `.dist` wheel path. `provisioning/compute/service/tests/integration/test_fulfillment_api.py` (including `TestStatusAndResultQueries`) runs clean end-to-end against a real FastAPI app, a real SQLite-backed repository, and a real `AnsibleFulfillmentProvider`. `provisioning/compute/service/tests/unit` runs 388/388 passing (the earlier session's 8 `storefront_client`-import failures were an artifact of an unbuilt `.dist`, not a real repository failure; they do not reproduce against the standard wheel-built target).
-
-**Continued below:** tasks 8.1–8.8 above predate a post-implementation code
-review that changed the credential/result contract shape (see the correction
-note earlier in this section) and found real gaps in the initial 8.9–8.13
-diff. The corrected tasks (8.9–8.15), the fix loop that found and repaired
-those gaps, and Section 8's current, reconciled validation status follow
-immediately below. Do not treat 8.1–8.8 as Section 8's complete or final
-state in isolation.
+8.1–8.8 predate the review that changed the credential and result shape; 8.9–8.15 below are Section 8's final state.
 
 ### Section 8 correction tasks
 
 - [x] 8.9 Replace the generic credential/result shape with a provider-neutral outer `fulfillment.result.v1` envelope carrying a versioned domain payload. Define the VM-domain payload and `VmFulfillmentCredential` in the VM/compute boundary, preserve all credential material as response-only data, and model credential-to-output association as many-to-many through `provisioned_resource_id`. **Permanent documentation:** `openspec/specs/fulfillment/spec.md` for the generic envelope/provider boundary; the authoritative VM provisioning specification for the VM payload and credential fields.
 - [x] 8.10 Remove `domain_resource_ref` from the generic `ProvisionedResource` persistence and result contracts, including its uniqueness assumptions and migrations. Continue to use globally unique `provisioned_resource_id` for fulfillment-owned output identity; retain `vm_host`, `vm_target`, job IDs, and other provider-operational identifiers only in versioned provider metadata or prepared teardown input. Update all repositories, adapters, tests, and backfill paths consistently. **Permanent documentation:** `openspec/specs/fulfillment/spec.md#durable-settlement-persistence`; `openspec/specs/fulfillment/architecture.md` for the identifier ownership boundary; `docs/development/ARCHITECTURE.md` only if the repository-wide vocabulary table currently names this identifier.
-- [x] 8.11 Define active-result consistency and failure semantics in code and tests: every active result read performs a fresh credential lookup; durable aggregate/output fields remain stable unless the aggregate changes; credential equality across reads is not guaranteed; result reads do not mutate fulfillment state; and any required credential-fetch failure rejects the whole result with `credential_fetch_failed` rather than returning a partial security result. **Permanent documentation:** `openspec/specs/fulfillment/spec.md#requirement-fulfillment-status-and-result-queries`; `openspec/specs/fulfillment/architecture.md`. **Done:** five new tests in `kit/fulfillment/tests/unit/test_fulfillment.py` -- fresh `fetch_credentials` call on every repeated read (no caching), durable fields (`state`/failure detail/`provisioned_resources`) identical across repeated reads while `domain_result` content is explicitly allowed to differ, no write transaction opened and aggregate state unchanged across any number of reads, and an unexpected (non-`CredentialFetchFailedError`) provider exception still rejects the whole result via the 8.12 wrapper rather than leaking. `spec.md`'s "Fulfillment status and result queries" gained an explicit consistency/failure-semantics paragraph and three new scenarios; the Provider contract's `fetch_credentials` paragraph now names the wrapper's re-raise behavior explicitly; `architecture.md`'s "Fulfillment result ownership" section gained a paragraph on why the outer envelope and the inner domain result carry different consistency guarantees by design.
+- [x] 8.11 Define active-result consistency and failure semantics in code and tests: every active result read performs a fresh credential lookup; durable aggregate/output fields remain stable unless the aggregate changes; credential equality across reads is not guaranteed; result reads do not mutate fulfillment state; and any required credential-fetch failure rejects the whole result with `credential_fetch_failed` rather than returning a partial security result. **Permanent documentation:** `openspec/specs/fulfillment/spec.md#requirement-fulfillment-status-and-result-queries`; `openspec/specs/fulfillment/architecture.md`. **Done:** five tests in `test_fulfillment.py` (fresh fetch per read, stable durable fields, no write, unexpected exceptions rejected whole). Promoted to the spec's "Fulfillment status and result queries" and "Provider contract" and the companion's "Fulfillment result ownership".
 - [x] 8.12 Keep expected metadata/provider/credential-store exception classification in each adapter, add a defensive orchestration wrapper for unexpected provider exceptions, and emit only safe structured diagnostics (`fulfillment_id`, provider identity, stable error category) without raw provider metadata or credential material. Add focused Ansible adapter tests for malformed metadata, missing/null job identity, missing job, credential-store failure, multiple credential roles, and unexpected exceptions. **Permanent documentation:** `openspec/specs/fulfillment/spec.md#requirement-provider-contract`; `openspec/specs/fulfillment/architecture.md`.
-- [x] 8.13 Strengthen result-query validation with dedicated tests: fresh service composition against the same file-backed SQLite database after disposing the first composition; repeated status and non-active result reads; repeated active result reads asserting stable durable fields and fresh provider calls without credential-equality assumptions; multi-resource/multi-credential many-to-many association; provider I/O occurring after the read transaction closes; and aggregate state remaining unchanged on credential-fetch failure. **Done:** added explicit repeated status and repeated non-active result tests, a read-transaction-closed-before-provider-I/O assertion, and a two-resource/two-credential association-preservation contract test; centralized deterministic output identity derivation in `market_fulfillment.ids` and renamed the legacy draft field to `provisioned_resource_id`. `test_fresh_service_composition_reads_status_and_result_from_same_file_database` and every other test this task names pass, re-verified in the working final-review environment as part of the full 151/151 `kit/fulfillment` suite.
-- [x] 8.14 Make the HTTP result contract explicitly typed for FastAPI/OpenAPI, remove stale comments claiming credential fetch is unimplemented or credentials are always empty, and ensure production comments describe only current invariants. Build and inspect the fulfillment wheel, install it through the repository-standard review path, verify `market_fulfillment/results.py` and the domain payload are packaged, and run the affected compute API tests against installed artifacts. **Done:** the typed `response_model=VersionedEnvelope[dict[str, Any]]` is in place on `GET /fulfillment/{id}/result`; no stale "unimplemented"/"always empty" comments remain in the touched modules. `make dist` packages `vm_provisioning_adapter/fulfillment_results.py` correctly (the file the fix loop found missing from an earlier diff). Full suite evidence for this wheel build is 8.15's, immediately below, not repeated here.
+- [x] 8.13 Strengthen result-query validation with dedicated tests: fresh service composition against the same file-backed SQLite database after disposing the first composition; repeated status and non-active result reads; repeated active result reads asserting stable durable fields and fresh provider calls without credential-equality assumptions; multi-resource/multi-credential many-to-many association; provider I/O occurring after the read transaction closes; and aggregate state remaining unchanged on credential-fetch failure. **Done:** repeated-read tests, a transaction-closed-before-I/O assertion, and a two-resource/two-credential association test; output identity derivation centralized in `market_fulfillment.ids`. `test_fresh_service_composition_reads_status_and_result_from_same_file_database` now lives in `kit/fulfillment/tests/integration/test_fulfillment_restart.py`.
+- [x] 8.14 Make the HTTP result contract explicitly typed for FastAPI/OpenAPI, remove stale comments claiming credential fetch is unimplemented or credentials are always empty, and ensure production comments describe only current invariants. Build and inspect the fulfillment wheel, install it through the repository-standard review path, verify `market_fulfillment/results.py` and the domain payload are packaged, and run the affected compute API tests against installed artifacts. **Done:** typed `response_model` on the result route; stale comments removed; the wheel packaged the adapter's result module (since removed by `bare-metal-mock-provisioned-deal`). Suite evidence is 8.15's.
 
-**Fix loop (following code review):** the reviewed diff (8.9/8.10/8.12/8.13
-marked done above) did not actually run when checked against the real service --
-verified by applying it to a clean checkout and running the affected suites, not
-by inspection alone. Five independent real bugs were found and fixed: a file
-missing from the reviewed diff that broke the whole service composition's
-import (invalidating every suite that exercised a real adapter/app instance,
-while the mocked-provider `kit/fulfillment` suite stayed green and masked it);
-two integration assertions stale against the new envelope shape; a weakened
-legacy-backfill conflict check that had lost a real safety property; an
-unstable ID-derivation choice caught by a rerun-idempotency test failing; and
-the backfill `INSERT` silently discarding the derived id in favor of a fresh
-random one. See `design.md`'s "Section 8 correction tasks — fix-loop
-debugging record" for the full account.
+**Correction (fix loop):** 8.9, 8.10, 8.12, and 8.13 were marked done on a diff that did not run against the real service. Five bugs were found and fixed (design.md, "Section 8 correction tasks — fix-loop debugging record").
 
-**Validation (fix loop):** `kit/fulfillment/tests/unit` (121),
-`provisioning/compute/service/tests/integration/test_fulfillment_api.py` (13),
-`test_composition.py` + both `test_fulfillment_convergence*.py` files (30),
-and `test_database.py` + `test_legacy_vm_lease_migration.py` (17) all ran
-clean against source -- 181 tests total across every suite this diff's
-changes touch.
+- [x] 8.15 Run the repository-standard wheel-based build/install/test path for `kit/fulfillment` and `provisioning/compute/service` against the post-fix-loop code, and run `openspec validate --all --strict`. **Done in the final review pass:** `kit/fulfillment` and `make test-provisioning` passed on the wheel path. Strict validation ran for the first time: the change validated, and it exposed structural errors in five permanent specs, which 12.2 fixed. Section 8's own text had made this task a gate for Section 9, and Section 9 began before it closed (proposal.md, "Knowledge to promote").
 
-- [x] 8.15 Run the repository-standard wheel-based build/install/test path for `kit/fulfillment` and `provisioning/compute/service` against the post-fix-loop code, and run `openspec validate --all --strict`. **Done during the final review pass, in a working environment:** `make dist && make test` for `kit/fulfillment` (151/151) and `make test-provisioning` (unit 388/388, integration 164/164) both pass via the repository-standard `.dist` wheel path. `npx @fission-ai/openspec@latest validate --all --strict` now runs (unavailable in every earlier session): `change/pools-7-storefront-fulfillment-cutover` itself validates cleanly. It surfaced real, pre-existing structural errors in several specs this change depends on or touches (`spec/fulfillment`, `spec/physical-provisioning`, `spec/resource-pool-management`, `spec/site-capacity`, `spec/vm-storefront-fulfillment` — mostly `### Requirement:` headers living outside the parsed `## Requirements` section, plus one missing-scenario and one missing-SHALL/MUST case), none introduced by this task. These are real Section 12 documentation-closure blockers, not resolved here; do not archive this change until they're fixed.
-
-**Section 8 complete.** All of 8.1–8.15 are done and verified, including the credential-contract correction (8.2/8.3/8.8/8.9/8.10) and the fix-loop corrections above; see 8.15 for the current validation evidence and the one carried-forward item (pre-existing spec structural errors, tracked as a Section 12 blocker).
+**Section 8 complete.**
 
 ## 9. Cut over storefront orchestration
 
@@ -465,14 +436,9 @@ changes touch.
     `/begin` wraps `FulfillmentOrchestrator.begin_fulfillment` — same
     404/409/422 error-mapping conventions as the existing routes
     (`SettlementEntityNotFoundError`/`NoEligibleSettlementResourceError`/etc.).
-    **Done.** `CapacityReservationExpiredError`/`SettlementRequestMismatchError`
-    also mapped (409) beyond the two named above, matching the full set
-    `schedule_resource` can actually raise. Covered by 5 new integration
-    tests in `TestScheduleEndpoint`
-    (`provisioning/compute/service/tests/integration/test_fulfillment_api.py`);
-    full suite run: 18/18 passing (13 pre-existing + 5 new). Spec
-    promotion (into `openspec/specs/fulfillment/spec.md`) is 9.8.1, not yet
-    done — this task is the code only.
+    **Done,** also mapping `CapacityReservationExpiredError` and
+    `SettlementRequestMismatchError` to 409; `TestScheduleEndpoint`. Promoted
+    by 9.8.1.
   - [x] 9.0.2 Move `FulfillmentRequestBody`, `FulfillmentAcceptanceResponse`,
     `FulfillmentStatusResponse`, `FulfillmentValidationResponse` out of
     `fulfillment_controller.py` (server-only today) into
@@ -485,14 +451,9 @@ changes touch.
     `market_fulfillment`'s own `VersionedEnvelope`/`schema_version` axis —
     two deliberately separate version concepts (design.md, item 3).
     `fulfillment_controller.py` imports these from `compute_provisioning`
-    rather than declaring local duplicates. **Done.** Added
-    `arkhai-kit-fulfillment` as a `compute_provisioning` dependency
-    (`provisioning/compute/pyproject.toml`) so `contracts.py` can import
-    `VersionedEnvelope`. All six models also re-exported from
-    `compute_provisioning`'s top-level `__init__.py`, matching every other
-    contract's existing export pattern. Verified: `compute_provisioning`'s
-    own unit suite (28/28, including `test_contracts.py`) and the compute
-    service's full suites (above) all pass against the moved types.
+    rather than declaring local duplicates. **Done;** `compute_provisioning`
+    depends on `arkhai-kit-fulfillment` for `VersionedEnvelope` and
+    re-exports the six models.
   - [x] 9.0.3 Add `schedule`, `begin_fulfillment`, `get_fulfillment_status`,
     `get_fulfillment_result` methods to `ComputeProvisioningClient`
     (`provisioning/compute/src/compute_provisioning/client.py`), calling
@@ -506,10 +467,9 @@ changes touch.
     cover, alongside job/lease/capacity. Permanent documentation
     destination: `openspec/specs/compute-provisioning-contract/spec.md`, new
     requirement(s) alongside "Versioned executor action submission" and
-    "Allocation-backed lease control". **Done.** Methods named
-    `schedule_resource` (not bare `schedule`, matching the kit method name
-    exactly) plus the other three as specified; `ComputeProvisioningClientProtocol`
-    extended to match. Spec promotion is 9.8.2, not yet done.
+    "Allocation-backed lease control". **Done,** as `schedule_resource`
+    (the kit's name) and the other three, with the protocol extended.
+    Promoted by 9.8.2.
   - [x] 9.0.4 Add a new sibling aggregator (module/class name decided at
     implementation time, e.g. `AggregateComputeProvisioningClient`) mapping
     site name → `ComputeProvisioningClient` instance, in
@@ -523,24 +483,11 @@ changes touch.
     `AggregateCapacityClient`/`RemoteCapacityClient` themselves — both are
     deliberately scoped to the `CapacityClient` protocol's
     `/api/v1/capacity` site-ledger surface only. **Done as
-    `AggregateFulfillmentClient` in `market_storefront/services/capacity_client.py`**
-    (confirmed at implementation time that `core_storefront` cannot host it:
-    core is a lower repository layer than domain packages and must not
-    depend on `compute_provisioning`, which `ComputeProvisioningClient`
-    requires — checked `core/storefront/pyproject.toml` has no such
-    dependency and per `ARCHITECTURE.md`'s repository-layers diagram must
-    not gain one). `build_fulfillment_client(capacity_client)` composition-root
-    builder added alongside the existing `build_capacity_client`, keyed the
-    same way `_aggregate_for` is. `get_fulfillment_status`/`get_fulfillment_result`
-    take an optional `capacity_reservation_id` for routing, since the shared
-    cache is keyed by that, not `fulfillment_id` — not originally specified
-    in this task's text, decided at implementation time as the natural
-    consequence of 9.0.5's cache shape. Covered by 6 new unit tests
-    (`domains/vms/storefront/tests/unit/services/test_aggregate_fulfillment_client.py`):
-    cache-hit routing, cold-cache fan-out with self-healing cache write,
-    every-site-refusing error propagation, cache sharing between
-    `schedule_resource` and `begin_fulfillment`, and explicit-vs-absent
-    `capacity_reservation_id` routing for status/result. All 6 pass.
+    `AggregateFulfillmentClient` in `market_storefront/services/capacity_client.py`,**
+    built by `build_fulfillment_client`. `core_storefront` cannot host it:
+    core may not depend on `compute_provisioning`. Status and result take an
+    optional `capacity_reservation_id` for routing, since the shared cache is
+    keyed by it. `test_aggregate_fulfillment_client.py`.
   - [x] 9.0.5 Promote `AggregateCapacityClient._reservation_sites`
     (`core_storefront/aggregation.py`) from private, class-owned state to a
     shared mapping object the composition root
@@ -553,14 +500,8 @@ changes touch.
     `core_storefront/aggregation`); this decision's durable rationale is
     documented in the module's own docstring, matching that file's existing
     style, not promoted into a new spec file for this one mechanism.
-    **Done.** `AggregateCapacityClient.__init__` gained an optional
-    `reservation_sites: dict[str, str] | None` parameter (defaults to a
-    fresh dict, preserving existing behavior for every other caller/test)
-    and a new `reservation_sites` property exposing the live dict instance.
-    `build_fulfillment_client` reads `capacity_client.reservation_sites`
-    directly rather than being passed a separate dict, guaranteeing the
-    same instance. Existing `core/storefront` aggregation unit suite
-    re-run after the change: 10/10 still passing (no regression).
+    **Done:** an optional `reservation_sites` argument and property;
+    `build_fulfillment_client` reads the same instance.
   - [x] 9.0.6 Add `fulfillment_id` (physical-provisioning aggregate identity)
     to `ARCHITECTURE.md`'s "Shared vocabulary and identities" table
     alongside a new `fulfillment_uid` entry (on-chain settlement-claim
@@ -568,275 +509,44 @@ changes touch.
     there), with a one-line note distinguishing them. Keep `fulfillment_id`
     bare when persisted in 9.3 below — no column rename to
     `provisioning_fulfillment_id` (design.md, item 3 — tried first, not
-    committed permanently). **Done.** `fulfillment_id` was already listed;
-    added a paragraph after the identifiers table introducing
-    `fulfillment_uid`, explicitly noting it predates `fulfillment_id`, is
-    not part of the UUIDv7 fulfillment-lifecycle family, and that a single
-    storefront row may legitimately carry both.
+    committed permanently). **Done:** `ARCHITECTURE.md`'s identifiers
+    section distinguishes `fulfillment_uid` from `fulfillment_id`.
 
-  **Validation:** ran every test suite touched by 9.0 directly
-  against source (no wheel build available in this environment — same
-  constraint documented throughout Section 8): `provisioning/compute`
-  unit suite 28/28; `provisioning/compute/service` fulfillment integration
-  suite 18/18; `provisioning/compute/service` unit suite 342/350 (the 8
-  failures are the pre-existing `storefront_client` import gap already
-  documented in Section 8's validation notes, confirmed unrelated by
-  inspection, not newly introduced); `core/storefront` aggregation unit
-  suite 10/10; new `AggregateFulfillmentClient` unit suite 6/6. The
-  broader `domains/vms/storefront` unit suite could not be run to
-  completion in this environment — most of its test modules fail to
-  collect on missing sibling-package dependencies (`typer`, `market_policy`,
-  `arkhai_vms`, and others) that were not installed this session; the
-  subset reachable after manually pathing `kit/config` in (13/16 of
-  `test_remote_capacity_client.py`, all of the new aggregate-fulfillment
-  test file) passed, and the remaining 3 failures were confirmed by direct
-  import isolation to be a pre-existing `market_storefront.utils.sqlite_client`
-  dependency gap unrelated to this section's changes, not a new regression.
-  Repository-standard wheel-based validation and `openspec validate --all
-  --strict` remain unrun, per the same open item Section 8 tracked as task
-  8.15.
+  **Validation:** 9.0's suites ran against source only, with environment
+  gaps disclosed (design.md, "Rationale moved from task notes at closeout",
+  9.0); wheel-based validation came with 8.15.
 
 
-- [x] 9.1 Replace host-shaped ordinary storefront reservation assumptions with the implemented POOLS-4 capacity-reservation claim and owning-site routing. **Correction (design review):** the claim-shape half of this task is already done — `vm_job_spec_service.compute_capacity_claim_from_order` already builds a pool/resource/dimension-shaped claim, not `required_attributes=("vm_host",)`. What remains under this task number is narrower: confirm no other call site still assumes a bare `vm_host`-only claim, and that owning-site routing (9.0.4/9.0.5) is wired before 9.2 needs it. The actual `vm_host`-direct-to-executor hand-off this task's original text was really describing is 9.2's concern, not this one's. **Done.** Grepped every production `required_attributes`/`vm_host` reference under `domains/vms/storefront/src`: the only remaining `vm_host`-dependent dispatch is `vm_fulfillment_service.py`'s direct hand-off to `provision_vm`, which is 9.2's concern as expected; every other `vm_host` reference is either inventory-attribute matching (`resource_capacity_validator.py`, `sqlite_client.py`, `migrations.py` — seller-declared resource shape, unrelated to claim building) or the read-only admin dry-run diagnostic (`admin_settle_service.py`). Owning-site routing (9.0.4/9.0.5) is wired and tested, ready for 9.2.
-- [x] 9.2 Replace direct `ExecutorActionEnvelope` submission and provider-job polling with `schedule_resource` followed by `begin_fulfillment` when the commercial workflow is ready, using 9.0's new client methods. Use `market="vms"` (design.md, item 6 — matches the existing integration test and the `domains/vms` package name; no other convention documented anywhere). **Do not remove the `_register_vm_lease_with_settings`/`register_lease` call site as part of this task** — traced during the design review: it writes `offering_mode`/`executor_target`/`executor_ref` onto the same `CapacityReservation` row `LeaseLifecycleService`/`VmReleaseExecutor.submit_release` reads to route and act on release. Removing it here would strand every VM fulfilled through this new path with no way for the watchdog to find or route its teardown at all. Leave `register_lease` calling as before. **Update (Section 10 design review):** the call site is not removed in Section 10 either — `register_lease` and `LeaseLifecycleService` are retained as the release trigger. Investigation (task 10.7) found `executor_ref` safely droppable (self-heals from independently-written `vm_host`) but `executor_target` (backs `vm_target`, no independent write path, read directly by `LeasesController._lease_view`) must stay. `offering_mode`/`lease_end_utc` remain load-bearing indefinitely.
+- [x] 9.1 Replace host-shaped ordinary storefront reservation assumptions with the implemented POOLS-4 capacity-reservation claim and owning-site routing. **Correction (design review):** the claim-shape half of this task is already done — `vm_job_spec_service.compute_capacity_claim_from_order` already builds a pool/resource/dimension-shaped claim, not `required_attributes=("vm_host",)`. What remains under this task number is narrower: confirm no other call site still assumes a bare `vm_host`-only claim, and that owning-site routing (9.0.4/9.0.5) is wired before 9.2 needs it. The actual `vm_host`-direct-to-executor hand-off this task's original text was really describing is 9.2's concern, not this one's. **Done:** the only `vm_host`-dependent dispatch left was the hand-off 9.2 replaced; the other references were inventory matching or an admin dry run.
+- [x] 9.2 Replace direct `ExecutorActionEnvelope` submission and provider-job polling with `schedule_resource` followed by `begin_fulfillment` when the commercial workflow is ready, using 9.0's new client methods. Use `market="vms"` (design.md, item 6 — matches the existing integration test and the `domains/vms` package name; no other convention documented anywhere). **Do not remove the `_register_vm_lease_with_settings`/`register_lease` call site as part of this task** — traced during the design review: it writes `offering_mode`/`executor_target`/`executor_ref` onto the same `CapacityReservation` row `LeaseLifecycleService`/`VmReleaseExecutor.submit_release` reads to route and act on release. Removing it here would strand every VM fulfilled through this new path with no way for the watchdog to find or route its teardown at all. Leave `register_lease` calling as before. **Update (Section 10):** `register_lease` stayed as the release trigger; 10.7 found `executor_ref` droppable but `executor_target` load-bearing. `bare-metal-mock-provisioned-deal` later removed lease registration entirely.
 
-  **Adapter-layer prep, done and tested before the storefront-side rewiring below:** building the actual `fulfillment_request` payload this task needs to send surfaced two real feature-parity gaps neither the design review nor the original task text caught:
-  - **Connectivity (FRP):** `VmFulfillmentRequirements` had no field for `frp_server_addr`/`frp_domain`/`frp_dashboard_password` at all — the legacy path sourced these from storefront settings and passed them per-call; silently dropping them would break buyer connectivity for any host without a public IP. Added `VmConnectivitySettings`/`connectivity` field (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/models/fulfillment_model.py`), deliberately separate from sizing fields — forwarded metadata for the provider, not a scheduling requirement. Forwarded through in `AnsibleFulfillmentProvider.prepare_create`. Storefront-configured only, matching today's behavior exactly; buyer-specified/negotiated FRP terms are split out to a new change, `add-buyer-vm-connectivity-terms` (design phase; registered in `openspec/changes/README.md`), since that requires negotiation-protocol and settlement-encoding changes out of proportion for this section. Covered by 2 new unit tests.
-  - **VM sizing:** the legacy path never sent `vm_ram`/`vm_vcpus`/`vm_disk_size` at all (relied entirely on Ansible inventory `group_vars` defaults), but `VmFulfillmentRequirements` had these as *required* fields — would have hard-failed every ordinary fulfillment. Traced the actual units against the Ansible role (`domains/vms/provisioning/iac/ansible/roles/vm-management/tasks/vm-create.yml`, `inventory/vm-vars-example.yaml`): `vm_ram` is MB (`virt-install --ram`), `vm_vcpus` is a plain count, `vm_disk_size` is a `qemu-img`-style string (e.g. `"80G"`). Made all three optional on `VmFulfillmentRequirements` and added a pool-level default tier (`default_vm_ram`/`default_vm_vcpus`/`default_vm_disk_size` on `AnsiblePoolConfig`), resolved buyer-specified → pool-default → left unset (Ansible/inventory resolves it, unchanged from today) in `prepare_create`. This is intentionally the first step of a longer-term pattern (pool-level defaults now; negotiation-sourced buyer requirements later, as POOLS work continues wiring VM shape configurability up from the bottom) rather than a one-off. Covered by 3 new unit tests.
+  **Done.** Building the request surfaced four parity gaps, each fixed: connectivity (a `connectivity` request field, since deleted by the fix for pre-closeout review 17 F1), optional VM sizing with pool defaults, and the credential and connection fields the result had dropped (design.md, "Section 9 implementation confirmation" and "Rationale moved from task notes at closeout", 9.2). Comments citing task numbers were rewritten.
 
-  Continued investigation surfaced two more real gaps in the *already-implemented* Section 5/8 result pipeline, not just the request side:
-  - **Credential fields silently dropped:** `job_service.get_credentials` already returns `ssh_key_path_host`/`key_type` per credential (populated for real from parsed Ansible output), but `AnsibleFulfillmentProvider.fetch_credentials` never copied them into `VmFulfillmentCredential`, which didn't have the fields at all. Added both fields to `VmFulfillmentCredential` (`domains/vms/provisioning/adapter/src/vm_provisioning_adapter/fulfillment_results.py`) and populated them in `fetch_credentials`.
-  - **VM connection metadata missing entirely:** the legacy job result carried `vm_name`/`host`/`timestamp`/`tenant_user`/`vm_ip_internal`/`ssh_port` (stored as `connection_details` JSON on the listing); the new `VmFulfillmentResultPayload` had none of it — only `provisioned_resources` (id/status) and `credentials`. Traced the data's actual source: `AnsibleJobService._build_result_payload`, persisted as `AnsibleJob.result`, already readable via the existing `job_service.get_job(job_id)`. Extended `VmFulfillmentResultPayload`/`build_vm_fulfillment_result` with these six fields (all optional; `ssh_commands` on each credential already embeds a ready-to-use connection string, so this is structured convenience data, not something buyer connectivity depended on) and populated them in `fetch_credentials` via a best-effort `get_job` read that never fails an otherwise-successful credential fetch.
-
-  Both surfaced and confirmed real via a user design discussion before implementing (per that discussion: extend the model rather than accept the narrower result, since checking whether anything reads these fields by key first would have taken about as long as just fixing it correctly).
-
-  **Comment cleanup:** a broader review of this session's own new code found several comments/docstrings citing this change's task numbers directly (e.g. "POOLS-7 9.0.4/9.0.5"), violating `AGENTS.md`'s rule that production code must not reference `openspec/changes`. Swept every file touched this session (production and test) and rewrote each to describe the rationale in stable, present-tense terms with no change-document citation. Confirmed via `grep` across all touched files: zero remaining `POOLS-7`/`pools-7` references outside this change's own `openspec/changes` documents.
-
-  Both fixes verified against the full `provisioning/compute/service` suite: 365/373 passing (same 8 pre-existing, unrelated `storefront_client` import failures as documented throughout Sections 8-9; +11 new tests, 0 regressions).
-
-  **Storefront-side rewiring: done.** Replaced `_do_provision`'s
-  implementation in `fulfillment_service.py` — the `provision_vm` DI seam
-  `vm_fulfillment_service.py`'s `fulfill_vm_obligation` already calls through,
-  left unchanged — with `schedule_resource` → `begin_fulfillment` → poll
-  `get_fulfillment_status`/`get_fulfillment_result`, using 9.0's client
-  methods and 9.0.4's `build_fulfillment_client`. `vm_host`/`deal_ref` are
-  still accepted for call-site compatibility but no longer used to select a
-  resource (that's `schedule_resource`'s job now). `create_vm_and_wait_with_credentials`
-  is no longer called from this path (its definition in
-  `provisioning_orchestration_service.py` is untouched — removing/tombstoning
-  it is 9.6's job, not this task's).
-
-  Three new helpers do the actual mapping work:
-  - `_connectivity_settings_from_storefront_config`: reads storefront-configured
-    FRP settings into the new `connectivity` request field.
-  - `_poll_fulfillment_until_terminal`: polls status until `active`/`failed`
-    per `SettlementRecordState`, raising `ComputeProvisioningTimeoutError` on
-    timeout — the new-path equivalent of `poll_until_complete`.
-  - `_fulfillment_result_to_legacy_shape`: maps the new result envelope's
-    `domain_result.payload` (credentials plus the VM metadata fields added
-    while fixing the two result-pipeline gaps above) back into the
-    `{"authentication": {"root": ..., "tenant": ...}, ...}` shape
-    `fulfill_vm_obligation` already expects from `provision_vm`, so nothing
-    downstream of the `provision_vm` call needed to change.
-
-  Added `arkhai-kit-fulfillment` as a `domains/vms/storefront` dependency
-  (needed for `VersionedEnvelope` — the storefront building fulfillment
-  requests directly is a domain-package-depends-on-kit edge, permitted by
-  `ARCHITECTURE.md`'s repository-layers diagram).
-
-  **Verification:** `alkahest_py` (a compiled dependency) is not installed
-  in this environment and never has been this session — confirmed this is
-  an environment gap, not something introduced here: the *pre-existing*
-  `test_fulfillment_service.py` also fails to collect on the identical
-  `ModuleNotFoundError: No module named 'alkahest_py'` with no changes from
-  this session at all. Worked around it for direct verification: confirmed
-  the full `fulfillment_service.py` module imports cleanly with only
-  `alkahest_py` stubbed (every other real dependency, including the new
-  `market_fulfillment`/`compute_provisioning` imports, resolved for real);
-  then wrote a new, focused unit suite,
-  `domains/vms/storefront/tests/unit/test_fulfillment_provisioning.py` (13
-  tests, all passing), using the same stub approach, covering: result
-  mapping (root/tenant credential shape, missing domain result, unknown
-  credential roles ignored), connectivity settings resolution (none/full/partial
-  configuration), status polling (immediate terminal state, failure,
-  multi-step non-terminal progression, timeout), and `_do_provision`
-  end-to-end against a fully mocked fulfillment client (schedule → begin →
-  poll → result call sequence and argument shapes, connectivity forwarding,
-  and the failed-state short-circuit that skips the result fetch entirely).
-  Also re-ran every test suite this section's earlier work touched
-  (`AggregateFulfillmentClient`, `RemoteCapacityClient`/`AggregateCapacityClient`)
-  to confirm no regression: 29/29 passing across all three files together.
-
-  **Comment cleanup applied here too:** swept `fulfillment_service.py` and
-  the new test file for change-document references before considering this
-  done; none found.
-
-  **Code review follow-up:**
-  - Refactored the repeated 6-field VM metadata block (`vm_name`/`host`/
-    `timestamp`/`tenant_user`/`vm_ip_internal`/`ssh_port`), previously
-    named three separate times (payload model, `build_vm_fulfillment_result`'s
-    kwargs, and the caller building those kwargs), into one new
-    `VmConnectionInfo` class (`fulfillment_results.py`) — result-side
-    counterpart to the existing `VmConnectivitySettings` (request-side),
-    not merged into it since they're opposite directions (buyer/storefront
-    *input* vs. provider-reported *output*). `fetch_credentials` now
-    constructs one `VmConnectionInfo` instance instead of naming all six
-    fields as kwargs; `_fulfillment_result_to_legacy_shape` now spreads the
-    nested `connection_info` dict (`**connection_info`) instead of naming
-    each field again on the read side. Updated every test asserting on the
-    old flat wire shape (`test_fulfillment_api.py`,
-    `test_fulfillment_provisioning.py`) to the new nested shape; full
-    suites re-run clean (40 in `provisioning/compute/service`, 13 in the
-    new storefront test file).
-  - Added `arkhai-kit-fulfillment` to `domains/vms/storefront/Makefile`'s
-    `reinit` target (was missing entirely — `provisioning/compute/service/Makefile`'s
-    `reinit` already had it, since that service already depended on
-    `market_fulfillment` before this section). Also added `dist-kits` as
-    an explicit prerequisite of `dist-compute-provisioning` and
-    `dist-storefront` in the root `Makefile`, matching the existing pattern
-    used by `dist-provisioning-adapters`/`dist-compute-provisioning-service`
-    for their own kit dependencies — both packages now genuinely depend on
-    `arkhai-kit-fulfillment` and previously had no declared build-order
-    dependency on the target that produces its wheel. Verified with
-    `make -n` dry-runs (both `dist-compute-provisioning` and `reinit`)
-    rather than assumed correct from reading alone.
-  - **Follow-up (caught by a real `make test` run, not this
-    session's own sandbox verification):** the `reinit` fix above was
-    incomplete. `arkhai-kit-fulfillment` transitively depends on
-    `arkhai-kit-site` and `arkhai-kit-resource-pools`
-    (`ARCHITECTURE.md`'s kit-layer hierarchy), but neither was previously
-    forced to reinstall in `domains/vms/storefront/Makefile`'s `reinit`
-    target — the VM storefront never needed either directly before this
-    section added `arkhai-kit-fulfillment`. A real `make test` run
-    surfaced this as `ImportError: cannot import name
-    'resource_satisfies_requirement' from 'market_site'`: the venv's
-    already-installed `market_site` predated that function's addition,
-    and nothing told `uv sync` to refresh it. Added both to the
-    `reinit` target's upgrade/reinstall list, alongside
-    `arkhai-kit-fulfillment`. This session's own sandbox verification
-    (manually pathing sibling packages via `PYTHONPATH`, not a real `uv`-
-    managed venv) could not have caught this class of gap — it's specific
-    to dependency *resolution/reinstall* behavior, not import-path
-    availability. `provisioning/compute/service/Makefile` already had
-    both for unrelated reasons (that service depended on
-    `arkhai-kit-fulfillment` before this section), so it was never
-    exposed to this gap.
+  **Storefront-side rewiring.** `_do_provision` runs `schedule_resource` →
+  `begin_fulfillment` → poll status → result through the unchanged
+  `provision_vm` seam, mapping the result back to the shape
+  `fulfill_vm_obligation` expects. The VM storefront depends on
+  `arkhai-kit-fulfillment`, and its `reinit` refreshes that kit and its two
+  transitive kits; the root `Makefile`'s `dist-*` targets gained the kit
+  build as a prerequisite. A real `make test` caught the transitive `reinit`
+  gap the sandbox could not (design.md, "Rationale moved from task notes at
+  closeout", 9.2). Evidence: `test_fulfillment_provisioning.py`, verified
+  then with `alkahest_py` stubbed.
 - [x] 9.3 Persist `capacity_reservation_id`, selected settlement resource, and returned `fulfillment_id` in storefront workflow state so negotiation and fulfillment resume after restart. **Done.**
 
-  **Correction (external code review):** this task's own text — "so negotiation and fulfillment resume after restart" — overclaims what was actually built. What's done: the three identifiers are persisted, correctly, as soon as each becomes known. What's not done, and not implied to exist by the code itself, only by this task's phrasing: nothing reads them back to resume an in-progress fulfillment after a restart. See `design.md`'s "Section 9 reconciled status" for the full accounting.
-
-  **Update:** the specific correctness gap this correction originally flagged — that a naive "retry the whole call" approach would be unsafe because `capacity.reserve()` minted a fresh reservation on every call — is now fixed; `reserve()` is idempotent by `deal_ref["escrow_uid"]` (see the design-promotion record's open-question 1). A retry-the-whole-call approach is now *safe*, just not *automatic*: nothing yet drives that retry after a restart without an external trigger (a buyer/operator re-invoking the settle call). Automatic resumption (discuss question 3) remains open.
-
-  **Follow-up fixes applied in response to this review:**
-  - Persistence is no longer a single silent attempt: new `persist_escrow_fields_with_retry` helper (`vm_fulfillment_service.py`) retries a bounded number of times (default 3, with backoff) and logs at ERROR (not WARNING) naming the escrow and every failed field if all attempts fail, rather than swallowing the failure. Does not abort an otherwise-successful fulfillment over a failed metadata write, but the failure is no longer invisible. Used by both `_do_provision`'s `capacity_reservation_id`/`settlement_resource_id` write and `_record_fulfillment_id`'s `fulfillment_id` write. 4 new tests.
-  - `fulfillment_id` added to all three buyer-facing settlement response models (`SettleResponse`, `SettleStatusResponse`, `SettleWaitResponse` in `core_storefront/models/settle_models.py`), populated from the escrow row via `serialize_settlement_job` (the shared helper, one fix covers `SettleResponse`/`SettleStatusResponse`) and directly in `wait_for_settlement` (which builds its response manually, not through the shared helper). 3 new unit tests for `serialize_settlement_job`'s handling; could not execute them in this environment (`arkhai_vms`, a dependency of this test file's other fixtures, is not vendored in this sandbox at all, unlike every other missing dependency encountered this session) — verified by direct standalone execution of the changed function with the import gap bypassed, and by `py_compile` on every changed file, but not by running the actual test file. Disclosed as unrun, not represented as passing.
-
-  Added `capacity_reservation_id`, `settlement_resource_id`, `fulfillment_id`
-  columns to the shared `escrows` table (`core_storefront/sqlite_client.py`
-  — domain-neutral, not VM-specific; the natural home since this table
-  already carries the pre-existing `fulfillment_uid`/`provisioning_job_id`
-  precedent for exactly this kind of per-deal durable identity). Both the
-  fresh-DB `CREATE TABLE` and an `ALTER TABLE ... ADD COLUMN` migration
-  guard (existing DBs) were added, matching this file's own established
-  pattern. Extended `update_escrow`/`_ESCROW_COLS` accordingly.
-
-  Wired the actual writes in from two points, both restart-safe as soon as
-  each value becomes known rather than batched at the end:
-  - `fulfillment_service.py`'s `_do_provision` persists `capacity_reservation_id`
-    and `settlement_resource_id` immediately after `schedule_resource`
-    returns (best-effort — a persistence failure is logged, not fatal to
-    the fulfillment attempt itself).
-  - `vm_fulfillment_service.py`'s `on_job_submitted` hook (renamed
-    `_record_fulfillment_id`, from `_record_job_id`) persists `fulfillment_id`
-    once `begin_fulfillment` returns it.
-
-  **Found and fixed a real bug in 9.2's own code while wiring this up:**
-  `_do_provision` was already calling `on_job_submitted(accepted.fulfillment_id)`
-  (a durable fulfillment identity), but the receiving callback
-  (`_record_job_id`) was still writing that value into the `provisioning_job_id`
-  column — a column whose entire meaning is an ephemeral executor job id,
-  not a durable fulfillment identity. Renamed the callback and column
-  target to match what it actually now receives.
-
-  **Deliberate scope boundary, not resolved here:** `provisioning_job_id`
-  is no longer written by the new path at all (there is no ephemeral
-  executor job id in this architecture — `fulfillment_id` is the durable
-  identity now). `SettleWaitResponse`/`wait_for_settlement`
-  (`settle_controller.py`) still surfaces `provisioning_job_id` to buyers
-  as part of settlement status polling; that field will simply be empty
-  for every new-path fulfillment. Whether callers need a `fulfillment_id`
-  field added to that response, or the existing field repurposed, is a
-  buyer-facing API question that belongs with 9.4/9.5 (which own polling
-  and cross-domain status exposure), not this persistence-only task.
-
-  **Verification:** new `core/storefront/tests/unit/test_sqlite_client_escrow_fulfillment_identity.py`
-  (4 tests: default-None, full write, partial-update non-clobbering,
-  `fulfillment_id`/`fulfillment_uid` coexistence) — all pass. Full
-  `core/storefront` unit suite re-run: 43/43 passing (excluding modules
-  with a pre-existing, unrelated `market_core` import gap in this
-  environment, not touched by this change). `_do_provision`'s persistence
-  calls are now asserted for real in
-  `test_fulfillment_provisioning.py` (previously silently swallowed by
-  that function's own defensive `except Exception` when the test's mock
-  sqlite client had no `update_escrow` method at all — fixed the test
-  fixtures too); all 13 tests there still pass.
-- [x] 9.4 Poll `get_fulfillment_status`/`get_fulfillment_result` (pull-based, per section 8) at appropriate points in the storefront's workflow and deliver/retain buyer-facing credential state according to the storefront's security model. **Done as part of 9.2's `_do_provision` implementation** — `_poll_fulfillment_until_terminal` polls status until terminal, then `get_fulfillment_result` fetches the result once, mapped back into the exact `{"authentication": {"root": ..., "tenant": ...}}` shape `fulfill_vm_obligation`'s existing, unmodified credential-storage code (`cred_client.store_credential(..., granted_to="self", ...)`) already expects and consumes — verified the field names line up exactly (`ssh_key_path_host` on root, `key_type` on tenant), not just structurally similar. No separate credential-delivery code needed: the storefront's existing security model (server-side storage, `granted_to="self"`, buyer-authenticated retrieval elsewhere) is unchanged, and parity with the legacy path's blocking-call-then-store shape is preserved — no regression in when or how credentials become available to the buyer.
-- [x] 9.5 Map VM-domain job/provider states to the shared fulfillment lifecycle invariant without leaking raw VM job status cross-domain. **Verified already satisfied, no new mapping code needed.** Traced the full status chain end to end: `_poll_fulfillment_until_terminal` reads only `FulfillmentStatusResponse.state` — the kit-level, domain-neutral `SettlementRecordState` values (`assigned`/`dispatch_pending`/`dispatching`/`active`/`failed`/...) — and never touches `AnsibleJob.status` (the raw VM-domain job state: `queued`/`running`/`succeeded`/`failed`) at any point. `fulfill_vm_obligation`'s return dict (unchanged) already used only generic `"fulfilled"`/`"error"` status strings, which `settlement_jobs.py` (unchanged) already translates into generic `"ready"`/`"failed"` escrow status. Raw VM job status was never in this cross-domain-visible chain before this section's changes, and nothing added by 9.0-9.4 introduces a new leak point — confirmed by grep across every file this section touched for any reference to `AnsibleJob`/raw job-status fields outside `vm_provisioning_adapter` itself, finding none.
-- [x] 9.6 Remove `create_vm_and_wait_with_credentials` and ordinary storefront polling/direct executor dispatch after all callers are migrated; tombstone deleted paths where repository workflow requires it. **Done.**
-
-  Confirmed via repository-wide search that no production or test code
-  called `provisioning_orchestration_service`/`create_vm_and_wait_with_credentials`
-  outside that module's own definition and its dedicated test file — 9.2
-  already removed the only real caller.
-
-  Tombstoned two files (manual deletion required, per this repository's
-  review-artifact convention):
-  - `market_storefront/services/provisioning_orchestration_service.py`
-    (`create_vm_and_wait_with_credentials` + its private helper) — dead
-    code, no remaining callers.
-  - `tests/unit/test_compute_provisioning_orchestration.py` — had two
-    tests. `test_vm_orchestration_submits_versioned_correlated_envelope`
-    tested the now-dead function and is deleted with it.
-    `test_vm_lease_registration_uses_common_compute_model` tests
-    `_register_vm_lease_with_settings`, unrelated to this removal and
-    still in production use (its own removal is deferred to Section 10
-    task 10.5) — **moved, not deleted**, to `test_fulfillment_service.py`,
-    which already tests the module it lives in.
-
-  **Verification:** ran the moved test directly (passes). Also ran the
-  full pre-existing `test_fulfillment_service.py` for the first time this
-  session — previously blocked by the same `alkahest_py` environment gap
-  documented throughout Sections 8-9, worked around here the same way as
-  9.2's verification (temporary out-of-repo stub script, not a repository
-  change). All 3 tests pass, including the two pre-existing
-  `fulfill_compute_obligation`-level tests. Note on what this does and
-  doesn't prove: both pre-existing tests monkeypatch `_do_provision`
-  itself out, so this confirms the module still imports cleanly and the
-  surrounding orchestration (credential storage, listing reconciliation,
-  the `provision_vm` DI seam) still works with `_do_provision` swapped
-  out — it does not newly exercise `_do_provision`'s own internals beyond
-  what 9.2's dedicated `test_fulfillment_provisioning.py` suite already
-  covers.
+  **Correction (external review):** the task text overclaimed. The identifiers were persisted as each became known, but nothing read them back to resume after restart; 9.9–9.18 built recovery (design.md, "Section 9 reconciled status"). Fixes from that review: `reserve()` became idempotent by escrow, persistence retries and escalates (`persist_escrow_fields_with_retry`), `fulfillment_id` reached the three settlement responses, and a callback writing `fulfillment_id` into `provisioning_job_id` was corrected. Evidence: `test_sqlite_client_escrow_fulfillment_identity.py` and `test_fulfillment_provisioning.py`; the three `serialize_settlement_job` tests were disclosed as unrun at the time (design.md, "Rationale moved from task notes at closeout", 9.3).
+- [x] 9.4 Poll `get_fulfillment_status`/`get_fulfillment_result` (pull-based, per section 8) at appropriate points in the storefront's workflow and deliver/retain buyer-facing credential state according to the storefront's security model. **Done in 9.2's `_do_provision`:** poll to terminal, fetch the result once, and hand it to the unchanged credential storage (`granted_to="self"`), so the storefront's security model and the timing of credential availability are unchanged.
+- [x] 9.5 Map VM-domain job/provider states to the shared fulfillment lifecycle invariant without leaking raw VM job status cross-domain. **Already satisfied:** the storefront reads only the kit's `SettlementRecordState`, never `AnsibleJob.status`, and escrow status stays generic.
+- [x] 9.6 Remove `create_vm_and_wait_with_credentials` and ordinary storefront polling/direct executor dispatch after all callers are migrated; tombstone deleted paths where repository workflow requires it. **Done:** `provisioning_orchestration_service.py` and its test file had no other callers and were tombstoned; the one lease-registration test still in use moved to `test_fulfillment_service.py`, which passed with `alkahest_py` stubbed.
 - [x] 9.7 Add storefront restart, duplicate result, site-routing, negotiation-resume, and end-to-end credential-delivery tests. **Done.**
 
-  **Correction (external code review):** the "restart / negotiation-resume" sub-bullet below overstated what the cited tests prove. An external review correctly pushed back: persisted-identifier round-tripping and cold-cache fan-out are prerequisites for recovery, not recovery itself — no test here starts a fresh process/composition, reloads an incomplete escrow, and resumes polling/result-collection/credential-storage without redispatching. That test doesn't exist yet because the capability it would test doesn't exist yet (see 9.3's correction and `design.md`'s "Section 9 reconciled status"). Site-routing, duplicate-result, and end-to-end credential-delivery coverage below stand as originally described.
-
-  - **Site-routing:** already covered by 9.0.4's `test_aggregate_fulfillment_client.py` (6 tests: cache-hit routing, cold-cache fan-out with self-healing cache write, every-site-refusing error propagation, cache sharing across schedule/begin, explicit-vs-absent routing hints for status/result).
-  - **Restart / negotiation-resume:** covered at the persistence layer by 9.3's `test_sqlite_client_escrow_fulfillment_identity.py` (default-None, full write, partial-update non-clobbering, `fulfillment_id`/`fulfillment_uid` coexistence) and at the routing layer by the site-routing tests above (a cold cache — the actual restart condition — already has dedicated coverage). No separate storefront-side "resume" driver exists to test against (see 9.3's own scope-boundary note); what's testable today — that persisted identifiers round-trip correctly and that routing self-heals from a cold cache — is covered.
-  - **Duplicate result / end-to-end credential-delivery:** added two new tests to `test_fulfillment_service.py`,
-    exercising the *real* `_do_provision` (not mocked, unlike every other test in that file) through `fulfill_compute_obligation`'s unmodified surrounding code, with the fulfillment client mocked only at the network boundary and capacity reservation going through a real `FakeSite` ledger:
-    - `test_do_provision_end_to_end_delivers_credentials_for_storage`: confirms real rows land in the `credentials` table with correct fields, and the escrow row carries the durable fulfillment identity — verifying what 9.4 had previously only confirmed by field-name inspection.
-    - `test_do_provision_result_fetch_is_safe_to_repeat`: confirms a second `get_fulfillment_result` read for the same fulfillment is side-effect-free and does not double-store credentials.
-
-  **Two real test-authoring bugs found and fixed while writing these (not production bugs):** (1) `_compute_listing()`'s actual `listing_id` is `"listing-1x"` (gpu-count-suffixed), not `"listing-1"` — the credential/escrow lookups initially queried the wrong key, silently returning empty rather than failing loudly, which is exactly the kind of false-negative-shaped bug this whole task exists to catch; traced with a standalone debug script rather than guessing. (2) `update_escrow` is an `UPDATE`-only operation and is a no-op against a row that doesn't exist yet — both new tests needed an explicit `insert_escrow` first, matching what the real negotiation/settlement flow does before fulfillment ever runs.
-
-  **Verification:** all 5 tests in `test_fulfillment_service.py` pass (3 pre-existing + 2 new); full storefront regression across every test file this section touched: 34/34 passing.
+  **Correction (external review):** the restart and negotiation-resume claim overstated the evidence: identifier round-trips and cold-cache fan-out are prerequisites for recovery, not recovery, which 9.9–9.18 built. Standing evidence: site routing, `test_aggregate_fulfillment_client.py`; duplicate result and credential delivery through the real `_do_provision`, `test_fulfillment_service.py`'s `test_do_provision_end_to_end_delivers_credentials_for_storage` and `test_do_provision_result_fetch_is_safe_to_repeat` (design.md, "Rationale moved from task notes at closeout", 9.7).
 - [x] 9.8 Promote Section 9's accepted decisions into permanent documentation and complete this section's design-promotion record, per the destinations identified during planning: **Done.**
-  - [x] 9.8.1 `openspec/specs/fulfillment/spec.md`: document `POST /fulfillment/schedule`'s HTTP contract (9.0.1) alongside the existing validate/begin/status/result requirement prose. **Done:** added to "Scheduling and assignment" — endpoint contract, error-mapping (404/409/422), schedule-before-begin requirement, two new scenarios, and an extended Evidence line pointing at `TestScheduleEndpoint`.
-  - [x] 9.8.2 `openspec/specs/compute-provisioning-contract/spec.md`: add requirement(s) for the new client-side fulfillment scheduling/acceptance surface (9.0.2/9.0.3), alongside "Versioned executor action submission" and "Allocation-backed lease control." **Done:** new "Requirement: Fulfillment scheduling and acceptance" with two scenarios (schedule-then-begin through the shared client; bare-metal reuse without VM-owned imports, mirroring the existing "Compute-owned caller contract" precedent), and the file's own Purpose statement extended to mention it.
+  - [x] 9.8.1 `openspec/specs/fulfillment/spec.md`: document `POST /fulfillment/schedule`'s HTTP contract (9.0.1) alongside the existing validate/begin/status/result requirement prose. **Done:** `openspec/specs/fulfillment/spec.md#requirement-scheduling-and-assignment`.
+  - [x] 9.8.2 `openspec/specs/compute-provisioning-contract/spec.md`: add requirement(s) for the new client-side fulfillment scheduling/acceptance surface (9.0.2/9.0.3), alongside "Versioned executor action submission" and "Allocation-backed lease control." **Done:** `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance`.
   - [x] 9.8.3 `docs/development/ARCHITECTURE.md`: add `fulfillment_id`/`fulfillment_uid` to "Shared vocabulary and identities" (9.0.6). **Done in 9.0.6, confirmed still correct.**
-  - [x] 9.8.4 Add design-promotion record entries (table at the end of `design.md`) for: the `/fulfillment/schedule` endpoint, the moved/added client contracts, the sibling aggregator and shared routing-cache decision (recorded as a code-docstring destination, not a new spec — see 9.0.5), and the `fulfillment_id`/`fulfillment_uid` vocabulary entries. **Done:** "Section 9 completed design-promotion record" table added at the end of `design.md`, matching Section 8's format exactly, with nine rows covering every decision from the design review plus the connectivity/sizing/persistence decisions made during implementation. An "implementation confirmation" note alongside it records four real corrections found during implementation (sizing, two result-pipeline data gaps, the `on_job_submitted`/`provisioning_job_id` naming bug, and the reinit dependency gaps) — matching the same honest-confirmation pattern Section 8's own promotion record already established.
-  - [x] 9.8.5 Remove change-document/task-number references from any Section 9 production code comments before considering the section implemented, per `AGENTS.md`'s comment rules. **Done:** final repository-wide `grep` across every production and test file touched this section (`core/storefront`, `domains/vms/storefront`, `domains/vms/provisioning`, `provisioning`, and both `Makefile`s) for `POOLS-7`/`pools-7` — zero matches outside this change's own `openspec/changes` documents.
+  - [x] 9.8.4 Add design-promotion record entries (table at the end of `design.md`) for: the `/fulfillment/schedule` endpoint, the moved/added client contracts, the sibling aggregator and shared routing-cache decision (recorded as a code-docstring destination, not a new spec — see 9.0.5), and the `fulfillment_id`/`fulfillment_uid` vocabulary entries. **Done:** design.md's "Section 9 completed design-promotion record" and "Section 9 implementation confirmation".
+  - [x] 9.8.5 Remove change-document/task-number references from any Section 9 production code comments before considering the section implemented, per `AGENTS.md`'s comment rules. **Done** for `POOLS-7`/`pools-7`; review then found other change-document references this sweep missed, since fixed (design.md, "Section 9 reconciled status").
 
 
 ### Section 9 recovery completion plan
@@ -869,14 +579,14 @@ The completed 9.0–9.8 tasks above remain implementation history. The following
 
 Task 9.18's validation gate was declared satisfied on a green suite that, on external review, was found not to exercise the composed seam these two corrections fix. Recorded here as their own tasks, not folded into 9.9–9.18's history, since the completion record for those tasks stands as originally written and this correction is what actually closes the gate.
 
-- [x] 9.19 Fix `vm_target` ownership: `fulfill_vm_obligation` generates it once and must be the single source of truth from generation through persistence, physical fulfillment, and lease registration. **Done.** `_build_vm_fulfillment_context` was found declaring its own internal `vm_target: str | None = None`, never assigned, then returned in a tuple that the caller unpacked directly over the real, already-generated value — silently replacing it with `None` on every call. Fixed by making `vm_target` a required parameter of `_build_vm_fulfillment_context` and removing it from the return tuple entirely, so the shadowing mechanism that caused the bug cannot recur (there is nothing left to unpack over the caller's value). Confirmed by direct execution before and after the fix, not by reading alone: calling `_build_vm_fulfillment_context` directly returned a persisted-context `vm_target` of `None` before this task and the passed-in value after.
-- [x] 9.20 Add regression coverage that exercises the real, composed seam this bug lived in, not a mocked-over version of it. **Done:** `test_generated_vm_target_survives_context_fulfillment_and_lease_registration` (`test_fulfillment_provisioning.py`) calls the real `fulfill_vm_obligation` (not `_do_provision` directly, and not through a `provision_vm` mock that skips argument validation) with a `provision_vm` stub that itself asserts the received `vm_target` is a non-empty, correctly-prefixed string, and separately asserts the same value was used for `register_lease` and matches what was persisted in `fulfillment_context`. Confirmed this test fails against the pre-9.19 code (`assert isinstance(None, str)`) and passes against the fix — not merely that it passes now. Root cause of why 9.18's suite missed this: every existing test at this boundary either supplied `vm_target` as an explicit test literal directly to `_do_provision` (never exercising generation) or mocked `begin_fulfillment`/`provision_vm` as a plain `AsyncMock` with no argument validation, so a `None` value in a required field was never observed failing.
-- [x] 9.21 Replace `find_compute_fulfillments`'s speculative Alkahest method probing (`find_obligations_by_ref`/`get_obligations_by_ref`/`find_attestations_by_ref`) with an explicit, injectable query capability, since none of those three names exist anywhere in `kit/alkahest`'s actual client interface (confirmed by repository-wide search — only `get_obligation(client, uid)`, a lookup by already-known uid, exists; nothing resembling a search-by-reference query). **Done:** `find_compute_fulfillments` and `reconcile_or_submit_compute_fulfillment` now take an explicit `query_fulfillments: Callable | None = None` parameter. Production composition passes nothing (`alkahest-py==1.1.2` has no supported query), so the existing safe-pending fallback triggers honestly, on "no capability is configured," rather than on "guessed method names weren't found on this particular client instance."
-- [x] 9.22 Update `test_fulfillment_reconciliation.py` to match the new explicit-capability design rather than a hand-constructed mock exposing one of the removed guessed method names. **Done:** the adopts-a-matching-attestation test now injects `query_fulfillments=AsyncMock(return_value=["att-1"])` directly; the no-capability-configured test is unchanged (it was already testing the real fallback behavior, not the guessed methods).
+- [x] 9.19 Fix `vm_target` ownership: `fulfill_vm_obligation` generates it once and must be the single source of truth from generation through persistence, physical fulfillment, and lease registration. **Done:** `_build_vm_fulfillment_context` returned an unassigned local `vm_target` that the caller unpacked over the generated value, replacing it with `None` on every call; `vm_target` became a required parameter and left the return tuple. (Provisioning now names the guest, and this requirement was removed by `bare-metal-mock-provisioned-deal`.)
+- [x] 9.20 Add regression coverage that exercises the real, composed seam this bug lived in, not a mocked-over version of it. **Done:** `test_generated_vm_target_survives_context_fulfillment_and_lease_registration` drives the real `fulfill_vm_obligation`; it failed before 9.19 and passes after. 9.18's suite missed the bug because every test at that seam either passed `vm_target` as a literal or mocked the callee without validating arguments.
+- [x] 9.21 Replace `find_compute_fulfillments`'s speculative Alkahest method probing (`find_obligations_by_ref`/`get_obligations_by_ref`/`find_attestations_by_ref`) with an explicit, injectable query capability, since none of those three names exist anywhere in `kit/alkahest`'s actual client interface (confirmed by repository-wide search — only `get_obligation(client, uid)`, a lookup by already-known uid, exists; nothing resembling a search-by-reference query). **Done:** an explicit `query_fulfillments` parameter; production passes none, so the safe-pending fallback triggers on a missing capability rather than on guessed names.
+- [x] 9.22 Update `test_fulfillment_reconciliation.py` to match the new explicit-capability design rather than a hand-constructed mock exposing one of the removed guessed method names. **Done:** the adoption test injects the query; the fallback test was already correct.
 - [x] 9.23 File the upstream capability this repository cannot supply on its own as its own OpenSpec change, rather than leaving the gap implicit. **Done:** `openspec/changes/add-alkahest-attestation-reference-query/proposal.md` — scopes the missing capability (a bounded, reference-UID-based attestation query) as owned by `alkahest-py`/`kit/alkahest`, not by this repository, with the concrete downstream integration work that becomes possible once it exists.
-- [x] 9.24 Give every requirement in `openspec/specs/vm-storefront-fulfillment/spec.md` at least one `#### Scenario:`, matching every other spec in this repository (`fulfillment`, `physical-provisioning`, `site-capacity`, `compute-provisioning-contract` all pair every requirement with scenarios; this new spec, as first written, had none). **Done:** added scenarios to all seven requirements, including "Generated VM target is preserved exactly," which directly encodes the invariant 9.19 fixed and 9.20 now tests, so a future regression at this seam is spec-visible, not only test-visible.
+- [x] 9.24 Give every requirement in `openspec/specs/vm-storefront-fulfillment/spec.md` at least one `#### Scenario:`, matching every other spec in this repository (`fulfillment`, `physical-provisioning`, `site-capacity`, `compute-provisioning-contract` all pair every requirement with scenarios; this new spec, as first written, had none). **Done** for all seven requirements.
 
-**Validation:** 34 tests passing across every file this correction touched (`test_fulfillment_provisioning.py`, `test_fulfillment_reconciliation.py`, `test_fulfillment_resume_runtime.py`, `test_fulfillment_service.py`, `test_aggregate_fulfillment_client.py`) in this review pass; the repository owner's separately supplied root `make test` result (recorded under 9.18) remains the full-suite baseline. Strict OpenSpec CLI validation remains waived, unchanged from 9.18, because the executable is unavailable in either validation environment.
+**Validation:** the five touched storefront test modules passed; the owner's root `make test` (9.18) remained the baseline, and strict validation stayed waived until 8.15 ran it.
 
 ### Section 9 implementation history
 
@@ -889,14 +599,14 @@ Tasks 9.9–9.18 were implemented across several passes (initial recovery envelo
 
 The task list below supersedes the original 10.1–10.6 drafting after design review (`design.md`, "Section 10 design review"). The original items assumed `VmReleaseExecutor`/`LeaseLifecycleService` would be removed from VM's release path and that capacity release needed a new home. Repository inspection during review found the durable teardown state machine and `FulfillmentConvergenceWatchdog`'s dispatch/converge passes already implemented and already running with no caller, and established that `LeaseLifecycleService` should remain the sole trigger and capacity-release owner for both VM and bare-metal, with the fulfillment aggregate entered only as the seam `VmReleaseExecutor` and a small `ReleaseJobPort` routing layer cross. Items are renumbered here; none of the original items had been started (all were `[ ]`), so this is a plan amendment, not a correction of completed work.
 
-- [x] 10.1 Add `begin_fulfillment_teardown(fulfillment_id)` to `FulfillmentOrchestrator` as the whole-fulfillment teardown entrypoint: resolve the aggregate by `fulfillment_id`, reject unless `active`, reuse an already-prepared `prepared_teardown_operation`/`teardown_provider_metadata` when present (backfilled rows — idempotent, no re-preparation) or call `provider.prepare_teardown` and persist it when absent (native rows reaching teardown for the first time), then transition `active → teardown_dispatch_pending`. No inline provider dispatch — `FulfillmentConvergenceWatchdog.dispatch_pending_teardowns`/`converge_teardowns` (already implemented) own dispatch and convergence from there. Keep `provisioned_resource_id` in the schema as-is; no schema change is needed for this task (it already exists as `ProvisionedResource.provisioned_resource_id`, a future per-resource teardown extension point). **Done:** implemented in `kit/fulfillment/src/market_fulfillment/fulfillment.py` (`begin_fulfillment_teardown`, `_TEARDOWN_INITIATED_STATES`, `_settlement_result`) with `begin_teardown` added to `FulfillmentTransaction`/`SqlAlchemyFulfillmentTransaction` in `fulfillment_persistence.py`. 16 new unit tests in `test_fulfillment.py`/`test_fulfillment_persistence.py`; full kit suite 148/148 passing.
-- [x] 10.2 Expose `begin_fulfillment_teardown` through the compute provisioning service's fulfillment controller/client, and confirm backfilled rows (`legacy_backfill.py` output) and native rows resolve through the same lookup with no special-casing beyond 10.1's already-prepared check. **Done:** `POST /fulfillment/{fulfillment_id}/begin-teardown` added to `fulfillment_controller.py`, reusing the existing `FulfillmentAcceptanceResponse` contract shape and `begin`'s error-mapping conventions. Backfilled-vs-native resolution needs no special-casing beyond 10.1, confirmed by inspection of `legacy_backfill.py`'s output shape (same `SettlementRecord` row, same `prepared_teardown_operation` field). Client-side wrapper on `ComputeProvisioningClient` still open — needed before 10.4's `VmReleaseExecutor` can call it in-process (10.4 calls the orchestrator directly, not over HTTP, so this is only needed if/when an out-of-process caller requires it) — deferred until an actual out-of-process caller exists, consistent with 10.6's stance on not inventing callers ahead of need.
-- [x] 10.3 Add a kind-routed `ReleaseJobPort` (mirroring the existing `ExecutorReleaseDispatcher` submission-side pattern) so `LeaseLifecycleService._process_releasing_reservation`'s `get_job(job_id)` call routes by the reservation's `offering_mode`: bare-metal keeps resolving through the existing shared `job_service`/`AsyncJobQueue`, unchanged; VM resolves by reading the `SettlementRecord` teardown state for the given `fulfillment_id` (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending) via `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly. **Done:** `ReleaseJobPort`/`ReleaseJobDispatcher` added to `compute_provisioning/release.py`; `lease_lifecycle.py` imports the shared `ReleaseJobPort` (dropping its own duplicate definition) and passes `offering_mode=reservation.get("offering_mode")` at its one `get_job` call site. **Found and fixed a real regression while wiring this in**, not just a test-fixture issue: `_process_releasing_reservation`'s `"direct-release"` sentinel check was gated on `self._release_jobs is None`, which was true for every deployment before this task but is never true now that a per-kind dispatcher is always configured — this silently broke bare-metal's (and any future no-job-service executor's) "nothing to poll, already done" shortcut. Fixed by making the sentinel check unconditional on `job_id == "direct-release"` alone, independent of whether a dispatcher happens to be configured for other kinds.
-- [x] 10.4 Replace `VmReleaseExecutor.submit_release`'s direct Ansible `vm_remove` job submission with: resolve `fulfillment_id` for the reservation's `capacity_reservation_id`, call `begin_fulfillment_teardown(fulfillment_id)`, return `fulfillment_id` as the job id consumed by 10.3's dispatcher. `LeaseLifecycleService`, `LeaseWatchdog`, `_finish_release`, and the admin recovery endpoints (`retry_release`, `force_release`, `release_oversight`) are unchanged — this task touches only the submission leaf, not the trigger, polling loop, or capacity-release call site. **Done:** `VmReleaseExecutor` rewritten in `vm_provisioning_adapter/release.py`; `VmFulfillmentReleaseJobPort` added alongside it for 10.3's completion-read side. Threaded `settlement_repository` and a lazy `fulfillment_service_provider` callable through `VmProvisioningRuntime`/`build_vm_runtime`. The lazy-callable indirection is load-bearing, not stylistic: `FulfillmentOrchestrator` depends on `provider_registry` → `composed_adapters` → the VM adapter bundle these two classes live inside, so a direct DI reference would be circular. Broken the same way `container.py` already breaks it for controllers — a module-level `resolved_fulfillment_service` global read lazily at call time (`_resolved_fulfillment_service()`, mirroring the existing `_resolved_job_queue()`), passed in via `providers.Object` (not a DI dependency) so the container never tries to resolve it during `vm_runtime`'s own construction. Verified with a standalone container smoke-import (`init_resources()` + resolving both `lease_lifecycle_service` and `fulfillment_service`) before running the suite, specifically to catch a cycle that wouldn't show up as an edit-time error. Rewired both integration `client_and_queue` fixtures (`tests/integration/conftest.py`, `tests/integration/test_test_controller.py`) that constructed `VmReleaseExecutor`/`VmProvisioningRuntime` by hand, and rewrote `test_ledger_lease_lifecycle.py`'s VM-specific tests (which exercised the old direct-Ansible-dispatch behavior directly) against the new mechanism, plus fixed four integration tests that registered a lease without ever creating a fulfillment aggregate for it (no longer sufficient — release now genuinely needs one to resolve a `fulfillment_id` from). Full suite green: kit/fulfillment 148/148, `compute_provisioning` kit 28/28, compute-provisioning-service unit+integration 513/513, VM storefront unit 629/629.
-- [x] 10.5 Do not return physical capacity to scheduling until teardown succeeds or an explicit operator recovery action resolves the resource. This is already true today (`_finish_release` only runs after confirmed job completion) and remains true once 10.3/10.4 land, since `_finish_release` is unchanged and 10.3's VM route only reports `succeeded` once `SettlementRecord.state == torn_down`. Add a regression test asserting capacity is not released while the aggregate is `teardown_dispatch_pending`/`tearing_down`/`teardown_failed`. **Done:** covered by the rewritten `test_ledger_lease_lifecycle.py` — `test_releasing_reservation_past_grace_marks_release_failed`/`test_releasing_reservation_within_grace_skips` assert `available_units < 8`/reservation stays `releasing` while the aggregate is `tearing_down`, `test_failed_vm_remove_marks_release_failed_without_notification` asserts the same for `teardown_failed`, and `test_expired_ledger_lease_releases_locally_and_notifies` asserts capacity is released (`available_units == 8`) only after the aggregate is explicitly moved to `torn_down`.
-- [x] 10.6 No buyer-initiated early-termination business flow exists yet in the VM storefront (confirmed — this is bottom-up infrastructure work, not wiring an existing flow). Scope is limited to exposing the capability for that future flow to use. **Done:** added `terminate_vm_lease(*, capacity_reservation_id, reason=None)` to `fulfillment_service.py`, calling `ComputeProvisioningClient.terminate_lease` → `POST /api/v1/contract/leases/{capacity_reservation_id}/terminate` — the same client `_register_vm_lease_with_settings` already uses, not the separate VM-domain-branded `/leases/...` surface `design.md` originally (incorrectly) cited; both call the identical `LeaseLifecycleService.terminate_lease`, but the storefront isn't wired to the other client. No new provisioning-service endpoint; no business-flow caller invented.
-- [x] 10.7 `_register_vm_lease_with_settings` stops passing `executor_ref` to `register_lease`. **Corrected during implementation:** tracing the actual call chain (`ComputeProvisioningClient.register_lease` → `compute_contract_controller.register_lease` → `ExecutorLeaseService.register_lease` → `ExecutorLeaseRegistration`) shows `executor_ref` was never constructed or passed on this path at all — that construction only exists in the other, VM-domain-branded `leases_controller.create_lease`, which the storefront doesn't call. So there was no write to remove; `_register_vm_lease_with_settings` is unchanged. `executor_target` continues to flow through unchanged, confirmed retained (backs `vm_target`, no independent write path, read directly with no fallback). Added `test_contract_register_lease_never_sends_executor_ref_and_it_self_heals` (`test_compute_contract_api.py`) asserting `LeaseRegistration` has no `executor_ref` field and that the ledger row's `executor_ref` still resolves correctly via `market_site.ledger._sync_executor_fields`'s self-heal from the independently-committed `vm_host`. **While adding that test, found and fixed a real, pre-existing production bug** on this exact call path (unrelated to this task's own change, but directly undermining confidence in it, so fixed here rather than filed separately per discussion): `compute_contract_controller._lease_view` passed `reservation["state"]` straight into `LeaseView.status: LeaseState` with no translation, and `LeaseState` didn't include `"leased"` — the literal raw state `attach_lease` always sets — so `ComputeProvisioningClient.register_lease` (what the storefront actually calls) failed its own client-side response validation with a 422 on every real call. No existing integration test caught this: the only passing lease-registration coverage used either the other client (`vm_provisioning_operator.ProvisioningClient`, whose controller already translates state correctly) or mocked the client entirely. Fixed by adding the same `reserved→pending, provisioning→pending, leased→active, ...` translation `leases_controller._LEASE_STATUS` already uses, and extending `LeaseState` with the two members it was missing (`provisioning_failed`, `force_released`) so the full `ReservationState` vocabulary round-trips. Added `test_contract_lease_view_serializes_every_reachable_reservation_state`, asserting every `ReservationState` member maps to a valid `LeaseState` and specifically that `"leased"` → `"active"`.
-- [x] 10.8 Add idempotent repeated teardown, partial failure, restart, lost submission acknowledgement, backfilled VM, kind-routed `ReleaseJobPort` (both VM and bare-metal routes), `terminate_lease`-triggered teardown, and final capacity-release tests. **Done.** Idempotent repeated teardown, partial failure, and backfilled-VM (already-prepared operation reuse) were already covered in `kit/fulfillment`'s `test_fulfillment.py`. Final capacity-release gating is covered by 10.5's tests. `ReleaseJobDispatcher` now has direct unit coverage (`provisioning/compute/tests/unit/test_release.py`: routing by kind, injected default, `LookupError` for an unregistered kind or no kind/no default) alongside the `ExecutorReleaseDispatcher` tests it mirrors. `terminate_lease`-triggered teardown (`test_provisioning_client_endpoint_coverage.py::test_terminate_lease_uses_client_contract`) now asserts the underlying `SettlementRecord` actually reaches `teardown_dispatch_pending`, not just that the reservation-ledger view reports `"releasing"` — those became two separate state machines under this section's design, joined only by `VmReleaseExecutor`. Restart and lost-submission-acknowledgement were genuinely missing for the teardown path specifically: `FulfillmentConvergenceWatchdog`'s existing pre-Section-10 test suite (`test_fulfillment_convergence.py`) exercised its claim/lease/resume machinery only through `dispatch_pending_creates`, never `dispatch_pending_teardowns` — the sharing was real but unasserted. Added `test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restart` and `test_worker_death_leaves_a_reclaimable_teardown_row_not_a_stuck_one`, mirroring the existing create-path tests exactly but against `teardown_dispatch_pending`. Full suite green throughout: kit/fulfillment 148/148, `compute_provisioning` kit 32/32, compute-provisioning-service unit+integration 515/515, VM storefront unit 629/629.
+- [x] 10.1 Add `begin_fulfillment_teardown(fulfillment_id)` to `FulfillmentOrchestrator` as the whole-fulfillment teardown entrypoint: resolve the aggregate by `fulfillment_id`, reject unless `active`, reuse an already-prepared `prepared_teardown_operation`/`teardown_provider_metadata` when present (backfilled rows — idempotent, no re-preparation) or call `provider.prepare_teardown` and persist it when absent (native rows reaching teardown for the first time), then transition `active → teardown_dispatch_pending`. No inline provider dispatch — `FulfillmentConvergenceWatchdog.dispatch_pending_teardowns`/`converge_teardowns` (already implemented) own dispatch and convergence from there. Keep `provisioned_resource_id` in the schema as-is; no schema change is needed for this task (it already exists as `ProvisionedResource.provisioned_resource_id`, a future per-resource teardown extension point). **Done:** `FulfillmentOrchestrator.begin_fulfillment_teardown` and the transaction's `begin_teardown`; `test_fulfillment.py`, `test_fulfillment_persistence.py`.
+- [x] 10.2 Expose `begin_fulfillment_teardown` through the compute provisioning service's fulfillment controller/client, and confirm backfilled rows (`legacy_backfill.py` output) and native rows resolve through the same lookup with no special-casing beyond 10.1's already-prepared check. **Done:** `POST /fulfillment/{fulfillment_id}/begin-teardown`, with `begin`'s response shape and error mapping; backfilled and native rows share the lookup. The client method, first deferred, was added by 10.11.
+- [x] 10.3 Add a kind-routed `ReleaseJobPort` (mirroring the existing `ExecutorReleaseDispatcher` submission-side pattern) so `LeaseLifecycleService._process_releasing_reservation`'s `get_job(job_id)` call routes by the reservation's `offering_mode`: bare-metal keeps resolving through the existing shared `job_service`/`AsyncJobQueue`, unchanged; VM resolves by reading the `SettlementRecord` teardown state for the given `fulfillment_id` (`torn_down` → succeeded, `teardown_failed` → failed, otherwise pending) via `FulfillmentOrchestrator.get_fulfillment_status` or the settlement repository directly. **Done:** `ReleaseJobPort`/`ReleaseJobDispatcher` in `compute_provisioning/release.py`, routed by `offering_mode`. Wiring it in exposed and fixed a `"direct-release"` sentinel regression (design.md, "Rationale moved from task notes at closeout", 10.3). (`bare-metal-mock-provisioned-deal` later replaced per-mode release with one provider-neutral executor.)
+- [x] 10.4 Replace `VmReleaseExecutor.submit_release`'s direct Ansible `vm_remove` job submission with: resolve `fulfillment_id` for the reservation's `capacity_reservation_id`, call `begin_fulfillment_teardown(fulfillment_id)`, return `fulfillment_id` as the job id consumed by 10.3's dispatcher. `LeaseLifecycleService`, `LeaseWatchdog`, `_finish_release`, and the admin recovery endpoints (`retry_release`, `force_release`, `release_oversight`) are unchanged — this task touches only the submission leaf, not the trigger, polling loop, or capacity-release call site. **Done:** `VmReleaseExecutor` and `VmFulfillmentReleaseJobPort` in `vm_provisioning_adapter/release.py`. The circular dependency (`FulfillmentOrchestrator` → provider registry → the VM adapter bundle) was first broken with a lazy module-global accessor, which 10.9 replaced with a composition-bound port (design.md, "Section 10 completed design-promotion record" and "Rationale moved from task notes at closeout", 10.4). `test_ledger_lease_lifecycle.py`'s VM tests were rewritten for the new mechanism; the suites passed.
+- [x] 10.5 Do not return physical capacity to scheduling until teardown succeeds or an explicit operator recovery action resolves the resource. This is already true today (`_finish_release` only runs after confirmed job completion) and remains true once 10.3/10.4 land, since `_finish_release` is unchanged and 10.3's VM route only reports `succeeded` once `SettlementRecord.state == torn_down`. Add a regression test asserting capacity is not released while the aggregate is `teardown_dispatch_pending`/`tearing_down`/`teardown_failed`. **Done:** `test_ledger_lease_lifecycle.py`'s `test_releasing_reservation_past_grace_marks_release_failed`, `test_releasing_reservation_within_grace_skips`, `test_failed_vm_remove_marks_release_failed_without_notification` (capacity held while tearing down or failed), and `test_expired_ledger_lease_releases_locally_and_notifies` (released only at `torn_down`).
+- [x] 10.6 No buyer-initiated early-termination business flow exists yet in the VM storefront (confirmed — this is bottom-up infrastructure work, not wiring an existing flow). Scope is limited to exposing the capability for that future flow to use. **Done:** `terminate_vm_lease` in `fulfillment_service.py`, through `ComputeProvisioningClient.terminate_lease` (design.md, "Rationale moved from task notes at closeout", 10.6). No new endpoint and no invented caller.
+- [x] 10.7 `_register_vm_lease_with_settings` stops passing `executor_ref` to `register_lease`. **Corrected during implementation:** this path never sent `executor_ref`, so nothing was removed; `executor_target` stays (design.md, "Rationale moved from task notes at closeout", 10.7). The test that showed it, `test_contract_register_lease_never_sends_executor_ref_and_it_self_heals`, also exposed a pre-existing defect, fixed with the owner's agreement: the contract lease view did not translate `"leased"`, so every real `register_lease` call failed validation (design.md, "Addendum: pre-existing `LeaseState` serialization bug"). `test_contract_lease_view_serializes_every_reachable_reservation_state` covers it.
+- [x] 10.8 Add idempotent repeated teardown, partial failure, restart, lost submission acknowledgement, backfilled VM, kind-routed `ReleaseJobPort` (both VM and bare-metal routes), `terminate_lease`-triggered teardown, and final capacity-release tests. **Done.** Repeated, partial-failure, and backfilled teardown: `test_fulfillment.py`. Capacity gating: 10.5. Dispatcher routing: `provisioning/compute/tests/unit/test_release.py`. Termination: `test_provisioning_client_endpoint_coverage.py::test_terminate_lease_uses_client_contract`. Teardown restart and worker death, which were missing: `test_fresh_watchdog_resumes_a_teardown_from_durable_state_after_restart` and `test_worker_death_leaves_a_reclaimable_teardown_row_not_a_stuck_one` (design.md, "Rationale moved from task notes at closeout", 10.8).
 
 ### Section 10 post-implementation correction tasks
 
@@ -909,24 +619,19 @@ must close before Section 11 begins.
 - [x] 10.11 Add `begin_fulfillment_teardown(fulfillment_id)` to `ComputeProvisioningClientProtocol` and `ComputeProvisioningClient`. Add an integration test that creates or resolves an active fulfillment aggregate and invokes `POST /fulfillment/{fulfillment_id}/begin-teardown` through the client, including idempotent repeated invocation and HTTP error mapping for unknown/conflicting aggregates. Reopen task 10.2 until this is complete. **Permanent documentation:** `openspec/specs/fulfillment/spec.md` HTTP/client contract section.
 - [x] 10.12 Decide and implement one authoritative reservation-state-to-lease-state projection. Preferred direction: a pure helper or shared mapping in the `compute_provisioning` contract package consumed by both `compute_contract_controller` and the VM `leases_controller`; confirm the package boundary before implementation. Remove the knowingly duplicated controller tables and update the e2e `DealLease` helper so it does not maintain a third partial mapping. Add a test proving every reachable `ReservationState` has one valid `LeaseState` projection across both API surfaces. **Permanent documentation:** update `openspec/specs/compute-provisioning-contract/spec.md` only if it documents lease-state vocabulary; otherwise the enum/helper is the authoritative code contract and no new prose requirement is needed.
 - [x] 10.13 Add the permanent invariant separating lease-release retry ownership from fulfillment-teardown retry ownership: lease lifecycle owns `releasing`/`released` and final capacity return; fulfillment convergence owns dispatch/requeue/recovery of teardown states; lease retry re-observes the same fulfillment aggregate and never creates a second teardown operation. Include scenarios for `teardown_failed`, convergence requeue, operator lease retry, and capacity remaining held until `torn_down`. **Permanent documentation:** `openspec/specs/physical-provisioning/spec.md`, cross-referencing `openspec/specs/fulfillment/spec.md` teardown convergence.
-- [x] 10.14 Rewrite the VM full-deal e2e teardown phases to the current storefront/provisioning relationship. Remove assumptions that the lease-facing release id is an Ansible job id, stop calling `SyncProvisioningClient.get_job()`/`wait_for_job()` with a `fulfillment_id`, and assert the composed durable path: lease expiration or termination → reservation `releasing` → fulfillment `teardown_dispatch_pending`/`tearing_down` with capacity held → provider completion → fulfillment `torn_down` → lease `released` and capacity available. Inventory existing mock/admin controls first; if none can deterministically pause and step fulfillment convergence, add a mock-profile test control rather than relying on background timing. Update all stale stage names, comments, and docstrings that describe Section 10 as a future direct `vm_destroy` change. **Permanent documentation:** no e2e implementation detail belongs in permanent specs; the durable state/capacity invariants map to physical-provisioning and fulfillment specs. **Correction (discovered during `refactor-e2e-fulfillment-lifecycle`'s Section 2 audit):** this task's own "explicitly deferred" note below is stale. `test_full_deal.py`/`test_full_deal_buyer_cli.py` stages 10a-11b already implement exactly the sequence this task describes -- `check_leases()`, `run_fulfillment_convergence_cycle()`, `drain()`, and the full `teardown_dispatch_pending`→`tearing_down`→`torn_down`→`released` state chain, verified line-by-line against this task's own target sequence and against each other (word-for-word identical between the two files). What was actually missing was upstream: stage 08b asserted on `provisioning_job_id`, which is permanently `None` on the durable path, so it failed outright and every stage after it -- teardown included -- never ran, masking that the teardown rewrite already existed. `refactor-e2e-fulfillment-lifecycle`'s Section 1 fixed that upstream failure. **Still open, not yet closed by this correction:** an actual passing run against live services -- both changes' audits were static/structural (no live docker-compose stack available), so runtime confirmation remains outstanding. See `refactor-e2e-fulfillment-lifecycle/design.md`'s "Section 2" for the full trace. **Resolved (2026-10-15):** E2E run 38741626285 on `dev` passed stages 08b–11b of `test_full_deal.py` and `test_full_deal_buyer_cli.py` against the composed VM stack, so the runtime confirmation this correction left open now exists; `refactor-e2e-fulfillment-lifecycle` closed out and archived on that evidence, and this task is complete as written.
-  ~~**Explicitly deferred (repository owner direction):** Section 10 is being completed without executing the full e2e suite; this task, its underlying `test_full_deal.py` rewrite, and the `DealLease._LEASE_STATUS` helper's own partial-mapping cleanup (part of the same batch, not worth touching independently given `e2e-tests` doesn't currently depend on the `compute_provisioning` package at all) move to the final POOLS-7 review loop after Section 11. This is a scope decision, not a discovered non-issue — the static analysis above remains accurate and must still be acted on before that e2e suite is trusted again.~~ (superseded by the correction above -- the deferred work was in fact already done; struck through rather than deleted per `AGENTS.md`'s "amend rather than replace implementation history.")
-- [x] 10.15 Add a migration-produced backfill integration path: create representative pre-POOLS VM lease/settlement data, run the actual legacy backfill/migration entrypoint, initiate teardown through the public client, converge provider teardown, and prove final lease/capacity release. Do not substitute a hand-constructed row for this test. **Permanent documentation:** migration behavior remains in the active change; only resulting current-state backfilled/native equivalence belongs in `openspec/specs/fulfillment/spec.md`. **Done:** `provisioning/compute/service/tests/integration/test_legacy_backfill_teardown.py` — bootstraps a real engine via `run_migrations`, seeds a representative pre-cutover `leased` VM lease directly in `vm_leases`, runs the real `_apply_legacy_vm_lease_backfill` entrypoint (not a hand-constructed `SettlementRecord`), then drives the resulting aggregate through `begin_fulfillment_teardown`, simulated convergence (`FulfillmentConvergenceWatchdog` has its own suite; this test only needs its end state), and two `LeaseLifecycleService.force_check_leases()` cycles, proving `releasing` → `teardown_dispatch_pending` → (simulated `torn_down`) → `released` with capacity returned.
-- [x] 10.16 Rebuild the Section 10 design-promotion record after 10.9–10.15. Map the fulfillment-id-as-release-tracking-id seam, kind-routed status lookup, two-state-machine retry invariant, client contract, capacity-hold rule, and backfilled/native equivalence to exact permanent headings. Remove superseded rows and mark Section 10 complete only after focused suites, ~~the rewritten full-deal e2e path~~ (deferred per 10.14's note above), root `make test`, and available strict OpenSpec validation pass. Section 11 remains blocked until this gate is complete. **Done:** see "Section 10 rebuilt design-promotion record" in `design.md`. Section 11 is unblocked as of this entry — 10.14's e2e work is deferred by explicit direction, not silently dropped, and is tracked to resume after Section 11 in the final POOLS-7 review loop.
+- [x] 10.14 Rewrite the VM full-deal e2e teardown phases to the current storefront/provisioning relationship. Remove assumptions that the lease-facing release id is an Ansible job id, stop calling `SyncProvisioningClient.get_job()`/`wait_for_job()` with a `fulfillment_id`, and assert the composed durable path: lease expiration or termination → reservation `releasing` → fulfillment `teardown_dispatch_pending`/`tearing_down` with capacity held → provider completion → fulfillment `torn_down` → lease `released` and capacity available. Inventory existing mock/admin controls first; if none can deterministically pause and step fulfillment convergence, add a mock-profile test control rather than relying on background timing. Update all stale stage names, comments, and docstrings that describe Section 10 as a future direct `vm_destroy` change. **Permanent documentation:** no e2e implementation detail belongs in permanent specs; the durable state/capacity invariants map to physical-provisioning and fulfillment specs. **Done:** stages 10a–11b of `test_full_deal.py` and `test_full_deal_buyer_cli.py` already implemented this sequence, hidden behind a failing stage 08b that `refactor-e2e-fulfillment-lifecycle` fixed. E2E run 38741626285 on `dev` passed stages 08b–11b (2026-10-15). The owner had deferred this task to after Section 11; that deferral is superseded (design.md, "Rationale moved from task notes at closeout", 10.14).
+- [x] 10.15 Add a migration-produced backfill integration path: create representative pre-POOLS VM lease/settlement data, run the actual legacy backfill/migration entrypoint, initiate teardown through the public client, converge provider teardown, and prove final lease/capacity release. Do not substitute a hand-constructed row for this test. **Permanent documentation:** migration behavior remains in the active change; only resulting current-state backfilled/native equivalence belongs in `openspec/specs/fulfillment/spec.md`. **Done:** `test_legacy_backfill_teardown.py` runs the real backfill entrypoint on a seeded pre-cutover lease, then teardown and two lease cycles to `released` with capacity returned (convergence simulated; the watchdog has its own suite).
+- [x] 10.16 Rebuild the Section 10 design-promotion record after 10.9–10.15. Map the fulfillment-id-as-release-tracking-id seam, kind-routed status lookup, two-state-machine retry invariant, client contract, capacity-hold rule, and backfilled/native equivalence to exact permanent headings. Remove superseded rows and mark Section 10 complete only after focused suites, ~~the rewritten full-deal e2e path~~ (deferred per 10.14's note above), root `make test`, and available strict OpenSpec validation pass. Section 11 remains blocked until this gate is complete. **Done:** design.md's "Section 10 rebuilt design-promotion record". The e2e path is 10.14's.
 
-**Section 10 correction implementation, verified and completed:** the 2026-07-27 entry above (tasks 10.9–10.13 "implemented") was written without running the test suite — it explicitly notes "focused pytest collection remains blocked in this review environment by the unavailable `uuid6` dependency." Once a working environment was available, verification found three of the five `[x]`-marked tasks did not meet their own stated acceptance criteria, despite being marked done:
+**Correction (Section 10 verification):** 10.9–10.13 were first marked done without running the suite. A working environment then found three did not meet their own criteria, each completed:
 
-- **10.10** was marked done with no exception-taxonomy tests at all — none of the four scenarios its own text lists (missing aggregate, invalid aggregate state, unavailable teardown port, unexpected repository failure) had coverage anywhere in the repository. Added all four to `test_ledger_lease_lifecycle.py`. The existing bare-propagation design turned out to already be correct — `SettlementEntityNotFoundError`/`FulfillmentConflictError`/generic exception messages are already distinguishable through `str(exc)` in the persisted `failure_message`, so no new exception-translation classes were needed, only the tests proving it.
-- **10.11**'s only test monkeypatched `FulfillmentOrchestrator.begin_fulfillment_teardown` directly, so it never exercised the real endpoint, real orchestrator, or a real aggregate at all — and there was no coverage for "HTTP error mapping for unknown/conflicting aggregates" despite that being explicitly named in the task. Rewrote the test to drive a real `SettlementRecord` through the real ASGI app, and added the 404 (unknown fulfillment) and 409 (non-active fulfillment) cases.
-- **10.12** was marked done while `compute_contract_controller.py` still imported `lease_state_for_reservation_state` and never called it, keeping its own separate, un-migrated `_LEASE_STATUS` dict (complete with a comment claiming to "mirror" `leases_controller.py`'s copy, which no longer existed) — `design.md`'s own "Lease-state projection duplication" section already said as much, directly contradicting the `[x]` in this file. Removed the dead local dict; the controller now uses the shared projection it already imported.
+- **10.10** had none of its four failure-taxonomy tests; they were added to `test_ledger_lease_lifecycle.py`. The bare-propagation design needed no change, since the persisted `failure_message` already distinguishes the cases.
+- **10.11**'s only test monkeypatched the orchestrator; it now drives a real aggregate through the app, with the 404 and 409 cases.
+- **10.12** left `compute_contract_controller.py` on its own dead `_LEASE_STATUS` dict beside the shared projection it imported; the dict is gone.
 
-10.13 was verified accurate as written — `physical-provisioning/spec.md` gained the stated retry-ownership invariant correctly. Its content overlapped with an existing paragraph from the original Section 10 design-promotion record's "kind-routed release completion" addition; lightly cross-referenced the two rather than restructuring either, since the overlap was redundant, not contradictory.
+10.13 was accurate as written, and cross-referenced with the overlapping "Site-backed release lifecycle" paragraph. The provisioning suites passed together at the end.
 
-10.14 is explicitly deferred by repository-owner direction (see 10.14's own entry) — Section 10 is completing without the full e2e suite; that work resumes after Section 11 in the final POOLS-7 review loop. 10.15 is newly completed with a real, non-substituted migration-entrypoint test. 10.16's rebuilt promotion record is in `design.md`, not repeated here.
-
-Full suite green together at the end, not just per-package: kit/fulfillment 148/148 (unchanged), `compute_provisioning` kit 33/33 (unchanged from the prior pass), compute-provisioning-service unit+integration 523/523 (13 net new: 4 failure-taxonomy tests, 2 replacing 1 for the client-contract rewrite, 1 backfill-integration test, plus 10.9-adjacent fixture rewiring already counted in the prior pass), VM storefront unit 629/629 (unaffected, not re-verified against these specific commits since none of them touch code the storefront depends on — `compute_provisioning`'s public contract shape is unchanged by this pass).
-
-Section 10 is complete under this record. Section 11 may begin. The one carried-forward obligation is 10.14, tracked explicitly rather than folded into "done," to be picked up in the final POOLS-7 review loop after Section 11.
+**Section 10 complete.**
 
 ## 11. Remove obsolete schema and compatibility paths
 
@@ -1034,12 +739,10 @@ design.
     `ComputeGpuResourceAdapter` actually registers. Fixed a test-double
     gap this exposed: `fake_site.py`'s `FakeSite` didn't understand
     `resource_type` as a special claim key.
-    Validation: `core/storefront` 20/20, `kit/site` 135/135 (22 new in
-    `test_dict_resource_satisfies_claim.py`, a parametrized equivalence
-    sweep against the authoritative admission path),
-    `domains/vms/storefront` unit 635/635 + integration 146/148 (2
-    known, unrelated Node/Rust/Foundry alkahest gaps),
-    `provisioning/compute/service` 540/540.
+    Validation: `test_dict_resource_satisfies_claim.py` sweeps the
+    matcher against the authoritative admission path; the touched suites
+    passed except two Alkahest integration cases needing a toolchain the
+    environment lacked.
   - **Permanent documentation:** none — the injected-matcher design is
     implementation technique, not new externally-observable behavior;
     recorded as in-code docstrings on `ClaimMatcher`/
@@ -1108,9 +811,7 @@ design.
     needs genuine file descriptors), and
     `test_vm_management_contracts.py` (+2 cases, including an explicit
     pin that `json-output.yml`'s transport tasks must **not** carry
-    `no_log`). Full suite: `test_job_service.py` + `test_ansible_service.py`
-    93/93, `test_aggregation.py` 17/17, `test_vm_management_contracts.py` +
-    `test_gpu_attachment_discovery.py` 9/9.
+    `no_log`). All passed.
   - **Permanent documentation:** none — restores the "credentials must
     not leak into logs" posture the codebase already partially implements
     (Section 8's principle, `openspec/specs/fulfillment/spec.md`); not
@@ -1150,25 +851,11 @@ design.
   - **Permanent documentation:** none from the run itself; any behavioral
     fix the run surfaces gets its own permanent-documentation destination
     named when it's made, per the usual rule.
-  - **Done (2026-07-30).** Assembled a working multi-package test
-    environment in the validation sandbox. Results:
-    - **Green:** `kit/site` 113/113, `kit/fulfillment` 149/149,
-      `kit/resource-pools` 34/34, `kit/alkahest` 150/150, `kit/config`
-      94/94, `kit/identity` 14/14, `kit/policy` 7/7,
-      `provisioning/compute/service` 540/540, `core` 65/65, `core/buyer`
-      26/26, `core/storefront` 74/74, `core/storefront-client` 17/17,
-      `core/registry-client` 1/1, `domains/vms/storefront` unit 779/779
-      (1 skipped) + integration passing except the two Alkahest cases
-      below, `domains/vms/buyer` 157/157, `domains/apicredits/service`
-      14/14, `domains/apicredits/storefront` 47/47,
-      `domains/apicredits/buyer` 16/16.
-    - **Four failures found, all root-caused, none attributable to this
-      change.** Two were sandbox dependency-version drift, not real bugs
-      — installed `fastapi`/`uvicorn`/`dynaconf` versions differed from
-      this repo's pins; installing the pinned versions fixed both (see
-      `design.md`'s "Suite-run failure root causes" for the full
-      diagnosis). The remaining two `test_alkahest.py` failures need a
-      live Node.js/Rust/Foundry toolchain this sandbox doesn't have.
+  - **Done (2026-07-30).** Eighteen package suites passed in an
+    assembled multi-package environment. Four failures, none this
+    change's: two from installed versions differing from the pins (fixed
+    by installing the pins; design.md, "Suite-run failure root causes"),
+    two `test_alkahest.py` cases needing a Node.js/Rust/Foundry toolchain.
     - **Typing checks run:** `typecheck-core` (1 pre-existing error,
       untouched file), `typecheck-core-registry-client` (clean),
       `core/registry`'s `mypy src/` (30 pre-existing errors, all in files
@@ -1208,9 +895,8 @@ design.
   - [x] 11.6.9 **Follow-up: migration consolidation** — four migrations
     folded into the existing cutover migration rather than registered
     separately; see `design.md` for the safety verification.
-  - **Final validation:** `kit/site` 113/113,
-    `provisioning/compute/service` (unit+integration) 544/544 (27/27 in
-    the migration-specific suite), `kit/fulfillment` 149/149.
+  - **Final validation:** `kit/site`, `kit/fulfillment`, and the
+    provisioning service suites passed.
   - **Permanent documentation:** none needed — checked
     `openspec/specs/site-capacity/spec.md`, `physical-provisioning/spec.md`,
     and `ARCHITECTURE.md` for now-stale `vm_host` mentions; all remaining
@@ -1480,19 +1166,11 @@ found two blocking defects and accepted a bounded Section 11 expansion. Section
     code-review planning diff. 11.13.2: `proposal.md`'s Section 11 status
     corrected. 11.13.3: swept every file this section touched for
     task-number/review-history references — found and fixed one real
-    violation, one false positive. 11.13.4: full suite run across every
-    package this section touched — `core/storefront` 20/20, `kit/site`
-    135/135, `kit/site-client` 5/5, `provisioning/compute/service`
-    547/547, `domains/vms/storefront` unit 640/640 + integration 146/148
-    (2 known, unrelated alkahest gaps), `domains/apicredits` domain
-    15/15 + storefront 51/51 + buyer 16/16 + service 23/23. Disclosed,
-    not silently skipped: `core/registry`'s own pytest suite and
-    `e2e-tests` (unrelated dependency chain; a two-service live stack),
-    `openspec validate --all --strict` (unavailable, unchanged since
-    Section 8), and the apicredits `make dist` chain itself (this
-    sandbox has no built `.dist/`; the underlying `pytest` commands were
-    run directly and confirmed passing, which is not the same as
-    confirming the wheel-build step succeeds end to end).
+    violation. 11.13.4: every touched package's suite passed except two
+    Alkahest integration cases needing a toolchain. Disclosed as unrun:
+    `core/registry`'s suite, `e2e-tests`, strict validation, and the
+    API-credit `make dist` chain (its tests ran directly, not from
+    wheels). 11.13.5 was completed by 11.18.6.
 
 **Explicitly deferred to a new OpenSpec change** (`structured-capacity-requirements`,
 opened 2026-07-31): nested buyer-facing `requirements`, normalization into
@@ -1511,21 +1189,11 @@ a deployment-topology redesign, startup-lifecycle tests, a new client protocol,
 capacity-admin caller expansion, and core-layer refactors. Section 11 remains
 open until the accepted corrections below are implemented and validated.
 
-**Verification note (2026-08-01):** this plan and its implementation arrived as
-an external review upload. Before accepting it, every `[x]` claim was checked
-directly against the actual files, not taken from the checklist. 11.14, 11.15,
-and 11.17.1 are genuinely implemented and independently re-verified (test
-suites re-run after merging). 11.16.1, 11.16.3, 11.17.2, 11.18.1, 11.18.3, and
-11.18.4 were marked `[x]` but the files they claim to have changed are
-byte-identical to before -- corrected back to `[ ]` below. Separately, the
-review upload also regenerated `domains/apicredits/settlement/issuance.py` (a
-dead file with a duplicate `CreditsServiceError` class, unused by anything --
-an artifact of being patched against a base that predated its original
-deletion) and reverted part of `proposal.md`'s Section 11 status paragraph to
-an earlier version of its own text. Both were caught and reconciled: the dead
-file removed again, `proposal.md` restored to its accurate current content
-with the new status note preserved on top. Corrected parent checkboxes for
-11.16/11.17/11.18 below to reflect that not every subtask is actually done.
+**Correction (2026-08-01):** this plan arrived as an external review upload
+marking 11.16.1, 11.16.3, 11.17.2, 11.18.1, 11.18.3, and 11.18.4 done on files
+that were unchanged; they were unchecked, then implemented. The upload also
+restored a dead `issuance.py` and reverted part of `proposal.md`, both
+reconciled.
 
 - [x] 11.14 Make the API-credit migration registry exercise real ordered state.
   - [x] 11.14.1 Register a durable API-credit baseline/adoption migration, or
@@ -1612,50 +1280,14 @@ with the new status note preserved on top. Corrected parent checkboxes for
     environments using only built internal wheels.
   - [x] 11.17.3 Validate the API-credit Docker build contexts or equivalent
     packaging assembly so no hidden repository-relative dependency is required.
-  - **Done (2026-08-01).** 11.17.2: added
-    `test_no_apicredits_project_declares_an_internal_editable_source`,
-    scanning every `pyproject.toml` under the API-credit domain for a
-    `[tool.uv.sources]` block — deliberately scoped to this domain only,
-    not a repository-wide check; `remove-relative-uv-sources` is an
-    existing, separate change already scoped to exactly that repository-
-    wide version, and this doesn't duplicate it. 11.17.3: inspecting
-    `domains/apicredits/storefront/Dockerfile` found a real hidden
-    repository-relative dependency: the runtime stage did
-    `COPY domains/ ./domains/` (its own comment said the apicredits
-    concept modules "are imported by path, not shipped in the wheel"),
-    with `PYTHONPATH=/app` making that raw copy the actual import source
-    at runtime rather than the properly wheel-installed
-    `arkhai-apicredits-domain` package the same stage's sync step also
-    installs. Verified, before touching it, that the comment's premise
-    was stale: the wheel *does* contain everything the storefront
-    package actually imports (`domain_runtime`,
-    `negotiation.storefront_round`/`terms`,
-    `listings.models`/`pricing`/`reconciler`, `settlement` — checked
-    against the domain package's own force-include list and confirmed
-    with a repo-wide grep that nothing does file-path-based, non-import
-    access to these files). Removed the `COPY domains/ ./domains/` line
-    and its stale comment. Verified as rigorously as this sandbox
-    allows without a Docker daemon: built every wheel the storefront
-    transitively depends on, installed them into a clean venv with
-    *only* the storefront's own `src/` tree present (no raw `domains/`
-    source anywhere), and imported every `domains.apicredits.*` module
-    the storefront package's code actually references — all resolved
-    from the installed wheel. Turned that verification into a permanent
-    test, `test_storefront_domain_imports_resolve_without_a_raw_source_copy`,
-    rather than leaving it as a one-off manual check. Also added
-    `arkhai-apicredits-domain` and `arkhai-kit-site-client` (both changed
-    this session without a version bump) to both Dockerfile stages'
-    `--refresh-package` lists, matching why `arkhai-kit-site` already has
-    the same treatment in the service Dockerfile. **Not independently
-    verified**: an actual `docker build` + container run — this sandbox
-    has no Docker daemon, so the wheel-import simulation above is the
-    strongest evidence available, not a substitute for a real build. The
-    broader, repository-wide version of this pattern (other packages that
-    may have the same `COPY domains/`-style fallback) remains
-    `remove-relative-uv-sources`'s scope, not duplicated here. Full
-    suite: `domains/apicredits` (domain) 21/21 (2 new:
-    the editable-source check and the Docker-runtime-simulation import
-    test), `domains/apicredits/storefront` 51/51.
+  - **Done (2026-08-01).** 11.17.2:
+    `test_no_apicredits_project_declares_an_internal_editable_source`.
+    11.17.3: the storefront image imported the domain from a raw
+    `COPY domains/` rather than its wheel; the copy is gone, and
+    `test_storefront_domain_imports_resolve_without_a_raw_source_copy`
+    holds the wheel-only import (design.md, "Rationale moved from task
+    notes at closeout", 11.17). A real `docker build` was not run then;
+    the pipeline's image builds have since exercised it.
   - **Permanent documentation after review acceptance:**
     `docs/development/ARCHITECTURE.md#package-and-dependency-layers` and
     `#build-packaging-and-initialization`; API-credit subsystem package map.
@@ -1701,20 +1333,9 @@ with the new status note preserved on top. Corrected parent checkboxes for
     touched by this correction pass had the same pattern (checked
     `credits_client.py`, `credits_service_client.py`, and
     `kit/site-client`'s `client.py`; all clean).
-  - **11.18.5 done (2026-08-01).** Full suite, every package this
-    correction pass touched, run individually: `kit/site` 135/135,
-    `kit/site-client` 5/5, `core/storefront` 20/20,
-    `provisioning/compute/service` (unit+integration) 550/550,
-    `domains/vms/storefront` unit 640/640, `domains/apicredits` (domain)
-    20/20, `domains/apicredits/storefront` 51/51, `domains/apicredits/buyer`
-    16/16, `domains/apicredits/service` 24/24 — 1,461 tests, zero
-    failures. Disclosed, not silently skipped: `e2e-tests` (needs a live
-    multi-service stack this sandbox doesn't have) and
-    `openspec validate --all --strict` (unavailable in this environment,
-    unchanged from every validation pass since Section 8) were not run.
-    The Docker-build-context question 11.17.3 raised was also not
-    verified end to end — this sandbox has no Docker daemon to actually
-    build and run the image against.
+  - **11.18.5 done (2026-08-01).** Every touched package's suite passed.
+    Disclosed as unrun then: `e2e-tests`, strict validation, and a real
+    Docker build.
 
 **Explicitly skipped in this correction:** API-credit deployment-init/CLI work,
 startup-lifecycle contract tests, a new credits-client protocol, additional
@@ -1748,61 +1369,520 @@ already-stated wheel-only policy rather than establishing new policy.
 
 ## 12. Documentation and specification closure
 
-- [x] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `replace-polling-with-authenticated-push` as planned future work, not implemented by this change. **Done:** fixed a broken terminology/identifiers table (a two-paragraph digression had split it mid-table, silently dropping the `pool_id` row from parsing); added a "Fulfillment status and results" subsection (pull-based queries, live credential fetch, `credential_fetch_failed`, and the `replace-polling-with-authenticated-push` follow-on); rewrote the "Release" section, which still described the pre-Section-10 generic teardown model, with the real two-state-machine ownership split (lease lifecycle vs. fulfillment convergence) and `begin_fulfillment_teardown`; added a new "Recovery workers" section documenting all three watchdogs (`CapacityReservationWatchdog`, `FulfillmentConvergenceWatchdog`, `LeaseWatchdog`) and the claim/lease/no-attempt-ceiling recovery pattern; updated the runtime service map and authority-boundary table to match. Added to the document map.
-- [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived. **Done, and found more than drift:** running `openspec validate --all --strict` for the first time in a working environment (see 8.15) surfaced that this wasn't just stale prose -- `resource-pool-management`, `physical-provisioning`, and `fulfillment` each had one or more requirements physically stranded outside the parsed `## Requirements` section (a `##`-level companion header, like "## Fulfillment convergence worker", ends the section OpenSpec parses; anything after it is invisible to `validate`/`list`/`archive`), plus several missing scenarios and missing MUST/SHALL language. Fixed all of it: moved every stranded requirement back into a contiguous `## Requirements` block, demoted two `fulfillment/spec.md` companion headers to bold lead-ins with preserved HTML anchors (`#fulfillment-convergence-worker`, `#durable-settlement-persistence` -- confirmed via repository-wide grep that many docstrings and `design.md`/`tasks.md` cross-references depend on those exact anchors still resolving), added missing scenarios, and added missing MUST/SHALL wording. Also found and fixed one genuinely stale content claim in `physical-provisioning/spec.md`: it described `PhysicalSettlementScheduler` and fulfillment-provider coordination as "process-local" with "no durable mechanism-neutral recovery guarantee" -- directly contradicted by Sections 3-6, which made both durable with a dedicated recovery worker. `site-capacity/spec.md`, `resource-pool-management/spec.md`, `physical-provisioning/spec.md`, `fulfillment/spec.md`, and `vm-storefront-fulfillment/spec.md` all now validate clean (`openspec validate --all --strict`: 37/43 passing, up from 32/43; the remaining 6 failures are unrelated other active changes, not POOLS-7's own specs).
-- [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions. **Done.** This repository's documentation model doesn't use separate operator-runbook files (`spec.md`/`architecture.md` are the documentation); checked each of the four service-scoped companions this task names against current behavior rather than inventing a new doc genre. Found and fixed one significant staleness: `openspec/specs/physical-provisioning/architecture.md`'s "Proof-driven release" section still described release as a single-owner, lease-expiry-triggered dispatch, and its "Current limits" section explicitly claimed the compute service "does not yet provide a durable generic fulfillment recovery aggregate" -- directly false since Sections 3-6 built exactly that. Rewrote "Proof-driven release" to describe the real two-owner split (lease lifecycle decides when to release; fulfillment convergence owns teardown dispatch/recovery) and removed the false limits claim. `vm-storefront-fulfillment/architecture.md`, `fulfillment/architecture.md`, and `domains/vms/storefront`/`domains/vms/provisioning` (no README exists; checked for stale references to the retired direct-dispatch/polling path and found none) were already accurate. Migrations: `docs/development/DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup" is repository-wide and already generic/accurate; `physical-provisioning/architecture.md`'s "Preserving provider operations across schema cutover" already covers the compute-provisioning-specific cutover model. Status/result query usage and watchdog health are covered normatively by `fulfillment/spec.md`'s "Fulfillment status and result queries" and "Fulfillment convergence worker" (structured per-cycle diagnostics), and now by `ARCHITECTURE.md`'s "Recovery workers" section (12.1).
-- [ ] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirmed it still reflects reality against the final Section 8-11 state. **Blocked, not merely unstarted:** this change cannot archive without a passing end-to-end result, which does not exist yet -- the test harness has not successfully mounted and submitted a result in the environment where that's attempted, independent of anything in this review pass (this review's own environment has no live docker-compose stack to attempt it in either). This is also the same live-services confirmation task 10.14 flagged as still outstanding after its otherwise-complete static/structural correction. Do not archive on the strength of 12.1-12.3's documentation work or this review's unit/integration suite results alone -- 11.18.5 and this review pass both explicitly waived strict OpenSpec validation's absence and later ran it for real (see 8.15), but no equivalent path exists yet for the e2e gate; it stays open until a real result exists.
-- [ ] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
+- [x] 12.1 Update `ARCHITECTURE.md` service map, terminology table, ID definitions, lifecycle ownership, transaction boundaries, recovery workers, pull-based status/result query contract, and teardown flow. Note `replace-polling-with-authenticated-push` as planned future work, not implemented by this change. **Done:** `ARCHITECTURE.md`'s "Identifiers" (a table split mid-way that had dropped the `pool_id` row was repaired), "Fulfillment status and results", "Release" (rewritten from the pre-Section-10 model), "Recovery workers" (new), the runtime service map, and the authority table.
+- [x] 12.2 Update baseline `site-capacity` and `physical-provisioning` specs to incorporate completed POOLS-2/3/4/6/7 behavior when the change is archived. **Done.** Strict validation (8.15) showed requirements stranded after a `##` companion header, where OpenSpec cannot see them, in `resource-pool-management`, `physical-provisioning`, and `fulfillment`, plus missing scenarios and MUST/SHALL wording. All fixed; `fulfillment/spec.md`'s two companion headers became bold lead-ins keeping their `#fulfillment-convergence-worker` and `#durable-settlement-persistence` anchors, which code and documents cite. A stale "process-local" scheduler claim in `physical-provisioning/spec.md` was corrected. The five specs then validated clean. The requirements the deltas add are written by the archive (13.11).
+- [x] 12.3 Update compute provisioning service, VM adapter, storefront, and operator documentation for migrations, watchdog health, status/result query usage, and recovery procedures without lease-expiry sequencing instructions. **Done.** The repository has no separate runbooks, so the specs and companions were checked. `physical-provisioning/architecture.md`'s "Proof-driven release" was rewritten to the two-owner split, and a false "no durable recovery aggregate" limit removed. Already accurate: the VM storefront and fulfillment companions, `DEPLOYMENT_AND_CONFIG.md`'s "Migrations at startup", and the provider-operation correlation section (now "Provider operation correlation"). Query usage and watchdog health: `fulfillment/spec.md`'s "Fulfillment status and result queries" and convergence worker, and `ARCHITECTURE.md`'s "Recovery workers".
+- [x] 12.4 Verify the implementation against every POOLS-7 scenario and archive the OpenSpec change after validation. `proposal.md`'s "Permanent documentation impact" checklist (task 7.14) was added during Section 7 review rather than deferred here; confirmed it still reflects reality against the final Section 8-11 state. A "Blocked" note here, waiting on an end-to-end result, is superseded by the 2026-10-27 verification below.
+      **Verification against the delta scenarios (2026-10-27).**
+      - **End-to-end.** This supersedes the "Blocked" paragraph above: a passing result
+        now exists. Validation `reviews/03-validation.md`
+        ran commit `02319877e` and passed every part: local, Helm (scenario pod exit
+        0), and pipeline run 40495699817 with all three lanes green.
+        - That record does not match scenarios to log lines. The run's own log does.
+          `.snapshot/e2e-logs/40495699817/actions.log`, `e2e-vm` lane, under marker
+          `e2e_deal`, shows `test_full_deal.py`'s stages 00 to 11b running:
+          - 09a: the provisioning job succeeds;
+          - 09b: settlement ready, with credentials;
+          - 10b: the lease cycle records the `fulfillment_id`;
+          - 11a: convergence dispatches teardown while capacity stays held;
+          - 11b: provider completion releases the lease and capacity.
+        - The lane's total is "134 passed, 162 deselected", with none failed. That is
+          the live-services confirmation this task and 10.14 were waiting on.
+        - Archival is closeout's 13.11, not this task's.
+      - **Scenarios.** The 24 scenarios in `specs/physical-provisioning/spec.md` (20)
+        and `specs/site-capacity/spec.md` (4) were mapped to the tests that exercise
+        them at HEAD. Levels below:
+        - "application integration" is the service's app over ASGI, as `TESTING.md`
+          defines it;
+        - "library integration" is a kit library against real SQLite;
+        - "service, real SQLite" marks a service's own components against real SQLite
+          without the app, which `TESTING.md` does not name as a level.
+      - **Asserted in full (nine):**
+        - Equivalent fulfillment retry:
+          `test_fulfillment_api.py::TestARepeatedBeginAdoptsTheAcceptedFulfillment`
+          (application integration).
+        - Crash during assignment:
+          `test_scheduling_composition.py::test_real_container_composed_schedule_rolls_back_all_participating_tables`
+          (service, real SQLite, through the real DI container).
+        - Recovery retries create submission:
+          `test_fulfillment_api.py::TestAcknowledgementFailureRecovery`
+          (application-composed) and
+          `test_job_fulfillment_migration.py::test_an_unrecorded_create_job_is_found_by_its_contract_and_redispatch_finds_it`.
+        - Worker dies after claiming: `test_fulfillment_convergence.py`'s
+          `test_worker_death_leaves_a_reclaimable_*` and
+          `test_concurrent_reclaim_cannot_be_clobbered_by_a_stale_outcome` (service,
+          real SQLite).
+        - Result query for a completed fulfillment:
+          `test_fulfillment_api.py::TestStatusAndResultQueries::test_result_on_an_active_fulfillment_includes_live_credentials`.
+        - Repeated result queries: `kit/fulfillment/tests/unit/test_fulfillment.py`'s
+          `test_get_fulfillment_result_does_not_mutate_fulfillment_state` and its
+          siblings (unit, fakes).
+        - Reservation expires before fulfillment:
+          `test_lease_release_api.py::test_a_lease_whose_fulfillment_never_began_is_released_directly`.
+        - Existing active VM:
+          `test_legacy_backfill_teardown.py::test_pre_cutover_vm_lease_backfills_and_tears_down_to_release`.
+        - Ambiguous active VM mapping: `test_legacy_vm_lease_migration.py`'s
+          conflict and rollback tests (service, real SQLite, under `unit/`).
+      - **Asserted in all but one point:**
+        - "Process restarts after acceptance": a fresh watchdog resumes from the
+          durable state, but the handlers are called directly rather than through
+          its periodic loop.
+        - "Unknown owning authority": the rejection is asserted. That nothing is
+          forwarded holds only because the site has no forwarding path.
+        - "Existing host migration": the migration still places every existing host
+          in `default` through the column default, ahead of the backfill. It now
+          refuses a database whose `default` pool is missing instead of creating the
+          pool (`_migrate_resource_pools_and_hosts_pool_id`). The requirement holds
+          for every database the chain accepts. "Before" is not itself asserted.
+      - **Behaviour the code no longer has, so the delta would promote a false
+        requirement at archive:**
+        - "Credentials rotate between two queries" and the `credential_generation`
+          clause of "Credentials are fetched on read". This change dropped the field
+          itself (Section 8 decisions, above), and no `.py` file names it.
+      - **Requirement text that is not system behaviour:**
+        - "Broad capacity schema cleanup" opens "POOLS-7 MUST perform the approved
+          breaking rename".
+        - "Unambiguous capacity reservation identity" ends with "Planning MUST review
+          whether site-plus-pool composite identity is additionally required".
+        - Both would land in `openspec/specs/site-capacity/spec.md` at archive as
+          written.
+      - **Holds, but has no production trigger or is only partly tested:**
+        - "Reservation requirements change": nothing mutates an assignment in place.
+          `resize_reservation` supersedes and is tested at library level
+          (`kit/site/tests/integration/test_ledger.py`'s `resize_*` tests), but has no
+          production caller. No test schedules the superseding reservation.
+          `openspec/specs/site-capacity/spec.md`'s "Reservation supersede and the
+          release guard" already states the current rule.
+        - "Reservation routed to owning site": every production caller names its
+          `site_id`. Targeted status and terminate calls are shown not to fall back
+          (`domains/vms/storefront/tests/integration/test_site_trust.py`). Targeted
+          schedule, begin, and result calls are not. `AggregateFulfillmentClient`
+          still falls back across sites when no `site_id` is given
+          (`market_storefront/services/capacity_client.py`, `_route_order`).
+      - **Covered only in part:**
+        - "Conflicting fulfillment retry": the job count after a conflict is not
+          asserted, and `begin` cannot carry a resource or provider.
+        - "Resource selected before fulfillment": "no provider command" is not
+          asserted.
+        - "Multi-resource fulfillment representation": unit fakes only; nothing
+          persists two outputs.
+        - "Pool configuration changes after acceptance": the frozen payload and the
+          retry are proven in separate tests.
+        - "Recovery retries teardown submission": a deterministic key plus generic
+          contract dedup, but no redispatched-teardown test.
+        - "Status query after process restart": a fresh composition reads durable
+          state (now `kit/fulfillment/tests/integration/test_fulfillment_restart.py`),
+          but nothing restarts mid-lifecycle.
+        - "Smaller scheduled shape" and "Scheduling exceeds reservation": "without
+          increasing" and "before assignment" are not asserted.
+        - "Fulfillment succeeds but is never queried": inferred only.
+      - **What this means for closeout.** Closeout's 13.9 note says this change's
+        delta specs "remain compatible and promote as written". The two groups
+        "Behaviour the code no longer has" and "Requirement text that is not system
+        behaviour" contradict that. The owner chose to reconcile them here
+        (2026-10-27), applying decisions already recorded rather than making new ones:
+        - `specs/physical-provisioning/spec.md`: the `credential_generation` sentence
+          and the "Credentials rotate between two queries" scenario are removed,
+          following this change's Section 8 decision to drop the field. "Durable
+          fulfillment status and result queries" no longer names
+          `replace-polling-with-authenticated-push` as "not yet started"; it says the
+          service does not push results and the guarantee does not depend on push.
+          That falls under the same rule against change names in permanent specs.
+        - `specs/site-capacity/spec.md`: "Broad capacity schema cleanup" ("POOLS-7
+          MUST perform…") is restated as "Capacity schema separation", the current
+          schema rule, and keeps its "Existing host migration" scenario. The
+          "Planning MUST review…" sentence is deleted from "Unambiguous capacity
+          reservation identity".
+
+        Every other delta requirement holds as written. The partial coverage is
+        recorded for the pre-closeout review; it is not a defect in the delta.
+        `make check-change` (strict OpenSpec validation included) passes after the
+        edits.
+      - **A further divergence, outside the delta.** `openspec/specs/physical-provisioning/spec.md`
+        says leftover `connectivity` content is "opaque metadata the adapter forwards
+        unchanged". The VM fulfillment plan validates the field and never reads it
+        (`vm_fulfillment_plan.py`). The model also still declares relay fields that
+        the same spec says `connectivity` must not carry.
+      - **Resolved (2026-10-27, pre-closeout review 17 F1, owner's alternative A).**
+        A VM request carrying `connectivity` is now refused rather than stored. See
+        `design.md`'s "Pre-closeout review 17 F1" for the decision.
+        - `VmConnectivitySettings` and the request's `connectivity` field are
+          deleted (`vm_provisioning_adapter/models/fulfillment_model.py`). The
+          request's `extra="forbid"` refuses the field at preparation, inside the
+          acceptance transaction, so a refused request is never stored.
+        - Paired migrations remove `connectivity` from stored VM requests, sharing
+          field-removal helpers with the guest-name pair:
+          - provisioning: `20261027_001_vm_fulfillment_request_carries_no_connectivity`;
+          - VM storefront, over `escrows.fulfillment_context`:
+            `20261027_001_fulfillment_context_carries_no_connectivity`.
+
+          Prepared operations, provider metadata, and the storefront's
+          `vm_delivery_records` are not touched. The delivery table arrived after
+          the storefront stopped sending the field, so it cannot hold one.
+        - Delta specs: MODIFIED `physical-provisioning` "Ansible fulfillment
+          adapter" (the refusal and its scenario) and MODIFIED
+          `vm-storefront-fulfillment` "The storefront does not select buyer access
+          infrastructure".
+        - Tests:
+          - unit: `test_vm_fulfillment_plan.py::test_a_request_naming_a_relay_is_refused_before_a_port_is_leased`;
+          - application integration, through `ComputeProvisioningClient`:
+            `test_fulfillment_api.py`'s `test_a_request_naming_a_relay_is_invalid`
+            and `TestARequestNamingARelayIsRefused` (422; no fulfillment, request,
+            or job stored);
+          - service, real SQLite: `test_vm_fulfillment_request_migration.py`'s
+            connectivity tests, plus the migration-ID set in `test_database.py`;
+          - storefront integration: `test_fulfillment_context_migration.py`'s
+            connectivity test.
+        - Evidence:
+          - `make check-packaging`: passed.
+          - `make test-provisioning`: unit 658 passed, application integration 536
+            passed.
+          - `make test-provisioning-adapter`: 37 passed.
+          - `make test-storefront`: unit 1103 passed with 1 skipped; integration
+            449 passed.
+          - `make test`: passed (exit 0).
+          - `make check-change`: passed (comment hygiene, citations, task list,
+            change index, strict OpenSpec validation).
+        - Fresh-context check of the diff against `a3103948a` found no blocker.
+          - Fixed:
+            - placeholder comments added to the new test fixtures;
+            - the guest-name wrapper's docstring no longer claims a version check;
+            - `design.md` corrected where it still described
+              `VmConnectivitySettings` as standing;
+            - the storefront migration's docstring no longer calls the escrow copy
+              the replayed one. Recovery replays `vm_delivery_records`.
+          - Declined:
+            - a test that the storefront migration is registered in
+              `VM_MIGRATIONS`, a gap the guest-name migration shares;
+            - rewording the guest-name pair's replay wording, which predates this
+              fix.
+          - Dropped: a draft storefront scenario that described a migration step
+            rather than current behaviour.
+- [x] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
       added to module level unless a verified circular import or a recorded lazy-load
       reason keeps it local. Closeout only confirms both.
+      **Done (2026-10-27).** The change's code landed on `dev` as its section pull
+      requests. "Added by this change" was therefore read from `git diff 3e8c33554~1
+      9b2bd3fe2`, the first section commit's parent through the promotion record,
+      restricted to what still exists at HEAD.
+      - That range also carries other work merged to `dev` in the same weeks. The
+        comment rewrites were attributed one by one with `git blame`/`git log -S`.
+        The import moves were taken from the range as a whole, so a few may predate
+        this change, such as one of the two `resource_feasibility_view` imports in
+        `test_resource_satisfies_requirement.py`.
+      - **Comments.** `make check-comment-hygiene` passes. The narrative markers it
+        cannot catch were swept with grep across the tree: "review/finding",
+        "previously/originally/used to/no longer", "now lives/now acquires",
+        "gap/the fix", "for now/not yet/yet", "first pass", "POOLS". The
+        fresh-context check found more, with "yet" phrasings and retired class names
+        the grep missed. Every one this change added was rewritten as current
+        invariants or current names:
+        - `fulfillment_convergence.py`: the `_claim` and `_with_owned_record`
+          docstrings.
+        - `db/migrations.py`: the `settlement_resource_id` docstring's "no production
+          caller exists yet".
+        - `kit/site`'s `resize_reservation` docstring: "no caller uses this method
+          yet", and the retired `AnsibleFulfillmentProvider.prepare_create`, now
+          `VmFulfillmentPlan.prepare_create`.
+        - `kit/site`'s held-reservation lookup docstring ("a future caller ... a
+          not-yet-built direct-resource-reservation path").
+        - `core_storefront/sqlite_client.py`: the `escrows` schema comment and
+          `update_escrow`'s docstring. Both said the three fulfillment-identity
+          columns let a caller resume by escrow after a restart, but nothing does.
+        - `vm_job_spec_service.py`'s resource-type comment ("needs to carry yet").
+        - The VM storefront's `terminate_vm_lease` docstring
+          (`market_storefront/services/fulfillment_service.py`).
+        - `VmConnectivitySettings`'s docstring and field comment. They now say what
+          is true: the plan never reads the field, and a request cannot select a
+          relay. They had said the settings were storefront-configured "for now",
+          and that the remote port is leased by the service.
+        - Tests:
+          - `test_fulfillment_convergence.py`: the "code review finding" header and
+            three docstrings.
+          - `test_compute_contract_api.py`.
+          - `test_fulfillment_api.py`: five references to the retired
+            `AnsibleFulfillmentProvider`, now `JobFulfillmentProvider`, and
+            `TestTeardownPreparation`'s "no HTTP path to exercise yet". The teardown
+            endpoint exists.
+          - The API-credit service's `test_migrations.py`: two docstrings written
+            while there were no migrations and no deployment step.
+          - `test_legacy_backfill_teardown.py`: "pre-POOLS" and "new teardown path".
+          - `kit/site/tests/integration/test_ledger.py`: two docstrings.
+          - `test_vm_job_spec_service.py`.
+          - The VM storefront's `test_fulfillment_service.py`. One comment wrongly
+            said nothing reads the identifiers back; restart convergence does, from
+            the delivery row.
+          - `test_capacity_reservation_boundary.py` ("the fix didn't overcorrect").
+          - `test_sqlite_client_escrow_fulfillment_identity.py`. Its docstring no
+            longer claims resumption reads the escrow row; it reads the delivery row.
+      - **Imports.** Every indented import the range added and HEAD still has is now at
+        module level. None hit a circular import: the full suite passes with them
+        moved.
+        - Production code:
+          - `db/database.py`: `FulfillmentBase`, `SiteBase`, and the adjacent
+            `PoolsBase` and `VmBase`. `VmBase` had stayed local under a comment
+            saying the module imports without the optional VM adapter. That was
+            false, since `db.migrations`, which `database.py` imports, already
+            imports `vm_provisioning_adapter.db` at module level. The comment is
+            removed.
+          - `db/migrations.py`: `FulfillmentBase`, `LegacyBackfillValidationError`,
+            the VM legacy-backfill compiler, `SiteBase`, and the adjacent
+            `PoolsBase`.
+          - The API-credit storefront's `credits_service_client.py` (`config`).
+          - The API-credit storefront's `startup.py` (`SiteCapacityAdminClient`). Its
+            test had patched the `market_site_client` module attribute that the local
+            import read at call time. `TESTING.md` forbids patching module-level
+            imports, so `_register_seed_quota` now takes the client's `transport`, and
+            `test_startup_seed_quota.py` passes an `httpx.MockTransport` instead of
+            patching the client class. It still patches `_capacity_authority_site`
+            and the container's signer, as it did before.
+        - Tests:
+          - provisioning service: `conftest.py` (the three metadata bases,
+            `PhysicalSettlementScheduler`, `FulfillmentOrchestrator`,
+            `SqlAlchemyFulfillmentUnitOfWork`), `test_fulfillment_api.py`,
+            `test_compute_contract_api.py`, `test_legacy_backfill_teardown.py`,
+            `test_fulfillment_convergence.py`, `test_vm_host_executor_ref_migration.py`;
+          - `kit/fulfillment`: `test_fulfillment.py`;
+          - `kit/site`: `test_dict_resource_satisfies_claim.py`,
+            `test_resource_satisfies_requirement.py`, `test_settlement_assignment.py`;
+          - `core/storefront`: `test_sqlite_client_escrow_fulfillment_identity.py`;
+          - the VM storefront: `test_vm_job_spec_service.py`,
+            `test_remote_capacity_client.py`, `test_fulfillment_resume_runtime.py`;
+          - the API-credit storefront: `test_keys_lookup.py`,
+            `test_startup_seed_quota.py`;
+          - the API-credit service: `tests/integration/test_migrations.py` (`SiteBase`
+            six times, the migrations module twice). The file moved out of
+            `src/tests/unit/` after the change's range, which is why the range-based
+            search first missed it.
+        - Left as they are: `test_fulfillment_provisioning.py`'s `alkahest_py` probe
+          inside `try`, which is an availability check, and
+          `market_fulfillment/provider.py`'s `TYPE_CHECKING` import, which is
+          module-level.
+      - **Test placement.** `TESTING.md` moves a touched library test that uses a real
+        database from `unit/` to `integration/`. Three moved:
+        - `kit/site/tests/unit/test_settlement_assignment.py` to
+          `kit/site/tests/integration/`;
+        - `core/storefront/tests/unit/test_sqlite_client_escrow_fulfillment_identity.py`
+          to `core/storefront/tests/integration/`;
+        - `kit/fulfillment`'s file-database restart test, out of
+          `tests/unit/test_fulfillment.py` into the new
+          `tests/integration/test_fulfillment_restart.py`, with its own provider fake.
+      - **Seen, not this change's, left alone.**
+        - `kit/site/tests/integration/test_ledger.py`'s "documented pass-1 scope ...
+          before this change" comment, from the multidimensional-capacity change's
+          first pass.
+        - The provisioning service's `pyproject.toml` declares the VM adapter under
+          the optional `adapters` extra. The migration history imports the adapter at
+          module level, so the service cannot start without it.
+        - The `escrows` table's `capacity_reservation_id`, `settlement_resource_id`,
+          and `fulfillment_id` columns are written by no production code. VM keeps
+          the identity on its delivery record (`persist_delivery_fields_with_retry`).
+          Whether to drop the columns is a schema decision, not comment work.
+        - `reviews/03-validation.md`'s coverage table lists `test_credits_payment_deal`
+          as passed. Run 40495699817's log shows all three of its tests skipped
+          (`actions.log`, `e2e-apicredits`: "1 passed, 3 skipped").
+      - **Also fixed.** Two rows of `design.md`'s Section 9 promotion table (around
+        `VmConnectivitySettings` and the sizing precedence) named a file and a model
+        that no longer exist. Each now carries a dated correction for closeout's
+        13.9. The rest of the table is closeout's to re-check.
+        `make check-change` reported two unresolvable citations in this change's
+        `design.md`. One was the full-deal scenario's path written with its middle
+        directories elided. The other was the connectivity-terms change, now archived as
+        `openspec/changes/archive/2026-09-25-add-buyer-vm-connectivity-terms/`. Both
+        now point at real paths.
+      - **Evidence.** `make test` passed. Among its suites:
+        - the provisioning service: unit 658 passed, application integration 527
+          passed;
+        - `kit/site`: 289 passed;
+        - `kit/fulfillment`: 171 passed;
+        - `core/storefront`: 217 passed, 2 skipped;
+        - the VM storefront: unit 1103 passed, 1 skipped; integration 448 passed;
+        - the API-credit storefront: 184 passed.
+
+        These are the counts after the fixes, unchanged by the test moves. The edited
+        source was exercised: each package under test installs editable.
+        `make check-packaging` passed, including the architecture layer, scope,
+        dependency, and kind rules. `make check-change` passed.
+      - **End-to-end.** Validation 03 ran the commit before these edits. Moving imports
+        to module level changes what the provisioning service, its migrate entrypoint,
+        and the API-credit storefront load at start. The next validation's pipeline
+        is therefore the evidence for this section:
+        - `e2e-vm` (`e2e_deal` and the rest of its markers);
+        - `e2e-apicredits` (`e2e_credits_deal`). Its storefront's startup registers
+          the seed quota through the moved import. `e2e_credits_payment_deal` was a
+          blocked skip in run 40495699817, with no payments target configured, so it
+          is not evidence here;
+        - `e2e-bare-metal`, whose stack runs the same provisioning service.
+
+        No `e2e-tests/` marker exercises the comment rewrites.
+      - **Round fixes (2026-10-27, implementation review 07).**
+        - 07 F1, the owner's alternative A: the delta requirement that credentials
+          are never persisted anywhere contradicted the job authority's `credentials`
+          table, which the permanent requirement "Compute provisioning owns the job
+          and host authorities" already requires. It is restated as "Credentials
+          stay with the job authority and are read on demand". The same false claim
+          is corrected in `openspec/specs/fulfillment/spec.md` (the "No persisted
+          `SettlementResult`" paragraph) and in `docs/development/ARCHITECTURE.md`'s
+          "Fulfillment status and results". `design.md` carries a dated correction.
+          `openspec/specs/physical-provisioning/architecture.md`'s "Durable jobs,
+          transient workers" now names the job record as the credential store and
+          records two current limits:
+          - the envelopes are plain JSON, and no job row is ever deleted;
+          - an operator's VM password reset stores its new credentials against the
+            reset job, which the fulfillment result does not read.
+
+          The fresh-context check found the reset path. It also showed that
+          `design.md`'s earlier "never rotated by this codebase" is not quite true.
+        - 07 F2: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`
+          now sends every status, result, schedule and begin call through
+          `ComputeProvisioningClient`. The five 404 and 422 cases assert
+          `ComputeProvisioningError.status_code`, and the raw transport and
+          `begin_raw` are gone. Their docstrings had claimed a typed client cannot
+          observe a status code, which was false.
+        - 07 F3: closeout's 13.8 no longer says that no end-to-end result exists.
+        - **Evidence.** All checks passed:
+          - the provisioning service suites (`make test-provisioning`): unit 658
+            passed, application integration 527 passed;
+          - `make test`;
+          - `make check-packaging`, layer, scope, dependency and kind rules included;
+          - `make check-change`.
+
+          The fresh-context check of the diff against `cdb244466` raised:
+          - the reset path, which is now fixed in the wording above;
+          - the bare-metal provider's use of the same job-backed provider, now named
+            in `ARCHITECTURE.md`.
+
+          Declined:
+          - the substring match on `fulfillment_not_found` in the rejection cases.
+            The client flattens `detail` into its message, so that is what it
+            exposes.
+          - things that predate this round and were left alone: an unused `FastAPI`
+            import, three function-local `container` re-imports in the same file,
+            and a narrating comment above the conflicting-retry assertion.
+        - **End-to-end.** These fixes change no production code, so the fix commit's
+          validation confirms them against an unchanged pipeline.
 
 ## 13. Closeout
 
 Per `openspec/README.md#plan-closeout-requirements`.
 
-- [ ] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
+- [x] 13.1 **Comment hygiene — confirm.** Run `make check-comment-hygiene`, and read
       the comments this change added for any that narrate the review or migration that
       introduced them. Do not edit code here: anything to rewrite returns the change to
       implementation.
-- [ ] 13.2 **Import placement — confirm.** Check the imports this change added for any
+      **Confirmed (2026-10-27).** `make check-comment-hygiene` passes. 12.5 swept the
+      change's comments; pre-closeout review 28 read the ones the last round added. A
+      grep of the Python added since `02319877e` for narrating markers finds one hit, a
+      test fixture describing its data ("a VM lease still active"), which is not
+      history. No production file names this change.
+- [x] 13.2 **Import placement — confirm.** Check the imports this change added for any
       still local without a recorded reason. One that should move returns the change to
       implementation.
-- [ ] 13.3 **Documentation compliance.** Re-check this change's accepted decisions
+      **Confirmed (2026-10-27).** 12.5 moved every indented import the change added to
+      module level, with the full suite passing. The Python added since `02319877e`
+      adds no indented import, and review 28 found none without a reason.
+- [x] 13.3 **Documentation compliance.** Re-check this change's accepted decisions
       against `openspec/README.md`'s placement rules, and the permanent documents
       against the code they describe. It carries delta specs for
-      `physical-provisioning` and `site-capacity`; confirm durable conceptual rationale
-      sits in the companion `architecture.md` rather than only in `design.md`.
-- [ ] 13.4 **Narrative compression.** Compress completed-task notes to final behavior,
+      `physical-provisioning`, `site-capacity`, and `vm-storefront-fulfillment` (the
+      last added by the fix for review 17 F1, named here per review 28 F1); confirm
+      durable conceptual rationale sits in the companion `architecture.md` rather than
+      only in `design.md`.
+      **Done (2026-10-27).** Each section's decisions were checked against their
+      destinations; the result is `design.md`'s "Closeout design-promotion record".
+      Conceptual rationale sits in the companions: `fulfillment/architecture.md`
+      (scheduling boundary, acceptance, legacy cutover, result ownership),
+      `physical-provisioning/architecture.md` (job credential store, proof-driven
+      release, provider operation correlation), and `site-capacity/architecture.md`
+      (resize, projected matching). Three corrections:
+      - The `physical-provisioning` delta's "Provisioning-owned lifecycle
+        convergence" required a "multi-replica-safe" claim mechanism. Section 6 item 1
+        decided that phrase means safety under concurrent claim attempts, serialized by
+        SQLite's single writer, and `fulfillment/spec.md` says it is not a distributed
+        multi-replica protocol. The delta now says so, applying that decision.
+      - `ARCHITECTURE.md`'s "Fulfillment status and results" named
+        `replace-polling-with-authenticated-push` as planned work. It now states the
+        current fact, that provisioning does not notify the storefront of results, and
+        names no change; and a garbled clause about the job-backed provider reads
+        correctly.
+      - Section-record anchors renamed or removed by later archived changes are
+        mapped to current headings in the closeout record.
+- [x] 13.4 **Narrative compression.** Compress completed-task notes to final behavior,
       material validation evidence, unresolved or deferred work, and
       permanent-documentation destinations, moving durable rationale into `design.md`
       first.
-- [ ] 13.5 **Roadmap currency.** Update the affected goal's current state and gap
+      **Done (2026-10-27).** Sections 1–12 notes shortened, from 309 KB to 237 KB.
+      Removed: interim statuses later overtaken, interim test counts, file-path
+      recitals, and fix-loop narratives. Kept: task statements, final evidence,
+      12.4's scenario-to-test mapping and 12.5 in full, and every correction recording
+      that a task was marked done without meeting its criteria (4.7.4, 4.7.5, 4.11.3,
+      9.3, 9.7, 10.10–10.12) or a gate was not honoured (8.15). Rationale not already in
+      `design.md` moved to its "Rationale moved from task notes at closeout" section
+      (4.2.3, 4.5.2, 4.6, 4.7.2, 4.11.5, 4.15.3, Section 4's comment fixes, 9.0, 9.2,
+      9.3, 9.7, 10.3, 10.4, 10.6, 10.7, 10.8, 10.14, 11.17). Section 11 was already
+      compressed by 11.18.3 and was only trimmed.
+- [x] 13.5 **Roadmap currency.** Update the affected goal's current state and gap
       mapping in `docs/development/ROADMAP.md`, or record that no goal is affected.
       This change sits under the lesser goal "POOLS capacity and fulfillment
       foundation", which has no roadmap goal behind it, so it most likely owes the
       roadmap nothing; confirm that and record the no-impact disposition explicitly.
-- [ ] 13.6 **Campaign index currency.** Update this change's row, and its campaign's
+      **No goal affected (2026-10-27).** No roadmap goal names this change or maps a
+      gap to it. Goal 1's current state already says the provisioning service is
+      authoritative for scheduling and the fulfillment lifecycle, which this change
+      made true. `ROADMAP.md` is unchanged.
+- [x] 13.6 **Campaign index currency.** Update this change's row, and its campaign's
       dependency graph, in `openspec/changes/README.md`, or record that both are
       unchanged. Other rows' `Depends on` are left alone: archive cleanup releases
       dependents after the closeout gate.
-- [ ] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure it
+      **Done (2026-10-27).** The row is `in closeout`, its notes rewritten for
+      closeout, and after 13.11 it links the archived directory. The POOLS campaign
+      graph is unchanged. `pools-6-fair-scheduling-policy`,
+      `replace-polling-with-authenticated-push`, and
+      `market-platform-compute-40-multi-domain-proof` keep this change in `Depends on`
+      until archive cleanup. `make check-change-index` passes.
+- [x] 13.7 **Packaging.** Run `make check-packaging` and resolve every failure it
       reports (a failure needing a code or lock change returns the change to
       implementation).
-- [ ] 13.8 **End-to-end pipeline.** Record the passing run the latest validation names,
+      **Passed (2026-10-27).** `make check-packaging`: every lock, install, Python
+      version, layer, scope, dependency and kind rule holds.
+      `make check-architecture-change`: the change owns no architecture row. The last
+      rounds touched no `.agents/`, `.claude/` or `.codex/` path, so
+      `make check-agent-skills` was not owed; `make check-change` runs it and passes.
+- [x] 13.8 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates
-      treated as unrun. Task 12.4 records that no passing end-to-end result exists yet
-      for this change; closeout does not proceed on documentation or suite results
-      alone.
-- [ ] 13.9 **Promotion.** Write the permanent documents this change owes — those
+      treated as unrun. Validations 03 (run 40495699817, `02319877e`) and 08 (run
+      40505352410, `cdb244466`) passed, with `test_full_deal` stages 00 to 11b on the
+      VM lane. Closeout records the run of the latest validation, which must name
+      `HEAD` or an ancestor from which `HEAD` changes only `openspec/` and `docs/`.
+      **Recorded (2026-10-27).** Validation 27 (`reviews/27-validation.md`) passed
+      every part at `a6376b8bc`, the pre-closeout commit. `HEAD` before closeout,
+      `c9b2a96e1`, changes only `openspec/` paths from it, and closeout changes only
+      `openspec/` and `docs/`, so the run describes the code this commit carries.
+      - Pipeline run 40534579682, success:
+        - `e2e-vm`: 134 passed, 162 deselected. `e2e_deal`'s `test_full_deal` stages
+          00 to 11b exercise scheduling, durable fulfillment, pulled credentials, the
+          lease cycle's `fulfillment_id`, convergence teardown with capacity held, and
+          release on teardown.
+        - `e2e-bare-metal`: 51 passed, 3 skipped. It runs the same provisioning
+          service.
+        - `e2e-apicredits`: 1 passed, 3 skipped; `e2e_credits_deal` covers the
+          storefront startup's seed-quota registration.
+        - The skips are the payment-deal tests, for want of a payments target, and are
+          not evidence for this change.
+      - Helm: the scenario pod exited 0. Local `check-packaging` and `make test`
+        passed.
+      - CI: no section owed a workflow observation (`ci not owed`).
+- [x] 13.9 **Promotion.** Write the permanent documents this change owes — those
       12.1–12.3 and the section design-promotion records name — and complete the
       design-promotion record, mapping every accepted decision to its exact permanent
       heading, and verify no production source references
       `openspec/changes/pools-7-storefront-fulfillment-cutover`. A `spec.md` the deltas cover
-      (`physical-provisioning`, `site-capacity`) is written by the archive in 13.11, not
-      by hand; the record names it all the same.
+      (`physical-provisioning`, `site-capacity`, `vm-storefront-fulfillment`) is written
+      by the archive in 13.11, not by hand; the record names it all the same, and 13.11
+      checks the merged text of each.
       *Superseded decisions (2026-10-05, `bare-metal-mock-provisioned-deal` 5B.8):*
       - Do not promote the following as current behaviour; record each as superseded by
         that change instead:
@@ -1815,10 +1895,41 @@ Per `openspec/README.md#plan-closeout-requirements`.
         and registration written once by executor target.
       - This change's own delta specs (atomic abandonment and release, scheduling,
         fulfillment identity) remain compatible and promote as written.
-- [ ] 13.10 **Documentation citations.** After promotion, run
+        *Amended 2026-10-27 (task 12.4):* they promote as reconciled in 12.4.
+        `credential_generation` is gone, and "Capacity schema separation" replaces
+        "Broad capacity schema cleanup".
+      **Done (2026-10-27).** The permanent documents 12.1–12.3 named were written
+      then. Closeout edited `docs/development/ARCHITECTURE.md`'s "Fulfillment status
+      and results" (13.3). `openspec/specs/README.md` lacked a row for
+      `vm-storefront-fulfillment`; the closeout triage added it (35 F1). `design.md`'s "Closeout design-promotion
+      record" maps every accepted decision to a heading that resolves, and records the
+      three superseded decisions above as superseded by `bare-metal-mock-provisioned-deal`,
+      with the current requirements that replace them. No file outside
+      `openspec/changes/` names this change. The deltas merge at archive (13.11): the
+      14 ADDED requirements appear in no permanent spec, and the two MODIFIED
+      requirements, "Ansible fulfillment adapter" and "The storefront does not select
+      buyer access infrastructure", exist under those headings; so the archive runs
+      without `--skip-specs`.
+- [x] 13.10 **Documentation citations.** After promotion, run
       `make check-doc-citations CHANGE=pools-7-storefront-fulfillment-cutover` and resolve every
       match, then `openspec validate pools-7-storefront-fulfillment-cutover --strict`.
-- [ ] 13.11 **Archival.** Last, once every other part is checked: `openspec archive
+      **Passed (2026-10-27).** `make check-change` after promotion: comment hygiene,
+      agent skills, documentation citations, task list, change index, and strict
+      `openspec validate` with the pinned validator all pass. The citations check
+      tests paths only; the heading anchors in the closeout promotion record were
+      checked against each target's headings and explicit anchors by hand.
+- [x] 13.11 **Archival.** Last, once every other part is checked: `openspec archive
       pools-7-storefront-fulfillment-cutover -y` merges the deltas into `openspec/specs/` and
       moves the change under `openspec/changes/archive/`; point the index row at the
       archived directory, and run `openspec validate --specs --strict`.
+      **Done (2026-10-27).** `openspec archive -y` with the pinned 1.14.0 validator,
+      without `--skip-specs` (13.9), moved the change to
+      `openspec/changes/archive/2026-10-27-pools-7-storefront-fulfillment-cutover/`
+      and merged 14 added and 2 modified requirements: 11 added and "Ansible
+      fulfillment adapter" modified in `physical-provisioning/spec.md`, 3 added in
+      `site-capacity/spec.md`, and "The storefront does not select buyer access
+      infrastructure" modified in `vm-storefront-fulfillment/spec.md`. The diff of
+      each was read: every requirement appears once, as its delta stated, and nothing
+      else changed. The index row links the archived directory and stays `in
+      closeout` until archive cleanup. `make check-change` on the archived change,
+      which runs `openspec validate --specs --strict`, passes.

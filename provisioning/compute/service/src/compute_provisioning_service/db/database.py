@@ -2,6 +2,11 @@ from sqlalchemy import create_engine, Engine, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
+from market_fulfillment.db import Base as FulfillmentBase
+from market_resource_pools.db import Base as PoolsBase
+from market_site.db import Base as SiteBase
+from vm_provisioning_adapter.db import Base as VmBase
+
 from compute_provisioning.hosts.db import Base as HostsBase
 from compute_provisioning.jobs.db import Base as JobsBase
 from compute_provisioning_service.db.migrations import apply_schema_migrations
@@ -55,13 +60,6 @@ def run_migrations(engine: Engine) -> None:
     # Resource-pool tables must be created before VM's: ansible_pool_configs
     # has a ForeignKey to resource_pools, and SQLAlchemy's cross-metadata FK
     # resolution during create_all needs the referenced table to exist.
-    from market_fulfillment.db import Base as FulfillmentBase
-    from market_resource_pools.db import Base as PoolsBase
-    from market_site.db import Base as SiteBase
-    # The VM adapter is the service's optional `adapters` extra, so the module
-    # imports without it and only migrating requires it.
-    from vm_provisioning_adapter.db import Base as VmBase
-
     PoolsBase.metadata.create_all(bind=engine)
     VmBase.metadata.create_all(bind=engine)
     HostsBase.metadata.create_all(bind=engine)

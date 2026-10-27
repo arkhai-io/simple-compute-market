@@ -16,6 +16,8 @@ from __future__ import annotations
 import pytest
 
 from market_site.ledger import (
+    _requested_dimensions,
+    _split_claim_requirement,
     dict_resource_satisfies_claim,
     resource_feasibility_view,
     resource_satisfies_requirement,
@@ -42,8 +44,6 @@ def _row(**overrides):
 def _authoritative_result(row, claim):
     """The admission-path result for the same data, built the same way
     ledger.py's own call sites build a ResourceFeasibilityView."""
-    from market_site.ledger import _requested_dimensions, _split_claim_requirement
-
     resource_kind, required_attributes = _split_claim_requirement(claim)
     required_dimensions = _requested_dimensions(claim)
     resource = resource_feasibility_view(

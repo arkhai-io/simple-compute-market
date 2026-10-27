@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from market_resource_pools.db import (
@@ -7,7 +8,7 @@ from market_resource_pools.db import (
 )
 
 from market_site.db import Base, CapacityReservationDebit
-from market_site.ledger import CapacityLedgerService
+from market_site.ledger import CapacityConflictError, CapacityLedgerService
 
 
 def _ledger(tmp_path):
@@ -52,9 +53,6 @@ def test_assignment_rejects_destination_without_capacity(tmp_path):
     ledger.register_resource(resource_id="a", total_units=4, pool_id="default")
     ledger.register_resource(resource_id="b", total_units=2, pool_id="default")
     reserved = ledger.reserve(claim={"offering_mode": "vm", **{"units": 4}}, deal_ref={})
-
-    import pytest
-    from market_site.ledger import CapacityConflictError
 
     with pytest.raises(CapacityConflictError):
         ledger.assign_settlement_resource(

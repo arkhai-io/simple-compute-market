@@ -107,9 +107,11 @@ own provider submission, retry, provider-status convergence, output
 persistence, settlement-result delivery, teardown, and final physical-resource
 reclamation. Progress MUST NOT depend on storefront polling.
 
-Pending and in-progress work MUST be recovered periodically with a
-multi-replica-safe claim/lease mechanism. Database locks MUST be released
-before external provider calls.
+Pending and in-progress work MUST be recovered periodically through durable
+claims that stay safe under concurrent claim attempts; on the service's SQLite
+database the single writer serializes those attempts, which is not a
+distributed multi-replica protocol. Database locks MUST be released before
+external provider calls.
 
 #### Scenario: Process restarts after acceptance
 - **WHEN** the provisioning process restarts with a pending or in-progress
@@ -131,12 +133,11 @@ from durably persisted fulfillment state; neither requires a separate
 delivery-acknowledgement mechanism, since a read reflects current state
 on demand rather than requiring retry-until-acknowledged delivery.
 
-Push-based delivery of `SettlementResult` to the storefront is out of
-scope for this requirement — see `replace-polling-with-authenticated-push`
-(separate change, not yet started). This requirement's durability
-guarantee is unaffected by that change's absence: a terminal or
-otherwise reportable fulfillment transition commits atomically with the
-state these queries read, regardless of whether or when it is polled.
+The provisioning service does not push `SettlementResult` to the
+storefront, and this requirement's durability guarantee does not depend
+on push delivery: a terminal or otherwise reportable fulfillment
+transition commits atomically with the state these queries read,
+regardless of whether or when it is polled.
 
 #### Scenario: Status query after process restart
 - **WHEN** `get_fulfillment_status` is called for a fulfillment whose
@@ -157,22 +158,15 @@ state these queries read, regardless of whether or when it is polled.
   deduplication bookkeeping is required because reads have no delivery
   side effect to duplicate
 
-### Requirement: Credentials are fetched on read, never persisted at rest
+### Requirement: Credentials stay with the job authority and are read on demand
 
-Raw credentials MUST NOT be persisted in settlement records, generic JSON
-columns, or any other durable storage. `get_fulfillment_result`'s handler
-MUST obtain or refresh credentials at the moment it is called, return
-them only in that response over the authenticated encrypted channel, and
-MUST NOT persist them afterward. Where credentials can rotate, each
-response MUST include a monotonic `credential_generation` so a caller
-holding an earlier cached response can detect staleness.
-
-#### Scenario: Credentials rotate between two queries
-- **WHEN** credentials are rotated between two `get_fulfillment_result`
-  calls for the same fulfillment
-- **THEN** the later call returns a higher `credential_generation` than
-  the earlier one, and the caller can detect that its cached copy is
-  stale
+Raw credentials MUST NOT be persisted in the fulfillment aggregate, its
+settlement records or provider metadata, or any result row. The job
+authority's records of the credentials its jobs' executors reported are the
+only provisioning store that holds them. `get_fulfillment_result` MUST read
+the credentials its fulfillment's create job reported from that store at the
+moment it is called, only for an `active` fulfillment, and MUST return them
+only in that response over the authenticated channel.
 
 #### Scenario: Fulfillment succeeds but is never queried
 - **WHEN** a fulfillment reaches a successful terminal state and
@@ -213,3 +207,53 @@ unambiguously.
 - **WHEN** an active VM cannot be mapped unambiguously to a resource and
   teardown input
 - **THEN** migration fails visibly rather than creating a partial record
+
+## MODIFIED Requirements
+
+### Requirement: Ansible fulfillment adapter
+
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job; the resolved playbook is the pool's `playbook_path` when the pool states one, and otherwise the service's `vm_playbook_path` as configured when the job is prepared. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+
+Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
+
+A VM fulfillment request MUST NOT say how its guest is reached, and the adapter MUST refuse one that carries a `connectivity` field or any other field the request does not declare. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. The refusal happens while the request is prepared, inside the transaction that would accept it, so a refused request is never stored and nothing it carried, such as a relay credential, is kept at rest.
+
+#### Scenario: A request supplies relay configuration
+
+- **WHEN** a fulfillment request's payload carries a `connectivity` field, such as a relay address, domain, or dashboard credential
+- **THEN** validation reports the request invalid, `begin_fulfillment` refuses it, and no fulfillment is accepted, no job is dispatched, and the request is not stored
+
+#### Scenario: Pool configuration changes after create dispatch
+
+- **WHEN** an operator edits provider configuration after an Ansible create job is accepted
+- **THEN** the accepted job retains the resolved configuration snapshot captured at dispatch
+
+#### Scenario: Provider variables collide with job identity
+
+- **WHEN** pool-supplied extra variables attempt to override an authoritative host, target, action, sizing, or executor field
+- **THEN** validation rejects the operation before asynchronous dispatch
+
+#### Scenario: VM teardown is dispatched
+
+- **WHEN** teardown begins for an accepted VM fulfillment
+- **THEN** the adapter targets the recorded `host_id` and `executor_target` from fulfillment metadata
+
+#### Scenario: A committed dimension is present
+
+- **WHEN** the scheduled settlement resource carries a committed VM dimension
+- **THEN** the adapter translates that value through the pool-selected requirement delegate and ignores any conflicting caller-supplied sizing field
+
+#### Scenario: A committed dimension is absent and the pool has a default
+
+- **WHEN** the committed reservation omits a VM dimension and the resolved pool configures the corresponding default
+- **THEN** the adapter uses the pool default for that dimension
+
+#### Scenario: A committed dimension and pool default are both absent
+
+- **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
+- **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
+
+#### Scenario: A VM pool states no playbook
+
+- **WHEN** a VM job is prepared for a pool whose provider configuration states no `playbook_path`
+- **THEN** the job's stored parameters carry the service's `vm_playbook_path` as configured at preparation
