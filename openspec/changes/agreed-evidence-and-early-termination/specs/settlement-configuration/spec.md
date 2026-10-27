@@ -2,7 +2,12 @@
 
 ### Requirement: Payments configuration separates accounts and credentials
 
-Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, and an API-key environment-variable reference, not the resolved credential; the dispute authority is named per option and configured through `[[Dispute]]` defaults. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+Shared Arkhai payments registration, typed configuration, and owner-scoped client provision MUST live in `kit/arkhai-payments`'s `settlement_config.py`. `[Settlement.arkhai_payments]` MUST contain the trusted service origin, Ed25519 receipt identity, fee policy, and an API-key environment-variable reference, not the resolved credential; the dispute authority is named per option. A configuration that still sets `dispute_authority` MUST be rejected with a diagnostic naming `[[Dispute]]`. Payment credentials MUST NOT appear in public options, Agreement bytes, run logs, or status.
+
+#### Scenario: The retired dispute authority key is set
+
+- **WHEN** a role's configuration sets `[Settlement.arkhai_payments].dispute_authority`
+- **THEN** validation fails with a diagnostic naming `[[Dispute]]`
 
 #### Scenario: Credentials stay out of public surfaces
 
@@ -63,14 +68,23 @@ Alkahest options MUST carry their escrow policy in mechanism-owned parameters; l
 
 ## ADDED Requirements
 
-### Requirement: Dispute authorities are configured as defaults
+### Requirement: Dispute authorities are configured as preferences
 
-`[[Dispute]]` entries MUST be ordered by preference, each naming one authority: `interface`, `origin`, `account`, `record_key`, interface-owned `params`, the payment mechanisms it advertises, its minimum dispute window and case hold, and the role's credential reference for filing. A storefront's entries MUST be the authorities its builders offer; a buyer's MUST be the authorities it accepts. The resolved credential MUST NOT appear in any option, Agreement or status.
+`[[Dispute]]` entries MUST be ordered by preference, each naming one authority by `interface`, `origin`, `account` and `record_key`, with interface-owned `params` and a copy of its advertisement (payment mechanisms, minimum dispute window and case hold); an entry MAY be marked not offered or not accepted. `use_registry_dispute_authorities`, true by default, MUST append the registry descriptor's recommended authorities after the entries.
 
 #### Scenario: A buyer prefers one authority
 
 - **WHEN** a buyer lists two accepted authorities and a listing offers equal options naming each
 - **THEN** the buyer selects the option naming its first entry
+
+### Requirement: Dispute credentials are bound by identity and no template ships an authority
+
+`[[DisputeCredential]]` entries MUST bind a credential's environment-variable reference to an authority identity. No configuration template MAY ship an authority. Resolved credentials MUST NOT appear in any option, Agreement or status.
+
+#### Scenario: A template is written
+
+- **WHEN** a role CLI writes a fresh configuration template
+- **THEN** it contains no `[[Dispute]]` entry and no operator's authority account, origin or key
 
 ### Requirement: Alkahest release models are listed per option
 

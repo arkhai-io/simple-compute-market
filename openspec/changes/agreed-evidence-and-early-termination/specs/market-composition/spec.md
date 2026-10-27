@@ -21,7 +21,7 @@ Marketplace roles MUST NOT own ledger state or implement cash movement, Stripe t
 #### Scenario: A storefront watches a deal
 
 - **WHEN** a storefront watches a hosted deal
-- **THEN** it stores the payment authority's event sequence and the arbitration record's sequence and the dispute authority's record sequence as its cursors and stores no balance or settled amount of its own
+- **THEN** it stores the payment authority's event sequence and the dispute authority's record sequence as its cursors and stores no balance or settled amount of its own
 
 ### Requirement: Arkhai payments authority remains external
 

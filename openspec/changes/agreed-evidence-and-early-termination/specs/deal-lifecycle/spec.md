@@ -11,7 +11,7 @@ A payment event MUST be read from the payment authority the committed agreement 
 
 ### Requirement: Disputes are per agreement and separate from payment
 
-A case MUST be filed about an agreement, not a part, with the dispute authority its `adjudication.dispute` names. Dispute events (filed, appended, ruled, closed) MUST carry the case reference and be read from that authority's record, whose sequence is per agreement across its cases and whose entries are signed with the Agreement's `adjudication.dispute.record_key`. A transaction MAY have any number of cases. The payment adapter MUST NOT file or decide cases.
+A case MUST be filed about an agreement, not a part, with the dispute authority its `adjudication.dispute` names. Dispute events (filed, appended, ruled, closed) MUST carry the case reference and be read from that authority's record, whose sequence is per agreement across its cases and whose entries a party MUST verify against the Agreement's `adjudication.dispute.record_key` before acting on them. A transaction MAY have any number of cases. The payment adapter MUST NOT file or decide cases.
 
 #### Scenario: Two cases on one deal
 
@@ -20,7 +20,7 @@ A case MUST be filed about an agreement, not a part, with the dispute authority 
 
 ### Requirement: Only the dispute authority acts on a case
 
-A party's dispute adapter MUST communicate only with the agreement's dispute authority, and MUST only file, append and read. A filing's or append's outcome MUST be the dispute authority's response; it MUST NOT be a payment authority response passed through. Only the dispute authority MAY send a case's `extend` and `lift` or apply its outcome. Lifecycle events within the deal's terms, such as an entitled stop, MUST be applied by the party directly at the payment authority.
+A party's dispute adapter MUST communicate only with the agreement's dispute authority, and MUST only file, append and read. A filing's or append's outcome MUST be the dispute authority's response; it MUST NOT be a payment authority response passed through. A party's adapters MUST NOT send a case's `extend` or `lift` or apply its outcome. Lifecycle events within the deal's terms, such as an entitled stop, MUST be applied by the party directly at the payment authority.
 
 #### Scenario: A filed case requests a reverse
 
@@ -41,28 +41,28 @@ A ruling's outcome MUST be a list of consequences, each a payment effect on one 
 - **WHEN** a ruling reverses a quarter of a hosted deal's held `once` payment and has no delivery end
 - **THEN** the payment authority records one partial `reverse` by the dispute authority with the case reference, and the lease is unchanged
 
-### Requirement: Requests are stated in the authority's terms
+### Requirement: Requests are intents or interface requests
 
-A case's requested outcome MUST be stated in the terms of the dispute authority's interface. The lifecycle layer MUST NOT compute per-part effects for a request; the dispute authority derives them from the committed form.
+A case's requested outcome MUST be either a deal-level intent SCM issues, at least `exceptional_end(at)`, or an interface request the dispute adapter built or validated. The dispute adapter MUST map an intent into its interface's request or reject it as unsupported. The generic lifecycle kits MUST NOT contain any interface's request vocabulary, and the lifecycle layer MUST NOT compute per-part effects for a request.
 
 #### Scenario: A buyer requests a refund for an outage
 
 - **WHEN** a buyer files a case requesting a refund of the share of its deal lost to an outage
-- **THEN** the buyer half sends the request in the interface's terms, with no per-part amounts of its own
+- **THEN** the dispute adapter builds the interface request, and the buyer half sends it with no per-part amounts of its own
 
-### Requirement: Outcome effects are applied once
+#### Scenario: An interface has no exceptional end
 
-The dispute authority MUST apply each payment effect at the payment authority with its own authority and the case reference, and MUST record each effect with a stable ID and an applied state, so a partly applied outcome resumes without repeating an effect.
+- **WHEN** a seller issues `exceptional_end(now)` on a deal whose dispute interface defines no such request
+- **THEN** the outcome is `rejected` as unsupported and no authority is contacted
 
-#### Scenario: Application is interrupted
+### Requirement: Outcome effects are acted on once
 
-- **WHEN** the dispute authority has applied one of an outcome's two effects and restarts
-- **THEN** it applies only the second, and the record shows both effects applied
+The storefront MUST read a ruling's effects from the dispute authority's record by their stable IDs and applied states, and MUST act on each effect at most once, whether the record shows it partly or wholly applied.
 
-#### Scenario: Two outcomes reverse the same part
+#### Scenario: A ruling is read while partly applied
 
-- **WHEN** two outcomes on one hosted deal each reverse part of its `once` payment
-- **THEN** both reverses are applied, the second bounded by what is still held
+- **WHEN** `watch` yields a ruling with a reverse and a delivery end, of which only the reverse is shown applied, and later the same ruling with both applied
+- **THEN** end service receives the delivery end once
 
 ### Requirement: Peer messages are hints until the authority confirms them
 
@@ -167,7 +167,7 @@ An adapter MUST make each initiator with an entitlement a `stop` authority of th
 
 ### Requirement: The dispute window sets the earliest payout
 
-Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A `once` part's end MUST be the Agreement's term end, `start_utc + duration_seconds`; a rate part's end MUST be its stop, or the term end if it is not stopped. The window MUST NOT be shorter than the dispute authority's advertised minimum. Whether a case filed after the window is taken MUST be the dispute authority's policy.
+Each payment adapter MUST derive holds under which each amount a part holds pays out no earlier than the part's end plus `adjudication.dispute_window_seconds`. A `once` part's end MUST be the Agreement's term end, `start_utc + duration_seconds`; a rate part's end MUST be its stop, or the term end if it is not stopped. The window MUST NOT be shorter than the dispute authority's advertised minimum. SCM MUST NOT refuse a filing for being after the window; that is the dispute authority's policy.
 
 #### Scenario: A once deal's hold is derived
 
@@ -177,40 +177,40 @@ Each payment adapter MUST derive holds under which each amount a part holds pays
 #### Scenario: A rate part stops early
 
 - **WHEN** a spot deal with a 30-day maximum term and a 14-day window is stopped after one hour
-- **THEN** its rate part's amounts pay out 14 days after the stop, not after the maximum term
+- **THEN** its rate part's amounts are derived to pay out 14 days after the stop, not after the maximum term
 
-#### Scenario: A case is filed after the window while another holds the part
+#### Scenario: A buyer files after the window
 
-- **WHEN** case A holds a `once` part past its normal payout, and a party files case B after the window
-- **THEN** the payments service accepts B's `extend`, since nothing has paid out, and the part stays held until both are lifted
+- **WHEN** a buyer files a case after the window while another case holds the deal's `once` part
+- **THEN** the buyer half sends the filing to the dispute authority and reports the authority's answer
 
-### Requirement: A case holds money only through an accepted extension
+### Requirement: Protection is what the authority reports
 
-On each part, a case MUST protect exactly the money for which the payment authority accepted the dispute authority's `extend`. Arkhai mediation MUST send `extend` on every part with held money at filing, with no human step, before acknowledging the case, keyed by case and part.
-
-#### Scenario: A case is filed at the last moment
-
-- **WHEN** a buyer files a case one minute before a `once` hold pays out, and mediation rules a week later with `case_hold_max_seconds` null
-- **THEN** filing returns `accepted` with the part `held`, the ruling's partial `reverse` is applied, and `lift` pays the remainder to the seller
+The halves MUST report a filing's per-part protection as the dispute authority states it, and MUST treat a part as protected by a case only while the payment authority's record shows that case's open extension on it.
 
 #### Scenario: Payout wins against the extension
 
-- **WHEN** a case reaches the dispute authority at 12:59:59.9, the hold pays out at 13:00:00, and the `extend` reaches the payment authority at 13:00:00.1
-- **THEN** the payment authority refuses the `extend`, and filing returns `accepted` with the case reference and the part `paid_out`
+- **WHEN** a buyer files a case moments before a `once` hold pays out, and the dispute authority answers that the part is `not_held` because it paid out
+- **THEN** the buyer half reports `accepted` with the case reference and the part `not_held`, paid out
 
-#### Scenario: The authority restarts before extending
+#### Scenario: A held part shows its extension
 
-- **WHEN** the dispute authority records a case and restarts before its `extend` is acknowledged
-- **THEN** it resends `extend` with the same idempotency key, the payment authority returns the one extension it recorded, and filing reports the part `held` only then
+- **WHEN** the authority answers that a part is `held` with an extension ref
+- **THEN** the seller's `read` shows that open extension on the part, and `list` shows the deal with an open extension
 
 ### Requirement: A filing's outcome is the authority's answer
 
-A `dispute` MUST be `accepted` with the case reference and each part's status, `held` with its extension ref or `paid_out`, once every extension is resolved. It MUST be `rejected` only when the dispute authority refuses the filing, and otherwise `pending` or `unknown` until the case is read.
+A `dispute` MUST be `accepted` with the case reference and each part's status, `held` with its extension ref or `not_held` with the authority's reason (paid out or reversed), once the authority has answered for every part. It MUST be `rejected` only when the dispute authority refuses the filing, and otherwise `pending` or `unknown` until the case is read.
 
 #### Scenario: Parts differ
 
 - **WHEN** a case is filed on a deal with two `once` parts, one still held and one already paid out
-- **THEN** filing returns `accepted` with the first part `held` with its ref and the second `paid_out`
+- **THEN** filing returns `accepted` with the first part `held` with its ref and the second `not_held`, paid out
+
+#### Scenario: A part was wholly reversed
+
+- **WHEN** a case is filed after an earlier ruling reversed a `once` part in full
+- **THEN** filing returns `accepted` with that part `not_held`, reversed, and does not wait for an extension on it
 
 ### Requirement: A late case moves no paid-out money
 
@@ -219,34 +219,39 @@ A late case MAY be recorded and ruled, and its outcome MAY end delivery. An outc
 #### Scenario: A late case ends delivery
 
 - **WHEN** a buyer files a case after the `once` hold has paid out, and it is ruled with a delivery end
-- **THEN** filing returned `accepted` with every part `paid_out`, the storefront ends delivery through end service, and no payment effect is applied
+- **THEN** filing returned `accepted` with every part `not_held`, the storefront ends delivery through end service, and no payment effect is applied
 
-### Requirement: Each case owns its hold extensions
+### Requirement: Open extensions are observed per ref
 
-`extend {part, until?}` MUST open an extension and return its `ref`, and `lift {ref}` MUST end that extension only. A held amount MUST NOT pay out while an extension on its part without `until` is open, nor before the latest `until` among the open ones. The dispute authority MUST lift a case's extensions only after its outcome is applied.
+`read` and `watch` MUST report each open extension on a part by its `ref` and case, and MUST show a part held while any extension on it is open. A `lift` MUST close only the extension its `ref` names in SCM's view.
 
 #### Scenario: Two cases overlap
 
-- **WHEN** case A and case B on one deal each hold its `once` part, and A closes and its `lift` arrives after B's `extend`
-- **THEN** the part stays held until B's extension is lifted
+- **WHEN** case A and case B each hold a deal's `once` part, and A's `lift` is recorded after B's `extend`
+- **THEN** `read` shows B's extension still open and the part still held
 
 ### Requirement: Case holds are capped by terms
 
-A held amount MUST pay out no later than its normal date plus the part's maximum extension, taken from `case_hold_max_seconds`. With `null`, an extension without `until` MUST last until it is lifted.
+Mandate derivation MUST carry `case_hold_max_seconds` into each part's maximum extension, `null` when the term is `null`.
 
-#### Scenario: A bounded case hold expires
+#### Scenario: A bounded case hold is derived
 
-- **WHEN** a case stays open longer than `case_hold_max_seconds` past the hold's normal end
-- **THEN** the held money pays out at the cap without a `lift`
+- **WHEN** a hosted mandate is derived from an option with `case_hold_max_seconds: 604800`
+- **THEN** each part's `maxHoldExtension` is 604800 seconds
+
+#### Scenario: An unbounded case hold is derived
+
+- **WHEN** a hosted mandate is derived from an option with `case_hold_max_seconds: null`
+- **THEN** each part's `maxHoldExtension` is `null`
 
 ### Requirement: Only the dispute authority extends and lifts
 
-Every mandate MUST authorize `extend` and `lift` for the agreement's dispute authority only, the account its `adjudication.dispute` names.
+Every derived mandate MUST authorize `extend` and `lift` for the agreement's dispute authority only, the account its `adjudication.dispute` names.
 
-#### Scenario: A party tries to extend
+#### Scenario: A mandate's extend authorities are derived
 
-- **WHEN** a payer sends `extend` on a hosted deal's part
-- **THEN** the payment authority refuses it, since the mandate lists only the dispute authority
+- **WHEN** a hosted mandate is derived for a deal
+- **THEN** its `extend` authorities list only the dispute authority's account, and neither the payer nor the payee
 
 ### Requirement: Any party may append to a case
 
@@ -267,33 +272,42 @@ A dispute adapter MUST offer `append {case_ref, items}` on an open case to eithe
 - **WHEN** a buyer appends a second evidence item to its open case
 - **THEN** the record shows both submissions under the buyer, in order
 
+### Requirement: An append to a closed case is skipped
+
+When the authority confirms a case closed before the seller's journaled append lands, the journal MUST record the append as skipped for a closed case, keep the local evidence, and let observation continue. An append acknowledged before closure MUST keep its acknowledgement.
+
+#### Scenario: A case is filed and closed while the storefront is down
+
+- **WHEN** a buyer's case is filed, ruled and closed while the storefront is down
+- **THEN** after restart the seller's append is journaled as skipped for a closed case, the evidence stays in the store, and the ruling is still acted on
+
+#### Scenario: The case closes during the append
+
+- **WHEN** an append was acknowledged and the case then closes before the journal records the acknowledgement
+- **THEN** a retry with the same idempotency key returns the original acknowledgement, and the journal records the append done
+
 ### Requirement: Mechanical rulings are the authority's policy
 
-A party's request against itself MUST be an ordinary `dispute`, with no kind of its own. Which disputes an authority rules with no person MUST be its published policy, and the lifecycle layer MUST NOT depend on it. Arkhai mediation's policy MUST rule mechanically only payee-filed requests at least as strong as the standard self-penalty on every part, and MUST send every other dispute, including any filed by the payer, to its triage, until that policy is widened.
+A party's request against itself MUST be an ordinary `dispute`, with no kind of its own. SCM MUST NOT depend on which disputes an authority rules without a person: the storefront MUST NOT change delivery on filing, and MUST act only on rulings read from the authority's record.
 
 #### Scenario: A seller's hardware fails
 
-- **WHEN** a seller files the standard self-penalty on a hosted `once` deal halfway through its term
-- **THEN** Arkhai mediation rules it mechanically and applies a `reverse` of half the payment with the case reference in its payload, and the storefront reads the delivery end through `watch` and ends delivery now
+- **WHEN** a seller files `exceptional_end(now)` on a hosted `once` deal
+- **THEN** the lease is unchanged until `watch` yields the ruling's delivery end, which end service then applies
 
-#### Scenario: A seller requests a bare stop
+#### Scenario: A filing is not ruled
 
-- **WHEN** a seller with no stop entitlement files a dispute requesting only that a rate part stop now
-- **THEN** Arkhai mediation sends it to triage and nothing is applied until a person rules
+- **WHEN** a seller's filing is sent to the authority's triage and no ruling follows
+- **THEN** the storefront keeps delivering and sends no payment command
 
-#### Scenario: A buyer asks for a stop it is not entitled to
+### Requirement: A seller's exceptional end is an intent
 
-- **WHEN** a buyer files a dispute requesting only that a rate part stop now
-- **THEN** the dispute goes to a person and nothing is applied until it is ruled
-
-### Requirement: A seller's exceptional end is a standard request
-
-The seller half's exceptional-end command MUST file, with the agreement's dispute authority, the interface's standard self-penalty with a delivery end of now. The standard self-penalty MUST end delivery now, reverse the unserved share of `once` parts by time, stop `rate` parts now, and award any bond in full, as computed by the dispute authority from the committed form.
+The seller half's exceptional-end command MUST file `exceptional_end(now)` with the agreement's dispute authority through its dispute adapter, carrying no per-part amounts computed by the storefront.
 
 #### Scenario: An administrator files an exceptional end
 
 - **WHEN** an administrator files an exceptional end on a hosted `once` deal
-- **THEN** the filed request names the standard self-penalty and a delivery end of now, and carries no per-part amounts computed by the storefront
+- **THEN** the dispute adapter maps `exceptional_end(now)` into its interface's request, and the filing carries no per-part amounts
 
 ### Requirement: Lifecycle commands have defined outcomes
 
@@ -347,7 +361,7 @@ Payment adapters MUST resolve through the domain's role table by negotiation ID 
 
 ### Requirement: Dispute adapters resolve by dispute interface
 
-Dispute adapters MUST resolve through a dispute adapter table the domain composition fills, keyed by `adjudication.dispute.interface`. The lifecycle kits MUST receive both adapter tables injected and MUST NOT import a payment or dispute kit, and a dispute kit MUST NOT name a payment mechanism. An interface with no adapter, or an authority that does not advertise the deal's payment mechanism, MUST be `rejected` before any request.
+Dispute adapters MUST resolve through a dispute adapter table the domain composition fills, keyed by `adjudication.dispute.interface`. The lifecycle kits MUST receive both adapter tables injected and MUST NOT import a payment or dispute kit, and a dispute kit MUST NOT name a payment mechanism. An interface with no adapter MUST be `rejected` before any request. Advertised compatibility MUST be checked only before commitment, never on a committed deal's commands.
 
 #### Scenario: A deal names an interface with no adapter
 
@@ -356,21 +370,53 @@ Dispute adapters MUST resolve through a dispute adapter table the domain composi
 
 ### Requirement: Dispute authorities are named per deal
 
-The Agreement's `adjudication.dispute` MUST be the only source of a committed deal's dispute authority: its origin, account and record key. Configured `[[Dispute]]` entries MUST be defaults ordered by preference: a storefront's builders fill options from its entries that advertise the option's payment mechanism, and a buyer accepts only authorities matching its entries. Mandate derivation MUST read the dispute authority's account from the option. Changing an entry MUST NOT affect accepted deals.
+The Agreement's `adjudication.dispute` MUST be the only source of a committed deal's dispute authority. A role's credential for an authority MUST be bound by the authority's identity (`interface`, `origin`, `account`, `record_key`), independently of preference. Changing preferences, registry recommendations or advertisements MUST NOT affect accepted deals. A running deal whose authority has no bound credential MUST be shown as repair required in `list`.
 
-#### Scenario: A seller changes its preferred authority
+#### Scenario: A seller stops offering an authority
 
-- **WHEN** a seller reorders its `[[Dispute]]` entries while a deal accepted under the old first entry is running
-- **THEN** new options name the new first entry, and the running deal's cases still go to the authority its Agreement names
+- **WHEN** a seller marks an authority not offered while a deal under it is running
+- **THEN** new options do not name it, and the running deal's `watch` and appends still reach it with the credential bound to its identity
+
+#### Scenario: An authority's credential is missing
+
+- **WHEN** a running deal's authority has no bound credential
+- **THEN** `list` shows the deal as repair required
+
+### Requirement: A role's authorities are its entries and its registry's recommendations
+
+A role's authorities MUST be its own `[[Dispute]]` entries in preference order, followed by the authorities its registry's descriptor recommends unless `use_registry_dispute_authorities` is false. Each authority MUST carry a copy of its advertisement, which publication and buyer checks read.
+
+#### Scenario: A buyer uses its registry's recommendation
+
+- **WHEN** a buyer with no `[[Dispute]]` entries selects from a registry whose descriptor recommends one authority
+- **THEN** it accepts options naming exactly that authority and refuses others
+
+### Requirement: A buyer accepts an authority only on an exact identity match
+
+A buyer MUST accept an option's authority only when its `interface`, `origin`, `account` and `record_key` equal one authority in its list, and its `params` equal that authority's or pass the interface's acceptance check.
+
+#### Scenario: A seller pairs the real account with its own origin
+
+- **WHEN** an option names an accepted authority's account with a different origin or record key
+- **THEN** the buyer refuses the option, naming the mismatched field
+
+### Requirement: With no authorities, no hosted options
+
+With no authorities, a storefront MUST publish no hosted option and a buyer MUST accept none, and each MUST report it at startup.
+
+#### Scenario: No authority is available
+
+- **WHEN** a storefront has no `[[Dispute]]` entries and its registry recommends none
+- **THEN** it publishes no hosted option and reports why at startup
 
 ### Requirement: Lifecycle servicing is composed by the compute domains
 
-The VM and bare-metal roles MUST compose the buyer half, the seller half, both evidence stores and `watch`. API-credit roles MUST compose the `[[Dispute]]` entries they need to check options at publication, selection and the mandate check, and are not required to compose the halves, the evidence stores or `watch`.
+The VM and bare-metal roles MUST compose the buyer half, the seller half, both evidence stores and `watch`. API-credit roles MUST compose the authority list they need to check options at publication, selection and the mandate check, and are not required to compose the halves, the evidence stores or `watch`.
 
 #### Scenario: An API-credit storefront publishes a hosted option
 
 - **WHEN** an API-credit storefront publishes an `arkhai.payments.v1` option
-- **THEN** the option carries `adjudication` checked against the storefront's dispute entries, and the storefront runs no lifecycle loop
+- **THEN** the option carries `adjudication` checked against the storefront's authority list, and the storefront runs no lifecycle loop
 
 ### Requirement: Watch replays from a durable cursor per record
 
@@ -417,7 +463,7 @@ The VM and bare-metal storefronts MUST expose the seller half's `submit`, `read`
 #### Scenario: The admin interrupt route ends a hosted deal
 
 - **WHEN** an administrator interrupts a hosted deal with only `once` parts through the VM admin route
-- **THEN** the route files the standard self-penalty with the agreement's dispute authority through the seller half, the authority applies it, and the lease changes only through end service
+- **THEN** the route files `exceptional_end(now)` with the agreement's dispute authority through the seller half, and the lease changes only through end service, once the ruling is read
 
 ### Requirement: End service keeps the earliest final request
 
@@ -495,7 +541,7 @@ Each party MUST capture its commitment envelopes through an injected envelope-ca
 
 ### Requirement: Evidence outlives the deal and its cases
 
-Records MUST be kept until the Agreement's `dispute_window_seconds` after the latest of the deal's delivery end and physical recovery, the last payout of every part as the party observes it, and the close of every case on the deal. The storefront MUST observe through `watch`; the buyer MUST prune only through a command that reads each deal first. An accepted negotiation never committed MUST be kept for the same window after its acceptance expires.
+For a deal with `adjudication` and a lifecycle adapter, records MUST be kept until the Agreement's `dispute_window_seconds` after the latest of the deal's delivery end and physical recovery, the last payout of every part as the party observes it, and the close of every case on the deal. An accepted negotiation never committed MUST be kept for the same window after its acceptance expires.
 
 #### Scenario: A long deal passes the window
 
@@ -512,9 +558,27 @@ Records MUST be kept until the Agreement's `dispute_window_seconds` after the la
 - **WHEN** a ruling ends a hosted `once` deal mid-term, and the buyer files a case contesting its amount while the remaining payment is still held
 - **THEN** both parties still hold their commitment envelopes and authority records, since the last payout has not happened
 
+### Requirement: Pruning observes payouts first
+
+The storefront MUST observe payouts and case closes through `watch`; the buyer MUST prune only through a command that reads each deal first.
+
+#### Scenario: A buyer prunes
+
+- **WHEN** a buyer runs the prune command
+- **THEN** it reads each deal before deleting any of its records, and deletes nothing for a deal it cannot read
+
+### Requirement: Evidence without lifecycle terms is kept
+
+Records of a deal with no lifecycle terms or no adapter MUST be kept until a pruning path for them is specified.
+
+#### Scenario: An Alkahest deal's envelopes are kept
+
+- **WHEN** a VM deal settled through Alkahest, or an accepted Alkahest negotiation never committed, is older than any dispute window
+- **THEN** its captured envelopes remain, and no prune deletes them
+
 ### Requirement: A dispute is one case payload
 
-A `dispute` MUST carry one case about the agreement: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome, and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
+A `dispute` MUST carry one case about the agreement: the commitment reference, the committed agreement or where to fetch it, the terms, the claim, the requested outcome (an intent or an interface request), and ordered evidence items. Each item MUST be an evidence-store record with kind, producer, time, content digest, and the exact original bytes or the authority's signed record. A party MUST be able to export the case as one bundle.
 
 #### Scenario: A buyer files a dispute
 
