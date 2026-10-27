@@ -227,8 +227,11 @@ migration entrypoint to receive only its database. The service's database holds 
 tables, and its migration history is the record of how they were created and evolved, so
 it names them. This change documents that allowance in `physical-provisioning`'s
 architecture companion and corrects the comment at `database.py` claiming the module
-imports without the adapters. `hollow-pre-floor-provisioning-migrations` removes the
-legacy-backfill import with the data rewrite it serves.
+imports without the adapters. The closeout of `pools-7-storefront-fulfillment-cutover`,
+which landed on `dev` (`1e5ba29`) after this design, already moved those imports to
+module level and removed the comment, so implementation only confirms it is gone.
+`hollow-pre-floor-provisioning-migrations` removes the legacy-backfill import with the
+data rewrite it serves.
 
 Rejected: injecting VM's schema from the entry point (it relocates the import and amends
 a requirement promoted days before); per-adapter migration chains now (one domain owns
@@ -609,6 +612,15 @@ naming it. None of those hunks touches the branch's: the branch edits the module
 for round 2 would leave round 1's pipeline calling a client method that round 1 removed.
 D14's first round changes no path or signed operation, so the e2e harness's hand-built
 mock-rule client keeps working until its callers move in round 2.
+
+Planning re-derived the partition once the branch had merged `dev` and moved on, from
+the branch at `c6e2108` against its new merge base `73d3760`, with `dev` at `1e5ba29`.
+It holds: every first-round file the branch also edits overlaps it only in a version
+line, a floor raised to the same bump, a lock, or a hunk with unchanged lines between.
+One shared line is adjacent rather than separated: `kit/policy`'s description, which D7
+edits, follows the version line both sides raise to `0.6.0`, so Git reports one
+conflict whose resolution keeps that version and D7's description; it is a version-line
+overlap, which D2 admits.
 
 ## Edits to other changes
 

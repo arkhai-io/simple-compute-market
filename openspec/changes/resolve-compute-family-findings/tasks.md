@@ -25,14 +25,24 @@ lands.
 **Dependency gating implementation.** Sections 10–26 wait for
 `unbacked-bare-metal-listings` to land on `dev`, and start from `dev` with it
 merged (design D2). Sections 1–9 do not wait. Each of them names every file it
-shares with that change's branch, compared against the branch's merge base
-`968a4a9`, and why the file merges mechanically. Two kinds of overlap qualify:
+shares with that change's branch, and why the file merges mechanically. The
+partition was derived from the branch at `c6e2108`, compared against its merge
+base with `dev`, `73d3760`, and checked against `dev` at `1e5ba29`, after
+`pools-7-storefront-fulfillment-cutover`'s closeout landed. Three kinds of
+overlap qualify:
 
 - **A version line or a lock.** Both sides bump the package, and the merge keeps
   one bump over its last released version (RELEASING.md's versioning policy).
   Both sides re-derive the lock with `make lock`.
+- **A dependency floor raised to a bumped version.** Where both sides raise one
+  floor to the same bump, the lines are identical and merge cleanly; otherwise
+  the merge keeps the higher floor.
 - **A hunk that touches none of the branch's hunks,** with at least one
   unchanged line between them.
+
+A section that finds a shared file this plan does not name, or a hunk that
+touches one of the branch's, stops and reports it: whether that work waits for
+the branch is D2's rule to apply, not the session's.
 
 **Versions.** A section bumps each package it changes incompatibly by a minor
 version and raises a consumer's lower bound only where the consumer needs the
@@ -54,20 +64,24 @@ Files: `kit/site/src/market_site/ledger.py` (the method at its definition; the
 `vm_target` entry of the reservation payload); `kit/site/tests/integration/test_ledger.py`.
 
 Shared with the branch: `kit/site/pyproject.toml`'s version line, and locks. The
-branch edits `kit/site`'s `auth.py` and `projections.py`, which this section
-does not touch.
+branch edits `kit/site`'s `auth.py`, `projections.py`,
+`tests/integration/test_site_auth_middleware.py`, and
+`tests/unit/test_projections.py`, none of which this section touches.
 
 - [ ] 1.1 Remove `CapacityLedgerService.find_active_lease_by_vm_target` and its
   test, `test_find_active_lease_by_vm_target_matches_via_executor_ref`. Remove
-  the `vm_target` key from the reservation payload. `executor_target` stays
+  the `vm_target` key from `_reservation_payload`. `executor_target` stays
   (D21).
   Verify:
   - Library integration (`test_ledger.py`): a VM reservation's payload carries
     `executor_target` and no `vm_target`.
-  - A repository search finds no caller of the method, and no read of a
-    payload's `vm_target`. The only remaining matches are the legacy `vm_leases`
-    column in the provisioning migration fixtures, which is a table column, not
-    this key.
+  - A repository search finds no caller of the method, and no read of
+    `vm_target` from a reservation payload: a site reservation read, a
+    `fake_site` reservation, or a ledger answer. `vm_target` is also the name of
+    a field of VM's job models, fulfillment requests, operator client, and
+    legacy migrations, which this key is not; those matches stay. A reader of
+    the reservation key, if one is found, is a design question, since D21
+    rests on there being none.
 - [ ] 1.2 Bump `arkhai-kit-site` by a minor version, since a public method is
   removed. Run `make lock`.
 - [ ] 1.3 **Verification checkpoint.**
@@ -161,21 +175,42 @@ Files:
 - `domains/vms/provisioning/adapter/src/vm_provisioning_adapter/controllers/test_controller.py`
   and `models/system_model.py`, whose VM-owned mock-rule models are removed;
 - `domains/bare_metal/src/arkhai_bare_metal/provisioning_client.py`, renamed to
-  `provisioning_routes.py`;
+  `provisioning_routes.py`, and `arkhai_bare_metal/__init__.py`, which imports
+  and exports `BARE_METAL_PROVISIONING_ROUTES` from it;
 - `domains/bare_metal/provisioning/adapter/src/bare_metal_provisioning_adapter/routers.py`
   and `controllers/test_controller.py`;
 - in `provisioning/compute/service/tests/integration`: `conftest.py`,
-  `test_test_controller.py`, `test_bare_metal_mock_profile.py`, and
-  `test_system_api.py` (its evaluate-job case only).
+  `test_test_controller.py`, `test_bare_metal_mock_profile.py`,
+  `test_system_api.py` (its `TestEvaluateJob` only), and
+  `test_provisioning_client_endpoint_coverage.py` (its
+  `TestBareMetalTestRouteCoverage` only, which compares the rule answers with
+  dictionaries). `test_lease_release_api.py` calls the conftest's bare-metal
+  rule methods and discards their answers, so it needs no edit.
 
 Shared with the branch:
-- **Version lines and locks:**
-  - `pyproject.toml` version lines of the VM adapter, the VM operator client,
-    `arkhai-bare-metal`, and the bare-metal adapter;
+- **Version lines, floors, and locks:**
+  - `pyproject.toml` version lines of the VM adapter, `arkhai-bare-metal`, and
+    the bare-metal adapter. The VM operator client's `pyproject.toml` is not
+    shared;
+  - the service's `dev` floor on `arkhai-compute-provisioning-client`, which
+    the branch raises to `0.8.0`, the version section 2 bumps the client to;
   - locks.
+
+  The adapters' and the operator client's floors on the contracts, if raised
+  for `MockRouteMount`, are not lines the branch edits. In the bare-metal
+  adapter, one unchanged line separates that floor from the branch's.
+- **`arkhai_bare_metal/__init__.py`.** The branch adds names to the
+  `.projections` and `.schema` import blocks and to `__all__`. This section
+  edits the `.provisioning_client` import block, which sits above the `.schema`
+  block with four unchanged lines between, and the
+  `"BARE_METAL_PROVISIONING_ROUTES"` entry of `__all__`, away from the branch's
+  entries.
 - **`test_system_api.py`.** The branch edits its imports and `TestWorkerControls`.
-  This section edits only the evaluate-job case below that class, or leaves that
-  case on the conftest fixture unchanged.
+  This section edits only `TestEvaluateJob`, below `TestMockedExecution`, or
+  leaves it on the conftest fixture unchanged.
+- **`test_provisioning_client_endpoint_coverage.py`.** The branch edits the two
+  assertions of `TestSystemClientEndpointCoverage`. This section edits only
+  `TestBareMetalTestRouteCoverage`, two classes below.
 
 The e2e harness keeps its own client until section 21. The paths and signed
 operations do not change, so it keeps working.
@@ -203,14 +238,17 @@ operations do not change, so it keeps working.
   shared `/test/jobs/*` drain and wait stay where they are (D14; TESTING.md's
   "no raw calls" rule).
   Application integration (`test_test_controller.py`,
-  `test_bare_metal_mock_profile.py`):
+  `test_bare_metal_mock_profile.py`, and
+  `test_provisioning_client_endpoint_coverage.py`'s
+  `TestBareMetalTestRouteCoverage`):
   - Rules are installed, listed, resumed, and deleted, and jobs evaluated,
     through the family client under both mounts. Each answer is the family's
     typed model.
   - A VM rule matches only VM jobs.
 - [ ] 3.4 Bump `arkhai-bare-metal` by a minor version, since the module is
   renamed. Bump the VM and bare-metal adapters and the VM operator client.
-  Run `make lock`.
+  Raise the service's `dev` floor on the client to section 2's bump. Run
+  `make lock`.
 - [ ] 3.5 **Verification checkpoint.**
   - Unit: 3.1 and 3.2.
   - Application integration: 3.3.
@@ -273,7 +311,13 @@ locks. The branch edits only the adapter's `inventory_views.py`.
 Delivers:
 - the VM-owned suites, moved into the VM adapter with a VM schema fixture;
 - `uq_relay_port_leases_active_owner`, declared on VM's model;
-- the service's `database.py` comment stating why it names VM's tables (D20, D6).
+- confirmation that `database.py` no longer claims to import without the
+  adapters (D20, D6).
+
+Task 5.3 was replanned against `dev` at `1e5ba29`: the closeout of
+`pools-7-storefront-fulfillment-cutover` moved `database.py`'s metadata imports,
+VM's included, to module level and removed the comment D6 corrects, so no code
+change remains for it.
 
 Files:
 - **Moved from `provisioning/compute/service/tests/`:**
@@ -285,7 +329,7 @@ Files:
 - **The index:** VM's `relay_port_leases` model in the VM adapter.
 - **Configuration:** the VM adapter's `pyproject.toml` (`pyyaml` in its `dev`
   group).
-- **The comment:**
+- **Read, not changed:**
   `provisioning/compute/service/src/compute_provisioning_service/db/database.py`.
 
 Shared with the branch: the VM adapter's `pyproject.toml`. The branch edits its
@@ -308,10 +352,12 @@ the `dev` group, many lines below. Also locks.
     `domains/vms/provisioning/adapter`, whose target runs both `unit/` and
     `integration/`;
   - the service suite no longer contains them.
-- [ ] 5.3 Rewrite the `database.py` comment that claims the module imports
-  without the adapters. The new comment says that the service's database holds
-  VM's tables, so its metadata and migration history name them (D6). The
-  rationale is promoted at closeout (27.9).
+- [ ] 5.3 Confirm that `database.py` imports VM's metadata at module level and
+  that no comment in it or in `db/migrations.py` still says the module imports
+  without the adapters, or that the VM adapter is optional to it (D6). No code
+  change is expected; if such a comment is found, rewrite it to say that the
+  service's database holds VM's tables, so its metadata and migration history
+  name them. The rationale is promoted at closeout (27.9).
 - [ ] 5.4 **Verification checkpoint.**
   - Library and persistence integration: 5.1.
   - Run `make test` in `domains/vms/provisioning/adapter` and
@@ -341,7 +387,10 @@ Files:
 
 Shared with the branch:
 - **Version lines and locks.** `kit/policy/pyproject.toml`'s version line: the
-  branch edits only that line in this file. Also locks.
+  branch edits only that line in this file, raising it to `0.6.0`, the minor
+  bump this section makes. The description this section edits is the next
+  line, so Git reports the two lines as one conflict; it is resolved by keeping
+  `0.6.0` and this section's description. Also locks.
 - **`RELEASING.md`.** The branch edits two rows of the "Published packages"
   table and the "Versioning policy" section. This section edits only the
   console-script sentence in its opening paragraphs.
@@ -475,7 +524,11 @@ Shared with the branch:
   cadence": the branch edits the imports, `pytestmark`, the head of
   `DynamicListingState`, and `test_00`/`test_00a`. This section edits the
   module docstring's step 4, the `usage_started` field, `test_03`, and
-  `test_04`'s `require_state`.
+  `test_04`'s `require_state`. Four unchanged fields separate the
+  `usage_started` field from the branch's new first field.
+- **`docs/configuration.md`.** The branch edits the `escrow_shape_guard` and
+  `bisection` rows of the bundled-policies table. This section edits the
+  failure-policy section's opening paragraph, below that table.
 - **Version lines and locks:** `pyproject.toml` version lines of the VM
   storefront, `arkhai-core-storefront`, and `arkhai-core-storefront-client`, and
   locks.
@@ -552,9 +605,10 @@ Shared with the branch:
 - **`admin_controller.py`.** The branch's hunks are the ones listed in section 8.
   The pool-override routes are separate from them.
 - **`server.py`.** The branch edits the module's imports up to the settlement
-  registry import, the Alkahest composition, `VmStorefrontServices`, and the
-  service start. This section edits only the controller import block and the
-  routers tuple, below all of those.
+  registry import, the Alkahest composition, `VmStorefrontServices`,
+  `VmCompositionSeams`, `_build_vm_services`, and `_start_vm_services`. This
+  section edits only the late controller import block and the routers tuple,
+  below all of those.
 - **`test_pool_overrides_api.py`.** The branch edits two assertions in it. This
   section does not change that file.
 - **Version line:** the VM storefront's, already bumped by section 8.
@@ -1463,7 +1517,7 @@ implementation.
   - Run `make check-comment-hygiene`.
   - Read every comment and docstring that sections 1–26 added or rewrote, for
     current-system rationale with no change, review, or migration narration:
-    - `database.py`'s;
+    - `database.py`'s, if 5.3 rewrote one;
     - the migrations' docstrings (the reservation-state conversion, the claim
       table, `awaiting_delivery`);
     - the route grammar's refusal text;
@@ -1555,11 +1609,11 @@ resolvable citations, and a current index.
 | Decision / requirement | Implementation | Promotion |
 |---|---|---|
 | D1 scope: items kept, dropped, and handed over | none: no code; recorded in `design.md` and the other changes' proposals | 27.6 |
-| D2 sequencing against `unbacked-bare-metal-listings` | the gating note above; each of sections 1–9 names its shared files | 27.6 |
+| D2 sequencing against `unbacked-bare-metal-listings` | the gating note above; each of sections 1–9 names its shared files, derived from the branch at `c6e2108` | 27.6 |
 | D3 unmatched routes, grammar, and overlap; "A site authority answers an unroutable request…"; "The provisioning service answers an unroutable request…"; "The family client names an unauthenticated answer" | 10, 12, 13 | 27.9 |
 | D4 senderless callbacks removed; "Deal-scoped lifecycle events" | 8 | 27.9 |
 | D5 retired reservation states; "A stored reservation in a retired state is converted at upgrade"; "Reservation lifecycle"; the lease-transition and truncation requirements; "Explicit contract incompatibility" (the lease state) | 14, 15, 16 | 27.9 |
-| D6 migration modules name VM's tables | 5.3 | 27.9 |
+| D6 migration modules name VM's tables | 5.3 (a confirmation: the false comment left `dev` with the pools-7 closeout) | 27.9 |
 | D7 RL training CLI leaves `kit/policy` | 6.1–6.3, 6.5 | 27.6 |
 | D8 servicing: reporting, awaiting delivery, settle wait; the four `settlement-servicing` deltas | 11, 18 | 27.9 |
 | D9 claim-once seller delivery; "Delivery fires once per reveal…" | 7 | 27.9 |
