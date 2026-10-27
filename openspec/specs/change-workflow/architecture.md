@@ -257,8 +257,11 @@ unreviewed. A declined return is the owner's to settle, since the triage it ende
 no longer says what follows. A triage run's log line does not name the review it
 triaged, so a confirmation counts for a review only when it was recorded after that
 review's triage file was last written, which a triage file, never rewritten after
-`## Next`, makes the time of the return. A triage with nothing to dispose of advances
-without the owner. An implementation or pre-closeout round advances only on a
+`## Next`, makes the time of the return. Only a decision the log attributes to the
+owner confirms a return, as with the owner's other decisions — a branch decision, a
+waiver — so a confirmation the orchestrating session records without the owner's
+name is refused when written and confirms nothing when read. A triage with nothing
+to dispose of advances without the owner. An implementation or pre-closeout round advances only on a
 `passed` validation of its final commit, and after a closeout review a correction
 outside `openspec/` and `docs/` is validated before archive cleanup, so a code
 correction reaches the merge validated unless the owner waives it. The owner's own look at the pull request before merging is outside

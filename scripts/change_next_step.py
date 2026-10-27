@@ -1022,11 +1022,16 @@ class Computation:
         runs, and resolves the returned run, which would otherwise wait ahead of
         it; a review asked for again outside a triage names `review` and its kind,
         and no run; and the owner's waiver of the validation `_closeout` names
-        directs archive cleanup, and no run, ahead of that validation.
+        directs archive cleanup, and no run, ahead of that validation. A line
+        directing any step but a review is the owner's alone, so one the log
+        attributes to anyone else directs nothing. It still resolves its run: a
+        triage's return the phase's routing then finds unconfirmed, and any other
+        returned run is left resolved, as by a decline.
         """
         log = self.state.log
         decision = next((e for e in reversed(log)
-                         if e.get("outcome") == ORCHESTRATOR and e.get("next")), None)
+                         if e.get("outcome") == ORCHESTRATOR and e.get("next")
+                         and (e["next"] == "review" or e.get("by") == "owner")), None)
         if decision is None:
             return None
         step, kind = decision["next"], decision.get("kind")
@@ -1072,9 +1077,9 @@ class Computation:
         return None
 
     def return_confirmed(self, review: Record) -> bool:
-        """Whether the owner confirmed the return `review`'s triage records: a
-        decision resolving a returned triage run and directing design or planning,
-        recorded once that triage wrote its `## Next`.
+        """Whether the owner confirmed the return `review`'s triage records: the
+        owner's decision resolving a returned triage run and directing design or
+        planning, recorded once that triage wrote its `## Next`.
 
         Triage writes `## Next` as its last edit and is never rewritten after it,
         so the file's time is when the return was proposed, and a decision from
@@ -1088,7 +1093,8 @@ class Computation:
         returned = {e["seq"] for e in log
                     if e.get("step") == "triage" and e.get("outcome") == "returned"}
         proposed = review.triage.stat().st_mtime_ns // 1_000_000_000
-        return any(e.get("outcome") == ORCHESTRATOR and e.get("resolves") in returned
+        return any(e.get("outcome") == ORCHESTRATOR and e.get("by") == "owner"
+                   and e.get("resolves") in returned
                    and e.get("next") in ("design", "plan")
                    and isinstance(e.get("at"), str) and _seconds(e["at"]) >= proposed
                    for e in log)

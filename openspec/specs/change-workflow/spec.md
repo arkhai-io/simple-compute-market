@@ -807,8 +807,9 @@ that published none MUST be recorded as stopped, and an earlier record MUST NOT 
 as its result.
 A question MUST be answered by resuming the same session with the owner's answer.
 A proposed return MUST NOT change the change's status until the owner confirms it;
-the confirmation MUST be recorded in the workflow log as a decision naming the run
-it resolves and the step it directs, and the step so directed sets the status.
+the confirmation MUST be recorded in the workflow log as the owner's decision naming
+the run it resolves and the step it directs, and the step so directed sets the
+status; a decision the log attributes to anyone else MUST NOT confirm a return.
 A decision that resolves a run MUST name it, and MUST NOT resolve any other; a
 decision that reads a run's denials MUST name that run; a decision that directs a
 review MUST name its kind.
@@ -942,6 +943,13 @@ the owner.
 - **WHEN** a triage recorded `Returned` and the owner's decision resolved its run
   without directing design or planning
 - **THEN** the computation names the owner, who decides what the triage records
+
+#### Scenario: A return confirmed by anyone but the owner
+
+- **WHEN** a triage recorded `Returned` and a decision the log attributes to the
+  orchestrating session resolved its run and directed planning
+- **THEN** the computation neither names planning nor sets the round aside; it
+  names the owner, as for an unconfirmed return
 
 #### Scenario: A triage file predates `## Next`
 

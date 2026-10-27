@@ -1738,3 +1738,33 @@ two findings):
   rule, "The change's namespace" gives fixed per-change tags their present
   reasons only, and "The orchestrator relays and routes" says the session commits
   no step's leftover work, without "no longer".
+
+Closeout triage 165 corrections, on the owner's direction (the closeout review's
+two findings):
+
+- 165 F1, a code correction: only the owner's decision confirms a return.
+  `note_orchestrator` refuses a decision directing any step but a review unless it
+  is the owner's; `directed`, `return_confirmed`, and `redesigned_after_return`
+  count such a line only when the log attributes it to the owner, so one already in
+  a log still resolves its run but directs nothing, and a triage's return then names
+  the owner as unconfirmed. The spec's requirement "Unattended step runs end with a
+  structured outcome" states it, with a scenario under "The next step is computed
+  from the files"; the architecture's "The owner is interrupted only for judgement"
+  explains it. Evidence: `scripts/tests/test_change_workflow_log.py` and
+  `scripts/tests/test_change_next_step.py`, unit level (`TESTING.md`), four new
+  cases — the writer refusing an orchestrator-attributed return to design and to
+  planning; routing past such a line naming the owner; a design-review waiver
+  refused after such a line. `uv run --no-project --with pytest pytest -q
+  scripts/tests`: 1583 passed; `make test`: passed, `make -C helm test-render`
+  included; `make check-packaging` and `make check-comment-hygiene` passed. A
+  fresh-context compliance check of the diff against `27a038db4` found no broken
+  path; fixed — an error message naming a waiver it could never apply to, the
+  `directed` docstring overstating what follows for a non-triage returned run, a
+  test comment describing the writer's past behaviour, an unwrapped architecture
+  line, and no test of the owner filter in `redesigned_after_return`; declined — a
+  spec scenario for the writer's refusal, since the spec's MUST is on the
+  confirmation and the writer is one enforcement of it.
+- 165 F2, documentation: the design's promotion record splits the "Known gaps" row,
+  the returning triage's token and its owner-only confirmation pointing to the spec,
+  the architecture's routing discussion, and the contributor guide, and only the
+  merge check to "Current limits".

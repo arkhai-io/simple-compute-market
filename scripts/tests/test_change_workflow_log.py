@@ -9,8 +9,8 @@ import pytest
 
 from change_workflow.cli import main
 from change_workflow.common import StepError
-from change_workflow.log import (LogError, branch_decisions, last_entries, note_orchestrator,
-                                 note_round, read_log, record_outcome)
+from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
+                                 note_orchestrator, note_round, read_log, record_outcome)
 from change_workflow_fixtures import CHANGE, COMMIT, DENIALS, VALID, clock, log_file
 
 
@@ -181,6 +181,18 @@ def test_the_owner_may_direct_archive_cleanup_past_its_validation(tmp_path: Path
         note_orchestrator(log, "d", "r", next_step="archive-cleanup")
 
 
+@pytest.mark.parametrize("next_step", ["design", "plan"])
+def test_only_the_owner_confirms_a_return(tmp_path: Path, next_step: str) -> None:
+    log = log_file(tmp_path)
+    run = record_outcome(log, "triage", VALID["returned"], session="s", commit=COMMIT)
+
+    with pytest.raises(StepError, match="which is the owner's"):
+        note_orchestrator(log, "return confirmed", "r", resolves=run["seq"],
+                          next_step=next_step)
+
+    assert len(read_log(log)) == 1
+
+
 @pytest.mark.parametrize("fields,problem", [
     ({"resolves": 9}, "no run has seq 9"),
     ({"reads": 9}, "no run has seq 9"),
@@ -301,7 +313,8 @@ def test_the_owner_may_waive_another_design_review_after_a_return(tmp_path: Path
 
 
 @pytest.mark.parametrize("case", ["by the orchestrator", "not in design", "no return",
-                                  "design not finished", "design before the return"])
+                                  "design not finished", "design before the return",
+                                  "return not the owner's"])
 def test_a_waiver_is_refused_unless_it_follows_a_finished_redesign(tmp_path: Path,
                                                                    case: str) -> None:
     log = log_file(tmp_path)
@@ -316,6 +329,13 @@ def test_a_waiver_is_refused_unless_it_follows_a_finished_redesign(tmp_path: Pat
         record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
     elif case == "design not finished":
         _returned_and_redesigned(log, design=VALID["question"])
+    elif case == "return not the owner's":
+        run = record_outcome(log, "plan", VALID["returned"], session="s", commit=COMMIT)
+        # Appended past the writer, which refuses this line, to stand for a log holding one.
+        append_entry(log, {"step": "orchestrator", "outcome": "orchestrator",
+                           "by": "orchestrator", "decision": "return to design confirmed",
+                           "reason": "r", "resolves": run["seq"], "next": "design"})
+        record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
     else:
         record_outcome(log, "design", VALID["finished"], session="s", commit=COMMIT)
         run = record_outcome(log, "plan", VALID["returned"], session="s", commit=COMMIT)

@@ -184,7 +184,8 @@ def redesigned_after_return(entries: Sequence[Entry]) -> bool:
     """Whether the latest design run finished after the latest confirmed return to
     design: when the owner may waive another design review for what it settled."""
     returns = [entry["seq"] for entry in entries if entry.get("outcome") == ORCHESTRATOR
-               and entry.get("next") == "design" and entry.get("resolves") is not None]
+               and entry.get("by") == "owner" and entry.get("next") == "design"
+               and entry.get("resolves") is not None]
     designs = [entry for entry in entries if entry.get("step") == "design"]
     return bool(returns and designs and designs[-1].get("outcome") == "finished"
                 and designs[-1]["seq"] > returns[-1])
@@ -212,7 +213,8 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
     computation names until that step has run. A directed review takes its
     `kind`, without which the computation could not name one; a directed step
     of any other kind is a confirmed return, so it resolves the returned run,
-    which would otherwise wait ahead of the directive. A repeat review the owner
+    which would otherwise wait ahead of the directive, and only the owner gives
+    it: the spec reserves confirming a return to them. A repeat review the owner
     asks for outside a triage names no run, since no run waits on it; nor does the
     owner's direction to archive cleanup, by which they waive the validation the
     computation would name first. Only the owner gives it; archive cleanup's own
@@ -271,6 +273,9 @@ def note_orchestrator(path: Path, decision: str, reason: str, *, by: str = ORCHE
         elif next_step != "review" and resolves is None:
             raise StepError(f"a decision directing {next_step} is a confirmed return and "
                             "names the run it resolves")
+        if next_step != "review" and by != "owner":
+            raise StepError(f"a decision directing {next_step} confirms a return, which is "
+                            "the owner's")
         line["next"] = next_step
     if kind is not None:
         if next_step != "review":

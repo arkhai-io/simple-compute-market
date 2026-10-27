@@ -1253,7 +1253,8 @@ the rest by hand at closeout. Paths are from the repository root; `arch` is
 | Open question 1 — the container per change kept open with its triggers | `arch#current-limits` |
 | Open question 2 — the round view mixing merges into a round, deferred to its own change | `arch#current-limits` (the limit; the change is proposed from `dev` after this one merges) |
 | Risks — an unattended step's reads reaching any file the owner can read; two releases exhausting a node | `arch#current-limits` |
-| Known gaps — a returning triage's missing `## Next`; the merge check in the computing checkout | `arch#current-limits` |
+| Known gaps — a returning triage's `## Next`, the `Returned` token (157 F1), confirmed by the owner's decision alone (165 F1) | `spec.md#requirement-the-next-step-is-computed-from-the-files`, `spec.md#requirement-unattended-step-runs-end-with-a-structured-outcome`; `arch#the-owner-is-interrupted-only-for-judgement`; `docs/agents/change-workflow.md#skills` |
+| Known gaps — the merge check in the computing checkout | `arch#current-limits` |
 | Roadmap currency | no goal in `docs/development/ROADMAP.md` covers contributor workflow; no edit |
 | Campaign index currency | this change's row in `openspec/changes/README.md`, `in closeout` then linking the archive; no campaign graph names it |
 | Capability index and repository architecture | no edit to `openspec/specs/README.md` or `docs/development/ARCHITECTURE.md`: no new capability or companion, and the workflow is contributor process |

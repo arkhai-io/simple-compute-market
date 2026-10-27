@@ -13,7 +13,8 @@ from pathlib import Path
 import pytest
 
 import change_clone as clones
-from change_workflow.log import log_path, note_orchestrator, note_round, record_outcome
+from change_workflow.log import (append_entry, log_path, note_orchestrator, note_round,
+                                 record_outcome)
 from find_change import change_directory
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -538,6 +539,22 @@ def test_a_return_waits_for_the_owner_and_a_declined_one_stays_theirs(
 
     assert (unconfirmed["step"], unconfirmed["return_to"]) == ("owner", "planning")
     assert declined["step"] == "owner" and "not confirmed" in declined["reason"]
+
+
+def test_a_confirmation_the_log_does_not_attribute_to_the_owner_confirms_nothing(
+        tmp_path: Path) -> None:
+    root = _repository(tmp_path, "in implementation")
+    run = _returned_round(root)
+    # Appended past the writer, which refuses this line, to stand for a log holding one.
+    append_entry(log_path(root, CHANGE), {
+        "step": "orchestrator", "outcome": "orchestrator", "by": "orchestrator",
+        "decision": "return to planning confirmed", "reason": "a reason",
+        "resolves": run["seq"], "next": "plan"})
+
+    result = _next(root)
+
+    # Neither directed to planning nor past the round it would set aside.
+    assert result["step"] == "owner" and "not confirmed" in result["reason"]
 
 
 def test_a_confirmed_return_from_pre_closeout_reviews_the_work_again(
