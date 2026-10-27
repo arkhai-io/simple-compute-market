@@ -1,6 +1,6 @@
 # Arkhai Market Stack — Directional Roadmap
 
-> **Purpose:** The goals currently being pursued, the value each delivers, what is true today, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, no acceptance criteria, and no implementation tasks — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
+> **Purpose:** The goals currently being pursued, and those completed, the value each delivers, what is true today, and which OpenSpec change owns each open gap. This document carries no readiness status, no delivery sequencing, no acceptance criteria, and no implementation tasks — those belong to the changes themselves and to [`openspec/changes/README.md`](../../openspec/changes/README.md).
 
 ## How this document relates to the others
 
@@ -18,7 +18,7 @@ Each goal below carries a present-tense **current state** grounded in the code a
 
 A gap identified without an owning change does not become a standing entry here; an OpenSpec change is opened for it and linked. Where a goal has known work that no change yet owns, the current-state section says so plainly rather than the gap table implying coverage that does not exist.
 
-When every gap for a goal closes, the goal is removed. Its durable result is by then in `ARCHITECTURE.md` or the owning capability's specification through the ordinary promotion path, and the record of the work is in Git history and the archived changes.
+When every gap for a goal closes, the goal moves to [Completed goals](#completed-goals) and is no longer updated. Its durable result is by then in `ARCHITECTURE.md` or the owning capability's specification through the ordinary promotion path, and the record of the work is in Git history and the archived changes.
 
 ---
 
@@ -295,7 +295,38 @@ Current limits: escrow claimant, expiration, and condition fields remain in exis
 
 ---
 
-## Goal 7 — Sell capacity the marketplace cannot admit against
+## Buyer identity lifecycle status
+
+Buyer marketplace identity is now a core-owned durable profile rather than
+repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
+stable random UUID, canonical principal history, redacted credential-provider
+references, lifecycle/selection, and opaque authority bindings. Fresh VM and
+API-credit work uses the selected primary; version-3 run recovery resolves the
+recorded retained principal. Installed buyer plugins must declare the shared
+resolved-identity injection contract.
+
+The implemented change mapping is
+[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
+Remaining external operational evidence belongs to that change's unchecked
+verification tasks; it does not restore legacy identity precedence.
+
+---
+
+## Payment qualification boundaries
+
+Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
+
+A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
+
+---
+
+## Completed goals
+
+A goal moves here when its last open gap closes. Its current state is kept as it stood at completion, so a reader can see what the goal delivered and what it deliberately left unowned; the system as it is now is described by `ARCHITECTURE.md` and the capability specifications, which are kept current.
+
+### Goal 7 — Sell capacity the marketplace cannot admit against
+
+**Completed 2026-10-27**, when [`unbacked-bare-metal-listings`](../../openspec/changes/archive/2026-10-27-unbacked-bare-metal-listings/) closed its last open gap. The text below describes the goal as it stood then; work it left unowned is listed in its closing paragraphs.
 
 **Value.** A large share of real capacity trade is arranged directly between the parties, on terms too exotic to parametrize and with no escrow, payment custody, or automated provisioning anywhere in the deal. The marketplace's value there is discovery and a trustworthy introduction. Without an explicit notion of backing such a seller could not list at all: every listing had to name a trusted site and an admissible source, so a seller with nothing to admit against had to either fabricate an authority that admits forever — a value the admission, commit, release, and restart-recovery paths would then trust — or stay out of the market.
 
@@ -331,29 +362,6 @@ Finite unbacked listings, and payment settlement over them, are anticipated and 
 Two consequences of this posture are accepted rather than solved. Nothing keeps a listed rate current or honest, since a seller pays nothing to advertise one they will not honour; the intended control is registry curation, which sits outside the registry service boundary and is not implemented here. And an unbacked listing cannot be exhausted, which closes capacity-exhaustion abuse but not abuse of whatever the settlement mechanism reveals.
 
 ---
-
-## Buyer identity lifecycle status
-
-Buyer marketplace identity is now a core-owned durable profile rather than
-repeated domain-local `[Identity]` configuration. The XDG profile store keeps a
-stable random UUID, canonical principal history, redacted credential-provider
-references, lifecycle/selection, and opaque authority bindings. Fresh VM and
-API-credit work uses the selected primary; version-3 run recovery resolves the
-recorded retained principal. Installed buyer plugins must declare the shared
-resolved-identity injection contract.
-
-The implemented change mapping is
-[`add-persistent-buyer-profiles`](../../openspec/changes/add-persistent-buyer-profiles/).
-Remaining external operational evidence belongs to that change's unchecked
-verification tasks; it does not restore legacy identity precedence.
-
----
-
-## Payment qualification boundaries
-
-Local focused suites exercise Agreement retention, mandate validation, signed receipts, retryable pending, and idempotent physical/grant progress. The controlled VM smoke reaches pending → provisioning → ready with one delivery; it is not live-ledger or hardware acceptance. Bare-metal and API-credit package tests likewise do not establish external payments or delivery qualification.
-
-A qualified payment run needs the intended owned payments target, owner-scoped credentials, observed readiness, and the actual domain delivery authority. VM delivery, API-key use and top-up, and bare-metal authenticated access, revocation, teardown, and capacity release remain separate outcomes. Unavailable service or hardware prerequisites remain named evidence gaps, not permission to claim a simulated result.
 
 ## Related documents
 
