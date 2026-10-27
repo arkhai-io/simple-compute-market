@@ -113,11 +113,16 @@ broken `rl` setup at startup.
 
 ## Storefront: fulfillment failure policy
 
-The storefront failure policy is an explicit commercial/admin repair surface;
-it is not the physical release authority for durable fulfillments. Provisioning
+The storefront failure policy is the storefront's commercial response to a
+failed fulfillment; it is not the physical release authority for durable
+fulfillments. Provisioning
 provider failures retain capacity until fulfillment teardown succeeds or an
-operator performs explicit recovery. Legacy callback invocation may emit events
-or run configured commercial actions:
+operator performs explicit recovery. The VM storefront runs the policy on its
+pull path, when it reads a failed fulfillment: settlement's provisioning step
+when starting the fulfillment fails, and the fulfillment-resume loop when the
+provisioning service reports the fulfillment failed. No callback runs it; the
+provisioning service's only callback to the storefront is capacity-released.
+The policy may emit events or run configured commercial actions:
 
 ```toml
 [fulfillment.failure_policy]

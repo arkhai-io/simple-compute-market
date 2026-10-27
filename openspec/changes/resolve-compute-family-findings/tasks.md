@@ -1200,7 +1200,7 @@ Shared with the branch:
   storefront, `arkhai-core-storefront`, and `arkhai-core-storefront-client`, and
   locks.
 
-- [ ] 8.1 Remove the four routes, their request models, their operation-map
+- [x] 8.1 Remove the four routes, their request models, their operation-map
   entries, and their OpenAPI callback entries. Keep `capacity-released`,
   `_apply_fulfillment_event`, and `apply_fulfillment_failure_policy`, with its
   unit and pull-path tests (D4). Remove code that only the removed routes
@@ -1215,20 +1215,81 @@ Shared with the branch:
   - Application integration (`test_admin_api.py`, typed `StorefrontClient`):
     `capacity-released` still records the release and reopens the listings it
     closed.
-- [ ] 8.2 Remove `notify_usage_started` and `notify_fulfillment_failed` from
+
+  Removed: the `started`, `usage-started`, `release-started`, and `failed`
+  routes; `FulfillmentStartedEventRequest`, `UsageStartedEventRequest`,
+  `ReleaseStartedEventRequest`, and `FulfillmentFailedEventRequest`; their
+  four `_CALLBACK_OPERATIONS` entries; the two in the OpenAPI
+  `service_callbacks` set (`started` and `release-started` had none). Only
+  `capacity-released` called `_apply_fulfillment_event` after that, always
+  releasing and reopening, so its `close_oversized`, `reopen_available`, and
+  `release_reservation` flags, its `event_name` and `state` parameters, its
+  failure-reason pass-through, and its `**_extra` went; it now releases, then
+  reopens, and records the `capacity_released` stage event and `released`
+  state itself. `_reservation_binding` returns only the binding, since only
+  `failed` read the reservation and listing it also returned. The stage event
+  and response keep `closed_listing_ids` (always empty) for their shape. The
+  admin controller no longer imports `failure_actions`; the policy and its
+  pull-path callers (`settlement_stages.py`, `vm_fulfillment_service.py`,
+  `fulfillment_resume_runtime.py`) are untouched. The service-peer
+  middleware's comment, `test_admin_api.py`'s status-read docstring, and
+  `core/storefront-client/README.md`'s role list now name the one callback.
+  - Unit, VM storefront: `test_service_peer_identity.py` asserts the map is
+    exactly `capacity-released`, that `_callback` takes none of the removed
+    paths, and keeps its replay and rejection cases on `capacity-released`;
+    `test_capacity_admin_models.py` asserts the remaining request's field set
+    and the response's listing fields; new `test_openapi_callback_roles.py`
+    mounts the VM storefront's real admin router, installs the OpenAPI
+    customisation, and finds `capacity-released` the only fulfillment-event
+    path, documented as the `service` role, so it also shows the four routes
+    are no longer served. It sits in the VM storefront, not
+    `core/storefront`, because the customisation imports FastAPI, which
+    `core/storefront` neither declares nor installs for its tests (a first
+    placement there failed at import; the undeclared import predates this
+    section).
+  - Application integration (`test_admin_api.py`):
+    `test_capacity_released_releases_and_reopens` now closes the 3x and 4x
+    listings with the typed admin reserve instead of `usage-started`, then
+    releases through the typed service client and sees both reopen, the
+    reservation released, and the pool's units returned.
+    `test_manual_compute_listings_reopen_after_release`, which became its
+    duplicate once both reserved the same way, went, with `usage-started`'s
+    test and both `failed` tests.
+
+  All pass.
+- [x] 8.2 Remove `notify_usage_started` and `notify_fulfillment_failed` from
   both storefront client classes (D4). Verify:
   - the storefront client's sync/async parity test passes;
   - a repository search finds no caller.
-- [ ] 8.3 Remove the e2e stage that tests `usage-started` itself:
+
+  Removed from `StorefrontClient` and `SyncStorefrontClient`. The parity test
+  (`domains/vms/storefront/tests/unit/test_storefront_client_parity.py`)
+  passes. Outside `openspec/` and `.venv`s, the search finds neither name.
+- [x] 8.3 Remove the e2e stage that tests `usage-started` itself:
   - `test_03_usage_started_keeps_oversized_listings_closed`;
   - the `usage_started` field, and `test_04`'s requirement on it;
   - the module docstring's "Mark usage started" step.
 
   `test_04` now follows the reserve stage (D4). Verify: `make -C e2e-tests
   test-unit` passes, including the stage-set check.
-- [ ] 8.4 `docs/configuration.md` describes the failure policy as the pull
+
+  Done as listed; step 4 of the docstring reads "Release the capacity and
+  verify 3x/4x reopen." The e2e unit suite passes (80, run by `make test`).
+  The stage-set check reads the compute deal modules, not this one, so the
+  module was also collected: `make -C e2e-tests test
+  PYTEST_ARGS="--collect-only -q …/test_compute_dynamic_listings.py"`
+  collects its nine stages, `TestComputeDynamicListings` without `test_03`.
+- [x] 8.4 `docs/configuration.md` describes the failure policy as the pull
   path's, run when the storefront reads a failed fulfillment (D4).
-- [ ] 8.5 Confirm the sender's side of "Deal-scoped lifecycle events". In
+
+  The section's opening paragraph now says the VM storefront runs the policy
+  when settlement's provisioning step fails to start a fulfillment and when
+  the fulfillment-resume loop reads a failed one, that no callback runs it,
+  and that capacity-released is the provisioning service's only callback,
+  in place of "Legacy callback invocation may …"; its first sentence calls the
+  policy the storefront's commercial response to a failed fulfillment rather
+  than an admin repair surface, since no admin route runs it any longer.
+- [x] 8.5 Confirm the sender's side of "Deal-scoped lifecycle events". In
   `services/deal_event_sink.py`, the provisioner derives the notification's
   request identity from the release's event identity and retries it from its
   outbox until acknowledged. Confirm that
@@ -1240,10 +1301,46 @@ Shared with the branch:
 
   Add any missing case. No production change is expected. If one is needed, it
   is a design question, not a task (D4).
-- [ ] 8.6 Bump the VM storefront, `arkhai-core-storefront`, and
+
+  Confirmed, no production change. Unit:
+  - one notification: `test_release_event_uses_service_signer_site_and_storefront_pin`
+    awaits `notify_capacity_released` exactly once, signed as `service`, with
+    a request identity derived from the release's event identity;
+  - resend: `test_uncertain_ack_retry_reuses_the_same_client_and_request_identity`
+    resends after a lost acknowledgement under the same request identity, and
+    `test_capacity_release_outbox.py` keeps the reservation pending across a
+    restart until marked delivered;
+  - no usage-ready notification: missing, so added
+    `test_the_sink_sends_nothing_for_an_event_other_than_capacity_release`
+    (`usage_ready`, `provisioning_started`): the sink builds no client and
+    answers `False`. That shows the sink's refusal, not the transition: the
+    sink's only producer is `notify_storefront_capacity_released`, called
+    from release completion (`lease_lifecycle.py`), and that no other
+    transition reaches the sink is read from the code.
+
+  "Signed under the `service` role" rests on the arguments the first test
+  sees passed to a mocked client's constructor. The service's unit suite
+  passes (572).
+
+  Not met, and left for design: the delta's first scenario ends "without the
+  provisioner depending on the full storefront client", wording carried from
+  the permanent spec's earlier scenario. The service declares
+  `arkhai-core-storefront-client` and the sink builds the full
+  `StorefrontClient`, as it did before this change. D4 calls for no
+  production change, so the clause is either dropped from the delta or a
+  narrow client is designed; that is the delta's author's to settle (recorded
+  in the handoff below).
+- [x] 8.6 Bump the VM storefront, `arkhai-core-storefront`, and
   `arkhai-core-storefront-client` by a minor version each, since routes and
   public methods are removed. Run `make lock`.
-- [ ] 8.7 **Verification checkpoint.**
+
+  Amended by the owner's decision A (section 6's notes): no bump here. The
+  branch bumps `arkhai-vms-storefront` to `0.22.0`,
+  `arkhai-core-storefront` to `0.16.0`, and `arkhai-core-storefront-client`
+  to `0.27.0`, with the exact pins on them, and section 10 confirms the bumps
+  once the branch has merged. No dependency changed, so no lock did; `make
+  check-packaging` confirms every lock current.
+- [x] 8.7 **Verification checkpoint.**
   - Unit and application integration: 8.1–8.2.
   - Run `make test` in `domains/vms/storefront`, `core/storefront`,
     `core/storefront-client`, and `provisioning/compute/service`.
@@ -1258,6 +1355,41 @@ Shared with the branch:
 
   Together they are the evidence that the surviving callback works and that
   nothing calls the removed ones.
+
+  `make test` (full): the VM storefront 1108 unit and 447 integration;
+  `core/storefront` 217; `core/storefront-client` 62;
+  `provisioning/compute/service` 572 unit and 434 integration; the e2e unit
+  suite 80. All pass. After the fresh-context fixes, the VM storefront (1108
+  and 446, the duplicate gone), the service (572 and 434), and both core
+  projects were run again and pass. `make check-packaging` passes; `make
+  check-comment-hygiene` passes; `make check-change` passes but for the
+  closeout citation section 1 notes. No end-to-end lane was run in this
+  session; the three scenarios above are validation's evidence, and until
+  then the end-to-end statement is the plan's reasoning, not a result.
+
+  Handoff, from the fresh-context check:
+  - For design (or the delta's next edit): the delta scenario's "without the
+    provisioner depending on the full storefront client" (8.5's note).
+  - For closeout's promotion (27.9): `docs/development/ARCHITECTURE.md`,
+    "Site authority", says deal-scoped fulfillment events are point-to-point
+    and retain deal context; under D4 one notification, capacity-released, is
+    pushed, and the provisioner's lifecycle event, with its deal reference,
+    is not sent. The design-promotion record's D4 row names only the spec.
+  - Left in `docs/configuration.md`, older than this section: the
+    `release_capacity` row says not to configure it as an automatic response
+    to a provider failure, while `release_capacity` is in the default
+    actions and the policy now runs only automatically. The site's release
+    guard is what keeps an automatic release safe; reconciling the row with
+    the default is a policy decision this section does not make.
+  - Left, outside this section's files: `e2e-tests/tests/e2e/roles/scenarios/vms/conftest.py`'s
+    `storefront_service_client` docstring names usage-started and
+    fulfillment-failed events, and `e2e-tests/settings.toml` and the VM
+    storefront's `tests/publication_app.py` speak of "callbacks" in the
+    plural; the conftest is the branch's file, so section 21, which edits it
+    after the merge, can correct it. `core/storefront` imports FastAPI
+    without declaring it. `notify_capacity_released`'s async docstring names
+    the site authority's watchdog as its sender and a legacy PATCH it
+    replaced.
 
 ## 9. VM binds pool overrides at `POOL_OVERRIDES_PATH`
 

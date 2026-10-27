@@ -3,26 +3,37 @@
 from __future__ import annotations
 
 from market_storefront.models.capacity_admin_models import (
-    ReleaseStartedEventRequest,
+    CapacityReleasedEventRequest,
+    FulfillmentEventResponse,
 )
 
-_RETIRED = "vm_remove_job_id"
+
+def test_the_capacity_released_request_carries_its_release_fields():
+    assert set(CapacityReleasedEventRequest.model_fields) == {
+        "capacity_reservation_id",
+        "site_id",
+        "provider_lease_id",
+        "resource_id",
+        "released_at",
+    }
 
 
-def test_release_started_event_defines_no_vm_release_handle():
-    assert _RETIRED not in ReleaseStartedEventRequest.model_fields
-
-
-def test_release_started_event_ignores_the_retired_name_like_any_unknown_field():
-    """The retired name is not refused: an event carrying it is accepted and
-    the value is dropped, as for any field the model does not define."""
-    event = ReleaseStartedEventRequest.model_validate(
-        {
-            "capacity_reservation_id": "reservation-1",
-            "site_id": "site-1",
-            _RETIRED: "fulfillment-1",
-        }
+def test_a_capacity_released_event_names_its_reservation_and_site():
+    event = CapacityReleasedEventRequest.model_validate(
+        {"capacity_reservation_id": "reservation-1", "site_id": "site-1"}
     )
 
     assert event.capacity_reservation_id == "reservation-1"
-    assert _RETIRED not in event.model_dump()
+    assert event.site_id == "site-1"
+    assert event.released_at is None
+
+
+def test_the_event_response_reports_the_listings_it_changed():
+    response = FulfillmentEventResponse(
+        capacity_reservation_id="reservation-1",
+        state="released",
+        reopened_listing_ids=["listing-1"],
+    )
+
+    assert response.closed_listing_ids == []
+    assert response.reopened_listing_ids == ["listing-1"]

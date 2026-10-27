@@ -42,8 +42,6 @@ def install_marketplace_identity_openapi(app: Any, root_path: str = "") -> None:
         signature_requirement = {name: [] for name in identity_headers}
         service_callbacks = {
             "/api/v1/admin/fulfillment/events/capacity-released",
-            "/api/v1/admin/fulfillment/events/usage-started",
-            "/api/v1/admin/fulfillment/events/failed",
         }
         for path, path_item in schema.get("paths", {}).items():
             if not isinstance(path_item, dict):
