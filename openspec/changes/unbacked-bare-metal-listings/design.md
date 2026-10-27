@@ -825,7 +825,7 @@ repair it.
     an exact retry of a retry-safe route runs again, and one of a route marked unsafe is
     refused with a signed 409 asking for a new request ID. It has only the unsigned-500
     half of the gap, so it answers the signed 500 and records nothing. Outcome recording
-    for every authority is `redesign-authenticated-replay-state`'s subject.
+    for every authority is `redesign-authenticated-requests`'s subject.
 
 Rejected: tolerating the row on reads with a problems field, which adds a pool wire field
 and a non-importable export entry; mapping the error in the read routes only.

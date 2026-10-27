@@ -1,6 +1,6 @@
 # Tasks
 
-Blocked on `redesign-authenticated-replay-state`; see `proposal.md`. Its decision
+Blocked on `redesign-authenticated-requests`; see `proposal.md`. Its decision
 1.7 determines whether these tasks proceed, narrow, or are superseded.
 
 ## 1. Decide the record before building it

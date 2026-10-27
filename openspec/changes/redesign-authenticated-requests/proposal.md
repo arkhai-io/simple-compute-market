@@ -37,8 +37,8 @@ store with the same two problems. It is blocked on this change so the two are no
 designed in the wrong order.
 
 *Expanded 2026-10-27, by `resolve-compute-family-findings`' design (its decision D3), to
-the shared `kit/identity` request contract; the change is to be renamed
-`redesign-authenticated-requests` to match.* The direction is independently operated
+the shared `kit/identity` request contract, and renamed from
+`redesign-authenticated-replay-state` to match.* The direction is independently operated
 sites and storefronts, and one storefront serving several sites, and the version 2
 request envelope does not carry what that needs:
 

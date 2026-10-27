@@ -102,8 +102,8 @@ operator's own requests meet them directly.
 
 A request that names its operation in a header, so an authority can sign "operation not
 served" over the caller's own claim, and binds its audience, so a request signed for one
-authority is refused by another, belongs to the expanded `redesign-authenticated-replay-state`
-(to be renamed `redesign-authenticated-requests`), whose subject is every authority's
+authority is refused by another, belongs to the expanded `redesign-authenticated-requests`
+(renamed from `redesign-authenticated-replay-state`), whose subject is every authority's
 authentication. The answers above are what it would later sign.
 
 Rejected: signing the answer now (a request-envelope change in `kit/identity` and every
@@ -429,12 +429,12 @@ Two rounds, each reviewed before the next, then closeout.
 Made with this design's recording:
 
 - `site-route-contracts` and `repair-rl-training-tooling` are proposed, with index rows.
-- `redesign-authenticated-replay-state`'s proposal is expanded: a version 3 request
+- `redesign-authenticated-requests`'s proposal is expanded: a version 3 request
   envelope that states its operation and binds its audience, motivated by independently
   operated sites and storefronts and several sites per storefront, and what
-  `service-identity-signing` left undone. The change is to be renamed
-  `redesign-authenticated-requests`; the directory move, with its index row and
-  `retain-authenticated-request-outcomes`' dependency, is made outside the design step,
+  `service-identity-signing` left undone. The change was renamed from
+  `redesign-authenticated-replay-state`; the directory move, with its index row and
+  `retain-authenticated-request-outcomes`' dependency, was made outside the design step,
   which cannot move directories.
 - `service-identity-signing` is found delivered: its requirements are already in the
   permanent specifications and most of its tasks were carried out by

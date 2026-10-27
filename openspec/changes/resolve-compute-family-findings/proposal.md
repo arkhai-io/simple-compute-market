@@ -103,8 +103,7 @@ None.
   from the signing key): an unowned Goal 6 gap. This change states the current rule,
   that the published recipient and the signer are one account.
 - Signing an unmatched request's answer, binding a request's audience, and naming its
-  operation in the request: `redesign-authenticated-replay-state`, to be renamed
-  `redesign-authenticated-requests`.
+  operation in the request: `redesign-authenticated-requests`.
 - A signed answer to a route that raises after authentication:
   `unbacked-bare-metal-listings`.
 - Reservation idempotency and release by escrow: `capacity-reservation-lifecycle-hardening`.
@@ -130,8 +129,8 @@ None.
   (the deferral cadence its pending outcome inherits), and `pools-7-storefront-fulfillment-cutover`
   (`terminate_vm_lease` stays as that change's required plumbing).
 - Opens `site-route-contracts` and `repair-rl-training-tooling`; expands
-  `redesign-authenticated-replay-state`, to be renamed `redesign-authenticated-requests`;
-  finds `service-identity-signing` delivered, to be archived as such.
+  `redesign-authenticated-requests` (renamed from `redesign-authenticated-replay-state`);
+  finds `service-identity-signing` delivered and archives it as such.
 
 ## Impact
 

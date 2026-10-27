@@ -45,7 +45,7 @@ None expected.
 
 - The site middleware's answer to an unroutable request, and the site client's report of
   an unauthenticated answer: `resolve-compute-family-findings`.
-- The request envelope: `redesign-authenticated-replay-state`.
+- The request envelope: `redesign-authenticated-requests`.
 
 ## Dependencies and Related Changes
 
