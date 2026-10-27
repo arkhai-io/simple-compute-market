@@ -42,6 +42,9 @@ allow = [
   "Bash(tr *)", "Bash(cd *)",
   # Lists a built wheel's or archive's contents; with -l unzip extracts nothing.
   "Bash(unzip -l *)",
+  # The running session's id, and only that variable: the rest of the
+  # environment may hold credentials.
+  "Bash(printenv CLAUDE_CODE_SESSION_ID)",
 ]
 deny = [
   "Bash(git push*)", "Bash(git reset*)", "Bash(git checkout*)", "Bash(git switch*)",
