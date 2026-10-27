@@ -1486,7 +1486,7 @@ only.
       from the pilot's orchestrating session's transcript.
       Handoff, each settled:
       - Open question 2 (the round view mixing merges into a round): deferred in
-        round 4's triage (145 F1) to `round-view-without-merges`, proposed from
+        round 4's triage (145 F1) to `workflow-round-review-without-merges`, proposed from
         `dev` after this change merges; recorded in open question 2 and 10.9's
         "Current limits".
       - The pilot merged into this branch (PR #306, seq 177), not after it as D9

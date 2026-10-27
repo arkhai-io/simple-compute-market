@@ -1123,7 +1123,7 @@ pre-closeout review.
    duplicate, so holding merges to round boundaries would delay it.
 
    **Decided in round 4's triage (145 F1): deferred to its own change,
-   `round-view-without-merges`, proposed on its own branch from `dev` once this
+   `workflow-round-review-without-merges`, proposed on its own branch from `dev` once this
    change merges, not here.** The pilot met the case again — eleven of the 118
    files in its round view came from merges inside the round — so the view stays
    as D2 builds it, and "Current limits" says it mixes in merges until that change
