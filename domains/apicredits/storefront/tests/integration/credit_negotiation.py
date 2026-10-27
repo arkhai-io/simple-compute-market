@@ -59,9 +59,9 @@ PAYER_ACCOUNT = "11111111-1111-4111-8111-111111111111"
 PAYEE_ACCOUNT = "22222222-2222-4222-8222-222222222222"
 
 
-def payment_option() -> SettlementOption:
+def payment_option(rate: int = 100) -> SettlementOption:
     """An Arkhai payments option priced per credit, as a seller publishes one."""
-    rates = [RateValue(field="amount", per="credit", value=100)]
+    rates = [RateValue(field="amount", per="credit", value=rate)]
     params = {"payee_account": PAYEE_ACCOUNT, "asset": "USD/2"}
     return SettlementOption(
         option_id=derive_settlement_option_id(
@@ -198,3 +198,25 @@ async def seed_listing(client) -> None:
         storefront_url="http://test-seller:8002",
         seller_principal=SELLER_PRINCIPAL,
     )
+
+
+# A deterministic development payments-service key for these tests only; never
+# used on any network.
+PAYMENTS_SERVICE = Ed25519Signer(bytes.fromhex("55" * 32))
+DISPUTE_ACCOUNT = "33333333-3333-4333-8333-333333333333"
+
+
+class QuotaHolds:
+    """The capacity runtime a payment acceptance reserves its quota through."""
+
+    def __init__(self) -> None:
+        self.claims: list[dict] = []
+
+    async def reserve(self, _binding, *, claim, deal_ref, ttl_seconds):
+        self.claims.append(claim)
+        return {
+            "capacity_reservation_id": f"alloc-{len(self.claims)}",
+            "resource_id": "svc-quota",
+            "allocated_units": claim["units"],
+            "hold_expires_at": "2099-01-01 00:00",
+        }

@@ -11,7 +11,7 @@ dependencies = [
     "arkhai-core-registry-client==0.12.2",
     "arkhai-kit-alkahest>=0.7.0",
     "arkhai-kit-contact-exchange==0.3.0",
-    "arkhai-kit-arkhai-payments==0.2.0",
+    "arkhai-kit-arkhai-payments==0.3.0",
     "arkhai-kit-identity==0.4.0",
     "arkhai-kit-settlement-runtime==0.4.0",
     "pydantic>=2.7",

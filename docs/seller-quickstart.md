@@ -143,6 +143,7 @@ service_identity = { scheme = "ed25519", identifier = "<RECEIPT_SIGNING_KEY>" }
 fee_bps = 250
 dispute_authority = "<DISPUTE_AUTHORITY_ACCOUNT>"
 api_key_env = "ARKHAI_PAYMENTS_API_KEY"   # names the variable; the key stays in the environment
+livemode = true                          # false against the public test-mode service
 
 [pricing]
 settlements = [

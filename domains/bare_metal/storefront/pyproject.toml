@@ -25,7 +25,7 @@ dependencies = [
     "arkhai-kit-capacity-publication==0.10.1",
     "arkhai-kit-pool-overrides==0.2.1",
     "arkhai-kit-resource-pools>=0.7.0",
-    "arkhai-kit-arkhai-payments==0.2.0",
+    "arkhai-kit-arkhai-payments==0.3.0",
     "arkhai-kit-settlement-runtime>=0.4.0",
     "arkhai-kit-storefront==0.8.0",
     "dynaconf>=3.0.0",

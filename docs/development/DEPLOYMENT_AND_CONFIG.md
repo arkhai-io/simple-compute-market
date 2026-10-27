@@ -1219,6 +1219,19 @@ EVM credentials and networks remain in `[Wallet]` and `[Chains]`.
 Generated TOML, ConfigMaps, status output, and run logs contain only public
 configuration projections.
 
+`livemode` in a role's Arkhai payments settings — `[Settlement.arkhai_payments]`,
+or `[bare_metal.arkhai_payments]` in the bare-metal buyer's configuration file — is
+the service mode whose receipts the role accepts. Receipts sign `livemode`, true only from a live payments service, and a
+receipt verifies only when its signed mode equals the role's setting. The default,
+`false`, accepts only test-mode receipts, so a role against a live service refuses
+every receipt until it sets `livemode = true`; set it on both buyer and storefront
+in the same release that points them at a live service. Mode, service origin, and
+receipt identity change together, and changing them is a cutover: each receipt
+check, including the revalidation of a stored receipt at restart, compares with the
+current setting, so a payment deal accepted under the old mode never reaches
+delivery or issuance afterwards. Drain open payment deals, or refund them, before
+the change.
+
 Agreement attachment is set on each side. A buyer's `attach_agreement` (default `false`)
 attaches the exact Agreement when it approves a payment; setting it in a seller
 configuration is a publication blocker. A seller that wants the Agreement on file sets

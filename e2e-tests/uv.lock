@@ -367,6 +367,7 @@ dependencies = [
     { name = "arkhai-bare-metal-buyer" },
     { name = "arkhai-compute-provisioning-client" },
     { name = "arkhai-compute-provisioning-contracts" },
+    { name = "arkhai-core-buyer" },
     { name = "arkhai-core-registry-client" },
     { name = "arkhai-core-storefront-client" },
     { name = "arkhai-kit-alkahest" },
@@ -411,10 +412,11 @@ requires-dist = [
     { name = "arkhai-bare-metal-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-compute-provisioning-client", specifier = ">=0.6.0" },
     { name = "arkhai-compute-provisioning-contracts", specifier = ">=0.9.0" },
+    { name = "arkhai-core-buyer", specifier = ">=0.5.0" },
     { name = "arkhai-core-registry-client", specifier = ">=0.12.1" },
     { name = "arkhai-core-storefront-client", specifier = ">=0.25.0" },
     { name = "arkhai-kit-alkahest", specifier = ">=0.7.0" },
-    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.2.0" },
+    { name = "arkhai-kit-arkhai-payments", specifier = ">=0.3.0" },
     { name = "arkhai-kit-config" },
     { name = "arkhai-kit-policy", specifier = ">=0.4.0" },
     { name = "arkhai-kit-pool-overrides", specifier = ">=0.2.0" },
@@ -460,7 +462,7 @@ wheels = [
 
 [[package]]
 name = "arkhai-kit-arkhai-payments"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "../.dist" }
 dependencies = [
     { name = "arkhai-core" },
@@ -471,7 +473,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { path = "arkhai_kit_arkhai_payments-0.2.0-py3-none-any.whl" },
+    { path = "arkhai_kit_arkhai_payments-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]

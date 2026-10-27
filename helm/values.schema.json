@@ -1547,6 +1547,12 @@
                     "null"
                   ]
                 },
+                "^[lL][iI][vV][eE][mM][oO][dD][eE]$": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
                 "^[aA][tT][tT][aA][cC][hH]_[aA][gG][rR][eE][eE][mM][eE][nN][tT]$": {
                   "type": [
                     "boolean",
