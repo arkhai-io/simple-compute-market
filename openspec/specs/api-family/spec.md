@@ -22,8 +22,9 @@ prepaid bearer access MUST bind it rather than define or copy its own. The vocab
 depend only on foundation kits, never on core, a domain, a role, or a
 family-kit distribution, and MUST NOT name a sibling domain's label value. Every
 distribution under `domains/api` MUST import no API-selling domain and no
-role; the edges still tracked as exceptions are listed under
-[Current limits](architecture.md#current-limits).
+role, except through an edge recorded as an exception row in
+`docs/development/ARCHITECTURE.toml`;
+[Current limits](architecture.md#current-limits) lists those edges.
 
 #### Scenario: Two kind literals bind the purchase shape
 

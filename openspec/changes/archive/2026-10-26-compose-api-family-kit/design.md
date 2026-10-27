@@ -77,10 +77,11 @@ the Python reference requires and the verify-cache fixes D10 records. A ledger-f
 
 Credits is one way to pay for API access; a domain selling access by
 subscription or by invoice would still publish a listing, issue a credential,
-and gate requests on it. The family is named for what is sold, and both domains
-join it: `ARCHITECTURE.toml` gains a `[[families]]` row (`name = "api"`,
+and gate requests on it. The family is named for what is sold, and API credits
+joins it now: `ARCHITECTURE.toml` gains a `[[families]]` row (`name = "api"`,
 `directory = "domains/api"`, `vocabulary = "arkhai-api"`) and the `apicredits`
-and `inference` domain rows gain `family = "api"`.
+domain row gains `family = "api"`; the inference domain joins when its campaign
+composes the kit.
 
 The kit lives under the family directory. The scope rule reads scope from the
 path: "a package under a family's directory [is scoped] to that family", and the
@@ -706,9 +707,10 @@ notes were compressed.
 
 - **Refactoring a live domain.** Mitigated by the pins, the compatibility
   baselines, each slice's suites and lane, and the rule that a slice leaves
-  API credits green. The change's pull request is in the main repository, so
-  the pipeline runs on every push beside the local suites; two storefront
-  jobs fail on the `dev` base itself and are inherited, not this change's.
+  API credits green. The pipeline was meant to run on every push; the change
+  was worked from a fork without push access to the main repository, so it
+  never ran (11.8), and the API-credit lane is tracked in the index's Goal 4
+  unowned work.
 - **Eleven projects where there were five.** Each exists for a rule the
   documents state; the cost is lock files and the aggregate test target, which
   `make check-packaging` and "Aggregate kit tests cover every kit" hold.
