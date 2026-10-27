@@ -113,8 +113,14 @@ None.
 
 ## Dependencies and Related Changes
 
-- **Hard-depends on `service-identity-signing`** for the authenticated channel. Without
-  it, delivery routing derives from broadly scoped configuration and cannot be trusted.
+- The authenticated channel this change once waited on `service-identity-signing` for
+  exists (found 2026-10-27 by `resolve-compute-family-findings`' design): signed
+  `service`-role callbacks verified against durable, rotating per-site peer trust, a
+  durable callback outbox (`capacity_released`), and a callback's site taken from its
+  signer's binding. The dependency is released. Only `capacity_released` is delivered
+  today, and the VM storefront no longer serves the four senderless fulfillment
+  callbacks that change removed, so the events this change delivers are designed here,
+  with their own routes, outside the administrator path.
 - Hard-depends on `pools-7-storefront-fulfillment-cutover`'s durable Settlement Record,
   fulfillment result, and pull APIs, including the `fulfillment.result.v1` envelope this
   change reuses rather than redesigns.

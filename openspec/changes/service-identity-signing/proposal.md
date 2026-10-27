@@ -1,3 +1,14 @@
+*Found delivered 2026-10-27, by `resolve-compute-family-findings`' design (its decision
+D3): `add-nonchain-marketplace-identities` (archived 2026-08-11) and later changes carried
+out most of this plan, and its spec deltas' requirements are already in
+`physical-provisioning` and `storefront-publication`. To be archived as delivered, with
+`--skip-specs`. What its tasks left undone — the API-credits shared-secret fallback, a
+site-registry interface, provisioning-side retirement and disablement, unsigned callback
+refusals in the VM storefront, and runtime capability checks — moves to
+`redesign-authenticated-replay-state`, which is to be renamed
+`redesign-authenticated-requests`. The authenticated channel
+`replace-polling-with-authenticated-push` needed from this change exists.*
+
 ## Why
 
 **Supersedes `add-storefront-principal-authentication`** (2026-08-06). That

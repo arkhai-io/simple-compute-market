@@ -3,111 +3,79 @@
 Moving provisioning execution into the compute family kit, composing bare metal
 onto the kit negotiation runtime, and running a bare-metal deal in the pipeline
 surfaced defects and dead surfaces that were outside that work's scope. Each is
-small; together they are the compute family's known debt, and none has another
-owner. `bare-metal-mock-provisioned-deal` recorded them as it found them; its
-design (archived) holds the context for each.
+small; together they are the compute family's known debt.
+`bare-metal-mock-provisioned-deal` (archived) recorded them as it found them.
 
-The substantive gaps it found — host-secret protection, failure classification,
-guest network isolation, disabled-host admission, a relay lane, the
+Design checked every recorded item against the code. Some had been resolved since,
+some belong to other changes, and the rest are below. The design also found defects
+the record missed: a reveal whose first completion failed never reaches the seller's
+delivery sinks, a deferred bare-metal fulfillment is rechecked on a backoff that grows
+to thirty minutes, a single Alkahest address book is applied to every chain when
+claims are serviced, and the configuration-migration tool retires the address-book key
+everything else still reads.
+
+The substantive gaps the record found — host-secret protection, failure
+classification, guest network isolation, disabled-host admission, a relay lane, the
 administrator stance, lease start policy, and pricing an escrow that names no
-contract — are open roadmap gaps rather than part of this change.
+contract — are roadmap gaps rather than part of this change.
 
 ## What Changes
 
-Typed and single-sourced route contracts:
+`design.md` records each decision; the labels below are its.
 
-- `kit/site` serves a router of its own rather than contributing its routes as
-  data the composition root binds; the site's server and client state their
-  contracts twice; the family contracts carry path templates; VM's pool-override
-  route is a literal path.
-- Bare metal's mock-rule routes, and the system worker controls' responses, are
-  untyped bodies.
+Route answers and typed surfaces:
 
-Dead or senderless surfaces — remove each, or give it its caller:
+- A request matching no route contract is answered unsigned by what failed to match:
+  404 for an unknown path, 405 with `Allow` for a known path under another method, 400
+  for a route whose body resource cannot be bound; overlapping route patterns are
+  refused when the table is composed. Both the provisioning service's middleware and
+  `kit/site`'s do this, and the family client and the site client report an
+  unauthenticated answer as such, naming its status (D3).
+- Bare metal's and VM's mock-rule routes return typed responses and each domain gains
+  an extension client; the remaining worker controls return typed responses (D14,
+  D15). VM binds pool overrides at `POOL_OVERRIDES_PATH` (D16).
 
-- `ReservationState.provisioning`, which nothing sets: `commit` moves a reservation
-  from `reserved` past it.
-- The site ledger's `find_active_lease_by_vm_target`, which nothing calls (its
-  docstring names a retired VM removal route), with its match on a reservation's
-  `executor_target`, and the `vm_target` key the ledger's reservation payload still
-  emits.
-- The VM storefront's fulfillment-failed callback and admin usage-started event,
-  which have no production sender (and usage-started's unrecorded `host_id`), and
-  its uncalled `terminate_vm_lease`.
-- The VM storefront wheel's shipped `[provisioning] mode`, which nothing reads, and
-  the validation runbook's Helm override of it.
+Dead or senderless surfaces removed:
+
+- The VM storefront's four fulfillment callbacks with no production sender —
+  `started`, `usage-started`, `release-started`, `failed` — with their models, client
+  methods, operation-map and OpenAPI entries, and tests; the lifecycle-events
+  requirement describes the `capacity_released` event provisioning sends (D4).
+- `ReservationState.provisioning` and `provisioning_failed`, which nothing writes, from
+  every reader and the lease contract, with an upgrade conversion of any stored row,
+  and the guard-free `update_reservation_state` (D5).
+- `find_active_lease_by_vm_target` and the `vm_target` payload key (D21); the VM
+  storefront's unread `[provisioning] mode` from settings, the chart, the runbook, and
+  the quickstart (D22).
+- `kit/policy`'s broken `market-policy` RL training CLI and its training dependency
+  settings, carried into `repair-rl-training-tooling` (D7).
 
 Behaviour that answers wrongly:
 
-- The provisioning service's authentication middleware answers a request matching no
-  route contract with an unsigned 404, never a 405 for a known path with another method,
-  which a typed client reports as missing response authentication. It is unsigned because
-  no route resolved, so no operation or resource binds a signature; whether a rejection
-  before routing can be signed is this change's to decide. A failure after authentication
-  is answered signed since `unbacked-bare-metal-listings`.
-- VM's operator `create_vm` route checks no guest name against the rules
-  provisioning's own names satisfy, so a name whose login exceeds 32 characters
-  fails at `useradd`.
-- A restarted bare-metal storefront whose site reports a different delivery for an
-  active lease answers the buyer's status read with an unhandled 500.
-- The bare-metal storefront's begin reads a scheduled resource's nested
-  `bare_metal_publication.physical_host_id`, a shape the site treats as legacy.
-- The policy kit's refusal of an unknown middleware name points a bare-metal
-  operator at the VM policy package.
-- The bare-metal settlement servicing worker has no event callback, so a failing
-  servicing step retries with no stage event or log line; only the administrator's
-  settlement wait wakes servicing when a lease becomes active, where
-  `BareMetalFulfillmentService.status` recording the transition should; and that
-  wait fails on a site error rather than polling through it.
-- The VM storefront requires an opening to state its settlement selection inside the
-  proposal, while the bare-metal storefront projects an Alkahest selection from the
-  escrow carrier and refuses one stated beside it, so the shared compute deal stages
-  ask each domain's driver which opening to send; one rule for both belongs with
-  moving bare metal onto the shell's negotiation routes.
-- The bare-metal Compose wrapper and Helm chart forward no seller negotiation
-  chain, so only the lane's overlay sets one (to be re-verified: the chart now passes
-  its `config` through to `storefront.json` and, in an umbrella release, derives its
-  registry and the trust it pins, so a chart-deployed bare-metal storefront publishes).
-  Running pipeline scenarios against the charts is `helm-e2e-pipeline-parity`'s.
-- An interrupted contact-exchange reveal is finished only by the buyer retrying,
-  though the servicing worker could finish it from the persisted introduction.
-- A seller's EVM address and wallet key are separate inputs nothing checks against
-  each other; the Alkahest address book is named both by the settlement section and
-  by each chain.
-- The fulfillment convergence sweep logs its counts as structured fields the
-  end-to-end lanes' plain-text log format does not print.
+- A bare-metal status or result read whose site reports a delivery other than the
+  recorded one answers a typed 409 rather than a 500 (D12).
+- Bare-metal begin reads the scheduled resource's own physical identity, and the
+  schedule response names its host, so a declaration that does not repeat them in its
+  publication settings can be fulfilled (D13).
+- VM's operator `create_vm` refuses a guest name provisioning's rules reject (D17).
+- The policy kit's refusals name `[negotiation].policies` and where built-ins come
+  from (D18); fulfillment convergence prints its counts (D19).
+- Bare metal's servicing worker reports its events, every scheduled retry is logged, a
+  deferred delivery is rechecked every servicing cycle, and the settle wait polls
+  through a failed status read (D8).
+- An introduction's seller-side delivery happens once, whenever the reveal completes
+  (D9).
+- A seller's wallet address and key name one account, as an Alkahest readiness rule;
+  the address is derived when absent (D10).
+- Alkahest address books are named per chain in `[Settlement.alkahest.address_books]`,
+  for storefronts and buyers (D11).
 
-Placement and test reliability:
+Placement:
 
-- The relay administration, port allocator, port lease, pool-configuration, and VM
-  codec suites test VM-owned behaviour from the provisioning service's suite.
-- The provisioning integration harness shares one in-memory SQLite connection
-  across sessions, so a dispatched job can end the transaction the authentication
-  middleware is committing; production uses a connection per session.
-- The site ledger keys reservation idempotency and release-by-escrow on the escrow,
-  which hosted deals lack, while jobs correlate on the capacity reservation.
-- Bare metal's listing recheck and publication read each site's projection live,
-  where VM reads the projections its storefront holds; reading held projections is the
-  preferred end state for every storefront. (API credits' move onto the
-  kit's listing-source verdict was `encapsulate-capacity-backing`'s, archived
-  2026-10-14; bare metal's move onto held projections is `share-site-projection-state`'s.)
-- The provisioning service's `db/database.py` and `db/migrations.py` import
-  `vm_provisioning_adapter.db` (`AnsiblePoolConfig`, `Base`) and
-  `vm_provisioning_adapter.legacy_backfill`. VM table metadata and the legacy VM
-  lease backfill are adapter-bundle contributions the composition root should
-  receive from the bundle, as it receives executors and routers, rather than
-  modules the service names; the service's boundary-test allowlist then shrinks to
-  `runtime` and `routers`. The service's scope legitimately contains both compute
-  domains, so no architecture check reports this; it is a wiring judgement under
-  `ARCHITECTURE.md`'s "wiring" placement test.
-- `kit/policy`'s `market-policy` console script (`market_policy/cli.py`) is the RL
-  train/eval/export lifecycle and shells out to `domains/vms/training/`. It is VM
-  tooling in a foundation kit, found by the 2026-10-04 architecture review. Move the
-  entry point to `domains/vms/negotiation`, which owns the RL strategies, or to the
-  training project.
-
-State: **proposed; design not started.** Design decides, per item, fix or record
-as accepted.
+- The VM-owned relay, port, pool-configuration, and codec suites move into the VM
+  adapter, with the relay port-lease index declared on its model (D20).
+- The provisioning service's migration modules keep naming VM's tables, with the
+  reason documented (D6).
 
 ## Capabilities
 
@@ -117,24 +85,106 @@ None.
 
 ### Modified Capabilities
 
-None expected; `.openspec.yaml` sets `skip_specs`. Design adds a delta and clears
-it for any item that changes a normative requirement (the 500, for instance).
+- `site-capacity`: reservation states; the site middleware's unmatched-route answer and
+  the site client's report.
+- `physical-provisioning`: the provisioning middleware's unmatched-route answer and the
+  family client's report; operator guest names.
+- `compute-provisioning-contract`: the lifecycle event provisioning sends; the schedule
+  response's host and physical identity.
+- `storefront-publication`: the bare-metal delivery conflict and begin.
+- `settlement-servicing`: deferred delivery, retry reporting, and the settle wait.
+- `introduction-delivery`: once-only seller delivery after an interrupted reveal.
+- `settlement-configuration`: wallet address and key; Alkahest address books.
 
 ## Non-Goals
 
 - The roadmap's substantive gaps listed under Why.
+- Separate payout accounts (a multisig or treasury receiving Alkahest settlement apart
+  from the signing key): an unowned Goal 6 gap. This change states the current rule,
+  that the published recipient and the signer are one account.
+- Signing an unmatched request's answer, binding a request's audience, and naming its
+  operation in the request: `redesign-authenticated-replay-state`, to be renamed
+  `redesign-authenticated-requests`.
+- A signed answer to a route that raises after authentication:
+  `unbacked-bare-metal-listings`.
+- Reservation idempotency and release by escrow: `capacity-reservation-lifecycle-hardening`.
+- One opening-selection rule for both compute storefronts: `move-escrow-into-alkahest`.
+- `kit/site`'s route surface: `site-route-contracts`.
+- Repairing RL model training: `repair-rl-training-tooling`.
+- Per-adapter migration chains in the provisioning service; see `design.md`'s open
+  question.
 - Should anything come to act on a reservation's recorded executor target, a
-  deliberate operation to resolve a reservation whose recorded target differs from
-  its fulfillment's is needed with it; nothing does today.
+  deliberate operation to resolve a reservation whose recorded target differs from its
+  fulfillment's is needed with it; nothing does today.
 
 ## Dependencies and Related Changes
 
-- Follows `bare-metal-mock-provisioned-deal` (archived), which recorded each item.
-- The VM storefront items coordinate with `remove-dead-storefront-physical-surfaces`
-  and `pools-9-retire-local-physical-authority`; the listing-source items with
-  `kit-owned-listing-and-fulfillment-lifecycles`.
+- Follows `bare-metal-mock-provisioned-deal` (archived), which recorded the items.
+- Its second implementation round waits for `unbacked-bare-metal-listings`, whose
+  unmerged work changes the same files: both authentication middlewares, bare metal's
+  deal controls and servicing composition, `kit/alkahest/settlement_config.py`, the
+  worker controls, VM's admin controller, and an e2e scenario. The first round does not
+  wait.
+- Coordinates with `hollow-pre-floor-provisioning-migrations` (the legacy-backfill
+  import; the relay port-lease index), `kit-owned-listing-and-fulfillment-lifecycles`
+  (the deferral cadence its pending outcome inherits), and `pools-7-storefront-fulfillment-cutover`
+  (`terminate_vm_lease` stays as that change's required plumbing).
+- Opens `site-route-contracts` and `repair-rl-training-tooling`; expands
+  `redesign-authenticated-replay-state`, to be renamed `redesign-authenticated-requests`;
+  finds `service-identity-signing` delivered, to be archived as such.
 
 ## Impact
 
-`provisioning/compute/`, `kit/site`, `kit/policy`, `domains/vms/`, and
-`domains/bare_metal/`; the bare-metal Helm chart and Compose wrapper.
+`provisioning/compute/` (contracts, client, service middleware, migrations, worker
+controls, convergence), `kit/site`, `kit/site-client`, `kit/policy`, `kit/alkahest`,
+`kit/config`, `kit/settlement-runtime`, `kit/contact-exchange`, `kit/storefront`,
+`core/storefront-client`, `domains/vms/` (storefront, provisioning adapter and client,
+buyer, training README), `domains/bare_metal/` (storefront, domain package, buyer),
+`domains/apicredits/` (storefront, buyer), e2e scenarios and harness, the storefront and
+bare-metal Helm charts' values, and the seller and buyer quickstarts.
+
+Wire: removed VM callback routes and client methods; reservation states and
+`LeaseState.PROVISIONING_FAILED` removed; `host_id` on the schedule response; typed
+mock-rule and worker-control responses; unmatched-route statuses. Configuration:
+`[Settlement.alkahest.address_books]` replaces two keys; `[Wallet].address` becomes
+optional for a seller. Persistence: a reservation-state conversion in the provisioning
+and API-credits services' migration chains; a seller-delivery marker on introductions.
+Each is a minor bump of its package under the repository's pre-1.0 versioning policy.
+
+## Permanent documentation impact
+
+- [x] `docs/development/ARCHITECTURE.md`
+- [x] Existing subsystem specification
+- [ ] New subsystem specification
+- [ ] No permanent documentation change
+
+### Knowledge to promote
+
+- Unmatched-route answers and the clients' report of an unauthenticated answer →
+  `openspec/specs/physical-provisioning/spec.md`, `openspec/specs/site-capacity/spec.md`;
+  why an unroutable request is unsigned →
+  `openspec/specs/physical-provisioning/architecture.md`, "Canonical requests, durable
+  replay, and signed responses" (D3).
+- The lifecycle event provisioning sends; the schedule response's identities →
+  `openspec/specs/compute-provisioning-contract/spec.md` (D4, D13).
+- Reservation states and their upgrade conversion → `openspec/specs/site-capacity/spec.md`
+  and `architecture.md` (D5).
+- The service's migration history names the tables its database holds →
+  `openspec/specs/physical-provisioning/architecture.md`, "Compute composition" (D6).
+- Deferred-delivery cadence, retry reporting, the settle wait →
+  `openspec/specs/settlement-servicing/spec.md` (D8).
+- Once-only seller delivery → `openspec/specs/introduction-delivery/spec.md`; the
+  buyer-retry limit → a new architecture companion for `contact-exchange-settlement`
+  (D9).
+- Wallet address and key; address books → `openspec/specs/settlement-configuration/spec.md`,
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, the seller, bare-metal seller, and buyer
+  quickstarts (D10, D11).
+- Bare-metal delivery conflict and begin → `openspec/specs/storefront-publication/spec.md`
+  (D12, D13); operator guest names → `openspec/specs/physical-provisioning/spec.md` (D17).
+- Before 1.0, an incompatible change to anything a package publishes is a minor bump,
+  and a versioned contract is versioned rather than changed in place →
+  `docs/development/RELEASING.md`, "Versioning policy"; a pointer in
+  `docs/development/ARCHITECTURE.md`, "Operators"; one sentence in
+  `docs/development/DEPLOYMENT_AND_CONFIG.md`, "Profile-based configuration".
+- The roadmap: Goal 1's row for this change; Goal 6's unowned payout-account gap →
+  `docs/development/ROADMAP.md`.

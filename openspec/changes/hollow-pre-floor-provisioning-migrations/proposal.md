@@ -63,6 +63,13 @@ None.
 - Independent. Split from `seed-default-pool-at-runtime`'s design, which stops
   `20260713_002_resource_pools_and_hosts_pool_id` seeding a default pool and
   removes capacity derivation from host inventory; either may land first.
+- `resolve-compute-family-findings` (its design's decisions D6 and D20, 2026-10-27)
+  leaves the service's migration modules naming VM's tables, as the history of a
+  database that holds them. Removing the legacy conversion's data rewrite removes the
+  `db/migrations.py` import of `vm_provisioning_adapter.legacy_backfill` and its entry in
+  the service's import-boundary allowlist; this change owns both. That change also
+  declares `uq_relay_port_leases_active_owner` on VM's `relay_port_leases` model, so the
+  schema work `20260901_001` keeps is no longer the index's only declaration.
 
 ## Permanent documentation impact
 
