@@ -562,7 +562,7 @@ Files:
 Shared with the branch: the VM adapter's `pyproject.toml` version line, and
 locks. The branch edits only the adapter's `inventory_views.py`.
 
-- [ ] 4.1 VM's operator `create_vm` checks the guest name with
+- [x] 4.1 VM's operator `create_vm` checks the guest name with
   `check_guest_name` in the adapter's service, before anything is prepared or
   submitted, and answers 422 naming the rule (D17).
   - Unit:
@@ -572,9 +572,40 @@ locks. The branch edits only the adapter's `inventory_views.py`.
     - provisioning's own generated names pass.
   - Application integration, through the typed VM operator client: an over-long
     login is refused with 422, and no job is submitted.
-- [ ] 4.2 Correct the IaC README: an operator's guest name is checked against
+
+  `VmOperationsService.create_vm` runs `check_guest_name` first and raises the
+  family's `ProvisioningRouteError(422, …)` with the rule's message; the VMs
+  controller's `_submitted`, which already mapped an unregistered host to 404,
+  awaits the submission through a new `route_binding.routed_async`, VM's async
+  form of `routed`, which answers the refusal with its status and detail. Only
+  create is checked, as D17 says.
+  - Unit, VM adapter, new `tests/unit/test_guest_names.py`: names that are not
+    hostname labels (upper case, underscore, leading or trailing hyphen, a
+    space, 64 characters, empty) and names whose login is 33 characters or
+    starts with a digit are refused, each by its rule's message; names at the
+    32-character login limit and the 63-character label limit pass, and so do
+    provisioning's own generated names.
+  - Unit, `provisioning/compute/service/tests/unit/services/test_vm_operations_service.py`:
+    a 33-character login is refused with 422 naming `useradd`, and nothing is
+    submitted. The suite tests VM-adapter code from the service's tree, as it
+    did before this change; D20 does not list it among the suites to move, so
+    it stays.
+  - Application integration, `test_vms_api.py` `TestCreateVmViaClient`, whose
+    host is registered, through `VmOperatorClient`:
+    `test_a_guest_name_the_playbooks_refuse_is_refused_before_any_job`, a
+    33-character login answers 422 naming `useradd`, no job is listed, and the
+    runner never starts a playbook. On a registered host an unchecked name
+    would be recorded and run, so the last two assertions depend on the check.
+
+  All pass.
+- [x] 4.2 Correct the IaC README: an operator's guest name is checked against
   the same rules (D17).
-- [ ] 4.3 Bump the VM adapter, unless section 3 already did, and run
+
+  `domains/vms/provisioning/iac/README.md`, "Guest names": a name an operator
+  chooses when creating a VM directly is checked against the same rules and
+  refused with 422 before any job is submitted. `guest_names.py`'s docstring
+  says the same.
+- [x] 4.3 Bump the VM adapter, unless section 3 already did, and run
   `make lock`. **Verification checkpoint:**
   - unit and application integration, 4.1;
   - `make test` in `domains/vms/provisioning/adapter` and
@@ -583,6 +614,18 @@ locks. The branch edits only the adapter's `inventory_views.py`.
 
   End-to-end: no scenario creates an operator-named VM. No scenario is owed: the
   check is one authority's validation, which application integration owns.
+
+  No bump: the VM adapter took its one bump of the change in section 2
+  (`0.14.0`). `make lock` rebuilt the wheels and changed no lock. `make test`:
+  VM adapter 55 passed; `provisioning/compute/service` 662 unit and 539
+  application integration. The full `make test` passes; `make
+  check-packaging` passes; `make check-change` passes but for the closeout
+  citation section 1 notes. The end-to-end statement stands.
+
+  Handoff: the fresh-context check found the first integration test on an
+  unregistered host, where no job is recorded whatever the name, and no case
+  at the hostname-label limit; both corrected as recorded above, and the
+  controller's duplicated error mapping became `routed_async`.
 
 ## 5. VM's tables: suites in the VM adapter, the relay index on its model
 

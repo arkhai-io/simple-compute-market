@@ -253,6 +253,21 @@ class TestCreateVmViaClient:
         assert submit.status == "queued"
         await asyncio.wait_for(dispatched.wait(), timeout=5.0)
 
+    async def test_a_guest_name_the_playbooks_refuse_is_refused_before_any_job(
+        self, client_and_queue, fake_ansible
+    ):
+        """On a registered host, where an accepted name would be recorded and run."""
+        client, _ = client_and_queue
+
+        # 'agent' and 28 more letters: a 33-character login, one over useradd's.
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await client.vm.create_vm(HOST, CreateVmRequest(vm_target="agent-" + "b" * 28))
+
+        assert refused.value.status_code == 422
+        assert "useradd" in str(refused.value)
+        assert (await client.family.list_jobs()).total == 0
+        fake_ansible.start_playbook.assert_not_called()
+
 
 
 class TestDispatchRequiresARegisteredHost:
