@@ -301,6 +301,21 @@ def _ancestor(clone: Path, ancestor: str, commit: str) -> bool:
                 check=False).returncode == 0
 
 
+def _merged(clone: Path, head: str, into: str) -> bool:
+    """Whether `into` holds all that `head` brings.
+
+    A squash or rebase merge leaves `head` no ancestor of `into`, so the content is
+    compared instead: merging `head` into `into` must apply cleanly and change
+    nothing. A later commit on `into` that undid part of `head` reads as not merged,
+    the safe way to be wrong before deleting.
+    """
+    if _ancestor(clone, head, into):
+        return True
+    merge = _git(clone, "merge-tree", "--write-tree", into, head, check=False)
+    tree = _git(clone, "rev-parse", f"{into}^{{tree}}").stdout.strip()
+    return merge.returncode == 0 and merge.stdout.strip() == tree
+
+
 def _furthest(clone: Path, name: str, on_origin: set[str]) -> tuple[str, str] | None:
     """`name` at its furthest point among the workspace's branch and `origin`'s, as
     (ref, commit); refused when the two have diverged, since either could be meant."""
@@ -463,7 +478,7 @@ def _left_behind(clone: Path, branch: str) -> list[str]:
     head = _ref(clone, f"refs/heads/{branch}")
     if head is None:
         problems.append(f"{branch} is not a branch of the clone, so its merge cannot be shown")
-    elif _ref(clone, merged_into) is None or not _ancestor(clone, head, merged_into):
+    elif _ref(clone, merged_into) is None or not _merged(clone, head, merged_into):
         problems.append(f"{branch} is not merged into origin/{DEFAULT_FROM}")
     unpushed = _git(clone, "rev-list", "--branches", "--not", "--remotes=origin").stdout.split()
     if unpushed:

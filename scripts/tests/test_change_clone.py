@@ -622,6 +622,51 @@ def test_a_record_that_differs_in_the_workspace_refuses_removal(workspace: Path)
     assert refused.synced.copied
 
 
+def _land_on_dev(tmp_path: Path, squash: bool, later: str | None = None) -> None:
+    """Lands the branch on origin's dev as one new commit, the way a pull request's
+    squash merge does, or not at all; then commits `later` to dev on top."""
+    other = tmp_path / "dev-checkout"
+    _git(tmp_path, "clone", "-q", "-b", "dev", str(tmp_path / "origin.git"), str(other))
+    if squash:
+        _git(other, "merge", "-q", "--squash", f"origin/{BRANCH}")
+        _git(other, "commit", "-q", "-m", "the change (#1)")
+    if later:
+        _commit(other, later, "after the merge\n")
+    _git(other, "push", "-q", "origin", "dev")
+
+
+def _pushed_clone(workspace: Path) -> Path:
+    clone = _create(workspace).clone
+    _commit(clone, "feature.txt", "the change\n")
+    _git(clone, "push", "-q", "origin", BRANCH)
+    (clone / REVIEWS).mkdir(parents=True)
+    (clone / REVIEWS / "workflow.jsonl").write_text("{}\n", "utf-8")
+    return clone
+
+
+def test_a_squash_merged_branch_is_removed(workspace: Path, tmp_path: Path) -> None:
+    clone = _pushed_clone(workspace)
+    _land_on_dev(tmp_path, squash=True, later="unrelated.txt")
+
+    clones.remove(workspace, CHANGE)
+
+    assert not clone.exists()
+
+
+def test_a_squash_merge_later_undone_on_dev_refuses_removal(
+        workspace: Path, tmp_path: Path) -> None:
+    clone = _pushed_clone(workspace)
+    _land_on_dev(tmp_path, squash=True)
+    other = tmp_path / "dev-checkout"
+    _git(other, "rm", "-q", "feature.txt")
+    _git(other, "commit", "-q", "-m", "undo the change")
+    _git(other, "push", "-q", "origin", "dev")
+
+    _refused(workspace, f"{BRANCH} is not merged into origin/dev")
+
+    assert clone.is_dir()
+
+
 def test_a_branch_not_merged_refuses_removal(workspace: Path) -> None:
     clone = _create(workspace).clone
     _commit(clone, "feature.txt", "the change\n")
