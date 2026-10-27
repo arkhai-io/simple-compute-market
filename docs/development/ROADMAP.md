@@ -425,7 +425,7 @@ value — quota as a sales cap, not capacity — so admitting the unbacked value
 an inference filter-specification bump when a seller needs it, since a model
 server's supply is not finite the way a GPU is. And a monetary `asking_rate` per
 million tokens, once
-[`publish-indicative-listing-rates`](../../openspec/changes/publish-indicative-listing-rates/)
+[`publish-indicative-listing-rates`](../../openspec/changes/archive/2026-10-01-publish-indicative-listing-rates/)
 — now unblocked — promotes the exact-decimal filter value type and declarative
 co-requirements. Until then inference compares on integer credit rates and the
 settlement asset.

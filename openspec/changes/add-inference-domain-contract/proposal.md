@@ -217,7 +217,7 @@ them.
   Admitting the unbacked value is an inference filter-specification bump;
   `design.md` records the trigger. Its publication-hook changes are in the
   publication roles the family kit takes from current `dev`.
-- [`publish-indicative-listing-rates`](../publish-indicative-listing-rates/) —
+- [`publish-indicative-listing-rates`](../archive/2026-10-01-publish-indicative-listing-rates/) —
   now design-complete and unblocked; owns the exact-decimal filter value type and declarative filter
   co-requirements the generic registry lacks. Inference does not duplicate that
   work; it filters on integer credit rates and the settlement asset today and
