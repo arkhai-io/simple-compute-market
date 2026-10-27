@@ -17,22 +17,30 @@ The log holds only what the change's files cannot: session ids, the owner's roun
 agreements, and the last outcome. Where the log and the files disagree, the files
 win. It lives in the change's untracked `reviews/` directory and moves with the
 change when it is archived.
+
+Every line this module appends carries the log's format, `"format": 2`, so a line
+another writer appended without it is told apart. A log may be replaced whole, a new
+file renamed over its name, so every reader and appender checks, once it holds the
+lock, that the file it locked is still the one the name holds.
 """
 
 from __future__ import annotations
 
 import fcntl
 import json
+import os
 from datetime import timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import IO, Any, Sequence
 
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
+from change_workflow.graph import section_ids
 from change_workflow.outcome import outcome_problems
 from change_workflow.records import next_number
 from find_change import ChangeNotFound, change_directory, find_records
 
 LOG = "workflow.jsonl"
+FORMAT = 2
 
 
 class LogError(StepError):
@@ -79,6 +87,37 @@ def _parse(path: Path, text: str) -> list[Entry]:
     return entries
 
 
+def _locked(path: Path, mode: str, operation: int) -> IO[str] | None:
+    """The log opened in `mode` and locked by `operation`; None when there is no log
+    to open for reading.
+
+    A lock is held on a file, not on its name: a process that opened the log, then
+    waited for its lock while the log was replaced by a rename, would take the lock
+    on the replaced file and read or append where no one looks. So once the lock is
+    held, the file locked is compared with the file the name holds, and the log is
+    opened and locked again until they are one.
+    """
+    while True:
+        try:
+            stream = path.open(mode, encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        try:
+            fcntl.flock(stream, operation)
+            locked = os.fstat(stream.fileno())
+            try:
+                named = path.stat()
+            except FileNotFoundError:
+                named = None
+        except BaseException:
+            stream.close()
+            raise
+        if named is not None and (named.st_dev, named.st_ino) == (locked.st_dev,
+                                                                  locked.st_ino):
+            return stream
+        stream.close()
+
+
 def read_log(path: Path) -> list[Entry]:
     """Every line of the workflow log, in order; an absent log is empty.
 
@@ -88,9 +127,11 @@ def read_log(path: Path) -> list[Entry]:
     """
     if not path.is_file():
         return []
-    with path.open(encoding="utf-8") as stream:
-        # Shared, so a line being appended is never read half-written.
-        fcntl.flock(stream, fcntl.LOCK_SH)
+    # Shared, so a line being appended is never read half-written.
+    stream = _locked(path, "r", fcntl.LOCK_SH)
+    if stream is None:
+        return []
+    with stream:
         return _parse(path, stream.read())
 
 
@@ -100,24 +141,30 @@ def last_entries(path: Path, count: int) -> list[Entry]:
 
 
 def append_entry(path: Path, entry: Entry, clock: Clock = utc_now) -> Entry:
-    """Append `entry` to the log with the next `seq` and the time, and return the line.
+    """Append `entry` to the log with the next `seq`, the time, and the log's format,
+    and return the line.
 
     Several processes may append to one change's log at once, so the log is
     locked from reading the last `seq` to writing the new line; without the lock
     both could take the same number.
     """
-    if reserved := {"seq", "at"} & entry.keys():
+    if reserved := {"seq", "at", "format"} & entry.keys():
         raise StepError(f"a log line may not set {', '.join(sorted(reserved))}, which "
                         "the log assigns")
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+    # Opened to append, so a log that does not exist yet is created; only a
+    # directory that has gone since cannot be opened.
+    stream = _locked(path, "a+", fcntl.LOCK_EX)
+    if stream is None:
+        raise StepError(f"{path.parent} is gone; the change was moved while its log was "
+                        "written")
+    with stream:
         stream.seek(0)
         text = stream.read()
         entries = _parse(path, text)
         line = {"seq": max((e["seq"] for e in entries), default=0) + 1,
                 "at": clock().astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                **entry}
+                "format": FORMAT, **entry}
         stream.seek(0, 2)
         # A last line saved without its newline would otherwise be joined to this one.
         separator = "\n" if text and not text.endswith("\n") else ""
@@ -144,15 +191,6 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
     return append_entry(path, {**run, **(extra or {}), **outcome}, clock)
 
 
-def _section_ids(sessions: Any) -> bool:
-    return (isinstance(sessions, list) and bool(sessions)
-            and all(isinstance(session, list) and session
-                    and all((isinstance(section, int) and not isinstance(section, bool))
-                            or (isinstance(section, str) and section)
-                            for section in session)
-                    for session in sessions))
-
-
 def note_round(path: Path, sections: Any, by: str, after: int | None = None,
                clock: Clock = utc_now, commit: str | None = None) -> Entry:
     """Record the implementation round the owner agreed: its sessions, each a list
@@ -166,7 +204,7 @@ def note_round(path: Path, sections: Any, by: str, after: int | None = None,
     as the round starts, the base its round view shows the round against: commits
     landing between rounds, a design revision among them, are not the round's.
     """
-    if not _section_ids(sections):
+    if not section_ids(sections):
         raise StepError("a round names one or more sessions, each a non-empty list of "
                         f"sections; got {sections!r}")
     if not by:

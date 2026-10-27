@@ -49,13 +49,13 @@ def test_a_run_is_headless_held_to_its_rules_and_given_the_schema(tmp_path: Path
 def test_each_outcome_is_logged_with_its_session_and_commit(tmp_path: Path, kind: str) -> None:
     claude = FakeClaude((event_lines(VALID[kind]), 0))
 
-    line = make_wrapper(tmp_path, claude).run("triage", CHANGE)
+    line = make_wrapper(tmp_path, claude).run("implement", CHANGE)
 
     # Every line carries the run's own record of denials, the step's replaced.
     expected = {**VALID[kind], "denials": []}
     assert {key: line[key] for key in expected} == expected
     assert (line["step"], line["session"], line["commit"], line["exit_status"]) == (
-        "triage", SESSION, COMMIT, 0)
+        "implement", SESSION, COMMIT, 0)
     assert (line["harness"], line["model"], line["effort"]) == ("claude", "claude-opus-5-5",
                                                                "high")
     assert "unavailable" not in line
@@ -568,11 +568,11 @@ def test_an_unavailable_model_falls_to_the_next_in_order(tmp_path: Path) -> None
     Claude entries is proven on the wrapper's turn with the models given directly."""
     claude = FakeClaude((failed_run(LIMIT), 1), (event_lines(VALID["finished"]), 0))
     wrapper = make_wrapper(tmp_path, claude)
-    rules = load_steps()["triage"]
+    rules = load_steps()["validate"]
     second = Model("claude", "second-model", "low")
 
-    line = wrapper._turn("triage", rules, CHANGE, log_path(tmp_path, CHANGE),
-                         "/change-triage x", (OPUS, second), session=None)
+    line = wrapper._turn("validate", rules, CHANGE, log_path(tmp_path, CHANGE),
+                         "/change-validate x", (OPUS, second), session=None)
 
     assert [option(command, "--model") for command in claude.commands] == [
         "claude-opus-5-5", "second-model"]
@@ -736,6 +736,77 @@ def test_a_record_whose_process_is_gone_counts_as_no_run(tmp_path: Path) -> None
             f"triage of {CHANGE} (process 4242, started 2026-10-21T09:15:40Z)")
         assert live_runs(runs, alive=lambda pid: False) == []
     assert live_runs(runs, alive=lambda pid: True) == []
+
+
+# A triage names the records it triaged, which the computation routes on.
+
+def _reviews(tmp_path: Path) -> Path:
+    return log_path(tmp_path, CHANGE).parent
+
+
+def _triaged_records(tmp_path: Path, *names: str) -> None:
+    (tmp_path / "openspec/changes" / CHANGE).mkdir(parents=True, exist_ok=True)
+    reviews = _reviews(tmp_path)
+    reviews.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (reviews / f"{name}.md").write_text("A record.\n", "utf-8")
+        (reviews / f"{name}.triage.md").write_text("Its triage.\n", "utf-8")
+
+
+def _triage(tmp_path: Path, outcome: dict) -> dict:
+    return make_wrapper(tmp_path, FakeClaude((event_lines(outcome), 0))).run("triage", CHANGE)
+
+
+def test_a_triage_names_its_exit(tmp_path: Path) -> None:
+    _triaged_records(tmp_path, "157-closeout")
+    outcome = {"outcome": "finished", "message": "Another closeout review.",
+               "triaged": ["157-closeout"], "next": {"step": "review", "kind": "closeout"}}
+
+    line = _triage(tmp_path, outcome)
+
+    assert {key: line[key] for key in outcome} == outcome
+    assert read_log(log_path(tmp_path, CHANGE)) == [line]
+
+
+def test_a_triage_may_name_the_records_triaged_beside_its_review(tmp_path: Path) -> None:
+    _triaged_records(tmp_path, "52-implementation", "53-validation",
+                     "54-implementation-owner", "55-design-external")
+    outcome = {"outcome": "returned", "message": "Back to planning.", "evidence": "F1",
+               "triaged": ["52-implementation", "53-validation", "54-implementation-owner"],
+               "next": {"step": "plan"}}
+
+    assert _triage(tmp_path, outcome)["outcome"] == "returned"
+    # An external review is a review of its kind.
+    assert _triage(tmp_path, {**outcome, "triaged": ["55-design-external"]})[
+        "outcome"] == "returned"
+
+
+@pytest.mark.parametrize("triaged,named", [
+    (None, "names no records in triaged"),
+    ([], "not a non-empty list"),
+    (["31-design"], "31-design is no record in reviews/"),
+    (["12-validation"], "12-validation names no review"),
+    (["13-design", "13-design"], "13-design is named twice"),
+    (["14-design"], "14-design has no triage file beside it"),
+    (["design"], "'design' is not a record's name"),
+])
+def test_a_triage_that_does_not_name_what_it_triaged_is_logged_stopped(
+        tmp_path: Path, triaged, named: str) -> None:
+    _triaged_records(tmp_path, "12-validation", "13-design")
+    # A review whose triage has not been written.
+    (_reviews(tmp_path) / "14-design").with_suffix(".md").write_text("x", "utf-8")
+    outcome = {"outcome": "finished", "message": "Advance.", "next": {"step": "plan"},
+               **({"triaged": triaged} if triaged is not None else {})}
+
+    line = _triage(tmp_path, outcome)
+
+    assert line["outcome"] == "stopped"
+    assert named in line["reason"]
+    assert line["message"] == f"Advance.\n\n{line['reason']}"
+
+
+def test_a_triage_that_asks_names_nothing_it_triaged(tmp_path: Path) -> None:
+    assert _triage(tmp_path, VALID["question"])["outcome"] == "question"
 
 
 def test_a_checkout_without_git_has_no_runs_directory(tmp_path: Path) -> None:

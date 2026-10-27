@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -47,7 +51,7 @@ def test_an_outcome_is_logged_with_its_run(tmp_path: Path) -> None:
     line = record_outcome(log, "validate", VALID["question"], session="51aa",
                           commit=COMMIT, clock=clock)
 
-    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "validate",
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "validate",
                     "session": "51aa", "commit": COMMIT, **VALID["question"]}
     assert [json.loads(text) for text in log.read_text("utf-8").splitlines()] == [line]
 
@@ -78,8 +82,8 @@ def test_seq_increases_across_outcomes_and_notes(tmp_path: Path) -> None:
 
     entries = read_log(log)
     assert [entry["seq"] for entry in entries] == [1, 2, 3]
-    assert entries[0] == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "orchestrator",
-                          "outcome": "round", "sections": [[1, 2], [3]], "by": "owner",
+    assert entries[0] == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2,
+                          "step": "orchestrator", "outcome": "round", "sections": [[1, 2], [3]], "by": "owner",
                           "after": 0}
     assert entries[1]["sections"] == [1, 2]
     assert entries[2]["decision"] == "rerun validate"
@@ -162,8 +166,8 @@ def test_a_decision_names_who_decided_the_run_it_resolves_and_the_next_step(
     review = note_orchestrator(log, "review again", "the owner asked", by="owner",
                                next_step="review", kind="pre-closeout", clock=clock)
 
-    assert line == {"seq": 2, "at": "2026-10-21T09:15:40Z", "step": "orchestrator",
-                    "outcome": "orchestrator", "by": "owner",
+    assert line == {"seq": 2, "at": "2026-10-21T09:15:40Z", "format": 2,
+                    "step": "orchestrator", "outcome": "orchestrator", "by": "owner",
                     "decision": "return to design confirmed", "reason": "the owner's word",
                     "resolves": 1, "next": "design"}
     assert (review["next"], review["kind"]) == ("review", "pre-closeout")
@@ -262,6 +266,109 @@ def test_run_fields_are_recorded_once(tmp_path: Path, extra: dict) -> None:
                        extra=extra)
 
     assert not log.exists()
+
+
+def test_every_appended_line_carries_the_logs_format(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+
+    note_round(log, [[1]], "owner", clock=clock)
+    record_outcome(log, "implement", VALID["finished"], session="s", commit=COMMIT,
+                   clock=clock)
+    note_orchestrator(log, "d", "r", clock=clock)
+    append_entry(log, {"step": "orchestrator", "outcome": "round"}, clock)
+
+    assert [entry["format"] for entry in read_log(log)] == [2, 2, 2, 2]
+
+
+@pytest.mark.parametrize("record", [True, False])
+def test_no_writer_sets_the_logs_format(tmp_path: Path, record: bool) -> None:
+    log = log_file(tmp_path)
+
+    with pytest.raises(StepError, match="format"):
+        if record:
+            record_outcome(log, "plan", {**VALID["finished"], "format": 1}, session="s",
+                           commit=COMMIT)
+        else:
+            append_entry(log, {"step": "orchestrator", "format": 1})
+
+    assert not log.exists()
+
+
+def _descriptors_of(path: Path) -> int:
+    """How many of this process's open descriptors name `path` as it is now."""
+    named = 0
+    for descriptor in Path("/proc/self/fd").iterdir():
+        try:
+            named += os.readlink(descriptor) == str(path)
+        except OSError:
+            continue
+    return named
+
+
+def _while_replaced(log: Path, call) -> tuple[list, str]:
+    """Run `call` in a second thread that opens the log while this one holds its
+    lock, then rename a new log over the name and release the lock: what `call`
+    returned, and what the replaced file holds afterwards.
+
+    The thread's opening is observed as a second descriptor naming the log, a
+    bounded wait, so a call that never opens the log fails rather than hangs.
+    """
+    replacement = log.with_name("workflow.jsonl.new")
+    replacement.write_text('{"seq": 5, "step": "orchestrator", "format": 2}\n', "utf-8")
+    returned: list = []
+    failures: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            returned.append(call())
+        except BaseException as exc:
+            failures.append(exc)
+
+    with log.open("a+", encoding="utf-8") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        caller = threading.Thread(target=run)
+        caller.start()
+        deadline = time.monotonic() + 10
+        while _descriptors_of(log) < 2:
+            assert time.monotonic() < deadline, "the call never opened the log"
+            time.sleep(0.01)
+        os.replace(replacement, log)
+        fcntl.flock(held, fcntl.LOCK_UN)
+        caller.join(10)
+        held.seek(0)
+        replaced = held.read()
+    assert not caller.is_alive() and not failures, failures
+    return returned, replaced
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),
+                    reason="observes the thread's descriptors through /proc")
+def test_an_append_waiting_on_a_replacement_lands_in_the_new_log(tmp_path: Path) -> None:
+    # A writer that replaces the log holds its lock while it renames a new file over
+    # the name; a run appending its outcome, which opened the log before the rename,
+    # takes the lock on the replaced file and must append to the new one.
+    log = log_file(tmp_path)
+    note_orchestrator(log, "old", "r", clock=clock)
+    old = log.read_text("utf-8")
+
+    (line,), replaced = _while_replaced(log, lambda: record_outcome(
+        log, "implement", VALID["finished"], session="s", commit=COMMIT, clock=clock))
+
+    assert [entry["seq"] for entry in read_log(log)] == [5, 6]
+    assert read_log(log)[-1] == line
+    # The replaced file was never written: the line went where readers look.
+    assert replaced == old
+
+
+@pytest.mark.skipif(not Path("/proc/self/fd").is_dir(),
+                    reason="observes the thread's descriptors through /proc")
+def test_a_read_waiting_on_a_replacement_reads_the_new_log(tmp_path: Path) -> None:
+    log = log_file(tmp_path)
+    note_orchestrator(log, "old", "r", clock=clock)
+
+    (entries,), _ = _while_replaced(log, lambda: read_log(log))
+
+    assert [entry["seq"] for entry in entries] == [5]
 
 
 def test_a_last_line_without_its_newline_is_not_joined(tmp_path: Path) -> None:

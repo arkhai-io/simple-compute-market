@@ -18,8 +18,8 @@ pre-closeout review refuses to start unless the latest validation record names
 `HEAD`, or an ancestor from which `HEAD` changes only changes' records — after an
 earlier pre-closeout review's triage, only paths under `openspec/` and `docs/` —
 with the result `passed`; the owner may override that. The review's outcome is `finished`,
-naming the record this run published, or `stopped` with the runner's reason; an
-earlier record never counts.
+naming the record this run published and, as its exit, the triage of its kind, or
+`stopped` with the runner's reason; an earlier record never counts.
 """
 
 from __future__ import annotations
@@ -400,9 +400,10 @@ def run_review(change: str, kind: str, *, base: str = DEFAULT_BASE, model: str |
     return output
 
 
-def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
-    """A published review's outcome, with its reviewer session, its reviewed commit,
-    and what the line records of its reviewer.
+def review_outcome(path: Path, kind: str) -> tuple[Entry, str | None, str | None, Entry]:
+    """A published review's outcome, naming the triage of its `kind` as its exit, with
+    its reviewer session, its reviewed commit, and what the line records of its
+    reviewer.
 
     Each is read back from the markers the record ends with, so the line names what
     this run published and nothing an earlier record says. A review on Claude also
@@ -415,7 +416,7 @@ def review_outcome(path: Path) -> tuple[Entry, str | None, str | None, Entry]:
     commits = _REVIEWED_COMMIT.findall(text)
     reviewers = _REVIEWER.findall(text)
     closing = text.rstrip("\n").rsplit("\n\n", 1)[-1]
-    outcome: Entry = {"outcome": "finished", "next": "triage",
+    outcome: Entry = {"outcome": "finished", "next": {"step": "triage", "kind": kind},
                       "message": f"{path.name} written; triage is next"}
     extra: Entry = {}
     if reviewers:
@@ -486,7 +487,7 @@ def _review_and_log(change: str, kind: str, *, root: Path, clock: Clock,
         if not isinstance(exc, Exception):
             raise
         return line
-    outcome, session, commit, reviewer = review_outcome(path)
+    outcome, session, commit, reviewer = review_outcome(path, kind)
     reviewer.update(review_cost(path.parent / TRANSCRIPTS / path.with_suffix(".log").name,
                                 log, session, reviewer.get("harness"), started))
     return record_outcome(log, "review", outcome, session=session, commit=commit,

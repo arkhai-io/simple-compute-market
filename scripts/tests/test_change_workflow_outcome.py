@@ -24,7 +24,7 @@ EXAMPLE_OUTCOMES = [
      "awaiting": "environmental remedy"},
 ]
 REQUIRED = {"finished": ["next"], "question": ["awaiting"],
-            "returned": ["return_to", "evidence"], "blocked": ["blocked_on"],
+            "returned": ["evidence"], "blocked": ["blocked_on"],
             "stopped": ["reason", "denials"]}
 
 
@@ -101,6 +101,76 @@ def test_a_malformed_mapping_of_rounds_is_rejected(rounds, problem: str) -> None
     problems = outcome_problems({**VALID["finished"], "rounds": rounds})
 
     assert any(problem in found for found in problems), problems
+
+
+# An exit is a target naming a node of the workflow graph.
+
+@pytest.mark.parametrize("target", [
+    {"step": "plan"}, {"step": "review", "kind": "pre-closeout"},
+    {"step": "triage", "kind": "implementation"}, {"step": "round"},
+    {"step": "implement", "sections": [["5"], [6]]},
+    {"step": "validate", "target": {"step": "closeout"}},
+    {"step": "validate", "target": {"step": "triage", "kind": "implementation"}},
+    {"step": "done"},
+], ids=lambda target: str(target))
+def test_an_object_next_naming_a_node_is_accepted(target: dict) -> None:
+    assert outcome_problems({**VALID["finished"], "next": target}) == []
+
+
+def test_a_finished_step_may_say_what_comes_next_as_a_string() -> None:
+    assert outcome_problems({**VALID["finished"], "next": "the plan's next round"}) == []
+
+
+@pytest.mark.parametrize("target,problem", [
+    ({"step": "review"}, "a review is a node only with the kind of review it is"),
+    ({"step": "triage"}, "a triage is a node only with the kind of review it triages"),
+    ({"step": "review", "kind": "owner"}, "review:owner is no node"),
+    ({"step": "triage", "kind": "validation"}, "triage:validation is no node"),
+    ({"step": "validate"}, "a validation names the target it is for"),
+    ({"step": "validate", "target": {"step": "review"}}, "kind of review it is"),
+    ({"step": "validate", "target": {"step": "validate", "target": {"step": "plan"}}},
+     "other than another validation"),
+    ({"step": "implement"}, "an implementation names its sessions"),
+    ({"step": "plan", "kind": "design"}, "only a review or a triage names a kind"),
+    ({"step": "plan", "sections": [[1]]}, "only an implementation names sections"),
+    ({"step": "deploy"}, "'deploy' is no node"),
+], ids=lambda value: str(value))
+def test_an_object_next_naming_no_node_is_refused(target: dict, problem: str) -> None:
+    problems = outcome_problems({**VALID["finished"], "next": target})
+
+    assert len(problems) == 1 and problems[0].startswith("outcome.next names no node")
+    assert problem in problems[0]
+
+
+def test_an_empty_kind_is_refused_by_the_schema() -> None:
+    problems = outcome_problems({**VALID["finished"], "next": {"step": "review", "kind": ""}})
+
+    assert problems and "outcome.next" in problems[0] and "shorter than 1" in problems[0]
+
+
+def test_a_return_names_the_step_it_returns_to() -> None:
+    returned = {"outcome": "returned", "message": "Needs a decision.",
+                "evidence": "the section's notes", "next": {"step": "design"}}
+
+    assert outcome_problems(returned) == []
+    # A return names its target as a node, never as words, whatever else it gives.
+    for given in ({}, {"return_to": "design"}):
+        assert "outcome.next is not of type object" in outcome_problems(
+            {**returned, **given, "next": "back to design"})
+    # Or the phase it returns to.
+    assert outcome_problems({**VALID["returned"]}) == []
+    assert outcome_problems({key: value for key, value in returned.items()
+                             if key != "next"}) == [
+        "outcome matches none of its allowed forms: outcome has no next; or outcome has "
+        "no return_to"]
+
+
+def test_a_triage_names_the_records_it_triaged_as_strings() -> None:
+    triaged = {**VALID["finished"], "next": {"step": "plan"}, "triaged": ["13-design"]}
+
+    assert outcome_problems(triaged) == []
+    assert outcome_problems({**triaged, "triaged": [13]}) == [
+        "outcome.triaged[0] is not of type string"]
 
 
 def test_claude_code_is_given_no_top_level_combinator() -> None:

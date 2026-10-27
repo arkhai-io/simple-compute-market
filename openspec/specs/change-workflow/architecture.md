@@ -164,6 +164,7 @@ flowchart TD
     review_closeout["review:closeout"]
     triage_closeout["triage:closeout"]
     archive_cleanup["archive-cleanup"]
+    done["done"]
     round_view["round-view"]
     validate["validate"]
     join_triage_implementation{{"join"}}
@@ -191,6 +192,7 @@ flowchart TD
     review_closeout --> triage_closeout
     triage_closeout -->|"advance<br/>a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate, failed or inconclusive: owner"| archive_cleanup
     triage_closeout -->|"another round"| review_closeout
+    archive_cleanup --> done
     round_view -->|"the owner's reading"| join_triage_implementation
     round_view -->|"another round<br/>a fix committed since the review read ⇒ round-view<br/>a fix committed since the review validated ⇒ validate, failed or inconclusive: owner"| review_implementation
     validate -->|"nothing to implement<br/>HEAD validated, records exempt ⇒ validate, failed or inconclusive: owner"| review_pre_closeout

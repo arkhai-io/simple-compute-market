@@ -489,10 +489,11 @@ def test_a_published_review_is_logged_finished_naming_its_record_and_commit(
                           runner=writing(review_text(), session="codex-1"),
                           head=lambda _: HEAD)
 
-    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "step": "review",
+    assert line == {"seq": 1, "at": "2026-10-21T09:15:40Z", "format": 2, "step": "review",
                     "session": "codex:codex-1", "commit": HEAD, "kind": "design",
                     "record": f"01-{kind}.md", "harness": "codex", "model": "gpt-6-sol",
-                    "effort": "high", "outcome": "finished", "next": "triage",
+                    "effort": "high", "outcome": "finished",
+                    "next": {"step": "triage", "kind": "design"},
                     "message": f"01-{kind}.md written; triage is next"}
 
 

@@ -3,7 +3,8 @@ commits they name.
 
 Records and transcripts share one numbering: each takes the number after every
 numbered file in `reviews/` and its transcripts, so a record written beside a run
-is never overwritten by it. A validation record clears a commit for what follows
+is never overwritten by it. A triage's outcome names the records it triaged by
+these names (`triaged_problems`). A validation record clears a commit for what follows
 it when it names that commit, or an ancestor from which the commit changes only
 changes' records — or, at closeout's gate, only documentation.
 """
@@ -13,9 +14,9 @@ from __future__ import annotations
 import re
 import subprocess
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-from change_workflow.common import CHANGES
+from change_workflow.common import CHANGES, KINDS
 
 TRANSCRIPTS = "transcripts"
 NUMBERED = re.compile(r"^(\d+)-")
@@ -90,6 +91,45 @@ def changed_since(root: Path, commit: str, head: str) -> list[str] | None:
     diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", commit, head],
                           cwd=root, capture_output=True, text=True)
     return [path for path in diff.stdout.split("\0") if path] if diff.returncode == 0 else None
+
+
+_RECORD_NAME = re.compile(r"^\d+-([a-z]+(?:-[a-z]+)*)$")
+
+
+def triaged_problems(triaged: Any, reviews: Path) -> list[str]:
+    """Why `triaged`, the records a triage's outcome names, does not name what it
+    triaged; empty when it does.
+
+    It is a non-empty list of distinct names, each a numbered record in `reviews` as
+    its file is named without `.md`, `NN-<kind>`, with its triage file beside it, and
+    at least one of them a review, `-external` included; the others may be the
+    validation, the owner's notes, or the orchestrating session's observations
+    triaged with it. Whether a record belongs to the triage the computation meant
+    cannot be checked here: the triage file beside it is that triage's mark.
+    """
+    if triaged is None:
+        return ["the triage names no records in triaged"]
+    if not isinstance(triaged, list) or not triaged:
+        return [f"triaged is not a non-empty list of records: {triaged!r}"]
+    problems = []
+    seen: set[str] = set()
+    kinds = []
+    for name in triaged:
+        if not isinstance(name, str) or not (match := _RECORD_NAME.match(name)):
+            problems.append(f"{name!r} is not a record's name, NN-<kind>")
+            continue
+        if name in seen:
+            problems.append(f"{name} is named twice")
+            continue
+        seen.add(name)
+        if not (reviews / f"{name}.md").is_file():
+            problems.append(f"{name} is no record in reviews/")
+        elif not (reviews / f"{name}.triage.md").is_file():
+            problems.append(f"{name} has no triage file beside it")
+        kinds.append(match.group(1))
+    if not problems and not any(kind.removesuffix("-external") in KINDS for kind in kinds):
+        problems.append(f"{', '.join(triaged)} names no review")
+    return problems
 
 
 def latest_validation(reviews: Path) -> Path | None:

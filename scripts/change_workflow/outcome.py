@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from change_workflow.common import ROOT, StepError
+from change_workflow.graph import TargetError, node_of
 
 SCHEMA = ROOT / ".agents" / "change-outcome.schema.json"
 
@@ -60,8 +61,10 @@ def schema_problems(value: Any, schema: dict[str, Any], path: str = "outcome") -
         problems.append(f"{path} is shorter than {schema['minLength']}")
     if "minItems" in schema and isinstance(value, list) and len(value) < schema["minItems"]:
         problems.append(f"{path} has fewer than {schema['minItems']} items")
-    if "anyOf" in schema and all(schema_problems(value, part, path) for part in schema["anyOf"]):
-        problems.append(f"{path} matches none of its allowed forms")
+    if "anyOf" in schema and all(found := [schema_problems(value, part, path)
+                                           for part in schema["anyOf"]]):
+        problems.append(f"{path} matches none of its allowed forms: "
+                        + "; or ".join(", ".join(each) for each in found))
     if isinstance(value, list) and "items" in schema:
         for index, item in enumerate(value):
             problems += schema_problems(item, schema["items"], f"{path}[{index}]")
@@ -94,5 +97,16 @@ def harness_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def outcome_problems(outcome: Any, schema: dict[str, Any] | None = None) -> list[str]:
-    """Why `outcome` is not a step outcome; empty when it is."""
-    return schema_problems(outcome, schema if schema is not None else load_schema())
+    """Why `outcome` is not a step outcome; empty when it is.
+
+    The schema holds a target's shape; whether it names a node of the workflow
+    graph, a review with a kind the graph knows say, is the graph's to answer.
+    """
+    problems = schema_problems(outcome, schema if schema is not None else load_schema())
+    target = outcome.get("next") if isinstance(outcome, dict) else None
+    if isinstance(target, dict) and not any(p.startswith("outcome.next") for p in problems):
+        try:
+            node_of(target)
+        except TargetError as exc:
+            problems.append(f"outcome.next names no node: {exc}")
+    return problems

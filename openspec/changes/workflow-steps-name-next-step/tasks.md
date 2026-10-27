@@ -214,37 +214,73 @@ outcome"). Touches `scripts/change_workflow/graph.py`,
 `.agents/change-outcome.schema.json`, `scripts/change_workflow/outcome.py`, `log.py`,
 `wrapper.py`, `harness.py`, `review.py`, `cli.py`, `cost.py`, and `scripts/tests/`.
 
-- [ ] 3.1 `graph.py`: a target's node from its object — `step`, with `kind` for a
+- [x] 3.1 `graph.py`: a target's node from its object — `step`, with `kind` for a
       review and for a triage the kind of review it triages, `sections` for an
       implementation, a nested `target` for validation, and `{"step": "done"}` —
       refusing a review or a triage without its kind, or with an empty or unknown
       one, and naming why (D2, 21 F3). The table gains the triage nodes' kinds as
       targets and `done` as archive cleanup's exit (D1); the drawing is redrawn.
-- [ ] 3.2 `.agents/change-outcome.schema.json` and `outcome.py`: `next` an object
+      `graph.node_of(target)` returns the node or raises `TargetError` naming why:
+      also refused are a kind, sections, or target on a step that takes none, an
+      unknown key, a validation for another validation, and `implement` without
+      sessions of sections (`graph.section_ids`, moved here from `log.py`, which
+      imports it); `implement` with sections is the `round` node. `DONE` is a node
+      with no exits and no step (`runs` None). Correction to the plan: a triage's
+      *result* still names no kind — `Node.result` is unchanged, since
+      `test_change_next_step.py`, unchanged in this section, compares a triage
+      result exactly (`{"step": "triage", "reason": …}`); section 6 changes it with
+      that test. The drawing gains `done` and `archive_cleanup --> done`.
+- [x] 3.2 `.agents/change-outcome.schema.json` and `outcome.py`: `next` an object
       target or, until section 8 switches the skills, a string — a per-property
       `anyOf`, which `harness_schema()` keeps (D3, the cadence's ordering note);
       `returned` requires `next` as an object and no longer `return_to`; `triaged`
       an array of strings. The schema check refuses an object `next` that names no
       node.
-- [ ] 3.3 `triaged` (D3): a non-empty list of distinct `NN-<kind>` names, each a
+      The object form: `step`, `kind`, `sections` (shaped as `rounds`' sessions),
+      and `target` (an object, its node checked by `node_of`), no other key;
+      `outcome_problems` adds `node_of`'s refusal as `outcome.next names no node:
+      …`, and an `anyOf` failure now lists each form's problems. Correction to the
+      plan: `returned` requires `evidence` and *either* an object `next` or
+      `return_to`, not an object `next` alone, until section 8 — the cadence's
+      ordering note applies to returns too, since today's skills write `return_to`,
+      and `test_change_next_step.py` logs such returns through `record_outcome`;
+      8.5 drops `return_to`'s alternative. A returned `next`, when given, is an
+      object, `return_to` or not.
+- [x] 3.3 `triaged` (D3): a non-empty list of distinct `NN-<kind>` names, each a
       numbered record in the change's `reviews/` with its triage file beside it, at
       least one a review of any kind, `-external` included. `wrapper.py` records a
       triage outcome that breaks the rule, or names none, as stopped, naming the
       reference; the rule is one function that section 4's `record` calls too.
-- [ ] 3.4 `log.py`: every line `append_entry` writes carries `"format": 2` (D7), so
+      `records.triaged_problems(triaged, reviews)`, a list of problems; the
+      wrapper's `triage_outcome` applies it to a triage's `finished` or `returned`
+      outcome, in the log's directory at the run's end, keeping the step's message
+      ahead of the reason. A question, block, or stop names nothing.
+- [x] 3.4 `log.py`: every line `append_entry` writes carries `"format": 2` (D7), so
       the wrapper's, the decision writer's, and the round lines all do;
       `record_outcome` refuses an outcome that sets `format`.
-- [ ] 3.5 `log.py`: `read_log` and `append_entry`, once they hold the log's lock,
+      `format` is reserved in `append_entry` beside `seq` and `at`, so no writer
+      sets it; an outcome setting it is refused by the schema first. An appender
+      whose change directory has gone since it was found raises `StepError`.
+- [x] 3.5 `log.py`: `read_log` and `append_entry`, once they hold the log's lock,
       compare the file they locked with the file at the log's name by inode, and
       open and lock the log again when they differ (D7, 43 F2); a missing log is
       still empty to a reader, and created by an appender.
-- [ ] 3.6 `harness.py`: an unattended run's environment carries a marker that the
+      One helper, `_locked`, compares device and inode and reopens until they match.
+- [x] 3.6 `harness.py`: an unattended run's environment carries a marker that the
       run is the wrapper's, for `record` to refuse (D11).
-- [ ] 3.7 `review.py`: a review run's outcome names `{"step": "triage", "kind":
+      `run_claude` sets `CHANGE_WORKFLOW_UNATTENDED=1` (`harness.UNATTENDED_RUN`) in
+      the run's environment, so a review run on Claude carries it too; a Codex
+      review cannot run `record` in its read-only sandbox and is not marked.
+- [x] 3.7 `review.py`: a review run's outcome names `{"step": "triage", "kind":
       <its kind>}` as its exit (D3). `cli.py`'s `log` printing, `wrapper.py`'s
       `earlier`, and `cost.py` render an object `next` as its display string, and a
       string as before.
-- [ ] 3.8 Verification, each unit: `test_change_workflow_outcome.py` — an object
+      `review_outcome(path, kind)`. Correction to the plan: nothing renders `next`.
+      `cli.py`'s `log` prints each line as JSON, where an object `next` reads as
+      it is; `earlier` keeps the outcome's fields as the step gave them, an object
+      among them; and `cost.py` reads no `next`. A display string in either would
+      replace the target with words a reader could not route on.
+- [x] 3.8 Verification, each unit: `test_change_workflow_outcome.py` — an object
       `next` accepted, a string accepted, a review or a triage without its kind, an
       empty or unknown kind, and validation without its target refused;
       `test_change_workflow_wrapper.py` — the spec's "A triage names its exit", "A
@@ -258,6 +294,49 @@ outcome"). Touches `scripts/change_workflow/graph.py`,
       `test_change_next_step.py` unchanged, since routing still reads today's
       inputs; `make test`; `make check-change
       CHANGE=workflow-steps-name-next-step`. End-to-end: none, and none is owed.
+      Unit, each by calling the module it names: the outcome tests check targets
+      through `outcome_problems`, a returned outcome naming its step, and
+      `triaged`'s shape; the wrapper tests run a triage through the wrapper with a
+      fake harness over real records in a temporary directory, for each scenario
+      named and an external review, a record without its triage file, and a
+      malformed name; the log tests check the marker on lines from every writer,
+      `format` refused from an outcome and from `append_entry`, and a call waiting
+      on a replacement — a second thread runs `record_outcome`, or `read_log`,
+      which opens the log while the test holds its lock; the test renames a new
+      file over it and releases the lock, and the line lands in the new file, the
+      replaced one unchanged, or the read returns the new file's lines. Both fail
+      with the inode comparison disabled, which was tried and reverted. The
+      thread's opening is observed through `/proc/self/fd`, a bounded wait, and
+      the tests skip where `/proc` is absent. The review test checks the logged
+      line's exit; the graph tests `done`, `node_of`, and the redrawn block. One
+      harness test crosses a process boundary, so is not unit by `TESTING.md`'s
+      definition: a Python process `run_claude` starts, standing in for Claude
+      Code, sees the marker; that Claude Code passes it on to its own commands is
+      the harness's behaviour and not tested here. Those six files and
+      `test_change_next_step.py`: 488 passed, the latter unchanged from the
+      section's base (179).
+      Workflow suites (`-k "change or run_change_step or check_tasks or
+      round_view"` over `scripts/tests/`): 979 passed. `make test`: passed, before
+      the fresh-context check's fixes, which touched only the schema's return
+      branch, `append_entry`'s missing-directory error, and tests under
+      `scripts/`, rerun above. `make check-change`: every check passes but the
+      documentation citations, which
+      report `scripts/change_workflow/convert.py`, section 7's file. End-to-end:
+      none, confirmed; no `Owed by validation:` line.
+
+Handoff from section 3: from this commit the change's own log mixes unmarked lines
+with marked ones, which section 6's detection names for `convert`, as D7 intends.
+Today's routing still reads string `next` and `return_to`, which every line still
+carries or omits as before; an object `next` (a review's, from now on) is read by
+nothing yet, since `change_next_step.py` reads a review's line only for its
+outcome. Left for section 6: a triage's result naming its kind (`Node.result`),
+and the routing on `triaged`. Left for section 8: dropping the string `next` and
+`returned`'s `return_to` alternative. `section_ids` lives in `graph.py`, and
+`note_round` calls it from there. The replacement tests' helper, `_while_replaced`
+in `test_change_workflow_log.py`, is what section 7's "an append waiting on the
+conversion" can reuse with the real `convert`. It polls `/proc/self/fd` rather than
+a hook in `_locked`, since production code exposes no test-only hook
+(`ARCHITECTURE.md`, "Deterministic database-concurrency tests").
 
 ## 4. `record`: an interactive run records its own outcome
 
@@ -396,6 +475,11 @@ Touches `scripts/change_next_step.py`, `scripts/change_workflow/graph.py`,
       waits for that member's record (52 F1: the table declared the join while
       `in_round` read it from record kinds of its own, so a changed join redrew the
       diagram and left routing as it was).
+- [ ] 6.8 `graph.py`: a triage's result names the kind of review it triages
+      (`Node.result`, D2), with `test_change_next_step.py`'s rewrite (6.5) and the
+      graph test `test_a_node_names_its_step_and_a_reviews_kind`: section 3 left
+      it, since that test file is unchanged until 6.5 and compares a triage's
+      result exactly.
 
 ## 7. `convert`: a change's records converted when it takes the new code
 

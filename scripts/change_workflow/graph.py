@@ -22,6 +22,12 @@ closeout holds every step from that phase on, before the change is read; a clone
 bootstrap holds every step that needs the environment, the round's own
 implementation included, and every step while it has not started or has failed.
 
+A step's exit, an owner's direction, and the computation's result name a node the
+same way, as a target: an object naming its step, with `kind` for a review and for a
+triage the kind of review it triages, `sections` for an implementation out of the
+plan's order, and for a validation the `target` it is for (`node_of`). Its label,
+`review:pre-closeout`, is drawn in diagrams and documents and never parsed.
+
 `make change-graph` prints the table as a Mermaid diagram (`mermaid`), the diagram
 the change-workflow architecture shows. A durable change to the workflow is a
 change to this table, made as an OpenSpec change. See
@@ -34,6 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from change_workflow.common import StepError
 from change_workflow.records import is_documentation, is_record
 
 Result = dict[str, Any]
@@ -154,6 +161,8 @@ CLOSEOUT = Node("closeout")
 CLOSEOUT_REVIEW = Node("review", "closeout")
 CLOSEOUT_TRIAGE = Node("triage", "closeout")
 ARCHIVE_CLEANUP = Node("archive-cleanup")
+# The change is done: no step runs, and nothing leads on.
+DONE = Node("done")
 
 
 def owner(reason: str, **extra: Any) -> Result:
@@ -282,8 +291,8 @@ _STEPS = (
     _declare(CLOSEOUT_TRIAGE, ("closeout",),
              Exit(ARCHIVE_CLEANUP, (CORRECTION_VALIDATED,), ADVANCE),
              Exit(CLOSEOUT_REVIEW, when=ANOTHER_ROUND)),
-    # The change is done once archive cleanup has run.
-    _declare(ARCHIVE_CLEANUP, ("closeout",)),
+    _declare(ARCHIVE_CLEANUP, ("closeout",), Exit(DONE)),
+    Declaration(DONE, (), ("closeout",), None),
 )
 
 
@@ -307,6 +316,70 @@ TABLE: tuple[Declaration, ...] = _STEPS + (
     _remedying(VALIDATE, ("implementation", "closeout"), VALIDATE.step),
 )
 NODES: dict[Node, Declaration] = {declaration.node: declaration for declaration in TABLE}
+# The steps whose nodes are told apart by the kind of review they are or triage.
+_KINDED = {node.step for node in NODES if node.kind}
+
+
+class TargetError(StepError):
+    """A target names no node of the table."""
+
+
+def section_ids(sessions: Any) -> bool:
+    """Whether `sessions` is a list of sessions, each a non-empty list of section ids,
+    each a positive whole number or a name."""
+    return (isinstance(sessions, list) and bool(sessions)
+            and all(isinstance(session, list) and session
+                    and all((isinstance(section, int) and not isinstance(section, bool))
+                            or (isinstance(section, str) and section)
+                            for section in session)
+                    for session in sessions))
+
+
+def node_of(target: Any) -> Node:
+    """The node `target` names, or `TargetError` saying why it names none.
+
+    A review or a triage is a node only with its kind: without one, or with an
+    empty or unknown one, it is refused rather than read as any review. An
+    implementation names its sections, which it takes out of the plan's order, and is
+    the round that implements them. A validation names the target it is for, itself
+    a node and not another validation.
+    """
+    if not isinstance(target, Mapping) or not isinstance(target.get("step"), str):
+        raise TargetError(f"a target is an object naming its step; got {target!r}")
+    step = target["step"]
+    if unknown := sorted(set(target) - {"step", "kind", "sections", "target"}):
+        raise TargetError(f"a target names its step, kind, sections, or target, not "
+                          f"{', '.join(unknown)}")
+    if "kind" in target and step not in _KINDED:
+        raise TargetError(f"only a review or a triage names a kind, not {step!r}")
+    if "sections" in target and step != "implement":
+        raise TargetError(f"only an implementation names sections, not {step!r}")
+    if "target" in target and step != VALIDATE.step:
+        raise TargetError(f"only a validation names a target, not {step!r}")
+    if step in _KINDED:
+        kind = target.get("kind")
+        if not isinstance(kind, str) or not kind:
+            raise TargetError(f"a {step} is a node only with the kind of review it "
+                              f"{'is' if step == 'review' else 'triages'}; got "
+                              f"{target!r}")
+        node = Node(step, kind)
+        if node not in NODES:
+            raise TargetError(f"{node.label} is no node: {kind!r} is not a kind of review")
+        return node
+    if step == "implement":
+        if not section_ids(target.get("sections")):
+            raise TargetError("an implementation names its sessions, each a non-empty list "
+                              f"of sections; got {target.get('sections')!r}")
+        return ROUND
+    if step == VALIDATE.step:
+        if "target" not in target:
+            raise TargetError("a validation names the target it is for")
+        if node_of(target["target"]) == VALIDATE:
+            raise TargetError("a validation is for a target other than another validation")
+        return VALIDATE
+    if Node(step) not in NODES:
+        raise TargetError(f"{step!r} is no node of the workflow graph")
+    return Node(step)
 
 
 def exits(source: Node, *, target: Node | None = None, when: str | None = None) -> list[Exit]:

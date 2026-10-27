@@ -84,7 +84,21 @@ def test_every_node_is_reachable_from_design() -> None:
 
 
 def test_every_node_has_an_exit_but_the_one_that_finishes_the_change() -> None:
-    assert [d.node for d in TABLE if not d.exits] == [ARCHIVE_CLEANUP]
+    assert [d.node for d in TABLE if not d.exits] == [graph.DONE]
+    assert [e.target for e in NODES[ARCHIVE_CLEANUP].exits] == [graph.DONE]
+    # No step runs once the change is done.
+    assert NODES[graph.DONE].runs is None
+
+
+def test_a_target_names_its_node() -> None:
+    assert graph.node_of({"step": "triage", "kind": "pre-closeout"}) == graph.PRE_CLOSEOUT_TRIAGE
+    assert graph.node_of({"step": "implement", "sections": [[5]]}) == graph.ROUND
+    assert graph.node_of({"step": "validate", "target": {"step": "round"}}) == graph.VALIDATE
+    assert graph.node_of({"step": "done"}) == graph.DONE
+    with pytest.raises(graph.TargetError, match="kind of review it triages"):
+        graph.node_of({"step": "triage", "kind": None})
+    with pytest.raises(graph.TargetError, match="an object naming its step"):
+        graph.node_of("review:design")
 
 
 def test_every_logged_step_is_a_step_the_wrapper_runs() -> None:
