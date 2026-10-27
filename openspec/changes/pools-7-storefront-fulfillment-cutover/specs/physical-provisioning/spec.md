@@ -205,3 +205,53 @@ unambiguously.
 - **WHEN** an active VM cannot be mapped unambiguously to a resource and
   teardown input
 - **THEN** migration fails visibly rather than creating a partial record
+
+## MODIFIED Requirements
+
+### Requirement: Ansible fulfillment adapter
+
+The VM Ansible fulfillment adapter MUST execute only against the scheduler-selected `SettlementResource`. Before dispatch it MUST reject disabled or missing pools, pool/resource/provider mismatches, missing host identity, malformed VM requirements, and provider variables that collide with authoritative job inputs. Accepted operations MUST snapshot the resolved playbook and provider variables with the submitted job; the resolved playbook is the pool's `playbook_path` when the pool states one, and otherwise the service's `vm_playbook_path` as configured when the job is prepared. Create metadata MUST retain the exact `host_id` and `executor_target` (the guest provisioning named), and teardown MUST reuse those accepted values rather than infer them from a resource identifier. Provider-specific job states MUST map to the normalized fulfillment states `pending`, `succeeded`, `failed`, or `unknown`.
+
+Reservation-governed VM shape is resolved from the committed reservation dimensions carried by the scheduled settlement resource. Caller-supplied sizing fields do not override or fill missing committed dimensions. For each dimension absent from the committed reservation, the adapter MAY apply the corresponding pool default; if neither a committed dimension nor a pool default exists, the provider input remains unset and the selected playbook or inventory supplies its own default. The pool-selected registered requirement delegate owns conversion from canonical VM dimensions into the selected playbook's variable names, units, and derived values.
+
+A VM fulfillment request MUST NOT say how its guest is reached, and the adapter MUST refuse one that carries a `connectivity` field or any other field the request does not declare. Which relay a host dials is a durable property of the deployment, recorded on the relay a pool references, and MUST NOT be selectable per request: a request-supplied relay would make a fleet-wide fact depend on a caller's configuration and would let two requests for one host disagree about how that host is reached. The buyer-facing address and port are returned in the fulfillment result rather than supplied with the request. The refusal happens while the request is prepared, inside the transaction that would accept it, so a refused request is never stored and nothing it carried, such as a relay credential, is kept at rest.
+
+#### Scenario: A request supplies relay configuration
+
+- **WHEN** a fulfillment request's payload carries a `connectivity` field, such as a relay address, domain, or dashboard credential
+- **THEN** validation reports the request invalid, `begin_fulfillment` refuses it, and no fulfillment is accepted, no job is dispatched, and the request is not stored
+
+#### Scenario: Pool configuration changes after create dispatch
+
+- **WHEN** an operator edits provider configuration after an Ansible create job is accepted
+- **THEN** the accepted job retains the resolved configuration snapshot captured at dispatch
+
+#### Scenario: Provider variables collide with job identity
+
+- **WHEN** pool-supplied extra variables attempt to override an authoritative host, target, action, sizing, or executor field
+- **THEN** validation rejects the operation before asynchronous dispatch
+
+#### Scenario: VM teardown is dispatched
+
+- **WHEN** teardown begins for an accepted VM fulfillment
+- **THEN** the adapter targets the recorded `host_id` and `executor_target` from fulfillment metadata
+
+#### Scenario: A committed dimension is present
+
+- **WHEN** the scheduled settlement resource carries a committed VM dimension
+- **THEN** the adapter translates that value through the pool-selected requirement delegate and ignores any conflicting caller-supplied sizing field
+
+#### Scenario: A committed dimension is absent and the pool has a default
+
+- **WHEN** the committed reservation omits a VM dimension and the resolved pool configures the corresponding default
+- **THEN** the adapter uses the pool default for that dimension
+
+#### Scenario: A committed dimension and pool default are both absent
+
+- **WHEN** neither the committed reservation nor the resolved pool supplies a VM dimension
+- **THEN** the adapter leaves the corresponding provider input unset so the selected playbook or inventory may supply its own default
+
+#### Scenario: A VM pool states no playbook
+
+- **WHEN** a VM job is prepared for a pool whose provider configuration states no `playbook_path`
+- **THEN** the job's stored parameters carry the service's `vm_playbook_path` as configured at preparation

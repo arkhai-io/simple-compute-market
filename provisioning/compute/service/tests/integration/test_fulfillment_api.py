@@ -452,6 +452,46 @@ class TestValidateIsSideEffectFree:
         assert result["valid"] is False
         assert "vm_target" in str(result["issues"])
 
+    async def test_a_request_naming_a_relay_is_invalid(self, fulfillment: FulfillmentApi):
+        """The relay a host dials is its pool's; a request cannot name one."""
+        capacity_reservation_id = await _scheduled_reservation()
+
+        # A documentation-range address, never a real relay.
+        result = await fulfillment.validate(
+            capacity_reservation_id,
+            "vms",
+            _fulfillment_request(connectivity={"relay_addr": "198.51.100.1"}),
+        )
+        assert result["valid"] is False
+        assert "connectivity" in str(result["issues"])
+
+
+class TestARequestNamingARelayIsRefused:
+    async def test_begin_refuses_it_and_stores_nothing(self, fulfillment: FulfillmentApi):
+        """Preparation refuses the request inside the acceptance transaction, so
+        the caller's relay token never reaches the settlement record."""
+        capacity_reservation_id = await _scheduled_reservation()
+
+        # A documentation-range address and a placeholder token, never real.
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.begin(
+                capacity_reservation_id,
+                "vms",
+                _fulfillment_request(
+                    connectivity={"relay_addr": "198.51.100.1", "relay_token": "caller-token"}
+                ),
+            )
+        assert refused.value.status_code == 422
+
+        with _container_module.resolved_session_factory() as db:
+            record = SettlementRepository().get(db, capacity_reservation_id)
+            assert record.fulfillment_id is None
+            assert record.fulfillment_request is None
+            assert record.state == "assigned"
+            assert db.query(JobRecord).filter(
+                JobRecord.capacity_reservation_id == capacity_reservation_id
+            ).count() == 0
+
 
 class TestTeardownPreparation:
     """JobFulfillmentProvider.prepare_teardown/dispatch_teardown, driven

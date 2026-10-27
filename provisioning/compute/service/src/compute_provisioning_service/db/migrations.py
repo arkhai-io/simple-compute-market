@@ -3211,6 +3211,31 @@ def _migrate_vm_fulfillment_request_names_no_guest(engine: Engine) -> None:
     not touched, and an accepted request is never prepared again. A rerun
     changes nothing.
     """
+    _remove_vm_fulfillment_request_fields(engine, frozenset({"vm_target"}))
+
+
+def _migrate_vm_fulfillment_request_carries_no_connectivity(engine: Engine) -> None:
+    """Remove ``connectivity`` from every stored VM fulfillment request.
+
+    VM's fulfillment request declares no ``connectivity``: the relay a host
+    dials is the one its pool references, and the buyer's address and port come
+    back in the fulfillment result. A request that carries it is refused, so a
+    stored one could never be prepared again, and the storefront's stored copies
+    are rewritten the same way by its own migration so a replay still matches,
+    as for the guest name. A stored copy may also hold a relay dashboard
+    credential that nothing reads.
+
+    Prepared operations and metadata are not touched, as for the guest name.
+    """
+    _remove_vm_fulfillment_request_fields(engine, frozenset({"connectivity"}))
+
+
+def _remove_vm_fulfillment_request_fields(engine: Engine, fields: frozenset[str]) -> None:
+    """Drop ``fields`` from every stored VM fulfillment request's payload.
+
+    Requests of another kind, and requests carrying none of ``fields``, are left
+    as they are, so a rerun changes nothing.
+    """
     if not _table_exists(engine, "settlement_records"):
         return
     with engine.begin() as connection:
@@ -3228,12 +3253,12 @@ def _migrate_vm_fulfillment_request_names_no_guest(engine: Engine) -> None:
             if (
                 envelope.get("kind") != "vm.fulfillment.request"
                 or not isinstance(payload, dict)
-                or "vm_target" not in payload
+                or fields.isdisjoint(payload)
             ):
                 continue
             rewritten = {
                 **envelope,
-                "payload": {key: value for key, value in payload.items() if key != "vm_target"},
+                "payload": {key: value for key, value in payload.items() if key not in fields},
             }
             connection.execute(
                 text(
@@ -3518,4 +3543,8 @@ MIGRATIONS: tuple[Migration, ...] = (
         _migrate_vm_pool_playbook_optional,
     ),
     Migration("20261023_002_hosts_pool_optional", _migrate_hosts_pool_optional),
+    Migration(
+        "20261027_001_vm_fulfillment_request_carries_no_connectivity",
+        _migrate_vm_fulfillment_request_carries_no_connectivity,
+    ),
 )

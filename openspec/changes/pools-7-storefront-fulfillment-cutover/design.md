@@ -3030,7 +3030,7 @@ dependency note) belongs to the plan phase, not this document.
 | `schedule_resource`/`begin_fulfillment`/`get_fulfillment_status`/`get_fulfillment_result` as generic `ComputeProvisioningClient` methods, not split into a separate client/class | `openspec/specs/compute-provisioning-contract/spec.md#requirement-fulfillment-scheduling-and-acceptance` |
 | Sibling aggregator (`AggregateFulfillmentClient`) pattern and shared `reservation_sites` cache, not an extension of `AggregateCapacityClient`/`RemoteCapacityClient` | `core_storefront/aggregation.py` and `market_storefront/services/capacity_client.py` docstrings — no dedicated subsystem spec exists for storefront-side capacity aggregation at all (checked); recorded as code-owned rationale, not promoted into a new spec file for this one mechanism |
 | `fulfillment_id`/`fulfillment_uid` disambiguation | `docs/development/ARCHITECTURE.md`, "Shared vocabulary and identities" |
-| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects. **Correction (2026-10-27, task 12.5):** superseded since. `fulfillment_results.py` and `VmConnectionInfo` no longer exist; the relay comes from the pool's referenced relay, and the plan never reads `VmConnectivitySettings`, whose docstring now says so. Not promoted at closeout. |
+| `VmConnectivitySettings` (buyer/storefront-configured FRP, request-side) and `VmConnectionInfo` (provider-reported VM metadata, result-side) as separate, direction-specific models rather than one shared shape | `vm_provisioning_adapter/models/fulfillment_model.py` and `vm_provisioning_adapter/fulfillment_results.py` docstrings; no subsystem spec change, since these are VM-domain-adapter-internal shapes the fulfillment kit itself never inspects. **Correction (2026-10-27, task 12.5):** superseded since. `fulfillment_results.py` and `VmConnectionInfo` no longer exist; the relay comes from the pool's referenced relay, and the plan never reads `VmConnectivitySettings`, whose docstring now says so. Not promoted at closeout. **Further correction (2026-10-27, pre-closeout review 17 F1):** `VmConnectivitySettings` is deleted and a request carrying `connectivity` is refused; see "Pre-closeout review 17 F1" below. |
 | Three-tier VM sizing precedence (buyer-specified, pool default, Ansible/inventory unset) | `vm_provisioning_adapter/models/fulfillment_model.py`'s `AnsiblePoolConfig` docstring. **Correction (2026-10-27, task 12.5):** that docstring no longer states the precedence; closeout's 13.9 re-checks where it lives now. |
 | Buyer-specified/negotiated connectivity terms split into a separate change | `openspec/changes/archive/2026-09-25-add-buyer-vm-connectivity-terms/proposal.md` (archived) |
 | `register_lease` removal sequencing (Section 10 task 10.5, not 9.2/9.6) | Noted on both `tasks.md`'s 9.2 and 10.5 entries |
@@ -3081,6 +3081,9 @@ status/result as the fulfillment-cutover shape; `VmConnectivitySettings`/
 `VmConnectionInfo` as separate request/result-side models; the three-tier
 VM sizing precedence; `register_lease` removal sequenced with Section 10;
 `fulfillment_id` kept bare (not renamed) alongside `fulfillment_uid`.
+*Corrected 2026-10-27 (pre-closeout review 17 F1):* the request-side
+connectivity model no longer stands; a VM request carrying `connectivity` is
+refused.
 
 **Implemented and verified:** the HTTP schedule endpoint and shared client
 contracts; the storefront cutover itself (`_do_provision`); durable
@@ -4553,6 +4556,36 @@ belongs in this design record.
 Permanent promotion is complete as of 2026-08-01 — see `tasks.md`'s "Section
 11 design promotion record" for the destinations and what was deliberately
 not promoted.
+
+## Pre-closeout review 17 F1: a VM request carries no connectivity (2026-10-27)
+
+Task 9.2 gave the VM fulfillment request a `connectivity` field, filled from
+storefront-configured FRP settings. Later relay work stopped the storefront
+sending it and wrote the permanent rule that a request cannot select a relay,
+but left the field declared: `VmConnectivitySettings` accepted `relay_addr`,
+`relay_port`, `relay_token`, and `vm_remote_port`, ignored unknown keys, and
+the plan never read it, while the fulfillment kit stored the request as
+received. A caller-supplied token therefore stayed at rest in
+`settlement_records.fulfillment_request`, and requests stored while the
+storefront still sent FRP settings may hold a dashboard password.
+
+The owner chose to refuse the field (alternative A) over stripping it before
+persistence (which needs a normalization hook in the generic kit), a
+specification-only restatement, or deferral:
+
+- `VmFulfillmentRequirements` no longer declares `connectivity`, and its
+  `extra="forbid"` refuses a request that carries it at preparation, inside
+  the acceptance transaction, so nothing is stored.
+- Paired migrations remove `connectivity` from stored VM requests: the
+  provisioning service's `20261027_001_vm_fulfillment_request_carries_no_connectivity`
+  and the VM storefront's `20261027_001_fulfillment_context_carries_no_connectivity`,
+  sharing field-removal helpers with the guest-name pair. Prepared operations
+  and provider metadata are not touched, as for the guest name.
+
+Promoted through this change's deltas: the MODIFIED `physical-provisioning`
+requirement "Ansible fulfillment adapter" (the refusal and its scenario) and
+the MODIFIED `vm-storefront-fulfillment` requirement "The storefront does not
+select buyer access infrastructure" (the request carries no `connectivity`).
 
 ## Task 11.2 alternatives: where the exact claim matcher lives (2026-07-30)
 

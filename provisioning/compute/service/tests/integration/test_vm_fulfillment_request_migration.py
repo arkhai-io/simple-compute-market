@@ -1,4 +1,4 @@
-"""Stored VM fulfillment requests lose the guest name, in every state.
+"""Stored VM fulfillment requests lose the guest name and connectivity, in every state.
 
 A storefront replays its stored request verbatim, and the fulfillment kit
 accepts a repeat only when it equals the stored copy; both sides' copies are
@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from compute_provisioning_service.db.database import run_migrations
 from compute_provisioning_service.db.migrations import (
+    _migrate_vm_fulfillment_request_carries_no_connectivity,
     _migrate_vm_fulfillment_request_names_no_guest,
 )
 
@@ -141,3 +142,51 @@ def test_a_replayed_migrated_request_finds_its_accepted_fulfillment():
             market="vms",
             fulfillment_request=VersionedEnvelope.model_validate(_vm_request(_OLD_PAYLOAD)),
         )
+
+
+# A request a storefront built while it still filled ``connectivity`` from its
+# own relay settings. Every value here is an illustrative placeholder from a
+# documentation range, never a real relay or credential.
+_CONNECTIVITY_PAYLOAD = {
+    "ssh_pubkey": "ssh-ed25519 AAAA",
+    "connectivity": {
+        "frp_server_addr": "203.0.113.9",
+        "frp_domain": "relay.example.test",
+        "frp_dashboard_password": "placeholder-password",
+    },
+}
+
+
+@pytest.mark.parametrize("state", _STATES)
+def test_every_state_s_stored_request_loses_connectivity_and_nothing_else(state):
+    engine = _engine()
+    _record(engine, "r-1", request=_vm_request(_CONNECTIVITY_PAYLOAD), state=state)
+
+    _migrate_vm_fulfillment_request_carries_no_connectivity(engine)
+
+    assert _column(engine, "r-1", "fulfillment_request") == _vm_request(
+        {"ssh_pubkey": "ssh-ed25519 AAAA"}
+    )
+    assert _column(engine, "r-1", "prepared_create_operation") == _PREPARED
+    assert _column(engine, "r-1", "provider_metadata") == _METADATA
+    assert _column(engine, "r-1", "state") == state
+
+
+def test_connectivity_on_other_requests_is_left_alone_and_a_rerun_changes_nothing():
+    engine = _engine()
+    other = {
+        "kind": "bare_metal.v2", "schema_version": 1, "payload": {"connectivity": {"a": 1}},
+    }
+    current = _vm_request({"ssh_pubkey": "ssh-ed25519 AAAA"})
+    _record(engine, "r-bm", request=other, market="bare_metal")
+    _record(engine, "r-new", request=current)
+    _record(engine, "r-old", request=_vm_request(_CONNECTIVITY_PAYLOAD))
+
+    _migrate_vm_fulfillment_request_carries_no_connectivity(engine)
+    first = {r: _column(engine, r, "fulfillment_request") for r in ("r-bm", "r-new", "r-old")}
+    _migrate_vm_fulfillment_request_carries_no_connectivity(engine)
+
+    assert first == {"r-bm": other, "r-new": current, "r-old": current}
+    assert {
+        r: _column(engine, r, "fulfillment_request") for r in ("r-bm", "r-new", "r-old")
+    } == first

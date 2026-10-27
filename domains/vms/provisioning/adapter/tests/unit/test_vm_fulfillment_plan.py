@@ -272,13 +272,19 @@ class TestRelayAccessPath:
             _create(_plan(allocator), pool_config=_relay_pool_config(), db=None)
         assert allocator.allocated == []
 
-    def test_a_request_cannot_select_a_relay(self):
-        prepared = _create(
-            _plan(_Allocator()),
-            request=_request(connectivity={"relay_addr": "198.51.100.1", "relay_port": 7000}),
-        )
+    def test_a_request_naming_a_relay_is_refused_before_a_port_is_leased(self):
+        allocator = _Allocator()
+        # A documentation-range address and a placeholder token, never real.
+        with pytest.raises(ProviderConfigInvalidError, match="connectivity"):
+            _create(
+                _plan(allocator),
+                pool_config=_relay_pool_config(),
+                request=_request(
+                    connectivity={"relay_addr": "198.51.100.1", "relay_token": "caller-token"}
+                ),
+            )
 
-        assert prepared.parameters["relay_id"] is None
+        assert allocator.allocated == []
 
 
 class TestGuestName:

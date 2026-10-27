@@ -7,32 +7,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class VmConnectivitySettings(BaseModel):
-    """Buyer-reachability configuration a request may carry.
-
-    Deliberately not part of ``VmFulfillmentRequirements``' flat field set:
-    these aren't sizing/feasibility requirements the provisioning server or
-    its scheduler reasons about. The fulfillment plan does not read them: a
-    request cannot select a relay, because which relay a host dials comes
-    from the relay its pool references, and the buyer's address and port
-    come back in the fulfillment result.
-    """
-
-    # Relay-neutral names: the buyer receives a host and a port and has no
-    # reason to learn which relay implementation produced them.
-    relay_addr: str | None = None
-    relay_port: int | None = None
-    relay_token: str | None = None
-    vm_remote_port: int | None = None
-
-
 class VmFulfillmentRequirements(BaseModel):
     """What a storefront asks of a VM fulfillment.
 
     It never names the guest: provisioning names it from the capacity
-    reservation (see ``vm_provisioning_adapter.guest_names``). Unknown fields
-    are refused rather than ignored, so a request naming a guest fails loudly
-    instead of being provisioned under a name its sender did not choose.
+    reservation (see ``vm_provisioning_adapter.guest_names``). Nor does it say
+    how the guest is reached: the relay a host dials is the one its pool
+    references, and the buyer's address and port come back in the fulfillment
+    result. Unknown fields are refused rather than ignored, so a request naming
+    a guest or a relay fails loudly, before acceptance stores it, instead of
+    being provisioned in a way its sender did not choose.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -48,7 +32,6 @@ class VmFulfillmentRequirements(BaseModel):
     vm_gpu_device: str | None = None
     vm_gpu_devices: list[str] | None = None
     vm_gpu_partition_size: str | None = None
-    connectivity: VmConnectivitySettings | None = None
 
 
 class AnsiblePoolConfig(BaseModel):

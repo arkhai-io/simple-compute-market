@@ -1882,6 +1882,61 @@ already-stated wheel-only policy rather than establishing new policy.
         unchanged". The VM fulfillment plan validates the field and never reads it
         (`vm_fulfillment_plan.py`). The model also still declares relay fields that
         the same spec says `connectivity` must not carry.
+      - **Resolved (2026-10-27, pre-closeout review 17 F1, owner's alternative A).**
+        A VM request carrying `connectivity` is now refused rather than stored. See
+        `design.md`'s "Pre-closeout review 17 F1" for the decision.
+        - `VmConnectivitySettings` and the request's `connectivity` field are
+          deleted (`vm_provisioning_adapter/models/fulfillment_model.py`). The
+          request's `extra="forbid"` refuses the field at preparation, inside the
+          acceptance transaction, so a refused request is never stored.
+        - Paired migrations remove `connectivity` from stored VM requests, sharing
+          field-removal helpers with the guest-name pair:
+          - provisioning: `20261027_001_vm_fulfillment_request_carries_no_connectivity`;
+          - VM storefront, over `escrows.fulfillment_context`:
+            `20261027_001_fulfillment_context_carries_no_connectivity`.
+
+          Prepared operations, provider metadata, and the storefront's
+          `vm_delivery_records` are not touched. The delivery table arrived after
+          the storefront stopped sending the field, so it cannot hold one.
+        - Delta specs: MODIFIED `physical-provisioning` "Ansible fulfillment
+          adapter" (the refusal and its scenario) and MODIFIED
+          `vm-storefront-fulfillment` "The storefront does not select buyer access
+          infrastructure".
+        - Tests:
+          - unit: `test_vm_fulfillment_plan.py::test_a_request_naming_a_relay_is_refused_before_a_port_is_leased`;
+          - application integration, through `ComputeProvisioningClient`:
+            `test_fulfillment_api.py`'s `test_a_request_naming_a_relay_is_invalid`
+            and `TestARequestNamingARelayIsRefused` (422; no fulfillment, request,
+            or job stored);
+          - service, real SQLite: `test_vm_fulfillment_request_migration.py`'s
+            connectivity tests, plus the migration-ID set in `test_database.py`;
+          - storefront integration: `test_fulfillment_context_migration.py`'s
+            connectivity test.
+        - Evidence:
+          - `make check-packaging`: passed.
+          - `make test-provisioning`: unit 658 passed, application integration 536
+            passed.
+          - `make test-provisioning-adapter`: 37 passed.
+          - `make test-storefront`: unit 1103 passed with 1 skipped; integration
+            449 passed.
+          - `make test`: passed (exit 0).
+          - `make check-change`: passed (comment hygiene, citations, task list,
+            change index, strict OpenSpec validation).
+        - Fresh-context check of the diff against `a3103948a` found no blocker.
+          - Fixed:
+            - placeholder comments added to the new test fixtures;
+            - the guest-name wrapper's docstring no longer claims a version check;
+            - `design.md` corrected where it still described
+              `VmConnectivitySettings` as standing;
+            - the storefront migration's docstring no longer calls the escrow copy
+              the replayed one. Recovery replays `vm_delivery_records`.
+          - Declined:
+            - a test that the storefront migration is registered in
+              `VM_MIGRATIONS`, a gap the guest-name migration shares;
+            - rewording the guest-name pair's replay wording, which predates this
+              fix.
+          - Dropped: a draft storefront scenario that described a migration step
+            rather than current behaviour.
 - [x] 12.5 **Comment hygiene and import placement, before the pre-closeout review.** Run
       `make check-comment-hygiene` and read the comments this change added for any that
       narrate the review or migration that introduced them; move each import the change
