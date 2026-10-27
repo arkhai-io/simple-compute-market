@@ -26,34 +26,109 @@ D4's exit guards and remedies; requirement "The workflow graph is declared in
 code"). Touches a new `scripts/change_workflow/graph.py`,
 `scripts/change_next_step.py`, and `scripts/tests/`.
 
-- [ ] 1.1 `scripts/change_workflow/graph.py`: the table — each node a step qualified
+- [x] 1.1 `scripts/change_workflow/graph.py`: the table — each node a step qualified
       by its review kind where today's routing distinguishes one (D1's table), its
       exits, the join it waits on, and each exit guard with its remedy, a step or
       the owner. State today's routing only: entry guards, the triage's kind as part
       of a target a step writes, and the terminal `done` as a node a step names are
       round 2's (D1, "The table states today's routing").
-- [ ] 1.2 Each exit guard as a function of the files and the log, from today's
+      Done as D1's rows, with five modelling choices D1 left open: `round` is one
+      node (D1's "`round` / `implement`"), its in-progress result `implement`;
+      `round-view` and `validate` are nodes too, since they are guards' remedies
+      and the round's join suppliers, and their exits are derived from the table —
+      the join's exit and each exit whose guard they remedy (`_remedying`); the
+      bootstrap guard's remedy is `WAIT`, D1's `wait`, which no step runs; exits
+      carry a `when` label (`advance`, `another round`, `a return`, …) that a
+      triage's token chooses among; and the dependency gates and the bootstrap are
+      *held* guards (no `check`), which the computation holds a stretch of the
+      workflow on rather than checking as the exit is taken, as today —
+      `dependencies()` before the change is read, `bootstrap_held()` and
+      `bootstrapping()` around whatever is named. Beyond D1's rows, a dependency
+      gating closeout is a held guard on the exit into closeout, since
+      `dependencies()` holds it today; one gating design holds the change before
+      its first node and has no exit to sit on. `archive-cleanup` has no exit; a
+      triage's result names no kind (`Node.result`).
+- [x] 1.2 Each exit guard as a function of the files and the log, from today's
       `validated()`, `fixed_since()`, `changed_outside_documentation()`, the round's
       join in `_round`, `return_confirmed()`, the clone's bootstrap, and the
       dependency gates, moved rather than rewritten, so each keeps its tests.
-- [ ] 1.3 `scripts/change_next_step.py`: the computation interprets the table in
+      Each checked guard's `check` in `graph.py` calls the computation's readings —
+      `validated`, `fixed_since`, `changed_outside_documentation`,
+      `return_confirmed`, kept as methods and typed by `graph.Readings`, which no
+      type checker holds, since none covers `scripts/` — with the reason text each
+      call site had, but for one that cannot show: on the round's triage into the
+      pre-closeout review the second, identical validation check now carries the
+      round's reason, and it holds wherever the first did; `another_round()`'s body became
+      `REPEAT_FIX_VALIDATED`/`DOCUMENTED_FIX_VALIDATED`, the repeat pass's
+      reading-first rule `REPEAT_FIX_READ`, closeout's correction check
+      `CORRECTION_VALIDATED`. The held guards stay in `dependencies()`,
+      `bootstrap_held()`, and `bootstrapping()`, whose docstrings name the table's
+      guard. The round's join is declared in the table (`ROUND_JOIN`) and still read
+      by `in_round` from the records, as before.
+- [x] 1.3 `scripts/change_next_step.py`: the computation interprets the table in
       place of `_design`, `_implementation`, `_round`, `_pre_closeout`, and
       `_closeout`, and of `_STEP_PHASE`, `_PHASE_STEPS`, and `_REVIEW_PHASE` where
       the table now states what they held; today's token reading, file-time rules,
       and directed decisions are kept as the inputs that choose an exit, since
       round 2 replaces them. The result contract in the module docstring is
       unchanged.
-- [ ] 1.4 A new `scripts/tests/test_change_workflow_graph.py`, unit: every exit names
+      Each phase's reading takes the exits it reads through `follow`/`unmet`, which
+      evaluate the exit's checked guards in the table's order, and names an
+      in-progress node with `Node.result`. Still built in place: the owner's waiver
+      of another design review, a direction rather than an exit; the round's join —
+      its next `implement` session, `round-view`, `validate-and-review` — read from
+      the records as before, `ROUND_JOIN` declaring it without being read; and
+      `REPEAT_FIX_READ`'s `round-view` result. Correction to the plan: `_design`, `_planning`, `_implementation`, and
+      `_closeout` keep their names, since `test_change_next_step.py` calls
+      `Computation._design` directly and may not change; `_round` became
+      `in_round`, `_pre_closeout` became `pre_closeout(source)`, the exit it is
+      reached by, and `another_round` is gone. `_PHASE_STEPS` and `_REVIEW_PHASE`
+      are read from the table (`graph.phase_steps`, `graph.review_phase`, from each
+      node's phases); `_STEP_PHASE` stays: the disagreement leaves review and triage
+      out of its comparison on purpose, and reading their nodes' phases from the
+      table would change which logged line it compares. One difference from today, in a state no test reaches: an unconfirmed return
+      recorded by a closeout triage names the owner with the archived-change reason
+      rather than the unconfirmed-return one, since the table gives a closeout
+      triage no return exit; both name the owner.
+- [x] 1.4 A new `scripts/tests/test_change_workflow_graph.py`, unit: every exit names
       a node of the table; every guard's remedy is a node or the owner; every node is
       reachable from `design`; every node has an exit, except where the change is
       done.
-- [ ] 1.5 Verification: `scripts/tests/test_change_next_step.py` passes unchanged —
+      Reachability follows exits, guards' remedies, and join suppliers, the ways the
+      computation names a node; a remedy may also be `WAIT` (the bootstrap). Added:
+      every join waits on nodes, every logged step is one the wrapper runs, the
+      return and another-round exits, the phases read from the table, and a node's
+      result.
+- [x] 1.5 Verification: `scripts/tests/test_change_next_step.py` passes unchanged —
       no test edited, added, or removed — which is this section's proof that
       routing is today's (D1, "round 1 reproduces exactly"); the new graph tests,
       unit; every other `scripts/tests/test_change_*` and `test_run_change_step.py`,
       unit; `make test`; `make check-change CHANGE=workflow-steps-name-next-step`.
       End-to-end: none of `e2e-tests/` exercises the workflow tooling, and none is
       owed.
+      `test_change_next_step.py`, unit, unchanged from the section's base: 179
+      passed. It asserts mostly steps and kinds, and reasons by substring, so a
+      reason changed in a state it does not reach would pass; the fresh-context
+      check compared every reason and guard order with the code before by hand,
+      and found only the differences these notes give. The graph tests, unit: 44
+      passed. `test_change_*.py`, `test_run_change_step.py`, and
+      `test_check_tasks.py`, unit: 735 passed. `make test`: passed, every suite, run
+      before the fresh-context check's fixes, which touched only comments, a held
+      guard's declaration, and a graph test under `scripts/`, rerun above.
+      `make check-packaging`: passed. `make check-change`: every check passes but
+      the documentation citations, which report `scripts/change_workflow/convert.py`,
+      the file section 7 creates. End-to-end: none, confirmed; no `Owed by
+      validation:` line.
+
+Handoff from section 1: `follow(source, target, reason, **context)` names the
+target once the exit's checked guards hold; `unmet` returns the first unmet guard's
+result and raises `StepError` for an exit the table lacks, which compute() reports
+as unclassified — round 2's D4 rule (an undeclared exit names the owner) replaces
+that. The context a guard reads is passed by keyword: `review`, `first` (the first
+closeout review), and for the repeat pass `unread`, `in_clone`, `base`. Section 3
+changes `Node.result` so a triage names its kind, and adds `done` as archive
+cleanup's exit; `test_every_node_has_an_exit_but_the_one_that_finishes_the_change`
+and `test_a_node_names_its_step_and_a_reviews_kind` then change with it.
 
 ## 2. The graph drawn, and the drawing held to the table
 

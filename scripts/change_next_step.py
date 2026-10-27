@@ -30,13 +30,15 @@ log, and whether a round view is open, and prints one JSON object:
 - `{"step": "unclassified", "reason": …, "read": …}` when no rule applies, with
   what it read, for the orchestrating session to work out.
 
-The rules follow each step's skill: its entry check, and the handoff that names
-what comes after it. A review's triage file records under `## Next` whether the
-change advances, another review round runs, or the triage returned the change to
-an earlier phase, and the change advances on that
-token and the conditions each phase sets — a passing validation of the round's
-fix commit, of `HEAD` before closeout, and of a closeout correction that changed
-more than documentation — without the owner.
+The workflow's graph is the table in `change_workflow/graph.py`: each node's exits,
+the join an exit waits on, and the guards on each exit with the step that remedies
+each. This computation reads where the change stands and which exit its last step
+chose, then follows that exit through its guards. A review's triage file records
+under `## Next` whether the change advances, another review round runs, or the
+triage returned the change to an earlier phase, and that token chooses the
+triage's exit; the change then advances once the exit's guards hold — a passing
+validation of the round's fix commit, of `HEAD` before closeout, and of a closeout
+correction that changed more than documentation — without the owner.
 
 A change is computed where it is worked: in the checkout that has its branch
 checked out — its own name's branch, or one the owner's decision says it is
@@ -75,7 +77,15 @@ from change_clone import (ABSENT as BOOTSTRAP_ABSENT, DEFAULT_FROM,  # noqa: E40
 from check_change_index import _DEPENDENCY, INDEX, Row, index_rows  # noqa: E402
 from find_change import ChangeNotFound, change_directory, is_archived  # noqa: E402
 from round_view import RoundError, View, open_view  # noqa: E402
+from change_workflow import graph  # noqa: E402
 from change_workflow.common import ORCHESTRATOR, StepError  # noqa: E402
+from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT,  # noqa: E402
+                                   CLOSEOUT_REVIEW, CLOSEOUT_TRIAGE,
+                                   DESIGN, DESIGN_REVIEW, DESIGN_TRIAGE,
+                                   IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE, PHASES,
+                                   PLAN, PRE_CLOSEOUT_REVIEW, PRE_CLOSEOUT_TRIAGE, ROUND,
+                                   ROUND_VIEW, VALIDATE, Node)
+from change_workflow.graph import owner as _owner  # noqa: E402
 from change_workflow.log import (branch_decisions, log_path, read_log,  # noqa: E402
                                  redesigned_after_return)
 from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
@@ -83,7 +93,6 @@ from change_workflow.records import (ChangedSince, changed_since,  # noqa: E402
                                      validation_problem, validation_result)
 
 ROOT = Path(__file__).resolve().parents[1]
-PHASES = ("design", "planning", "implementation", "closeout")
 _RECORD = re.compile(r"^(?P<number>\d+)-(?P<kind>[a-z-]+)\.md$")
 _REVIEWED_COMMIT = re.compile(r"<!-- reviewed-commit: (\S+) -->")
 # The change's task list, whose sections and checks say how far implementation got.
@@ -96,12 +105,6 @@ _TASK = re.compile(r"^\s*- \[(?P<done>[ xX])\] "
 _STEP_PHASE = {"design": "design", "plan": "planning", "implement": "implementation",
                "validate": "implementation", "triage": None, "review": None,
                "closeout": "closeout", "archive-cleanup": "closeout"}
-_REVIEW_PHASE = {"design": "design", "implementation": "implementation",
-                 "pre-closeout": "implementation", "closeout": "closeout"}
-# The steps that run while a change is in each phase.
-_PHASE_STEPS = {"design": ("design", "review", "triage"), "planning": ("plan",),
-                "implementation": ("implement", "validate", "review", "triage"),
-                "closeout": ("closeout", "review", "triage", "validate", "archive-cleanup")}
 # What a review's triage file records next, read from its `## Next` token.
 ADVANCE, ANOTHER_ROUND, RETURNED, IN_PROGRESS, OWNER = (
     "advance", "another round", "returned", "in progress", "owner")
@@ -179,7 +182,7 @@ class Record:
     def review_kind(self) -> str | None:
         """The kind of review this record is, `-external` copies included."""
         kind = self.kind.removesuffix("-external")
-        return kind if kind in _REVIEW_PHASE else None
+        return kind if graph.review_phase(kind) else None
 
     @property
     def reviewed_commit(self) -> str | None:
@@ -340,7 +343,7 @@ def _triage_phase(before: Sequence[dict[str, Any]]) -> str | None:
     followed, the nearest one logged before it; None with none logged."""
     for entry in reversed(before):
         if entry.get("step") == "review":
-            return _REVIEW_PHASE.get(entry.get("kind", ""))
+            return graph.review_phase(entry.get("kind", ""))
         if entry.get("step") == "validate":
             return "implementation"
     return None
@@ -362,10 +365,6 @@ def governing(reviews: Sequence[Record]) -> Record:
     return next((r for r in reversed(reviews[:-1])
                  if r.next_token() not in (None, IN_PROGRESS)
                  and r.triage.stat().st_mtime_ns >= published), latest)
-
-
-def _owner(reason: str, **extra: Any) -> Result:
-    return {"step": "owner", "reason": reason, **extra}
 
 
 def _waiting(entry: dict[str, Any], read: bool = True) -> Result | None:
@@ -567,7 +566,8 @@ class Computation:
     def bootstrapping(self, result: Result) -> Result | None:
         """The step `result` names, held while the clone's bootstrap runs, unless it
         is a design or planning step, which need no environment: design and plan
-        themselves, and a review or triage of the design phase."""
+        themselves, and a review or triage of the design phase. With
+        `bootstrap_held`, this is the table's held guard `graph.BOOTSTRAPPED`."""
         state = self.state
         if state.bootstrap is None or state.bootstrap.state != BOOTSTRAP_RUNNING:
             return None
@@ -599,7 +599,11 @@ class Computation:
         return getattr(self, f"_{phase}")(status)
 
     def dependencies(self, phase: str) -> Result | None:
-        """A dependency that gates `phase` or an earlier one, and is not yet released."""
+        """A dependency that gates `phase` or an earlier one, and is not yet released:
+        the table's held guards on the exits into planning, implementation, and
+        closeout (`graph.PLANNING_RELEASED`, `graph.IMPLEMENTATION_RELEASED`,
+        `graph.CLOSEOUT_RELEASED`), and a dependency gating design, which holds the
+        change before its first node."""
         depends_on = self.state.row.depends_on if self.state.row else None
         if depends_on in (None, "", "—"):
             return None
@@ -626,15 +630,19 @@ class Computation:
                           prerequisite=name)
         return None
 
-    # The phases. Each is called with the change's status.
+    # Where the change stands in the graph, and the exit its last step chose, read
+    # from the status, the latest runs of its steps, and the `## Next` tokens of its
+    # triage files; each exit is then followed through its guards in the table
+    # (`follow`). The status's phase says where to start reading, and each phase's
+    # reading is called with the status.
 
     def _design(self, status: str) -> Result:
         if status == "ready for design":
-            return {"step": "design", "reason": "ready for design"}
+            return DESIGN.result("ready for design")
         if blocked := self.blocked_on_prerequisite():
             return blocked
         if untriaged := self.untriaged(kinds=("design",)):
-            return {"step": "triage", "reason": f"{untriaged} has no triage"}
+            return self.follow(DESIGN_REVIEW, DESIGN_TRIAGE, f"{untriaged} has no triage")
         last = self.last(("design", "review", "triage"))
         if last and last.get("step") == "design":
             if last.get("outcome") == "finished":
@@ -653,33 +661,33 @@ class Computation:
                     return _owner(f"planning ran on the owner's waiver (seq "
                                   f"{planned['seq']}) but left the change in design: the "
                                   "files decide, so the status is the owner's to correct")
-                return {"step": "review", "kind": "design",
-                        "reason": "the design discussion finished; its design review is next"}
-            return {"step": "design", "reason": "in design"}
+                return self.follow(DESIGN, DESIGN_REVIEW, "the design discussion finished; "
+                                                          "its design review is next")
+            return DESIGN.result("in design")
         reviews = [r for r in self.state.records if r.review_kind == "design"]
         if not reviews:
-            return {"step": "design", "reason": "in design"}
+            return DESIGN.result("in design")
         review = reviews[-1]
-        if waiting := self.not_advancing(review):
+        if waiting := self.not_advancing(review, DESIGN_TRIAGE):
             return waiting
         if review.next_token() == RETURNED:
-            return {"step": "design", "reason": f"{review.triage.name} returned the change "
-                                                "to design"}
+            return self.follow(DESIGN_TRIAGE, DESIGN, f"{review.triage.name} returned the "
+                                                      "change to design", review=review)
         if review.next_token() == ANOTHER_ROUND:
-            return {"step": "review", "kind": "design",
-                    "reason": f"{review.triage.name} records another round"}
-        return {"step": "plan", "reason": f"{review.triage.name} records that the change "
-                                          "advances"}
+            return self.follow(DESIGN_TRIAGE, DESIGN_REVIEW,
+                               f"{review.triage.name} records another round", review=review)
+        return self.follow(DESIGN_TRIAGE, PLAN, f"{review.triage.name} records that the change "
+                                                "advances", review=review)
 
     def _planning(self, status: str) -> Result:
         if status == "ready for planning":
-            return {"step": "plan", "reason": "ready for planning"}
+            return PLAN.result("ready for planning")
         last = self.last(("plan",))
         if last and last.get("outcome") == "finished":
             # Planning sets the change ready for implementation as it finishes.
             return _owner("the plan finished but left the change in planning: the files "
                           "decide, so the status is the owner's to correct")
-        return {"step": "plan", "reason": "in planning"}
+        return PLAN.result("in planning")
 
     def _implementation(self, status: str) -> Result:
         state = self.state
@@ -697,9 +705,7 @@ class Computation:
             # Read before the round's sections: the amended plan may have renumbered
             # or dropped them. The next round's own validation covers the
             # work-in-progress commit the return left, so none is asked for before it.
-            if all(s.complete for s in work):
-                return self._pre_closeout()
-            return self.next_round(work)
+            return self.planned(work)
         round_sections = ([str(s) for session in current["sections"] for s in session]
                           if current else [])
         by_id = {s.id: s for s in state.sections}
@@ -711,6 +717,7 @@ class Computation:
             # The closeout section is closeout's, never a round's to implement.
             return not by_id[str(section)].complete and not by_id[str(section)].closeout
 
+        # The round's join waits first for its sections, each session in turn.
         if current and any(unfinished(s) for s in round_sections):
             for session in current["sections"]:
                 if any(unfinished(s) for s in session):
@@ -718,10 +725,17 @@ class Computation:
                         "step": "implement", "sections": session,
                         "reason": "the agreed round's sections are not all checked"}
         if current is None:
-            if all(s.complete for s in work):
-                return self._pre_closeout()
-            return self.next_round(work)
-        return self._round(current, work)
+            return self.planned(work)
+        return self.in_round(current, work)
+
+    def planned(self, work: list[Section]) -> Result:
+        """The plan's exit: its next round, or, with nothing left to implement, the
+        pre-closeout review."""
+        if all(s.complete for s in work):
+            return self.pre_closeout(PLAN)
+        if unmet := self.unmet(PLAN, ROUND):
+            return unmet
+        return self.next_round(work)
 
     def next_round(self, work: list[Section]) -> Result:
         """The next round of the latest plan's mapping, for the orchestrating session
@@ -763,9 +777,9 @@ class Computation:
         return _owner("agree the next implementation round: which sections, and how many "
                       "sessions; the plan maps none", round=open_ids)
 
-    def _round(self, current: dict[str, Any], work: list[Section]) -> Result:
-        """The round's sections are checked: its reading, validation, review, and
-        triage, then what its triage records.
+    def in_round(self, current: dict[str, Any], work: list[Section]) -> Result:
+        """The round's sections are checked: the rest of its join — its reading,
+        validation, and review — then its triage, and the exit that triage chose.
 
         A change worked in this checkout is read first, since its view moves the
         branch its own steps run on. A change in its own clone is read in the
@@ -787,8 +801,8 @@ class Computation:
         in_clone = state.workspace is not None
         if not in_clone and not kinds & {"implementation-owner", "implementation",
                                          "validation"}:
-            return {"step": "round-view",
-                    "reason": "the round's sections are committed; the owner reads the round"}
+            return ROUND_VIEW.result("the round's sections are committed; the owner reads "
+                                     "the round")
         again = next((r for r in reversed(mine) if r.review_kind == "implementation"
                       and r.next_token() == ANOTHER_ROUND), None)
         base = again.reviewed_commit if again and self.fixed_since(again) else None
@@ -822,10 +836,9 @@ class Computation:
                 {"step": "validate-and-review", "kind": "implementation",
                  "reason": "the round has no validation or implementation review"}
                 if missing == ["validation", "implementation"]
-                else {"step": "validate", "reason": "the round has no validation"}
+                else VALIDATE.result("the round has no validation")
                 if missing == ["validation"]
-                else {"step": "review", "kind": "implementation",
-                      "reason": "the round has no implementation review"})
+                else IMPLEMENTATION_REVIEW.result("the round has no implementation review"))
             if unread and not viewing:
                 result.update(reading=True, workspace=str(state.workspace))
                 result["reason"] += ("; the owner reads the round in the workspace beside "
@@ -857,99 +870,103 @@ class Computation:
                         "reason": "the round's validation and review are in, and the owner "
                                   "reads the round" + (" in the workspace" if in_clone else "")
                                   + " before triage"}
-            return {"step": "triage", "reason": ", ".join(r.path.name for r in untriaged)
-                                                + " have no triage"}
+            return self.follow(IMPLEMENTATION_REVIEW, IMPLEMENTATION_TRIAGE,
+                               ", ".join(r.path.name for r in untriaged) + " have no triage")
         review = governing([r for r in mine if r.review_kind == "implementation"])
-        if waiting := self.not_advancing(review):
+        if waiting := self.not_advancing(review, IMPLEMENTATION_TRIAGE):
             return waiting
         if review.next_token() == ANOTHER_ROUND:
-            if unread and not in_clone:
-                # As on the first pass, the view moves the branch the fix's
-                # validation and review would run on, so the reading comes first.
-                return {"step": "round-view", **pass_base,
-                        "reason": f"{review.triage.name} records another round over a "
-                                  "fix; the owner reads the fix"}
-            result = self.another_round(review, "implementation")
+            result = self.follow(IMPLEMENTATION_TRIAGE, IMPLEMENTATION_REVIEW,
+                                 f"{review.triage.name} records another round", review=review,
+                                 unread=unread, in_clone=in_clone, base=pass_base)
             if unread and not viewing and result["step"] in ("validate", "review"):
                 result.update(reading=True, workspace=str(state.workspace), **pass_base)
                 result["reason"] += "; the owner reads the fix in the workspace beside it"
             return result
-        if waiting := self.validated("the round's fixes need validating"):
-            return waiting
+        # Anything else advances: a return waits above until the owner confirms it,
+        # and once confirmed has set the round aside before it is read here.
         if all(s.complete for s in work):
-            return self._pre_closeout()
+            if unmet := self.unmet(IMPLEMENTATION_TRIAGE, PRE_CLOSEOUT_REVIEW):
+                return unmet
+            return self.pre_closeout(IMPLEMENTATION_TRIAGE)
+        if unmet := self.unmet(IMPLEMENTATION_TRIAGE, ROUND):
+            return unmet
         return self.next_round(work)
 
-    def another_round(self, review: Record, kind: str,
-                      exempt: Callable[[str], bool] = is_record) -> Result:
-        """The review of `kind` again, after `review`'s triage recorded another round:
-        once a fix committed since it is validated, or on the same commit when
-        nothing but `exempt` paths changed."""
-        if self.fixed_since(review, exempt):
-            if waiting := self.validated(f"{review.triage.name} records another round, and "
-                                         "the fix committed since needs validating", exempt):
-                return waiting
-        return {"step": "review", "kind": kind,
-                "reason": f"{review.triage.name} records another round"}
-
-    def _pre_closeout(self) -> Result:
+    def pre_closeout(self, source: Node) -> Result:
+        """The pre-closeout review, reached by `source`'s exit to it, and where its
+        triage leads: the review is named once that exit's guards hold."""
         if untriaged := self.untriaged(kinds=("pre-closeout",)):
-            return {"step": "triage", "reason": f"{untriaged} has no triage"}
+            return self.follow(PRE_CLOSEOUT_REVIEW, PRE_CLOSEOUT_TRIAGE,
+                               f"{untriaged} has no triage")
         reviews = [r for r in self.state.records if r.review_kind == "pre-closeout"]
         review = governing(reviews) if reviews else None
-        if review is not None and (waiting := self.not_advancing(review)):
+        if review is not None and (waiting := self.not_advancing(review, PRE_CLOSEOUT_TRIAGE)):
             return waiting
         # A review whose triage returned the change describes work the return
         # replaced, so the work implemented since is reviewed afresh.
         if review is None or review.next_token() == RETURNED:
-            if waiting := self.validated("a pre-closeout review needs a passing validation "
-                                         "of HEAD"):
-                return waiting
-            return {"step": "review", "kind": "pre-closeout",
-                    "reason": "every section before closeout is checked and validated"}
+            return self.follow(source, PRE_CLOSEOUT_REVIEW,
+                               "every section before closeout is checked and validated")
         # From here closeout is next, and its own checks read the documentation, so
         # a triage's commit of documents alone needs no validation.
         if review.next_token() == ANOTHER_ROUND:
-            return self.another_round(review, "pre-closeout", is_documentation)
-        if waiting := self.validated("closeout needs a passing validation of HEAD",
-                                     is_documentation):
-            return waiting
-        return {"step": "closeout", "reason": f"{review.triage.name} records that the change "
-                                              "advances, and HEAD is validated"}
+            return self.follow(PRE_CLOSEOUT_TRIAGE, PRE_CLOSEOUT_REVIEW,
+                               f"{review.triage.name} records another round", review=review)
+        return self.follow(PRE_CLOSEOUT_TRIAGE, CLOSEOUT,
+                           f"{review.triage.name} records that the change advances, and "
+                           "HEAD is validated", review=review)
 
     def _closeout(self, status: str) -> Result:
         state = self.state
         if status == "ready for closeout" or not is_archived(self.root, state.directory):
-            return {"step": "closeout", "reason": status}
+            return CLOSEOUT.result(status)
         if self._uncommitted(self.root, state.directory):
-            return {"step": "closeout", "reason": "the archive is not committed: closeout "
-                                                  "resumes after its archive step"}
+            return CLOSEOUT.result("the archive is not committed: closeout resumes after its "
+                                   "archive step")
         if untriaged := self.untriaged(kinds=("closeout",)):
-            return {"step": "triage", "reason": f"{untriaged} has no triage"}
+            return self.follow(CLOSEOUT_REVIEW, CLOSEOUT_TRIAGE, f"{untriaged} has no triage")
         reviews = [r for r in state.records if r.review_kind == "closeout"]
         if not reviews:
-            return {"step": "review", "kind": "closeout",
-                    "reason": "the change is archived; its closeout review is next"}
+            return self.follow(CLOSEOUT, CLOSEOUT_REVIEW,
+                               "the change is archived; its closeout review is next")
         review = governing(reviews)
-        if waiting := self.not_advancing(review):
+        if waiting := self.not_advancing(review, CLOSEOUT_TRIAGE):
             return waiting
         if review.next_token() == RETURNED:
+            # The table gives a closeout triage no return among its exits.
             return _owner(f"{review.triage.name} records a return, and an archived change "
                           "has no earlier phase to return to: the owner directs its "
                           "correction")
         if review.next_token() == ANOTHER_ROUND:
-            return {"step": "review", "kind": "closeout",
-                    "reason": f"{review.triage.name} records another round"}
-        # Measured from the commit the first closeout review read, the archive: a
-        # code fix an earlier round of closeout reviews committed is still
-        # unvalidated when the latest review read it.
-        if changed := self.changed_outside_documentation(reviews[0]):
-            if waiting := self.validated(f"HEAD changes {changed} since "
-                                         f"{reviews[0].path.name} reviewed the archive, so it "
-                                         "is validated before archive cleanup"):
-                return waiting
-        return {"step": "archive-cleanup",
-                "reason": f"{review.triage.name} records that the change advances"}
+            return self.follow(CLOSEOUT_TRIAGE, CLOSEOUT_REVIEW,
+                               f"{review.triage.name} records another round", review=review)
+        return self.follow(CLOSEOUT_TRIAGE, ARCHIVE_CLEANUP,
+                           f"{review.triage.name} records that the change advances",
+                           review=review, first=reviews[0])
+
+    # Following an exit through the table.
+
+    def unmet(self, source: Node, target: Node | None = None, *, when: str | None = None,
+              **context: Any) -> Result | None:
+        """The first unmet guard's result on the exit of `source` to `target`, or taken
+        on `when`, in the table's order; None when every guard holds. A held guard
+        is skipped: `dependencies` holds the change on it before it is read, and
+        `bootstrap_held` and `bootstrapping` around whatever is named. The exits a
+        return may take share their guard, so a return names no target."""
+        found = graph.exits(source, target=target, when=when)
+        if not found:
+            raise StepError(f"the workflow graph gives {source.label} no exit "
+                            f"{target.label if target else when}")
+        for guard in found[0].guards:
+            if guard.check is not None and (result := guard.check(self, context)):
+                return result
+        return None
+
+    def follow(self, source: Node, target: Node, reason: str, **context: Any) -> Result:
+        """The exit of `source` to `target`: the first unmet guard's remedy, or
+        `target`'s step once every guard holds."""
+        return self.unmet(source, target, **context) or target.result(reason)
 
     # Shared readings.
 
@@ -987,14 +1004,15 @@ class Computation:
         read = {e.get("reads") for e in decisions} | resolved
         latest: dict[str, dict[str, Any]] = {}
         latest_any: dict[str, dict[str, Any]] = {}
+        steps = graph.phase_steps(phase)
         for index, entry in enumerate(log):
             name = entry.get("step")
             if name == ORCHESTRATOR:
                 continue
             latest_any[name] = entry
-            if name not in _PHASE_STEPS[phase]:
+            if name not in steps:
                 continue
-            if name == "review" and _REVIEW_PHASE.get(entry.get("kind", "")) != phase:
+            if name == "review" and graph.review_phase(entry.get("kind", "")) != phase:
                 continue
             if name == "triage" and _triage_phase(log[:index]) not in (phase, None):
                 continue
@@ -1057,23 +1075,21 @@ class Computation:
                      and entry.get("next") == "plan" and entry.get("resolves") is None
                      and entry["seq"] > design["seq"]), None)
 
-    def not_advancing(self, review: Record) -> Result | None:
-        """The step while `review`'s triage records no token the phase can route on:
-        the triage, while it has no `## Next`; the owner, for a legacy gate not
-        passed, a `## Next` without a token, or a return the owner has not
-        confirmed."""
+    def not_advancing(self, review: Record, triage: Node) -> Result | None:
+        """The step while `review`'s triage, the node `triage`, records no token the
+        phase can route on: the triage, while it has no `## Next`; the owner, for a
+        legacy gate not passed, a `## Next` without a token, or a return whose guard
+        does not hold, where `triage` has a return among its exits."""
         token = review.next_token()
         if token == IN_PROGRESS:
-            return {"step": "triage", "reason": f"{review.triage.name} has no `## Next`: its "
-                                                "triage is in progress"}
+            return triage.result(f"{review.triage.name} has no `## Next`: its triage is in "
+                                 "progress")
         if token == OWNER:
             return _owner(f"{review.triage.name} records neither Advance, Another round, nor "
                           "Returned under `## Next`, or a gate it did not pass: the owner "
                           "decides what follows")
-        if token == RETURNED and not self.return_confirmed(review):
-            return _owner(f"{review.triage.name} records a return the owner has not "
-                          "confirmed: resume its triage if it stopped before proposing the "
-                          "return, or decide what the triage records")
+        if token == RETURNED and graph.exits(triage, when=graph.RETURN):
+            return self.unmet(triage, when=graph.RETURN, review=review)
         return None
 
     def return_confirmed(self, review: Record) -> bool:
