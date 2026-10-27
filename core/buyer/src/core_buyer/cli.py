@@ -15,6 +15,7 @@ fallbacks for those names. Without plugins:
 from __future__ import annotations
 
 import json
+import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -503,19 +504,61 @@ def _make_plugin_required_stub(verb: str):
 # ---------------------------------------------------------------------------
 
 
+class DuplicateRootCommandError(RuntimeError):
+    """Two installed buyer domains register the same root-level command."""
+
+
+def _group_name(group: Any) -> str | None:
+    if group.name:
+        return str(group.name)
+    if group.typer_instance is not None and group.typer_instance.info.name:
+        return str(group.typer_instance.info.name)
+    return None
+
+
+def _command_name(command: Any) -> str | None:
+    if command.name:
+        return str(command.name)
+    if command.callback is not None:
+        return command.callback.__name__.replace("_", "-")
+    return None
+
+
 def _registered_names(app: typer.Typer) -> set[str]:
-    names: set[str] = set()
-    for group in app.registered_groups:
-        if group.name:
-            names.add(group.name)
-        elif group.typer_instance is not None and group.typer_instance.info.name:
-            names.add(str(group.typer_instance.info.name))
-    for command in app.registered_commands:
-        if command.name:
-            names.add(command.name)
-        elif command.callback is not None:
-            names.add(command.callback.__name__.replace("_", "-"))
-    return names
+    names = [_group_name(group) for group in app.registered_groups]
+    names += [_command_name(command) for command in app.registered_commands]
+    return {name for name in names if name}
+
+
+def _register_domain_commands(
+    app: typer.Typer, domains: list[MarketDomainContract]
+) -> None:
+    """Add every domain's commands, refusing a root name two domains register.
+
+    Typer keeps every registration and dispatches a repeated name to whichever
+    entry it resolves first, so with two domains installed one domain's command
+    could run the other's behaviour, decided by entry-point discovery order.
+    """
+    owners: dict[str, str] = {}
+    for domain in domains:
+        if domain.buyer is None:
+            continue
+        groups = len(app.registered_groups)
+        commands = len(app.registered_commands)
+        domain.buyer.register_commands(app)
+        added = [_group_name(group) for group in app.registered_groups[groups:]]
+        added += [
+            _command_name(command) for command in app.registered_commands[commands:]
+        ]
+        identity = str(domain.identity)
+        for name in filter(None, added):
+            owner = owners.setdefault(name, identity)
+            if owner != identity:
+                raise DuplicateRootCommandError(
+                    f"buyer domains {owner!r} and {identity!r} both register "
+                    f"the root command {name!r}; a root command belongs to one "
+                    "domain"
+                )
 
 
 def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
@@ -582,9 +625,7 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
         help="Manage durable local buyer profiles and retained signer history.",
     )
 
-    for domain in domains:
-        if domain.buyer is not None:
-            domain.buyer.register_commands(app)
+    _register_domain_commands(app, domains)
 
     claimed = _registered_names(app)
     if "listing" not in claimed:
@@ -608,7 +649,12 @@ def build_app(domains: list[MarketDomainContract] | None = None) -> typer.Typer:
 
 def main() -> None:
     """Console-script entry point for ``market``."""
-    build_app()()
+    try:
+        app = build_app()
+    except DuplicateRootCommandError as exc:
+        print(f"[market] {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    app()
 
 
 if __name__ == "__main__":

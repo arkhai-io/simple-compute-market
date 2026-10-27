@@ -144,19 +144,12 @@ def test_a_resource_the_site_built_no_view_for_is_a_declared_mismatch_naming_why
 
 
 def test_unbacked_supply_matches_on_its_declaration_with_no_availability_read():
-    """An unbacked view states no availability, and none is asked of it."""
+    """An unbacked view states no availability, and none is asked of it. The
+    recheck reads only the trusted carrier, which holds no ledger counts, so a
+    machine the site's ledger reports taken is the storefront's tests' case."""
     generation = _generation(backing=UNBACKED)
 
     assert generation.resources[0].view.available is None
-    assert _check(generation, backing=UNBACKED).outcome == SOURCE_MATCHES
-
-
-def test_an_unbacked_machine_reported_taken_still_matches():
-    """Spec scenario "An unbacked listing's resource reads as unavailable": the
-    site carries no availability for unbacked supply, whatever its ledger
-    says, so the recheck has nothing to refuse it for."""
-    generation = _generation(backing=UNBACKED, available=False)
-
     assert _check(generation, backing=UNBACKED).outcome == SOURCE_MATCHES
 
 

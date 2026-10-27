@@ -327,6 +327,28 @@ def test_a_malformed_view_problem_refuses_the_generation(resource):
         _parse(_projection(_pool("pool-1", resource)))
 
 
+@pytest.mark.parametrize(
+    "first",
+    [
+        pytest.param(lambda: _resource(), id="viewed-and-unbuildable"),
+        pytest.param(
+            lambda: _unbuildable(["access_methods: required"], physical_resource_id="resource-1"),
+            id="unbuildable-twice",
+        ),
+    ],
+)
+def test_a_resource_reported_twice_refuses_the_generation(first):
+    """One Physical Resource the site reported in two pools, viewed in one and
+    unbuildable in the other or unbuildable in both, would be classified twice."""
+    projection = _projection(
+        _pool("pool-1", first()),
+        _pool("pool-2", _unbuildable(["host_id: required"], physical_resource_id="resource-1")),
+    )
+
+    with pytest.raises(ValueError, match="unique within a site"):
+        _parse(projection)
+
+
 def test_a_projection_without_a_generation_identity_is_refused():
     with pytest.raises(ValidationError):
         _parse({"resource_pools": []})

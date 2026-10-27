@@ -509,10 +509,7 @@ def request_introduction(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        publisher_principals=publisher_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
@@ -531,7 +528,11 @@ def request_introduction(
                 "access_method": "none",
             },
         ),
+        decode_provision_terms=BareMetalProvisionTerms.model_validate,
         settlement_selection=selection,
+        # The seller's accept reply is checked against the option the listing
+        # advertised; without it the buyer has nothing to hold the plan to.
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
     )
     if outcome.status != "agreed" or outcome.negotiation_id is None:
@@ -547,10 +548,7 @@ def request_introduction(
         negotiation_id=outcome.negotiation_id,
         agreement_ref=outcome.negotiation_id,
         obligation_ref=obligation_ref,
-        seller_principals=[
-            item.model_dump(mode="json")
-            for item in listing.publisher_principals.identities
-        ],
+        seller_principals=publisher_principals.model_dump(mode="json"),
         storefront_url=listing.storefront_url,
         accepted_plan=outcome.settlement_plan.model_dump(mode="json"),
     )
@@ -584,9 +582,14 @@ def _seller_principal(deal: Any) -> Any:
     return identities[0] if identities else None
 
 
+# Bare metal's settlement utilities sit under its own command, beside
+# ``request-introduction``, so it registers no root ``settlement`` group: the
+# core application refuses a root command two installed domains register.
+bare_metal_app.add_typer(settlement_app, name="settlement")
+
+
 def register_commands(app: object) -> None:
     """Register the bare-metal group on the core market application."""
 
     add_typer = getattr(app, "add_typer")
     add_typer(bare_metal_app, name="bare-metal")
-    add_typer(settlement_app, name="settlement")

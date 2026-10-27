@@ -127,6 +127,12 @@ class VmAlkahestSellerStage:
     # fulfillment. Required of every VM seller stage, with no default, because
     # publication drops such a stage's options from an unbacked listing.
     fulfils_through_capacity: bool = field(kw_only=True)
+    # Whether a deal through this entry completes outside settlement and
+    # fulfillment, so that it has no settle, delivery, or refund operation.
+    # Required of every VM seller stage, with no default, because the settle
+    # route answers such a deal from it. It is not fulfils_through_capacity:
+    # a mechanism may settle without delivering through capacity.
+    completes_outside_settlement: bool = field(kw_only=True)
     # The Alkahest release models this entry can deliver, from
     # market_alkahest.RELEASE_MODELS. A configured [Settlement.alkahest] model
     # outside them makes Alkahest unready, so a listing never advertises a
@@ -447,6 +453,7 @@ class VmPaymentsSellerStage:
     settles_from_agreement: ClassVar[bool] = True
     mechanism: str = "arkhai.payments.v1"
     fulfils_through_capacity: bool = field(kw_only=True)
+    completes_outside_settlement: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -727,13 +734,15 @@ class VmContactSellerStage:
 
     Its accepted plan comes from the registration, and the reveal is served by
     the contact-exchange kit, so this entry publishes no chains and has no
-    settle, delivery or refund operation.
+    settle, delivery or refund operation; it declares that it completes outside
+    settlement, and the settle route answers its deals from that declaration.
     """
 
     # Its plan is built by the registration's obligation builder.
     settles_from_agreement: ClassVar[bool] = False
     mechanism: str = CONTACT_MECHANISM
     fulfils_through_capacity: bool = field(kw_only=True)
+    completes_outside_settlement: bool = field(kw_only=True)
 
     def readiness_inputs(self, clauses: Any) -> dict[str, Any]:
         return {}
@@ -746,12 +755,6 @@ class VmContactSellerStage:
     ) -> dict[str, Any]:
         return {}
 
-    async def start(self, **_: Any) -> Any:
-        raise HTTPException(
-            status_code=409,
-            detail="a contact exchange completes by introduction, not settlement",
-        )
-
 
 def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any]:
     return SettlementStageTable(
@@ -759,13 +762,21 @@ def vm_seller_stages(build_plan: Callable[..., Any]) -> SettlementStageTable[Any
             # A VM listing may be a preemptible spot shape, so VM delivers every
             # release model, the interruptible splitter included.
             "alkahest.v1": VmAlkahestSellerStage(
-                build_plan, fulfils_through_capacity=True, release_models=RELEASE_MODELS
+                build_plan,
+                fulfils_through_capacity=True,
+                completes_outside_settlement=False,
+                release_models=RELEASE_MODELS,
             ),
             # A payment deal provisions its VM through capacity, like Alkahest.
-            "arkhai.payments.v1": VmPaymentsSellerStage(fulfils_through_capacity=True),
+            "arkhai.payments.v1": VmPaymentsSellerStage(
+                fulfils_through_capacity=True, completes_outside_settlement=False
+            ),
             # An introduction settles by revealing contacts; nothing is admitted
-            # against capacity, so an unbacked listing may offer it.
-            CONTACT_MECHANISM: VmContactSellerStage(fulfils_through_capacity=False),
+            # against capacity, so an unbacked listing may offer it, and nothing
+            # is settled or delivered after the reveal.
+            CONTACT_MECHANISM: VmContactSellerStage(
+                fulfils_through_capacity=False, completes_outside_settlement=True
+            ),
         }
     )
 

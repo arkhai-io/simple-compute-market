@@ -44,7 +44,6 @@ from market_identity import Identity, Signer, TrustedIdentitySet
 from market_negotiation_runtime import NegotiationRuntime
 from market_pool_overrides import PoolOverrideService, SQLitePoolOverrideStore
 from market_settlement_runtime import (
-    SettlementObligationRecord,
     SettlementPublicationClause,
     SettlementRuntime,
     SettlementServicingWorker,
@@ -129,60 +128,6 @@ def _watchdog_policy(settings: BareMetalStorefrontSettings) -> NegotiationWatchd
         timeout_seconds=settings.negotiation_timeout_seconds,
         interval_seconds=settings.negotiation_watchdog_interval,
     )
-
-
-@dataclass(frozen=True)
-class _RevealRecordingRuntime:
-    """The settlement runtime contact exchange drives an introduction through.
-
-    Collecting the introduction's obligation completes the reveal, so the deal's
-    settlement evidence is recorded once collection succeeds; every other step
-    is the settlement runtime's own.
-    """
-
-    runtime: SettlementRuntime
-    record_collected: Callable[[str], Awaitable[None]]
-
-    async def register_plan(self, *, agreement_ref: str, obligations: list[Any]) -> Any:
-        return await self.runtime.register_plan(
-            agreement_ref=agreement_ref, obligations=obligations
-        )
-
-    async def materialize(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        return await self.runtime.materialize(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-
-    async def bind_fulfillment(
-        self, obligation_ref: str, fulfillment_ref: str, *, local_principal: Identity
-    ) -> Any:
-        return await self.runtime.bind_fulfillment(
-            obligation_ref, fulfillment_ref, local_principal=local_principal
-        )
-
-    async def check(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        return await self.runtime.check(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-
-    async def collect(
-        self, *, obligation_ref: str, local_principal: Identity, worker_id: str
-    ) -> Any:
-        collected = await self.runtime.collect(
-            obligation_ref=obligation_ref,
-            local_principal=local_principal,
-            worker_id=worker_id,
-        )
-        await self.record_collected(obligation_ref)
-        return collected
 
 
 @dataclass(frozen=True)
@@ -344,9 +289,10 @@ class BareMetalStorefrontRuntime:
                 load_thread=self._accepted_contact_thread,
                 load_obligation=repository.load_settlement_obligation,
                 load_origin=self._negotiation_origin,
-                settlement_runtime=_RevealRecordingRuntime(
-                    self.settlement_runtime, self._record_collected_introduction
-                ),
+                # A revealed introduction is the contact-exchange kit's record,
+                # never settlement evidence: the deal has no settlement or
+                # fulfillment to verify.
+                settlement_runtime=self.settlement_runtime,
                 known_origins=[binding.site_id for binding in self.site_bindings],
                 deliver=self._deliver_introduction,
             ),
@@ -504,22 +450,6 @@ class BareMetalStorefrontRuntime:
         ):
             raise ValueError("introduction Agreement differs from the accepted negotiation")
         return thread
-
-    async def _record_collected_introduction(self, obligation_ref: str) -> None:
-        """Record a collected introduction as its deal's settlement evidence."""
-        row = await self.settlement_repository.load_settlement_obligation(obligation_ref)
-        if row is None:
-            raise ValueError("introduction obligation is missing")
-        negotiation_id = SettlementObligationRecord.model_validate(row).agreement_ref
-        thread = await self._accepted_contact_thread(negotiation_id=negotiation_id)
-        if thread is None:
-            raise ValueError("introduction deal is not accepted")
-        accepted = Agreement.model_validate_json(thread["agreement_bytes"])
-        assert accepted.settlement is not None
-        stage = self.domain.settlement.seller_stages[accepted.settlement.mechanism]
-        await stage.record_reveal(
-            self.db, negotiation_id=negotiation_id, obligation_ref=obligation_ref
-        )
 
     def payments_reconciliation_enabled(self) -> bool:
         """Whether accepted payment deals need a seller-side reconciliation loop."""

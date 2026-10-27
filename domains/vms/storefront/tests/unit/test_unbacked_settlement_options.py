@@ -11,7 +11,11 @@ from market_settlement_runtime import MechanismReadiness, ReadinessBlocker
 
 from market_storefront.domain_runtime import build_vm_seller_stages
 from market_storefront.services.listing_service import ListingService
-from market_storefront.settlement_stages import VmPaymentsSellerStage
+from market_storefront.settlement_stages import (
+    VmAlkahestSellerStage,
+    VmContactSellerStage,
+    VmPaymentsSellerStage,
+)
 
 
 def _option(mechanism):
@@ -79,9 +83,41 @@ def test_every_vm_seller_stage_declares_whether_it_fulfils_through_capacity():
     }
 
 
-def test_a_stage_without_the_declaration_cannot_be_constructed():
-    with pytest.raises(TypeError, match="fulfils_through_capacity"):
-        VmPaymentsSellerStage()
+def test_every_vm_seller_stage_declares_whether_it_completes_outside_settlement():
+    declared = {
+        mechanism: stage.completes_outside_settlement
+        for mechanism, stage in build_vm_seller_stages().items()
+    }
+
+    assert declared == {
+        "alkahest.v1": False,
+        "arkhai.payments.v1": False,
+        "contact-exchange.v1": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "build_stage",
+    [
+        pytest.param(
+            lambda **declarations: VmAlkahestSellerStage(
+                build_plan=lambda **_: None, release_models=frozenset(), **declarations
+            ),
+            id="alkahest",
+        ),
+        pytest.param(VmPaymentsSellerStage, id="payments"),
+        pytest.param(VmContactSellerStage, id="contact"),
+    ],
+)
+@pytest.mark.parametrize(
+    "declaration", ["fulfils_through_capacity", "completes_outside_settlement"]
+)
+def test_a_stage_without_a_declaration_cannot_be_constructed(build_stage, declaration):
+    declarations = {"fulfils_through_capacity": True, "completes_outside_settlement": False}
+    del declarations[declaration]
+
+    with pytest.raises(TypeError, match=declaration):
+        build_stage(**declarations)
 
 
 def test_a_backed_listing_keeps_every_option():

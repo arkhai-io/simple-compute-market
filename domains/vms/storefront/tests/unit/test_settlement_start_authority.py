@@ -194,6 +194,46 @@ async def test_a_chain_with_no_client_is_retryable_only_when_configured(
     coordinator.start.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_a_deal_settled_by_introduction_is_refused_before_its_stage_starts(
+    monkeypatch,
+) -> None:
+    """The settle route answers from the accepted stage's declaration that it
+    completes outside settlement, after the buyer's ownership is checked and
+    before anything starts."""
+    thread = {
+        **_thread(),
+        "agreement_bytes": json.dumps(
+            {"settlement": {"mechanism": "contact-exchange.v1"}}
+        ).encode(),
+    }
+    db = SimpleNamespace(
+        load_negotiation_thread_row=AsyncMock(return_value=thread),
+        load_escrow=AsyncMock(return_value=None),
+    )
+    verify = AsyncMock(return_value=SimpleNamespace(exact_retry=False))
+    monkeypatch.setattr(buyer_auth, "_verify", verify)
+    coordinator = SimpleNamespace(start=AsyncMock())
+    composition = SimpleNamespace(
+        coordinator=coordinator,
+        seller_stages=build_vm_storefront_domain().settlement.seller_stages,
+        mechanism_clients={},
+        local_principal=_SELLER,
+    )
+    monkeypatch.setattr(_container, "resolved_settlement_composition", composition)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _controller(db).settle_escrow("neg-1", _body(), _request())
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == (
+        "a contact exchange completes by introduction, not settlement"
+    )
+    verify.assert_awaited_once()
+    coordinator.start.assert_not_awaited()
+    db.load_escrow.assert_not_awaited()
+
+
 def test_the_accepted_escrow_proposal_is_never_the_buyers_opening() -> None:
     """Settlement reads the proposal the seller accepted under the listing's
     release condition; a thread recording only the buyer's opening is refused."""

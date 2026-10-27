@@ -21,10 +21,13 @@ _STAGES = SettlementStageTable({
     "alkahest.v1": VmAlkahestSellerStage(
         lambda **kwargs: {},
         fulfils_through_capacity=True,
+        completes_outside_settlement=False,
         release_models=frozenset({"recipient"}),
     ),
     "example.payment.v1": VmPaymentsSellerStage(
-        mechanism="example.payment.v1", fulfils_through_capacity=True
+        mechanism="example.payment.v1",
+        fulfils_through_capacity=True,
+        completes_outside_settlement=False,
     ),
 })
 

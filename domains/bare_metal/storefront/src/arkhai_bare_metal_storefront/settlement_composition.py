@@ -19,11 +19,9 @@ from .settlement_stages import (
     declined_servicing,
     refund_payment,
     revalidate_alkahest,
-    revalidate_contact,
     revalidate_payment,
     settle_payment,
     verify_alkahest,
-    verify_contact,
     verify_payment,
 )
 from market_alkahest import (
@@ -63,6 +61,7 @@ SELLER_STAGES = SettlementStageTable(
             verify_alkahest,
             revalidate_alkahest,
             True,
+            completes_outside_settlement=False,
             servicing=alkahest_servicing,
             release_models=frozenset({RECIPIENT_RELEASE, ORACLE_GATED_RELEASE}),
         ),
@@ -71,14 +70,18 @@ SELLER_STAGES = SettlementStageTable(
             verify_payment,
             revalidate_payment,
             True,
+            completes_outside_settlement=False,
             refund=refund_payment,
             reconcile=settle_payment,
         ),
+        # An introduction delivers nothing through capacity and is completed by
+        # its reveal, so it has no settle operation or recovery gate.
         CONTACT_MECHANISM: ContactStage(
             create_contact_exchange_registration,
-            verify_contact,
-            revalidate_contact,
-            False,
+            verify=None,
+            revalidate=None,
+            fulfils_through_capacity=False,
+            completes_outside_settlement=True,
             servicing=declined_servicing,
         ),
     }

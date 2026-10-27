@@ -293,7 +293,10 @@ these hold:
 
 - the shape digest differs from the binding's;
 - the region differs from the published region;
-- the Physical Resource is absent, disabled, or no longer projected under its bound pool.
+- the Physical Resource is absent, disabled, or no longer projected under its bound pool;
+- the site projects the Physical Resource, enabled in a pool admitting bare metal, with the
+  problems that kept it from building a bare-metal view, which the storefront's record of
+  the refusal names.
 
 For a capacity-backed listing it MUST refuse with the availability reason when the held
 projection's bare-metal view shows the Physical Resource unavailable; an unbacked listing
@@ -315,6 +318,13 @@ the site by at most that window; admission at the site remains authoritative.
 - **WHEN** a buyer opens a negotiation on a capacity-backed bare-metal listing whose
   Physical Resource is reserved by another deal, as the held projection shows
 - **THEN** the opening is refused with the availability reason
+
+#### Scenario: The site builds no view for the listing's resource
+
+- **WHEN** a buyer opens a negotiation on a bare-metal listing whose Physical Resource the
+  held projection carries with a `publication_view_problems` entry for the bare-metal view
+- **THEN** the opening is refused with a declared-match reason, and the storefront's record
+  of the refusal names the site's problem
 
 #### Scenario: An unbacked listing's resource reads as unavailable
 

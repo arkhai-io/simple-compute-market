@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import traceback
+import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from arkhai_bare_metal_buyer import cli as buyer_cli
+from arkhai_bare_metal_buyer.plugin import domain as bare_metal_buyer
+from core_buyer.cli import build_app
+from typer.testing import CliRunner
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     IntroductionAdminClient,
@@ -33,11 +41,16 @@ from arkhai_bare_metal_storefront.settlement_composition import (
 from arkhai_bare_metal_storefront.site_clients import BareMetalSiteBinding
 from arkhai_bare_metal_storefront.sqlite_client import SQLiteClient
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
+from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
+from dataclasses import replace
 from loopback import serving
 from held_loops import held_loop_controller
-from source_sites import SourceSites, source_projections
+from market_resource_pools_contracts.backing import UNBACKED
+from source_sites import SourceSite, SourceSites, listing_source_projection, source_projections
 from storefront_client import StorefrontClient, StorefrontClientError
+from test_http_system import _REGISTRY_TRUST, _RecordedRegistries
+from test_publication_cycle import REGISTRY_URL
 
 BUYER_SIGNER = Eip191Signer(bytes.fromhex("22" * 32))
 SELLER_SIGNER = Eip191Signer(bytes.fromhex("11" * 32))
@@ -113,7 +126,10 @@ def _runtime(
                         },
                         **(contact or {}),
                     },
-                }
+                },
+                # As the composition root supplies it: the seller a contact
+                # option names as the introduction's claimant.
+                resources={"claimant_principal": SELLER_SIGNER.identity},
             )
         ),
         introduction_delivery=deliver,
@@ -294,12 +310,13 @@ async def test_introduction_start_reveals_and_completes(tmp_path) -> None:
     assert seller_read["counterparty_contact"] == _BUYER_CONTACT
     status = await runtime.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
-    evidence = await runtime.settlement_service().verified_evidence(
-        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    # Spec scenario "An introduction is revealed": the reveal is the
+    # contact-exchange kit's record, and the deal's settlement record stays as
+    # acceptance wrote it, with no settlement evidence.
+    record = await runtime.db.load_bare_metal_settlement_record(
+        negotiation_id=negotiation_id
     )
-    assert evidence.settlement_ref == obligation_ref
-    assert evidence.evidence["delivery"] is None
-    assert evidence.evidence["source"] == {"obligation_ref": obligation_ref}
+    assert (record["status"], record["settlement_ref"]) == ("accepted", None)
     assert (
         await runtime.db.load_bare_metal_fulfillment_lifecycle(
             negotiation_id=negotiation_id
@@ -387,11 +404,10 @@ async def test_accepted_introduction_survives_contact_disable(
 
     status = await restarted.settlement_runtime.get_status(negotiation_id)
     assert status.status == "complete"
-    evidence = await restarted.settlement_service().verified_evidence(
-        negotiation_id=negotiation_id, buyer_principal=BUYER_SIGNER.identity
+    record = await restarted.db.load_bare_metal_settlement_record(
+        negotiation_id=negotiation_id
     )
-    assert evidence.settlement_ref == obligation_ref
-    assert evidence.evidence["source"] == {"obligation_ref": obligation_ref}
+    assert (record["status"], record["settlement_ref"]) == ("accepted", None)
 
 
 async def test_reveal_refusals(tmp_path) -> None:
@@ -404,6 +420,266 @@ async def test_reveal_refusals(tmp_path) -> None:
         _, obligation_ref, _ = await _accept_and_start(base_url, option)
         with pytest.raises(RuntimeError, match="403"):
             _introductions(base_url, OUTSIDER_SIGNER).read(obligation_ref=obligation_ref)
+
+
+# -- a deal settled by introduction has no settlement or fulfillment -----------
+
+
+def _fulfillment(base_url: str, signer=BUYER_SIGNER) -> BareMetalFulfillmentTransport:
+    """The production bare-metal buyer's fulfillment transport."""
+    return BareMetalFulfillmentTransport(
+        seller_url=base_url,
+        principal=signer.identity,
+        signer=signer,
+        resolve_seller_principals=lambda: TrustedIdentitySet(
+            identities=(SELLER_SIGNER.identity,)
+        ),
+    )
+
+
+def _buyer_storefront(base_url: str) -> StorefrontClient:
+    return StorefrontClient(
+        base_url,
+        signer=BUYER_SIGNER,
+        caller_role="buyer",
+        expected_publishers=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+    )
+
+
+_FULFILLMENT_READS = ("status", "access", "result", "teardown")
+
+
+async def _settlement_and_fulfillment_answers(base_url: str, negotiation_id: str) -> dict:
+    """What settle, settle status, and each fulfillment route answer the deal's
+    buyer, and what fulfillment status answers another principal."""
+    answers: dict[str, Any] = {}
+    async with _buyer_storefront(base_url) as buyer:
+        for name, call in (
+            ("settle", buyer.settle_agreement(negotiation_id)),
+            ("settle_status", buyer.get_settle_status(negotiation_id)),
+        ):
+            try:
+                answers[name] = await call
+            except StorefrontClientError as exc:
+                answers[name] = exc
+    for name in _FULFILLMENT_READS:
+        try:
+            answers[name] = getattr(_fulfillment(base_url), name)(negotiation_id)
+        except RuntimeError as exc:
+            answers[name] = exc
+    try:
+        answers["outsider"] = _fulfillment(base_url, OUTSIDER_SIGNER).status(negotiation_id)
+    except RuntimeError as exc:
+        answers["outsider"] = exc
+    return answers
+
+
+def _assert_settled_by_introduction(answers: dict) -> None:
+    """Spec scenarios "A buyer settles an introduction deal", "A buyer asks for
+    an introduction deal's fulfillment", and "Another buyer asks about an
+    introduction deal"."""
+    for name in ("settle", "settle_status"):
+        refused = answers[name]
+        assert isinstance(refused, StorefrontClientError), (name, refused)
+        assert refused.status_code == 409
+        assert "completes by introduction, not settlement" in str(refused)
+    for name in _FULFILLMENT_READS:
+        refused = answers[name]
+        assert isinstance(refused, RuntimeError), (name, refused)
+        assert "404" in str(refused) and "has no fulfillment" in str(refused), refused
+    # Refused by the buyer authorization every deal's routes run before the
+    # stage is resolved, so the answer names nothing of the mechanism.
+    outsider = answers["outsider"]
+    assert isinstance(outsider, RuntimeError), outsider
+    assert "403" in str(outsider), outsider
+    assert "404" not in str(outsider) and "introduction" not in str(outsider)
+
+
+async def test_an_introduction_deal_answers_settle_and_fulfillment_from_its_stage(
+    tmp_path,
+) -> None:
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_contact_listing(runtime)
+    with serving(_app(runtime)) as base_url:
+        negotiation_id, _, _ = await _accept_and_start(base_url, option)
+        answers = await _settlement_and_fulfillment_answers(base_url, negotiation_id)
+
+    _assert_settled_by_introduction(answers)
+    record = await runtime.db.load_bare_metal_settlement_record(
+        negotiation_id=negotiation_id
+    )
+    assert (record["status"], record["settlement_ref"]) == ("accepted", None)
+
+
+class _ContextCountingClient(SQLiteClient):
+    """The storefront's persistence, counting fulfillment-context loads."""
+
+    context_loads = 0
+
+    async def load_bare_metal_fulfillment_context(self, *, negotiation_id: str):
+        type(self).context_loads += 1
+        return await super().load_bare_metal_fulfillment_context(
+            negotiation_id=negotiation_id
+        )
+
+
+async def test_an_unbacked_listing_published_by_the_storefront_reaches_an_introduction(
+    tmp_path,
+) -> None:
+    """Spec scenarios "An unbacked pool advertises bare metal", "An unbacked
+    bare-metal listing is accepted", and "An unbacked introduction deal's
+    fulfillment is requested", through the app: its own publication cycle
+    publishes the unbacked pool's machine with no delivery term and only the
+    introduction option; the buyer accepts and reveals it, the seller's contact
+    reaching the buyer; and every settlement and fulfillment route answers from
+    the stage, without loading a fulfillment context for a binding that names
+    no host. No fulfillment authority is composed, so a route that reached the
+    fulfillment service would fail rather than answer."""
+    site = SourceSite(listing_source_projection(backing=UNBACKED))
+    registries = _RecordedRegistries(authorities={REGISTRY_URL: _REGISTRY_TRUST})
+    path = str(tmp_path / "storefront.db")
+    _ContextCountingClient.context_loads = 0
+    runtime = replace(
+        _runtime(path),
+        db=_ContextCountingClient(path, domain=get_market_domain_contract()),
+        capacity_client=SourceSites(site),
+        site_projections=source_projections(site),
+        registry_configuration=registries,
+        publication_clauses=(
+            SettlementPublicationClause(
+                mechanism=CONTACT_MECHANISM,
+                asset="introduction",
+                mechanism_input={"profile": "default"},
+            ),
+        ),
+        default_max_duration_seconds=3600,
+    )
+    app = _app(runtime)
+    with serving(app) as base_url:
+        async with _admin(base_url) as admin:
+            report = await admin.admin_run_lifecycle_cycle("publication")
+        # What the registry was sent is what a buyer discovers.
+        ((operation, _url, listing_id, sent),) = registries.recording.sent
+        published = sent["listing_resource"]
+        (option,) = [dict(item) for item in sent["settlement_options"]]
+        async with _buyer_storefront(base_url) as buyer:
+            accepted = await buyer.negotiate_new(
+                listing_id=listing_id,
+                initial_amount=None,
+                provision_terms=_opening(option)["provision_terms"],
+                proposal_fields={},
+                settlement_selection=_opening(option)["proposal"]["settlement_selection"],
+                selection_only=True,
+                buyer_agent_url="https://buyer.example",
+            )
+        negotiation_id = accepted["negotiation_id"]
+        obligation_ref = derive_obligation_ref(
+            negotiation_id, 0, accepted["settlement_plan"]["obligations"][0]
+        )
+        revealed = _introductions(base_url).start(
+            negotiation_id=negotiation_id,
+            obligation_ref=obligation_ref,
+            contact_payload=dict(_BUYER_CONTACT),
+        )
+        answers = await _settlement_and_fulfillment_answers(base_url, negotiation_id)
+
+    assert [item["action"] for item in report["actions"]] == ["publish"]
+    assert operation == "publish"
+    assert published["capacity_backing"] == "unbacked"
+    for term in ("host_id", "physical_host_id", "access_methods"):
+        assert term not in published
+    assert option["mechanism"] == CONTACT_MECHANISM
+    assert accepted["action"] == "accept"
+    assert revealed["counterparty_contact"] == _SELLER_CONTACT
+    _assert_settled_by_introduction(answers)
+    assert _ContextCountingClient.context_loads == 0
+    assert runtime.capacity_client.reservation_sites == {}
+
+
+class _ListingRegistry:
+    """The buyer's registry client, serving the one listing it was given."""
+
+    def __init__(self, listing: SimpleNamespace) -> None:
+        self.listing = listing
+
+    def __enter__(self) -> _ListingRegistry:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+    def get_listing(self, listing_id: str) -> SimpleNamespace:
+        assert listing_id == self.listing.listing_id
+        return self.listing
+
+
+def _last_json_line(result: Any) -> dict:
+    """The JSON a command printed last, once it is shown to have succeeded."""
+    assert result.exit_code == 0, result.output + "".join(
+        traceback.format_exception(result.exception) if result.exception else ()
+    )
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+async def test_the_buyer_commands_reach_an_introduction_over_their_own_run_log(
+    tmp_path, monkeypatch
+) -> None:
+    """The production ``market bare-metal request-introduction`` and ``market
+    bare-metal settlement contact introduce`` against the storefront: the first
+    holds the seller's accept reply to the advertised option and records a run
+    log the second reloads, as a buyer runs them. The registry is doubled at the
+    buyer's client and the profile's identity resolved to the test buyer."""
+    runtime = _runtime(str(tmp_path / "storefront.db"))
+    option = await _insert_contact_listing(runtime)
+    identity = SimpleNamespace(
+        profile_id=str(uuid.uuid4()), principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER
+    )
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(buyer_cli, "fresh_identity", lambda: identity)
+    monkeypatch.setattr(buyer_cli, "recovery_identity", lambda run_id: identity)
+    registry = ADMIN_SIGNER.identity.model_dump(mode="json")
+    config = tmp_path / "buyer.toml"
+    config.write_text(
+        "[bare_metal]\n"
+        'registry_url = "https://registry.invalid"\n'
+        'registry_authority = "registry-a"\n'
+        f'registry_principals = [{{scheme = "{registry["scheme"]}", '
+        f'identifier = "{registry["identifier"]}"}}]\n',
+        encoding="utf-8",
+    )
+    app = build_app(domains=[bare_metal_buyer])
+    runner = CliRunner()
+    contact = ",".join(f"{key}={value}" for key, value in _BUYER_CONTACT.items())
+    with serving(_app(runtime)) as base_url:
+        listing = SimpleNamespace(
+            listing_id="intro-listing",
+            storefront_url=base_url,
+            publisher_id="publisher-1",
+            publisher_principals=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+            settlement_options=[option],
+        )
+        monkeypatch.setattr(
+            buyer_cli, "registry_client", lambda config, identity: _ListingRegistry(listing)
+        )
+        requested = runner.invoke(
+            app,
+            [
+                "bare-metal", "request-introduction", "intro-listing",
+                "--option-id", option["option_id"], "--config", str(config),
+            ],
+        )
+        request = _last_json_line(requested)
+        introduced = runner.invoke(
+            app,
+            [
+                "bare-metal", "settlement", "contact", "introduce",
+                "--run-id", request["run_id"], "--contact", contact,
+                "--config", str(config),
+            ],
+        )
+
+    assert request["status"] == "agreed"
+    assert _last_json_line(introduced)["counterparty_contact"] == _SELLER_CONTACT
 
 
 

@@ -30,6 +30,10 @@ from market_config.config_loader import (  # type: ignore[import-not-found]
 from market_config.registry_url import normalize_registry_url
 from market_config.setting_types import PositiveSeconds, SiteAuthorityUrl
 from market_identity import Identity, IdentityScheme, Signer, TrustedIdentitySet
+from market_settlement_runtime import (
+    compile_settlement_publication_clause,
+    parse_settlement_publication_clause,
+)
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from .zerotier import BaseUrlResolutionError, resolve_base_url_best_effort
@@ -154,9 +158,14 @@ def storefront_domain_registry(
 def settlement_publication_defaults(
     source: Dynaconf | None = None,
 ) -> tuple[Any, ...]:
-    """Return validated structured publication defaults as complete clauses."""
+    """Return validated structured publication defaults as complete clauses.
 
-    from market_settlement_runtime import compile_settlement_publication_clause
+    A clause naming a mechanism whose section is absent or disabled is read in
+    full but not compiled against its section, which a disabled mechanism has
+    no use for: publication drops it, so the storefront's own configuration
+    rules that mechanism out, and a listing it alone priced closes. A clause
+    that cannot be read, whatever its mechanism, is refused here.
+    """
 
     from market_storefront.settlement_composition import (
         build_storefront_settlement_registry,
@@ -173,15 +182,22 @@ def settlement_publication_defaults(
 
     registry = build_storefront_settlement_registry()
     config = registry.resolve(settlement_config_mapping(active), role="seller")
-    return tuple(
-        compile_settlement_publication_clause(
-            item,
-            registry=registry,
-            config=config,
-            role="seller",
+    clauses = []
+    for item in raw:
+        clause = parse_settlement_publication_clause(item, registry=registry, role="seller")
+        section = config.mechanisms.get(registry.registration(clause.mechanism).config_key)
+        if section is None or getattr(section, "enabled", False) is not True:
+            clauses.append(clause)
+            continue
+        clauses.append(
+            compile_settlement_publication_clause(
+                item,
+                registry=registry,
+                config=config,
+                role="seller",
+            )
         )
-        for item in raw
-    )
+    return tuple(clauses)
 
 
 def _build_chains(s: Dynaconf) -> dict[str, ChainConfig]:

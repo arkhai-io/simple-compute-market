@@ -49,11 +49,19 @@ def listing_source_projection(
     backing: CapacityBacking = BACKED,
 ) -> dict[str, Any]:
     """The seeded listing's site generation; ``backing`` is its pool's, whose
-    delegate decides which delivery terms the view carries."""
+    delegate decides which delivery terms the view carries.
+
+    ``available=False`` is the machine taken as the site reports it: none of
+    the resource's declared capacity available in its ledger, and, where the
+    backing carries availability on the view, the view saying so. An unbacked
+    view carries no availability, so for unbacked supply the ledger is the
+    only place the site reports the machine taken.
+    """
     declared = dict(DECLARED_CAPACITY if capacity is None else capacity)
     resource = build_projected_resource(
         resource_id,
         capacity=declared,
+        available=None if available else {dimension: 0 for dimension in declared},
         attributes={"gpu_model": gpu_model, "physical_host_id": physical_host_id},
         resource_type="compute.bare-metal",
         publication_views={
