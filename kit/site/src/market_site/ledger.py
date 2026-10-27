@@ -49,7 +49,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional, Protocol, Sequence
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session, sessionmaker
 from market_resource_pools import (
     HostRequirement,
@@ -74,7 +73,6 @@ ALLOCATION_MODE_ATTR = "allocation_mode"
 ALLOCATION_MODE_EXCLUSIVE = "exclusive"
 ALLOCATION_MODE_SHAREABLE = "shareable"
 PHYSICAL_HOST_ID_ATTR = "physical_host_id"
-VM_OFFERING_MODE = "vm"
 OFFERING_MODE_CLAIM_KEY = "offering_mode"
 
 
@@ -1954,40 +1952,6 @@ class CapacityLedgerService:
             self._sync_executor_fields(reservation, executor_target=executor_target)
         return self._reservation_payload(reservation)
 
-    def find_active_lease_by_vm_target(
-        self, host_id: str, vm_target: str
-    ) -> dict[str, Any] | None:
-        """Return the first active (held) lease reservation for a VM, or None.
-
-        Used by the ``POST /vms/{vm_name}/remove`` endpoint to cancel any
-        watchdog-managed lease before submitting the explicit removal job,
-        avoiding a double-fire when the lease would otherwise expire later.
-
-        ``host_id`` is matched via ``executor_ref``'s JSON payload and
-        ``vm_target`` via ``executor_target`` — neither
-        ``CapacityReservation`` column exists anymore (see
-        ``docs/development/ARCHITECTURE.md``, "Shared vocabulary and
-        identities"); the `executor_ref` lookup is the first ORM-level
-        use of SQLite's JSON1 extension in this module, though the
-        extension itself is already relied on at the migration layer
-        (``compute_provisioning_service/db/migrations.py``'s ``pool_id``
-        backfill).
-        """
-        with self.serialized(), self._session_factory() as db:
-            reservation = (
-                db.query(CapacityReservation)
-                .filter(
-                    func.json_extract(CapacityReservation.executor_ref, "$.host_id")
-                    == host_id,
-                    CapacityReservation.executor_target == vm_target,
-                    CapacityReservation.state.in_(HELD_RESERVATION_STATES),
-                    CapacityReservation.lease_end_utc.isnot(None),
-                )
-                .order_by(CapacityReservation.created_at.desc())
-                .first()
-            )
-            return self._reservation_payload(reservation) if reservation else None
-
     def update_reservation_state(
         self,
         capacity_reservation_id: str,
@@ -2613,11 +2577,6 @@ class CapacityLedgerService:
             "release_job_id": reservation.release_job_id,
             "executor_ref": dict(reservation.executor_ref or {}),
             "host_id": (reservation.executor_ref or {}).get("host_id"),
-            "vm_target": (
-                reservation.executor_target
-                if reservation.offering_mode == VM_OFFERING_MODE
-                else None
-            ),
             "lease_start_utc": reservation.lease_start_utc,
             "lease_end_utc": reservation.lease_end_utc,
             "create_job_id": reservation.create_job_id,

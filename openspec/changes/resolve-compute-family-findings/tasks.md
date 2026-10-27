@@ -68,7 +68,7 @@ branch edits `kit/site`'s `auth.py`, `projections.py`,
 `tests/integration/test_site_auth_middleware.py`, and
 `tests/unit/test_projections.py`, none of which this section touches.
 
-- [ ] 1.1 Remove `CapacityLedgerService.find_active_lease_by_vm_target` and its
+- [x] 1.1 Remove `CapacityLedgerService.find_active_lease_by_vm_target` and its
   test, `test_find_active_lease_by_vm_target_matches_via_executor_ref`. Remove
   the `vm_target` key from `_reservation_payload`. `executor_target` stays
   (D21).
@@ -82,15 +82,43 @@ branch edits `kit/site`'s `auth.py`, `projections.py`,
     legacy migrations, which this key is not; those matches stay. A reader of
     the reservation key, if one is found, is a design question, since D21
     rests on there being none.
-- [ ] 1.2 Bump `arkhai-kit-site` by a minor version, since a public method is
+
+  Done. The method's removal left `ledger.py`'s `sqlalchemy.func` import and its
+  `VM_OFFERING_MODE` constant unread, so both went too. Library integration:
+  `test_a_vm_reservation_names_its_target_once` (`kit/site`'s `test_ledger.py`)
+  commits a VM reservation, records its target through
+  `record_executor_target_in_session`, and reads it through `get_reservation`:
+  `executor_target` is the target and the payload has no `vm_target`; passes.
+  Search, outside `.venv`s: no caller of the method remains; every other
+  `vm_target` match is a job parameter, a VM fulfillment-request payload, the
+  operator client's `CreateVmRequest`, a legacy migration, or a test asserting
+  the key's absence from a storefront result. No reservation-payload reader.
+- [x] 1.2 Bump `arkhai-kit-site` by a minor version, since a public method is
   removed. Run `make lock`.
-- [ ] 1.3 **Verification checkpoint.**
+
+  `0.10.1` → `0.11.0`. No consumer called the method, so no floor is raised;
+  `make lock` updated the locks that resolve it.
+- [x] 1.3 **Verification checkpoint.**
   - Library integration: `kit/site`'s `test_ledger.py`.
   - Run `make test` in `kit/site`, `kit/site-client`, and
     `provisioning/compute/service`, which composes the ledger.
   - Run `make check-packaging` and `make check-comment-hygiene`.
 
   End-to-end: no scenario reads the removed lookup or key, and none is owed.
+
+  `make test`: `kit/site` 289 passed (unit and library integration);
+  `kit/site-client` 57 passed (unit); `provisioning/compute/service` 536 passed
+  (unit and application integration), against `arkhai-kit-site` 0.11.0.
+  The full `make test` passes. `make check-packaging` passes. `make
+  check-change` passes its comment-hygiene, agent-skill, task-list, index, and
+  OpenSpec checks, and fails only on the citation of
+  `openspec/specs/introduction-delivery/architecture.md`, which closeout
+  creates (27.9). The end-to-end statement stands: no scenario reads the lookup
+  or the key.
+
+  Handoff: nothing resisted. The fresh-context check found no guidance
+  violation; it asked only that the comment-hygiene result be recorded, as it
+  now is.
 
 ## 2. The mock mechanism's route template, models, and typed client are the family's
 

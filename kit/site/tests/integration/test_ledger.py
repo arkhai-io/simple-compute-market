@@ -851,33 +851,17 @@ def test_event_feed_is_versioned_and_anonymous(seeded: CapacityLedgerService):
     assert latest_again == latest
 
 
-def test_find_active_lease_by_vm_target_matches_via_executor_ref(seeded: CapacityLedgerService):
-    """host_id is matched through executor_ref's JSON payload
-    (func.json_extract) and vm_target through executor_target -- neither
-    is a dedicated column."""
-    reserved = seeded.reserve(claim={"offering_mode": "vm", **{"gpu_count": 1}}, deal_ref={"escrow_uid": "0xm"})
-    seeded.commit(
-        capacity_reservation_id=reserved["capacity_reservation_id"],
-        lease_end_utc="2099-01-01 00:00",
-    )
-    with seeded._session_factory() as db:
-        reservation = db.get(CapacityReservation, reserved["capacity_reservation_id"])
-        reservation.executor_ref = {"host_id": "kvm1"}
-        db.commit()
-    _record_target(seeded, reserved["capacity_reservation_id"], "tenant-find-me")
+def test_a_vm_reservation_names_its_target_once(seeded: CapacityLedgerService):
+    """A VM reservation's recorded target is ``executor_target``, with no
+    VM-named copy on the payload."""
+    reservation_id = _committed(seeded, "0xm")
+    _record_target(seeded, reservation_id, "tenant-named-once")
 
-    found = seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me")
-    assert found is not None
-    assert found["capacity_reservation_id"] == reserved["capacity_reservation_id"]
+    payload = seeded.get_reservation(reservation_id)
 
-    # A different host_id must not match, even with the same vm_target --
-    # proves the filter actually discriminates on the JSON value rather
-    # than matching any row with a non-null executor_ref.
-    assert seeded.find_active_lease_by_vm_target("kvm-wrong-host", "tenant-find-me") is None
-    # A different vm_target must not match either.
-    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-someone-else") is None
-    seeded.release(capacity_reservation_id=reserved["capacity_reservation_id"])
-    assert seeded.find_active_lease_by_vm_target("kvm1", "tenant-find-me") is None
+    assert payload["offering_mode"] == "vm"
+    assert payload["executor_target"] == "tenant-named-once"
+    assert "vm_target" not in payload
 
 
 def test_a_vm_release_handle_has_one_name(seeded: CapacityLedgerService):
