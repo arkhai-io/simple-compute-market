@@ -439,8 +439,8 @@ Made with this design's recording:
 - `service-identity-signing` is found delivered: its requirements are already in the
   permanent specifications and most of its tasks were carried out by
   `add-nonchain-marketplace-identities`; its remainder moves to the expanded change, and
-  its proposal records this. It is to be archived as delivered with `--skip-specs`, a
-  move likewise made outside the design step; until then its row says so.
+  its proposal records this. It was archived as delivered with `--skip-specs` on
+  2026-10-27, a move likewise made outside the design step.
   `replace-polling-with-authenticated-push` no longer depends on it.
 - Recorded in the proposals of `move-escrow-into-alkahest` (the opening rule),
   `capacity-reservation-lifecycle-hardening` (release by escrow and the repurposed
