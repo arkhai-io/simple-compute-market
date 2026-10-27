@@ -81,7 +81,7 @@ A guard is of one of two kinds (21 F1):
   guard that remedies it. An entry guard unmet on a step's exit names the owner.
 
 The table states today's routing, which round 1 reproduces exactly (13 F1); the
-triages' kinds, the entry guards, and the temporary `convert` node are round 2's:
+triages' kinds and the entry guards are round 2's:
 
 | Node | Exits a step names | Join | Guards on the exits, and their remedy |
 |---|---|---|---|
@@ -100,7 +100,6 @@ triages' kinds, the entry guards, and the temporary `convert` node are round 2's
 | `triage` `closeout` | `archive-cleanup`; `review` `closeout` | — | `archive-cleanup`: when a path outside `openspec/` and `docs/` changed since the first closeout review, `HEAD` validated (`validate`; failed or inconclusive: owner) |
 | `archive-cleanup` | `done` | — | — |
 | `done` | none: the change is done, and no step runs | — | — |
-| `convert`, while older records remain (D7) | the node the change stands at, which the owner confirms | — | the guards of that exit, as for a step's |
 
 The entry guards:
 
@@ -111,15 +110,18 @@ The entry guards:
 | `review` `closeout`, `triage` `closeout`, `archive-cleanup` | the change is archived | no |
 | `triage` of each kind | a review of its kind awaits triage | no |
 | `done` | reached only by archive cleanup's exit | no: never directed |
-| `validate` | it carries a target that is a node of the table, whose unwaivable entry guards are met | no |
-| `convert` | the change's records are not yet converted | no |
+| `validate` | it carries a target that is a node of the table | no |
 
 Closeout has no archive guard, since it is the step that archives.
 
 The computation names `validate` always with a `target` (D4): in a round's join,
 the round's triage; as a guard's remedy, the exit it clears; after the owner's
 direction to validation, the target the direction names (D5). Validation's entry
-guard holds every entry to that rule, a direction's included (30 F2). Validation
+guard holds every entry to that rule, a direction's included (30 F2). It does not
+check the target's own entry guards: a round's validation starts beside the
+implementation review, before the review its target triages is published, so the
+target's entry guards are checked on validation's exit, as on every exit, and a
+direction's nested target is checked by the log's writer (D5, 36 F1). Validation
 names that target as its exit, and the computation checks the target's guards
 again, so a passed validation clears the guard and a failed or inconclusive one
 names the owner (21 F2). Under orchestration validation takes the target from the
@@ -273,9 +275,10 @@ change's current node is needed, and no exit guard is checked: an exit guard is 
 condition on a step's exit (D1, D4), and a direction the owner made deliberately is
 not refused by one. A direction that causes a problem is the owner's to correct, by
 another direction (13 F1). The target's entry guards are checked (21 F1): the log's
-writer refuses a direction whose target's unwaivable entry guard is not met, naming
-the guard, since the step could not carry out its work, and a waivable entry guard
-takes the direction as its override. The directed step's entry check — its own,
+writer refuses a direction while an unwaivable entry guard of any node it names is
+not met — its target, and the target nested in a direction to validation (36 F1) —
+naming the guard, since the step could not carry out its work, and a waivable entry
+guard takes the direction as its override. The directed step's entry check — its own,
 as the pre-closeout review's validation check, or the computation it asks — accepts
 the direction in the log as that override; the step sets its own status as it
 starts, accepting the change in that state because the log holds the owner's
@@ -284,7 +287,9 @@ A direction to validation names the target it is for, so the owner can have a
 validation before a step a direction would otherwise reach unchecked: a passed
 validation leads to the target, its entry guards checked, and a failed or
 inconclusive one names the owner. No exit guard of an earlier edge applies, since
-the owner directed it (30 F2).
+the owner directed it (30 F2). A directed validation whose target could never be
+entered, such as archive cleanup of a change not archived, is refused while the
+owner is present rather than run to an exit the archive guard refuses (36 F1).
 The waiver of another design review and the waiver of archive cleanup's validation
 are plain directions, whose `reason` says what they skip; archive cleanup, finding
 the direction in the log, still writes the waiver's ledger line. Every decision
@@ -340,7 +345,8 @@ and `reads` are unchanged. The CLI keeps its flags — `--next`, `--kind`, and
 `--sections` — and builds the object; a direction to validation adds `--target`,
 the step it is for, which `--kind` and `--sections` then qualify (30 F2). `note_orchestrator` checks three things in
 place of its special cases: a `next` is the owner's, its target is a node of the
-table, and its target's unwaivable entry guards are met. A direction checks no exit
+table, and the unwaivable entry guards of every node it names are met, a nested
+target's included (36 F1). A direction checks no exit
 guard and overrides a waivable entry guard (D5), so a decision line names none.
 
 Rejected: keeping a string `next` and a `kind` field on decision lines alone, two
@@ -371,47 +377,80 @@ design's (D11), before its first review is published (30 F1).
 
 A committed command, `python3 scripts/run_change_step.py convert <change>`,
 converts one change's records in the checkout that holds them, its clone or the
-workspace, in two parts:
+workspace, in three parts:
 
 - The log's lines, in place, each keeping its seq, so every `resolves` and `reads`
   still names its run: a decision line's string `next` and `kind` become the D2
   object, a `returned` outcome's `return_to` gains its target, an outcome's prose
   `next`, which nothing routes on, moves into its `message`, and each line gains
   the format marker.
-- One line appended, `step` `convert`, stating where the change stands: `triaged`
-  names every review with a triage file, so none reads as a triage in progress, and
-  `next` names the node the change stands at, which the owner confirms. The command
-  proposes it from the latest triage file's token as that token leads in its phase
-  today — `Advance` and a `## Gate` beginning `Passed` the phase's advancing exit,
+- One line appended, `step` `convert`, `outcome` `converted`, recording the
+  conversion: `triaged` names every review with a triage file, so none reads as a
+  triage in progress. It names no exit, and is no step's run: the computation
+  routes past it on the last step's exit and the owner's latest direction (36 F2).
+- The owner's direction to the node the change stands at, appended after it as a
+  D5 decision line `by: owner`, which the log's writer checks as it checks every
+  direction. The command proposes the direction, and the owner, whom the
+  computation named, confirms it or gives `--next` in its place. It proposes from
+  the latest triage file's token as that token leads in its phase today —
+  `Advance` and a `## Gate` beginning `Passed` the phase's advancing exit,
   `Another round` the review of the same kind, `Returned` the step a recorded
-  confirmation directed — and takes the owner's `--next` in its place. A return not
-  yet confirmed is converted as a `returned` line naming its target, which the
-  owner's confirmation then resolves by that line's own seq.
+  confirmation directed. A direction checks no exit guard, so where the edge from
+  that triage's node to the proposed node carries an exit guard not met, evaluated
+  by the table's own guards, the command proposes the guard's remedy carrying the
+  node as its target: `{"step": "validate", "target": {"step": "round"}}` for a
+  round's fix commit not yet validated. Where the log holds a step's run after the
+  latest triage's, the token no longer states the present: the command proposes
+  nothing, names those runs, and requires `--next`. A return not yet confirmed,
+  its run rewritten in place, is proposed as the direction to its target that
+  resolves that run's seq; the owner declining it writes no direction, and the
+  return waits for the owner as any return does.
 
 ```json
-{"seq": 38, "step": "convert", "outcome": "finished", "format": 2,
- "triaged": ["13-design", "21-design", "30-design"],
+{"seq": 46, "step": "convert", "outcome": "converted", "format": 2,
+ "triaged": ["13-design", "21-design", "30-design", "36-design"],
+ "message": "converted the change's records"}
+{"seq": 47, "step": "orchestrator", "outcome": "orchestrator", "by": "owner", "format": 2,
  "next": {"step": "review", "kind": "design"},
- "message": "converted; 30-design's triage chose another round"}
+ "decision": "the change stands at a design review",
+ "reason": "36-design's triage chose another round; confirmed at conversion"}
 ```
 
-The history is not rebuilt as triage lines, one per older triage: an older triage
-line names no review, so every older triage would gain an appended line, placed
-after the runs its exit already led to, and the computation would name those runs
-again (30 F1). The one conversion line comes last, and states the present.
+Where the change stands is the owner's assertion, made with the owner present, so
+it is recorded as the owner's direction and needs no node of the table; the phase
+requirement's exception for the owner's directions covers a converted change's
+phase-ending triages, which have no triage outcome of their own (36 F2). The
+history is not rebuilt as triage lines, one per older triage: an older triage line
+names no review, so every older triage would gain an appended line, placed after
+the runs its exit already led to, and the computation would name those runs again
+(30 F1). The conversion and the direction come last, and state the present.
 
-`convert` is a node of the table while the command exists (D1): its exit is
-checked as a step's is, against the node the owner confirmed, and its entry guard
-refuses a change already converted. Round 2 runs the command on this change, and
-the marker catches the converting run's own last line, which the wrapper that
-started it appends unmarked. A change that takes the new code with a triage in
-progress finishes that triage on the code it started with, then converts.
-Cleaned-up changes are history and are left as they are. With no older reading,
-`## Next` is free prose, and a triage file whose outcome is not yet recorded is a
-triage in progress whatever its first words.
+The command writes the converted log — the rewritten lines, the conversion line,
+and the direction — to a temporary file beside the log, checks that the log is
+unchanged since it read it, starting over if it is not, and renames the file over
+the log; a change with records and no log gains its log the same way. An
+interrupted conversion so leaves either the older log, still detected, or the
+converted one whole, never marked lines without their conversion line, and a retry
+is running the command again (36 F3). A rerun after a line without the marker was
+appended — the converting run's own last line, which the wrapper that started it
+appends unmarked — converts again: it rewrites what is unmarked and states the
+present again, and, a run then following the latest triage, requires `--next`.
 
-The command, its node, and the detection are temporary: a change opened at this
-change's closeout removes them once every change not yet cleaned up is converted.
+The command refuses a change already converted, and a change with a triage in
+progress: a triage file with neither `## Next` nor `## Gate`, by the older reading,
+which lives only in the command, unless a triage outcome carrying the marker names
+its review. It names the review and the two ways to finish it — on the code it
+started with, or resumed under the new skill, which records its outcome with
+`record` — after which the command is run again (36 F4). A triage file whose
+`## Next` begins with other words is a finished triage that today's code brings to
+the owner; it counts as triaged, and the owner's direction settles where it leads.
+
+Round 2 runs the command on this change. Cleaned-up changes are history and are
+left as they are. With no older reading, `## Next` is free prose, and a triage file
+whose outcome is not yet recorded is a triage in progress whatever its first words.
+
+The command and the detection are temporary: a change opened at this change's
+closeout removes them once every change not yet cleaned up is converted.
 The marker stays, as the log's format for any later change to it. The computation's
 routing keeps no older reading meanwhile.
 
@@ -439,6 +478,20 @@ Rejected:
   in the log at which its exit would not repeat a run that followed it.
 - *Appended triage lines, with only the confirmation's link mended*: leaves the
   detection's gaps and the appended exits that repeat the runs after them.
+- *`convert` as a node whose exit is the node the change stands at* (D7 as settled
+  by 30 F1): no edge declares that exit, so no exit guard is defined on it, and
+  where the change stands is the owner's assertion, which D5 already records
+  (36 F2).
+- *A fixed declared exit for `convert`, then the owner's direction* (review 36 F2's
+  suggestion): no node means waiting for the owner's direction, and adding one is
+  mechanism for a temporary command.
+- *The conversion line as an exit checked against the edge from the latest
+  triage's node*: keeps the table's guards without the proposal, but is defined
+  only where the change stands at an exit of that triage, and has a step that is
+  not a triage write a triage's exit.
+- *A completion marker written after the conversion line* (review 36 F3's
+  alternative): a second check on every route, for a state the single replacement
+  never leaves.
 
 ### D8 — Recovery
 
@@ -518,7 +571,7 @@ Two rounds:
   a direction's nested one, the terminal `done`, the result's `target` and the
   undeclared-exit rule, routing on outcomes, and the `triaged` rule, the file-time
   rules and the older readings deleted, with the log's format marker, the
-  `convert` command and node, and the detection of a change not yet converted (D7),
+  `convert` command, and the detection of a change not yet converted (D7),
   run on this change's records, since the computation it lands reads only the new
   format; then every skill's handoff and interactive ending, triage's prose
   `## Next`, the entry checks asking the computation and the pre-closeout review's
@@ -543,11 +596,12 @@ within round 2.
   time the workflow rewrites a record. A change whose branch takes the new code
   stops at the owner until its records are converted, which the owner does by one
   command when the computation names it.
-- The conversion line's exit is the owner's confirmation of where the change
-  stands, not a reconstruction: a wrong one routes the change wrongly, which the
-  owner corrects by a direction. The older history keeps its own lines, readable
-  as they were written.
-- The command, its node, and the detection outlive this change until every change not yet
+- Where a converted change stands is the owner's direction at conversion, not a
+  reconstruction: the command's proposal folds in an unmet exit guard's remedy and
+  proposes nothing after a later run, but a wrong direction routes the change
+  wrongly, which the owner corrects by another. The older history keeps its own
+  lines, readable as they were written.
+- The command and the detection outlive this change until every change not yet
   cleaned up has taken the new code; their removal is a later change's.
 - A direction may name a node that makes no sense from where the change stands;
   only its unwaivable entry guards and the owner hold it.

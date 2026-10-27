@@ -54,14 +54,18 @@ step rather than inferring one.
   to resume or record by hand.
 - A change's records are converted to the new format when its branch first carries
   the new code, by a committed `convert` command, which rewrites the log's lines in
-  place and appends one line stating where the change stands, as the owner confirms
-  it. Every new log line carries a format marker; the computation reads only the
+  place, appends one line recording the conversion, and the owner's direction to
+  where the change stands, which it proposes and the owner confirms, all in one
+  replacement of the log; it refuses a change with a triage in progress. Every new log line carries a format marker; the computation reads only the
   new format, detects a change not yet converted by a line without the marker, or
   by records with no log, and names the owner with the command for it. A later
   change removes the command and the detection once every change not yet cleaned up
   is converted.
 - A direction to validation names the target the validation is for, and
-  validation's entry guard refuses one without it.
+  validation's entry guard refuses one without it; the log's writer checks the
+  nested target's unwaivable entry guards, and the computation's own validations
+  have theirs checked on their exit, so a round's validation starts beside its
+  review.
 
 ## Capabilities
 
@@ -131,7 +135,8 @@ None.
   `spec.md`.
 - The owner's directions to any node, past its exit guards and within its entry
   guards: an unwaivable one refuses the direction, a waivable one takes it as its
-  override; a direction to validation names the target it is for (D5): `spec.md`,
+  override; a direction to validation names the target it is for, whose
+  unwaivable entry guards are checked too (D5): `spec.md`,
   and the orchestrate skill.
 - Interactive runs record their outcome through `record` (D11): `spec.md`,
   `architecture.md` ("Steps run headless and resume with the owner's answers"), and
