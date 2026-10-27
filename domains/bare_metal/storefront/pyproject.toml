@@ -49,9 +49,10 @@ dev = [
     "pytest-asyncio>=0.25,<2.0",
     # The bare-metal fulfillment and introduction routes have typed clients only
     # in the buyer packages, so the storefront's tests drive those routes with the
-    # production buyer's own clients and commands, the commands through the core
-    # buyer application that composes them. Test-only; production code never
-    # imports either.
+    # production buyer's own clients; and they run the buyer's introduction and
+    # purchase commands against the storefront, through the core buyer
+    # application that composes them. Test-only; production code never imports
+    # either.
     "arkhai-bare-metal-buyer>=0.6.0",
     "arkhai-core-buyer>=0.6.0",
     # The site's own claim predicate, which the claim test checks the storefront's

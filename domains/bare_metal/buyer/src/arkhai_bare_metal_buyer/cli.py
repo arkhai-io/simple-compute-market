@@ -346,6 +346,7 @@ def buy_bare_metal(
         listing = client.get_listing(listing_id)
     if not listing.storefront_url or listing.publisher_principals is None:
         raise typer.BadParameter("listing has no trusted storefront identity")
+    publisher_principals = listing.publisher_principals
     options = [
         SettlementOption.model_validate(item) for item in listing.settlement_options
     ]
@@ -375,10 +376,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         storefront_url=listing.storefront_url,
         publisher_id=str(listing.publisher_id),
-        publisher_principals=[
-            principal.model_dump(mode="json")
-            for principal in listing.publisher_principals.identities
-        ],
+        publisher_principals=publisher_principals.model_dump(mode="json"),
         source_registry_url=buyer_config.registry_url,
         source_registry_authority=buyer_config.registry_authority,
     )
@@ -392,7 +390,7 @@ def buy_bare_metal(
         principal=identity.principal,
         signer=identity.signer,
         listing_id=listing_id,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: publisher_principals,
         initial_price=amount,
         max_price=amount,
         unit_count=duration_seconds / 3600,
@@ -403,7 +401,12 @@ def buy_bare_metal(
                 "ssh_public_key": ssh_public_key,
             },
         ),
+        decode_provision_terms=BareMetalProvisionTerms.model_validate,
         settlement_selection=selection,
+        # The opening policy reads from the selected option whether it bargains
+        # an amount; without it the opening carries none, and the amount this
+        # buyer derived from the option's rate never enters the negotiation.
+        policy_params={"_selected_settlement_option": selected.model_dump(mode="json")},
         max_rounds=buyer_config.default_max_rounds,
         validate_acceptance=lambda accepted: stage.validate_acceptance(
             accepted, payment_approval
@@ -430,7 +433,7 @@ def buy_bare_metal(
         seller_url=listing.storefront_url,
         principal=identity.principal,
         signer=identity.signer,
-        resolve_seller_principals=lambda: listing.publisher_principals,
+        resolve_seller_principals=lambda: publisher_principals,
         timeout=buyer_config.timeout_seconds,
     )
     transaction, fulfillment = stage.settle(

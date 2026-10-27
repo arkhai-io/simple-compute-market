@@ -4240,7 +4240,10 @@ configuration.
       storefront's run of the production buyer commands (22.3's correction), within
       `make test`, the Helm render unrun for want of `helm`; `make check-packaging` and
       `make check-change` passed.
-- [ ] 22.7 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `buy_bare_metal`:
+      Still unchecked after 22.7, for the same reason. No end-to-end scenario covers
+      22.7: the one scenario running `buy`, `e2e_bare_metal_deal`, is in no lane
+      (Section 22 notes).
+- [x] 22.7 `domains/bare_metal/buyer/src/arkhai_bare_metal_buyer/cli.py` `buy_bare_metal`:
       fix the three defects 22.3's correction fixed in `request_introduction`, which
       `buy` shares. It passes the listing's advertised settlement option, so the seller
       can accept; it records the publisher principals in the shape the run-log loader
@@ -4252,6 +4255,45 @@ configuration.
       this branch has not already bumped it past `dev` (it has, to 0.6.0, in 21.3);
       `make lock` if a pin moves. **Verify.** `make test-bare-metal`; `make test`;
       `make check-packaging`.
+      Done: `buy` passes the advertised option, records the publisher principals as the
+      trust set, and decodes the echoed terms, as `request-introduction` does.
+      Application integration through the production commands
+      (`tests/integration/test_payment_settlement_client.py`,
+      `test_the_buy_command_settles_over_a_run_log_a_later_command_reloads`):
+      `market bare-metal buy` through the core `build_app` against the served
+      storefront, which accepts the deal, approves the mandate once and settles until
+      delivery starts; then `market bare-metal teardown` reloads the run and asks the
+      site to end the lease (the provisioning double's `terminate_lease`; the lease is
+      `terminating`, not ended). The registry is doubled at the buyer's client and the
+      profile identity resolved to the test buyer, as in 22.3's test, by patching those
+      names in the buyer's CLI module; the payments kit's fake stands behind both
+      parties' `PaymentsClient`, the buyer's by patching the CLI's `PaymentApproval`
+      name with one bound to the fake's `client_for_owner`, since `buy` offers no seam
+      to inject it. With each fix reverted alone: without the decoder, `buy`
+      fails writing its run's end ("'dict' object has no attribute 'model_dump'"),
+      after settling; with the principals as a bare list, `teardown` fails in the
+      run-log loader ("malformed publisher_principals").
+      **Difference from the plan: the advertised option is not needed for the seller
+      to accept a payment deal,** and the test passes with it reverted. What it does is
+      tell the buyer's opening policy that the option bargains an amount
+      (`negotiation_client.py`, the opening's listing context): without it the opening
+      carries no amount and the deal closes at the seller's price, which here equals
+      the buyer's derived amount, so the test cannot tell the two apart. It is kept for
+      that, and because VM's buyer passes it for every selection. It does not guard
+      against a substituted option: an Agreement's option ID must derive from its
+      content (`SettlementOption`'s validator) and equal the selection's, so the buyer
+      refuses one without it, as the storefront refuses a stored option whose ID does
+      not derive ("listing settlement options are invalid").
+      **Correction after the fresh-context check:** the first version of this note, and
+      the comment in `buy`, gave that guard as the reason; both now state the opening's
+      amount.
+      The test's runtime holds its loops (`held_loop_controller`), so the served app
+      reconciles no payment the buyer's settle call should. Version: none owed, 0.6.0
+      against `dev`'s 0.5.0; no pin moved, so no relock.
+      Suites: `make test-bare-metal` (domain 183, storefront 498, buyer 12, adapter 51,
+      all passed); `make test`, every suite passed, the storefront's with the test as
+      corrected, and the Helm render unrun for want of `helm`; `make check-packaging`
+      and `make check-change` passed.
 
 Section 22 notes (handoff):
 
@@ -4264,7 +4306,26 @@ Section 22 notes (handoff):
   `request-introduction` had: no advertised option passed to the negotiation, the
   publisher principals recorded as a bare list, and no provision-terms decoder. No
   scenario or test here runs it, so it is unchanged; it is the Arkhai-payments
-  purchase, outside this change.
+  purchase, outside this change. **Fixed by 22.7**, added on the owner's word; two of
+  the three stopped it working, and the third left its opening without an amount
+  (22.7's note).
+- **22.7's session.** The storefront test runs `buy` beside the payment settlement
+  suite, whose fakes (site capacity, provisioning, the payments kit's client) it
+  shares; the provisioning fake gained the status read and lease termination that
+  `teardown` reaches. The buyer-command doubles 22.3's test wrote inline now live in
+  `tests/buyer_commands.py`, which both tests use. Section 20's introduction test
+  failed once on a loopback port containing `404` (it asserted `"404" not in` the
+  refusal's text, which names the URL); its status checks now match `HTTP 404` and
+  `HTTP 403`.
+- **Adjacent and left: no pipeline scenario runs `buy`.** `e2e_bare_metal_deal`
+  (`scenarios/bare_metal/test_bare_metal_deal.py`) is the only one, no lane selects
+  it (TESTING.md: it needs a real host), and its later commands no longer match the
+  CLI: it passes `--from` and `--json` to `result` and `access`, which take
+  `--run-id`, and runs `teardown request` and `teardown status`, which do not exist.
+  Unchanged here.
+- **Adjacent and left:** `buy` and `request-introduction` still repeat the listing
+  read, the option match, and the run's start; a shared helper would keep the run
+  shape in one place.
 - `storefront.dev.toml`'s seller-mail sink names the development overlay's `mailpit`,
   which the base bare-metal stack (`compose.bare-metal.yml` alone) does not run. The
   sink's delivery is never fatal to a reveal, so that stack still reveals; its seller

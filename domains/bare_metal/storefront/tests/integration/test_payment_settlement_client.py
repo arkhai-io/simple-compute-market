@@ -6,6 +6,9 @@ payment selection, exactly as a buyer opens one. Site capacity and provisioning
 are in-memory authorities, and the payments service is the kit's fake injected at
 ``PaymentsClient`` through the settlement composition. Settlement must start
 fulfillment itself once the receipt verifies.
+
+One deal is instead bought by the production buyer's ``market bare-metal buy``,
+against the app served on loopback, through the same fake.
 """
 
 from __future__ import annotations
@@ -14,12 +17,17 @@ import asyncio
 import base64
 import hashlib
 import json
+from functools import partial
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from market_arkhai_payments import PaymentSettlementData
+from arkhai_bare_metal_buyer import cli as buyer_cli
+from buyer_commands import BuyerCommands
+from held_loops import held_loop_controller
+from loopback import serving
+from market_arkhai_payments import PaymentApproval, PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -91,6 +99,7 @@ class Capacity:
 class Provisioning:
     def __init__(self) -> None:
         self.begin_calls: list = []
+        self.terminated: list = []
         # When set, dispatch pauses after delivery started until ``release`` is set.
         self.started: asyncio.Event | None = None
         self.release: asyncio.Event | None = None
@@ -120,6 +129,15 @@ class Provisioning:
             capacity_reservation_id="reservation-pay",
             state="dispatch_pending",
         )
+
+    async def get_fulfillment_status(self, fulfillment_id, *, capacity_reservation_id):
+        """The dispatched create has not settled yet."""
+        return SimpleNamespace(
+            state="dispatch_pending", failure_reason=None, failure_message=None
+        )
+
+    async def terminate_lease(self, capacity_reservation_id, *, reason):
+        self.terminated.append((capacity_reservation_id, reason))
 
 
 def _option() -> SettlementOption:
@@ -411,8 +429,12 @@ async def test_every_settlement_route_contract_is_mounted(harness):
 
 
 
-def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefrontRuntime, Provisioning]:
-    """A fresh runtime over the same SQLite file, as after a process restart."""
+def _runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMetalStorefrontRuntime, Provisioning]:
+    """A runtime over the test's SQLite file; built again over it, the storefront after a restart.
+
+    Its loops start held, so a served app reconciles no payment and publishes
+    nothing the test does not step.
+    """
     domain = get_market_domain_contract()
     provisioning = Provisioning()
     runtime = BareMetalStorefrontRuntime(
@@ -427,6 +449,7 @@ def _restarted_runtime(tmp_path, payments: FakePaymentsClient) -> tuple[BareMeta
         # Openings recheck the listing against the projection held for its site.
         site_projections=source_projections((SITE, SourceSite())),
         fulfillment_client=provisioning,
+        loop_controller_factory=held_loop_controller,
     )
     return runtime, provisioning
 
@@ -436,7 +459,7 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
     """The buyer approved, never settled, and the storefront restarted: the seller delivers."""
     payments = FakePaymentsClient()
     payments.serve(build_signed_receipt(signer=SERVICE, mandate=harness.data.mandate))
-    runtime, provisioning = _restarted_runtime(tmp_path, payments)
+    runtime, provisioning = _runtime(tmp_path, payments)
     assert runtime.payments_reconciliation_enabled()
 
     # The registered step: what the timer loop and an operator's step run.
@@ -458,7 +481,7 @@ async def test_an_approved_payment_converges_after_restart_without_the_buyer(har
 
 @pytest.mark.asyncio
 async def test_reconciliation_leaves_an_unapproved_payment_pending(harness, tmp_path):
-    runtime, provisioning = _restarted_runtime(tmp_path, FakePaymentsClient())
+    runtime, provisioning = _runtime(tmp_path, FakePaymentsClient())
 
     done = await runtime.settlement_service().reconcile_payments_once()
 
@@ -524,3 +547,61 @@ async def test_a_malformed_agreement_never_stops_reconciliation(harness):
 
     assert (done.attempted, done.failed) == (1, 0)
     assert len(harness.provisioning.begin_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
+    tmp_path, monkeypatch
+):
+    """The production ``market bare-metal buy`` against the served storefront:
+    it negotiates the advertised payment option, approves the mandate, and
+    settles until delivery starts, recording a run log that ``market bare-metal
+    teardown`` then reloads to ask for the lease's end. The kit's fake stands behind the
+    buyer's ``PaymentsClient`` as behind the seller's, so the receipt the
+    buyer's approval obtains is the one the seller verifies."""
+    payments = FakePaymentsClient(signer=SERVICE)
+    runtime, provisioning = _runtime(tmp_path, payments)
+    await _publish(runtime)
+    monkeypatch.setattr(
+        buyer_cli, "PaymentApproval", partial(PaymentApproval, client_for_owner=payments)
+    )
+    service = SERVICE.identity.model_dump(mode="json")
+    buyer = BuyerCommands(
+        monkeypatch,
+        tmp_path,
+        signer=BUYER,
+        registry_principal=ADMIN.identity,
+        settings=(
+            f'payer_account = "{PAYER}"\n'
+            "[bare_metal.arkhai_payments]\n"
+            "enabled = true\n"
+            'service_url = "http://127.0.0.1:9"\n'
+            f'service_identity = {{scheme = "{service["scheme"]}", '
+            f'identifier = "{service["identifier"]}"}}\n'
+            "fee_bps = 250\n"
+            f'dispute_authority = "{DISPUTE}"\n'
+        ),
+    )
+    option = _option()
+    app = build_bare_metal_storefront_app(
+        registry=build_bare_metal_storefront_registry(domain=runtime.domain), runtime=runtime
+    )
+    with serving(app) as base_url:
+        buyer.serve(
+            SimpleNamespace(
+                listing_id=LISTING,
+                storefront_url=base_url,
+                publisher_id="publisher-1",
+                publisher_principals=TrustedIdentitySet(identities=(SELLER.identity,)),
+                settlement_options=[option.model_dump(mode="json")],
+            )
+        )
+        bought = buyer.run(
+            "buy", LISTING, "--option-id", option.option_id, "--ssh-public-key", SSH_KEY
+        )
+        teardown = buyer.run("teardown", "--run-id", bought["run_id"])
+
+    assert payments.count("approve") == 1
+    assert len(provisioning.begin_calls) == 1
+    assert teardown["state"] == "terminating"
+    assert provisioning.terminated == [("reservation-pay", "buyer_teardown")]

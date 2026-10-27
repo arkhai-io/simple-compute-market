@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
-import traceback
-import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from arkhai_bare_metal_buyer import cli as buyer_cli
-from arkhai_bare_metal_buyer.plugin import domain as bare_metal_buyer
-from core_buyer.cli import build_app
-from typer.testing import CliRunner
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import (
     IntroductionAdminClient,
@@ -44,6 +37,7 @@ from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
 from arkhai_bare_metal_buyer.fulfillment import BareMetalFulfillmentTransport
 from core_buyer.introductions import IntroductionPayloadsDeleted, IntroductionTransport
 from dataclasses import replace
+from buyer_commands import BuyerCommands
 from loopback import serving
 from held_loops import held_loop_controller
 from market_resource_pools_contracts.backing import UNBACKED
@@ -486,13 +480,15 @@ def _assert_settled_by_introduction(answers: dict) -> None:
     for name in _FULFILLMENT_READS:
         refused = answers[name]
         assert isinstance(refused, RuntimeError), (name, refused)
-        assert "404" in str(refused) and "has no fulfillment" in str(refused), refused
+        assert "HTTP 404" in str(refused) and "has no fulfillment" in str(refused), refused
     # Refused by the buyer authorization every deal's routes run before the
-    # stage is resolved, so the answer names nothing of the mechanism.
+    # stage is resolved, so the answer names nothing of the mechanism. The
+    # status is matched with its prefix: the message also names the loopback
+    # URL, whose port may contain any three digits.
     outsider = answers["outsider"]
     assert isinstance(outsider, RuntimeError), outsider
-    assert "403" in str(outsider), outsider
-    assert "404" not in str(outsider) and "introduction" not in str(outsider)
+    assert "HTTP 403" in str(outsider), outsider
+    assert "HTTP 404" not in str(outsider) and "introduction" not in str(outsider)
 
 
 async def test_an_introduction_deal_answers_settle_and_fulfillment_from_its_stage(
@@ -596,90 +592,39 @@ async def test_an_unbacked_listing_published_by_the_storefront_reaches_an_introd
     assert runtime.capacity_client.reservation_sites == {}
 
 
-class _ListingRegistry:
-    """The buyer's registry client, serving the one listing it was given."""
-
-    def __init__(self, listing: SimpleNamespace) -> None:
-        self.listing = listing
-
-    def __enter__(self) -> _ListingRegistry:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        return None
-
-    def get_listing(self, listing_id: str) -> SimpleNamespace:
-        assert listing_id == self.listing.listing_id
-        return self.listing
-
-
-def _last_json_line(result: Any) -> dict:
-    """The JSON a command printed last, once it is shown to have succeeded."""
-    assert result.exit_code == 0, result.output + "".join(
-        traceback.format_exception(result.exception) if result.exception else ()
-    )
-    return json.loads(result.stdout.strip().splitlines()[-1])
-
-
 async def test_the_buyer_commands_reach_an_introduction_over_their_own_run_log(
     tmp_path, monkeypatch
 ) -> None:
     """The production ``market bare-metal request-introduction`` and ``market
     bare-metal settlement contact introduce`` against the storefront: the first
     holds the seller's accept reply to the advertised option and records a run
-    log the second reloads, as a buyer runs them. The registry is doubled at the
-    buyer's client and the profile's identity resolved to the test buyer."""
+    log the second reloads, as a buyer runs them."""
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
-    identity = SimpleNamespace(
-        profile_id=str(uuid.uuid4()), principal=BUYER_SIGNER.identity, signer=BUYER_SIGNER
+    buyer = BuyerCommands(
+        monkeypatch, tmp_path, signer=BUYER_SIGNER, registry_principal=ADMIN_SIGNER.identity
     )
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    monkeypatch.setattr(buyer_cli, "fresh_identity", lambda: identity)
-    monkeypatch.setattr(buyer_cli, "recovery_identity", lambda run_id: identity)
-    registry = ADMIN_SIGNER.identity.model_dump(mode="json")
-    config = tmp_path / "buyer.toml"
-    config.write_text(
-        "[bare_metal]\n"
-        'registry_url = "https://registry.invalid"\n'
-        'registry_authority = "registry-a"\n'
-        f'registry_principals = [{{scheme = "{registry["scheme"]}", '
-        f'identifier = "{registry["identifier"]}"}}]\n',
-        encoding="utf-8",
-    )
-    app = build_app(domains=[bare_metal_buyer])
-    runner = CliRunner()
     contact = ",".join(f"{key}={value}" for key, value in _BUYER_CONTACT.items())
     with serving(_app(runtime)) as base_url:
-        listing = SimpleNamespace(
-            listing_id="intro-listing",
-            storefront_url=base_url,
-            publisher_id="publisher-1",
-            publisher_principals=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
-            settlement_options=[option],
+        buyer.serve(
+            SimpleNamespace(
+                listing_id="intro-listing",
+                storefront_url=base_url,
+                publisher_id="publisher-1",
+                publisher_principals=TrustedIdentitySet(identities=(SELLER_SIGNER.identity,)),
+                settlement_options=[option],
+            )
         )
-        monkeypatch.setattr(
-            buyer_cli, "registry_client", lambda config, identity: _ListingRegistry(listing)
+        request = buyer.run(
+            "request-introduction", "intro-listing", "--option-id", option["option_id"]
         )
-        requested = runner.invoke(
-            app,
-            [
-                "bare-metal", "request-introduction", "intro-listing",
-                "--option-id", option["option_id"], "--config", str(config),
-            ],
-        )
-        request = _last_json_line(requested)
-        introduced = runner.invoke(
-            app,
-            [
-                "bare-metal", "settlement", "contact", "introduce",
-                "--run-id", request["run_id"], "--contact", contact,
-                "--config", str(config),
-            ],
+        introduced = buyer.run(
+            "settlement", "contact", "introduce",
+            "--run-id", request["run_id"], "--contact", contact,
         )
 
     assert request["status"] == "agreed"
-    assert _last_json_line(introduced)["counterparty_contact"] == _SELLER_CONTACT
+    assert introduced["counterparty_contact"] == _SELLER_CONTACT
 
 
 
