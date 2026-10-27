@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -394,6 +395,30 @@ async def test_refund_outcomes_without_held_funds_are_conflicts(make):
     h.serve()
     h.payments.reverse_error = "hold_matured"
     assert await _status_code(h.refund) == 409
+
+
+@pytest.mark.asyncio
+async def test_a_deal_settled_by_introduction_is_refused_settlement(make):
+    """Spec scenario "A buyer settles an introduction deal", on VM: the settle
+    route answers 409 from the accepted Agreement's stage, which completes
+    outside settlement, and starts nothing."""
+    h = await make()
+    thread = await h.db.load_negotiation_thread_row(negotiation_id=NEGOTIATION)
+    agreement = json.loads(thread["agreement_bytes"])
+    agreement["settlement"]["mechanism"] = "contact-exchange.v1"
+    with sqlite3.connect(h.db.db_path) as conn:
+        conn.execute(
+            "UPDATE negotiation_threads SET agreement_bytes=? WHERE negotiation_id=?",
+            (json.dumps(agreement).encode(), NEGOTIATION),
+        )
+
+    with pytest.raises(StorefrontClientError) as refused:
+        await h.settle()
+
+    assert refused.value.status_code == 409
+    assert "completes by introduction, not settlement" in str(refused.value)
+    assert h.delivery.starts == []
+    assert await h.db.load_vm_settlement_evidence(negotiation_id=NEGOTIATION) is None
 
 
 @pytest.mark.asyncio

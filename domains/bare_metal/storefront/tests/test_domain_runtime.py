@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from functools import partial
 
+import pytest
+
 import arkhai_bare_metal_storefront.domain_runtime as domain_runtime
 from arkhai_bare_metal.schema import (
     BARE_METAL_DOMAIN_IDENTITY,
@@ -22,7 +24,7 @@ from arkhai_bare_metal_storefront.domain_runtime import (
     BARE_METAL_STOREFRONT_DOMAIN,
     get_market_domain_contract,
 )
-from arkhai_bare_metal_storefront.settlement_stages import ALKAHEST_MECHANISM
+from arkhai_bare_metal_storefront.settlement_stages import ALKAHEST_MECHANISM, SellerStage
 
 
 def test_storefront_contract_validates() -> None:
@@ -50,6 +52,27 @@ def test_storefront_contract_validates() -> None:
     assert callable(contract.fulfillment.fulfill)
     assert not contract.has_capability(DomainCapability.COMPUTE_PROVISIONING)
     assert contract.capability(DomainCapability.COMPUTE_PROVISIONING) is None
+
+
+def test_every_seller_stage_declares_whether_it_completes_outside_settlement() -> None:
+    stages = get_market_domain_contract().settlement.seller_stages
+
+    assert {
+        mechanism: stage.completes_outside_settlement
+        for mechanism, stage in stages.items()
+    } == {
+        ALKAHEST_MECHANISM: False,
+        ARKHAI_PAYMENTS_MECHANISM: False,
+        CONTACT_MECHANISM: True,
+    }
+    # An entry completing outside settlement has nothing to verify or recheck.
+    assert stages[CONTACT_MECHANISM].verify is None
+    assert stages[CONTACT_MECHANISM].revalidate is None
+
+
+def test_a_seller_stage_without_the_declaration_cannot_be_constructed() -> None:
+    with pytest.raises(TypeError, match="completes_outside_settlement"):
+        SellerStage(lambda: None, None, None, False)
 
 
 def test_storefront_contract_retains_bare_metal_codecs() -> None:

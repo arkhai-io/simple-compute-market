@@ -36,6 +36,10 @@ from .deal_control_routes import (
     StageEventRouteService,
     opening_proposal,
 )
+from .introduction_routes import (
+    refuse_introduction_fulfillment,
+    refuse_introduction_settle,
+)
 from .lifecycle_routes import LifecycleRouteError, StorefrontLifecycleRouteService
 from .trading_pause import TradingPause, TradingPauseRouteService
 from .negotiation_watchdog import (
@@ -83,6 +87,8 @@ __all__ = [
     "build_storefront_lifespan",
     "get_storefront_container",
     "parse_timestamp",
+    "refuse_introduction_fulfillment",
+    "refuse_introduction_settle",
     "run_negotiation_watchdog",
     "stale_negotiations",
     "sweep_stale_negotiations",

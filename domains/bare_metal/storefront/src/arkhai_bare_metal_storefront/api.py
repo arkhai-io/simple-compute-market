@@ -93,6 +93,8 @@ from market_storefront_kit import (
     TradingPauseRouteService,
     get_storefront_container,
     opening_proposal,
+    refuse_introduction_fulfillment,
+    refuse_introduction_settle,
 )
 from storefront_client.settlement_routes import REFUND, SETTLE, SETTLE_STATUS
 
@@ -127,7 +129,11 @@ from .negotiation_runtime import BareMetalNegotiationRefusal, exact_selection
 from .response_auth import bind_response_auth, bind_response_contract
 from .runtime import BareMetalStorefrontRuntime
 from .settlement_composition import ALKAHEST_MECHANISM
-from .settlement_service import PaymentSettleResult, SettlementRequestError
+from .settlement_service import (
+    PaymentSettleResult,
+    SettlementRequestError,
+    accepted_seller_stage,
+)
 
 router = APIRouter()
 
@@ -842,7 +848,13 @@ async def settle(
             body=await _request_body(request),
             expected_principal=body.buyer_principal,
         )
-        result = await runtime.settlement_service().verify(
+        service = runtime.settlement_service()
+        _refuse_settle(
+            await service.owned_accepted_stage(
+                negotiation_id=body.negotiation_id, buyer_principal=identity
+            )
+        )
+        result = await service.verify(
             escrow_uid=escrow_uid,
             request=body,
             buyer_principal=identity,
@@ -903,12 +915,36 @@ async def settle_status(
             expected_principal=Identity.model_validate(thread["buyer_principal"]),
             resource=escrow_uid,
         )
+        _refuse_settle(
+            accepted_seller_stage(
+                runtime.domain.settlement.seller_stages,
+                thread,
+                str(record["negotiation_id"]),
+            )
+        )
         return await runtime.settlement_service().status(
             escrow_uid=escrow_uid,
             buyer_principal=identity,
         )
     except (AuthError, SettlementRequestError) as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+#: Why a deal settled by introduction has nothing to settle, and no fulfillment
+#: to read or tear down; bare metal's one such mechanism is contact exchange.
+_SETTLED_BY_INTRODUCTION = "a contact exchange completes by introduction, not settlement"
+_NO_FULFILLMENT = "this deal settled by introduction and has no fulfillment"
+
+
+def _refuse_settle(stage: Any) -> None:
+    """Answer a settle request for a deal its stage completes outside settlement."""
+    try:
+        refuse_introduction_settle(
+            completes_outside_settlement=stage.completes_outside_settlement,
+            reason=_SETTLED_BY_INTRODUCTION,
+        )
+    except LifecycleRouteError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 async def _fulfillment_identity(
@@ -918,6 +954,14 @@ async def _fulfillment_identity(
     negotiation_id: str,
     operation: str,
 ) -> Identity:
+    """The deal's buyer, once the deal is shown to have a fulfillment to serve.
+
+    Ownership is checked first, against the accepted thread's recorded buyer,
+    so another principal learns nothing of the deal's mechanism; then the
+    accepted stage is resolved and a deal settled by introduction is answered
+    404. Only after that may a route build the fulfillment service or load its
+    context: an unbacked introduction's binding names no host to load.
+    """
     thread = await runtime.db.load_negotiation_thread_row(
         negotiation_id=negotiation_id,
     )
@@ -926,13 +970,29 @@ async def _fulfillment_identity(
             "negotiation not found",
             status_code=404,
         )
-    return await _buyer(
+    identity = await _buyer(
         request=request,
         runtime=runtime,
         operation=operation,
         resource=negotiation_id,
         expected_principal=Identity.model_validate(thread["buyer_principal"]),
     )
+    try:
+        stage = accepted_seller_stage(
+            runtime.domain.settlement.seller_stages, thread, negotiation_id
+        )
+    except SettlementRequestError as exc:
+        raise BareMetalFulfillmentError(exc.detail, status_code=exc.status_code) from exc
+    try:
+        refuse_introduction_fulfillment(
+            completes_outside_settlement=stage.completes_outside_settlement,
+            reason=_NO_FULFILLMENT,
+        )
+    except LifecycleRouteError as exc:
+        raise BareMetalFulfillmentError(
+            str(exc.detail), status_code=exc.status_code
+        ) from exc
+    return identity
 
 
 @router.get(

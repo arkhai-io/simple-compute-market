@@ -3937,13 +3937,18 @@ Delivers the `completes_outside_settlement` stage declaration, the shared refusa
 introduction has no settlement or fulfillment"). Touches `kit/storefront` and the VM and
 bare-metal storefronts.
 
-- [ ] 20.1 `kit/storefront/src/market_storefront_kit/introduction_routes.py` (new, importing
+- [x] 20.1 `kit/storefront/src/market_storefront_kit/introduction_routes.py` (new, importing
       only `.lifecycle_routes`): the shared refusal, given the accepted stage's
       `completes_outside_settlement` and the domain's reason text, raising a
       `LifecycleRouteError` of 409 for a settle request and 404 for a fulfillment read or
       teardown; exported from `__init__.py`. Tests in
       `kit/storefront/tests/unit/test_introduction_routes.py` (new, unit) (D9).
-- [ ] 20.2 Stage tables: every seller stage in VM (`settlement_stages.py`:
+      Done: two functions, `refuse_introduction_settle` (409) and
+      `refuse_introduction_fulfillment` (404), each taking the declaration and the
+      reason as keywords and returning nothing for a stage that settles. Unit (`make -C
+      kit test-storefront`, 131 passed): each refuses with its status and the domain's
+      reason, and neither refuses a stage that settles.
+- [x] 20.2 Stage tables: every seller stage in VM (`settlement_stages.py`:
       `VmAlkahestSellerStage`, `VmPaymentsSellerStage`, `VmContactSellerStage`) and bare
       metal (`settlement_stages.py` `SellerStage` and its subclasses, keyword-only;
       `settlement_composition.py` `SELLER_STAGES`) declares `completes_outside_settlement`
@@ -3951,14 +3956,29 @@ bare-metal storefronts.
       `release_models`. API credits composes no introduction and no refusal, and its stage
       table is unchanged (the delta's "every compute domain"). VM's `VmContactSellerStage.start`
       no longer raises its own 409 (D9).
-- [ ] 20.3 Routes: VM `controllers/settle_controller.py` `settle_escrow` applies the refusal
+      Done; `VmContactSellerStage` has no `start` at all now. In bare metal, `verify` and
+      `revalidate` became optional fields (`None` for an entry completing outside
+      settlement) rather than required callables, since the contact stage has neither
+      once 20.4 removes them; the settlement service refuses, as the deal completing
+      outside settlement, a `verify` or `verified_evidence` that reaches an entry with
+      none, which the routes never let a contact deal do.
+- [x] 20.3 Routes: VM `controllers/settle_controller.py` `settle_escrow` applies the refusal
       after resolving the stage and before `stage.start`; bare metal `src/api.py` `settle`
       and `GET /api/v1/settle/{ref}/status` apply it after `accepted_stage` and before
       verification; bare metal's fulfillment status, access, result, and teardown routes
       check ownership and the accepted thread's terminal state in `_fulfillment_identity`,
       then resolve the stage, apply the refusal, and only then build the fulfillment
       service or load its context (D9).
-- [ ] 20.4 Bare metal stops recording the reveal as settlement evidence: delete
+      Done. Bare metal's stage resolution is a module function,
+      `settlement_service.accepted_seller_stage`, which the service's `accepted_stage`
+      delegates to, so the fulfillment routes resolve the stage from the domain's stage
+      table without building the settlement service, which builds the fulfillment
+      service. The settle route resolves it through the service's new
+      `owned_accepted_stage` (ownership first, then the stage); settle status after the
+      buyer's authentication against the thread's recorded buyer.
+      `accepted_seller_stage` refuses a thread that is not accepted, which is the
+      terminal-state check. Each domain names its own reason text beside the route.
+- [x] 20.4 Bare metal stops recording the reveal as settlement evidence: delete
       `ContactStage.record_reveal`, `runtime.py`'s `_RevealRecordingRuntime` and
       `_record_collected_introduction`, and pass the settlement runtime to the
       contact-exchange composition as VM does. Its only readers were the contact stage's
@@ -3966,7 +3986,10 @@ bare-metal storefronts.
       `settlement_verified` precondition, which an introduction deal never reaches; the
       contact-exchange kit's retention, deletion, and re-delivery read the introduction
       store. `verify_contact` and `revalidate_contact` go if nothing else calls them (D9).
-- [ ] 20.5 Tests: VM unit `tests/unit/test_unbacked_settlement_options.py` (every stage
+      Done; both went, their only other caller being a test's stage table. An
+      introduction deal's settlement record stays `accepted`, with no reference, after
+      the reveal.
+- [x] 20.5 Tests: VM unit `tests/unit/test_unbacked_settlement_options.py` (every stage
       declares the field; a stage omitting it cannot be constructed) and
       `test_settlement_start_authority.py`; VM application integration
       `tests/integration/test_introduction_origins.py` — settle answers 409. Bare metal
@@ -3976,12 +3999,64 @@ bare-metal storefronts.
       `accepted` after the reveal; an unbacked, host-less binding answering 404 without
       loading a context; `test_domain_runtime.py`, `test_selection_dispatch.py`,
       `test_app_composition.py` follow the stage table (D9).
-- [ ] 20.6 Versions: `arkhai-kit-storefront` (exact pins in both storefronts), both
+      Done, with one **difference from the plan:** VM's settle refusal is tested in
+      `tests/integration/test_payment_settlement.py`, not `test_introduction_origins.py`,
+      whose harness mounts no settle route.
+      - VM unit (`test_unbacked_settlement_options.py`): every stage declares both
+        fields, and each of the three stages refuses construction without either;
+        `test_settlement_start_authority.py`: a deal settled by introduction is refused
+        before its stage starts.
+      - VM application integration through `StorefrontClient`
+        (`test_payment_settlement.py`): an accepted Agreement naming contact exchange,
+        rewritten in the database as service-internal setup since no route accepts one
+        on that harness, is refused settlement with 409 naming introduction; no delivery
+        starts and no evidence is recorded. No case reveals first: VM's reveal path is
+        the contact-exchange kit's, which the refusal does not read.
+      - Bare-metal application integration through the typed clients
+        (`test_http_introductions.py`): settle and settle status answer 409, fulfillment
+        status, access, result and teardown 404 naming no fulfillment, another buyer the
+        403 authorization refusal every deal's routes give before the stage is resolved;
+        the record stays `accepted` with no reference after the reveal, and after a
+        restart; an unbacked listing published by the app's own cycle reaches an
+        introduction whose fulfillment status answers 404 with no context loaded.
+      - Bare-metal unit: `test_domain_runtime.py` (the contact stage declares that it
+        completes outside settlement and has no verification), `test_selection_dispatch.py`
+        (the stage tables). `test_app_composition.py` needed no change.
+      Suites: `make test-storefront` (VM unit 1132 passed, 1 skipped; integration 477
+      passed) and `make test-bare-metal` (domain 183, storefront 496, buyer 12, adapter 51,
+      all passed).
+- [x] 20.6 Versions: `arkhai-kit-storefront` (exact pins in both storefronts), both
       storefronts; `make lock`.
-- [ ] 20.7 **Verify.** `make -C kit test-storefront`; `make test-storefront`, `make
+      Nothing owed: against `origin/dev`, `arkhai-kit-storefront` is 0.8.0 there and 0.9.0
+      here, already a minor bump on this branch, with both storefronts' exact pins at
+      0.9.0; both storefronts are 0.22.0 against 0.17.0. No lock changes.
+- [x] 20.7 **Verify.** `make -C kit test-storefront`; `make test-storefront`, `make
       test-bare-metal`; `make test`; `make check-packaging`. End-to-end:
       `e2e_vm_introduction` and `e2e_bare_metal_introduction`; the fulfillment 404 in
       `e2e_bare_metal_unbacked_introduction` (Section 22).
+      Passed with Sections 18 to 22 (18.7's note): kit storefront 131, VM storefront unit
+      1132 (1 skipped) and integration 477, bare-metal storefront 497, within `make
+      test`, the Helm render unrun for want of `helm`; `make check-packaging` passed.
+      End-to-end: unrun here; the scenarios above are confirmed as this section's.
+
+Section 20 notes (handoff):
+
+- **Fresh-context check of Sections 20 and 21.** Taken up: the permanent
+  `buyer-orchestration` "Buyer mechanism utilities are namespaced" required every
+  mechanism's commands below `market settlement <mechanism>`, which bare metal's no longer
+  are, so the delta now modifies it to allow a domain's own `settlement` group; the
+  missing-declaration test covers all three VM stages; the stranger's refusal is asserted
+  to be the 403 authorization refusal; the VM integration test's function-local
+  `sqlite3` import moved to module level; a `#:` comment on a call in the bare-metal
+  buyer CLI made a plain comment. **Declined:** keying the bare-metal settlement
+  service's guards on the declaration rather than on `verify`/`revalidate` being
+  `None`: they are the typing guard on an optional hook, unreachable through the routes,
+  which refuse first by the declaration. Comparing the stranger's answer with a backed
+  deal's: the authorization runs before the stage is resolved, for every mechanism.
+- **Settle status by obligation reference.** A contact deal records no settlement
+  reference now, so settle status addressed by its `obligation_ref` answers 404
+  "settlement not found"; addressed by negotiation ID it answers the 409. No buyer
+  makes the first call.
 
 ## 21. Bare metal's settlement commands sit under its own command
 
