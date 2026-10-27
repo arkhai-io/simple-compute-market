@@ -172,7 +172,7 @@ allow = [
   "Bash(git add *)", "Bash(git commit *)", "Bash(make push-branch)",
 ]
 
-# Archive cleanup drafts the pull request; the owner creates it.
+# Archive cleanup drafts the pull request; the orchestrating session opens it.
 [steps.archive-cleanup]
 skill = "change-archive-cleanup"
 models = [{ harness = "claude", model = "claude-sonnet-5-5", effort = "medium" }]

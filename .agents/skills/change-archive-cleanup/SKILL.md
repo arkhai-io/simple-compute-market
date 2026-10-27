@@ -58,8 +58,8 @@ the session, and every turn ends with an outcome matching
   helm teardown`.
 - **The end is an outcome.** When the cleanup and any figure are committed and
   pushed, the pull request drafted, and the history copied (step 10), end with
-  `finished`, `next` naming the owner creating the pull request; you never create
-  it. A failed teardown and a history copy that refused a file end `finished` too,
+  `finished`, `next` naming the pull request's opening from the drafts, which the
+  orchestrating session does at `done`; you never create it. A failed teardown and a history copy that refused a file end `finished` too,
   with what failed and how to rerun it in the message. A row already `archived`
   (step 1) ends `finished` once steps 7 to 10 have run again, saying the rest of
   cleanup had run.

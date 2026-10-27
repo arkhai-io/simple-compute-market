@@ -8,8 +8,8 @@ description: Advance one OpenSpec change through its leaf skills from one sessio
 Carry only the change you were given between its steps. The leaf skills do the
 work in their own sessions; the owner decides every finding and design question,
 and the change advances without the owner wherever the next-step computation names
-a step. Never open this change's pull request or start another change, and never
-commit while a step is running. Each leaf step that writes tracked work commits and
+a step. Never start another change, never open this change's pull request before
+`done`, and never commit while a step is running. Each leaf step that writes tracked work commits and
 pushes it itself, and one that returns the change commits its partial work first;
 a stopped run's work waits uncommitted for its resume, unless the owner has you
 commit it to a separate work-in-progress branch — needed before a fresh rerun,
@@ -180,7 +180,7 @@ Planning resumes the design session through the wrapper. Offer a fresh planning
 session (`make plan CHANGE=<change> UNATTENDED=1 FRESH=1`) only when the owner
 asks for one; you judge no session's size. Closeout and archive cleanup are
 delegated like other steps, with their questions relayed; archive cleanup drafts
-the merge message and pull request for the owner to publish. Recompute after every
+the merge message and pull request, which you publish at `done`. Recompute after every
 outcome; its free-text `next` is not a routing command.
 
 ## Relay each discussion turn
@@ -261,8 +261,8 @@ in, since a session is keyed by its checkout's path: `cd <clone> && claude
 --resume <session-id>` for a change in its clone, `claude --resume <session-id>`
 in the workspace otherwise. Never resume concurrently. On handback reread the
 files and log and recompute rather than presuming the direct conversation's
-result. For `done`, report the archived change and stop; the owner creates its
-pull request. For a change worked in its clone, archive cleanup has copied its
+result. For `done`, open the change's pull request, report the archived change,
+and stop; the owner reviews and merges it. For a change worked in its clone, archive cleanup has copied its
 history into the workspace, where sessions working other changes find it
 (`python3 scripts/find_change.py --records <change>`), but its own log line is
 written after that copy: at `done`, before reporting, run `make -C <clone>
@@ -272,6 +272,15 @@ reach the workspace with the next such copy, or when the owner removes the clone
 after the merge with `make change-clone-remove CHANGE=<change>`, which copies them
 first. Removing a clone is
 the owner's alone: never run it.
+
+Open the pull request from the drafts archive cleanup wrote to the archived
+change's `reviews/pull-request.md`: from the change's branch into `dev`, titled
+with the merge commit message's subject, its body the pull request description.
+When a pull request from the branch already exists, open no second one; give its
+link. When the drafts say the branch carries another change that is not archived,
+the pull request would merge that change too: ask the owner before opening it.
+In the report, give the pull request's link and then the merge commit message, in
+a fenced block, for the owner to paste into the squash merge.
 
 ## Read every denial before advancing
 
