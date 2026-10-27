@@ -134,6 +134,26 @@ chain's last result and when it was taken.
 - **THEN** readiness keeps reporting the held result, with the time it was taken, until
   the `alkahest-chain-probe` loop is stepped or resumed
 
+### Requirement: A publication clause's mechanism input is a mapping
+
+A settlement publication clause MAY omit `mechanism_input`, which then means no input. A
+stated `mechanism_input` MUST be a mapping: a clause stating any other value -- null, a
+list, a number, or text -- MUST be refused as malformed rather than read as no input, by
+every consumer that reads clauses, whatever the clause's mechanism and before that
+mechanism's enablement is judged.
+
+#### Scenario: A clause states a mechanism input that is not a mapping
+
+- **WHEN** a publication clause, in a storefront's configuration or in a pool's hint,
+  states `mechanism_input` as null or as a list
+- **THEN** the clause is refused as malformed, naming `mechanism_input`, whether or not
+  its mechanism is enabled
+
+#### Scenario: A clause omits its mechanism input
+
+- **WHEN** a publication clause states no `mechanism_input`
+- **THEN** it is read as a clause with no mechanism input
+
 ## MODIFIED Requirements
 
 ### Requirement: Priority orders choices but never changes accepted settlement

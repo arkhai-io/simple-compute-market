@@ -174,6 +174,13 @@ def capacity_admin_routes(
         context = await _listing_context(runtime, listing_id)
         if runtime.capacity_client is None:
             raise ConnectionError("no site is configured")
+        binding = await bare_metal_listing_binding(runtime.db, listing_id)
+        if binding is None:
+            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
+        # A listing no admission authority stands behind constructs no claim:
+        # its delegate refuses first, which the kit's route answers as a
+        # conflict, whatever the administrator required.
+        binding.backing.require_admission("a bare-metal reservation")
         try:
             claim = whole_machine_claim(context)
         except ClaimAttributesMissing as exc:
@@ -183,11 +190,6 @@ def capacity_admin_routes(
         if any(claim.get(str(name)) != str(value) for name, value in required.items()):
             return None
         claim["resource_id"] = str(context["physical_resource_id"])
-        binding = await bare_metal_listing_binding(runtime.db, listing_id)
-        if binding is None:
-            raise LookupError(f"listing {listing_id!r} has no bare-metal binding")
-        # The kit's guard refuses a listing no admission authority stands
-        # behind, which the kit's route answers as a conflict.
         return await CapacityEffects(runtime.capacity_client).reserve(
             binding, claim=claim, deal_ref=dict(deal_ref)
         )

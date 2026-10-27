@@ -121,8 +121,12 @@ class SystemService:
         settlement_provider: (
             Callable[[], Awaitable[list[dict[str, Any]] | None]] | None
         ) = None,
+        registry_probe_transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._db = sqlite_client
+        # The transport the registry health probes are sent over; the network's
+        # unless a caller answers them itself.
+        self._registry_probe_transport = registry_probe_transport
         self._marketplace_signer = marketplace_signer
         self._agent_id = agent_id or AGENT_ID or "agent"
         # Both read the storefront's one projection state unless a caller
@@ -314,7 +318,9 @@ class SystemService:
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
+                async with httpx.AsyncClient(
+                    timeout=2.0, transport=self._registry_probe_transport
+                ) as client:
                     resp = await client.get(f"{url}/health", headers=headers)
                 return "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
             except httpx.ConnectError:

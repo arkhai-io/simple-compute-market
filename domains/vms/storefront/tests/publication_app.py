@@ -338,6 +338,16 @@ class SettlementCompositionDouble:
 REGISTRY_URLS = ("http://registry-a.test", "http://registry-b.test")
 
 
+def _refuse_registry_probe(request: httpx.Request) -> httpx.Response:
+    raise httpx.ConnectError("connection refused", request=request)
+
+
+#: System status's registry health probes, refused as by registries that are
+#: down: ``RecordingRegistries`` stands in for publication's registry client and
+#: serves no health route, so no probe leaves the process.
+REFUSED_REGISTRY_PROBES = httpx.MockTransport(_refuse_registry_probe)
+
+
 class RecordingRegistries:
     """The storefront's registry client, recording what each registry is sent.
 
@@ -692,6 +702,7 @@ async def publication_app(
             sqlite_client=db,
             marketplace_signer=TEST_MARKETPLACE_SIGNER,
             site_projections=site_projections,
+            registry_probe_transport=REFUSED_REGISTRY_PROBES,
         )
         container.resolved_admissibility_default = (
             parse_configured_admissibility_default()

@@ -12,7 +12,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from functools import partial
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -120,6 +120,7 @@ class ListingService:
         settlement_composition_provider: Callable[[], Any],
         site_projections: SiteProjectionState,
         source_backing_resolver: Callable[..., CapacityBacking] | None = None,
+        registry_publisher: Callable[..., Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         if getattr(sqlite_client, "domain_registry", None) is not registry:
             raise RuntimeError(
@@ -151,6 +152,18 @@ class ListingService:
         self._source_backing = source_backing_resolver or partial(
             resolve_source_backing, site_projections
         )
+        # Publishes one listing to every configured registry; the storefront's
+        # publication runtime unless a caller supplies its own.
+        self._registry_publisher = registry_publisher
+
+    async def _publish_to_registries(self, listing: Listing | dict) -> dict[str, Any]:
+        if self._registry_publisher is not None:
+            return await self._registry_publisher(listing, sqlite_client=self._db)
+        from market_storefront.services.publication_service import (
+            publish_order_to_registry,
+        )
+
+        return await publish_order_to_registry(listing, sqlite_client=self._db)
 
     @property
     def _token_transfers_available(self) -> bool:
@@ -747,10 +760,6 @@ class ListingService:
         self, derived: DerivedVmListing, *, paused: bool = False
     ) -> CreateListingResponse:
         """Write a derived listing and its binding, then publish it unless paused."""
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
-
         listing = derived.listing
         listing_dict = listing.model_dump(mode="json")
         listing_id = listing.listing_id
@@ -801,10 +810,7 @@ class ListingService:
             )
             return CreateListingResponse(status="created", listing_id=listing_id)
 
-        publish_result = await publish_order_to_registry(
-            listing_dict,
-            sqlite_client=self._db,
-        )
+        publish_result = await self._publish_to_registries(listing_dict)
         return CreateListingResponse(
             status="created",
             listing_id=listing_id,
@@ -821,10 +827,6 @@ class ListingService:
     ) -> dict[str, Any]:
         """Refresh one listing's ready options without touching accepted Terms."""
         from arkhai_vms_listings.models import Listing
-
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
 
         stored = await self._db.load_listing(listing_id=listing_id)
         if stored is None:
@@ -864,7 +866,7 @@ class ListingService:
             "settlement_options": settlement_options,
         }
         listing = Listing.model_validate(updated)
-        await publish_order_to_registry(listing, sqlite_client=self._db)
+        await self._publish_to_registries(listing)
         return listing.model_dump(mode="json")
 
     async def close_listing(self, listing_id: str) -> CloseListingResponse:

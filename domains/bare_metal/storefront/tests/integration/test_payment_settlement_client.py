@@ -17,17 +17,15 @@ import asyncio
 import base64
 import hashlib
 import json
-from functools import partial
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from arkhai_bare_metal.fixtures.listing import LISTING_HARDWARE
-from arkhai_bare_metal_buyer import cli as buyer_cli
 from buyer_commands import BuyerCommands
 from held_loops import held_loop_controller
 from loopback import serving
-from market_arkhai_payments import PaymentApproval, PaymentSettlementData
+from market_arkhai_payments import PaymentSettlementData
 from market_arkhai_payments.fixtures import FakePaymentsClient, build_signed_receipt
 from market_core.schemas import RateValue, SettlementOption, derive_settlement_option_id
 from market_identity import Ed25519Signer, TrustedIdentitySet
@@ -562,9 +560,6 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
     payments = FakePaymentsClient(signer=SERVICE)
     runtime, provisioning = _runtime(tmp_path, payments)
     await _publish(runtime)
-    monkeypatch.setattr(
-        buyer_cli, "PaymentApproval", partial(PaymentApproval, client_for_owner=payments)
-    )
     service = SERVICE.identity.model_dump(mode="json")
     buyer = BuyerCommands(
         monkeypatch,
@@ -582,6 +577,7 @@ async def test_the_buy_command_settles_over_a_run_log_a_later_command_reloads(
             f'dispute_authority = "{DISPUTE}"\n'
         ),
     )
+    buyer.pay_through(payments)
     option = _option()
     app = build_bare_metal_storefront_app(
         registry=build_bare_metal_storefront_registry(domain=runtime.domain), runtime=runtime

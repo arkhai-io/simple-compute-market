@@ -7,6 +7,7 @@ decoding those payloads and deriving mechanism-specific enrichments.
 
 from __future__ import annotations
 
+import base64
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -157,6 +158,25 @@ def settlement_acceptance_fields(
         "settlement_plan": decoded_plan.model_dump(mode="json"),
         "settlement_operation_identities": identities,
     }
+
+
+def accepted_seller_principal(deal: DealContext) -> Identity | None:
+    """The seller principal the accepted Agreement names.
+
+    Acceptance held the Agreement's seller to the listing's trusted publisher
+    set, but that set may hold several identities, so no member of it stands
+    in for the one the seller accepted as. Read from the retained Agreement
+    bytes where the run recorded them; None when the run recorded no Agreement.
+    """
+    if deal.agreement_bytes is not None:
+        agreement = Agreement.model_validate_json(
+            base64.b64decode(deal.agreement_bytes, validate=True)
+        )
+    elif deal.agreement is not None:
+        agreement = Agreement.model_validate(deal.agreement)
+    else:
+        return None
+    return Identity.model_validate(agreement.seller)
 
 
 def exact_agreed_amount(deal: DealContext) -> int | None:

@@ -191,5 +191,5 @@ class TestStage04_NoFulfillment:
         require_state(introduction_state, "revealed", "negotiation_id")
         with pytest.raises(RuntimeError) as refused:
             buyer_fulfillment.status(introduction_state.negotiation_id)
-        assert "404" in str(refused.value), refused.value
+        assert "HTTP 404" in str(refused.value), refused.value
         assert "has no fulfillment" in str(refused.value), refused.value

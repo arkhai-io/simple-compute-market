@@ -15,9 +15,7 @@ from tests.listing_service_fixtures import vm_listing_collaborators
 
 
 @pytest.mark.asyncio
-async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms(
-    monkeypatch,
-):
+async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_terms():
     domain = build_vm_storefront_domain()
     registry = build_vm_storefront_registry(domain)
     collaborators = vm_listing_collaborators(
@@ -82,10 +80,6 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         publication_artifacts=AsyncMock(return_value=([], [new_option], ()))
     )
     publish = AsyncMock(return_value={"status": "published"})
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        publish,
-    )
     service = ListingService(
         registry=collaborators.registry,
         binding=collaborators.binding,
@@ -96,6 +90,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        registry_publisher=publish,
     )
 
     result = await service.reconcile_settlement_options(
@@ -119,7 +114,7 @@ async def test_readiness_reconciliation_preserves_listing_identity_and_accepted_
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_building_no_option_refuses_and_changes_nothing(monkeypatch):
+async def test_reconciliation_building_no_option_refuses_and_changes_nothing():
     """With no mechanism ready, reconciliation builds nothing to refresh the
     listing with, so it refuses rather than storing or publishing a listing
     with no option."""
@@ -141,10 +136,6 @@ async def test_reconciliation_building_no_option_refuses_and_changes_nothing(mon
     )
     composition = SimpleNamespace(publication_artifacts=AsyncMock(return_value=([], [], ())))
     publish = AsyncMock()
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        publish,
-    )
     service = ListingService(
         registry=collaborators.registry,
         binding=collaborators.binding,
@@ -155,6 +146,7 @@ async def test_reconciliation_building_no_option_refuses_and_changes_nothing(mon
         marketplace_signer=TEST_MARKETPLACE_SIGNER,
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
+        registry_publisher=publish,
     )
 
     with pytest.raises(RuntimeError, match="no enabled settlement mechanism is ready"):

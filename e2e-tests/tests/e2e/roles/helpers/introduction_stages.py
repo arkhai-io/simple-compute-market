@@ -218,15 +218,22 @@ class Stage02_Reveal:
             "email": introduction_driver.seller_contact_email
         }
         assert projection["retention"] == introduction_state.disclosure
-        # The buyer's own sink holds the seller's contact.
-        lines = [
+        # The buyer's own sink holds the seller's contact, in an event naming as
+        # its counterparty the seller the accepted Agreement names.
+        events = [
             json.loads(line)
             for line in introduction_driver.delivered.read_text().splitlines()
             if line
         ]
-        assert any(
-            introduction_driver.seller_contact_email in json.dumps(line) for line in lines
-        ), lines
+        (event,) = [
+            event
+            for event in events
+            if event.get("obligation_ref") == introduction_state.obligation_ref
+        ]
+        seller = accepted["agreement"]["seller"]
+        assert event["role"] == "buyer", event
+        assert event["contact"] == {"email": introduction_driver.seller_contact_email}
+        assert event["counterparty"] == f"{seller['scheme']}:{seller['identifier']}", event
         introduction_state.revealed = True
 
 

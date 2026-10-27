@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -524,10 +525,28 @@ def _command_name(command: Any) -> str | None:
     return None
 
 
+def _root_names(groups: Sequence[Any], commands: Sequence[Any]) -> list[str]:
+    """The root command names these registrations claim.
+
+    A group added without a name is no command of its own: Typer merges its
+    commands and groups into the root under their own names, so those names
+    are what it claims.
+    """
+    names = [_command_name(command) for command in commands]
+    for group in groups:
+        name = _group_name(group)
+        if name is not None:
+            names.append(name)
+        elif group.typer_instance is not None:
+            names += _root_names(
+                group.typer_instance.registered_groups,
+                group.typer_instance.registered_commands,
+            )
+    return [name for name in names if name]
+
+
 def _registered_names(app: typer.Typer) -> set[str]:
-    names = [_group_name(group) for group in app.registered_groups]
-    names += [_command_name(command) for command in app.registered_commands]
-    return {name for name in names if name}
+    return set(_root_names(app.registered_groups, app.registered_commands))
 
 
 def _register_domain_commands(
@@ -535,9 +554,10 @@ def _register_domain_commands(
 ) -> None:
     """Add every domain's commands, refusing a root name two domains register.
 
-    Typer keeps every registration and dispatches a repeated name to whichever
-    entry it resolves first, so with two domains installed one domain's command
-    could run the other's behaviour, decided by entry-point discovery order.
+    Typer keeps every registration and builds one command table from them, a
+    later entry of a name replacing an earlier one and every group entered after
+    every command, so with two domains installed one domain's command would
+    replace the other's, decided by discovery order or by how each registered.
     """
     owners: dict[str, str] = {}
     for domain in domains:
@@ -546,12 +566,11 @@ def _register_domain_commands(
         groups = len(app.registered_groups)
         commands = len(app.registered_commands)
         domain.buyer.register_commands(app)
-        added = [_group_name(group) for group in app.registered_groups[groups:]]
-        added += [
-            _command_name(command) for command in app.registered_commands[commands:]
-        ]
+        added = _root_names(
+            app.registered_groups[groups:], app.registered_commands[commands:]
+        )
         identity = str(domain.identity)
-        for name in filter(None, added):
+        for name in added:
             owner = owners.setdefault(name, identity)
             if owner != identity:
                 raise DuplicateRootCommandError(

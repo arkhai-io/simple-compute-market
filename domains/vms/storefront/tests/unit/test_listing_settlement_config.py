@@ -135,15 +135,12 @@ async def test_clause_only_create_persists_canonical_clause_before_publication(
         alkahest_clients={},
         settlement_composition_provider=lambda: composition,
         source_backing_resolver=lambda **_source: BACKED,
+        registry_publisher=AsyncMock(return_value={"status": "published"}),
     )
     monkeypatch.setattr(
         service,
         "_compile_publication_clauses",
         lambda _request, *, composition: (clause,),
-    )
-    monkeypatch.setattr(
-        "market_storefront.services.publication_service.publish_order_to_registry",
-        AsyncMock(return_value={"status": "published"}),
     )
     request = VmCreateListingRequest(
         listing_resource={

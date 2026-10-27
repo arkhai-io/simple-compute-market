@@ -22,7 +22,10 @@ from core_buyer import (
     report_delivery,
 )
 from core_buyer.buyer_config import resolve_fresh_buyer_identity
-from core_buyer.deal_helpers import settlement_acceptance_fields
+from core_buyer.deal_helpers import (
+    accepted_seller_principal,
+    settlement_acceptance_fields,
+)
 from core_buyer.introductions import IntroductionPayloadsDeleted
 from market_contact_exchange import MECHANISM as CONTACT_MECHANISM
 from market_contact_exchange import RecoveredIntroductionRun
@@ -50,12 +53,6 @@ from .run_log import RunLog
 
 def _echo(value: Any) -> None:
     typer.echo(json.dumps(to_jsonable_python(value), ensure_ascii=True, sort_keys=True))
-
-
-def _seller_principal(deal: Any) -> Any:
-    principals = getattr(deal, "seller_principals", None)
-    identities = getattr(principals, "identities", ()) if principals else ()
-    return identities[0] if identities else None
 
 
 class IntroductionContext:
@@ -90,7 +87,7 @@ class IntroductionContext:
                 projection,
                 sinks=sinks,
                 agreement_ref=deal.negotiation_id,
-                counterparty=_seller_principal(deal),
+                counterparty=accepted_seller_principal(deal),
             )
             report_delivery(outcomes, sinks.warnings)
             if outcomes:
@@ -223,6 +220,14 @@ def request_introduction(
         "agreed",
         negotiation_id=outcome.negotiation_id,
         agreed_amount=outcome.agreed_amount,
+        # The accepted Agreement names the seller a delivered introduction
+        # identifies as its counterparty.
+        agreement=(
+            outcome.agreement.model_dump(mode="json", exclude_none=True)
+            if outcome.agreement is not None
+            else None
+        ),
+        agreement_bytes=outcome.agreement_bytes,
         accepted_provision_terms=(
             outcome.accepted_provision_terms.model_dump(mode="json")
             if outcome.accepted_provision_terms is not None

@@ -188,7 +188,6 @@ def test_the_context_builds_sinks_before_recovering_the_deal(monkeypatch) -> Non
         settlement_plan={"obligations": []},
         seller_url="https://seller.invalid",
         buyer_principal=None,
-        seller_principals=None,
     )
     identity = SimpleNamespace(signer=object(), profile_id="profile-1")
 

@@ -112,8 +112,9 @@ nothing above the compute family learns of it:
   declaration types it now imports.
 - The provisioning service, the composition root, reads the `ResourcePool` rows in its
   own resource pass, resolves each pool once through the shared resolver, and passes each
-  declaration its pool's context; it interprets none of it. One row-to-context function
-  serves both this pass and `load_capacity_pool_metadata`, so the two cannot drift.
+  declaration its pool's context; it interprets none of it. The row-to-context function
+  serves this pass alone; `load_capacity_pool_metadata` reads the provider from the same
+  column, as the Section 16 settlement below records.
 - The VM and bare-metal provisioning adapters take the new signature; the bare-metal
   adapter declares `arkhai-kit-resource-pools-contracts` wherever it imports from it.
 - `kit/site`'s `resource_pool_projection`, which rebuilds each projected resource from
@@ -337,7 +338,11 @@ Settled in implementation (Section 18):
   rules that mechanism out, whether it comes from a pool's hint, an override, or the
   storefront's own `[pricing].settlements`: in both domains a listing it alone priced
   closes, where VM had refused its own configured clause for the whole cycle and left
-  every listing open.
+  every listing open. `storefront config migrate --scope settlement|publication`
+  validates its result through the same reading, so it accepts a configuration whose
+  clause names a disabled mechanism, as the storefront starts with one, and publication
+  drops that clause (settled in 160 F4's triage: migration answers whether the storefront
+  accepts its result, and disabling a mechanism is a deliberate operator act).
 
 Rejected: closing whenever any mechanism is ruled out by configuration, which let an
 unrelated, unusable mechanism decide whether an outage delists supply; classifying every
@@ -478,6 +483,15 @@ Negotiation and settlement for an unbacked bare-metal listing sit on the kit neg
 runtime and settlement composition `bare-metal-mock-provisioned-deal` composed for bare
 metal. Settlement, the reveal, per-origin contact resolution, seller-side delivery, and
 retention key only on the listing's origin site and need no change.
+
+Settled in 159 F1 / 160 F2's triage: buyer-side delivery did need one. Both compute
+buyers named the counterparty from a deal field that does not exist, so every delivered
+event named none, against `introduction-delivery`'s "The delivered event carries the
+introduction without interpreting it". Each buyer's `request-introduction` now records
+the accepted Agreement on its run, and delivery names the seller that Agreement names,
+through core's `accepted_seller_principal`; the listing's trusted publisher set may hold
+several identities, so no member of it stands in. The shared reveal stage asserts the
+delivered event's counterparty in both lanes.
 
 #### 13. Bare metal publishes on a loop over held projections
 
@@ -1116,6 +1130,38 @@ closeout edited this change:
   in Section 9: decision 17 removes those coercions with the reply's escrow terms, so the row
   excuses nothing and the architecture check requires its removal.
 
+### E. Test seams
+
+#### 27. A command module's factories are its test seam
+
+Settled in 160 F3's triage. `TESTING.md`'s mocking convention injects collaborators
+through the constructor, and a Typer command, a module-level function the framework
+calls, has none. Every CLI in the repository -- each storefront's operator commands and
+each domain's buyer commands -- was tested by replacing names in the module under test,
+some of them library names (`sqlite3.connect`, `alkahest_py.AlkahestClient`), names a
+module imports from another (one API-credit test replaces `fetch_listing_dict` in three
+modules), or names inside core (`urllib.request.urlopen`). An import-style change can
+silently undo such a patch, and the test then runs the real collaborator.
+
+The rule: a command module is its own composition root. It builds its collaborators
+through module-level factory functions it defines, named for what they provide, and those
+factories are its seam. A test replaces a factory on the module that defines it, and
+nothing else -- no library name, no name the module imports, no name inside core.
+
+In this change the bare-metal buyer CLI takes the shape: it defines `fresh_identity`,
+`recovery_identity`, `registry_client` (moved from its configuration module, which now
+holds configuration only) and a new `payment_approval`, and the storefront-side helper
+this change's tests drive it through replaces only those. The other CLIs' library and
+cross-module patches, and the bare-metal buyer package's own older unit test that
+replaces names its CLI imports, are a `ROADMAP.md` gap row at closeout, for a follow-up
+change.
+
+Rejected: a context object injected through `register_commands` or `ctx.obj` for every
+CLI, which matches the convention's letter but touches every command module and about
+forty test files across three domains and core, and adds plumbing to every command;
+accepting module patching for CLIs as it stands, which codifies the cross-module and
+library patches whose cost is above.
+
 ### Permanent documentation
 
 Spec deltas this change carries:
@@ -1143,8 +1189,8 @@ Spec deltas this change carries:
   reply carries no escrow terms".
 - `settlement-servicing`: add "Settlement verifies against the accepted plan".
 - `settlement-configuration`: add "An Alkahest section that cannot settle makes Alkahest
-  unready", "Readiness blockers state their kind", and "Alkahest probes its chains apart
-  from readiness"; modify "Priority orders choices but never changes accepted settlement"
+  unready", "Readiness blockers state their kind", "Alkahest probes its chains apart
+  from readiness", and "A publication clause's mechanism input is a mapping"; modify "Priority orders choices but never changes accepted settlement"
   (with no ready mechanism the candidate is refused, rather than publication failing).
 - `buyer-orchestration`: add "A buyer funds only what it derives" and "Two domains may not
   register one root command".
@@ -1177,11 +1223,13 @@ Promoted at closeout:
   `fail_on_unreachable` and `preflight_timeout` settings and the Alkahest probe interval
   and RPC timeout; system status's `settlement` readiness in "System status";
   the rewritten `publication_derivation` passages; the bare-metal lane's mail sink and
-  delivery configuration.
+  delivery configuration; and that `storefront config migrate` accepts a clause naming a
+  disabled mechanism, which publication drops (decision 7).
 - `docs/development/TESTING.md`: the module-hold guidance, in the wording the maintainer
   agreed; the bounded topology render assertion; the new scenario and shared introduction
   stages; the `alkahest-chain-probe` loop in each storefront's row of the loop table, and
-  `listing-seed` in the API-credit row.
+  `listing-seed` in the API-credit row; the command-module factory seam beside the
+  mocking convention (decision 27).
 - The `storefront-publication` architecture companion: bare-metal candidates, delivery
   terms, the one-unit commitment, the recheck, the site-derivation log, the no-option
   close or hold, and a bare-metal negotiation continuing, accepting, and force-accepting
@@ -1203,7 +1251,9 @@ Promoted at closeout:
 - `docs/development/ROADMAP.md`: Goal 7's current state and gap row; Goal 6's unowned row
   on unpinned proposals, closed here; and a new Goal 6 row, "An API-credit listing's
   options are fixed at creation, so an unready mechanism's option stays advertised until
-  the seller closes it", owned by "Unowned — needs a new change".
+  the seller closes it", owned by "Unowned — needs a new change"; and a row that CLI
+  tests still replace library names, names a command module imports, or names inside
+  core, against decision 27's factory seam, owned by "Unowned — needs a new change".
 - The change index at completion.
 
 The `TESTING.md` guidance agreed for decision 22:

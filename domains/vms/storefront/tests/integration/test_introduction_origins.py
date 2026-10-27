@@ -10,15 +10,24 @@ the listing's durable binding records -- the same site the negotiation inherited
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import asyncio
 
+import httpx
 import pytest
 from arkhai_vms import make_vm_provision_terms
 from arkhai_vms_buyer.buyer_client import negotiate_with_seller
 from core_buyer.negotiation_client import AuthenticatedHTTPError
+from fastapi import FastAPI
 from market_core.schemas import SettlementOption, SettlementSelection
 from market_identity import TrustedIdentitySet
+from storefront_client import StorefrontClient, StorefrontClientError
+
+import market_storefront.container as container
+from market_storefront.controllers.settle_controller import router as settle_router
+from market_storefront.domain_runtime import build_vm_storefront_domain
+from market_storefront.middleware.seller_auth import listing_lifecycle_middleware
 
 from tests.introduction_deals import (
     BUYER_CONTACT,
@@ -181,6 +190,52 @@ async def test_a_reveal_against_another_obligation_is_refused_with_no_payload(
         assert SITE_CONTACTS[SITE]["email"] not in str(refused.value)
         assert await world.contact_exchange.store.load(obligation_ref) is None
         assert await world.contact_exchange.store.load("0" * 64) is None
+
+
+async def test_a_deal_accepted_by_introduction_is_refused_settlement(
+    tmp_path, monkeypatch
+) -> None:
+    """Spec scenario "A buyer settles an introduction deal", on VM, over a deal
+    the storefront negotiated and accepted: the settle route answers 409 from
+    the accepted Agreement's stage, which completes outside settlement, and
+    starts nothing."""
+    async with publication_app(
+        tmp_path,
+        mechanism_fulfillment=CONTACT_PUBLISHABLE,
+        contacts={SITE: SITE_CONTACTS[SITE]},
+    ) as world:
+        world.pools.append(pool("broker-a", backing="unbacked"))
+        await offer_introduction(world, SITE, "broker-a")
+        listing = (await publish(world))["broker-a"]
+        negotiation_id, _ = await accept_introduction(world, listing)
+        # The settle routes over the same storefront's database, resolving the
+        # accepted Agreement's stage from VM's own stage table.
+        monkeypatch.setattr(
+            container,
+            "resolved_settlement_composition",
+            SimpleNamespace(
+                seller_stages=build_vm_storefront_domain().settlement.seller_stages,
+                local_principal=TEST_MARKETPLACE_SIGNER.identity,
+            ),
+        )
+        settle_app = FastAPI()
+        settle_app.include_router(settle_router)
+        settle_app.middleware("http")(listing_lifecycle_middleware)
+        async with StorefrontClient(
+            "http://test",
+            transport=httpx.ASGITransport(app=settle_app),
+            signer=BUYER_SIGNER,
+            caller_role="buyer",
+            expected_publishers=TrustedIdentitySet(
+                identities=(TEST_MARKETPLACE_SIGNER.identity,)
+            ),
+        ) as buyer:
+            with pytest.raises(StorefrontClientError) as refused:
+                await buyer.settle_agreement(negotiation_id)
+
+        assert refused.value.status_code == 409
+        assert "completes by introduction, not settlement" in str(refused.value)
+        assert await world.db.load_vm_settlement_evidence(negotiation_id=negotiation_id) is None
 
 
 async def test_the_vm_buyer_accepts_an_introduction_the_seller_accepts_at_once(

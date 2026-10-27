@@ -3484,9 +3484,10 @@ bare-metal storefronts.
       nothing; a contact-only candidate whose origin has no contact yields no listing. Bare
       metal `tests/test_http_system.py`'s no-clause hold test becomes the close. VM
       `tests/unit/test_unbacked_settlement_options.py` (unit) follows the typed refusal (D7).
-      **Partly delivered; left unchecked.** The bare-metal cases on unbacked candidates
-      cannot run through the cycle before 19.1 and are carried into 19.6 as mandatory
-      (notes below).
+      **Partly delivered; left unchecked** *(superseded: 19.6 delivered the carried
+      bare-metal cases, and the item was checked when Sections 18 to 22 were qualified
+      together)*. The bare-metal cases on unbacked candidates cannot run through the cycle
+      before 19.1 and are carried into 19.6 as mandatory (notes below).
       - VM, application integration through `StorefrontClient` over the
         `tests/publication_app.py` harness (`tests/integration/test_publication_loop.py`,
         60 passed): configured away (Alkahest unready for a configuration blocker) closes
@@ -3569,9 +3570,13 @@ bare-metal storefronts.
       adapter 50, API-credit storefront 239, e2e-tests unit 107, release tooling 1092).
       An earlier focused run of the VM publication-loop file failed one new test whose
       fixture disabled Alkahest while `[pricing].settlements` still named it, which the
-      storefront refuses as contradictory configuration; the test now states the clause
-      as a pool hint, and production validation is unchanged. `make check-packaging`
-      passed. **Left unchecked:** `make check-change` fails on the citation in the
+      storefront then refused as contradictory configuration; the test now states the
+      clause as a pool hint. *(Superseded by the section's closing round: the storefront
+      no longer refuses such a clause but drops it and closes the listings it alone
+      priced, and `storefront config migrate`, which validates through the same reading,
+      accepts it -- decision 7, settled in 160 F4's triage.)* `make check-packaging`
+      passed. **Left unchecked** *(superseded by the qualification below, which checked
+      the item)*: `make check-change` fails on the citation in the
       handoff below, and the section's fresh-context check is outstanding. End-to-end: unrun here;
       `e2e_compute_dynamic_listings` and `e2e_bare_metal_publication` run the changed
       cycles once deployed, and no scenario closes a listing for configuration.
@@ -3584,7 +3589,8 @@ bare-metal storefronts.
       The Helm render (`make test-deployment-packaging`) did not run: this environment
       has no `helm`. `make check-packaging` and `make check-change` passed. The VM
       integration test once seen reporting `timeout` passed in all four full VM runs of
-      this session. End-to-end: unrun here (this session may not run Docker); the
+      this session; its cause was found in round 3's triage (160 F1, the round's fix note
+      under Section 22). End-to-end: unrun here (this session may not run Docker); the
       scenarios named above are the evidence once the pipeline runs.
 
 Section 18 notes (handoff):
@@ -3660,14 +3666,19 @@ Section 18 notes (handoff):
   a passing check or a general test waiver. No placeholder, checker weakening, or
   repository-wide policy change is authorized. Resolve the real helper in 22.1 and
   rerun the unchanged check.
-- **Current qualification remains incomplete.** The latest VM storefront run exited
+- **Current qualification remains incomplete** *(superseded: Sections 18 to 22 were
+  qualified together, 18.7's later note, and 18.5 and 18.7 checked)*. The latest VM
+  storefront run exited
   2: units 1122 passed and 1 skipped; integration 474 passed and 1 failed.
   `test_a_listing_every_registry_refused_is_published_once_they_answer` expected
   `unreachable` and observed `timeout`. Its system-status HTTP health probe is not
   replaced by the registry-client double; the runtime timeout phase and root cause
   are not established. The proposed HTTP fake or loopback fixture repair remains
   unapplied and requires separate approval; assertions and production timeout policy
-  are unchanged. Core storefront subsequently exited 0 (223 passed, 2 skipped),
+  are unchanged. *(Cause found and repaired in round 3's triage, 160 F1: the probe
+  was a real outbound request to the harness's `registry-a.test` URLs, whose answer
+  depended on the resolver and any proxy; the harness now answers it as refused
+  through an injected transport.)* Core storefront subsequently exited 0 (223 passed, 2 skipped),
   but deliberate one-time approval provenance for that run is unproven because of a
   prompt/input race; the result does not repair that provenance. Fresh review and
   full qualification after the latest fixes remain outstanding. 18.5 and 18.7 stay
@@ -3860,7 +3871,7 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
         listing published by the app's own cycle, accepted, and revealed through the
         typed clients (`test_http_introductions.py`).
 - [x] 19.7 Versions: `arkhai-bare-metal`, `arkhai-bare-metal-storefront`; `make lock`.
-      Left unchecked. This section changes no version and no lock, though
+      Left unchecked *(superseded by the closing round's check below)*. This section changes no version and no lock, though
       `arkhai-bare-metal` gains the public `BareMetalViewProblems`. Whether the packages'
       current versions meet `docs/development/RELEASING.md`'s rule against the target
       branch is unverifiable here: the comparison was out of this section's scope.
@@ -3882,7 +3893,8 @@ terms only when backed"; the removed "An unbacked pool yields no bare-metal list
       the narrow sequencing exception is not a passing check. These receipts predate
       this validation-note correction; production and test sources are unchanged.
       Review remains incomplete and its findings await assessment; this checkpoint is
-      not acceptance. This item and 19.7 remain unchecked.
+      not acceptance. This item and 19.7 remain unchecked *(superseded by the
+      qualification below, which checked both)*.
       End-to-end: unrun here; `e2e_bare_metal_publication` exercises backed supply, and
       `e2e_bare_metal_unbacked_introduction` arrives with Section 22.
       **Qualified with Sections 18 to 22** (18.7's note): `make test-bare-metal` and the
@@ -3899,10 +3911,14 @@ Section 19 notes (handoff):
   "Reconciliation" section says every bare-metal listing is capacity-backed and an
   unbacked pool yields none; both stop being true here.
 - **Section 18's carried bare-metal cases** are the three 19.6 tests above; 18.5 and 18.7
-  stay unchecked until Section 18's own requirements are met.
+  stay unchecked until Section 18's own requirements are met *(superseded: they were met,
+  and both checked with Sections 18 to 22's qualification)*.
 - **A VM integration test once observed a registry health check reporting `timeout`
   where `unreachable` was expected.** It passed in the next full run. Its cause is
-  unproven and it is not waived.
+  unproven and it is not waived. *(Cause found and repaired in round 3's triage, 160
+  F1: the status route's registry probe made a real request to the harness's
+  `registry-a.test` URLs, so a slow resolver or a proxy answered `timeout`; the harness
+  now answers the probe as refused through `SystemService`'s injected transport.)*
 - **Session:** a scoped pytest run must name the wheel directory by absolute path when
   given `uv --directory`, which resolves a relative `--find-links` against the caller's
   directory; and a storefront environment needs `make reinit` after `make dist`, since a
@@ -4233,7 +4249,8 @@ configuration.
 - [x] 22.6 **Verify.** `make test-e2e-unit`; `make -C e2e-tests test-e2e-bare-metal` and
       `test-e2e-vm` (system); `make test`; `make check-packaging`. End-to-end:
       `e2e_bare_metal_unbacked_introduction` and `e2e_vm_introduction`.
-      **Left unchecked:** the two system lanes did not run here, since this session may
+      **Left unchecked** *(superseded: checked from the owner's validation below)*: the
+      two system lanes did not run here, since this session may
       not run Docker, and they are this section's evidence; the
       pipeline the round view starts runs them. Passed: e2e-tests unit 122, the release
       tooling suite with the corrected compose render test, and the bare-metal
@@ -4274,7 +4291,9 @@ configuration.
       names in the buyer's CLI module; the payments kit's fake stands behind both
       parties' `PaymentsClient`, the buyer's by patching the CLI's `PaymentApproval`
       name with one bound to the fake's `client_for_owner`, since `buy` offers no seam
-      to inject it. With each fix reverted alone: without the decoder, `buy`
+      to inject it. *(Superseded by round 3's triage, 160 F3 and decision 27: the CLI
+      now builds its approval through its own `payment_approval` factory, and the test
+      helper replaces only the CLI's factories.)* With each fix reverted alone: without the decoder, `buy`
       fails writing its run's end ("'dict' object has no attribute 'model_dump'"),
       after settling; with the principals as a bare list, `teardown` fails in the
       run-log loader ("malformed publisher_principals").
@@ -4354,7 +4373,78 @@ Section 22 notes (handoff):
   which 22.3 prescribes, though the storefront's own suite proves both in-process.
 - **Also adjacent and left:** the bare-metal buyer's `_seller_principal` reads a
   `seller_principals` the core `DealContext` does not carry, so a delivered
-  introduction names no counterparty to the buyer's sinks.
+  introduction names no counterparty to the buyer's sinks. *(Fixed in both compute
+  buyers by round 3's triage, 159 F1 / 160 F2: the fix note below.)*
+
+Round 3 triage fixes (reviews 159 and 160, owner's notes 157), made against `88e5697`:
+
+- **159 F1 / 160 F2 — the delivered introduction names its seller.** Both compute buyers'
+  `request-introduction` record the accepted Agreement and its retained bytes on the
+  run's end, and both deliver with `counterparty` from core's new
+  `accepted_seller_principal` (`core_buyer/deal_helpers.py`), the seller the Agreement
+  names; the two `_seller_principal` helpers, which read a field `DealContext` never
+  had, are gone (design decision 12's settlement). `Stage02_Reveal` now finds the
+  delivered event by its obligation and asserts its role, contact, and counterparty
+  against the Agreement the buyer printed, so both lanes check it.
+- **160 F1 — the VM status test's registry probe is deterministic.** `SystemService`
+  takes an optional `registry_probe_transport`; the publication harness passes an
+  `httpx.MockTransport` refusing every probe, so
+  `test_a_listing_every_registry_refused_is_published_once_they_answer` no longer sends
+  a real request to `registry-a.test`. That request was the recorded `timeout` flake's
+  cause; Sections 18 and 19's notes now say so.
+- **160 F3 — seams instead of patches (decision 27).** The bare-metal buyer CLI defines
+  its factories (`fresh_identity`, `recovery_identity`, `registry_client`, moved from
+  its configuration module, and a new `payment_approval`), and `tests/buyer_commands.py`
+  replaces only those (`pay_through` for the payments fake). `ListingService` takes an
+  optional `registry_publisher`, which VM's reconciliation unit tests inject. VM's
+  introduction-settle refusal moved from a rewritten Alkahest row in
+  `test_payment_settlement.py` to a contact deal the storefront negotiated and accepted
+  (`test_introduction_origins.py`). The unbacked scenario's fulfillment check matches
+  `HTTP 404`, and the buyer helper's fixture registry URL carries its development-value
+  comment. The other CLIs' patches go to 23.5's roadmap row.
+- **160 F4 — decision 7 states migration's behaviour** (option A): `config migrate`
+  accepts a clause naming a disabled mechanism, which publication drops; 18.7's note is
+  corrected; `settlement-configuration`'s delta adds "A publication clause's mechanism
+  input is a mapping".
+- **160 F5** — superseded "unchecked" and "incomplete" sentences in Sections 18, 19 and
+  22 are marked, and decision 4's bullet states the settled behaviour.
+- **160 F6 — a nameless group's names are claimed.** `core_buyer.cli`'s `_root_names`
+  counts a group added without a name by the commands and groups Typer merges into the
+  root, recursively; the docstring says the command table is built later-wins.
+- **160 F7 — the reserve route refuses before building a claim.** The bare-metal admin
+  reserve route asks the binding's delegate for admission before `whole_machine_claim`;
+  its test seeds a real unbacked listing and shows a non-matching required attribute
+  still answers the unbacked conflict, not "nothing found".
+- **Evidence.** Unit: core buyer 152 passed (`make -C core/buyer test`, the helper's and
+  the refusal's new tests among them); VM storefront unit 1132 (1 skipped), with the
+  reconciliation tests' injected publisher; e2e-tests unit 122. Application
+  integration: VM storefront 477 passed (`make test-storefront`), with the deterministic
+  registry probe and the settle refusal over a negotiated contact deal; bare-metal
+  storefront 498 passed (`make test-bare-metal`, with domain 183, buyer 12, adapter 51),
+  with the buyer commands' delivered counterparty and the reserve route's refusals; VM
+  buyer 207 (`make test-vms-buyer`). `make test` passed every suite up to the Helm render,
+  which could not start for want of `helm` (exit 127), as in every session of this
+  change. `make check-packaging`, `make check-comment-hygiene` and `make check-change`
+  passed. No version or lock moves: every touched package already carries this change's
+  bump against `dev`. End-to-end: unrun here; the fix commit's validation runs the
+  changed `Stage02_Reveal` in `e2e_vm_introduction` and
+  `e2e_bare_metal_unbacked_introduction`.
+- **Fresh-context check of the fix diff** (against `88e5697`): no defect. Taken up: the
+  bare-metal CLI's seam comment no longer states as true a rule the buyer package's
+  older unit test breaks (that test is in 23.5's row); VM's
+  `test_listing_settlement_config.py` injects the publisher rather than patching
+  `publish_order_to_registry`; `_register_domain_commands`' docstring states Typer's
+  table exactly (later entries replace earlier, groups entered after commands). Core
+  buyer 152 and VM storefront 1132 (1 skipped) and 477 passed again after these,
+  bare-metal buyer 12, and `make check-packaging` and `make check-change` passed.
+  **Declined:** a VM-level integration test of the delivered counterparty, since VM's
+  path differs from bare metal's only in wiring the same core helper, which a core unit
+  test proves, and the VM buyer CLI has no harness below the e2e lane that does not
+  patch its names (23.5's row); a reason comment on `ListingService`'s call-time import
+  of the publication runtime, whose cycle is not verified, so 23.2's import review
+  takes it; claiming a group named by its own callback, which the installed Typer's
+  `callback()` cannot do; guarding the bare-metal buyer's delivery against malformed
+  Agreement bytes, which only a tampered run log holds, and run logs are signed.
 
 ## 23. Closeout
 
@@ -4372,7 +4462,7 @@ change to implementation.
       load) — in particular `compute_provisioning`'s and the bare-metal adapter's contracts
       imports, each storefront's chain-probe imports, and the e2e hold helpers. One that
       should move returns the change to implementation.
-- [ ] 23.3 **Documentation compliance.** Re-check D1–D26 against
+- [ ] 23.3 **Documentation compliance.** Re-check D1–D27 against
       `openspec/README.md#documentation-placement` and `AGENTS.md`'s "Documentation
       ownership": behaviour in the `spec.md` deltas, rationale in the architecture
       companions, repository-wide principles in `ARCHITECTURE.md`, nothing durable left only
@@ -4398,7 +4488,12 @@ change to implementation.
       continuation is resolved against the listing as currently stored in VM and against
       the opening's in bare metal, so a repriced option ends a VM negotiation that bare
       metal would continue" owned by "Unowned — needs a new change", unless a change owns it
-      by closeout (round 1's triage, 85 F17). Name each in the design-promotion record.
+      by closeout (round 1's triage, 85 F17). Goal 4 also gains the row (no goal is about
+      test hygiene, and the CLIs are domain composition) "CLI tests replace library names,
+      names a command module imports, or
+      names inside core, rather than the module's own factories", owned by "Unowned —
+      needs a new change" (round 3's triage, 160 F3, decision 27). Name each in the
+      design-promotion record.
 - [ ] 23.6 **Campaign index currency.** `openspec/changes/README.md`: this change's row and
       notes current, the Goal 7 campaign graph naming it current, and the two-seller scenario
       still recorded as unowned; other rows' `Depends on` are left to archive cleanup; `make
@@ -4460,7 +4555,9 @@ change to implementation.
         the provisioning pause routes' gate state; "System Integration Tests (End-to-End)" —
         the new scenario, the shared introduction stages, and the hold source check; "Chart
         Render Tests" — the bounded topology assertion and the no-`wait-for-` and
-        `startupProbe` assertions.
+        `startupProbe` assertions; the mocking convention — a command module builds its
+        collaborators through factory functions it defines, its one seam, and a test
+        replaces only those (decision 27, round 3's triage, 160 F3).
       - `openspec/specs/storefront-publication/architecture.md`: "Bare-metal listing
         shapes" — unbacked candidates, delivery terms, the one-unit commitment;
         "Reconciliation" — the recheck on the held projection and the no-option close or
@@ -4526,7 +4623,8 @@ change to implementation.
         shares; `docs/development/DEPLOYMENT_AND_CONFIG.md` "Storefront listing shapes
         and pool overrides" — the derivation reason codes `settlement_mechanism_unknown`
         and `payload_unbuildable`, and that a clause naming a disabled mechanism is
-        dropped wherever it is stated, closing a listing it alone priced; the
+        dropped wherever it is stated, closing a listing it alone priced, and that
+        `storefront config migrate` accepts such a clause (round 3's triage, 160 F4); the
         `settlement-configuration` companion — a clause read apart from configuration
         before its mechanism's enablement is judged.
       - The `spec.md` files of the ten capabilities the deltas cover are written by the

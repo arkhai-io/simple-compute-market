@@ -2,9 +2,11 @@
 
 The commands run through the core ``market`` application with the bare-metal
 buyer installed, negotiate and settle over HTTP, and write and reload a real
-run log, as a buyer runs them. Two things are doubled: the registry, at the
-buyer's own client, serving the one listing the test published; and the
-buyer's profile, whose identity resolves to the test's signer.
+run log, as a buyer runs them. What is doubled is replaced at the buyer CLI's
+own factories, its one seam, and nowhere else: the registry client, serving the
+one listing the test published; the buyer's profile, whose identity resolves to
+the test's signer; and, where a test pays, the payments client behind the
+buyer's approval.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ import pytest
 from arkhai_bare_metal_buyer import cli as buyer_cli
 from arkhai_bare_metal_buyer.plugin import domain as bare_metal_buyer
 from core_buyer.cli import build_app
+from market_arkhai_payments import PaymentApproval
 from market_identity import Identity, Signer
 from typer.testing import CliRunner
 
@@ -53,7 +56,8 @@ class BuyerCommands:
     """One buyer's ``market bare-metal`` commands, over its own config and run logs.
 
     ``settings`` is appended to the ``[bare_metal]`` table and may open its
-    subtables.
+    subtables. ``delivered``, when given, is the file the buyer's own delivery
+    sink writes each delivered introduction to.
     """
 
     def __init__(
@@ -64,6 +68,7 @@ class BuyerCommands:
         signer: Signer,
         registry_principal: Identity,
         settings: str = "",
+        delivered: Path | None = None,
     ) -> None:
         identity = SimpleNamespace(
             profile_id=str(uuid.uuid4()), principal=signer.identity, signer=signer
@@ -72,9 +77,16 @@ class BuyerCommands:
         monkeypatch.setattr(buyer_cli, "fresh_identity", lambda: identity)
         monkeypatch.setattr(buyer_cli, "recovery_identity", lambda run_id: identity)
         registry = registry_principal.model_dump(mode="json")
+        delivery = (
+            f'[Delivery]\nenabled = ["file"]\n[Delivery.file]\npath = "{delivered}"\n'
+            if delivered is not None
+            else ""
+        )
         self.config = tmp_path / "buyer.toml"
         self.config.write_text(
-            "[bare_metal]\n"
+            delivery + "[bare_metal]\n"
+            # A development fixture on a reserved domain, never to be used on a
+            # public network; the registry client is doubled, so nothing calls it.
             'registry_url = "https://registry.invalid"\n'
             'registry_authority = "registry-a"\n'
             f'registry_principals = [{{scheme = "{registry["scheme"]}", '
@@ -89,6 +101,16 @@ class BuyerCommands:
         """Serve ``listing`` from the buyer's registry client."""
         self._monkeypatch.setattr(
             buyer_cli, "registry_client", lambda config, identity: ListingRegistry(listing)
+        )
+
+    def pay_through(self, payments: Any) -> None:
+        """Back the buyer's approval with ``payments``, as its configuration states it."""
+        self._monkeypatch.setattr(
+            buyer_cli,
+            "payment_approval",
+            lambda config: PaymentApproval(
+                config.arkhai_payments, config.payer_account, client_for_owner=payments
+            ),
         )
 
     def run(self, *arguments: str) -> dict:

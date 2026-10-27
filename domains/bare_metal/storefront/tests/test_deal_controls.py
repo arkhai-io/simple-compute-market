@@ -266,24 +266,38 @@ async def test_admin_reserve_takes_the_listings_machine(tmp_path) -> None:
 
 
 async def test_admin_reserve_refuses_a_listing_no_authority_stands_behind(tmp_path) -> None:
+    """An unbacked bare-metal listing constructs no capacity claim (requirement
+    "A bare-metal listing sells one whole unit"): the refusal comes before any
+    claim is built, so an administrator's required attribute the machine would
+    not match is answered with the listing's backing, not with nothing found."""
     runtime, _negotiation_id, capacity = await _runtime(tmp_path)
-    # A binding recorded unbacked: bare metal publishes none today, so the
-    # durable record is written directly past its immutability trigger.
-    with sqlite3.connect(runtime.db.db_path) as conn:
-        conn.execute("DROP TRIGGER storefront_listing_binding_immutable")
-        conn.execute(
-            "UPDATE storefront_listing_bindings SET capacity_backing='unbacked' "
-            "WHERE listing_id='listing-1'"
-        )
+    await runtime.db.upsert_bare_metal_listing(
+        listing_id="listing-unbacked",
+        status="open",
+        created_at="now",
+        updated_at="now",
+        seller_principal=runtime.seller_principal,
+        storefront_url=runtime.storefront_url,
+        site_id="site-a",
+        pool_id="pool-u",
+        physical_resource_id="resource-u",
+        listing={"capacity_backing": "unbacked", **LISTING_HARDWARE, "kind": "bare_metal.v2"},
+        accepted_escrows=[],
+    )
     app = _app(runtime)
+    refused = []
     async with app.router.lifespan_context(app):
         async with _client(app, ADMIN_SIGNER, "admin") as admin:
-            with pytest.raises(StorefrontClientError) as refused:
-                await admin.admin_reserve_capacity(
-                    required_attributes={}, listing_id="listing-1"
-                )
+            for required in ({}, {"gpu_model": "a different model"}):
+                with pytest.raises(StorefrontClientError) as refusal:
+                    await admin.admin_reserve_capacity(
+                        required_attributes=required, listing_id="listing-unbacked"
+                    )
+                refused.append(refusal.value)
 
-    assert refused.value.status_code == 409
+    for refusal in refused:
+        assert refusal.status_code == 409
+        assert "requires capacity-backed supply" in str(refusal), refusal
     assert capacity.reserve_calls == []
 
 

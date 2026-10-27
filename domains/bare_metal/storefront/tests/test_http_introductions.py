@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -598,11 +599,19 @@ async def test_the_buyer_commands_reach_an_introduction_over_their_own_run_log(
     """The production ``market bare-metal request-introduction`` and ``market
     bare-metal settlement contact introduce`` against the storefront: the first
     holds the seller's accept reply to the advertised option and records a run
-    log the second reloads, as a buyer runs them."""
+    log the second reloads, as a buyer runs them. The buyer's own sink receives
+    the seller's contact in an event naming, as its counterparty, the seller
+    the accepted Agreement names (introduction-delivery's "The delivered event
+    carries the introduction without interpreting it")."""
     runtime = _runtime(str(tmp_path / "storefront.db"))
     option = await _insert_contact_listing(runtime)
+    delivered = tmp_path / "delivered.jsonl"
     buyer = BuyerCommands(
-        monkeypatch, tmp_path, signer=BUYER_SIGNER, registry_principal=ADMIN_SIGNER.identity
+        monkeypatch,
+        tmp_path,
+        signer=BUYER_SIGNER,
+        registry_principal=ADMIN_SIGNER.identity,
+        delivered=delivered,
     )
     contact = ",".join(f"{key}={value}" for key, value in _BUYER_CONTACT.items())
     with serving(_app(runtime)) as base_url:
@@ -625,6 +634,15 @@ async def test_the_buyer_commands_reach_an_introduction_over_their_own_run_log(
 
     assert request["status"] == "agreed"
     assert introduced["counterparty_contact"] == _SELLER_CONTACT
+    (event,) = [json.loads(line) for line in delivered.read_text().splitlines()]
+    seller = SELLER_SIGNER.identity
+    assert request["agreement"]["seller"] == seller.model_dump(mode="json")
+    assert (event["role"], event["obligation_ref"], event["contact"]) == (
+        "buyer",
+        request["obligation_ref"],
+        _SELLER_CONTACT,
+    )
+    assert event["counterparty"] == f"{seller.scheme.value}:{seller.identifier}"
 
 
 

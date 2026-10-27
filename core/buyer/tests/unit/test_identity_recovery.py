@@ -11,6 +11,7 @@ import core_buyer.run_log as run_log_module
 import pytest
 from core_buyer.buyer_config import BuyerProfileResolver, ResolvedBuyerIdentity
 from core_buyer.deal_helpers import (
+    accepted_seller_principal,
     exact_agreed_amount,
     load_deal_context,
     load_negotiation_resume_point,
@@ -298,6 +299,55 @@ def test_a_deal_reads_its_agreed_amount_exactly_from_the_agreement(
     assert int(deal.agreed_amount) != amount
     assert exact_agreed_amount(deal) == amount
     assert exact_agreed_amount(load(without)) == 12
+
+
+def test_a_deals_seller_is_the_one_its_agreement_names_not_a_trusted_publisher(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The listing trusts two publisher identities; the seller accepted as the
+    second, and that one is the deal's counterparty, from the retained bytes or
+    the recorded Agreement alike. A run that recorded no Agreement names none."""
+    _state_dir(monkeypatch, tmp_path)
+    signer = Ed25519Signer(b"\x2b" * 32)
+    other, seller = Ed25519Signer(b"\x2c" * 32), Ed25519Signer(b"\x2d" * 32)
+    trust = TrustedIdentitySet(identities=(other.identity, seller.identity))
+    option = SettlementOption(
+        mechanism="example.payment.v1", asset="usd",
+        option_id=derive_settlement_option_id(
+            mechanism="example.payment.v1", asset="usd", rates=[], params={},
+        ),
+    )
+    agreement = Agreement(
+        negotiation_id="neg-1", listing_id="listing-1", listing_hash="0" * 64,
+        buyer=signer.identity.model_dump(mode="json"),
+        seller=seller.identity.model_dump(mode="json"), amount=12,
+        duration_seconds=3600, start_utc="2026-01-01T00:00:00Z",
+        accepted_at="2026-01-01T00:00:00Z", asset="usd", settlement=option,
+    )
+
+    def load(**completed):
+        log = RunLog.start(
+            profile_id=uuid.uuid4(), principal=signer.identity,
+            seller_url="http://seller", listing_id="listing-1",
+            publisher_principals=trust.model_dump(mode="json"),
+            publisher_id="publisher-1", source_registry_url="http://registry",
+            source_registry_authority="registry", initial_price=10, max_price=12,
+        )
+        log.event(
+            "negotiation_completed", status="agreed", negotiation_id="neg-1",
+            agreed_amount=12, **completed,
+        )
+        return load_deal_context(
+            log.run_id, signer=signer,
+            refresh_publisher_principals=lambda *_binding: trust,
+        )
+
+    retained = base64.b64encode(agreement.model_dump_json().encode()).decode()
+    recorded = agreement.model_dump(mode="json", exclude_none=True)
+    assert accepted_seller_principal(load(agreement_bytes=retained)) == seller.identity
+    assert accepted_seller_principal(load(agreement=recorded)) == seller.identity
+    assert accepted_seller_principal(load()) is None
 
 
 def test_a_resumed_negotiation_carries_the_record_made_at_its_start(
