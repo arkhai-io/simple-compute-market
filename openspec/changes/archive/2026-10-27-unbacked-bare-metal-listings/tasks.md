@@ -1894,12 +1894,13 @@ change to implementation.
       validated commits and pipeline runs), owner decisions, and each deferral's owner.
       Implementation settlements not yet in `design.md` moved there first, as "Settled in
       implementation" paragraphs under D9, D10, D14, D16, D17, D18, D19, D20, and D23.
-      Kept as task notes, with no owner: test-coverage gaps (a typed-client VM settle after
-      a listing change, contact exchange's blockers beside `disabled`, API credits'
-      `negotiate` run-log recording and `--from` carry-forward), API-credit tests leaking
-      dotted `settings_overrides` keys, API credits' own `_unknown` predicate beside
-      `MechanismReadiness.unknown`, and VM's text `settlement status` omitting each
-      blocker's kind.*
+      Deferred, owned by one Goal 4 row of `docs/development/ROADMAP.md` ("Unowned — needs
+      a new change", added by closeout review 188 F2's triage): test-coverage gaps (a
+      typed-client VM settle after a listing change, contact exchange's blockers beside
+      `disabled`, API credits' `negotiate` run-log recording and `--from` carry-forward),
+      API-credit tests leaking dotted `settings_overrides` keys, API credits' own `_unknown`
+      predicate beside `MechanismReadiness.unknown`, and VM's text `settlement status`
+      omitting each blocker's kind.*
 - [x] 23.5 **Roadmap currency.** `docs/development/ROADMAP.md`: Goal 7's "Current state"
       (bare metal publishes unbacked listings, settling by introduction; the "remains
       backed" sentence and the pointers to this change replaced by the present state), its
