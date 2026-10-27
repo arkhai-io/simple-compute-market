@@ -1209,6 +1209,21 @@ only the transport is:**
   push design, just triggered by the storefront's request instead of a
   background worker's schedule. This preserves "raw credentials MUST NOT
   be persisted" without needing an outbox at all.
+  *Corrected 2026-10-27 (implementation review 07 F1):* "never at rest"
+  holds for the fulfillment aggregate, its provider metadata, and any
+  result row, not for the provisioning service as a whole. The job
+  authority persists the `CredentialEnvelope`s a create job's executor
+  reports (`credentials` table, plain JSON), as the permanent
+  `physical-provisioning` requirement "Compute provisioning owns the job
+  and host authorities" requires, and `JobFulfillmentProvider.fetch_credentials`
+  answers each result query by reading its create job's from there; the
+  create job generates them on the host, and nothing can read them back
+  from it. "Never rotated" above is also not quite true: an operator's VM
+  password reset runs as its own job and stores new credentials against
+  it, which the fulfillment result does not read. The delta requirement is
+  restated as "Credentials stay with the job authority and are read on
+  demand", and the unencrypted store and the reset gap are recorded as
+  current limits in `openspec/specs/physical-provisioning/architecture.md`.
 - **`credential_generation` is dropped from this section's scope, not
   carried forward.** (Revised 2026-07-25.) The original rationale assumed
   a rotation source to detect staleness against. There isn't one: VM

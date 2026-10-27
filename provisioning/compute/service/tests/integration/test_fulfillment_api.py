@@ -38,10 +38,9 @@ from compute_provisioning_ansible import ssh_connection
 import uuid
 from typing import Any
 
-import httpx
 import pytest
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport
 
 from compute_provisioning.jobs.db import JobRecord
 from compute_provisioning_service import container as _container_module
@@ -49,7 +48,12 @@ from compute_provisioning_client import (
     ComputeProvisioningClient,
     ComputeProvisioningError,
 )
-from compute_provisioning_contracts import FulfillmentRequestBody
+from compute_provisioning_contracts import (
+    FulfillmentRequestBody,
+    FulfillmentScheduleRequest,
+    FulfillmentScheduleResponse,
+    FulfillmentStatusResponse,
+)
 from compute_provisioning_service.main import app
 from .conftest import SERVICE_AUTHORITIES, STOREFRONT_SIGNER
 from market_fulfillment import (
@@ -93,14 +97,13 @@ class FulfillmentApi:
     server accepts *those* bodies, and could then drift from the shipped client
     indefinitely while staying green — the failure `TESTING.md` names.
 
-    What remains here is argument shape and unwrapping, so the call sites in
-    this file read as they did. The methods that still take the raw transport
-    say why at their definitions.
+    What remains here is argument shape and unwrapping. A refused request
+    raises ``ComputeProvisioningError`` carrying the HTTP status, so rejection
+    cases assert through the client too.
     """
 
-    def __init__(self, client: ComputeProvisioningClient, http: AsyncClient) -> None:
+    def __init__(self, client: ComputeProvisioningClient) -> None:
         self._client = client
-        self._http = http
 
     @staticmethod
     def _body(capacity_reservation_id: str, market: str, fulfillment_request: dict):
@@ -126,24 +129,6 @@ class FulfillmentApi:
         )
         return response.model_dump(mode="json")
 
-    async def begin_raw(
-        self, capacity_reservation_id: str, market: str, fulfillment_request: dict
-    ) -> httpx.Response:
-        """Raw, because the caller asserts on a rejection status code.
-
-        A typed client raises on those rather than returning them, so the
-        status code itself is unobservable through it. This is the
-        error-path exception `TESTING.md` allows, not a convenience.
-        """
-        return await self._http.post(
-            "/api/v1/fulfillment/begin",
-            json={
-                "capacity_reservation_id": capacity_reservation_id,
-                "market": market,
-                "fulfillment_request": fulfillment_request,
-            },
-        )
-
     @staticmethod
     def dispatched_job(job_id: str) -> dict:
         """The correlation identity of a job the provider dispatched.
@@ -162,46 +147,32 @@ class FulfillmentApi:
                 "idempotency_key": job.idempotency_key,
             }
 
-    async def status(self, fulfillment_id: str) -> httpx.Response:
-        """Raw for the same reason as `begin_raw`: callers assert 404."""
-        return await self._http.get(f"/api/v1/fulfillment/{fulfillment_id}/status")
+    async def status(self, fulfillment_id: str) -> FulfillmentStatusResponse:
+        return await self._client.get_fulfillment_status(fulfillment_id)
 
-    async def result(self, fulfillment_id: str) -> httpx.Response:
-        """Raw for the same reason as `begin_raw`."""
-        return await self._http.get(f"/api/v1/fulfillment/{fulfillment_id}/result")
+    async def result(self, fulfillment_id: str) -> VersionedEnvelope[dict[str, Any]]:
+        return await self._client.get_fulfillment_result(fulfillment_id)
 
     async def schedule(
-        self,
-        capacity_reservation_id: str,
-        market: str,
-        *,
-        requirements: dict[str, Any] | None = None,
-        resource_id: str | None = None,
-    ) -> httpx.Response:
-        """Raw: callers assert both success and rejection status codes."""
-        return await self._http.post(
-            "/api/v1/fulfillment/schedule",
-            json={
-                "capacity_reservation_id": capacity_reservation_id,
-                "market": market,
-                "requirements": requirements or {},
-                "resource_id": resource_id,
-            },
+        self, capacity_reservation_id: str, market: str
+    ) -> FulfillmentScheduleResponse:
+        return await self._client.schedule_resource(
+            FulfillmentScheduleRequest(
+                capacity_reservation_id=capacity_reservation_id, market=market
+            )
         )
 
 
 @pytest.fixture
 async def fulfillment(client_and_queue) -> FulfillmentApi:
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as http:
-        async with ComputeProvisioningClient(
-            "http://test",
-            signer=STOREFRONT_SIGNER,
-            caller_role="seller",
-            expected_authorities=SERVICE_AUTHORITIES,
-            transport=transport,
-        ) as client:
-            yield FulfillmentApi(client, http)
+    async with ComputeProvisioningClient(
+        "http://test",
+        signer=STOREFRONT_SIGNER,
+        caller_role="seller",
+        expected_authorities=SERVICE_AUTHORITIES,
+        transport=ASGITransport(app=app),
+    ) as client:
+        yield FulfillmentApi(client)
 
 
 def _fulfillment_request(**overrides: Any) -> dict:
@@ -723,18 +694,17 @@ class TestStatusAndResultQueries:
             capacity_reservation_id, "vms", _fulfillment_request()
         )
 
-        resp = await fulfillment.status(begun["fulfillment_id"])
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["fulfillment_id"] == begun["fulfillment_id"]
-        assert body["capacity_reservation_id"] == capacity_reservation_id
-        assert body["state"] == "dispatching"
-        assert body["failure_reason"] is None
+        status = await fulfillment.status(begun["fulfillment_id"])
+        assert status.fulfillment_id == begun["fulfillment_id"]
+        assert status.capacity_reservation_id == capacity_reservation_id
+        assert status.state == "dispatching"
+        assert status.failure_reason is None
 
     async def test_status_unknown_id_is_404(self, fulfillment: FulfillmentApi):
-        resp = await fulfillment.status("no-such-fulfillment")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.status("no-such-fulfillment")
+        assert refused.value.status_code == 404
+        assert "fulfillment_not_found" in str(refused.value)
 
     async def test_result_on_a_non_active_fulfillment_has_no_outputs_or_credentials(
         self, fulfillment: FulfillmentApi
@@ -747,18 +717,17 @@ class TestStatusAndResultQueries:
         )
         assert begun["state"] == "dispatching"
 
-        resp = await fulfillment.result(begun["fulfillment_id"])
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["kind"] == "fulfillment.result.v1"
-        assert body["payload"]["state"] == "dispatching"
-        assert body["payload"]["provisioned_resources"] == []
-        assert body["payload"]["domain_result"] is None
+        result = await fulfillment.result(begun["fulfillment_id"])
+        assert result.kind == "fulfillment.result.v1"
+        assert result.payload["state"] == "dispatching"
+        assert result.payload["provisioned_resources"] == []
+        assert result.payload["domain_result"] is None
 
     async def test_result_unknown_id_is_404(self, fulfillment: FulfillmentApi):
-        resp = await fulfillment.result("no-such-fulfillment")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.result("no-such-fulfillment")
+        assert refused.value.status_code == 404
+        assert "fulfillment_not_found" in str(refused.value)
 
     async def test_result_on_an_active_fulfillment_includes_live_credentials(
         self, fulfillment: FulfillmentApi, client_and_queue
@@ -791,9 +760,7 @@ class TestStatusAndResultQueries:
             SettlementRepository().transition(db, capacity_reservation_id, "active")
             db.commit()
 
-        resp = await fulfillment.result(fulfillment_id)
-        assert resp.status_code == 200, resp.text
-        payload = resp.json()["payload"]
+        payload = (await fulfillment.result(fulfillment_id)).payload
         assert payload["state"] == "active"
         assert [r["provisioned_resource_id"] for r in payload["provisioned_resources"]] == [
             "provisioned-vm-result-2"
@@ -829,12 +796,10 @@ class TestScheduleEndpoint:
     ):
         capacity_reservation_id = await _reserved_capacity("pool-schedule-basic")
 
-        resp = await fulfillment.schedule(capacity_reservation_id, "vms")
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert body["settlement_resource_id"] == "pool-schedule-basic-r1"
-        assert body["pool_id"] == "pool-schedule-basic"
-        assert body["provider"] == "vm.ansible"
+        scheduled = await fulfillment.schedule(capacity_reservation_id, "vms")
+        assert scheduled.settlement_resource_id == "pool-schedule-basic-r1"
+        assert scheduled.pool_id == "pool-schedule-basic"
+        assert scheduled.provider == "vm.ansible"
 
     async def test_schedule_is_idempotent_for_an_equivalent_retry(
         self, fulfillment: FulfillmentApi
@@ -843,24 +808,22 @@ class TestScheduleEndpoint:
 
         first = await fulfillment.schedule(capacity_reservation_id, "vms")
         second = await fulfillment.schedule(capacity_reservation_id, "vms")
-        assert first.status_code == 200, first.text
-        assert second.status_code == 200, second.text
-        assert first.json() == second.json()
+        assert first == second
 
     async def test_schedule_unknown_reservation_is_404(
         self, fulfillment: FulfillmentApi
     ):
-        resp = await fulfillment.schedule("no-such-reservation", "vms")
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.schedule("no-such-reservation", "vms")
+        assert refused.value.status_code == 404
+        assert "fulfillment_not_found" in str(refused.value)
 
     async def test_schedule_then_begin_uses_the_scheduled_resource(
         self, fulfillment: FulfillmentApi
     ):
         capacity_reservation_id = await _reserved_capacity("pool-schedule-then-begin")
 
-        scheduled = await fulfillment.schedule(capacity_reservation_id, "vms")
-        assert scheduled.status_code == 200, scheduled.text
+        await fulfillment.schedule(capacity_reservation_id, "vms")
 
         begun = await fulfillment.begin(
             capacity_reservation_id, "vms", _fulfillment_request()
@@ -873,11 +836,12 @@ class TestScheduleEndpoint:
     ):
         capacity_reservation_id = await _reserved_capacity("pool-begin-unscheduled")
 
-        resp = await fulfillment.begin_raw(
-            capacity_reservation_id, "vms", _fulfillment_request()
-        )
-        assert resp.status_code == 404
-        assert resp.json()["detail"]["code"] == "fulfillment_not_found"
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.begin(
+                capacity_reservation_id, "vms", _fulfillment_request()
+            )
+        assert refused.value.status_code == 404
+        assert "fulfillment_not_found" in str(refused.value)
 
 
 
@@ -1002,10 +966,11 @@ class TestRelayPortLifecycleOverTheApi:
 
         # Extra-variable collisions are checked after port acquisition, so this
         # rejection must roll back the lease along with durable acceptance.
-        response = await fulfillment.begin_raw(
-            capacity_reservation_id, "vms", _fulfillment_request()
-        )
-        assert response.status_code == 422
+        with pytest.raises(ComputeProvisioningError) as refused:
+            await fulfillment.begin(
+                capacity_reservation_id, "vms", _fulfillment_request()
+            )
+        assert refused.value.status_code == 422
         assert self._held_ports() == []
         with _container_module.resolved_session_factory() as db:
             record = db.get(SettlementRecord, capacity_reservation_id)

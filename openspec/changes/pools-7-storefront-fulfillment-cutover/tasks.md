@@ -2041,6 +2041,52 @@ already-stated wheel-only policy rather than establishing new policy.
         - `e2e-bare-metal`, whose stack runs the same provisioning service.
 
         No `e2e-tests/` marker exercises the comment rewrites.
+      - **Round fixes (2026-10-27, implementation review 07).**
+        - 07 F1, the owner's alternative A: the delta requirement that credentials
+          are never persisted anywhere contradicted the job authority's `credentials`
+          table, which the permanent requirement "Compute provisioning owns the job
+          and host authorities" already requires. It is restated as "Credentials
+          stay with the job authority and are read on demand". The same false claim
+          is corrected in `openspec/specs/fulfillment/spec.md` (the "No persisted
+          `SettlementResult`" paragraph) and in `docs/development/ARCHITECTURE.md`'s
+          "Fulfillment status and results". `design.md` carries a dated correction.
+          `openspec/specs/physical-provisioning/architecture.md`'s "Durable jobs,
+          transient workers" now names the job record as the credential store and
+          records two current limits:
+          - the envelopes are plain JSON, and no job row is ever deleted;
+          - an operator's VM password reset stores its new credentials against the
+            reset job, which the fulfillment result does not read.
+
+          The fresh-context check found the reset path. It also showed that
+          `design.md`'s earlier "never rotated by this codebase" is not quite true.
+        - 07 F2: `provisioning/compute/service/tests/integration/test_fulfillment_api.py`
+          now sends every status, result, schedule and begin call through
+          `ComputeProvisioningClient`. The five 404 and 422 cases assert
+          `ComputeProvisioningError.status_code`, and the raw transport and
+          `begin_raw` are gone. Their docstrings had claimed a typed client cannot
+          observe a status code, which was false.
+        - 07 F3: closeout's 13.8 no longer says that no end-to-end result exists.
+        - **Evidence.** All checks passed:
+          - the provisioning service suites (`make test-provisioning`): unit 658
+            passed, application integration 527 passed;
+          - `make test`;
+          - `make check-packaging`, layer, scope, dependency and kind rules included;
+          - `make check-change`.
+
+          The fresh-context check of the diff against `cdb244466` raised:
+          - the reset path, which is now fixed in the wording above;
+          - the bare-metal provider's use of the same job-backed provider, now named
+            in `ARCHITECTURE.md`.
+
+          Declined:
+          - the substring match on `fulfillment_not_found` in the rejection cases.
+            The client flattens `detail` into its message, so that is what it
+            exposes.
+          - things that predate this round and were left alone: an unused `FastAPI`
+            import, three function-local `container` re-imports in the same file,
+            and a narrating comment above the conflicting-retry assertion.
+        - **End-to-end.** These fixes change no production code, so the fix commit's
+          validation confirms them against an unchanged pipeline.
 
 ## 13. Closeout
 
@@ -2077,9 +2123,10 @@ Per `openspec/README.md#plan-closeout-requirements`.
 - [ ] 13.8 **End-to-end pipeline.** Record the passing run the latest validation names,
       its result, and the scenarios that exercise this change, or an explicit blocker
       naming its cause and the change that owns it, with the validations it gates
-      treated as unrun. Task 12.4 records that no passing end-to-end result exists yet
-      for this change; closeout does not proceed on documentation or suite results
-      alone.
+      treated as unrun. Validations 03 (run 40495699817, `02319877e`) and 08 (run
+      40505352410, `cdb244466`) passed, with `test_full_deal` stages 00 to 11b on the
+      VM lane. Closeout records the run of the latest validation, which must name
+      `HEAD` or an ancestor from which `HEAD` changes only `openspec/` and `docs/`.
 - [ ] 13.9 **Promotion.** Write the permanent documents this change owes — those
       12.1–12.3 and the section design-promotion records name — and complete the
       design-promotion record, mapping every accepted decision to its exact permanent

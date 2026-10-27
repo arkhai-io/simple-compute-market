@@ -156,13 +156,15 @@ regardless of whether or when it is polled.
   deduplication bookkeeping is required because reads have no delivery
   side effect to duplicate
 
-### Requirement: Credentials are fetched on read, never persisted at rest
+### Requirement: Credentials stay with the job authority and are read on demand
 
-Raw credentials MUST NOT be persisted in settlement records, generic JSON
-columns, or any other durable storage. `get_fulfillment_result`'s handler
-MUST obtain or refresh credentials at the moment it is called, return
-them only in that response over the authenticated encrypted channel, and
-MUST NOT persist them afterward.
+Raw credentials MUST NOT be persisted in the fulfillment aggregate, its
+settlement records or provider metadata, or any result row. The job
+authority's records of the credentials its jobs' executors reported are the
+only provisioning store that holds them. `get_fulfillment_result` MUST read
+the credentials its fulfillment's create job reported from that store at the
+moment it is called, only for an `active` fulfillment, and MUST return them
+only in that response over the authenticated channel.
 
 #### Scenario: Fulfillment succeeds but is never queried
 - **WHEN** a fulfillment reaches a successful terminal state and
