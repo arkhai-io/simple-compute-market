@@ -2,7 +2,9 @@
 
 `record_outcome` appends a step's outcome as a line of the change's
 `reviews/workflow.jsonl`, with a sequence number, the time, the step, and the
-run's session and commit. `note_round` and `note_orchestrator` append the
+run's session and commit: the wrapper's for an unattended run, and
+`record_interactive` for a run the owner held interactively, which records its own.
+`note_round` and `note_orchestrator` append the
 orchestrating session's own lines: a `round` line recording the implementation
 round the owner agreed, and an `orchestrator` line recording a decision — the
 orchestrating session's own routing or recovery, or the owner's, such as a
@@ -36,7 +38,7 @@ from typing import IO, Any, Sequence
 from change_workflow.common import KINDS, ORCHESTRATOR, STEPS, Clock, Entry, StepError, utc_now
 from change_workflow.graph import section_ids
 from change_workflow.outcome import outcome_problems
-from change_workflow.records import next_number
+from change_workflow.records import next_number, triage_outcome_problems
 from find_change import ChangeNotFound, change_directory, find_records
 
 LOG = "workflow.jsonl"
@@ -189,6 +191,30 @@ def record_outcome(path: Path, step: str, outcome: Entry, *, session: str | None
     # The schema admits no field beyond the outcome's own, so nothing a step
     # answers can overwrite what is recorded about its run.
     return append_entry(path, {**run, **(extra or {}), **outcome}, clock)
+
+
+def record_interactive(path: Path, step: str, outcome: Entry, *, session: str,
+                       commit: str | None, clock: Clock = utc_now) -> Entry:
+    """Append the outcome of a step the owner ran interactively, which records its
+    own: checked as the wrapper checks an unattended run's, and marked
+    `interactive`.
+
+    A triage's finished or returned outcome is refused unless it names the records
+    it triaged (`triage_outcome_problems`), as the wrapper records such a run
+    stopped: where an unattended run still ends with a line, an interactive one is
+    told why and records again. So is an outcome without its session or commit,
+    which say which run it ended and what that run left.
+    """
+    if not session:
+        raise StepError("an interactive run's outcome names its session")
+    if not commit:
+        raise StepError("an interactive run's outcome names the commit at HEAD, which "
+                        "could not be read")
+    if step == "triage" and (problems := triage_outcome_problems(outcome, path.parent)):
+        raise StepError("the triage's outcome does not name what it triaged: "
+                        + "; ".join(problems))
+    return record_outcome(path, step, outcome, session=session, commit=commit,
+                          extra={"interactive": True}, clock=clock)
 
 
 def note_round(path: Path, sections: Any, by: str, after: int | None = None,

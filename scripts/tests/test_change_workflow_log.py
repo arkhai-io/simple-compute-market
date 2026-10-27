@@ -14,7 +14,8 @@ import pytest
 from change_workflow.cli import main
 from change_workflow.common import StepError
 from change_workflow.log import (LogError, append_entry, branch_decisions, last_entries,
-                                 note_orchestrator, note_round, read_log, record_outcome)
+                                 note_orchestrator, note_round, read_log, record_interactive,
+                                 record_outcome)
 from change_workflow_fixtures import CHANGE, COMMIT, DENIALS, VALID, clock, log_file
 
 
@@ -292,6 +293,20 @@ def test_no_writer_sets_the_logs_format(tmp_path: Path, record: bool) -> None:
             append_entry(log, {"step": "orchestrator", "format": 1})
 
     assert not log.exists()
+
+
+@pytest.mark.parametrize("session,commit,named", [
+    ("", COMMIT, "names its session"), ("s", None, "the commit at HEAD")])
+def test_an_interactive_outcome_names_its_session_and_commit(
+        tmp_path: Path, session: str, commit: str | None, named: str) -> None:
+    log = log_file(tmp_path)
+
+    with pytest.raises(StepError, match=named):
+        record_interactive(log, "design", VALID["finished"], session=session, commit=commit)
+
+    assert not log.exists()
+    line = record_interactive(log, "design", VALID["finished"], session="s", commit=COMMIT)
+    assert (line["interactive"], line["session"], line["commit"]) == (True, "s", COMMIT)
 
 
 def _descriptors_of(path: Path) -> int:

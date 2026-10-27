@@ -132,6 +132,15 @@ def triaged_problems(triaged: Any, reviews: Path) -> list[str]:
     return problems
 
 
+def triage_outcome_problems(outcome: Any, reviews: Path) -> list[str]:
+    """Why a triage's outcome does not name what it triaged; empty when it does, or
+    when it ends without an exit — a question, a block, or a stop — and so names
+    nothing the next step is routed on."""
+    if not isinstance(outcome, dict) or outcome.get("outcome") not in ("finished", "returned"):
+        return []
+    return triaged_problems(outcome.get("triaged"), reviews)
+
+
 def latest_validation(reviews: Path) -> Path | None:
     """The change's latest validation record, if it has one."""
     records = [(int(match.group(1)), entry) for entry in

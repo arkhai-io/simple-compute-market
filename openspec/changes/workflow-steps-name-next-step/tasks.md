@@ -344,20 +344,56 @@ Delivers `python3 scripts/run_change_step.py record <change> <step> --outcome
 '<json>'` (D11; requirement "Interactive step runs record their outcome"). Touches
 `scripts/change_workflow/cli.py`, `log.py`, and `scripts/tests/`.
 
-- [ ] 4.1 `record`: checks the outcome against the outcome schema and, for a triage,
+- [x] 4.1 `record`: checks the outcome against the outcome schema and, for a triage,
       `triaged` by section 3's rule; appends it through `record_outcome` with the
       session from `CLAUDE_CODE_SESSION_ID`, or from `--session`, the commit at
       `HEAD`, and `interactive: true`.
-- [ ] 4.2 Refusals, each naming why and writing nothing: no session id, naming the
+      `log.record_interactive` holds the writer's rules — a session and a commit,
+      the triage's `triaged` by `records.triage_outcome_problems`, which the
+      wrapper's `triage_outcome` now shares, then `record_outcome` with
+      `interactive: true` — and `cli.interactive_outcome` the harness's side: the
+      marker, the session (the `--session` given wins over the variable), the
+      JSON, and `HEAD` through the wrapper's `head` seam, `git_head` by default.
+      `main` takes the environment as `environ`, `os.environ` by default, the seam
+      its tests use. A `HEAD` that cannot be read is refused, rather than recorded
+      as no commit.
+- [x] 4.2 Refusals, each naming why and writing nothing: no session id, naming the
       variable (scenario "The harness exports no session id"); inside an unattended
       run, by section 3's marker (scenario "An unattended run records its own
       outcome"); a step not in `STEPS`; an outcome the schema or `triaged` refuses.
-- [ ] 4.3 Verification, unit, in `test_run_change_step.py` with a real Git
+      Also refused: an `--outcome` that is not JSON. The marker is checked first,
+      so a wrapper's run is refused whatever session it names. Each prints
+      `ERROR: …` and exits 1, as every command of the CLI does.
+- [x] 4.3 Verification, unit, in `test_run_change_step.py` with a real Git
       repository in a temporary directory for `HEAD`: an interactive triage's
       outcome recorded with its session, `HEAD`, `interactive`, and the format
       marker (scenario "An interactive triage finishes", as far as the log); each
       refusal; `make test`; `make check-change CHANGE=workflow-steps-name-next-step`.
       End-to-end: none, and none is owed.
+      Through `main` with an injected environment over real records in a
+      temporary directory. One test, the interactive triage, reads `HEAD` from a
+      real Git repository it creates, starting `git` — a process boundary, so not
+      unit by `TESTING.md`, as the round test beside it; the rest are unit, `HEAD`
+      given through the wrapper's seam: `--session` recorded whether or not the
+      variable is set; each refusal leaving no log — no session, the marker, the
+      marker with `--session`, an unknown step, a schema refusal, an object `next`
+      naming no node, an unknown record, an empty `triaged`, an outcome that is not
+      JSON, and no `HEAD`. In `test_change_workflow_log.py`, unit,
+      `record_interactive`'s own refusals of a missing session and commit. The
+      workflow suites (`-k "change or run_change_step or check_tasks or
+      round_view"` over `scripts/tests/`): 994 passed. `make test`: passed, every
+      suite (`scripts/tests`: 1690 passed), before the fresh-context check's fixes,
+      which touched only `scripts/`, rerun above. `make check-packaging`: passed.
+      `make check-change`: every check passes but the documentation citations,
+      which report `scripts/change_workflow/convert.py`, section 7's file.
+      End-to-end: none, confirmed; no `Owed by validation:` line.
+
+Handoff from section 4: `record` exists for section 8's skills and section 9's
+guide; `python3 scripts/run_change_step.py record --help` prints its usage. The
+computation does not route on an `interactive` line differently from a wrapper's:
+section 6 reads both alike. The change-workflow architecture's "The log is the
+wrapper's alone" is now untrue; 10.9 rewrites it ("written by the wrapper, `record`,
+the decision writer, and `convert`").
 
 ## 5. Entry guards, and the owner's directions
 

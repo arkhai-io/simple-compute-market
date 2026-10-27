@@ -44,7 +44,7 @@ from change_workflow.harness import (NETWORK_RETRIES, Runner, claude_command, mi
                                      run_claude, unreachable)
 from change_workflow.log import last_run, log_path, read_log, record_outcome
 from change_workflow.outcome import SCHEMA, load_schema, outcome_problems
-from change_workflow.records import git_head, next_transcript, triaged_problems
+from change_workflow.records import git_head, next_transcript, triage_outcome_problems
 from change_workflow.running import recorded_run, runs_directory
 from change_workflow.steps import STEP_TABLE, Model, StepRules, load_steps
 from change_workflow.stream import Stream
@@ -132,9 +132,7 @@ def triage_outcome(outcome: Entry, reviews: Path) -> Entry:
     with its triage file, would leave that review's triage in progress or route
     another's. The step's own message is kept ahead of the reason.
     """
-    if outcome.get("outcome") not in ("finished", "returned"):
-        return outcome
-    if not (problems := triaged_problems(outcome.get("triaged"), reviews)):
+    if not (problems := triage_outcome_problems(outcome, reviews)):
         return outcome
     reason = "the triage's outcome does not name what it triaged: " + "; ".join(problems)
     return {"outcome": "stopped", "message": f"{outcome['message']}\n\n{reason}",
