@@ -810,12 +810,60 @@ Shared with the branch:
   branch edits only that line in this file, raising it to `0.6.0`, the minor
   bump this section makes. The description this section edits is the next
   line, so Git reports the two lines as one conflict; it is resolved by keeping
-  `0.6.0` and this section's description. Also locks.
+  `0.6.0` and this section's description. Also locks. (Corrected by the
+  owner's decision A below: this section makes no bump, so `0.6.0` is the
+  branch's alone; the conflict and its resolution stand.)
 - **`RELEASING.md`.** The branch edits two rows of the "Published packages"
   table and the "Versioning policy" section. This section edits only the
   console-script sentence in its opening paragraphs.
 
-- [ ] 6.1 Remove from `kit/policy` everything design D7 lists. `typer` stays, for
+**Stopped at the bump, for the owner (D2's rule).** The bumps of sections 6–8
+reach exact (`==`) pins the plan does not name, in files the branch at
+`c6e2108` also edits. A rebuilt `.dist` holds only the bumped wheel, so each
+pin must follow its bump or the projects pinning it stop resolving:
+- `arkhai-kit-policy` `0.6.0` (6.5): `kit/negotiation-runtime`'s
+  `arkhai-kit-policy==0.5.0`. The branch raises that line to `==0.6.0` and
+  bumps `kit/negotiation-runtime` `0.5.1` → `0.5.2`, its version line
+  separated from the pin by unchanged lines, so the same two edits here merge
+  cleanly. A `0.5.2` bump here, though, reaches the `==0.5.1` pins in the VM,
+  bare-metal, and API-credit storefronts, each in a run of lines the branch
+  changes.
+- `arkhai-kit-contact-exchange` `0.4.0` (7.4): `==0.3.0` in the VM buyer,
+  the VM storefront, the bare-metal buyer, and the bare-metal storefront. Only
+  the bare-metal storefront's line stands alone in the branch's diff; in the
+  other three the branch also changes the line before it (`arkhai-kit-alkahest`
+  and others), so an identical edit here still conflicts at merge.
+- `arkhai-core-storefront` `0.16.0` (8.6): `kit/capacity-publication`'s
+  `==0.15.2` (the branch's identical line, standing alone); bumping
+  `kit/capacity-publication` to the branch's `0.11.0` reaches `==0.10.1` in the
+  VM and API-credit storefronts (inside runs the branch changes), the
+  bare-metal storefront, and the provisioning service's `dev` group (lines
+  standing alone).
+- `arkhai-core-storefront-client` `0.27.0` (8.6): the provisioning service's
+  `==0.26.0`, the branch's identical line, standing alone.
+
+Every one of these packages is also bumped by the branch, to the versions
+named above, none of them released. When the branch lands first, as sections
+10–26 require, the merge keeps one bump over each package's last release
+(RELEASING.md's versioning policy), which covers this change's incompatible
+edits too.
+
+Done when the section stopped, uncommitted: 6.1's removal (`cli.py` with `git rm`, the
+description's CLI clause, the console script, the `[tool.uv]` settings and
+CPU torch index, the `training` group), 6.2's README, 6.3's `RELEASING.md`
+sentence, and 6.4's two refusals and their unit tests. `kit/policy`'s version
+line was back at `0.5.0` and no lock had been rebuilt yet. Nothing of
+sections 7–9 had been written.
+
+**The owner's decision (A).** Sections 6, 7, and 8 bump no version and move
+no pin. Each package's bump is carried by the branch's, to the version named
+above, and is checked once the branch has merged: section 10 confirms that
+`arkhai-kit-policy`, `arkhai-kit-contact-exchange`, `arkhai-core-storefront`,
+`arkhai-core-storefront-client`, and `arkhai-vms-storefront` each stand at
+least one minor version above their last release, and closeout's packaging
+part (27) confirms it again. Tasks 6.5, 7.4, and 8.6 are amended to say so.
+
+- [x] 6.1 Remove from `kit/policy` everything design D7 lists. `typer` stays, for
   `buyer_policy.py`. The removed material is already carried verbatim in
   `repair-rl-training-tooling`'s `removed-tooling.md`. Compare it with what is
   removed, and record any difference there (D7).
@@ -825,17 +873,80 @@ Shared with the branch:
   - Its lock no longer resolves pufferlib or the CPU torch index.
   - A repository search for `market-policy` finds only
     `repair-rl-training-tooling`'s records.
-- [ ] 6.2 Cut `domains/vms/training/README.md` down to what exists (D7). Verify
+
+  Done: `cli.py` removed with `git rm`; from `pyproject.toml`, the
+  description's CLI clause, `[project.scripts]`, `[tool.uv]`,
+  `[tool.uv.extra-build-dependencies]`, `[tool.uv.sources]`, the
+  `pytorch-cpu` index, and the `training` group with its comment. `typer`
+  stays: `buyer_policy.py` imports it. Compared by reading, line for line,
+  with `removed-tooling.md`: `cli.py`, the removed `pyproject.toml` sections,
+  the `RELEASING.md` sentence, and the training README are the verbatim
+  copies it holds, so nothing was recorded there. The rebuilt
+  `arkhai_kit_policy-0.5.0` wheel lists no `market_policy/cli.py` and no
+  `entry_points.txt`. `kit/policy/uv.lock` names neither pufferlib nor
+  torch; no other lock changed. The `market-policy` search, outside `.venv`s,
+  finds `repair-rl-training-tooling`'s proposal and `removed-tooling.md`,
+  and this change's own records (proposal, design, tasks, interventions, its
+  index row); no code, configuration, or permanent document.
+- [x] 6.2 Cut `domains/vms/training/README.md` down to what exists (D7). Verify
   that every path and target it names exists.
-- [ ] 6.3 Drop `market-policy` from `RELEASING.md`'s console-script examples
+
+  Rewritten to say the directory is a set of scripts and configurations, not a
+  project: no project installs pufferlib or `gymnasium`, which the scripts
+  import beside `torch`, and nothing runs them. It lists `train_arkhai.py`,
+  `eval_arkhai.py`, and the three `config/*.ini` files, and says that
+  `--config` chooses which agents train, since the script copies the file's
+  `[env]` keys over pufferlib's defaults and enforces no mode. Then inference:
+  the committed checkpoints under the VM negotiation package's `rl/models/`,
+  the inline `ArkhaiInferencePolicy` in `arkhai_common.py`,
+  `torch_arkhai_strategy.py`, its two path-override variables (corrected to
+  their real names, `ARKHAI_NEGOTIATOR_SELLER_MODEL_PATH` and
+  `ARKHAI_NEGOTIATOR_BUYER_MODEL_PATH`), the slot-layout variables
+  `arkhai_common.py` reads at inference, with their real defaults (five slots,
+  where the old text said three), the VM storefront's and buyer's `rl` extras,
+  and `.github/workflows/validate-model-release.yml`. Every path it names
+  exists; it names no Make target. Dropped: the `uv sync --group training`
+  install, the `/agent` Makefile targets, and the release and download
+  targets, none of which exists. Two other texts the removal made false:
+  `eval_arkhai.py`'s docstring offered `market policy eval`, which never
+  existed, and `docs/development/BUILD_AND_PACKAGING.md` listed `kit/policy`
+  among the projects declaring the PyTorch CPU index; both corrected.
+- [x] 6.3 Drop `market-policy` from `RELEASING.md`'s console-script examples
   (D7).
-- [ ] 6.4 The empty-chain refusal names `[negotiation].policies`. The
+
+  The sentence now names `market` and `market-storefront`.
+- [x] 6.4 The empty-chain refusal names `[negotiation].policies`. The
   unknown-name refusal says that built-ins are always registered and that
   extensions come from the `market_policy.negotiation_middlewares` entry-point
   group (D18). Unit (`kit/policy/tests/unit`): each refusal's message.
-- [ ] 6.5 Bump `arkhai-kit-policy` by a minor version, since the console script
+
+  `load_negotiation_chain`'s `ValueError` names `[negotiation].policies` (the
+  key the storefronts read; it named `[negotiation].chain`). Its `KeyError`
+  keeps the unknown name and the registered list, and now says built-in
+  middlewares are always registered and any other name must come from an
+  installed distribution under the `market_policy.negotiation_middlewares`
+  entry-point group, in place of "ensure the VM policy package is imported".
+  "Always registered" rests on composition, not on this module: the kit's
+  scalar built-ins register when `market_policy.scalar_policies` is imported,
+  and every caller of `load_negotiation_chain` (the VM, bare-metal, and
+  API-credit storefronts' negotiation modules and the core buyer) imports it,
+  or a domain module importing it, at module level. A domain's own names
+  (`rl`, `round_zero_opening_guard`, the API-credit guards) register when the
+  storefront or buyer composing that domain imports its module, which is the
+  only place they are offered. No distribution in the repository declares the
+  entry-point group, so it is the extension path only. Unit
+  (`test_negotiation_strategy.py`): the unknown-name refusal carries both
+  sentences and not the old hint; new
+  `test_an_empty_chain_is_refused_naming_the_policies_setting`, for `None`
+  and `[]`. Pass.
+- [x] 6.5 Bump `arkhai-kit-policy` by a minor version, since the console script
   is removed. Run `make lock`.
-- [ ] 6.6 **Verification checkpoint.**
+
+  Amended by the owner's decision A (above): no bump here. The branch bumps
+  `arkhai-kit-policy` to `0.6.0` with `kit/negotiation-runtime`'s pin, and
+  section 10 confirms the bump once the branch has merged. `make lock` ran for
+  the removed settings and changed `kit/policy/uv.lock` alone.
+- [x] 6.6 **Verification checkpoint.**
   - Unit: 6.4.
   - Run `make test` in `kit/policy` and in the VM and bare-metal storefronts,
     which compose its chain.
@@ -843,6 +954,27 @@ Shared with the branch:
 
   End-to-end: every storefront composes the chain at startup, and no scenario
   meets a refusal. No scenario is owed.
+
+  `make test` (the full target, which runs every project): `kit/policy` 82
+  passed (unit); the VM storefront 1103 unit and 449 integration; the
+  bare-metal storefront 444; the API-credit storefront 184; the core buyer
+  141; `kit/negotiation-runtime` 61. All pass. `make check-packaging` passes.
+  `make check-change` passes but for the closeout citation section 1 notes.
+  The end-to-end statement stands.
+
+  Handoff: `kit/negotiation-runtime` and several storefronts and buyers pin
+  internal kits exactly (`==`), so a bump reaches files a plan names only if
+  it counts those pins; that stopped this section, and the owner's decision A
+  leaves sections 6–8's bumps to the branch. The fresh-context check found
+  the first README overstating what no project installs, dropping the live
+  inference slot-map variables, and claiming a training mode the script does
+  not enforce, plus `BUILD_AND_PACKAGING.md`'s index sentence; all corrected
+  as recorded above. Left, outside this section's files:
+  `domains/vms/negotiation/src/arkhai_vms_negotiation/rl/policy-making.md`
+  describes a policy-callable system that no longer exists, including
+  `market policy train`/`eval` commands; `domains/vms/storefront/tests/unit/test_escrow_fields_policy.py`'s
+  docstring names `[negotiation].chain`; and `core/buyer/src/core_buyer/negotiation_client.py`
+  says the loader's `KeyError` points "at the extras", which it does not.
 
 ## 7. An introduction's seller-side delivery is claimed once
 
@@ -1063,6 +1195,14 @@ Files:
 - `kit/site/tests/integration/test_site_auth_middleware.py`;
 - `kit/site-client/tests/unit/test_client.py`;
 - `domains/apicredits/service/tests/integration/test_signed_authority.py`.
+
+Amended by the owner's decision A (section 6's notes): sections 6–8 bumped no
+version, leaving each bump to the branch's. Before 10.1, with the branch
+merged, confirm that `arkhai-kit-policy`, `arkhai-kit-contact-exchange`,
+`arkhai-core-storefront`, `arkhai-core-storefront-client`, and
+`arkhai-vms-storefront` each stand at least one minor version above their last
+release, and record the versions in 10.4's note. A package that does not is
+bumped in 10.4 by a minor version, with `make lock`.
 
 - [ ] 10.1 Route resolution reports which case failed through a typed error. The
   middleware answers each case unsigned (D3):

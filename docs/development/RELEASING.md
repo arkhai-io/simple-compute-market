@@ -14,8 +14,7 @@ issue-discovery development tool (`scm-issue-discovery`).
 Distribution names are prefixed `arkhai-`. PyPI does not namespace
 distribution names by organization, so the prefix is the project's
 namespace. Import names and console scripts (`market`,
-`market-storefront`, `market-policy`) are independent of the
-distribution name.
+`market-storefront`) are independent of the distribution name.
 
 ## Published packages
 

@@ -193,7 +193,7 @@ def load_negotiation_chain(
     if not names:
         raise ValueError(
             "load_negotiation_chain requires a non-empty list of middleware names. "
-            "Configure [negotiation].chain in your TOML."
+            "Configure [negotiation].policies in your TOML."
         )
 
     _discover_file_middlewares()
@@ -221,7 +221,9 @@ def load_negotiation_chain(
             raise KeyError(
                 f"Unknown negotiation middleware: {name!r}. "
                 f"Registered: {available}. "
-                f"For built-ins, ensure the VM policy package is imported."
+                "Built-in middlewares are always registered; any other name "
+                "must be provided by an installed distribution under the "
+                "'market_policy.negotiation_middlewares' entry-point group."
             )
 
     return chain
