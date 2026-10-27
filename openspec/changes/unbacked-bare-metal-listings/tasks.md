@@ -1793,7 +1793,10 @@ metal's reply.
       drives API credits' `negotiate` CLI recording, or the carry-forward of a resumed run's
       record by VM's `negotiate --from` or `buy --from`; only the resume point's reading of
       it is tested (9.3). `escrow_cli create` keeps its pre-existing call-time import block,
-      `make_create_escrow_fn` among it, which the file's tests patch through.
+      `make_create_escrow_fn` among it, which the file's tests patch through. *(Superseded
+      for `make_create_escrow_fn` by the pre-closeout triage, 176 F1: it is imported at
+      module level and the tests replace it on `escrow_cli`; the fix note under Section
+      22.)*
 - [x] 9.5 Tests (unit): `core/buyer/tests/unit/test_settlement_acceptance.py`,
       `test_identity_recovery.py`, `test_orchestrator.py` — a seller plan naming another
       arbiter or recipient than the listing advertised is refused before funding on the
@@ -4346,10 +4349,12 @@ Section 22 notes (handoff):
   it (TESTING.md: it needs a real host), and its later commands no longer match the
   CLI: it passes `--from` and `--json` to `result` and `access`, which take
   `--run-id`, and runs `teardown request` and `teardown status`, which do not exist.
-  Unchanged here.
+  Unchanged here. *(Owned by `bare-metal-and-credits-domain-stacks` 4b.9, which
+  reconciles the scenario with the command; pre-closeout review 176 F3.)*
 - **Adjacent and left:** `buy` and `request-introduction` still repeat the listing
   read, the option match, and the run's start; a shared helper would keep the run
-  shape in one place.
+  shape in one place. *(Owned by `bare-metal-and-credits-domain-stacks` 4b.10;
+  pre-closeout review 176 F3.)*
 - `storefront.dev.toml`'s seller-mail sink names the development overlay's `mailpit`,
   which the base bare-metal stack (`compose.bare-metal.yml` alone) does not run. The
   sink's delivery is never fatal to a reveal, so that stack still reveals; its seller
@@ -4442,9 +4447,44 @@ Round 3 triage fixes (reviews 159 and 160, owner's notes 157), made against `88e
   test proves, and the VM buyer CLI has no harness below the e2e lane that does not
   patch its names (23.5's row); a reason comment on `ListingService`'s call-time import
   of the publication runtime, whose cycle is not verified, so 23.2's import review
-  takes it; claiming a group named by its own callback, which the installed Typer's
+  takes it *(superseded by the pre-closeout triage, 176 F1: there is no cycle and the
+  import is at module level)*; claiming a group named by its own callback, which the installed Typer's
   `callback()` cannot do; guarding the bare-metal buyer's delivery against malformed
   Agreement bytes, which only a tampered run log holds, and run logs are signed.
+
+Pre-closeout triage fixes (review 176), made against `1e1eb7f`:
+
+- **176 F1 — touched imports at module level.** `ListingService` imports
+  `publish_order_to_registry` at module level: no cycle holds it local, since
+  `listing_service` already imports the config module at module level and
+  `publication_service` reaches `listing_service` only under `container`'s
+  `TYPE_CHECKING`. `escrow_cli` imports `make_create_escrow_fn` at module level beside
+  `settlement_stages`, which already loads `escrow_client`; `test_release_condition_refusals.py`
+  replaces it on `escrow_cli`, where `create_cmd` reads it — a command module's attribute,
+  as every VM buyer CLI test patches today, which 23.5's CLI-test row covers; a factory
+  seam for `escrow_cli` is that row's work, not this fix's. The kit's
+  `test_settlement_config.py` imports `verify_escrow_against_plan` with its other
+  `market_alkahest` names. 23.2 confirms these.
+- **176 F2–F4** are documentation: the proposal's Impact and promotion lists, 23.7 and 23.8
+  corrected, and the two adjacent `buy` defects above owned by
+  `bare-metal-and-credits-domain-stacks` 4b.9 and 4b.10.
+- **Evidence.** Unit: VM storefront 1132 passed (1 skipped), VM buyer 207, kit suites
+  (`make test-kits`, within `make test`). Application integration: VM storefront 477 passed
+  (`make test-storefront`). `make test` passed every suite up to the Helm render, which could
+  not start for want of `helm` (exit 127), as in every session of this change.
+  `make check-packaging`, `make check-comment-hygiene`, and `make check-change` (for this
+  change and for `bare-metal-and-credits-domain-stacks`) passed. No version or lock moves.
+  End-to-end: unrun here; the fix commit's validation runs it.
+- **Fresh-context check of the fix diff** (against `1e1eb7f`): no correctness defect; the
+  moves leave no unused import, and no other patch of the three names is defeated. Taken
+  up: 9.4's and round 3's notes on these imports marked superseded; the proposal's
+  decision-27 bullet says only the bare-metal buyer CLI takes the factory shape, and its
+  `RELEASING.md` path and "at most once" wording corrected; 23.8's long lines rewrapped.
+  **Declined:** a factory seam for `escrow_cli` in place of its test's attribute patch,
+  which is 23.5's CLI-test row; and an amendment to `bare-metal-and-credits-domain-stacks`'
+  proposal for 4b.10, beyond the owner's disposition, left to that change's next session.
+  `test_buy_resume_cli.py`'s patches of `escrow_client` names, which nothing on its path
+  reads, predate this change and fall under the same row.
 
 ## 23. Closeout
 
@@ -4500,8 +4540,8 @@ change to implementation.
       check-change-index` passes. Name the update in the design-promotion record.
 - [ ] 23.7 **Packaging.** `make check-packaging` passes with every failure resolved; `make
       check-architecture-change CHANGE=unbacked-bare-metal-listings` reports no exception or
-      override row this change owns. `make check-agent-skills` is not owed: the change
-      touches nothing under `.agents/`, `.claude/`, or `.codex/`.
+      override row this change owns. `make check-agent-skills` passes: the change edits
+      `.agents/skills/change-validate/SKILL.md` (pre-closeout review 176 F4).
 - [ ] 23.8 **End-to-end pipeline.** Record a passing pipeline run of all three lanes on the
       closeout commit, its result, and the scenarios that exercise the change: VM lane
       `e2e_deal`, `e2e_deal_buyer_cli`, `e2e_buy`, `multi_registry`,
@@ -4509,14 +4549,16 @@ change to implementation.
       buyer derivation, pinned openings, readiness kinds, the chain probe),
       `e2e_compute_dynamic_listings` and `e2e_listing_shapes` (site derivation),
       `e2e_vm_introduction` (shared introduction stages, the settle refusal); API-credit lane
-      `e2e_credits_deal` and `e2e_credits_payment_deal` (`listing-seed`, the CLI through the
-      typed client); bare-metal lane `e2e_bare_metal_unbacked_introduction` (unbacked
-      discovery reaching a usable introduction; a rate-bounded query returning backed and
+      `e2e_credits_deal` (`listing-seed`, the CLI through the typed client); bare-metal lane
+      `e2e_bare_metal_unbacked_introduction` (unbacked discovery reaching a usable
+      introduction; a rate-bounded query returning backed and
       unbacked bare-metal listings together, carried from `publish-indicative-listing-rates`
       7.13; the backing filter; the fulfillment 404), `e2e_bare_metal_introduction`,
       `e2e_bare_metal_publication`, and `e2e_bare_metal_mock_deal`; every lane on the module
-      holds. Record the local Helm topology evidence of D14 — `make helm-topology-up` and
-      `make helm-topology-check` on the change's commit, Bob's lifecycle loops running after
+      holds. Record `e2e_credits_payment_deal` and `e2e_bare_metal_payment_deal` as unrun, not
+      as evidence: both skip in every lane, which runs no payments service (validation 175;
+      pre-closeout review 176 F4). Record the local Helm topology evidence of D14 —
+      `make helm-topology-up` and `make helm-topology-check` on the change's commit, Bob's lifecycle loops running after
       the check, no init containers on the VM storefront — run by the maintainer, or record
       it unrun. A pipeline that cannot run for a reason unrelated to the change is recorded
       as a blocker naming its cause and owner, and what it gates as unrun.

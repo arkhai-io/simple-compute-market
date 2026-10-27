@@ -18,6 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from .common import resolve_config_value
+from .escrow_client import make_create_escrow_fn
 from .settlement_stages import derive_resumed_escrow_terms
 
 
@@ -367,7 +368,6 @@ def create_cmd(
 
     from .deal_helpers import load_deal_context, open_run_log, resolve_chain_settings
     from .buy_orchestrator import AgreedTerms
-    from .escrow_client import make_create_escrow_fn
     from .common import (
         chain_by_name,
         resolve_recovery_buyer_identity,

@@ -50,6 +50,7 @@ from market_settlement_runtime import (
 
 from market_storefront.models.listing_models import VmCreateListingRequest
 from market_storefront.publication_binding import prepare_vm_listing_binding
+from market_storefront.services.publication_service import publish_order_to_registry
 from market_storefront.services.publication_terms import (
     configured_alkahest_section,
 )
@@ -159,10 +160,6 @@ class ListingService:
     async def _publish_to_registries(self, listing: Listing | dict) -> dict[str, Any]:
         if self._registry_publisher is not None:
             return await self._registry_publisher(listing, sqlite_client=self._db)
-        from market_storefront.services.publication_service import (
-            publish_order_to_registry,
-        )
-
         return await publish_order_to_registry(listing, sqlite_client=self._db)
 
     @property

@@ -12,6 +12,7 @@ from market_alkahest import (
     AlkahestSettlementConfig,
     ChainProbeResult,
     create_alkahest_registration,
+    verify_escrow_against_plan,
 )
 from market_alkahest.settlement_config import alkahest_preflight
 from market_core.schemas import SettlementOption
@@ -763,7 +764,5 @@ def test_alkahest_rate_beyond_uint256_is_refused(monkeypatch) -> None:
 
 
 def test_registration_verifies_settlement_against_the_accepted_plan() -> None:
-    from market_alkahest import verify_escrow_against_plan
-
     registration = create_alkahest_registration()
     assert registration.settlement_verifier is verify_escrow_against_plan

@@ -26,7 +26,7 @@ from market_alkahest.release_authorization import release_conditions_record
 from market_alkahest.schemas import EscrowProposal
 from market_identity import Ed25519Signer
 
-from arkhai_vms_buyer import common, deal_helpers, escrow_cli, escrow_client
+from arkhai_vms_buyer import common, deal_helpers, escrow_cli
 from arkhai_vms_buyer import settle_cli, settlement_stages
 
 _BUYER = Ed25519Signer(b"\x35" * 32)
@@ -75,7 +75,7 @@ def _no_escrow_is_created(monkeypatch) -> None:
 
         return refuse
 
-    monkeypatch.setattr(escrow_client, "make_create_escrow_fn", create)
+    monkeypatch.setattr(escrow_cli, "make_create_escrow_fn", create)
     monkeypatch.setattr(settlement_stages, "make_create_escrow_fn", create)
 
 
@@ -253,7 +253,7 @@ def _create_from_recorded_conditions(monkeypatch, *, plan: dict, log: _Log, fund
         common, "resolve_buyer_wallet", lambda **_kw: ("0x" + "66" * 20, "0x" + "77" * 32)
     )
     monkeypatch.setattr(
-        escrow_client,
+        escrow_cli,
         "make_create_escrow_fn",
         lambda **_kwargs: lambda terms: funded.extend(terms) or ["0x" + "ee" * 32],
     )
