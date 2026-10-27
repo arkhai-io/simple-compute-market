@@ -20,7 +20,7 @@ IDENTITY_WHEEL := $(DIST_DIR)/arkhai_kit_identity-0.4.0-py3-none-any.whl
 .PHONY: dist-bare-metal-buyer
 .PHONY: run-e2e run-ci fetch-e2e-logs
 .PHONY: helm-topology-up helm-topology-down helm-topology-check helm-topology-secrets
-.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-clone-remove change-history record-capacity change-next change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
+.PHONY: check-agent-skills review design-review design orchestrate plan implement validate-local validate-ci validate-helm validate-parallel check-push-ready push-branch validate triage closeout archive-cleanup check-change-index check-tasks check-change change-clone change-clone-remove change-history record-capacity change-next change-graph change-watch change-cost round-view round-done round-view-closed review-diff last-diff code-snapshot review-wheelhouse-prepare review-locks
 
 # ---------------------------------------------------------------------------
 # Dist — build pure-Python wheels for internal packages before image builds.
@@ -999,6 +999,9 @@ change-history: ## Copy an archived change's records and the validation evidence
 change-next: ## Print the next step of an OpenSpec change as the orchestrator computes it, in plain form: the step, its reason, and for a waiting run its seq and what it asks (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null
 	@python3 scripts/change_next_step.py "$(CHANGE)" --plain
+
+change-graph: ## Print the workflow's graph as the Mermaid diagram the change-workflow architecture shows: every node, exit, join, and guard with its remedy, as the next-step computation interprets them
+	@PYTHONPATH=scripts python3 -m change_workflow.graph
 
 change-cost: ## Report what an OpenSpec change's unattended runs cost, by step and by round, with partial dollars as a range and the cache misses with their gaps (CHANGE=<change>)
 	@python3 scripts/find_change.py "$(CHANGE)" >/dev/null

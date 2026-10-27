@@ -138,23 +138,73 @@ code", scenarios "The graph is drawn" and "The documented diagram drifts"). Touc
 `scripts/change_workflow/graph.py`, the root `Makefile`,
 `openspec/specs/change-workflow/architecture.md`, and `scripts/tests/`.
 
-- [ ] 2.1 A rendering of the table as a Mermaid diagram — every node, exit, join, and
+- [x] 2.1 A rendering of the table as a Mermaid diagram — every node, exit, join, and
       guard with its remedy, each target in its display string form
       (`review:pre-closeout`), which is never parsed (D2) — deterministic, so the
       same table always renders the same text.
-- [ ] 2.2 `Makefile`: `make change-graph`, printing the rendering, with a help line
+      `graph.mermaid(table=TABLE)`: a box per node labelled `Node.label`, an edge per
+      exit labelled with what it is taken on and each guard as `condition ⇒
+      remedy`, its `otherwise` and `(held)` after it, and a `join` hexagon the
+      join's members enter, each edge labelled with the record its node supplies.
+      Node ids are the labels with `:` and `-` as `_`. Order is the table's, so it
+      is deterministic; `validate`'s nine derived exits carry the guards of the
+      exits they remedy, which makes the diagram busy around it.
+- [x] 2.2 `Makefile`: `make change-graph`, printing the rendering, with a help line
       in the style of `make change-next`.
-- [ ] 2.3 `openspec/specs/change-workflow/architecture.md`, "Routing is code, with
+      Runs `PYTHONPATH=scripts python3 -m change_workflow.graph`, `graph.py`'s
+      `main`; no new script file. Added to the workflow targets' `.PHONY` line.
+- [x] 2.3 `openspec/specs/change-workflow/architecture.md`, "Routing is code, with
       the model as backstop": the diagram, as the rendering prints it, in one fenced
       `mermaid` block the check can find; the section's prose is promoted at
       closeout (10.9), not here.
-- [ ] 2.4 The check, in `scripts/tests/test_change_workflow_graph.py`, unit: the
+      After the section's first paragraph, under a one-line caption naming
+      `make change-graph` and `graph.py`. Not rendered by a Mermaid renderer here,
+      none being installed; read by eye for Mermaid's syntax, its ids clear of
+      Mermaid's keywords by inspection, which no test holds.
+- [x] 2.4 The check, in `scripts/tests/test_change_workflow_graph.py`, unit: the
       architecture's diagram equals the rendering, and a failure names the first
       line that differs and the command that redraws it; a test that a table with an
       added exit no longer matches.
-- [ ] 2.5 Verification: the graph tests, unit; `make change-graph` run and its output
+      `drift()` finds the document's one `mermaid` block and names its first
+      differing line, both versions, and `make change-graph`; tests hold each of
+      those, a shorter block, and a document with no block or two. The added-exit
+      test gives the closeout triage a return. Also: the rendering draws an edge
+      for each exit from its node to its target or join carrying its `when`, the
+      record it supplies, and each guard's condition, remedy, `otherwise`, and
+      `(held)` mark; its ids are distinct and no label needs escaping; and `make
+      change-graph`, run with `python3` in a subprocess — the one test of this
+      file that crosses a process boundary — prints exactly the rendering.
+- [x] 2.5 Verification: the graph tests, unit; `make change-graph` run and its output
       compared by eye with D1's table; `make test`; `make check-change
       CHANGE=workflow-steps-name-next-step`. End-to-end: none, and none is owed.
+      The graph tests, unit but for the `make` one: 52 passed. `make change-graph`
+      is not among this step's allowed commands, so it was run by
+      `test_make_change_graph_prints_the_rendering` instead, whose output equals
+      the rendering, which equals the documented block; that block was compared by
+      eye with D1's table: every row's exits and guards are drawn, and where the
+      drawing departs from D1's rows it follows the section 1 notes — `implement`,
+      as an exit and as the join's supplier, drawn as `round`; `round-view` a node
+      with derived exits; `validate`'s exits spelled out; the dependency and
+      bootstrap guards marked held, with one more on the exit into closeout; the
+      repeat fix's validation naming the owner when it fails — and there is no
+      `done`, which is section 3's. Workflow suites (`test_change_*.py`,
+      `test_run_change_step.py`, `test_check_tasks.py`), unit: 743 passed. `make
+      test`: passed, every suite, before the fresh-context check's fixes, which
+      touched the graph tests, a caption, and two docstrings, rerun above. `make
+      check-packaging`: passed. `make check-change`: every check passes but the
+      documentation citations, which report `scripts/change_workflow/convert.py`,
+      the file section 7 creates. End-to-end: none, confirmed; no `Owed by
+      validation:` line.
+
+Handoff from section 2: a section that changes the table pastes `make change-graph`'s
+output over the `mermaid` block in the architecture companion in the same commit;
+the block is written to the line, and `drift` names the first line that differs.
+`make change-graph` is not in the implement step's allowed commands, so an
+unattended implementation session writes the block from `graph.mermaid()`'s
+algorithm and lets `drift` confirm it line by line, as this one did. The renderer escapes nothing, so a label with `"` or `|`
+fails `test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping` rather
+than drawing invalid Mermaid. The target runs `python3 -m change_workflow.graph`
+where its neighbours run a script file, since the plan adds no script.
 
 ## 3. Targets, the outcome's exit and `triaged`, and the log's format
 

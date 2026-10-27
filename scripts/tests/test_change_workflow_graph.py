@@ -1,16 +1,44 @@
 """The workflow's graph is one table: every exit and remedy names a node of it, and
-every node is reached from design and leads on until the change is done."""
+every node is reached from design and leads on until the change is done. Its
+diagram draws every node, exit, join, and guard, and the diagram the change-workflow
+architecture shows is held to that rendering."""
 
 from __future__ import annotations
+
+import dataclasses
+import itertools
+import os
+import re
+import subprocess
+from pathlib import Path
 
 import pytest
 
 from change_workflow import graph
 from change_workflow.common import STEPS
-from change_workflow.graph import (ARCHIVE_CLEANUP, DESIGN, NODES, OWNER, TABLE, WAIT,
-                                   Node)
+from change_workflow.graph import (ARCHIVE_CLEANUP, CLOSEOUT_TRIAGE, DESIGN, NODES, OWNER,
+                                   TABLE, WAIT, Node)
+
+ROOT = Path(__file__).resolve().parents[2]
+ARCHITECTURE = Path("openspec/specs/change-workflow/architecture.md")
+_DIAGRAM = re.compile(r"^```mermaid\n(.*?)^```$", re.M | re.S)
 
 EXITS = [(declaration.node, exit_) for declaration in TABLE for exit_ in declaration.exits]
+
+
+def drift(document: str, rendering: str) -> str | None:
+    """How the diagram in `document`, its one `mermaid` block, departs from
+    `rendering`: the first line that differs, and the command that redraws it."""
+    redraw = f"replace the block in {ARCHITECTURE} with what `make change-graph` prints"
+    diagrams = _DIAGRAM.findall(document)
+    if len(diagrams) != 1:
+        return f"{ARCHITECTURE} holds {len(diagrams)} mermaid blocks, not one: {redraw}"
+    pairs = itertools.zip_longest(diagrams[0].splitlines(), rendering.splitlines())
+    for number, (documented, rendered) in enumerate(pairs, start=1):
+        if documented != rendered:
+            return (f"the diagram departs from the table at its line {number}: it reads "
+                    f"{documented!r} where the table renders {rendered!r}; {redraw}")
+    return None
 
 
 def test_each_node_is_declared_once() -> None:
@@ -85,3 +113,88 @@ def test_a_node_names_its_step_and_a_reviews_kind() -> None:
         "step": "review", "kind": "pre-closeout", "reason": "why"}
     # A triage triages whatever records await it, so its result names no kind.
     assert graph.CLOSEOUT_TRIAGE.result("why") == {"step": "triage", "reason": "why"}
+
+
+# The diagram.
+
+def _node_id(node: Node) -> str:
+    return node.label.replace(":", "_").replace("-", "_")
+
+
+def test_the_diagram_draws_every_node_exit_join_and_guard() -> None:
+    rendering = graph.mermaid()
+    edges = [line.strip() for line in rendering.splitlines() if "-->" in line]
+    joins = {exit_.join for _, exit_ in EXITS if exit_.join}
+
+    assert all(f'    {_node_id(node)}["{node.label}"]' in rendering for node in NODES)
+    assert rendering.count('{{"join"}}') == len(joins)
+    assert len(edges) == len(EXITS) + len(joins)
+    for source, exit_ in EXITS:
+        target = f"join_{_node_id(exit_.target)}" if exit_.join else _node_id(exit_.target)
+        supplied = [what for what, node in exit_.join.waits_for
+                    if node == source] if exit_.join else []
+        held = [" (held)" for guard in exit_.guards if guard.held]
+        pieces = [*supplied, *([exit_.when] if exit_.when else []), *held,
+                  *(f"{guard.condition} ⇒ {getattr(guard.remedy, 'label', guard.remedy)}"
+                    + (f", {guard.otherwise}" if guard.otherwise else "")
+                    for guard in exit_.guards)]
+        assert any(edge.startswith(f"{_node_id(source)} -->") and edge.endswith(f" {target}")
+                   and all(piece in edge for piece in pieces) for edge in edges), (
+            f"no edge draws {source.label} → {exit_.target.label} with {pieces}")
+
+
+def test_the_diagrams_ids_are_distinct_and_its_labels_need_no_escaping() -> None:
+    labels = [node.label for node in NODES] + [
+        text for _, exit_ in EXITS
+        for text in [exit_.when or "", *(guard.condition for guard in exit_.guards),
+                     *(guard.otherwise or "" for guard in exit_.guards)]]
+
+    assert len({_node_id(node) for node in NODES}) == len(NODES)
+    assert not [label for label in labels if '"' in label or "|" in label]
+
+
+def test_the_documented_diagram_is_the_tables_rendering() -> None:
+    problem = drift((ROOT / ARCHITECTURE).read_text("utf-8"), graph.mermaid())
+
+    assert problem is None, problem
+
+
+def test_a_table_with_an_added_exit_no_longer_matches_the_diagram() -> None:
+    table = [dataclasses.replace(d, exits=d.exits + (graph.Exit(DESIGN, when=graph.RETURN),))
+             if d.node == CLOSEOUT_TRIAGE else d for d in TABLE]
+
+    problem = drift((ROOT / ARCHITECTURE).read_text("utf-8"), graph.mermaid(table))
+
+    assert problem is not None
+    assert "triage_closeout" in problem and "make change-graph" in problem
+
+
+def test_a_drift_names_the_first_line_that_differs_and_both_versions() -> None:
+    document = "Text.\n\n```mermaid\nflowchart TD\n    a --> b\n    b --> c\n```\n"
+
+    changed = drift(document, "flowchart TD\n    a --> b\n    b --> d\n")
+    shorter = drift(document, "flowchart TD\n    a --> b\n")
+
+    assert changed is not None and "line 3" in changed
+    assert "'    b --> c'" in changed and "'    b --> d'" in changed
+    assert shorter is not None and "line 3" in shorter and "None" in shorter
+
+
+@pytest.mark.parametrize("blocks", [0, 2])
+def test_a_document_without_exactly_one_diagram_drifts(blocks: int) -> None:
+    document = "Text.\n" + "```mermaid\nflowchart TD\n```\n" * blocks
+
+    problem = drift(document, "flowchart TD\n")
+
+    assert problem is not None and f"holds {blocks} mermaid blocks" in problem
+
+
+def test_make_change_graph_prints_the_rendering() -> None:
+    # A make that runs these tests passes its flags down through MAKEFLAGS; none
+    # may reach the target run here.
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")}
+    printed = subprocess.run(["make", "-s", "--no-print-directory", "change-graph"], cwd=ROOT,
+                             env=environment, capture_output=True, text=True, check=True)
+
+    assert printed.stdout == graph.mermaid()

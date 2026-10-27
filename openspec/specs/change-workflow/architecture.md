@@ -146,6 +146,65 @@ only as reliable as the model on a given turn, and least reliable late in a long
 session; a transition table written into a skill would still be read by a model, and
 untestable.
 
+The workflow's graph, as `make change-graph` draws it from the table in
+`scripts/change_workflow/graph.py`:
+
+```mermaid
+flowchart TD
+    design["design"]
+    review_design["review:design"]
+    triage_design["triage:design"]
+    plan["plan"]
+    round["round"]
+    review_implementation["review:implementation"]
+    triage_implementation["triage:implementation"]
+    review_pre_closeout["review:pre-closeout"]
+    triage_pre_closeout["triage:pre-closeout"]
+    closeout["closeout"]
+    review_closeout["review:closeout"]
+    triage_closeout["triage:closeout"]
+    archive_cleanup["archive-cleanup"]
+    round_view["round-view"]
+    validate["validate"]
+    join_triage_implementation{{"join"}}
+    design --> review_design
+    review_design --> triage_design
+    triage_design -->|"advance<br/>a dependency gating planning released ⇒ owner (held)"| plan
+    triage_design -->|"another round"| review_design
+    triage_design -->|"a return<br/>the owner's confirmation ⇒ owner"| design
+    plan -->|"a dependency gating implementation released ⇒ owner (held)"| round
+    plan -->|"nothing to implement<br/>HEAD validated, records exempt ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    round -->|"the round's sections checked<br/>in a clone, the bootstrap finished ⇒ wait, failed: owner (held)"| join_triage_implementation
+    review_implementation -->|"its implementation review"| join_triage_implementation
+    triage_implementation -->|"advance<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| round
+    triage_implementation -->|"sections out of the plan's order<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| round
+    triage_implementation -->|"advance, after the last round<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    triage_implementation -->|"another round<br/>a fix committed since the review read ⇒ round-view<br/>a fix committed since the review validated ⇒ validate, failed or inconclusive: owner"| review_implementation
+    triage_implementation -->|"a return<br/>the owner's confirmation ⇒ owner"| plan
+    triage_implementation -->|"a return<br/>the owner's confirmation ⇒ owner"| design
+    review_pre_closeout --> triage_pre_closeout
+    triage_pre_closeout -->|"advance<br/>a dependency gating closeout released ⇒ owner (held)<br/>HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed or inconclusive: owner"| closeout
+    triage_pre_closeout -->|"another round<br/>a fix outside openspec/ and docs/ validated ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    triage_pre_closeout -->|"a return<br/>the owner's confirmation ⇒ owner"| plan
+    triage_pre_closeout -->|"a return<br/>the owner's confirmation ⇒ owner"| design
+    closeout --> review_closeout
+    review_closeout --> triage_closeout
+    triage_closeout -->|"advance<br/>a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate, failed or inconclusive: owner"| archive_cleanup
+    triage_closeout -->|"another round"| review_closeout
+    round_view -->|"the owner's reading"| join_triage_implementation
+    round_view -->|"another round<br/>a fix committed since the review read ⇒ round-view<br/>a fix committed since the review validated ⇒ validate, failed or inconclusive: owner"| review_implementation
+    validate -->|"nothing to implement<br/>HEAD validated, records exempt ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    validate -->|"its validation"| join_triage_implementation
+    validate -->|"advance<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| round
+    validate -->|"sections out of the plan's order<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| round
+    validate -->|"advance, after the last round<br/>the fix commit validated, records exempt ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    validate -->|"another round<br/>a fix committed since the review read ⇒ round-view<br/>a fix committed since the review validated ⇒ validate, failed or inconclusive: owner"| review_implementation
+    validate -->|"advance<br/>a dependency gating closeout released ⇒ owner (held)<br/>HEAD validated, openspec/ and docs/ exempt ⇒ validate, failed or inconclusive: owner"| closeout
+    validate -->|"another round<br/>a fix outside openspec/ and docs/ validated ⇒ validate, failed or inconclusive: owner"| review_pre_closeout
+    validate -->|"advance<br/>a path outside openspec/ and docs/ changed since the first closeout review: HEAD validated ⇒ validate, failed or inconclusive: owner"| archive_cleanup
+    join_triage_implementation --> triage_implementation
+```
+
 The orchestrating session holds no state of its own. On every start and after
 compaction it runs the computation and reads the log's last lines, so any session
 picks a change up where the last one left it. When the computation errors, cannot

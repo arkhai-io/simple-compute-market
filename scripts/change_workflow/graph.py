@@ -22,15 +22,17 @@ closeout holds every step from that phase on, before the change is read; a clone
 bootstrap holds every step that needs the environment, the round's own
 implementation included, and every step while it has not started or has failed.
 
-A durable change to the workflow is a change to this table, made as an OpenSpec
-change. See openspec/specs/change-workflow/architecture.md, "Routing is code, with
-the model as backstop".
+`make change-graph` prints the table as a Mermaid diagram (`mermaid`), the diagram
+the change-workflow architecture shows. A durable change to the workflow is a
+change to this table, made as an OpenSpec change. See
+openspec/specs/change-workflow/architecture.md, "Routing is code, with the model as
+backstop".
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from change_workflow.records import is_documentation, is_record
 
@@ -310,7 +312,8 @@ NODES: dict[Node, Declaration] = {declaration.node: declaration for declaration 
 def exits(source: Node, *, target: Node | None = None, when: str | None = None) -> list[Exit]:
     """The exits of `source` to `target`, or taken on `when`, in the table's order."""
     return [exit_ for exit_ in NODES[source].exits
-            if (target is None or exit_.target == target) and (when is None or exit_.when == when)]
+            if (target is None or exit_.target == target)
+            and (when is None or exit_.when == when)]
 
 
 def phase_steps(phase: str) -> tuple[str, ...]:
@@ -324,3 +327,51 @@ def review_phase(kind: str) -> str | None:
     of."""
     declaration = NODES.get(Node("review", kind))
     return declaration.phases[0] if declaration else None
+
+
+# The diagram: the table drawn as a Mermaid flowchart, which the change-workflow
+# architecture shows and a test holds to this rendering.
+
+def _id(node: Node) -> str:
+    return node.label.replace(":", "_").replace("-", "_")
+
+
+def _remedy(remedy: Node | str) -> str:
+    return remedy.label if isinstance(remedy, Node) else remedy
+
+
+def _guard(guard: Guard) -> str:
+    otherwise = f", {guard.otherwise}" if guard.otherwise else ""
+    held = " (held)" if guard.held else ""
+    return f"{guard.condition} ⇒ {_remedy(guard.remedy)}{otherwise}{held}"
+
+
+def mermaid(table: Sequence[Declaration] = TABLE) -> str:
+    """The table as a Mermaid flowchart: a box for each node, an edge for each exit
+    labelled with what it is taken on and each guard with its remedy, and a hexagon
+    for each join, which the exits waiting on it enter, labelled with the record
+    their node supplies. The same table always renders the same text."""
+    lines = ["flowchart TD"]
+    lines += [f'    {_id(d.node)}["{d.node.label}"]' for d in table]
+    joins = {exit_.join: exit_.target for d in table for exit_ in d.exits if exit_.join}
+    lines += [f'    join_{_id(target)}{{{{"join"}}}}' for target in joins.values()]
+    for declaration in table:
+        for exit_ in declaration.exits:
+            supplies = [what for what, node in exit_.join.waits_for
+                        if node == declaration.node] if exit_.join else []
+            label = "<br/>".join([*supplies, *([exit_.when] if exit_.when else []),
+                                  *map(_guard, exit_.guards)])
+            arrow = f'-->|"{label}"|' if label else "-->"
+            target = f"join_{_id(exit_.target)}" if exit_.join else _id(exit_.target)
+            lines.append(f"    {_id(declaration.node)} {arrow} {target}")
+    lines += [f"    join_{_id(target)} --> {_id(target)}" for target in joins.values()]
+    return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    print(mermaid(), end="")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
